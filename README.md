@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/logo-dark.svg">
+  <img alt="krepi" src=".github/assets/logo.svg" height="64">
+</picture>
+
 # krepi
 
 krepi is the operating system of casξ, a portable workstation for
@@ -15,10 +20,10 @@ independent specifications and proved in Lean 4.
 
 ## Status
 
-This repository is newly initialized. It contains this README, the
-contribution rules, the target architecture, the documentation conventions,
-empty proof registries and a commit-message hook. There is no kernel source
-yet. Nothing builds or boots, and there are no build, test or run commands.
+This repository is newly initialized. It contains this README, the krepi logo,
+the contribution rules, the target architecture, the documentation conventions,
+empty proof registries and a commit-message hook. There is no kernel source yet.
+Nothing builds or boots, and there are no build, test or run commands.
 Continuous integration is not set up.
 
 The earlier prototype of the system is kept read-only in
