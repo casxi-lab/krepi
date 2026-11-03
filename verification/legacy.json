@@ -1,0 +1,6 @@
+{
+  "baseline": null,
+  "description": "Production functions without a proof when the formal inventory was adopted. Entries leave when a registered target proves them or, with review, when they are no longer production functions. The baseline is the commit of the adoption and stays null until the inventory is adopted.",
+  "functions": {},
+  "schema": 1
+}
