@@ -1,22 +1,30 @@
 # Contributing
 
-## State of the tooling
+## Tooling
 
-The repository has no source code and no build tooling yet. The commands that
-the rules below refer to, `cargo xtask check`, `cargo xtask docs check` and the
-`cargo xtask formal` family, do not exist. They arrive with the change that
-pins the Rust toolchain in `rust-toolchain.toml`, records the Clang version in
-the toolchain manifest and adds the `xtask` skeleton. Until then the only
-working check is the commit-message hook:
+The Rust toolchain is pinned in `rust-toolchain.toml`; the exact versions of
+rustc, Clang, lld and QEMU for each host are in `toolchains.toml`. Before
+proposing a change, enable the commit-message hook once and run the required
+host checks from the repository root:
 
 ```sh
 git config --local core.hooksPath .githooks
+cargo xtask check
 git diff --check
 git diff --cached --check
 ```
 
+[Testing](docs/conventions/testing.md#entry-points) describes what the check
+runs. A change that updates a tool version updates `toolchains.toml` in the
+same change.
+
 When a command lands, this page and [testing](docs/conventions/testing.md)
 describe what it runs. Do not write a command into a document before it works.
+A command that does not exist yet, such as `cargo xtask docs check` (planned)
+or the `cargo xtask formal` (planned) family, carries the marker `(planned)`
+right after its code span. The documentation check rejects any other mention
+of a command that `cargo xtask` does not provide, a mention outside code, and
+the marker once the command exists.
 
 ## Source and documentation
 
@@ -89,15 +97,6 @@ not public, is read-only and is the source for porting. Take one module at a tim
 tests over, and add a porting record in the same change; see
 [porting](docs/conventions/porting.md). Results obtained with the prototype,
 including proofs, QEMU runs and board runs, are not evidence for krepi.
-
-## Private repositories
-
-This repository is public. Documents, code comments and commit messages do not
-name or link the project's private repositories. Refer to their content in
-neutral terms (the prototype tree, the CAS project, the coordination records)
-and give only commit hashes and paths where a reference must be traceable. The
-documentation check rejects lines that match the case-insensitive pattern
-`casxi-(system|cas|build)|krepi-h[i]l|erthoaers[/]`.
 
 ## Evidence
 
