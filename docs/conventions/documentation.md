@@ -279,11 +279,13 @@ spans.
 
 ## Tooling
 
+`cargo xtask check` checks relative links and anchors in every tracked
+Markdown file ([testing](testing.md#entry-points)).
 `cargo xtask docs check` (planned) is to validate metadata, referenced paths,
 items, operations, tests, suites and examples, section order, the generated
-index, the reverse annotations, the domain tree, planning references, Han
-characters and local links in every Markdown file at the root and below
-`docs/`, as part of `cargo xtask check`. `cargo xtask docs index` (planned)
+index, the reverse annotations, the domain tree, planning references and Han
+characters in every Markdown file at the root and below `docs/`, as part of
+`cargo xtask check`. `cargo xtask docs index` (planned)
 regenerates `docs/features/README.md`, and `cargo xtask docs find` (planned)
 prints the documents that list or annotate a source path, item, test, suite
 or theorem. Until these commands exist, review checks these rules.

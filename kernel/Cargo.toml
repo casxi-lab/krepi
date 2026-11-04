@@ -1,0 +1,14 @@
+# The kernel workspace: the EL1 kernel, the board support, the ABI crate and
+# the ABI manifest. Its crates depend only on crates inside this directory.
+[workspace]
+resolver = "3"
+members = ["abi"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+publish = false
+rust-version = "1.99"
+
+[profile.release]
+overflow-checks = true

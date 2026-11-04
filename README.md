@@ -22,9 +22,18 @@ independent specifications and proved in Lean 4.
 
 This repository is newly initialized. It contains this README, the krepi logo,
 the contribution rules, the target architecture, the documentation conventions,
-empty proof registries and a commit-message hook. There is no kernel source yet.
-Nothing builds or boots, and there are no build, test or run commands.
-Continuous integration is not set up.
+empty proof registries, a commit-message hook and the build tooling: a pinned
+Rust toolchain, the kernel and user-space Cargo workspaces with an empty ABI
+crate and SDK crate, and the repository checks. There is no kernel source yet,
+and nothing boots. Continuous integration is not set up.
+
+The required host checks run from the repository root and need the tools that
+`toolchains.toml` lists for the host
+([testing](docs/conventions/testing.md#entry-points)):
+
+```sh
+cargo xtask check
+```
 
 An earlier prototype of the system is kept read-only and is not public. It is
 the source for porting: boot code, board

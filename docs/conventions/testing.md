@@ -21,12 +21,26 @@ Races are tested with multi-threaded TCG and then on the board.
 
 ## Entry points
 
-`cargo xtask check` (planned) runs the required host checks in order and
-stops at the first failure: formatting, Clippy with warnings as errors, the
-host tests, and the documentation and link check. The proof gate joins it once
-the formal tooling exists. It writes a receipt under
-`artifacts/validation/<UTC timestamp>/` with each command, its exit status,
-duration and log, the toolchain versions and the Git state.
+`cargo xtask check` runs the required host checks from the repository root in
+order. It stops at the first failure, exits with a non-zero status and names
+the failed step:
+
+1. `toolchain`: the installed rustc, Clang, lld and QEMU have the versions
+   that `toolchains.toml` pins for the host (`darwin-arm64` or
+   `linux-aarch64`), and every host pins the rustc of `rust-toolchain.toml`;
+2. `manifests`: every crate is licensed MIT, both workspace root manifests
+   build releases with `overflow-checks = true`, and the dependency rules of
+   the [source layout](../architecture.md#source-layout) hold;
+3. `fmt`, `clippy` with warnings as errors, and `test`, each in the kernel
+   workspace, the user-space workspace and `xtask`;
+4. `docs`: relative links and anchors in Markdown and the `cargo xtask`
+   commands that documents mention.
+
+The checks read only files that Git tracks, so a fresh clone and a working
+copy with build output give the same result. The proof gate joins the check
+once the formal tooling exists. A receipt of each run, with each command, its
+exit status, duration and log, the toolchain versions and the Git state under
+`artifacts/validation/<UTC timestamp>/`, is planned.
 
 QEMU suites and board suites have their own entry points (planned), built on
 the QEMU runner, serial capture and receipt modules ported from the legacy

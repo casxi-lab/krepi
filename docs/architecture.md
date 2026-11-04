@@ -262,5 +262,23 @@ this page when they are made:
 
 ## Source layout
 
-There is no source tree yet. The layout of crates and modules is described
-here once the first code lands.
+The repository holds two Cargo workspaces, the proof project and the
+repository tasks, each in its own directory:
+
+| Path | Contents |
+| --- | --- |
+| `kernel/` | The kernel workspace: the EL1 kernel, board support, the ABI crate and the ABI manifest; the input of proof extraction. It holds the ABI crate `kernel/abi` (`krepi-abi`), which defines no interface yet. |
+| `user/` | The user-space workspace: the resident root, services, drivers, the SDK and workers, which are members outside `default-members`. It holds the SDK crate `user/sdk` (`krepi-sdk`). |
+| `verification/` | The Lean proof project and its registries ([formal verification](formal-verification.md)) |
+| `xtask/` | The `cargo xtask` commands, a Cargo workspace of its own |
+
+Each workspace has its own `Cargo.lock`. Neither workspace directory contains
+the other or is the repository root, and `xtask` and host tool crates live
+outside both. Crates of the kernel workspace reach only paths inside
+`kernel/`: path dependencies of every kind, tracked symbolic links and the
+literal paths of `include!`, `include_bytes!`, `include_str!` and `#[path]`
+stay inside it. User-space crates reach the kernel workspace only through the
+ABI crate. Every crate is licensed MIT, and both workspaces build releases with
+`overflow-checks = true`. `cargo xtask check` enforces these rules
+([testing](conventions/testing.md#entry-points)). The crates and modules inside
+each workspace are described here as they land.

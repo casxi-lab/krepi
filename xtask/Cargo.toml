@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+description = "Repository tasks for krepi, run as `cargo xtask`"
+edition = "2024"
+license = "MIT"
+publish = false
+rust-version = "1.99"
+
+# xtask is a workspace of its own, outside the kernel and user-space
+# workspaces.
+[workspace]
+
+[dependencies]
+toml = "1.1.8"

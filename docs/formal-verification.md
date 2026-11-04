@@ -18,7 +18,7 @@ the compiled binary or concurrent execution unless a separate layer proves it.
 The three registries `verification/targets.json`, `verification/models.json`
 and `verification/legacy.json` exist and are empty. Everything else on this
 page is planned: the pinned tools, the Lake project, the `Krepi` Lean modules,
-the qualification crate and the `cargo xtask formal` commands. They are set
+the qualification crate and the `cargo xtask formal` (planned) commands. They are set
 up by porting the tooling of the CAS project and the prototype tree, and this
 page
 changes with them. No target is registered and nothing is proved.
@@ -63,7 +63,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/models.json` | The model registry | Present, empty |
 | `verification/legacy.json` | Production functions without proofs, recorded when the inventory is adopted | Present, empty |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Planned |
-| `xtask/src/formal/` | The `cargo xtask formal` commands | Planned |
+| `xtask/src/formal/` | The `cargo xtask formal` (planned) commands | Planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
 `artifacts/formal/` directory, and the Lake build directory
@@ -83,19 +83,19 @@ patch or pin requires a new installation and a passing qualification.
 
 ## Commands
 
-The `cargo xtask formal` family follows the CAS project. None of these commands
+The `cargo xtask formal` (planned) family follows the CAS project. None of these commands
 exists yet.
 
 | Command | Purpose |
 | --- | --- |
-| `cargo xtask formal setup` | Builds and seals the pinned tools |
-| `cargo xtask formal tools` | Checks the selected installation |
-| `cargo xtask formal qualify` | Tool qualification regression on the code shapes in `verification/qualification` |
-| `cargo xtask formal run [--target NAME]...` | The proof gate: qualification, the specifications and every target (or the named ones) with its mutants |
-| `cargo xtask formal check` | Registry, legacy and inventory metadata only; runs no tool and proves nothing |
-| `cargo xtask formal impact --base REV` | Classifies changed functions since `REV` and reports scope reductions |
-| `cargo xtask formal inventory` | Lists every production function by inventory key |
-| `cargo xtask formal editor` | Prepares `verification/` for interactive editing |
+| `cargo xtask formal setup` (planned) | Builds and seals the pinned tools |
+| `cargo xtask formal tools` (planned) | Checks the selected installation |
+| `cargo xtask formal qualify` (planned) | Tool qualification regression on the code shapes in `verification/qualification` |
+| `cargo xtask formal run [--target NAME]...` (planned) | The proof gate: qualification, the specifications and every target (or the named ones) with its mutants |
+| `cargo xtask formal check` (planned) | Registry, legacy and inventory metadata only; runs no tool and proves nothing |
+| `cargo xtask formal impact --base REV` (planned) | Classifies changed functions since `REV` and reports scope reductions |
+| `cargo xtask formal inventory` (planned) | Lists every production function by inventory key |
+| `cargo xtask formal editor` (planned) | Prepares `verification/` for interactive editing |
 
 Once the commands exist, `cargo xtask check` runs the proof gate, and CI runs
 it on every change. A change merges only when the required gate passes on its
@@ -227,9 +227,9 @@ inventory is adopted; its `baseline` is the commit of that adoption and is
 `null` until then. An entry leaves the list when a target proves the function
 or, with review, when the function is no longer a production function. A
 legacy function is never trusted by a proof and appears in a target's
-`unclosed` list when reached. `cargo xtask formal check` reports new
+`unclosed` list when reached. `cargo xtask formal check` (planned) reports new
 functions that are neither legacy nor proved, and
-`cargo xtask formal impact --base REV` reports a removed target, theorem or
+`cargo xtask formal impact --base REV` (planned) reports a removed target, theorem or
 proved function, a new unconstrained item, trusted axiom or premise, and a
 removed obligation or mutant, each of which needs independent review.
 

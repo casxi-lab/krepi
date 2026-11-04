@@ -1,0 +1,17 @@
+# The user-space workspace: the root, services, drivers, the SDK and workers.
+# Its crates reach the kernel workspace only through the ABI crate.
+[workspace]
+resolver = "3"
+members = ["sdk"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+publish = false
+rust-version = "1.99"
+
+[workspace.dependencies]
+krepi-abi = { path = "../kernel/abi" }
+
+[profile.release]
+overflow-checks = true
