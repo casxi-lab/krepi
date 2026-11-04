@@ -19,6 +19,5 @@
 - Tests do not depend on CPU speed, the wall clock or a fixed QEMU instruction count. Time slices, spin limits and timeouts are platform parameters. Follow [testing](docs/conventions/testing.md).
 - Tests and tools are written in Rust. Do not add Python tooling.
 - Follow the [documentation](docs/conventions/documentation.md) conventions. Milestone, task, proposal and decision numbers, capability and interface codes, and agent narratives belong in the project's coordination records outside this repository and appear in no document or code comment here; requirement IDs such as `IPC-R01` label requirements within a component and are not planning identifiers.
-- This repository is public: never name or link the project's private repositories; see [contributing](CONTRIBUTING.md#private-repositories).
 - Place generated outputs in the ignored `artifacts/` and `target/` directories. Once the toolchain is pinned, use `rust-toolchain.toml` and `Cargo.lock` as committed.
 - Inspect Git status before editing and preserve unrelated changes. Use English Conventional Commit subjects of at most 72 characters and the local `.githooks/commit-msg` hook. Do not change global Git configuration, create remotes or publish without authorization.

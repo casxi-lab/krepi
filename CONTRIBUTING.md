@@ -90,15 +90,6 @@ tests over, and add a porting record in the same change; see
 [porting](docs/conventions/porting.md). Results obtained with the prototype,
 including proofs, QEMU runs and board runs, are not evidence for krepi.
 
-## Private repositories
-
-This repository is public. Documents, code comments and commit messages do not
-name or link the project's private repositories. Refer to their content in
-neutral terms (the prototype tree, the CAS project, the coordination records)
-and give only commit hashes and paths where a reference must be traceable. The
-documentation check rejects lines that match the case-insensitive pattern
-`casxi-(system|cas|build)|krepi-h[i]l|erthoaers[/]`.
-
 ## Evidence
 
 Only receipts that CI or the hardware-in-the-loop (HIL) bench produced, and
