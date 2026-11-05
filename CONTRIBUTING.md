@@ -85,8 +85,11 @@ Review specification and theorem changes for weakened requirements, smaller
 input domains, missing calls and new trusted assumptions. Classify a failed
 proof before changing code: a production defect needs a minimal fix toward the
 intended behaviour, a Rust regression test and the affected proofs; a tool
-defect needs a qualified tool repair. Do not edit generated definitions,
-introduce unproved wrappers or weaken contracts to hide failures.
+defect needs a qualified tool repair, except that a construct that the
+[provable Rust subset](docs/conventions/provable-subset.md) covers is
+rewritten into its alternative and any other rejection is handled as that
+convention states. Do not edit generated definitions, introduce unproved
+wrappers or weaken contracts to hide failures.
 
 Once the required proof gate runs in CI, a kernel change merges only when the
 gate passes on its head or a committed waiver record covers the failure. A red
