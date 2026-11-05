@@ -203,12 +203,12 @@ occur in one transition.
   table that the caller names, and the kernel only checks that the slot is
   free.
 - **Identifiers.** An identifier that the kernel assigns and returns to EL0
-  depends only on the caller's own state: a handle is the number of a slot
-  in the caller's table with that slot's generation, and a reply right given
-  as a handle follows the same rule. Admission tokens, queue positions and
-  global counters are never returned. The party that mints an endpoint send
-  capability, the root or a service, chooses its badge, which the kernel
-  stores and derivation keeps.
+  depends only on the caller's own state: a handle, also one that carries a
+  reply right, names a slot of the caller's own table
+  ([handles](architecture.md#kernel-objects-and-capabilities)). Admission
+  tokens, queue positions and global counters are never returned. The party
+  that mints an endpoint send capability, the root or a service, chooses its
+  badge, which the kernel stores and derivation keeps.
 - **Queues.** Each priority has one FIFO run queue. A thread that becomes
   ready (woken, created, out of time slice or resumed after replenishment)
   joins the tail; a thread preempted with time slice left returns to the
@@ -241,10 +241,10 @@ occur in one transition.
   [budget loan](architecture.md#ipc-notifications-and-waits) settles as a
   whole within one transition.
 - **Exceptions.** The synchronous exception of the current instruction comes
-  first. While it runs in EL1, the kernel takes IRQs only before returning to
-  EL0 and at the preemption points that a contract states. Each interrupt
-  number is handled in a fixed way; the order in which the controller
-  presents numbers is [ND-02](#nd-02).
+  first. Interrupts are taken only where the
+  [execution model](architecture.md#system-calls-and-the-abi) takes them.
+  Each interrupt number is handled in a fixed way; the order in which the
+  controller presents numbers is [ND-02](#nd-02).
 - **Cascading revocation.** Revocation walks the derivation tree in
   post-order, children before parents and siblings in the order in which
   their derivations were made. Each step stays within the bound of its
@@ -368,9 +368,10 @@ and verification on the device uses no private key.
   data: a policy checkpoint that all entry points share and the import
   authorization of the runtime limit what an interpreter runs. The first
   release has neither the capability nor memory objects with the execute
-  right: executable pages come only from the boot bundle, and `mprotect`
-  cannot make anonymous memory executable. The execute right, and the kernel
-  specification of this check, come with the full VM object model.
+  right, so executable pages come only from the boot bundle (see
+  [VM objects](architecture.md#address-spaces-and-vm-objects)).
+  The execute right, and the kernel specification of this check, come with
+  the full VM object model.
 - **Packages.** A package carries a manifest of its package ID, version, the
   digest of each file and the permissions it requests, signed with the
   publisher's key. The installer verifies the signature with a trust anchor
