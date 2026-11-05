@@ -74,10 +74,12 @@ records. Lean 4 +
 Charon/Aeneas is the implementation-refinement toolchain. Follow
 [formal verification](docs/formal-verification.md).
 
-Code inside a proof target uses the provable Rust subset: the constructs that
-the pinned extraction tools translate. The coding convention that states the
-subset is planned. A helper proof does not close a feature, and metadata
-inspection or a successful fixture test is not a proof.
+Code of the modules that the
+[provable Rust subset](docs/conventions/provable-subset.md) lists follows it
+from the first change of the module: it avoids the constructs that the
+pinned extraction tools reject, leave unproved or fail on in Lean, and it
+follows the provable design rules. A helper proof does not close a feature,
+and metadata inspection or a successful fixture test is not a proof.
 
 Review specification and theorem changes for weakened requirements, smaller
 input domains, missing calls and new trusted assumptions. Classify a failed

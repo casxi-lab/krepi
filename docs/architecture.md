@@ -184,6 +184,8 @@ first line of kernel code:
   acknowledged invalidation and dropped its references. A timeout is never
   taken as an acknowledgement.
 
+The [SMP design rules](conventions/smp.md) state what code does to meet them.
+
 QEMU with one, two and four vCPUs checks function. A fixed instruction count
 reproduces function only; races are tested with multi-threaded TCG and then on
 the Pi 5. Four boot messages from four CPUs do not show that SMP works.
@@ -257,8 +259,11 @@ this page when they are made:
   connections the device offers (Ethernet, Wi-Fi and Bluetooth, USB device
   mode);
 - power management: battery, charging, backlight, sleep and saving before a
-  low-battery shutdown;
-- the SMP design rules in detail and the provable Rust subset.
+  low-battery shutdown.
+
+The [SMP design rules](conventions/smp.md) and the
+[provable Rust subset](conventions/provable-subset.md) are stated in the
+conventions.
 
 ## Source layout
 

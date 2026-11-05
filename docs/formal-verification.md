@@ -213,10 +213,12 @@ configuration, is never upgraded by a later theorem.
 `verification/qualification/` holds a small crate of the code shapes that
 targets use, with the expected outcome of the tools for each in
 `cases.json`. Every qualification re-extracts them, so a tool change that
-alters a translation fails before it reaches a target. The Aeneas release
-that the prototype used rejected some constructs, for example `Iterator::any`
-and `flatten`. Code inside a proof target uses the provable Rust subset that
-a coding convention states (planned).
+alters a translation fails before it reaches a target. Some constructs that
+the prototype used, such as `Iterator::any` and `flatten`, do not translate
+into code that a proof can rely on; the
+[provable Rust subset](conventions/provable-subset.md) lists them with the
+other constructs that stop extraction or proofs, and the forms to write
+instead, for the modules that proofs are to cover.
 
 ## Legacy inventory and admission
 
