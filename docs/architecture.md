@@ -312,8 +312,9 @@ completion and scheduling only at the points above
 
 - **Calls.** `call`, `receive` and `reply` exchange short messages. When a
   call is received, the kernel creates a one-shot reply right with a
-  generation. Reply, timeout, cancellation and peer death compete, and
-  exactly one of them completes the wait.
+  generation. Reply, timeout, cancellation, revocation and peer death
+  compete, and exactly one of them completes the wait
+  ([internal choices](security.md#internal-choices)).
 - **Budget lending.** A synchronous call lends the caller's remaining budget
   to the server within an authorized priority ceiling. A budget has at most
   one active holder and is never duplicated. When a call ends, the loan is
@@ -492,6 +493,13 @@ an emergency stack, so fatal diagnostics still run when the kernel stack of
 that CPU is damaged or has overflowed into its guard. IRQ and
 fatal-diagnostic paths do not allocate.
 
+## Security model
+
+The [security model](security.md) states the threat model, the security
+properties with the rules for internal choices, the observable outputs and
+the permitted nondeterminism that component contracts cite, and the
+integrity policy for loading, `exec`, packages and updates.
+
 ## Verification boundary
 
 Verification of the kernel is organized in layers: requirements and
@@ -505,8 +513,6 @@ each layer is organized and what remains trusted.
 These questions are being decided and the rules they produce will be stated on
 this page when they are made:
 
-- the threat model, the security properties and the integrity policy for
-  loading, `exec`, packages and updates;
 - the process model, the architecture of the POSIX layer, the approach to
   Linux compatibility and the POSIX, GNU and Linux baselines;
 - the storage architecture (read-only system image, VFS, writable file system
