@@ -115,7 +115,7 @@ of the system services. Neither is part of the kernel.
 | Document | Contents |
 | --- | --- |
 | [Architecture](docs/architecture.md) | Target design: protection domains, the resident root, objects and capabilities, IPC, scheduling, memory, multicore, devices |
-| [Security model](docs/security.md) | Threat model, security properties, rules for internal choices, permitted nondeterminism, integrity of loading, `exec`, packages and updates |
+| [Security model](docs/security.md) | Target design: threat model, security properties, rules for internal choices, observable outputs, permitted nondeterminism, integrity of loading, `exec`, packages and updates |
 | [Formal verification](docs/formal-verification.md) | How proofs, specifications and registries are organized |
 | [Subject domains](docs/domains/README.md) | The complete target scope of the system, by subject |
 | [Feature index](docs/features/README.md) | What the system provides today (empty) |

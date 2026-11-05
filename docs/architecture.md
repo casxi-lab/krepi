@@ -496,9 +496,9 @@ fatal-diagnostic paths do not allocate.
 ## Security model
 
 The [security model](security.md) states the threat model, the security
-properties with the rules for internal choices and the permitted
-nondeterminism that component contracts cite, and the integrity policy for
-loading, `exec`, packages and updates.
+properties with the rules for internal choices, the observable outputs and
+the permitted nondeterminism that component contracts cite, and the
+integrity policy for loading, `exec`, packages and updates.
 
 ## Verification boundary
 

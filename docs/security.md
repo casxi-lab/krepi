@@ -1,11 +1,13 @@
 # Security model
 
-This page states the threat model, the security properties of the kernel
-with the rules for its internal choices, and the integrity policy for code
-and updates.
+This page states the threat model, the security properties of the kernel,
+the rules for its internal choices, its observable outputs, the
+nondeterminism that its specification permits, and the integrity policy for
+code and updates.
 
 The [architecture](architecture.md) describes the system that these rules
-apply to.
+apply to. Like that page, this one states the target design: none of it is
+implemented in this repository yet.
 
 ## Threat model
 
