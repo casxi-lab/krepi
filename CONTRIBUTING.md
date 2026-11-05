@@ -74,17 +74,22 @@ records. Lean 4 +
 Charon/Aeneas is the implementation-refinement toolchain. Follow
 [formal verification](docs/formal-verification.md).
 
-Code inside a proof target uses the provable Rust subset: the constructs that
-the pinned extraction tools translate. The coding convention that states the
-subset is planned. A helper proof does not close a feature, and metadata
-inspection or a successful fixture test is not a proof.
+Code of the modules that the
+[provable Rust subset](docs/conventions/provable-subset.md) lists follows it
+from the first change of the module: it avoids the constructs that the
+pinned extraction tools reject, leave unproved or fail on in Lean, and it
+follows the provable design rules. A helper proof does not close a feature,
+and metadata inspection or a successful fixture test is not a proof.
 
 Review specification and theorem changes for weakened requirements, smaller
 input domains, missing calls and new trusted assumptions. Classify a failed
 proof before changing code: a production defect needs a minimal fix toward the
 intended behaviour, a Rust regression test and the affected proofs; a tool
-defect needs a qualified tool repair. Do not edit generated definitions,
-introduce unproved wrappers or weaken contracts to hide failures.
+defect needs a qualified tool repair, except that a construct that the
+[provable Rust subset](docs/conventions/provable-subset.md) covers is
+rewritten into its alternative and any other rejection is handled as that
+convention states. Do not edit generated definitions, introduce unproved
+wrappers or weaken contracts to hide failures.
 
 Once the required proof gate runs in CI, a kernel change merges only when the
 gate passes on its head or a committed waiver record covers the failure. A red

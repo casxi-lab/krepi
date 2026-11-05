@@ -110,9 +110,12 @@ identifiers and no legacy acceptance records; see
 - Read the whole legacy file before porting it, including its `unsafe`
   comments and module documentation.
 - Bring the code to the krepi conventions in the same change: English
-  documentation, feature annotations, the single-image rule, per-CPU
-  classification of state, and the provable Rust subset for code that a proof
-  target will cover.
+  documentation, feature annotations and the single-image rule. The
+  [SMP design rules](smp.md) bind all code, ported and redesigned alike.
+  Ported and redesigned code of the modules that the
+  [provable Rust subset](provable-subset.md) lists follows that subset and
+  its provable design rules from the first change of the module, whether or
+  not a proof target is registered for it.
 - Leave legacy diagnostic hooks, serial-triggered probes and feature-profile
   `cfg` branches out of the port.
 - Do not port a legacy document as it is. Write the krepi feature document or

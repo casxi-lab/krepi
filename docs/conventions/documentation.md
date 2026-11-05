@@ -201,7 +201,7 @@ Each kind of content has one home, and the other documents link it.
 | Content | Home | Not repeated in |
 | --- | --- | --- |
 | Observable behaviour of a component: criteria, examples, entry points, evidence and deliberate limits | `requirements.md` | Feature documents |
-| Rules that code and tests follow: terms, rule sections, testing obligations, extractability and current deviations | `contract.md` | Domain pages and the other component documents |
+| Rules that code and tests follow: terms, the entry-point table, extractability, rule sections, check and execute, work bounds, determinism, state fields, testing obligations, open obligations, legacy test vectors and current deviations | `contract.md` | Domain pages and the other component documents |
 | Model, design rationale, and the correspondence of contract clauses and requirements to Lean | `specification.md` | The contract |
 | Targets, obligations, premises, trusted items, mutants and what is not proved | `proof.md` | The Verification sections of feature documents |
 | Gate mechanics, receipts, the trusted-boundary table and library models | [Formal verification](../formal-verification.md) | `proof.md`, which names the rows it relies on |
@@ -219,11 +219,41 @@ Each kind of content has one home, and the other documents link it.
   `Configurations` names the boards, CPU counts and image configurations a
   requirement holds for.
 - **Contract.** `contract.md` has no metadata. Its introduction says what the
-  page governs and links the other three documents. `Terms` comes first,
-  followed by the rule sections, a section of testing obligations, an
-  `Extractability` section that states which code follows the provable Rust
-  subset, `Current deviations` while any deviation remains, and `References`
-  when it cites sources.
+  page governs and links the other three documents. `Terms` comes first.
+  `Entry points` follows with a table of every entry point of the component,
+  including the operations that it adds to the ABI inventory; the Entry
+  points field of a requirement names rows of this table. `Extractability`
+  states which of the component's code follows the
+  [provable Rust subset](provable-subset.md). The rule sections of the
+  component come next, among them four that every contract has:
+  `Check and execute` states, for each operation, that its checks complete
+  before its first write and which failures its write phase allows
+  ([rule 1](provable-subset.md#1-check-then-execute)); `Work bounds` states
+  the loop bound of every entry point and where long operations stop and
+  resume, with their progress stored in the object
+  ([rule 4](provable-subset.md#4-bounded-work-per-entry)); `Determinism`
+  states how each internal choice is made, such as the choice of a slot, the
+  order of wake-ups, the outcome of deadlines that expire together and the
+  outcome of a deadline that coincides with an event, by a fixed rule or by
+  the caller, and, for every choice that the specification leaves open,
+  cites, by its registered label and with a link, the entry that allows it
+  in the register of permitted nondeterminism (planned) of the
+  [architecture notes](../architecture.md); `State fields` holds the state
+  field table of the [SMP design rules](smp.md#s5-state-field-tables). A
+  section of testing obligations follows. `Open obligations` lists, one row
+  each, the obligations of the component's code that no target closes, such
+  as entry points outside the targets, assembly, `unsafe` code, MMIO and
+  each save, restore and clear rule of exception entry, exception return and
+  context switch, whose row also names the test that covers it. Every row
+  names its carrier: the planned target and obligation that close it, or the
+  condition that lifts it; the row of an `unsafe` site also states whether
+  the site reads or writes verified state
+  ([rule 9](provable-subset.md#9-unsafe-sites)). `Legacy test vectors` lists
+  the frozen test vectors taken from the legacy tree, each file by its path
+  at `prototype@ec8305c618a8f4e84e0707fa56beac5673f4675e` with the number of
+  vectors it holds, every vector with its expected output.
+  `Current deviations` follows while any deviation remains, and `References`
+  when the page cites sources.
 - **Specification.** `specification.md` starts with a metadata block whose only
   field, `specifications`, lists the Lean modules it describes, each
   registered under `specifications` in `verification/targets.json`. Its
@@ -235,8 +265,11 @@ Each kind of content has one home, and the other documents link it.
   `targets`, the registered targets of the component, and `planned`, the
   kebab-case names of its targets that are not registered. Its level-two
   sections are `Targets`, `Trusted boundary`, `Unclosed dependencies`,
-  `Mutants`, `Qualification` and `Not proved`. A planned target uses the name
-  it will carry in `verification/targets.json`.
+  `Mutants`, `Qualification` and `Not proved`. `Unclosed dependencies` refers
+  to the `Open obligations` section of the contract for the obligations that
+  the targets leave open instead of repeating them, and `Not proved` names
+  the properties that no registered theorem states. A planned target uses
+  the name it will carry in `verification/targets.json`.
 
 ### Requirement IDs
 

@@ -121,6 +121,8 @@ of the system services. Neither is part of the kernel.
 | [Documentation conventions](docs/conventions/documentation.md) | Feature documents, domain and component documents |
 | [Testing](docs/conventions/testing.md) | Test layout, environments and evidence |
 | [Porting](docs/conventions/porting.md) | How code is taken from the prototype tree |
+| [SMP design rules](docs/conventions/smp.md) | How code classifies its state and shares it between CPUs |
+| [Provable Rust subset](docs/conventions/provable-subset.md) | The constructs and design rules of the code that proofs are to cover |
 | [Contributing](CONTRIBUTING.md) | Rules for changes, commits and evidence |
 
 ## License
