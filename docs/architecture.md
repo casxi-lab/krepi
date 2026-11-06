@@ -543,11 +543,13 @@ Cargo workspaces of their own, each in its own directory:
 
 Each workspace has its own `Cargo.lock`. Neither workspace directory contains
 the other or is the repository root, and `xtask` and host tool crates live
-outside both. Crates of the kernel workspace reach only paths inside
-`kernel/`: path dependencies of every kind, tracked symbolic links and the
-literal paths of `include!`, `include_bytes!`, `include_str!` and `#[path]`
-stay inside it. User-space crates reach the kernel workspace only through the
-ABI crate. Every crate is licensed MIT, and both workspaces build releases with
-`overflow-checks = true`. `cargo xtask check` enforces these rules
-([testing](conventions/testing.md#entry-points)). The crates and modules inside
-each workspace are described here as they land.
+outside both. Crates of the kernel workspace use no external crate
+([dependencies](../CONTRIBUTING.md#dependencies)), reach only paths inside
+`kernel/` and are all members of the kernel workspace, and tracked Cargo
+configuration that applies to the kernel workspace passes rustc no crate.
+User-space crates reach the kernel workspace only through the ABI crate.
+Every crate is licensed MIT, and both workspaces build releases with
+`overflow-checks = true`. `cargo xtask check` checks these rules as
+[testing](conventions/testing.md#entry-points) describes, which also names
+what the check does not cover. The crates and modules inside each workspace
+are described here as they land.

@@ -1,10 +1,15 @@
-//! The manifests step: crate licenses, release profiles and the dependency
-//! direction between the two workspaces.
+//! The manifests step: crate licenses, release profiles, the dependency
+//! direction between the two workspaces and, as Cargo resolves it, the
+//! kernel workspace's freedom from external crates.
 
+use std::fs;
 use std::path::Path;
+use std::process::Command;
 
+use serde_json::Value as Json;
 use toml::{Table, Value};
 
+use crate::check;
 use crate::repo::{self, Entry, Tree};
 
 /// The kernel workspace. Its crates may only reach paths inside it.
@@ -18,7 +23,8 @@ pub const LICENSE: &str = "MIT";
 
 /// The manifests step.
 pub fn run(root: &Path) -> Result<(), String> {
-    let problems = check(&Tree::load(root)?);
+    let mut problems = check(&Tree::load(root)?);
+    problems.extend(check_kernel_workspace(root));
     if problems.is_empty() {
         Ok(())
     } else {
@@ -48,6 +54,7 @@ pub fn check(tree: &Tree) -> Vec<String> {
         check_workspace_root(workspace, &manifests, &mut problems);
     }
     check_kernel_sources(tree, &mut problems);
+    check_cargo_configs(tree, &mut problems);
     problems
 }
 
@@ -268,8 +275,150 @@ fn source_paths(line: &str) -> Vec<&str> {
     found
 }
 
+/// Asks Cargo to resolve the kernel workspace below `root` offline, from its
+/// `Cargo.lock` and with every feature of its members, and checks what it
+/// reports. A registry or Git package that is not cached, or a stale
+/// `Cargo.lock`, fails the resolution.
+fn check_kernel_workspace(root: &Path) -> Vec<String> {
+    const ARGS: &str = "metadata --format-version 1 --locked --offline --all-features --manifest-path kernel/Cargo.toml";
+    let program = check::cargo();
+    let shown = format!("{} {ARGS}", program.to_string_lossy());
+    println!("$ {shown}");
+    let output = match Command::new(&program)
+        .args(ARGS.split(' '))
+        .current_dir(root)
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) => return vec![format!("cannot run `{shown}`: {error}")],
+    };
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        let status = output.status;
+        return vec![format!(
+            "`{shown}` exited with {status}:\n{}",
+            stderr.trim_end()
+        )];
+    }
+    eprint!("{stderr}");
+    match serde_json::from_slice(&output.stdout) {
+        Ok(metadata) => check_kernel_metadata(&metadata, &root.join(KERNEL)),
+        Err(error) => vec![format!("`{shown}` printed no valid JSON: {error}")],
+    }
+}
+
+/// Problems in what `cargo metadata` reports for the kernel workspace in
+/// `kernel`: its root must be `kernel`, and every package must be a member
+/// of it, with its manifest and the sources of its targets inside `kernel`.
+/// Paths are
+/// compared with symbolic links resolved; a path that cannot be resolved is a
+/// problem.
+fn check_kernel_metadata(metadata: &Json, kernel: &Path) -> Vec<String> {
+    let kernel = match fs::canonicalize(kernel) {
+        Ok(kernel) => kernel,
+        Err(error) => return vec![format!("cannot resolve {}: {error}", kernel.display())],
+    };
+    let resolve = |path: &Json| path.as_str().and_then(|path| fs::canonicalize(path).ok());
+    let inside = |path: &Json| resolve(path).is_some_and(|path| path.starts_with(&kernel));
+    let mut problems = Vec::new();
+    let root = &metadata["workspace_root"];
+    if resolve(root).as_ref() != Some(&kernel) {
+        problems.push(format!(
+            "kernel workspace: the root {root} does not resolve to kernel/"
+        ));
+    }
+    let (Some(packages), Some(members)) = (
+        metadata["packages"].as_array(),
+        metadata["workspace_members"].as_array(),
+    ) else {
+        problems.push("kernel workspace: cargo metadata lists no packages or members".to_string());
+        return problems;
+    };
+    for package in packages {
+        let (name, id) = (&package["name"], &package["id"]);
+        // Members have no source: registry and Git packages are never members.
+        if !members.contains(id) {
+            problems.push(format!(
+                "kernel workspace: package {name} is not a member: {id}"
+            ));
+            continue;
+        }
+        let manifest = &package["manifest_path"];
+        if !inside(manifest) {
+            problems.push(format!(
+                "kernel workspace: package {name} has a manifest that does not resolve inside kernel/: {manifest}"
+            ));
+        }
+        for target in package["targets"].as_array().into_iter().flatten() {
+            let (target, path) = (&target["name"], &target["src_path"]);
+            if !inside(path) {
+                problems.push(format!(
+                    "kernel workspace: target {target} of package {name} has a source that does not resolve inside kernel/: {path}"
+                ));
+            }
+        }
+    }
+    problems
+}
+
+/// Whether the tracked `path`, without regard to ASCII case as a
+/// case-insensitive file system reads it, is a `.cargo` entry that stands
+/// for the directory (a link or a submodule) or a configuration file in a
+/// `.cargo` directory, at the repository root or in a directory of the
+/// kernel workspace.
+fn is_kernel_cargo_config(path: &str) -> bool {
+    let path = path.to_ascii_lowercase();
+    let dir = path
+        .strip_suffix("/config.toml")
+        .or_else(|| path.strip_suffix("/config"))
+        .unwrap_or(&path);
+    let (outer, name) = dir.rsplit_once('/').unwrap_or(("", dir));
+    name == ".cargo" && (outer.is_empty() || repo::is_within(outer, KERNEL))
+}
+
+/// Every string in `value`, at any depth.
+fn strings(value: &Value, found: &mut Vec<String>) {
+    match value {
+        Value::String(text) => found.push(text.clone()),
+        Value::Array(items) => items.iter().for_each(|item| strings(item, found)),
+        Value::Table(table) => table.values().for_each(|item| strings(item, found)),
+        _ => {}
+    }
+}
+
+/// Tracked Cargo configuration that applies to the kernel workspace passes
+/// rustc no crate and no library search path: no string in it, split at
+/// whitespace, has a word that starts with `--extern` or `-L`.
+fn check_cargo_configs(tree: &Tree, problems: &mut Vec<String>) {
+    for (path, _) in tree
+        .entries()
+        .filter(|(path, _)| is_kernel_cargo_config(path))
+    {
+        let Some(Ok(table)) = tree.text(path).map(str::parse::<Table>) else {
+            problems.push(format!(
+                "{path}: Cargo configuration must be a regular file of valid TOML"
+            ));
+            continue;
+        };
+        let mut texts = Vec::new();
+        strings(&Value::Table(table), &mut texts);
+        for word in texts.iter().flat_map(|text| text.split_whitespace()) {
+            if word.starts_with("--extern") || word.starts_with("-L") {
+                problems.push(format!(
+                    "{path}: `{word}` would pass rustc a crate or a library search path"
+                ));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use serde_json::json;
+
     use super::*;
 
     const KERNEL_ROOT: &str = "[workspace]\nmembers = [\"abi\", \"core\"]\n\n[workspace.package]\nlicense = \"MIT\"\n\n[profile.release]\noverflow-checks = true\n";
@@ -429,6 +578,449 @@ mod tests {
             problems
                 .iter()
                 .any(|problem| problem.contains(":3: the source path"))
+        );
+    }
+
+    fn config_problems(path: &'static str, entry: Entry) -> Vec<String> {
+        let files: Vec<(&str, String)> = valid();
+        let borrowed: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(path, text)| (*path, text.as_str()))
+            .collect();
+        let mut tree = Tree::from_files(&borrowed);
+        tree.insert(path, entry);
+        check(&tree)
+    }
+
+    fn config(text: &str) -> Entry {
+        Entry::File(text.as_bytes().to_vec())
+    }
+
+    #[test]
+    fn accepts_the_cargo_configuration_of_the_repository() {
+        let text = include_str!("../../.cargo/config.toml");
+        assert_eq!(
+            config_problems(".cargo/config.toml", config(text)),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn accepts_cargo_configuration_that_passes_no_crate() {
+        let text = "[build]\nrustflags = [\"-C\", \"link-arg=-Tlink.ld\"]\n\n[alias]\nk = \"build --release\"\n";
+        assert_eq!(
+            config_problems("kernel/.cargo/config.toml", config(text)),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn rejects_extern_and_library_search_paths_in_cargo_configuration() {
+        let text = "[build]\nrustflags = [\"--extern\", \"x=/tmp/libx.rlib\", \"-L/tmp\"]\n\n[target.aarch64-unknown-none]\nrustflags = \"--extern=y=/tmp/liby.rlib -L dependency=/tmp\"\n";
+        let problems = config_problems("kernel/.cargo/config.toml", config(text));
+        assert_eq!(problems.len(), 4, "{problems:?}");
+        for word in [
+            "`--extern`",
+            "`-L/tmp`",
+            "`--extern=y=/tmp/liby.rlib`",
+            "`-L`",
+        ] {
+            assert!(
+                problems.iter().any(|problem| problem.contains(word)),
+                "{word}: {problems:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_cargo_configuration_whatever_the_case_of_its_name() {
+        let text = "[build]\nrustflags = [\"-L/tmp\"]\n";
+        for path in [
+            ".cargo/config",
+            "kernel/.Cargo/Config.toml",
+            "Kernel/abi/.CARGO/CONFIG",
+        ] {
+            let problems = config_problems(path, config(text));
+            assert_eq!(problems.len(), 1, "{path}: {problems:?}");
+            assert!(problems[0].contains("`-L/tmp`"), "{problems:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_cargo_configuration_behind_a_symbolic_link() {
+        for path in [".cargo", "kernel/.cargo/config.toml"] {
+            let problems = config_problems(path, Entry::Symlink("elsewhere".to_string()));
+            assert_eq!(problems.len(), 1, "{problems:?}");
+            assert!(problems[0].contains("regular file"), "{problems:?}");
+        }
+    }
+
+    /// A path in this repository, which exists, as Cargo would print it.
+    fn at(path: &str) -> Json {
+        Json::from(repo::root().join(path).to_string_lossy().into_owned())
+    }
+
+    /// A package whose id is its name, with the given source, manifest and
+    /// targets (kind and source), paths relative to the repository root.
+    fn package(name: &str, source: Json, manifest: &str, targets: &[(&str, &str)]) -> Json {
+        let targets: Vec<Json> = targets
+            .iter()
+            .map(|(kind, path)| json!({ "name": kind, "kind": [kind], "src_path": at(path) }))
+            .collect();
+        json!({ "name": name, "id": name, "source": source, "manifest_path": at(manifest), "targets": targets })
+    }
+
+    /// The member `m` of the kernel workspace.
+    fn member(manifest: &str, targets: &[(&str, &str)]) -> Json {
+        package("m", Json::Null, manifest, targets)
+    }
+
+    const LIB: [(&str, &str); 1] = [("lib", "kernel/abi/src/lib.rs")];
+
+    fn local() -> Json {
+        member("kernel/abi/Cargo.toml", &LIB)
+    }
+
+    /// The problems of a kernel workspace with the root `root`, whose only
+    /// member is `m`, and the given packages.
+    fn metadata_problems(root: &str, packages: &[Json]) -> Vec<String> {
+        let metadata =
+            json!({ "workspace_root": at(root), "workspace_members": ["m"], "packages": packages });
+        check_kernel_metadata(&metadata, &repo::root().join(KERNEL))
+    }
+
+    /// The single problem of a kernel workspace with `extra` next to a local
+    /// member.
+    fn only_problem(extra: Json) -> String {
+        let problems = metadata_problems(KERNEL, &[local(), extra]);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        problems[0].clone()
+    }
+
+    #[test]
+    fn metadata_of_local_members_passes() {
+        let targets = [
+            ("lib", "kernel/abi/src/lib.rs"),
+            ("test", "kernel/abi/src/lib.rs"),
+        ];
+        let tested = member("kernel/abi/Cargo.toml", &targets);
+        assert_eq!(
+            metadata_problems(KERNEL, &[local(), tested]),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn metadata_rejects_a_registry_package() {
+        let registry = json!("registry+https://github.com/rust-lang/crates.io-index");
+        let problem = only_problem(package("x", registry, "kernel/abi/Cargo.toml", &LIB));
+        assert!(
+            problem.contains("package \"x\" is not a member"),
+            "{problem}"
+        );
+    }
+
+    #[test]
+    fn metadata_rejects_a_git_package() {
+        let git = json!("git+https://example.com/x.git#0123abc");
+        let problem = only_problem(package("x", git, "kernel/abi/Cargo.toml", &LIB));
+        assert!(
+            problem.contains("package \"x\" is not a member"),
+            "{problem}"
+        );
+    }
+
+    #[test]
+    fn metadata_rejects_a_local_package_that_is_not_a_member() {
+        let problem = only_problem(package("x", Json::Null, "kernel/abi/Cargo.toml", &LIB));
+        assert!(
+            problem.contains("package \"x\" is not a member"),
+            "{problem}"
+        );
+    }
+
+    #[test]
+    fn metadata_rejects_a_manifest_outside_kernel() {
+        let problem = only_problem(member("xtask/Cargo.toml", &LIB));
+        assert!(problem.contains("has a manifest"), "{problem}");
+    }
+
+    #[test]
+    fn metadata_rejects_a_build_script_outside_kernel() {
+        let targets = [("custom-build", "xtask/src/main.rs")];
+        let problem = only_problem(member("kernel/abi/Cargo.toml", &targets));
+        assert!(problem.contains("xtask/src/main.rs"), "{problem}");
+    }
+
+    #[test]
+    fn metadata_rejects_a_library_outside_kernel() {
+        let targets = [("lib", "xtask/src/main.rs")];
+        let problem = only_problem(member("kernel/abi/Cargo.toml", &targets));
+        assert!(problem.contains("target \"lib\""), "{problem}");
+    }
+
+    #[test]
+    fn metadata_rejects_a_workspace_root_other_than_kernel() {
+        for root in ["", "kernel/abi"] {
+            let problems = metadata_problems(root, &[local()]);
+            assert_eq!(problems.len(), 1, "{problems:?}");
+            assert!(problems[0].contains("the root"), "{problems:?}");
+        }
+    }
+
+    #[test]
+    fn metadata_rejects_a_path_that_does_not_exist() {
+        let missing = [("lib", "kernel/abi/src/missing.rs")];
+        let problem = only_problem(member("kernel/abi/Cargo.toml", &missing));
+        assert!(problem.contains("missing.rs"), "{problem}");
+    }
+
+    #[test]
+    fn metadata_without_packages_fails() {
+        let metadata = json!({ "workspace_root": at(KERNEL), "workspace_members": [] });
+        let problems = check_kernel_metadata(&metadata, &repo::root().join(KERNEL));
+        assert_eq!(problems.len(), 1, "{problems:?}");
+    }
+
+    /// A directory below the profile directory of the build, whose `deps`
+    /// directory holds the test executable, removed with its value.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(label: &str) -> Scratch {
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            let executable = std::env::current_exe().expect("locate the test executable");
+            let profile = executable
+                .parent()
+                .and_then(Path::parent)
+                .expect("the test executable lies in the deps directory of a profile");
+            let path = profile.join("scratch").join(format!(
+                "krepi-xtask-{label}-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            // A directory of the same name can only be left over from an
+            // earlier process with the same identifier.
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("create the scratch directory");
+            Scratch(path)
+        }
+
+        /// Writes `text` to the relative path `name`, with its directories.
+        fn write(&self, name: &str, text: &str) {
+            let path = self.0.join(name);
+            fs::create_dir_all(path.parent().expect("a file has a directory"))
+                .expect("create a scratch directory");
+            fs::write(path, text).expect("write a scratch file");
+        }
+
+        /// Writes `Cargo.lock` for the kernel workspace, offline.
+        fn lock(&self) {
+            let output = Command::new(check::cargo())
+                .args([
+                    "generate-lockfile",
+                    "--offline",
+                    "--manifest-path",
+                    "kernel/Cargo.toml",
+                ])
+                .current_dir(&self.0)
+                .output()
+                .expect("run cargo generate-lockfile");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{stderr}");
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const MEMBER: &str =
+        "[package]\nname = \"a\"\nedition = \"2024\"\n\n[dependencies]\nb = { path = \"../b\" }\n";
+
+    /// A repository whose kernel workspace holds the crate `a`, which depends
+    /// on the crate `b`, with the crate `outside` next to `kernel/`.
+    fn repository(label: &str) -> Scratch {
+        let scratch = Scratch::new(label);
+        scratch.write(
+            "kernel/Cargo.toml",
+            "[workspace]\nresolver = \"3\"\nmembers = [\"a\", \"b\"]\n",
+        );
+        scratch.write("kernel/a/Cargo.toml", MEMBER);
+        scratch.write("kernel/a/src/lib.rs", "");
+        scratch.write(
+            "kernel/b/Cargo.toml",
+            "[package]\nname = \"b\"\nedition = \"2024\"\n",
+        );
+        scratch.write("kernel/b/src/lib.rs", "");
+        // A workspace of its own, so that Cargo does not look for one in the
+        // directories that hold the scratch directory.
+        scratch.write(
+            "outside/Cargo.toml",
+            "[package]\nname = \"outside\"\nedition = \"2024\"\n\n[workspace]\n",
+        );
+        scratch.write("outside/src/lib.rs", "");
+        scratch
+    }
+
+    #[test]
+    fn cargo_accepts_a_kernel_workspace_of_its_own_crates() {
+        let scratch = repository("local");
+        scratch.lock();
+        assert_eq!(check_kernel_workspace(&scratch.0), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cargo_accepts_the_kernel_workspace_through_a_symbolic_link() {
+        let scratch = repository("linked");
+        scratch.lock();
+        let links = Scratch::new("links");
+        let link = links.0.join("repository");
+        std::os::unix::fs::symlink(&scratch.0, &link).expect("create a symbolic link");
+        assert_eq!(check_kernel_workspace(&link), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cargo_finds_a_path_dependency_outside_kernel() {
+        let scratch = repository("path");
+        let text = format!("{MEMBER}outside = {{ path = \"../../outside\" }}\n");
+        scratch.write("kernel/a/Cargo.toml", &text);
+        scratch.lock();
+        let problems = check_kernel_workspace(&scratch.0);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].contains("package \"outside\" is not a member"),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn cargo_finds_a_member_outside_kernel() {
+        let scratch = repository("member");
+        scratch.write(
+            "kernel/Cargo.toml",
+            "[workspace]\nresolver = \"3\"\nmembers = [\"a\", \"b\", \"../outside\"]\n",
+        );
+        scratch.write(
+            "outside/Cargo.toml",
+            "[package]\nname = \"outside\"\nedition = \"2024\"\nworkspace = \"../kernel\"\n",
+        );
+        scratch.lock();
+        let problems = check_kernel_workspace(&scratch.0);
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(problems[0].contains("package \"outside\""), "{problems:?}");
+    }
+
+    #[test]
+    fn cargo_finds_a_patch_from_outside_kernel() {
+        let scratch = repository("patch");
+        scratch.write(
+            "kernel/Cargo.toml",
+            "[workspace]\nresolver = \"3\"\nmembers = [\"a\", \"b\"]\n\n[patch.crates-io]\noutside = { path = \"../outside\" }\n",
+        );
+        scratch.write(
+            "kernel/a/Cargo.toml",
+            &format!("{MEMBER}outside = \"0.0.0\"\n"),
+        );
+        scratch.lock();
+        let problems = check_kernel_workspace(&scratch.0);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].contains("package \"outside\" is not a member"),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn cargo_finds_a_crate_excluded_from_the_kernel_workspace() {
+        let scratch = repository("excluded");
+        scratch.write(
+            "kernel/Cargo.toml",
+            "[workspace]\nresolver = \"3\"\nmembers = [\"a\"]\nexclude = [\"b\"]\n",
+        );
+        scratch.lock();
+        let problems = check_kernel_workspace(&scratch.0);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].contains("package \"b\" is not a member"),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn cargo_finds_a_kernel_manifest_that_joins_another_workspace() {
+        let scratch = repository("redirect");
+        scratch.write(
+            "kernel/Cargo.toml",
+            "[package]\nname = \"k\"\nedition = \"2024\"\nworkspace = \"../other\"\n",
+        );
+        scratch.write("kernel/src/lib.rs", "");
+        scratch.write(
+            "other/Cargo.toml",
+            "[workspace]\nresolver = \"3\"\nmembers = [\"../kernel\"]\n",
+        );
+        scratch.lock();
+        let problems = check_kernel_workspace(&scratch.0);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("the root"), "{problems:?}");
+    }
+
+    #[test]
+    fn cargo_accepts_a_build_script_inside_kernel() {
+        let scratch = repository("build");
+        scratch.write("kernel/b/build.rs", "fn main() {}\n");
+        scratch.lock();
+        assert_eq!(check_kernel_workspace(&scratch.0), Vec::<String>::new());
+    }
+
+    #[test]
+    fn cargo_finds_a_library_that_leaves_kernel_through_dot_dot() {
+        let scratch = repository("dot-dot");
+        let text = MEMBER.replace(
+            "edition = \"2024\"\n",
+            "edition = \"2024\"\n\n[lib]\npath = \"../../outside/src/lib.rs\"\n",
+        );
+        scratch.write("kernel/a/Cargo.toml", &text);
+        scratch.lock();
+        let problems = check_kernel_workspace(&scratch.0);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        // Cargo prints the path below kernel/a, so only the resolved path
+        // shows that it leaves kernel/.
+        assert!(
+            problems[0].contains("kernel/a/../../outside/src/lib.rs"),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn cargo_fails_closed_on_a_registry_crate_it_cannot_resolve_offline() {
+        let scratch = repository("registry");
+        scratch.lock();
+        let text = format!("{MEMBER}krepi-no-such-crate = \"1\"\n");
+        scratch.write("kernel/a/Cargo.toml", &text);
+        let problems = check_kernel_workspace(&scratch.0);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].contains("no matching package named `krepi-no-such-crate`"),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn cargo_fails_closed_on_a_stale_lock_file() {
+        let scratch = repository("stale");
+        scratch.lock();
+        scratch.write(
+            "kernel/b/Cargo.toml",
+            "[package]\nname = \"b\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        );
+        let problems = check_kernel_workspace(&scratch.0);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].contains("cannot update the lock file"),
+            "{problems:?}"
         );
     }
 }

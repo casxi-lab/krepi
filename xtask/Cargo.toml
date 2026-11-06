@@ -12,13 +12,14 @@ rust-version = "1.99"
 [workspace]
 
 [dependencies]
-# The receipt keeps its fields in the order in which they are written. It is
-# written to a string, so the standard-library support of the default
-# feature is left out.
+# The receipt keeps its fields in the order in which they are written, and
+# the manifests step reads the output of `cargo metadata`. Both are text in
+# memory, so the standard-library support of the default feature is left
+# out.
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
-# Manifests are parsed into tables, which `serde` defines, and never written,
-# so the writer and the standard-library support of the default features are
-# left out.
+# Manifests and Cargo configuration files are parsed into tables, which
+# `serde` defines, and never written, so the writer and the standard-library
+# support of the default features are left out.
 toml = { version = "=1.2.0", default-features = false, features = ["parse", "serde"] }
 # The workflows step uses the event parser on text that is already UTF-8,
 # so the input-decoding support of the default feature is left out.
