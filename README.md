@@ -25,7 +25,8 @@ the contribution rules, the target architecture, the documentation conventions,
 empty proof registries, a commit-message hook and the build tooling: a pinned
 Rust toolchain, the kernel and user-space Cargo workspaces with an empty ABI
 crate and SDK crate, and the repository checks. There is no kernel source yet,
-and nothing boots. Continuous integration is not set up.
+and nothing boots. Continuous integration runs the repository checks on every
+pull request to `main` and on every push to `main`.
 
 The required host checks run from the repository root and need the tools that
 `toolchains.toml` lists for the host

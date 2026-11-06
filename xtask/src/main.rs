@@ -4,9 +4,12 @@
 mod check;
 mod docs;
 mod manifests;
+mod receipt;
 mod repo;
 mod toolchain;
+mod workflows;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// A command of `cargo xtask`, possibly with subcommands of its own.
@@ -21,7 +24,7 @@ pub struct Command {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "check",
-        about: "Run the toolchain, manifest, format, Clippy, test and documentation checks",
+        about: "Run the toolchain, manifest, format, Clippy, test, documentation and workflow checks; with --receipt <path>, also write a JSON receipt of the run",
         subcommands: &[],
     },
     Command {
@@ -46,7 +49,8 @@ fn main() -> ExitCode {
         .collect::<Vec<_>>()
         .as_slice()
     {
-        ["check"] => check::run(repo::root()),
+        ["check"] => check::run(repo::root(), None),
+        ["check", "--receipt", path] => check::run(repo::root(), Some(PathBuf::from(path))),
         [] | ["help"] => {
             print_help();
             ExitCode::SUCCESS
