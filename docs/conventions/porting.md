@@ -56,8 +56,11 @@ of the legacy tooling crate `tools/` are ported with their tests.
 Every change that takes code, tests or data from the legacy tree adds or
 updates a porting record in the same change. A record lives at
 `docs/porting/<module>.md`, where `<module>` is the destination module path
-below `src/` (or below the tooling crate) with `/` written as `-`, for example
-`docs/porting/fdt.md`. One record may cover a module directory and its
+below `src/` with `/` written as `-`, for example `docs/porting/fdt.md`. A
+module of the host tooling crate `tools/` takes the prefix `tools-`, so that
+its record is not taken for that of a kernel module: `tools/src/elf.rs` has
+`docs/porting/tools-elf.md`, and the crate root and manifest have
+`docs/porting/tools-lib.md`. One record may cover a module directory and its
 children.
 
 A record starts with a metadata block:

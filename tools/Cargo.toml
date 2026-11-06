@@ -1,0 +1,18 @@
+[package]
+name = "krepi-tools"
+version = "0.0.0"
+description = "Host tooling for krepi tests: digests, ELF reading and JSON report values"
+edition = "2024"
+license = "MIT"
+publish = false
+rust-version = "1.99"
+
+# The host tooling crate is a workspace of its own, outside the kernel,
+# user-space and xtask workspaces.
+[workspace]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

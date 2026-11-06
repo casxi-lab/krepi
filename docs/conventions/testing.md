@@ -1,8 +1,9 @@
 # Testing
 
-Tests and test tooling are written in Rust. No test or test tool exists yet;
-this page states the rules that the first ones follow, and its command
-sections are filled in when the commands work.
+Tests and test tooling are written in Rust. So far the repository tasks in
+`xtask/` and the host tooling crate in `tools/`, which holds the first test
+tools, have host tests; this page states the rules that every test follows,
+and its command sections are filled in when the commands work.
 
 ## Environments
 
@@ -32,7 +33,8 @@ the failed step:
    build releases with `overflow-checks = true`, and the dependency rules of
    the [source layout](../architecture.md#source-layout) hold;
 3. `fmt`, `clippy` with warnings as errors, and `test`, each in the kernel
-   workspace, the user-space workspace and `xtask`;
+   workspace, the user-space workspace, `xtask` and the host tooling crate
+   `tools`;
 4. `docs`: relative links and anchors in Markdown and the `cargo xtask`
    commands that documents mention;
 5. `workflows`: every `.yml` or `.yaml` file below `.github/workflows/` is
@@ -147,6 +149,6 @@ not execution, and execution on QEMU is not execution on the board.
 
 ## Dependencies
 
-There is no package yet. Development dependencies are added only when a
-test category needs them, are pinned to an exact version and are listed here
-with their purpose.
+No test depends on a package from outside the repository yet. Development
+dependencies are added only when a test category needs them, are pinned to
+an exact version and are listed here with their purpose.

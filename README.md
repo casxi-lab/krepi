@@ -24,8 +24,10 @@ This repository is newly initialized. It contains this README, the krepi logo,
 the contribution rules, the target architecture, the documentation conventions,
 empty proof registries, a commit-message hook and the build tooling: a pinned
 Rust toolchain, the kernel and user-space Cargo workspaces with an empty ABI
-crate and SDK crate, and the repository checks. There is no kernel source yet,
-and nothing boots. Continuous integration runs the repository checks on every
+crate and SDK crate, and the repository checks. A host tooling crate for
+tests holds digests, an ELF reader and report values ported from the
+prototype, with their porting records. There is no kernel source yet, and
+nothing boots. Continuous integration runs the repository checks on every
 pull request to `main` and on every push to `main`.
 
 The required host checks run from the repository root and need the tools that
