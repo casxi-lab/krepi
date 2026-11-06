@@ -16,12 +16,15 @@ the compiled binary or concurrent execution unless a separate layer proves it.
 ## Status
 
 The three registries `verification/targets.json`, `verification/models.json`
-and `verification/legacy.json` exist and are empty. Everything else on this
-page is planned: the pinned tools, the Lake project, the `Krepi` Lean modules,
-the qualification crate and the `cargo xtask formal` (planned) commands. They are set
-up by porting the tooling of the CAS project and the prototype tree, and this
-page
-changes with them. No target is registered and nothing is proved.
+and `verification/legacy.json` exist and are empty. The pinned tools exist:
+the tool manifest `verification/toolchain.json`, the reviewed Aeneas patch,
+the recipe of the image that holds the tools, the workflows that build and
+publish it, and `cargo xtask formal toolchain-check`, which checks the
+manifest against the Aeneas and Charon sources ([tools](#tools)). Everything
+else on this page is planned: the Lake project, the `Krepi` Lean modules, the
+qualification crate and the other commands of `cargo xtask formal`. They are
+set up by porting the tooling of the CAS project and the prototype tree, and
+this page changes with them. No target is registered and nothing is proved.
 
 Proofs of the prototype are proofs about that code.
 They do not carry over: a module taken into krepi is proved again against the
@@ -51,8 +54,9 @@ never moved into the trusted boundary to close a gap.
 
 | Path | Content | Status |
 | --- | --- | --- |
-| `verification/toolchain.json` | Pinned tools: Lean, the Aeneas release and source commit, Charon, reviewed Aeneas patches, the Rust nightly used by Charon, and the Lake lock of the Aeneas library | Planned |
-| `verification/tooling/` | Reviewed tool patches and frozen tool environments named by the pins | Planned |
+| `verification/toolchain.json` | The tool manifest: Lean, the Aeneas source commit with its reviewed patch and the Lake lock of its Lean library, Charon, the Rust nightly used by Charon, opam and GMP, with the downloads of each host ([tools](#tool-manifest)) | Present |
+| `verification/tooling/` | Reviewed tool patches, named by the manifest, and their license texts | Present |
+| `verification/image/` | The recipe of the image that holds the pinned tools, and the list of its third-party notices ([image](#image)) | Present |
 | `verification/lakefile.lean`, `lean-toolchain`, `lake-manifest.json` | The Lake project for specifications and proofs | Planned |
 | `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there | Planned |
 | `verification/Krepi/Proofs/` | Refinement proofs of production targets | Planned |
@@ -63,7 +67,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/models.json` | The model registry | Present, empty |
 | `verification/legacy.json` | Production functions without proofs, recorded when the inventory is adopted | Present, empty |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Planned |
-| `xtask/src/formal/` | The `cargo xtask formal` (planned) commands | Planned |
+| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check` present, the others planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
 `artifacts/formal/` directory, and the Lake build directory
@@ -72,24 +76,223 @@ edited.
 
 ## Tools
 
-The pinned tools are built once per machine into a directory outside the
-checkout and sealed: every installed file is recorded with its size and
-digest, and later commands refuse an installation whose pins differ from
-`toolchain.json` or whose files changed. Setup is the only networked step.
-The pins and the setup procedure are ported from the CAS project, whose
-installation supports only macOS on Apple silicon; the hosts that krepi
-supports are fixed together with the CI runner. Any change of a tool version,
-patch or pin requires a new installation and a passing qualification.
+The proof tools have one set of pinned versions for two hosts:
+`linux-aarch64`, where CI runs them in a container image on a GitHub-hosted
+`ubuntu-24.04-arm` runner, and `darwin-arm64`, where a local installation
+serves development. Only runs in the image produce evidence. Aeneas and
+Charon are built from source; their released binaries are not used.
+
+| Tool | Pin |
+| --- | --- |
+| Lean | A release archive for each host, by SHA-256; it provides `lean`, `lake` and `leanchecker` |
+| Aeneas | A source commit, built with the reviewed patch in `verification/tooling/`; its Lean library is built with the Mathlib commit of its Lake lock |
+| Charon | The commit that Aeneas names in its `charon-pin` |
+| Rust | The nightly that Charon names in its `rust-toolchain`, installed with rustup, with the standard library for `aarch64-unknown-none` beside the host's |
+| opam and OCaml | An opam binary for each host, by SHA-256, a commit of the opam package repository and an OCaml compiler package; they build Aeneas |
+| GMP | A source archive, by SHA-256, built on each host |
+
+The patch keeps its Apache-2.0 notice; the license text is
+`verification/tooling/LICENSE-Apache-2.0`. Any change of a tool version,
+patch or pin requires a new image ([changing a tool](#changing-a-tool)) and a
+passing qualification.
+
+### Tool manifest
+
+`verification/toolchain.json` has schema version 1. Its sections pin what
+both hosts share; `hosts` holds what differs between them.
+
+| Field | Content |
+| --- | --- |
+| `schema` | `1` |
+| `lean` | `toolchain` as `lean-toolchain` files name it, and `version` and `commit` as `lean --version` prints them |
+| `aeneas` | `source_url` and `commit`; `patch`, the repository path of the reviewed patch, and its `patch_sha256`; `patch_origin`, the source, SHA-256 and changes of the version the patch was ported from; `lake_manifest_sha256`, the SHA-256 of `backends/lean/lake-manifest.json` at the commit, and `mathlib_commit`, the Mathlib commit that this lock pins |
+| `charon` | `source_url`, `commit`, and `version` as `charon version` prints it |
+| `rust` | `toolchain`, the rustup name of the nightly; `rustc_commit`; `manifest_url` and `manifest_sha256` of the dated channel manifest; the rustup `components` and the further `targets` to install; `rustup`, the version of rustup, and `rustup_source_url` and `rustup_commit`, the source of that version, from which the image takes rustup's license texts |
+| `opam` | `version`; `repository_url` and `repository_commit` of the opam package repository; `compiler`, the compiler package of the switch |
+| `gmp` | `version`, and `url` and `sha256` of the source archive |
+| `hosts` | One column each for `linux-aarch64` and `darwin-arm64`, described below |
+
+A host column holds:
+
+- `locale`, the locale of the tools;
+- `prefix`, the directory of the installation, laid out as the image lays out
+  `/opt/krepi-formal`: that path itself on `linux-aarch64`, and on
+  `darwin-arm64` `artifacts/formal/tools`, relative to the repository root,
+  where a symbolic link may point to an installation outside the checkout;
+- `url` and `sha256` of the Lean archive (`lean`), the opam binary (`opam`)
+  and `rustup-init` (`rustup_init`);
+- on `darwin-arm64` only, `version`, `url` and `sha256` of the pkgconf
+  source archive (`pkgconf`), built on that host because its OCaml switch
+  needs a `pkg-config`; the image build takes `pkg-config` from the Ubuntu
+  archive;
+- `switch_export_sha256`, the SHA-256 of what `opam switch export --full`
+  writes for the switch built on that host, or `null` until a build on that
+  host has produced it.
+
+### Tool checks
+
+`cargo xtask formal toolchain-check --aeneas DIR --charon DIR` checks the
+manifest against a checkout of Aeneas, a checkout of Charon and the patch in
+the repository, prints one line per check and fails when any check fails:
+
+- each checkout is at its pinned commit;
+- the pinned Lean toolchain is the one that Aeneas names in
+  `backends/lean/lean-toolchain`, the pinned Charon commit the one in
+  Aeneas's `charon-pin`, and the pinned nightly the channel of Charon's
+  `charon/rust-toolchain`;
+- the pinned Lean toolchain is that of the pinned Lean `version`, and the
+  Lean archive of each host belongs to that release, so that the Lean the
+  image installs is the Lean that Aeneas names;
+- the patch has the pinned SHA-256;
+- Aeneas's `backends/lean/lake-manifest.json` has the pinned SHA-256 and
+  pins the pinned Mathlib commit;
+- the Rust targets include `aarch64-unknown-none`, the triple for which the
+  kernel is extracted;
+- the manifest has exactly the two host columns, each with a UTF-8 locale, a
+  prefix without `.` or `..` components, `/opt/krepi-formal` on
+  `linux-aarch64`, and a `switch_export_sha256` that is `null` or a SHA-256
+  in lowercase hexadecimal.
+
+The image build runs it before its first expensive step. Its unit tests run
+in `cargo xtask check`, together with a test that the committed manifest
+passes the checks that need no checkout and that the committed patch has the
+pinned SHA-256.
+
+### Image
+
+`verification/image/Dockerfile` builds the image in stages from an Ubuntu
+base image pinned by digest; `verification/image/recipe.sh` holds the shell
+functions of its steps. Its default build context is `verification/`, and
+the named contexts `aeneas-src` and `charon-src` are the checkouts that the
+tool checks have accepted, Charon's with its submodules. The steps
+
+- download the Lean archive, `rustup-init`, the channel manifest, the opam
+  binary and the GMP source archive over HTTPS and check each against its
+  pinned SHA-256, and fetch the opam package repository and rustup's source
+  at their pinned commits;
+- install the nightly with a rustup whose self-update is turned off, check
+  the version and commit that rustup reports, check the SHA-256 of the dated
+  channel manifest, and check that the manifest and the installed `rustc -vV`
+  name the pinned rustc commit;
+- check the SHA-256 of the patch and of the Lake lock of the Aeneas Lean
+  library and the Mathlib commit of the lock again, apply the patch, and
+  build the library with Mathlib from the Mathlib cache;
+- build GMP, the OCaml switch, Aeneas and Charon from source, check that
+  Charon's submodules are at the commits that Charon records, check the
+  versions that Lean and opam report against the manifest, and, once the
+  `linux-aarch64` column pins it, check the SHA-256 of the switch export.
+
+Two kinds of download have no pin of their own. Cargo fetches the crates that
+Charon uses from crates.io and Git and checks them against the checksums and
+commits of Charon's `Cargo.lock`. `lake exe cache get` takes Mathlib's build
+cache, and the `leantar` tool that unpacks it, from Mathlib's cache service
+for the Mathlib commit of the pinned Lake lock, and Lake clones the packages
+of the lock at the commits that it names.
+
+The final stage holds the tools only, below `/opt/krepi-formal`:
+
+| Path | Content |
+| --- | --- |
+| `lean/` | The Lean toolchain |
+| `bin/` | `aeneas`, `charon` and `charon-driver` |
+| `backend/` | The patched Aeneas Lean library, built, with Mathlib and its other Lake packages in `.lake/packages` |
+| `rustup/`, `cargo/` | The rustup and Cargo homes with the nightly |
+| `versions.json` | What the build observed: `lean` (`version`, `commit`, `sha256`), `aeneas` (`commit`, `patch_sha256`, `version`, `lake_manifest_sha256`, `mathlib_commit`), `charon` (`commit`, `version`, and the commit of each path in `submodules`), `rust` (`toolchain`, `rustc_commit`, `manifest_sha256`, `rustup`, `rustup_commit`, `rustup_init_sha256`, `components`, `targets`), `opam` (`version`, `sha256`, `repository_commit`, `ocaml`, `switch_export_sha256`), `gmp` (`version`, `sha256`), the Ubuntu versions of bubblewrap and Git (`apt`) and the base image (`base_image`) |
+| `opam-switch.export` | The switch that built Aeneas, as `opam switch export --full` writes it |
+| `notices/` | The third-party license texts that its `README` lists, and the GMP source archive |
+
+GMP's shared library is in `/usr/local/lib`; bubblewrap, Git and `time` come
+from the Ubuntu archive. The source trees, the opam switch and the build
+directories stay in the build stages. Everything below `/opt/krepi-formal`
+belongs to root, and the installed trees and files have no write
+permission, so a tool that runs as another user cannot change the
+installation.
+
+The build fails when a component that `notices/README` lists has no license
+text, and also when one of the packages below has none:
+
+- each crate that Charon links for the host, that is the crates from
+  registries and Git repositories that its normal and build dependencies
+  reach: the license files of the crate, or for a crate from Git without
+  any, of its repository. A crate that ships no license file gets the
+  standard texts of the licenses that it declares, which the Rust toolchain
+  ships, and a note that says so;
+- each submodule of Charon, such as MiniRust;
+- each package of the opam switch that has a source: the license files that
+  it installs, or else those of its source as `opam source` fetches it. A
+  package without a source, such as a `base-` or `conf-` package, holds no
+  code;
+- each package of the Lake lock of the Aeneas Lean library.
+
+### Environment of tool commands
+
+The proof gate (planned) runs each tool command with an empty environment
+and only the variables that `xtask/src/formal/toolchain.rs` gives it:
+
+| Variable | Value | Commands |
+| --- | --- | --- |
+| `LAKE_ARTIFACT_CACHE` | `false` | All |
+| `CARGO_NET_OFFLINE` | `true` | All |
+| `CARGO_HOME` | `cargo/` of the installation | All |
+| `RUSTUP_HOME` | `rustup/` of the installation | All |
+| `RUSTUP_TOOLCHAIN` | The pinned nightly | All |
+| `LANG`, `LC_ALL` | The `locale` of the host's column | All |
+| `GIT_CONFIG_NOSYSTEM` | `1` | All |
+| `GIT_CONFIG_GLOBAL` | `/dev/null` | All |
+| `PATH` | `lean/bin`, `bin` and `cargo/bin` of the installation, then `/usr/bin:/bin:/usr/sbin:/sbin` | All |
+| `HOME` | A new, empty directory of the run | All |
+| `TMPDIR` | A directory of the run | All |
+| `CARGO_INCREMENTAL` | `0` | Charon and Aeneas, the extraction |
+| `CARGO_TARGET_DIR` | A directory of the run for this extraction alone | Charon and Aeneas, the extraction |
+
+The installation is the `prefix` of the host's column: `/opt/krepi-formal`
+in the image, and a directory with the same layout on `darwin-arm64`. The
+Lean toolchain comes first in `PATH` because `leanchecker` takes the
+toolchain of the `lean` it finds there as its system root. Charon runs Cargo
+through `rustup run`, which needs `RUSTUP_HOME` to find the nightly instead
+of installing it from the network. The two Cargo build variables go to both
+extraction commands; Aeneas runs no Cargo and ignores them.
+`LEAN_NUM_THREADS` is not set, so Lean uses every CPU of the host.
+
+### Changing a tool
+
+A change of a tool version, of the patch or of the image recipe takes two
+pull requests:
+
+1. The first changes `verification/toolchain.json`, `verification/tooling/`
+   or `verification/image/`. The workflow `formal image build` builds the
+   image on the pull request without publishing it. Where the change alters
+   the opam switch, the `linux-aarch64` column's `switch_export_sha256` is
+   `null` for the first build and takes `opam.switch_export_sha256` from the
+   `versions.json` that the build uploads; the build that follows checks it.
+   After the merge, the workflow `formal image publish` builds the image
+   again from `main`, publishes it as
+   `ghcr.io/casxi-lab/krepi-formal:<commit>` and prints its digest. It
+   refuses to run while `switch_export_sha256` of `linux-aarch64` is `null`.
+2. The second pins that digest as the image that the CI jobs of the proof
+   gate (planned) pull, and those jobs validate it on its pull request.
+
+Both workflows run only for changes to these paths or to the two workflows.
+The publish workflow runs only on pushes to `main`, and its job alone may
+write packages; a pull request never publishes an image. Both run every
+step with `bash -eo pipefail`. Before the image build, both run the tool
+checks and a check that `check_notices` of the recipe fails when any
+component that `notices.txt` lists has a missing or empty notice. Both record
+the available disk before and after removing preinstalled software from the
+runner, sample it together with the size of the Docker data directory every
+15 seconds during the build, record Docker's disk use at the end and then
+free its build cache, and upload the samples, the build log, the notice
+check, the layer sizes, `versions.json` and the switch export as a workflow
+artifact.
 
 ## Commands
 
-The `cargo xtask formal` (planned) family follows the CAS project. None of these commands
-exists yet.
+The commands of `cargo xtask formal` follow the CAS project. Only
+`cargo xtask formal toolchain-check` exists; the others are planned.
 
 | Command | Purpose |
 | --- | --- |
-| `cargo xtask formal setup` (planned) | Builds and seals the pinned tools |
-| `cargo xtask formal tools` (planned) | Checks the selected installation |
+| `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
 | `cargo xtask formal qualify` (planned) | Tool qualification regression on the code shapes in `verification/qualification` |
 | `cargo xtask formal run [--target NAME]...` (planned) | The proof gate: qualification, the specifications and every target (or the named ones) with its mutants |
 | `cargo xtask formal check` (planned) | Registry, legacy and inventory metadata only; runs no tool and proves nothing |

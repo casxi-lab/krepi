@@ -20,6 +20,14 @@ krepi-tools = { path = "../tools" }
 # memory, so the standard-library support of the default feature is left
 # out.
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
+# `verification/toolchain.json` is read into types that derive `Deserialize`;
+# nothing is serialized through `serde` itself, so only the derive macros and
+# the allocation support for strings, vectors and maps are needed.
+serde = { version = "=1.0.229", default-features = false, features = ["alloc", "derive"] }
+# The SHA-256 of files that the tool checks read into memory, so the
+# allocation and object-identifier support of the default features is left
+# out.
+sha2 = { version = "=0.11.1", default-features = false }
 # Manifests and Cargo configuration files are parsed into tables, which
 # `serde` defines, and never written, so the writer and the standard-library
 # support of the default features are left out.

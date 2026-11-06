@@ -1,0 +1,41 @@
+# Third-party software in the krepi proof-tool image
+#
+# This directory holds the license texts of the third-party software that
+# the image contains. Each line below starts with the subdirectory that
+# holds the texts of one component, followed by the component and its
+# license. The image build fails when a listed subdirectory is missing or
+# holds no file that is not empty. Below charon-crates, opam and
+# lean-packages, every crate, opam package with a source and Lake package
+# has a directory of its own, and the build fails when one has no license
+# text. A crate that ships no license file gets the standard texts of the
+# licenses it declares, from rust/rust/licenses, with a file PACKAGE that
+# says so.
+#
+# Source code:
+# - GMP is built without changes from the source archive in gmp/, which is
+#   the complete corresponding source of /usr/local/lib/libgmp.so.10.
+# - Aeneas, Charon, the Lean toolchain, Mathlib and the other Lake packages
+#   are built from, or are, their public source repositories at the commits
+#   that /opt/krepi-formal/versions.json and the Lake lock of
+#   /opt/krepi-formal/backend name. The Aeneas binary and the Aeneas Lean
+#   library carry the patch in aeneas-patch/. The opam packages are those
+#   that /opt/krepi-formal/opam-switch.export lists, from the opam
+#   repository commit in versions.json.
+# - The Rust toolchain and rustup are the official release builds of the
+#   versions in /opt/krepi-formal/versions.json.
+# - Packages of the Ubuntu base image, bubblewrap and Git among them, keep
+#   their copyright files in /usr/share/doc/<package>/copyright; their
+#   sources are in the Ubuntu archive at the versions that dpkg lists.
+
+lean            Lean 4 toolchain with lake and leanchecker; Apache-2.0, bundled software under the licenses in LICENSES
+lean-packages   Mathlib and the other Lake packages of the Aeneas Lean library, one directory each; Apache-2.0 and others, see each file
+aeneas          Aeneas, the aeneas binary and the Aeneas Lean library; Apache-2.0
+aeneas-patch    The patch applied to Aeneas; Apache-2.0
+opam            OCaml runtime and libraries linked into aeneas, one directory per opam package; licenses in index.txt
+charon          Charon, the charon and charon-driver binaries, Apache-2.0; and MiniRust, linked into them from the submodule in charon/crates/minirust, MIT OR Apache-2.0
+charon-crates   Rust crates linked into charon and charon-driver, one directory per crate; licenses in index.txt
+rust            The Rust nightly toolchain; MIT OR Apache-2.0, with the notices of rustc and the standard libraries in rust/rust and of Cargo in rust/cargo
+rustup          rustup and its proxies in /opt/krepi-formal/cargo/bin; MIT OR Apache-2.0
+gmp             GMP, /usr/local/lib/libgmp.so.10, with its source archive; LGPL-3.0-or-later OR GPL-2.0-or-later
+bubblewrap      bubblewrap, from the Ubuntu archive; LGPL-2.0-or-later
+git             Git, from the Ubuntu archive; GPL-2.0-only and others, see the file

@@ -1,0 +1,3 @@
+# The Aeneas patch keeps the blank context lines of the diff format, which
+# end in a space.
+/verification/tooling/*.patch -whitespace

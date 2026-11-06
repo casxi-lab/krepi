@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "lean": {
+    "toolchain": "leanprover/lean4:v4.35.0",
+    "version": "4.35.0",
+    "commit": "eb6cafb7290e8bd5f2937522d8d804f58f02bafc"
+  },
+  "aeneas": {
+    "source_url": "https://github.com/AeneasVerif/aeneas.git",
+    "commit": "4acbb6d73abe9082e45cf49ba6d6229a2c7d5836",
+    "patch": "verification/tooling/aeneas-option-unwrap-mut-and-prefix.patch",
+    "patch_sha256": "9656c257a42a96af3b7f1660315b2f3c27212b86bb3fc1a332f127b068d04456",
+    "patch_origin": {
+      "source": "cas-project@f2d2fba26cbf09474e6df8e59650014ae58dec78",
+      "path": "verification/tooling/aeneas-option-unwrap-mut-and-prefix.patch",
+      "sha256": "e12c89822e366d99c37850218d9d0d6155bcf88ebb3e1db2f8d70ddb793bde3e",
+      "changes": "Header with the origin and the Apache-2.0 notice added; the hunk of backends/lean/Aeneas/Std/Core/Core.lean starts at line 75 and its binders read {T : Type _}; the other seven hunks are unchanged."
+    },
+    "lake_manifest_sha256": "14e04fb0abf42c95fabccc050f11715f9cb7e86316a26a55a87c89b95a72a5a3",
+    "mathlib_commit": "56a005855ea17e0b0958f73ec801ae140b0a1679"
+  },
+  "charon": {
+    "source_url": "https://github.com/AeneasVerif/charon.git",
+    "commit": "6cc2b5f80b7edc2383cba3dab1f1e3b4059aebe2",
+    "version": "0.1.312"
+  },
+  "rust": {
+    "toolchain": "nightly-2026-09-17",
+    "rustc_commit": "923c95cdf5ba65cea505aa2ea829f578e1506ed8",
+    "manifest_url": "https://static.rust-lang.org/dist/2026-09-17/channel-rust-nightly.toml",
+    "manifest_sha256": "9cec46bc6224bd0ff346b0a01a951ba07f9ccb806f89842b897a5a182d0aaccd",
+    "components": ["rustc-dev", "llvm-tools", "rust-src"],
+    "targets": ["aarch64-unknown-none"],
+    "rustup": "1.29.3",
+    "rustup_source_url": "https://github.com/rust-lang/rustup.git",
+    "rustup_commit": "edbc831cec44dc2858a4a4dce768c74361d027dc"
+  },
+  "opam": {
+    "version": "2.6.1",
+    "repository_url": "https://github.com/ocaml/opam-repository.git",
+    "repository_commit": "63311767520ac015d77dcde43540889dd663e2c3",
+    "compiler": "ocaml-base-compiler.5.5.1"
+  },
+  "gmp": {
+    "version": "6.3.0",
+    "url": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz",
+    "sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898"
+  },
+  "hosts": {
+    "darwin-arm64": {
+      "locale": "en_US.UTF-8",
+      "prefix": "artifacts/formal/tools",
+      "lean": {
+        "url": "https://github.com/leanprover/lean4/releases/download/v4.35.0/lean-4.35.0-darwin_aarch64.tar.zst",
+        "sha256": "c0c6f34f35ba1dcc5c4a5fd106fefab9eb5e8469712624dd2c868d51b63177c2"
+      },
+      "opam": {
+        "url": "https://github.com/ocaml/opam/releases/download/2.6.1/opam-2.6.1-arm64-macos",
+        "sha256": "3e7f67bda3ba0bf72f597917b17dc337ed5a1bd48224df8b747bb35ce05c569e"
+      },
+      "rustup_init": {
+        "url": "https://static.rust-lang.org/rustup/archive/1.29.3/aarch64-apple-darwin/rustup-init",
+        "sha256": "63752a1919a3a4793173ec70f8f212621a7ce38ba6a246095984482f4de20f9f"
+      },
+      "pkgconf": {
+        "version": "2.3.0",
+        "url": "https://distfiles.ariadne.space/pkgconf/pkgconf-2.3.0.tar.xz",
+        "sha256": "3a9080ac51d03615e7c1910a0a2a8df08424892b5f13b0628a204d3fcce0ea8b"
+      },
+      "switch_export_sha256": "6b3b9196c1cf5ff357ddc09d1a830198ff023db676f23934120c2026883bc821"
+    },
+    "linux-aarch64": {
+      "locale": "C.UTF-8",
+      "prefix": "/opt/krepi-formal",
+      "lean": {
+        "url": "https://github.com/leanprover/lean4/releases/download/v4.35.0/lean-4.35.0-linux_aarch64.tar.zst",
+        "sha256": "c8f0f8a3920e839718b1343e6781fd80a3e9b1024fbcd7078eb30f54e806b028"
+      },
+      "opam": {
+        "url": "https://github.com/ocaml/opam/releases/download/2.6.1/opam-2.6.1-arm64-linux",
+        "sha256": "8b24ef2f3f44a31763f54878454fb52afa1f2db7e00abed58b8d4e7ee7e290a6"
+      },
+      "rustup_init": {
+        "url": "https://static.rust-lang.org/rustup/archive/1.29.3/aarch64-unknown-linux-gnu/rustup-init",
+        "sha256": "9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282"
+      },
+      "switch_export_sha256": null
+    }
+  }
+}
