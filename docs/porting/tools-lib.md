@@ -27,8 +27,8 @@ krepi modules that receive them.
 
 | Treatment | Legacy modules | What is taken |
 | --- | --- | --- |
-| Ported | `elf` in this change; `qemu`, `receipt`, `serial` and `serial_capture` in later changes | The module with its tests, each with its own record |
-| Ported in part | The crate root and `report` in this change; `tty`, `json`, `cycles`, `suites/platform/pi5_bundle.rs` and `suites/platform/pi5_kernel.rs` in later changes | The items that the ported modules use, with their tests: `Failure`; the UTC time stamps, with `serde_json` values in place of `Value`; the serial port, receiver and writer of `tty` with its interrupt flag, in a record of its own; the JSON reader of `json`, as test support; `random_hex` of `cycles`; and the path normalization, file error text and directory creation of the two suites, written again for serial capture |
+| Ported | `elf`, `serial`, `serial_capture` and the process helpers of `qemu`; the rest of `qemu` and `receipt` in later changes | The module with its tests, each with its own record |
+| Ported in part | The crate root, `report`, `tty`, `cycles`, `suites/platform/pi5_bundle.rs` and `suites/platform/pi5_kernel.rs` | The items that the ported modules use, with their tests: `Failure`; the UTC time stamps, with `serde_json` values in place of `Value`; the serial port, receiver and writer of `tty` with its interrupt flag, in a record of its own; and `random_hex` of `cycles` and the path normalization, file error text and directory creation of the two suites, written again for the serial capture and recorded with it |
 | Not ported | Every other module, listed under [Not carried over](#not-carried-over) | Nothing |
 
 ## Changes
@@ -39,13 +39,23 @@ krepi modules that receive them.
   steps of `cargo xtask check` cover it.
 - The crate depends on `serde_json` `=1.0.154` without its default features
   and with its `preserve_order` feature, for report values and their text,
-  and on `sha2` `=0.11.1` without its default features, for the SHA-256
-  digests of the ELF fixture patching; see [dependencies](../../CONTRIBUTING.md#dependencies). Both are
-  licensed MIT OR Apache-2.0, and the crates they depend on are licensed
-  under MIT, Apache-2.0, Zlib or the Unlicense, one of them with the
-  Unicode-3.0 license in addition; each permits its use in this MIT-licensed
-  crate. `libc`, pinned to the version of the legacy manifest, is added with
-  the first module that calls it.
+  on `sha2` `=0.11.1` without its default features, for the SHA-256
+  digests of the ELF fixture patching and of the serial capture, and on
+  `libc` `=0.2.191`, the version of the legacy manifest, without its default
+  feature, for the terminal, lock and signal calls of `tty`, the signal
+  that `qemu` sends, and the pseudo-terminals, signals, file-size limits and
+  child processes of the tests of `tty`, `serial_capture` and `qemu`; and on
+  `clap` `=4.6.7` without its default features and with its `std`, `help`,
+  `usage` and `error-context` features, for the command line of
+  `serial_capture`; see
+  [dependencies](../../CONTRIBUTING.md#dependencies). All four are licensed
+  MIT OR Apache-2.0, and the crates they depend on are licensed under MIT,
+  Apache-2.0, Zlib or the Unlicense, one of them with the Unicode-3.0
+  license in addition; each permits its use in this MIT-licensed crate.
+- The crate builds on Unix hosts only, the hosts of development and CI, and
+  stops with a compile error elsewhere. The legacy crate kept variants for
+  other hosts in two functions of `qemu` alone and called `libc` on Unix
+  throughout.
 - The lints `unsafe_op_in_unsafe_fn = "deny"` and
   `clippy::undocumented_unsafe_blocks = "deny"` are kept.
 - The crate documentation describes the modules it holds. The documentation
@@ -55,7 +65,24 @@ krepi modules that receive them.
   the legacy integration tests, it lies below the build directory, so that
   tests never fill the system temporary directory. Unit tests have no
   `CARGO_TARGET_TMPDIR`, so the directory is placed in `scratch` beside the
-  `deps` directory that holds the test executable.
+  `deps` directory that holds the test executable. It gives the path of the
+  directory and of a file in it, and writes and reads such a file.
+- The module `tools/src/timing.rs` is new: `Timing` holds the time slices,
+  polling intervals and timeouts of `tty`, `serial_capture`, `serial` and the
+  process helpers of `qemu`, which the legacy modules wrote as constants,
+  and gives one set for QEMU virt and one for the Pi 5. Both sets hold the
+  legacy values; [testing](../conventions/testing.md#determinism-and-time)
+  lists them.
+- The crate root gives `hex`, the lowercase hexadecimal digits of bytes,
+  which `tty` and `serial_capture` share; the legacy modules wrote the
+  digits each in place.
+- The test-only modules `tools/src/pty.rs` and `tools/src/child.rs`, a
+  pseudo-terminal pair and a runner of one test in a child process, are
+  recorded with [`tty`](tools-tty.md), whose tests they serve first, and
+  with [`serial_capture`](tools-serial_capture.md), whose tests added the
+  board scripts and the other parts that they use. The
+  crate root defines `TEST_WAIT`, the 60 s for which a test waits for an
+  event, which only a failing test reaches.
 - `Failure` had no test; `tests::a_failure_displays_its_message` and
   `tests::an_io_error_becomes_a_failure_with_its_text` check its text and its
   conversion from an I/O error.
@@ -83,6 +110,10 @@ None. The crate root runs on the host and had no QEMU or board results.
   - `cycles`, apart from `random_hex`: the interleaved diagnostic cycle suites
     and layered workloads, which drive the serial-triggered diagnostic
     controllers that are retired.
+  - `json`, the hand-written JSON reader and writer: `serde_json` writes the
+    reports and reads JSON in the tests. The legacy capture tests read their
+    receipts with its `parse`, which is recorded with
+    [`serial_capture`](tools-serial_capture.md#not-carried-over).
   - `kernel_elf`, the section and symbol contract of the prototype kernel
     image and its linker script. A kernel image of this repository states its
     own contract.
@@ -92,9 +123,9 @@ None. The crate root runs on the host and had no QEMU or board results.
   - `python_text`, the Python string semantics that the prototype audits
     reproduced; no Python parity is carried over.
   - `records`, the verifiers that bind prototype acceptance records to source
-    bytes. Those records are not ported. The tests carried over later use
-    equivalents of its JSON loading and canonical JSON, written as test
-    support.
+    bytes. Those records are not ported. The tests that are carried over
+    read JSON with `serde_json` and compare a receipt with the text that
+    `report::to_json` writes.
   - `rust_lexical`, the lexical masking of Rust sources for the prototype
     audits, which are not ported.
   - `sha1`, `sha256` and `sha512`, hand-written SHA-1, SHA-256 and SHA-512,

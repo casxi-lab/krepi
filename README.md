@@ -25,8 +25,10 @@ the contribution rules, the target architecture, the documentation conventions,
 empty proof registries, a commit-message hook and the build tooling: a pinned
 Rust toolchain, the kernel and user-space Cargo workspaces with an empty ABI
 crate and SDK crate, and the repository checks. A host tooling crate for
-tests holds an ELF reader and report values ported from the prototype, with
-their porting records. There is no kernel source yet, and nothing boots.
+tests holds an ELF reader, report values, a serial port transport, a serial
+link and the serial capture behind `cargo xtask serial-capture`, ported from
+the prototype with their porting records. There is no kernel source yet, and
+nothing boots.
 Continuous integration runs the repository checks on every pull request to
 `main` and on every push to `main`.
 

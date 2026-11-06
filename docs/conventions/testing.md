@@ -99,10 +99,41 @@ for the head commit of every pull request to `main` and for every push to
 archive and the toolchain of `rust-toolchain.toml` with rustup, and uploads
 the receipt as the artifact `check-receipt-<commit>-<attempt>`.
 
+`cargo xtask serial-capture --port <tty>` records what a board sends over a
+serial port, such as the UART of a Pi 5 behind a USB serial adapter, without
+evaluating its boot; it is a tool for the bench and is not part of the
+check. It opens the port read-only, holds it exclusively with `TIOCEXCL`,
+sets raw 115200 8N1 attributes without flow control, sends nothing and
+restores the attributes at its end. It receives for `--seconds` (default 30,
+greater than 0 and at most 300) or until `--max-bytes` (default 262144, at
+most 16777216) have arrived, never reading past that limit, or until the
+device ends. It writes three files into the new directory `--output-dir`, by
+default `artifacts/hardware-uart/<UTC time>Z-<12 hexadecimal digits>`:
+`raw.bin`, the bytes received; `preview.txt`, the first 16 KiB decoded as
+UTF-8 with control and other unprintable characters escaped; and
+`summary.json`, a receipt with sorted keys. The receipt records the port and
+its line settings, the limits, the count and SHA-256 digest of the bytes,
+whether the port was held exclusively and its attributes restored, the start
+and end times, and the status: `CAPTURED` or `NO_DATA` with the reason
+`deadline`, `byte_limit` or `end_of_stream`, `INTERRUPTED`, or `FAIL` with
+its `errors`; `boot_acceptance` is always `NOT_EVALUATED`. The command exits
+with 0 for `CAPTURED` and `NO_DATA`, 130 for `INTERRUPTED`, 2 for `FAIL`, a
+usage error or files that it cannot create or write, and 120 when it cannot
+write its own output. From immediately before the port opens, SIGINT,
+SIGTERM and SIGHUP end the capture as `INTERRUPTED`, with the port restored
+and the receipt written; before that, they end the process by the
+dispositions that it started with. `cargo xtask serial-capture --list` prints
+the likely USB serial devices below `/dev` without opening them. `clap`
+reads the command line: `--help` prints its help with the options and
+their defaults on standard output, and a usage error is its error text on
+standard error.
+
 QEMU suites and board suites have their own entry points (planned), built on
-the QEMU runner, serial capture and receipt modules ported from the legacy
-tooling crate. Each suite writes its report and the raw serial bytes under
-`artifacts/`, together with the identity of the image it ran.
+the serial port transport and the serial link of the host tooling crate and
+on the QEMU runner, with its serial capture, and the receipt module, which
+are still to be ported from the legacy tooling crate. Each suite writes its
+report and the raw serial bytes under `artifacts/`, together with the
+identity of the image it ran.
 
 ## Evidence and receipts
 
@@ -182,6 +213,32 @@ not execution, and execution on QEMU is not execution on the board.
   `regressions` as a fixed input.
 - Deadlines use generous bounds or an injected clock.
 
+The host tools take their time slices, polling intervals and timeouts from a
+`Timing` value of `tools/src/timing.rs`, which a caller chooses for the
+platform it talks to; `cargo xtask serial-capture` takes the Pi 5 set. The
+values for the Pi 5 are those of the legacy tooling crate, which used the
+same values on QEMU and on the board; they have not yet been measured
+against a board run of krepi.
+
+| Field | Use | QEMU virt | Pi 5 |
+| --- | --- | ---: | ---: |
+| `reader_poll` | Longest wait of a serial port's reader thread for input before it looks at its stop flag | 100 ms | 100 ms |
+| `request_transmit` | Longest transmission of one request of 1 to 128 bytes to a serial port, within the deadline of its session | 2 s | 2 s |
+| `capture_slice` | Longest wait of a serial capture for input before it looks at its interrupt flag | 100 ms | 100 ms |
+| `link_slice` | Longest wait of a serial link for output in one look: after its output ended, for the ready line and while it drains | 20 ms | 20 ms |
+| `link_drain` | How long a serial link collects the output that follows a failure | 250 ms | 250 ms |
+| `link_finish` | Longest final read of a finished serial link, until its output ends | 1 s | 1 s |
+| `link_finish_slice` | Longest wait in one look of that final read | 50 ms | 50 ms |
+| `stop_grace` | How long a stopped process may take to end after SIGTERM before it is killed | 1 s | 1 s |
+| `kill_grace` | How long a killed process may take to end before its status is given up | 1 s | 1 s |
+| `reap_poll` | Interval between two looks at whether a process has ended | 10 ms | 10 ms |
+
+The unit tests of these tools wait at most 60 s for an event that they
+expect, which only a failing test reaches, and pass sets of their own whose
+bounds for an expected event are as long; a capture that a test ends by its
+byte limit, the end of its stream or an interrupt has a deadline of 120 s.
+No test bounds the time that a step takes.
+
 ## Dependencies
 
 The test tooling takes general functionality from crates, as
@@ -190,8 +247,10 @@ to an exact version in the manifest of the crate that uses it:
 
 | Manifest | Dependency | License | Purpose |
 | --- | --- | --- | --- |
+| `tools/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command line of `cargo xtask serial-capture`, defined with the builder, with its help, usage and error texts, which have no colour and are not wrapped to the terminal |
+| `tools/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The terminal, lock and signal calls of the serial port transport, the signal that the process helpers send, and the pseudo-terminals, signals, file-size limits and child processes of the tests of the transport, the serial capture and the process helpers |
 | `tools/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | Report values, whose objects keep the order of their keys, and their JSON text |
-| `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching |
+| `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching and in the receipt of the serial capture, and the suffix of the capture's run directory |
 | `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipt of `cargo xtask check`, and reading the output of `cargo metadata` in the `manifests` step |
 | `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `toolchains.toml` and `rust-toolchain.toml` |
 | `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step |

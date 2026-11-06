@@ -1,14 +1,36 @@
-//! Host tooling for krepi tests: a bounded ELF64 reader and the JSON values
-//! that tool reports are written from.
+//! Host tooling for krepi tests: a bounded ELF64 reader, the JSON values
+//! that tool reports are written from, the serial port transport with the
+//! interrupt flag of a session, the serial capture of a board's serial port
+//! behind `cargo xtask serial-capture`, the serial link over the standard
+//! streams of a process with the process helpers it uses, and the time
+//! values of these tools per platform.
 //!
-//! The library runs on the development host and in CI. It is not part of any
-//! krepi image and never executes the files it reads.
+//! The library runs on the development host and in CI, both Unix hosts. It
+//! is not part of any krepi image and never executes the files it reads.
+
+#[cfg(not(unix))]
+compile_error!("krepi-tools runs on Unix hosts only");
 
 pub mod elf;
+pub mod qemu;
 pub mod report;
+pub mod serial;
+pub mod serial_capture;
+pub mod timing;
+pub mod tty;
 
 #[cfg(test)]
+mod child;
+#[cfg(test)]
+mod pty;
+#[cfg(test)]
 mod scratch;
+
+/// How long a test waits for something that it expects to happen, such as
+/// bytes on a pseudo-terminal or the end of a child process. It elapses only
+/// when the test fails, so it is generous: a slow host never reaches it.
+#[cfg(test)]
+const TEST_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// A check that did not hold, with the message that describes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +49,11 @@ impl std::fmt::Display for Failure {
 }
 
 impl std::error::Error for Failure {}
+
+/// The lowercase hexadecimal digits of `bytes`, two for each byte.
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
 
 impl From<std::io::Error> for Failure {
     fn from(error: std::io::Error) -> Self {

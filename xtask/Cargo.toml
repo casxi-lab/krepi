@@ -12,6 +12,9 @@ rust-version = "1.99"
 [workspace]
 
 [dependencies]
+# The host tooling crate of this repository, whose serial capture is the
+# command `cargo xtask serial-capture`.
+krepi-tools = { path = "../tools" }
 # The receipt keeps its fields in the order in which they are written, and
 # the manifests step reads the output of `cargo metadata`. Both are text in
 # memory, so the standard-library support of the default feature is left

@@ -71,11 +71,13 @@ None. The module runs on the host and had no QEMU or board results.
 
 - The `Value` type, its accessors and conversions, and its hand-written JSON
   writer, which `serde_json` replaces. Of its parts without a counterpart in
-  this module, `insert_front` and `sorted` have no caller in this crate. The
-  crate offers close equivalents: `Map::shift_insert` at index 0 inserts a
-  key at the front, but moves a present key there instead of leaving it in
-  place, and `Value::sort_all_objects` sorts the keys of every object in the
-  same byte order, in place instead of in a copy. `Value::Big`, an integer
+  this module, `insert_front` has no caller in this crate, and `sorted`,
+  which the legacy serial capture called, gives way there to
+  `Value::sort_all_objects`. The crate offers close equivalents:
+  `Map::shift_insert` at index 0 inserts a key at the front, but moves a
+  present key there instead of leaving it in place, and
+  `Value::sort_all_objects` sorts the keys of every object in the same byte
+  order, in place instead of in a copy. `Value::Big`, an integer
   beyond 64 bits that held raw card identities, has no ported caller, and
   `serde_json` holds integers of at most 64 bits.
 - `tests::floats_print_like_pythons_repr`. It tested `python_repr`, the

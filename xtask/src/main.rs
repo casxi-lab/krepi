@@ -32,12 +32,17 @@ pub const COMMANDS: &[Command] = &[
         about: "List the commands",
         subcommands: &[],
     },
+    Command {
+        name: "serial-capture",
+        about: "Record what a board sends over a serial port for a bounded time into a new directory, without evaluating its boot; --help lists the options",
+        subcommands: &[],
+    },
 ];
 
 fn print_help() {
     println!("Usage: cargo xtask <command>\n\nCommands:");
     for command in COMMANDS {
-        println!("  {:<8} {}", command.name, command.about);
+        println!("  {:<14} {}", command.name, command.about);
     }
 }
 
@@ -51,6 +56,12 @@ fn main() -> ExitCode {
     {
         ["check"] => check::run(repo::root(), None),
         ["check", "--receipt", path] => check::run(repo::root(), Some(PathBuf::from(path))),
+        ["serial-capture", rest @ ..] => {
+            let args: Vec<String> = rest.iter().map(|arg| arg.to_string()).collect();
+            let code = krepi_tools::serial_capture::main(&repo::root(), &args);
+            // The command exits with 0, 2, 120 or 130.
+            ExitCode::from(u8::try_from(code).unwrap_or(2))
+        }
         [] | ["help"] => {
             print_help();
             ExitCode::SUCCESS
