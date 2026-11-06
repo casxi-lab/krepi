@@ -131,3 +131,5 @@ of the system services. Neither is part of the kernel.
 
 krepi is released under the [MIT License](LICENSE). Copyright (c) 2026 The
 casξ Authors; see [AUTHORS](AUTHORS).
+
+[Probe](docs/probe-missing.md)
