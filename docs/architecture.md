@@ -536,7 +536,7 @@ Cargo workspaces of their own, each in its own directory:
 | Path | Contents |
 | --- | --- |
 | `kernel/` | The kernel workspace: the EL1 kernel, board support, the ABI crate and the operation inventory; the input of proof extraction. It holds the ABI crate `kernel/abi` (`krepi-abi`), which defines no interface yet. |
-| `tools/` | The host tooling crate `krepi-tools`, a Cargo workspace of its own: SHA-1, SHA-256 and SHA-512 digests, a bounded ELF64 reader and the JSON values of tool reports |
+| `tools/` | The host tooling crate `krepi-tools`, a Cargo workspace of its own: a bounded ELF64 reader and the JSON values of tool reports |
 | `user/` | The user-space workspace: the resident root, services, drivers, the SDK and workers, which are members outside `default-members`. It holds the SDK crate `user/sdk` (`krepi-sdk`). |
 | `verification/` | The Lean proof project and its registries ([formal verification](formal-verification.md)) |
 | `xtask/` | The `cargo xtask` commands, a Cargo workspace of its own |

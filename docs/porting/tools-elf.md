@@ -36,6 +36,10 @@ foundations, which exercised this reader on a synthetic image.
   Python symbolization script, and the documentation of `patch_symbol` named
   the Python test it was taken from.
 - `entry_fixture` is removed; see [Not carried over](#not-carried-over).
+- `patch_symbol` takes the SHA-256 digests of its report, of the fixture
+  before and after the patch, from the `sha2` crate instead of the legacy
+  `sha256` module, and returns the report as a `serde_json` value with the
+  keys in the legacy order ([report values](tools-report.md#changes)).
 - Header fields that no bound limits no longer overflow the arithmetic that
   places them. In `parse_elf`, the end of the build-id note and the file
   offset that its address gives in a read-only segment, the segment's file
@@ -53,13 +57,14 @@ foundations, which exercised this reader on a synthetic image.
   from files in a scratch directory.
 - `symbol_address` and `patch_symbol` had no direct test. The unit tests
   locate symbols, patch one word and compare the returned report and the
-  written file with the expected bytes and SHA-256 digests, and check each
-  refusal: an existing destination, a prefix or duplicated name, a symbol
-  outside its section, an unaligned target, unexpected contents, a load
-  segment without the requested rights or with a physical address other than
-  its virtual one, a section file offset whose sum exceeds 64 bits, and a
-  file outside the fixture size bound. A fixture whose text lies on the top
-  page of the address space is patched at its file offset.
+  written file with the expected bytes and with the SHA-256 digests of those
+  bytes, which `shasum` and OpenSSL computed, and check each refusal: an
+  existing destination, a prefix or duplicated name, a symbol outside its
+  section, an unaligned target, unexpected contents, a load segment without
+  the requested rights or with a physical address other than its virtual
+  one, a section file offset whose sum exceeds 64 bits, and a file outside
+  the fixture size bound. A fixture whose text lies on the top page of the
+  address space is patched at its file offset.
 - A new check covers the 64 MiB bound of `parse_elf` and of `read_elf` on a
   sparse file beyond the bound, and the malformed images include note
   addresses whose placement sums exceed 64 bits, beside a note that is

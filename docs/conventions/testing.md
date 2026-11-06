@@ -149,6 +149,18 @@ not execution, and execution on QEMU is not execution on the board.
 
 ## Dependencies
 
-No test depends on a package from outside the repository yet. Development
-dependencies are added only when a test category needs them, are pinned to
-an exact version and are listed here with their purpose.
+The test tooling takes general functionality from crates, as
+[contributing](../../CONTRIBUTING.md#dependencies) requires. Each is pinned
+to an exact version in the manifest of the crate that uses it:
+
+| Manifest | Dependency | License | Purpose |
+| --- | --- | --- | --- |
+| `tools/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | Report values, whose objects keep the order of their keys, and their JSON text |
+| `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching |
+| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipt of `cargo xtask check` |
+| `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests, `toolchains.toml` and `rust-toolchain.toml` |
+| `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step |
+
+No test has a development dependency yet. Development dependencies are added
+only when a test category needs them, are pinned to an exact version and are
+listed here with their purpose.

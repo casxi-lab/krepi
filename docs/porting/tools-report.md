@@ -12,30 +12,33 @@ features: none
 
 ## Summary
 
-The values that tool reports and receipts are built from: `Value`, a JSON
-value whose objects keep the order in which their keys were set, with its
-accessors, `sorted` for a copy with every object's keys in code-point order,
-and `to_json` for its text; and the UTC time stamps that reports record. The
-value type and its accessors are ported as they are. The legacy JSON text and
-time stamps reproduced the output of Python's `json.dumps` and `isoformat`,
-so that reports of the Rust and Python runners compared field by field; there
-is no Python runner here. The layout of the JSON text and the quoting of its
-strings now follow the receipt of `cargo xtask check`, and floats and time
-stamps, which that receipt does not contain, follow the rules given under
-[Changes](#changes).
+The values that tool reports are built from, their JSON text, and the UTC
+time stamps that reports record. The legacy module defined `Value`, a JSON
+value whose objects kept the order in which their keys were set, with a
+hand-written writer that reproduced the output of Python's `json.dumps`, so
+that reports of the Rust and Python runners compared field by field. There
+is no Python runner here, and the host tools take JSON from a crate
+([dependencies](../../CONTRIBUTING.md#dependencies)): a report is a
+`serde_json` value, and `to_json` writes the pretty form of the crate. The
+time stamps are ported with the changes listed under [Changes](#changes).
 
 ## Changes
 
-- String literals are quoted by the rule of `xtask/src/receipt.rs`: quotes,
-  backslashes, line feed, carriage return and tab by their short escapes,
-  every other C0 control character and DEL as `\u00XX`, and everything else,
-  non-ASCII text included, as UTF-8.
-- A finite float is written in its shortest round-trip digits, positional
-  with at least one fractional digit for decimal exponents from -4 to 15 and
-  otherwise scientific with an unpadded exponent that carries a sign only
-  when negative. A NaN or an infinity, which JSON cannot represent, is
-  written as `null`. The public `python_repr` that wrote Python's float text
-  is removed; the float form is internal to the writer.
+- `Value` is `serde_json::Value`, which the module re-exports with `Map`,
+  the type of its objects. The crate is built with its `preserve_order`
+  feature, so an object keeps the order in which its keys were first
+  inserted, and inserting a key that is present replaces its value in place,
+  as the legacy `set` did. The legacy constructor `object`, `set` and the
+  accessors give way to `Map::new`, `Map::insert`, the `json!` macro,
+  indexing and the accessors of the crate, which callers use directly.
+- `to_json` is a function of the module that writes the pretty form of
+  `serde_json` with a final newline: two-space indentation, `": "` after a
+  key, and `[]` and `{}` for an empty array and an empty object, which is
+  the layout of the legacy text. Strings are escaped as the legacy writer
+  escaped them: quotes, backslashes and C0 control characters, with the
+  short escapes for backspace, form feed, line feed, carriage return and tab;
+  DEL and non-ASCII text are kept as UTF-8. Floats are written by the crate;
+  see [Behaviour changes](#behaviour-changes).
 - `utc_now` writes RFC 3339 with six fraction digits and the offset `Z`.
   `utc_text` and `utc_stamp_of` format a given time, so that tests use fixed
   instants; `utc_now` and `utc_stamp` format the current time.
@@ -45,24 +48,19 @@ stamps, which that receipt does not contain, follow the rules given under
 
 | Legacy test | krepi test | Expected values |
 | --- | --- | --- |
-| `tools/src/report.rs` `tests::floats_print_like_pythons_repr` | `tools/src/report.rs` `tests::floats_print_in_their_shortest_round_trip_form` | Changed for four of the fifteen values, which are scientific: `1e-05`, `8.392747792833824e-08`, `1e+16` and `1.5e+300` become `1e-5`, `8.392747792833824e-8`, `1e16` and `1.5e300`. The positional values and `5e-324` are unchanged. The values are read from `to_json` |
-| `tools/src/report.rs` `tests::json_matches_python_formatting` | `tools/src/report.rs` `tests::json_has_two_space_indentation_and_keeps_text_as_utf8` | Unchanged |
-| `tools/src/report.rs` `tests::set_replaces_in_place` | `tools/src/report.rs` `tests::set_replaces_in_place` | Unchanged; extended with `insert_front` |
+| `tools/src/report.rs` `tests::json_matches_python_formatting` | `tools/src/report.rs` `tests::a_report_keeps_its_key_order_and_two_space_indentation` | Unchanged. The report is built with `json!` in the order in which the legacy test set its keys |
+| `tools/src/report.rs` `tests::set_replaces_in_place` | `tools/src/report.rs` `tests::inserting_a_present_key_replaces_its_value_in_place` | Unchanged: `a` holds 3 and stays before `b`. The order is read from `to_json`, because the equality of `serde_json` objects does not compare the order of their keys |
 | `tools/src/report.rs` `tests::timestamps_have_python_shapes` | `tools/src/report.rs` `tests::timestamps_are_rfc_3339_and_basic_iso_8601_in_utc` | Changed: the offset `+00:00` becomes `Z`, and exact texts at fixed instants replace the lengths of the current time, which only keeps its shape checked. `civil_from_days(20_740)` is unchanged |
 
-New tests cover non-finite values and negative zero, the escapes of every
-control character and of DEL, nested arrays and integers of every width,
-sorting of nested objects, and the integer accessor.
+`tests::floats_print_like_pythons_repr` is not carried over; see
+[Not carried over](#not-carried-over).
 
 ## Behaviour changes
 
 | Behaviour | Legacy | krepi | Test |
 | --- | --- | --- | --- |
-| Backspace and form feed in strings | `\b`, `\f` | `\u0008`, `\u000c` | `tests::control_characters_and_del_are_escaped_and_other_text_is_kept` |
-| DEL in strings and keys | Kept as it is, so that a port name with DEL appeared raw in the serial capture receipt | `\u007f` | `tests::control_characters_and_del_are_escaped_and_other_text_is_kept` |
-| Non-ASCII text in strings and keys | Kept as UTF-8, where the Python runner escaped it | Unchanged: kept as UTF-8 | `tests::json_has_two_space_indentation_and_keeps_text_as_utf8`, `tests::control_characters_and_del_are_escaped_and_other_text_is_kept` |
-| Scientific floats | Signed exponent of at least two digits, `1e+16`, `1e-05` | Unpadded exponent, signed only when negative, `1e16`, `1e-5` | `tests::floats_print_in_their_shortest_round_trip_form` |
-| NaN and infinities | `NaN`, `Infinity`, `-Infinity`, which are not JSON | `null` | `tests::negative_zero_and_values_without_a_json_form` |
+| Floats with a decimal exponent from -9 to -5 | Python's `repr`: scientific, with an exponent of at least two digits, `1e-05`, `8.392747792833824e-08` | The shortest form of `serde_json`: positional at -5 and with an unpadded exponent below, `0.00001`, `8.392747792833824e-8`. The other thirteen values of the legacy float test, `1e+16`, `1.5e+300` and `5e-324` among them, are written as before | None; `serde_json` writes floats |
+| NaN and infinities | `NaN`, `Infinity`, `-Infinity`, which are not JSON | `null`, the value that `serde_json` gives a float without a JSON form | None; `serde_json` converts floats |
 | `utc_now` | `2026-10-14T07:45:17.123456+00:00` | `2026-10-14T07:45:17.123456Z` | `tests::timestamps_are_rfc_3339_and_basic_iso_8601_in_utc` |
 
 ## Hardware evidence to re-obtain
@@ -71,6 +69,18 @@ None. The module runs on the host and had no QEMU or board results.
 
 ## Not carried over
 
+- The `Value` type, its accessors and conversions, and its hand-written JSON
+  writer, which `serde_json` replaces. Of its parts without a counterpart in
+  this module, `insert_front` and `sorted` have no caller in this crate. The
+  crate offers close equivalents: `Map::shift_insert` at index 0 inserts a
+  key at the front, but moves a present key there instead of leaving it in
+  place, and `Value::sort_all_objects` sorts the keys of every object in the
+  same byte order, in place instead of in a copy. `Value::Big`, an integer
+  beyond 64 bits that held raw card identities, has no ported caller, and
+  `serde_json` holds integers of at most 64 bits.
+- `tests::floats_print_like_pythons_repr`. It tested `python_repr`, the
+  hand-written float text, which is removed; `serde_json` writes floats, and
+  krepi tests do not test the crate.
 - `python_repr`, Python's `repr` of a float, which outside the writer only a
   legacy record verifier called.
 - `to_json_sorted_line`, `to_json_canonical`, `to_json_canonical_utf8` and

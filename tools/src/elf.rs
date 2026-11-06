@@ -4,6 +4,9 @@
 //! is an offline reader of files on the host, not a loader.
 
 use crate::Failure;
+use crate::report::Value;
+use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::path::Path;
 
 pub const MAX_ELF_BYTES: usize = 64 * 1024 * 1024;
@@ -405,7 +408,7 @@ pub fn symbol_address(source: &Path, symbol: &str) -> Result<u64, Failure> {
     let patched = patch_symbol(source, None, symbol, 0, 0, 0)?;
     patched
         .get("address")
-        .and_then(crate::report::Value::as_u64)
+        .and_then(Value::as_u64)
         .ok_or_else(|| Failure::new("Missing or duplicated target symbol"))
 }
 
@@ -418,7 +421,7 @@ pub fn patch_symbol(
     expected: u32,
     replacement: u32,
     permission: u32,
-) -> Result<crate::report::Value, Failure> {
+) -> Result<Value, Failure> {
     require(destination.is_none_or(|d| !d.exists()), || {
         "Negative ELF destination already exists".to_string()
     })?;
@@ -507,7 +510,6 @@ pub fn patch_symbol(
         "Missing or duplicated target symbol".to_string()
     })?;
     let (section, address) = matches[0];
-    let mut result = crate::report::Value::object();
     let Some(destination) = destination else {
         require(
             section[2] & 2 != 0
@@ -515,8 +517,7 @@ pub fn patch_symbol(
                 && address < section[3].wrapping_add(section[5]),
             || "Symbol is outside its allocated section".to_string(),
         )?;
-        result.set("address", address);
-        return Ok(result);
+        return Ok(json!({ "address": address }));
     };
     require(
         address.is_multiple_of(4)
@@ -573,30 +574,36 @@ pub fn patch_symbol(
     require(original == expected, || {
         "Target symbol contents do not match the intended fixture".to_string()
     })?;
-    let before_hash = crate::sha256::hex(&data);
+    let before_hash = sha256_hex(&data);
     data[file_offset..file_offset + 4].copy_from_slice(&replacement.to_le_bytes());
     std::fs::write(destination, &data)?;
-    result.set("symbol", symbol);
-    result.set("address", address);
-    result.set("file_offset", file_offset);
-    result.set("before", format!("{expected:#x}"));
-    result.set("after", format!("{replacement:#x}"));
-    result.set(
-        "file",
-        destination
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-    );
-    result.set("source_sha256", before_hash);
-    result.set("sha256", crate::sha256::hex(&data));
-    Ok(result)
+    let file = destination
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    Ok(json!({
+        "symbol": symbol,
+        "address": address,
+        "file_offset": file_offset,
+        "before": format!("{expected:#x}"),
+        "after": format!("{replacement:#x}"),
+        "file": file,
+        "source_sha256": before_hash,
+        "sha256": sha256_hex(&data),
+    }))
+}
+
+/// The SHA-256 digest of `data` in lowercase hexadecimal.
+fn sha256_hex(data: &[u8]) -> String {
+    Sha256::digest(data)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::report::Value;
     use crate::scratch::Scratch;
 
     const TEXT_ADDR: u64 = 0x4020_0000;
@@ -973,16 +980,24 @@ mod tests {
         patched[TEXT_OFF..TEXT_OFF + 4].copy_from_slice(&nop.to_le_bytes());
         assert_eq!(std::fs::read(&destination).unwrap(), patched);
         assert_eq!(std::fs::read(&source).unwrap(), synthetic_elf());
-        let mut expected = Value::object();
-        expected.set("symbol", "kernel_main");
-        expected.set("address", TEXT_ADDR);
-        expected.set("file_offset", TEXT_OFF);
-        expected.set("before", "0x0");
-        expected.set("after", "0xd503201f");
-        expected.set("file", "patched.elf");
-        expected.set("source_sha256", crate::sha256::hex(&synthetic_elf()));
-        expected.set("sha256", crate::sha256::hex(&patched));
+        // The digests of the fixture and of the patched file were computed
+        // from their bytes with `shasum -a 256` and `openssl dgst -sha256`.
+        let expected = json!({
+            "symbol": "kernel_main",
+            "address": TEXT_ADDR,
+            "file_offset": TEXT_OFF,
+            "before": "0x0",
+            "after": "0xd503201f",
+            "file": "patched.elf",
+            "source_sha256": "02c3d1ed4a3b2d9cba5070996a54296cce82cf6469b67dc4ff230b9466905e86",
+            "sha256": "57f99acea77e90f24744f8fe9fe29c10c93e796583158fead3caa303509fbc9a",
+        });
         assert_eq!(result, expected);
+        // Object equality ignores the order of keys, which the text keeps.
+        assert_eq!(
+            crate::report::to_json(&result),
+            crate::report::to_json(&expected)
+        );
     }
 
     #[test]

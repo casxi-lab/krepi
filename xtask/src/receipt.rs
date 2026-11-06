@@ -6,12 +6,15 @@
 //! status, duration and facts (the toolchain step's facts are the tool
 //! versions it found), the runner image and the GitHub Actions run. A value
 //! that cannot be read, or an environment variable that is not set, is
-//! `null`.
+//! `null`. The text is the pretty form of `serde_json`, with two-space
+//! indentation and the fields in the order in which they are written.
 
 use std::fs;
 use std::io;
 use std::path::Path;
 use std::process::Command;
+
+use serde_json::{Map, Value, json};
 
 use crate::check::{Outcome, Status};
 
@@ -119,127 +122,39 @@ fn assignment(text: &str, name: &str) -> Option<String> {
     (!unquoted.is_empty()).then(|| unquoted.to_string())
 }
 
-/// A JSON value.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Json {
-    Null,
-    Bool(bool),
-    Number(u128),
-    String(String),
-    Array(Vec<Json>),
-    Object(Vec<(String, Json)>),
+/// An object of the variables `values`, each a string or `null`, in their
+/// order.
+fn variables(values: &[(&'static str, Option<String>)]) -> Value {
+    Value::Object(
+        values
+            .iter()
+            .map(|(name, value)| (name.to_string(), Value::from(value.clone())))
+            .collect(),
+    )
 }
 
-impl Json {
-    fn text(value: &str) -> Json {
-        Json::String(value.to_string())
-    }
-
-    fn optional(value: Option<&str>) -> Json {
-        value.map_or(Json::Null, Json::text)
-    }
-
-    fn object(fields: Vec<(&str, Json)>) -> Json {
-        Json::Object(
-            fields
-                .into_iter()
-                .map(|(key, value)| (key.to_string(), value))
-                .collect(),
-        )
-    }
-
-    fn variables(values: &[(&'static str, Option<String>)]) -> Json {
-        Json::object(
-            values
-                .iter()
-                .map(|(name, value)| (*name, Json::optional(value.as_deref())))
-                .collect(),
-        )
-    }
-
-    /// Writes the value with two-space indentation, starting at `depth`.
-    fn write(&self, depth: usize, out: &mut String) {
-        let indent = |depth: usize| "  ".repeat(depth);
-        match self {
-            Json::Null => out.push_str("null"),
-            Json::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
-            Json::Number(value) => out.push_str(&value.to_string()),
-            Json::String(value) => out.push_str(&quote(value)),
-            Json::Array(items) if items.is_empty() => out.push_str("[]"),
-            Json::Object(fields) if fields.is_empty() => out.push_str("{}"),
-            Json::Array(items) => {
-                out.push_str("[\n");
-                for (index, item) in items.iter().enumerate() {
-                    out.push_str(&indent(depth + 1));
-                    item.write(depth + 1, out);
-                    out.push_str(if index + 1 < items.len() { ",\n" } else { "\n" });
-                }
-                out.push_str(&indent(depth));
-                out.push(']');
-            }
-            Json::Object(fields) => {
-                out.push_str("{\n");
-                for (index, (key, value)) in fields.iter().enumerate() {
-                    out.push_str(&indent(depth + 1));
-                    out.push_str(&quote(key));
-                    out.push_str(": ");
-                    value.write(depth + 1, out);
-                    out.push_str(if index + 1 < fields.len() {
-                        ",\n"
-                    } else {
-                        "\n"
-                    });
-                }
-                out.push_str(&indent(depth));
-                out.push('}');
-            }
-        }
-    }
-}
-
-/// `text` as a JSON string literal: quotes, backslashes and control
-/// characters are escaped, and everything else is kept as UTF-8.
-fn quote(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 2);
-    out.push('"');
-    for c in text.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if u32::from(c) < 0x20 || c == '\u{7f}' => {
-                out.push_str(&format!("\\u{:04x}", u32::from(c)));
-            }
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
-fn step(outcome: &Outcome) -> Json {
+fn step(outcome: &Outcome) -> Value {
     let status = match outcome.status {
         Status::Passed => "passed",
         Status::Failed(_) => "failed",
         Status::NotRun => "not run",
     };
-    let mut fields = vec![
-        ("name", Json::text(outcome.step)),
-        ("status", Json::text(status)),
-        ("duration_ms", Json::Number(outcome.duration.as_millis())),
-    ];
+    let duration_ms = u64::try_from(outcome.duration.as_millis()).unwrap_or(u64::MAX);
+    let mut step = json!({
+        "name": outcome.step,
+        "status": status,
+        "duration_ms": duration_ms,
+    });
     if let Status::Failed(detail) = &outcome.status {
-        fields.push(("detail", Json::text(detail)));
+        step["detail"] = Value::from(detail.as_str());
     }
-    let facts = outcome
+    let facts: Map<String, Value> = outcome
         .facts
         .iter()
-        .map(|(key, value)| (key.as_str(), Json::text(value)))
+        .map(|(key, value)| (key.clone(), Value::from(value.as_str())))
         .collect();
-    fields.push(("facts", Json::object(facts)));
-    Json::object(fields)
+    step["facts"] = Value::Object(facts);
+    step
 }
 
 /// The receipt of a run, as JSON text ending in a newline.
@@ -252,24 +167,19 @@ pub fn render(
     let passed = outcomes
         .iter()
         .all(|outcome| outcome.status == Status::Passed);
-    let receipt = Json::object(vec![
-        ("format", Json::Number(u128::from(FORMAT))),
-        ("command", Json::text("cargo xtask check")),
-        ("commit", Json::optional(before.commit.as_deref())),
-        ("clean_before", before.clean.map_or(Json::Null, Json::Bool)),
-        ("clean_after", after.clean.map_or(Json::Null, Json::Bool)),
-        (
-            "result",
-            Json::text(if passed { "passed" } else { "failed" }),
-        ),
-        ("steps", Json::Array(outcomes.iter().map(step).collect())),
-        ("image", Json::variables(&environment.image)),
-        ("github", Json::variables(&environment.github)),
-    ]);
-    let mut out = String::new();
-    receipt.write(0, &mut out);
-    out.push('\n');
-    out
+    let steps: Vec<Value> = outcomes.iter().map(step).collect();
+    let receipt = json!({
+        "format": FORMAT,
+        "command": "cargo xtask check",
+        "commit": before.commit,
+        "clean_before": before.clean,
+        "clean_after": after.clean,
+        "result": if passed { "passed" } else { "failed" },
+        "steps": steps,
+        "image": variables(&environment.image),
+        "github": variables(&environment.github),
+    });
+    format!("{receipt:#}\n")
 }
 
 /// Writes `text` to `path`, creating the directories above it.
@@ -285,15 +195,6 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-
-    #[test]
-    fn quote_escapes_json_specials() {
-        assert_eq!(quote("plain"), "\"plain\"");
-        assert_eq!(quote("a \"b\" \\c"), r#""a \"b\" \\c""#);
-        assert_eq!(quote("one\ntwo\r\tend"), r#""one\ntwo\r\tend""#);
-        assert_eq!(quote("\u{0}\u{1b}\u{7f}"), r#""\u0000\u001b\u007f""#);
-        assert_eq!(quote("casξ ✓"), "\"casξ ✓\"");
-    }
 
     #[test]
     fn reads_image_variables_from_etc_environment() {
@@ -430,6 +331,11 @@ mod tests {
         assert_eq!(render(&before, &after, &outcomes, &environment), expected);
     }
 
+    /// The receipt text read back as JSON.
+    fn parsed(text: &str) -> Value {
+        serde_json::from_str(text).expect("the receipt is JSON")
+    }
+
     #[test]
     fn a_run_with_every_step_passed_is_passed() {
         let state = GitState {
@@ -442,24 +348,40 @@ mod tests {
             duration: Duration::ZERO,
             facts: Vec::new(),
         }];
-        let text = render(
-            &state,
-            &state,
-            &outcomes,
-            &Environment::from_sources(|_| None, None),
+        let environment = Environment::from_sources(|_| None, None);
+        let receipt = parsed(&render(&state, &state, &outcomes, &environment));
+        assert_eq!(receipt["commit"], Value::Null);
+        assert_eq!(receipt["clean_before"], false);
+        assert_eq!(receipt["result"], "passed");
+        let empty = parsed(&render(&state, &state, &[], &environment));
+        assert_eq!(empty["steps"], json!([]));
+        assert_eq!(empty["result"], "passed");
+    }
+
+    #[test]
+    fn strings_with_json_specials_read_back_unchanged() {
+        let text = "a \"b\" \\c\none\r\ttwo \u{0}\u{8}\u{c}\u{1b}\u{7f} casξ ✓";
+        let state = GitState {
+            commit: Some(text.to_string()),
+            clean: None,
+        };
+        let outcomes = [Outcome {
+            step: "fmt",
+            status: Status::Failed(text.to_string()),
+            duration: Duration::from_millis(3),
+            facts: vec![(text.to_string(), text.to_string())],
+        }];
+        let environment = Environment::from_sources(
+            |name| (name == "GITHUB_REF").then(|| text.to_string()),
+            None,
         );
-        assert!(text.contains("\n  \"commit\": null,\n"), "{text}");
-        assert!(text.contains("\n  \"clean_before\": false,\n"), "{text}");
-        assert!(text.contains("\n  \"result\": \"passed\",\n"), "{text}");
-        assert!(
-            render(
-                &state,
-                &state,
-                &[],
-                &Environment::from_sources(|_| None, None)
-            )
-            .contains("\n  \"steps\": [],\n")
-        );
+        // The reader rejects a control character that is not escaped inside
+        // a string, so reading the receipt back also checks the escapes.
+        let receipt = parsed(&render(&state, &state, &outcomes, &environment));
+        assert_eq!(receipt["commit"], text);
+        assert_eq!(receipt["steps"][0]["detail"], text);
+        assert_eq!(receipt["steps"][0]["facts"][text], text);
+        assert_eq!(receipt["github"]["GITHUB_REF"], text);
     }
 
     #[test]

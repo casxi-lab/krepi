@@ -1,15 +1,11 @@
-//! Host tooling for krepi tests: SHA-1, SHA-256 and SHA-512 digests, a
-//! bounded ELF64 reader and the JSON values that tool reports are written
-//! from.
+//! Host tooling for krepi tests: a bounded ELF64 reader and the JSON values
+//! that tool reports are written from.
 //!
 //! The library runs on the development host and in CI. It is not part of any
 //! krepi image and never executes the files it reads.
 
 pub mod elf;
 pub mod report;
-pub mod sha1;
-pub mod sha256;
-pub mod sha512;
 
 #[cfg(test)]
 mod scratch;
