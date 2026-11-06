@@ -19,6 +19,11 @@ runs. CI runs the same check on every pull request to `main` and on every
 push to `main`. A change that updates a tool version updates
 `toolchains.toml` in the same change.
 
+`cargo xtask serial-capture` is a tool for the bench, not a check: it
+records what a board sends over a serial port into a new directory below
+`artifacts/`, with a receipt, and does not evaluate the board's boot.
+[Testing](docs/conventions/testing.md#entry-points) describes what it does.
+
 When a command lands, this page and [testing](docs/conventions/testing.md)
 describe what it runs. Do not write a command into a document before it works.
 A command that does not exist yet, such as `cargo xtask docs check` (planned)

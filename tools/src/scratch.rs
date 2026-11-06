@@ -1,7 +1,7 @@
 //! A directory for the files of one unit test, below the build directory and
 //! removed with its value.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Distinguishes the directories of one test process.
@@ -37,6 +37,11 @@ impl Scratch {
         Scratch { path }
     }
 
+    /// The path of the directory.
+    pub fn root(&self) -> &Path {
+        &self.path
+    }
+
     /// The path of `name` inside the directory.
     pub fn path(&self, name: &str) -> PathBuf {
         self.path.join(name)
@@ -47,6 +52,13 @@ impl Scratch {
         let path = self.path(name);
         std::fs::write(&path, data).expect("write a scratch file");
         path
+    }
+
+    /// The bytes of `name` inside the directory.
+    #[track_caller]
+    pub fn read(&self, name: &str) -> Vec<u8> {
+        let path = self.path(name);
+        std::fs::read(&path).unwrap_or_else(|error| panic!("cannot read {path:?}: {error}"))
     }
 }
 
