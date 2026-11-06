@@ -84,7 +84,7 @@
         "url": "https://static.rust-lang.org/rustup/archive/1.29.3/aarch64-unknown-linux-gnu/rustup-init",
         "sha256": "9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282"
       },
-      "switch_export_sha256": null
+      "switch_export_sha256": "6b3b9196c1cf5ff357ddc09d1a830198ff023db676f23934120c2026883bc821"
     }
   }
 }
