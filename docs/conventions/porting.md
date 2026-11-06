@@ -55,15 +55,17 @@ modules are not, because a crate provides the digests
 
 ## Porting records
 
-Every change that takes code, tests or data from the legacy tree adds or
-updates a porting record in the same change. A record lives at
-`docs/porting/<module>.md`, where `<module>` is the destination module path
-below `src/` with `/` written as `-`, for example `docs/porting/fdt.md`. A
-module of the host tooling crate `tools/` takes the prefix `tools-`, so that
-its record is not taken for that of a kernel module: `tools/src/elf.rs` has
-`docs/porting/tools-elf.md`, and the crate root and manifest have
-`docs/porting/tools-lib.md`. One record may cover a module directory and its
-children.
+Every change that takes code, tests or data from the legacy tree or the CAS
+project adds or updates a porting record in the same change. A record lives
+at `docs/porting/<module>.md`, where `<module>` is the destination module
+path below `src/` with `/` written as `-`, for example
+`docs/porting/fdt.md`. A module of the host tooling crate `tools/` takes the
+prefix `tools-`, so that its record is not taken for that of a kernel
+module: `tools/src/elf.rs` has `docs/porting/tools-elf.md`, and the crate
+root and manifest have `docs/porting/tools-lib.md`. A module of the
+repository tasks `xtask/` takes the prefix `xtask-`:
+`xtask/src/formal/outcome.rs` has `docs/porting/xtask-formal-outcome.md`.
+One record may cover a module directory and its children.
 
 A record starts with a metadata block:
 

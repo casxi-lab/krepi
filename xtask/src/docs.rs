@@ -539,7 +539,7 @@ mod tests {
     #[test]
     fn accepts_existing_and_planned_commands() {
         let readme = "Run `cargo xtask check` or `cargo xtask`.\n\n`cargo xtask docs index` (planned)\n\
-            and `cargo xtask formal run --target NAME`\n(planned) later.\n\n```sh\ncargo xtask check\n```\n";
+            and `cargo xtask formal impact --base REV`\n(planned) later.\n\n```sh\ncargo xtask check\n```\n";
         assert_eq!(problems(&[("README.md", readme)]), Vec::<String>::new());
     }
 

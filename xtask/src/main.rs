@@ -7,6 +7,8 @@ mod formal;
 mod manifests;
 mod receipt;
 mod repo;
+#[cfg(test)]
+mod scratch;
 mod toolchain;
 mod workflows;
 

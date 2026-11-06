@@ -20,9 +20,14 @@ and `verification/legacy.json` exist and are empty. The pinned tools exist:
 the tool manifest `verification/toolchain.json`, the reviewed Aeneas patch,
 the recipe of the image that holds the tools, the workflows that build and
 publish it, and `cargo xtask formal toolchain-check`, which checks the
-manifest against the Aeneas and Charon sources ([tools](#tools)). Everything
-else on this page is planned: the Lake project, the `Krepi` Lean modules, the
-qualification crate and the other commands of `cargo xtask formal`. They are
+manifest against the Aeneas and Charon sources ([tools](#tools)).
+`cargo xtask formal run` exists as the frame of the proof gate
+([gate run](#gate-run)): it takes a snapshot of the gate inputs, exports
+them, applies their rules and writes a receipt. Its pipeline has no phases
+yet, with no extraction, qualification or Lean build, so its receipt
+verifies nothing about the code. Everything else on this page is planned:
+the Lake project, the `Krepi` Lean modules, the qualification crate, the
+phases of the gate and the other commands of `cargo xtask formal`. They are
 set up by porting the tooling of the CAS project and the prototype tree, and
 this page changes with them. No target is registered and nothing is proved.
 
@@ -67,12 +72,16 @@ never moved into the trusted boundary to close a gap.
 | `verification/models.json` | The model registry | Present, empty |
 | `verification/legacy.json` | Production functions without proofs, recorded when the inventory is adopted | Present, empty |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Planned |
-| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check` present, the others planned |
+| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check` and `run` present, the others planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
 `artifacts/formal/` directory, and the Lake build directory
-`verification/.lake/` is ignored as well. Generated definitions are never
-edited.
+`verification/.lake/` is ignored as well. Each run of the gate has a
+directory `artifacts/formal/runs/<id>/`, where `<id>` is the Unix time of
+its start, its process number and a count: `receipt.json`, `logs/` with
+the two output files of each command, and `work/` with the export of the
+gate inputs and the home and temporary directories of the tools.
+Generated definitions are never edited.
 
 ## Tools
 
@@ -226,8 +235,9 @@ text, and also when one of the packages below has none:
 
 ### Environment of tool commands
 
-The proof gate (planned) runs each tool command with an empty environment
-and only the variables that `xtask/src/formal/toolchain.rs` gives it:
+`cargo xtask formal run` runs each command that it starts, Git and
+`cargo metadata` among them, with an empty environment and only the
+variables that `xtask/src/formal/toolchain.rs` gives it:
 
 | Variable | Value | Commands |
 | --- | --- | --- |
@@ -252,7 +262,9 @@ toolchain of the `lean` it finds there as its system root. Charon runs Cargo
 through `rustup run`, which needs `RUSTUP_HOME` to find the nightly instead
 of installing it from the network. The two Cargo build variables go to both
 extraction commands; Aeneas runs no Cargo and ignores them.
-`LEAN_NUM_THREADS` is not set, so Lean uses every CPU of the host.
+`LEAN_NUM_THREADS` is not set, so Lean uses every CPU of the host. Because
+`cargo` too comes from the installation, a local run needs the
+`darwin-arm64` installation at `artifacts/formal/tools`.
 
 ### Changing a tool
 
@@ -287,22 +299,251 @@ artifact.
 
 ## Commands
 
-The commands of `cargo xtask formal` follow the CAS project. Only
-`cargo xtask formal toolchain-check` exists; the others are planned.
+The commands of `cargo xtask formal` follow the CAS project.
+`cargo xtask formal toolchain-check` and `cargo xtask formal run` exist; the
+others are planned.
 
 | Command | Purpose |
 | --- | --- |
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
 | `cargo xtask formal qualify` (planned) | Tool qualification regression on the code shapes in `verification/qualification` |
-| `cargo xtask formal run [--target NAME]...` (planned) | The proof gate: qualification, the specifications and every target (or the named ones) with its mutants |
+| `cargo xtask formal run [--target NAME]...` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets. Its phases, which are planned, are the qualification, the specifications and every target (or the named ones) with its mutants |
 | `cargo xtask formal check` (planned) | Registry, legacy and inventory metadata only; runs no tool and proves nothing |
 | `cargo xtask formal impact --base REV` (planned) | Classifies changed functions since `REV` and reports scope reductions |
 | `cargo xtask formal inventory` (planned) | Lists every production function by inventory key |
 | `cargo xtask formal editor` (planned) | Prepares `verification/` for interactive editing |
 
-Once the commands exist, `cargo xtask check` runs the proof gate, and CI runs
-it on every change. A change merges only when the required gate passes on its
-head or a committed waiver record covers the failure.
+Once the gate checks the qualification and the specifications,
+`cargo xtask check` runs it, and CI runs it on every change. A change merges
+only when the required gate passes on its head or a committed waiver record
+covers the failure.
+
+## Gate run
+
+`cargo xtask formal run` runs the gate on the commit checked out, the
+snapshot commit, and writes a receipt of the run, whether it passes, fails
+or stops on an internal error. Its code is in `xtask/src/formal/`: the gate
+inputs in `paths.rs`, the commands in `process.rs`, their classes and the
+statuses in `outcome.rs`, the receipt in `receipt.rs` and the run in
+`run.rs`.
+
+### Gate inputs and snapshot
+
+The gate inputs are defined once, in `paths.rs`: the inputs of extraction,
+which are the kernel workspace `kernel/`, the qualification crate
+`verification/qualification/` and `.cargo/config.toml`, which Cargo reads
+in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
+`rust-toolchain.toml` and `toolchains.toml`. A run
+
+1. takes the snapshot: the commit checked out, its root tree, and the Git
+   object of each gate input at that commit (`git ls-tree`), or none for a
+   gate input that the commit does not have;
+2. stops unless the gate inputs are clean: `git status` lists no staged or
+   unstaged change and no untracked file below them. Ignored files, such as
+   Lake's build directory, are allowed;
+3. exports the gate inputs of the snapshot commit with `git archive`, whose
+   output is kept in `logs/` as that of any command, into `work/source` of
+   the run directory, and checks that the export holds every file of the
+   commit, with the same mode (a file, an executable file, a symbolic link)
+   and the same object name, which Git computes from the export without
+   filters. Attributes such as `export-ignore` or `export-subst`, or
+   line-ending conversions, therefore cannot change what the run reads; any
+   difference is a tool failure. The tool manifest of the export must also
+   be the file that the run read from the checkout at its start, for the
+   environment of its commands, and the target registry of the export,
+   `verification/targets.json`, must register every name given with
+   `--target`;
+4. rejects the run when a gate input is a Python source, a file whose name
+   ends in `.py` in any case;
+5. fails when Cargo would read a Cargo configuration in the export that is
+   not the snapshot's ([Cargo configuration](#cargo-configuration)), and
+   rejects the run when a manifest of the exported kernel workspace has a
+   path dependency outside `kernel/`, as the `manifests` step of
+   `cargo xtask check` does for the checkout, whether or not the export
+   holds the path; either way Cargo then does not run;
+6. resolves the exported kernel workspace with
+   `cargo metadata --format-version 1 --locked --offline --all-features --manifest-path kernel/Cargo.toml`
+   and rejects the run unless the workspace root is `kernel/` and every
+   package is a member of it, with its manifest and the sources of its
+   targets inside `kernel/` once symbolic links are resolved, as the
+   `manifests` step requires of the checkout. A failure of Cargo itself is
+   a tool failure.
+
+A tool failure in one of these steps ends them: the later steps do not run.
+A rule that rejects the run in step 4 does not. Every later step reads the
+gate inputs from the export, never from the checkout. After a clean start,
+the run takes the objects of the gate inputs again at the end, at the
+commit checked out then, and runs `git status` again: when an object
+differs, or the gate inputs are not clean at the end, the run is `STALE`,
+with one failure that names the gate inputs whose objects differ and the
+records of `git status`.
+
+### Cargo configuration
+
+Cargo reads the `.cargo/config.toml` or `.cargo/config` of the directory
+where it runs and of each directory above it, up to the root of the file
+system, and the configuration of its Cargo home. Before the run starts
+Cargo in the export, it looks for both files in the export and in every
+directory above it, with symbolic links resolved. Only the snapshot's own
+are allowed: `.cargo/config.toml` of the export when the snapshot holds it
+as a file, not as a symbolic link, and that of the checkout root when it
+has the bytes of the snapshot's. Any other, such as a file below the
+ignored `artifacts/`, a `.cargo/config` in the checkout root or a Cargo
+configuration above the repository, fails the run as a tool failure that
+names the file, without a conclusion about the code; Cargo then does not
+run. When the checkout root's file is allowed, Cargo reads the snapshot's
+configuration twice: values that Cargo joins across files, such as
+arrays, appear twice, and a relative path in the root's copy resolves in
+the checkout, not in the export.
+
+The Cargo home is `cargo/` of the tool installation. Its configuration is
+part of the installation, trusted as the tools are, and the run does not
+look for it: in the image it is what the recipe installs, and on
+`darwin-arm64` what the developer installed.
+
+### Deadlines and processes
+
+Each command runs in a process group of its own, with the environment
+above, its input from a file or from nothing, and its standard output and
+standard error each written to a file of `logs/`, so that what a killed
+command wrote is kept. Its limit is the smallest of:
+
+- the cap of its call site: 1,800 s for Charon, 3,600 s for Aeneas, 7,200 s
+  for each `lake build` and 1,800 s for each `lake env lean`; `leanchecker`,
+  the comparator, Git and `cargo metadata` have none;
+- the rest of the budget of its phase;
+- the rest of the budget of the gate, 7,200 s from the start of the run.
+
+The steps after the phases, the second snapshot and the receipt, have 300 s
+beyond the gate's budget. A command whose limit is used up does not start
+and is `NOT_RUN`. When a command reaches its limit, or ends by itself, the
+run kills its process group, collects the command and waits up to 60 s,
+beyond the command's limit, until no process of the group is left; a
+process that is still there makes the command a tool failure. The run
+restores the default disposition of `SIGCHLD` when it starts, without which
+the system could collect an ended command before the kill. Each command is
+printed when it ends.
+
+A signal from the terminal does not reach a running tool, whose group is
+its own. SIGINT and SIGTERM stop the run instead, also when they were
+ignored when it started, and so does SIGHUP unless it was ignored then, as
+`nohup` leaves it: the run kills the group of the command that is running,
+collects the command, waits for its group as above, and ends by the same
+signal, without a receipt. A signal that comes
+between two commands takes effect before the next command starts or before
+the receipt is written.
+
+### Results
+
+Every command gets one class from one function, `outcome::classify`, which
+every call site uses: `PASSED`, `PROOF_FAILURE`, `TOOL_FAILURE` or
+`NOT_RUN`, and `BUDGET`, a tool failure at the limit of a phase or of the
+gate rather than at the cap of the call site. A tool failure is never a
+statement about the code. The conventions:
+
+| Result of the command | Call sites | Class |
+| --- | --- | --- |
+| Ran until its cap | All | `TOOL_FAILURE` |
+| Ran until the rest of a budget | All | `BUDGET` |
+| Ended by a signal | All | `TOOL_FAILURE` |
+| Exited with a status above 128 | All | `TOOL_FAILURE` |
+| `lake build` prints `error: Lean exited with code N` with `N` above 128 | The three builds | `TOOL_FAILURE` |
+| Charon exits with 255 | Charon | `TOOL_FAILURE` |
+| Cargo reports a process ended by a signal, as in `(signal: 9, SIGKILL: kill)` | Charon | `TOOL_FAILURE` |
+| Could not start or could not keep its output | All | `TOOL_FAILURE` |
+| The base build fails with errors in krepi's own modules | The base build | `PROOF_FAILURE` |
+| The base build fails with warnings only in krepi's own modules | The base build | `PROOF_FAILURE` |
+| The base build fails without an error or a warning in krepi's own modules | The base build | `TOOL_FAILURE` |
+| The comparator exits with 1 and prints a line that starts with `error: Child exited with ` | The comparator | `TOOL_FAILURE` |
+| The comparator exits with 1 otherwise | The comparator | `PROOF_FAILURE` |
+
+A process of the group that survives the kill is a tool failure as well, and
+so is any failure of Git or `cargo metadata`, which the gate runs itself,
+and any status of the comparator but 0 and 1. Any other non-zero status of
+a tool is a `PROOF_FAILURE`, which its call site compares with what it
+expects. The call sites are the extraction, the qualification builds and
+audits, the base build, the axiom audit, `leanchecker` and the comparator,
+all planned.
+
+A unit is a registered piece of work that gets exactly one conclusion: a
+qualification case, an audited theorem, the base round. A phase is a part
+of the pipeline with a budget of its own, such as the qualification. A unit
+with a command that was a tool failure is concluded `TOOL_FAILURE`, and one
+with a command that met a budget `BUDGET`, whatever its phase concludes.
+
+The status of a run is the first of these that applies: `TOOL_FAILURE`,
+`BUDGET`, `STALE`, `REJECTED`, from its failures and the conclusions of its
+units; `TOOL_FAILURE` when a unit was `NOT_RUN` without another failure;
+`SCOPED` for a run of named targets; and `VERIFIED`. The run is a tool
+failure, and not complete, after an internal error, such as a host other
+than `linux-aarch64` or `darwin-arm64`, a tool manifest or a target
+registry that cannot be read, a tool manifest that is not the snapshot's,
+a failed Git command, a failed export, a phase that returns an error or
+panics, or a panic of the run itself. After an error of the export or of
+its checks, or of a phase, the closing steps still run; an error of the
+start ends the run without the second snapshot, and a panic of the run
+outside a phase ends it without any later command. The receipt is written in every case. It
+is a tool failure as well when the gate inputs are not clean at the start,
+when a name given with `--target` is not in `verification/targets.json`,
+and when a registered unit has no conclusion or more than one, or a
+conclusion is given for a unit that is not registered. After any failure
+before the phases, no phase runs, and after a phase stops no later phase
+runs; every registered unit without a conclusion is then `NOT_RUN`. A run
+of named targets is `SCOPED` and is never complete. A run of the whole
+gate is complete when its only failures are `STALE` and no unit is
+`NOT_RUN` or `BUDGET`.
+
+The command exits with 0 for `VERIFIED` and `SCOPED` and 1 for any other
+status, and prints each failure on standard error. It exits with 2 on a
+usage error, and by the signal after a stop signal, without a receipt in
+both cases. When the run directory or the receipt cannot be written, it
+writes the receipt to standard error and exits with 120.
+
+### Receipt
+
+`receipt.json` has schema 1. It is the pretty form of `serde_json`, with
+the fields in the order of the tables below and every map sorted by its
+keys; times are seconds, rounded to milliseconds.
+
+| Field | Content |
+| --- | --- |
+| `schema` | `1` |
+| `command` | `cargo xtask formal run` |
+| `status` | `VERIFIED`, `REJECTED`, `STALE`, `TOOL_FAILURE`, `BUDGET` or `SCOPED` |
+| `complete` | Whether the run is complete, as defined above |
+| `trigger` | `mode`, `MANUAL` for a run of the whole gate and `SCOPED` for a run of named targets, with `REQUIRED`, `FORCED_FULL` and `WEEKLY` kept for the jobs of CI; `event`, `ref`, `run_id` and `attempt`, from `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`, or `null` |
+| `targets` | The names given with `--target`, sorted; empty for a run of the whole gate |
+| `host` | `linux-aarch64` or `darwin-arm64`, or `null` on another host |
+| `run`, `directory` | The identifier of the run, and its directory relative to the repository root |
+| `started`, `seconds` | The Unix time in seconds at which the run started, and how long it took |
+| `commit`, `tree` | The snapshot commit and its root tree, or `null` |
+| `inputs` | `before` and `after`, the object of each gate input (`mode`, `type`, `oid`, or `null` when the commit does not have it) at the start and at the end, or `null` when they were not taken; `clean_after`, whether the gate inputs were clean at the end, or `null` |
+| `budgets` | `gate_seconds`, 7200, and `receipt_margin_seconds`, 300 |
+| `phases` | For each phase, `budget_seconds`, `seconds` and `ran` |
+| `units` | For each unit, its `phase`, its `status` and the `reason` for it, or `null` |
+| `commands` | Every command, in the order in which they ran |
+| `failures` | Every failure that is not the conclusion of a unit, with its `status` and `message` |
+
+Each command has these fields:
+
+| Field | Content |
+| --- | --- |
+| `sequence` | The number of the command in the run, from 1 |
+| `phase`, `unit` | The phase and the unit of the command, or `null` for the commands of the gate itself |
+| `site` | `charon`, `aeneas`, `qualification-build`, `ill-typed-build`, `case-audit`, `base-build`, `axiom-audit`, `leanchecker`, `comparator`, `git` or `cargo-metadata` |
+| `argv` | The program and its arguments |
+| `cwd` | The working directory, relative to the repository root |
+| `class`, `reason` | The class of the result, and the reason for any class but `PASSED`, or `null` |
+| `exit_code`, `signal`, `timed_out` | The exit status or the signal that ended the command, each `null` otherwise, and whether it ran until its limit |
+| `limit_seconds`, `limit` | The limit of the command, and what set it: `cap`, `phase` or `gate` |
+| `seconds` | How long the command ran |
+| `group_survived` | Whether processes of its group were still there after the kill |
+| `stdout`, `stderr` | `path` relative to the run directory, `bytes` and `sha256` of each output file, or `null` for a command that did not start |
+
+Fields are only added to schema 1 while the gate's phases are added, until
+CI keeps receipts; after that, any change of a field takes a new schema.
+CI is to run the gate on `linux-aarch64` in the image, and local runs on
+`darwin-arm64` serve development; only receipts of CI runs are evidence.
 
 ## Proof targets
 
