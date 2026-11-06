@@ -60,6 +60,8 @@
 //! limit raises SIGXFSZ, whose default action ends the process without a
 //! receipt and with the port left raw.
 
+pub use crate::console::Console;
+use crate::console::{Streams, with_process_console};
 use crate::report::{Map, Value, to_json, utc_now, utc_stamp};
 use crate::timing::Timing;
 use crate::tty::{self, Receiver};
@@ -184,13 +186,13 @@ fn interrupted(flag: &AtomicI32) -> bool {
 
 /// The failure of an operation on `path`: the path in Rust's debug form and
 /// the error, `"<path>": strerror (os error N)`.
-fn file_error(path: &Path, error: io::Error) -> Failure {
+pub(crate) fn file_error(path: &Path, error: io::Error) -> Failure {
     Failure::new(format!("{path:?}: {error}"))
 }
 
 /// `path` without `.` components and without repeated or trailing
 /// separators, `.` when nothing remains.
-fn pure_path(path: &Path) -> PathBuf {
+pub(crate) fn pure_path(path: &Path) -> PathBuf {
     let pure: PathBuf = path
         .components()
         .filter(|component| *component != Component::CurDir)
@@ -206,7 +208,7 @@ fn pure_path(path: &Path) -> PathBuf {
 /// parent is missing, its missing parents first. An error names the path
 /// that its step was given: `output` itself, or its parent while the
 /// parents are created.
-fn create_output(output: &Path) -> Result<(), Failure> {
+pub(crate) fn create_output(output: &Path) -> Result<(), Failure> {
     match std::fs::create_dir(output) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             if let Some(parent) = output.parent() {
@@ -219,7 +221,7 @@ fn create_output(output: &Path) -> Result<(), Failure> {
 }
 
 /// A new file `path` with `data`, which must not exist.
-fn write_new(path: &Path, data: &[u8]) -> Result<(), Failure> {
+pub(crate) fn write_new(path: &Path, data: &[u8]) -> Result<(), Failure> {
     File::create_new(path)
         .and_then(|mut file| file.write_all(data))
         .map_err(|error| file_error(path, error))
@@ -524,7 +526,7 @@ fn cli() -> clap::Command {
 /// The value of `--max-bytes`: a decimal integer as Rust's `u64` reads it,
 /// an optional `+` and ASCII digits. An integer too large for 64 bits is out
 /// of bounds, whatever its length, and reads as `u64::MAX`.
-fn read_max_bytes(value: &str) -> Result<u64, &'static str> {
+pub(crate) fn read_max_bytes(value: &str) -> Result<u64, &'static str> {
     let digits = value.strip_prefix('+').unwrap_or(value);
     if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err("not a decimal integer");
@@ -555,14 +557,20 @@ pub fn parse(args: &[String]) -> Result<Command, clap::Error> {
     })
 }
 
-/// `artifacts/hardware-uart/<%Y%m%dT%H%M%SZ>-<12 hex digits>` below `root`.
-fn default_output(root: &Path) -> PathBuf {
+/// A new run directory below `kind` below `root`:
+/// `<root>/<kind>/<%Y%m%dT%H%M%SZ>-<12 hex digits>`.
+pub(crate) fn run_directory(root: &Path, kind: &str) -> PathBuf {
     let stamp = utc_stamp();
-    root.join(OUTPUT_DIR).join(format!(
+    root.join(kind).join(format!(
         "{}Z-{}",
         &stamp[.."YYYYmmddTHHMMSS".len()],
         random_hex(12)
     ))
+}
+
+/// `artifacts/hardware-uart/<%Y%m%dT%H%M%SZ>-<12 hex digits>` below `root`.
+fn default_output(root: &Path) -> PathBuf {
+    run_directory(root, OUTPUT_DIR)
 }
 
 /// The exit status of a capture with the receipt status `status`: 130 for
@@ -575,68 +583,12 @@ fn exit_code(status: &str) -> i32 {
     }
 }
 
-/// The terminal of the command: its two output streams and the interrupt
-/// handlers.
-pub struct Console<'a> {
-    /// Writes one text and a newline on standard output.
-    pub print: &'a mut dyn FnMut(&str) -> io::Result<()>,
-    /// Writes one text and a newline on standard error.
-    pub warn: &'a mut dyn FnMut(&str) -> io::Result<()>,
-    /// Called immediately before the port opens: installs the interrupt
-    /// handlers and returns the flag they set.
-    pub arm: &'a mut dyn FnMut() -> Result<&'a AtomicI32, Failure>,
-}
-
-/// The output streams of one run, with what failed on them.
-struct Streams<'c, 'a> {
-    console: &'c mut Console<'a>,
-    /// The first write on standard output that failed; nothing more is
-    /// written there after it.
-    unwritten: Option<io::Error>,
-    /// Whether a write on standard error failed.
-    unwarned: bool,
-}
-
-impl Streams<'_, '_> {
-    fn print(&mut self, text: &str) {
-        if self.unwritten.is_none()
-            && let Err(error) = (self.console.print)(text)
-        {
-            self.unwritten = Some(error);
-        }
-    }
-
-    fn warn(&mut self, text: &str) {
-        if (self.console.warn)(text).is_err() {
-            self.unwarned = true;
-        }
-    }
-
-    /// The exit status of a run whose work ended with `code`: 120 after a
-    /// failed write, which on standard output is reported on standard error.
-    fn exit(mut self, code: i32) -> i32 {
-        if let Some(error) = self.unwritten.take() {
-            self.warn(&format!("{PROG}: cannot write standard output: {error}"));
-            return 120;
-        }
-        if self.unwarned { 120 } else { code }
-    }
-}
-
 /// The command entry point: `--list` searches `/dev`, the lines go to the
 /// standard streams, the interrupt handlers are installed immediately before
 /// the port opens, and the capture waits as `Timing::PI5` gives. Returns the
 /// exit status of the process.
 pub fn main(root: &Path, args: &[String]) -> i32 {
-    let console = &mut Console {
-        print: &mut |text| {
-            let mut stdout = io::stdout().lock();
-            writeln!(stdout, "{text}").and_then(|()| stdout.flush())
-        },
-        warn: &mut |text| writeln!(io::stderr(), "{text}"),
-        arm: &mut || tty::catch_interrupts(),
-    };
-    run_with(root, Path::new("/dev"), args, &Timing::PI5, console)
+    with_process_console(|console| run_with(root, Path::new("/dev"), args, &Timing::PI5, console))
 }
 
 /// [`main`] with `devices` as the directory that `--list` searches, the
@@ -648,11 +600,7 @@ pub fn run_with(
     timing: &Timing,
     console: &mut Console,
 ) -> i32 {
-    let mut streams = Streams {
-        console,
-        unwritten: None,
-        unwarned: false,
-    };
+    let mut streams = Streams::new(PROG, console);
     let code = run(root, devices, args, timing, &mut streams);
     streams.exit(code)
 }
@@ -673,18 +621,7 @@ fn run(
 ) -> i32 {
     let command = match parse(args) {
         Ok(command) => command,
-        // Clap's text ends with a newline, which the streams add.
-        Err(error) => {
-            let text = error.render().to_string();
-            let text = text.strip_suffix('\n').unwrap_or(&text);
-            return if error.kind() == ErrorKind::DisplayHelp {
-                streams.print(text);
-                0
-            } else {
-                streams.warn(text);
-                2
-            };
-        }
+        Err(error) => return streams.clap_error(&error),
     };
     let (port, seconds, max_bytes, output) = match command {
         Command::List => {

@@ -91,7 +91,11 @@ and from the support modules of the legacy integration tests.
   the legacy support module `tools/tests/support/pty.rs` are one test-only
   module, `tools/src/pty.rs`, with the parts that these tests use: opening a
   pair close-on-exec, the path of its slave and a read of a given count of
-  bytes from its master. The child runner `tests::in_child` of the legacy
+  bytes from its master, and the host checks of a second open of a held
+  terminal, which the tests of [`qemu`](tools-qemu.md) share: an open of
+  the terminal outside the code under test, the text of a refused lock, and
+  whether the kernel refuses this process a new open of a terminal held
+  with `TIOCEXCL`. The child runner `tests::in_child` of the legacy
   module and `ChildTest` of `tools/tests/support/child.rs` are one test-only
   module, `tools/src/child.rs`, with the parts that these tests use: running
   one test of the binary alone with the variable `KREPI_TOOLS_TEST_CHILD`
@@ -180,9 +184,11 @@ settings that took effect.
 ## Not carried over
 
 - `Board`, the guest of a board session behind a port, and its
-  implementation of the guest check of the legacy QEMU runner. Only the
+  implementation of the guest check of the legacy `qemu` module. Only the
   board suites of the prototype and the tests of the board sessions used it;
-  without it this module no longer depends on the QEMU runner.
+  without it this module no longer depends on `qemu`. The tests of
+  the board capture of [`qemu`](tools-qemu.md) use a test guest with its
+  rules.
 - `die_by_signal`, which ended the process by a caught signal, as Python's
   death by an uncaught `KeyboardInterrupt` did. Only the board suites of the
   prototype called it.

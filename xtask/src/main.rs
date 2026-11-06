@@ -33,6 +33,11 @@ pub const COMMANDS: &[Command] = &[
         subcommands: &[],
     },
     Command {
+        name: "qemu",
+        about: "Run an ELF image on QEMU virt with one Cortex-A76 until the guest powers off or a limit ends the run, writing the serial transcript, QEMU's standard error and a receipt into a new directory; --help lists the options",
+        subcommands: &[],
+    },
+    Command {
         name: "serial-capture",
         about: "Record what a board sends over a serial port for a bounded time into a new directory, without evaluating its boot; --help lists the options",
         subcommands: &[],
@@ -56,6 +61,12 @@ fn main() -> ExitCode {
     {
         ["check"] => check::run(repo::root(), None),
         ["check", "--receipt", path] => check::run(repo::root(), Some(PathBuf::from(path))),
+        ["qemu", rest @ ..] => {
+            let args: Vec<String> = rest.iter().map(|arg| arg.to_string()).collect();
+            let code = krepi_tools::qemu_run::main(&repo::root(), &args);
+            // The command exits with 0, 1, 2, 120 or 130.
+            ExitCode::from(u8::try_from(code).unwrap_or(2))
+        }
         ["serial-capture", rest @ ..] => {
             let args: Vec<String> = rest.iter().map(|arg| arg.to_string()).collect();
             let code = krepi_tools::serial_capture::main(&repo::root(), &args);

@@ -26,9 +26,10 @@ empty proof registries, a commit-message hook and the build tooling: a pinned
 Rust toolchain, the kernel and user-space Cargo workspaces with an empty ABI
 crate and SDK crate, and the repository checks. A host tooling crate for
 tests holds an ELF reader, report values, a serial port transport, a serial
-link and the serial capture behind `cargo xtask serial-capture`, ported from
-the prototype with their porting records. There is no kernel source yet, and
-nothing boots.
+link, the serial capture behind `cargo xtask serial-capture`, the QEMU runner
+behind `cargo xtask qemu` and the parsers of serial records, ported from the
+prototype with their porting records, and a test image that the checks boot
+with the runner. There is no kernel source yet, and no krepi kernel boots.
 Continuous integration runs the repository checks on every pull request to
 `main` and on every push to `main`.
 

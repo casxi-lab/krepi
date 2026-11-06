@@ -24,6 +24,14 @@ records what a board sends over a serial port into a new directory below
 `artifacts/`, with a receipt, and does not evaluate the board's boot.
 [Testing](docs/conventions/testing.md#entry-points) describes what it does.
 
+`cargo xtask qemu <ELF>` is a tool as well, not a check: it runs an image on
+QEMU virt until the guest powers the machine off or a limit ends the run,
+and records the serial output, QEMU's standard error and a receipt in a new
+directory below `artifacts/`, without evaluating the output. The tests of the
+check run it on the test image of the host tooling crate.
+[Testing](docs/conventions/testing.md#entry-points) describes it and its
+receipt.
+
 When a command lands, this page and [testing](docs/conventions/testing.md)
 describe what it runs. Do not write a command into a document before it works.
 A command that does not exist yet, such as `cargo xtask docs check` (planned)
