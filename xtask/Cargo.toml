@@ -16,19 +16,55 @@ rust-version = "1.99"
 # command `cargo xtask serial-capture` and whose QEMU runner is the command
 # `cargo xtask qemu`; the tests of the latter write its test image.
 krepi-tools = { path = "../tools" }
-# The receipt keeps its fields in the order in which they are written, the
-# manifests step reads the output of `cargo metadata`, and the test of
-# `cargo xtask qemu` reads the receipt of a run. All are text in memory, so
-# the standard-library support of the default feature is left out.
+# The command lines of `cargo xtask formal run` and
+# `cargo xtask formal toolchain-check`, with their help, usage and error
+# texts, as the host tooling crate reads its command lines. They are defined
+# with the builder, so the derive macros are left out. Their texts are plain
+# and do not depend on the terminal, so colour and wrapping to the terminal
+# width are left out, and so are the suggestions of similar options, which
+# need another crate.
+clap = { version = "=4.6.7", default-features = false, features = ["std", "help", "usage", "error-context"] }
+# The process groups of the commands of `cargo xtask formal run`: `killpg`
+# kills a command's group, `kill` with signal 0 finds whether any of its
+# processes remain, `waitid` with `WNOWAIT` sees that a command has ended
+# without collecting it, so that the group's number cannot be reused before
+# the kill, `signal` restores the default disposition of `SIGCHLD` that
+# this needs, and `sigaction` reads whether SIGHUP is ignored. Only the C
+# declarations are used, which need no standard-library support, so the
+# default feature is left out.
+libc = { version = "=0.2.191", default-features = false }
+# The receipt of `cargo xtask check` keeps its fields in the order in which
+# they are written, the receipt of `cargo xtask formal run` is written, and
+# read back by its tests, through the derive macros of `serde`, the
+# manifests step and `cargo xtask formal run` read the output of
+# `cargo metadata`, and the test of `cargo xtask qemu` reads the receipt of
+# a run. All are text in memory, so the standard-library support of the
+# default feature is left out.
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
-# `verification/toolchain.json` is read into types that derive `Deserialize`;
-# nothing is serialized through `serde` itself, so only the derive macros and
-# the allocation support for strings, vectors and maps are needed.
+# `verification/toolchain.json` and `verification/targets.json` are read
+# into types that derive `Deserialize`, and the receipt of
+# `cargo xtask formal run`, whose paths are strings, is written through
+# types that derive `Serialize` and, for its tests, `Deserialize`, so only
+# the derive macros and the allocation support for strings, vectors and
+# maps are needed.
 serde = { version = "=1.0.229", default-features = false, features = ["alloc", "derive"] }
-# The SHA-256 of files that the tool checks read into memory, so the
-# allocation and object-identifier support of the default features is left
+# SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop
+# `cargo xtask formal run`: the crate's handler sets a flag that the run
+# reads while a command runs, and the run ends by the signal through the
+# crate's emulation of its default action. Only the flag and that emulation
+# are used, so the iterator and the channel of the default features are left
 # out.
+signal-hook = { version = "=0.4.6", default-features = false }
+# The SHA-256 of files that `cargo xtask formal toolchain-check` and
+# `cargo xtask formal run` read into memory, among them the output files of
+# the commands of a run, so the allocation and object-identifier support of
+# the default features is left out.
 sha2 = { version = "=0.11.1", default-features = false }
+# `git archive` writes the gate inputs of the snapshot commit of
+# `cargo xtask formal run` as a tar archive, which the command unpacks into
+# its run directory. Extended attributes are not unpacked, so the default
+# `xattr` feature is left out.
+tar = { version = "=0.4.46", default-features = false }
 # Manifests and Cargo configuration files are parsed into tables, which
 # `serde` defines, and never written, so the writer and the standard-library
 # support of the default features are left out.

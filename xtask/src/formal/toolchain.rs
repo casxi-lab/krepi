@@ -628,10 +628,6 @@ pub fn command(root: &Path, layout: &Layout, aeneas: &Path, charon: &Path) -> Ex
 }
 
 /// The environment of the tool commands.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the proof gate run is the first caller")
-)]
 pub mod environment {
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
@@ -690,6 +686,13 @@ pub mod environment {
     /// A command that the proof gate runs. The two extraction commands
     /// carry the Cargo target directory of their extraction alone.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the extraction and the Lean build are the first to run the tools"
+        )
+    )]
     pub enum Tool<'a> {
         /// Charon extracting a crate through Cargo.
         Charon { target_dir: &'a Path },
@@ -703,6 +706,8 @@ pub mod environment {
         Leanchecker,
         /// Git, as the gate calls it.
         Git,
+        /// `cargo metadata`, as the gate calls it on the kernel workspace.
+        CargoMetadata,
     }
 
     /// The variables of a tool command, by name.
@@ -710,8 +715,20 @@ pub mod environment {
     pub struct Environment(BTreeMap<&'static str, String>);
 
     impl Environment {
+        #[cfg(test)]
         pub fn vars(&self) -> &BTreeMap<&'static str, String> {
             &self.0
+        }
+
+        /// The environment of exactly `vars`, for the tests of the code
+        /// that runs commands.
+        #[cfg(test)]
+        pub fn of(vars: &[(&'static str, &str)]) -> Environment {
+            Environment(
+                vars.iter()
+                    .map(|(name, value)| (*name, value.to_string()))
+                    .collect(),
+            )
         }
 
         /// Makes `command` run with exactly these variables: those of the
@@ -721,7 +738,8 @@ pub mod environment {
         }
     }
 
-    fn text(path: &Path) -> Result<String, String> {
+    /// `path` as text, or why it is not UTF-8.
+    pub fn text(path: &Path) -> Result<String, String> {
         path.to_str()
             .map(str::to_string)
             .ok_or_else(|| format!("the path {} is not UTF-8", path.display()))
@@ -1202,13 +1220,14 @@ mod tests {
     #[test]
     fn every_tool_gets_exactly_its_variables() {
         let target = Path::new("/work/run/cases/arithmetic/target");
-        let table: [Row; 6] = [
+        let table: [Row; 7] = [
             ("charon", Tool::Charon { target_dir: target }, &EXTRACTION),
             ("aeneas", Tool::Aeneas { target_dir: target }, &EXTRACTION),
             ("lake build", Tool::LakeBuild, &[]),
             ("lake env lean", Tool::LakeEnvLean, &[]),
             ("leanchecker", Tool::Leanchecker, &[]),
             ("git", Tool::Git, &[]),
+            ("cargo metadata", Tool::CargoMetadata, &[]),
         ];
         let manifest = parse(COMMITTED).expect("the committed manifest parses");
         for (name, tool, extra) in table {

@@ -207,6 +207,25 @@ fn check_dependencies(path: &str, table: &Table, problems: &mut Vec<String>) {
     }
 }
 
+/// The problems of the path dependencies of the kernel manifests among
+/// `paths`, read below `root`, as [`check`] finds them in the checkout.
+pub fn kernel_dependency_problems<'a>(
+    root: &Path,
+    paths: impl IntoIterator<Item = &'a String>,
+) -> Result<Vec<String>, String> {
+    let mut problems = Vec::new();
+    for path in paths {
+        if repo::is_within(path, KERNEL) && path.ends_with("/Cargo.toml") {
+            let text = fs::read_to_string(root.join(path))
+                .map_err(|error| format!("cannot read {path}: {error}"))?;
+            let table = (text.parse::<Table>())
+                .map_err(|error| format!("{path}: not valid TOML: {error}"))?;
+            check_dependencies(path, &table, &mut problems);
+        }
+    }
+    Ok(problems)
+}
+
 /// The string literal at the start of `text`, after optional whitespace.
 fn leading_literal(text: &str) -> Option<&str> {
     let rest = text.trim_start().strip_prefix('"')?;
@@ -275,17 +294,37 @@ fn source_paths(line: &str) -> Vec<&str> {
     found
 }
 
-/// Asks Cargo to resolve the kernel workspace below `root` offline, from its
-/// `Cargo.lock` and with every feature of its members, and checks what it
-/// reports. A registry or Git package that is not cached, or a stale
-/// `Cargo.lock`, fails the resolution.
+/// The arguments of Cargo that resolve the kernel workspace offline, from its
+/// `Cargo.lock` and with every feature of its members, run from the
+/// repository root; the proof gate runs the same command in its export of
+/// the repository.
+pub fn kernel_metadata_args() -> Vec<String> {
+    let manifest = format!("{KERNEL}/Cargo.toml");
+    [
+        "metadata",
+        "--format-version",
+        "1",
+        "--locked",
+        "--offline",
+        "--all-features",
+        "--manifest-path",
+        &manifest,
+    ]
+    .map(str::to_string)
+    .to_vec()
+}
+
+/// Asks Cargo to resolve the kernel workspace below `root` with
+/// [`kernel_metadata_args`], and checks what it reports. A registry or Git
+/// package that is not cached, or a stale `Cargo.lock`, fails the
+/// resolution.
 fn check_kernel_workspace(root: &Path) -> Vec<String> {
-    const ARGS: &str = "metadata --format-version 1 --locked --offline --all-features --manifest-path kernel/Cargo.toml";
+    let args = kernel_metadata_args();
     let program = check::cargo();
-    let shown = format!("{} {ARGS}", program.to_string_lossy());
+    let shown = format!("{} {}", program.to_string_lossy(), args.join(" "));
     println!("$ {shown}");
     let output = match Command::new(&program)
-        .args(ARGS.split(' '))
+        .args(&args)
         .current_dir(root)
         .output()
     {
@@ -313,7 +352,7 @@ fn check_kernel_workspace(root: &Path) -> Vec<String> {
 /// Paths are
 /// compared with symbolic links resolved; a path that cannot be resolved is a
 /// problem.
-fn check_kernel_metadata(metadata: &Json, kernel: &Path) -> Vec<String> {
+pub fn check_kernel_metadata(metadata: &Json, kernel: &Path) -> Vec<String> {
     let kernel = match fs::canonicalize(kernel) {
         Ok(kernel) => kernel,
         Err(error) => return vec![format!("cannot resolve {}: {error}", kernel.display())],
@@ -414,12 +453,10 @@ fn check_cargo_configs(tree: &Tree, problems: &mut Vec<String>) {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
     use serde_json::json;
 
     use super::*;
+    use crate::scratch::Scratch;
 
     const KERNEL_ROOT: &str = "[workspace]\nmembers = [\"abi\", \"core\"]\n\n[workspace.package]\nlicense = \"MIT\"\n\n[profile.release]\noverflow-checks = true\n";
     const USER_ROOT: &str = "[workspace]\nmembers = [\"sdk\"]\n\n[workspace.package]\nlicense = \"MIT\"\n\n[workspace.dependencies]\nkrepi-abi = { path = \"../kernel/abi\" }\n\n[profile.release]\noverflow-checks = true\n";
@@ -780,61 +817,6 @@ mod tests {
         let metadata = json!({ "workspace_root": at(KERNEL), "workspace_members": [] });
         let problems = check_kernel_metadata(&metadata, &repo::root().join(KERNEL));
         assert_eq!(problems.len(), 1, "{problems:?}");
-    }
-
-    /// A directory below the profile directory of the build, whose `deps`
-    /// directory holds the test executable, removed with its value.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new(label: &str) -> Scratch {
-            static NEXT: AtomicUsize = AtomicUsize::new(0);
-            let executable = std::env::current_exe().expect("locate the test executable");
-            let profile = executable
-                .parent()
-                .and_then(Path::parent)
-                .expect("the test executable lies in the deps directory of a profile");
-            let path = profile.join("scratch").join(format!(
-                "krepi-xtask-{label}-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-            // A directory of the same name can only be left over from an
-            // earlier process with the same identifier.
-            let _ = fs::remove_dir_all(&path);
-            fs::create_dir_all(&path).expect("create the scratch directory");
-            Scratch(path)
-        }
-
-        /// Writes `text` to the relative path `name`, with its directories.
-        fn write(&self, name: &str, text: &str) {
-            let path = self.0.join(name);
-            fs::create_dir_all(path.parent().expect("a file has a directory"))
-                .expect("create a scratch directory");
-            fs::write(path, text).expect("write a scratch file");
-        }
-
-        /// Writes `Cargo.lock` for the kernel workspace, offline.
-        fn lock(&self) {
-            let output = Command::new(check::cargo())
-                .args([
-                    "generate-lockfile",
-                    "--offline",
-                    "--manifest-path",
-                    "kernel/Cargo.toml",
-                ])
-                .current_dir(&self.0)
-                .output()
-                .expect("run cargo generate-lockfile");
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(output.status.success(), "{stderr}");
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
     }
 
     const MEMBER: &str =

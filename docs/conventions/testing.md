@@ -81,8 +81,8 @@ the failed step:
 The checks that `xtask` implements itself read only files that Git tracks,
 so a fresh clone and a working copy with build output give the same result;
 the Cargo commands, including the resolution in `manifests`, read the
-working copy. The proof gate joins the check once the formal tooling
-exists.
+working copy. The proof gate, `cargo xtask formal run`, joins the check
+once it checks the qualification and the specifications.
 
 `cargo xtask check --receipt <path>` also writes a JSON receipt of the run to
 `<path>`, whether the check passes or fails. It records the commit, whether
@@ -221,6 +221,26 @@ every push to `main`, which does the same and publishes the image
 ([changing a tool](../formal-verification.md#changing-a-tool)). Both upload
 the build record, with the disk measurement, as a workflow artifact.
 
+`cargo xtask formal run` runs the proof gate on a snapshot of the gate
+inputs and writes a receipt of the run below `artifacts/formal/runs/`
+([gate run](../formal-verification.md#gate-run)). It is not part of the
+check yet, and its pipeline has no phases, so a run checks the snapshot, the
+export and the rules of the gate inputs and concludes nothing about the
+code. Its unit tests run in the `test` step above, on Git repositories that
+they create with the gate inputs in a minimal form, and with fake tools:
+shell scripts that hang, exit with a given status, end by a signal or print
+what a tool prints. The repositories lie in the system's temporary
+directory, outside the checkout, whose Cargo configuration the gate would
+otherwise find above their exports. The tests therefore assume that no
+Cargo configuration lies in the temporary directory or above it, such as
+`~/.cargo/config.toml` when the temporary directory is below the home
+directory; with one there, every run that reaches Cargo fails and names
+the file. The test of a stop signal runs the gate in a child process, the
+test executable started again for that test alone, with SIGHUP at its
+default action even when the tests run under `nohup`; the test of an
+ignored SIGHUP starts the test executable again in the same way, once with
+SIGHUP ignored.
+
 QEMU suites and board suites have their own entry points (planned), built on
 the serial port transport, the serial link, the QEMU command and the serial
 capture of a guest, the QEMU runner, and the serial record parsers of the
@@ -340,6 +360,12 @@ test ends by its byte limit, the end of its stream or of the process, or an
 interrupt has a deadline of 120 s. No test bounds the time that a step
 takes.
 
+In the tests of `cargo xtask formal run`, a fake tool that hangs gets a
+limit of 1 s, which only decides that it is stopped, and any other fake
+tool a limit of 3,600 s. The test of a stop signal waits at most 120 s for
+the gate that it starts to reach its command, which only a failing test
+reaches. No other test bounds how long a step takes.
+
 ## Dependencies
 
 The test tooling takes general functionality from crates, as
@@ -353,9 +379,13 @@ to an exact version in the manifest of the crate that uses it:
 | `tools/Cargo.toml` | `object` without default features, with `write_core` and `elf` | MIT OR Apache-2.0 | The ELF writer that lays out and encodes the test image around its instruction words: the ELF header, the program and section headers, the symbol table and the string tables |
 | `tools/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | Report values, whose objects keep the order of their keys, and their JSON text |
 | `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching and in the receipts of the serial capture and of `cargo xtask qemu`, the suffix of their run directories, and the build-id of the test image |
-| `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json` |
-| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipt of `cargo xtask check`, reading the output of `cargo metadata` in the `manifests` step, and reading `verification/toolchain.json` and the Lake lock of the Aeneas Lean library |
-| `xtask/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests of the Aeneas patch and the Lake lock that `cargo xtask formal toolchain-check` compares with `verification/toolchain.json` |
+| `xtask/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask formal run` and `cargo xtask formal toolchain-check`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
+| `xtask/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The process groups of the commands of `cargo xtask formal run`: killing a command's group, finding whether any of its processes remain, seeing that a command has ended without collecting it, and the default disposition of `SIGCHLD` that this needs; and finding whether SIGHUP is ignored when the run starts |
+| `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json` and `cargo xtask formal run` reads `verification/targets.json`, and the types of the receipt of `cargo xtask formal run` |
+| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, reading the output of `cargo metadata` in the `manifests` step and in `cargo xtask formal run`, and reading `verification/toolchain.json`, `verification/targets.json` and the Lake lock of the Aeneas Lean library |
+| `xtask/Cargo.toml` | `signal-hook` without default features | MIT OR Apache-2.0 | The handler that lets SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop `cargo xtask formal run`, and the emulation of their default action with which the run then ends |
+| `xtask/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests of the Aeneas patch and the Lake lock that `cargo xtask formal toolchain-check` compares with `verification/toolchain.json`, and of the output files of the commands of `cargo xtask formal run` |
+| `xtask/Cargo.toml` | `tar` without default features | MIT OR Apache-2.0 | Unpacking the tar archive of the gate inputs that `git archive` writes for `cargo xtask formal run` |
 | `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `toolchains.toml`, `rust-toolchain.toml` and Charon's `rust-toolchain` |
 | `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step |
 

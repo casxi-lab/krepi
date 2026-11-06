@@ -38,7 +38,7 @@ receipt.
 When a command lands, this page and [testing](docs/conventions/testing.md)
 describe what it runs. Do not write a command into a document before it works.
 A command that does not exist yet, such as `cargo xtask docs check` (planned)
-or `cargo xtask formal run` (planned), carries the marker `(planned)` right
+or `cargo xtask formal check` (planned), carries the marker `(planned)` right
 after its code span. The documentation check rejects any other mention
 of a command that `cargo xtask` does not provide, a mention outside code, and
 the marker once the command exists.
