@@ -1,0 +1,188 @@
+# Builds the proof-tool image of a pull request that changes its recipe,
+# without publishing it, and measures the disk the build needs. The image is
+# published only from main (formal-image-publish.yml). Actions are pinned to
+# full commit SHAs; the comment names the release.
+name: formal image build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/formal-image-build.yml
+      - .github/workflows/formal-image-publish.yml
+      - verification/image/**
+      - verification/tooling/**
+      - verification/toolchain.json
+
+concurrency:
+  group: formal-image-build-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# `bash` runs every step with `-eo pipefail`, so that a failed command in a
+# pipeline, such as `docker build ... | tee`, fails its step.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: build the proof-tool image
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    env:
+      IMAGE_REF: krepi-formal:${{ github.event.pull_request.head.sha }}
+      REVISION: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Check out the candidate commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Record the disk and remove preinstalled software
+        run: |
+          mkdir -p artifacts/image
+          {
+            echo "started $(date -u +%FT%TZ)"
+            echo "available before removal: $(df -B1 --output=avail / | tail -n 1)"
+            df -B1 /
+            for dir in /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+                /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift \
+                /usr/local/share/powershell /usr/local/share/chromium \
+                /usr/local/lib/node_modules /opt/microsoft /opt/google /opt/az /usr/lib/jvm; do
+              if [ -e "$dir" ]; then
+                echo "removed $dir"
+                sudo rm -rf "$dir"
+              fi
+            done
+            docker image prune --all --force > /dev/null
+            echo "available after removal: $(df -B1 --output=avail / | tail -n 1)"
+            df -B1 /
+            docker version
+          } 2>&1 | tee artifacts/image/disk.txt
+
+      - name: Sample the disk every 15 seconds
+        run: |
+          root=$(docker info --format '{{.DockerRootDir}}')
+          nohup bash -c '
+            while :; do
+              used=$(sudo timeout 10 du -sxb "$1" 2> /dev/null | cut -f 1) || used=
+              printf "%s\t%s\t%s\n" "$(date -u +%FT%TZ)" \
+                "$(df -B1 --output=avail / | tail -n 1 | tr -d " ")" "${used:-unknown}"
+              sleep 15
+            done' sampler "$root" > artifacts/image/disk-samples.tsv 2> /dev/null &
+          echo "$!" > artifacts/image/sampler.pid
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Fetch the pinned Aeneas and Charon sources
+        run: |
+          fetch() {
+            git init --quiet "$1"
+            git -C "$1" fetch --quiet --depth 1 "$2" "$3"
+            git -C "$1" checkout --quiet --detach FETCH_HEAD
+          }
+          pins=verification/toolchain.json
+          fetch artifacts/image/aeneas "$(jq -er .aeneas.source_url "$pins")" \
+            "$(jq -er .aeneas.commit "$pins")"
+          fetch artifacts/image/charon "$(jq -er .charon.source_url "$pins")" \
+            "$(jq -er .charon.commit "$pins")"
+          git -C artifacts/image/charon submodule update --init --recursive
+          git -C artifacts/image/charon submodule status --recursive
+
+      - name: Check the sources and the patch against the manifest
+        run: >-
+          cargo xtask formal toolchain-check
+          --aeneas artifacts/image/aeneas --charon artifacts/image/charon
+
+      - name: Check that a missing notice fails the image build
+        run: |
+          source verification/image/recipe.sh
+          dir=$(mktemp -d)
+          cp verification/image/notices.txt "$dir/README"
+          listed=$(awk '$1 !~ /^#/ && NF { print $1 }' "$dir/README")
+          for name in $listed; do
+            mkdir -p "$dir/$name"
+            echo "license text" > "$dir/$name/LICENSE"
+          done
+          {
+            check_notices "$dir/README"
+            echo "every listed notice present: check_notices passes"
+            for name in $listed; do
+              mv "$dir/$name" "$dir/$name.away"
+              if check_notices "$dir/README"; then
+                echo "the notice of $name missing: check_notices passes, but must fail"
+                exit 1
+              fi
+              mkdir "$dir/$name"
+              : > "$dir/$name/LICENSE"
+              if check_notices "$dir/README"; then
+                echo "the notice of $name empty: check_notices passes, but must fail"
+                exit 1
+              fi
+              rm -r "$dir/$name"
+              mv "$dir/$name.away" "$dir/$name"
+              echo "the notice of $name missing or empty: check_notices fails"
+            done
+          } 2>&1 | tee artifacts/image/notices-check.txt
+
+      - name: Build the image
+        run: |
+          docker build --progress=plain --file verification/image/Dockerfile \
+            --build-context aeneas-src=artifacts/image/aeneas \
+            --build-context charon-src=artifacts/image/charon \
+            --build-arg REVISION="$REVISION" --tag "$IMAGE_REF" verification 2>&1 \
+            | tee artifacts/image/build.log
+
+      - name: Record the image
+        run: |
+          docker image inspect "$IMAGE_REF" > artifacts/image/inspect.json
+          docker history --no-trunc --human=false --format '{{.Size}}\t{{.CreatedBy}}' \
+            "$IMAGE_REF" > artifacts/image/layers.tsv
+          docker run --rm "$IMAGE_REF" cat /opt/krepi-formal/versions.json \
+            | tee artifacts/image/versions.json
+          docker run --rm "$IMAGE_REF" cat /opt/krepi-formal/opam-switch.export \
+            > artifacts/image/opam-switch.export
+          echo "image size: $(docker image inspect --format '{{.Size}}' "$IMAGE_REF")" \
+            | tee -a artifacts/image/disk.txt
+
+      - name: Summarize the disk measurement
+        if: always()
+        run: |
+          if [ -f artifacts/image/sampler.pid ]; then
+            kill "$(cat artifacts/image/sampler.pid)" || true
+          fi
+          # Record what Docker holds, then free its build cache, so that the
+          # record can be written and uploaded after a build that filled the disk.
+          docker system df > artifacts/image/docker-df.txt 2>&1 || true
+          docker builder prune --all --force > /dev/null 2>&1 || true
+          if [ -f artifacts/image/disk-samples.tsv ]; then
+            {
+              echo "finished $(date -u +%FT%TZ)"
+              echo "available at the end: $(df -B1 --output=avail / | tail -n 1)"
+              awk -F '\t' '
+                NR == 1 || $2 < low { low = $2 }
+                $3 ~ /^[0-9]+$/ && $3 > high { high = $3 }
+                END {
+                  print "least available during the build: " low
+                  print "largest Docker root: " high
+                  print "samples: " NR
+                }' artifacts/image/disk-samples.tsv
+            } | tee -a artifacts/image/disk.txt | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the build record
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-image-build-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: |
+            artifacts/image/*.txt
+            artifacts/image/*.tsv
+            artifacts/image/*.json
+            artifacts/image/*.log
+            artifacts/image/*.export
+          if-no-files-found: warn

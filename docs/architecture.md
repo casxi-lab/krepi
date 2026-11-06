@@ -538,7 +538,7 @@ Cargo workspaces of their own, each in its own directory:
 | `kernel/` | The kernel workspace: the EL1 kernel, board support, the ABI crate and the operation inventory; the input of proof extraction. It holds the ABI crate `kernel/abi` (`krepi-abi`), which defines no interface yet. |
 | `tools/` | The host tooling crate `krepi-tools`, a Cargo workspace of its own: a bounded ELF64 reader, the JSON values of tool reports, the serial port transport, the serial capture behind `cargo xtask serial-capture`, the serial link over the standard streams of a guest's process with the process helpers it uses, and the time values of these tools per platform |
 | `user/` | The user-space workspace: the resident root, services, drivers, the SDK and workers, which are members outside `default-members`. It holds the SDK crate `user/sdk` (`krepi-sdk`). |
-| `verification/` | The Lean proof project and its registries ([formal verification](formal-verification.md)) |
+| `verification/` | The Lean proof project and its registries, and the definition of the proof tools: their manifest, the reviewed patches and the recipe of the image that holds them, kept beside the proof project that the tools check ([formal verification](formal-verification.md#tools)) |
 | `xtask/` | The `cargo xtask` commands, a Cargo workspace of its own; it depends on the host tooling crate, which implements `cargo xtask serial-capture` |
 
 Each workspace has its own `Cargo.lock`. Neither workspace directory contains

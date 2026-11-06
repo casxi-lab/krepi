@@ -1,0 +1,156 @@
+Aeneas patch of the krepi proof tools.
+
+Base: Aeneas commit 4acbb6d73abe9082e45cf49ba6d6229a2c7d5836 of
+https://github.com/AeneasVerif/aeneas. Apply it in the root of that tree with
+`git apply`, which skips this text before the first file header.
+
+The patch changes the Lean backend only:
+
+1. A call of `Option<&mut T>::unwrap`, where `T` holds no borrow, translates
+   to `core.option.Option.unwrap.mut`, a definition that the patch adds to
+   the Aeneas Lean library. It returns the payload together with a backward
+   function, as `core.result.Result.unwrap.mut` does for
+   `Result<&mut T, E>::unwrap`. Every other shape keeps the existing
+   translation.
+2. A generated name counts as taken when another generated name extends it
+   by a `.` component, so that no definition shares its name with the
+   namespace of another one.
+
+Origin: ported from cas-project@f2d2fba26cbf09474e6df8e59650014ae58dec78,
+file `verification/tooling/aeneas-option-unwrap-mut-and-prefix.patch` (SHA-256
+e12c89822e366d99c37850218d9d0d6155bcf88ebb3e1db2f8d70ddb793bde3e), which was
+written for Aeneas commit d119a474f852781f8ae88a85424f2f8ba8407b82. The port
+differs only in the hunk of `backends/lean/Aeneas/Std/Core/Core.lean`: the
+hunk starts at line 75, and the binders of its context and of the added
+definition read `{T : Type _}`, as upstream commit
+6c2788d1366f09d69fd55b2b9be71cd17d28a9ab changed them. The other seven
+hunks are unchanged.
+
+License: this patch modifies source files of Aeneas, which is licensed under
+the Apache License, Version 2.0, and is itself distributed under that
+license. The license text is in `LICENSE-Apache-2.0` in this directory.
+Unless required by applicable law or agreed to in writing, this patch is
+distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.
+
+--- a/src/pure/Pure.ml
++++ b/src/pure/Pure.ml
+@@ -135,6 +135,8 @@
+           We use this when using `ok ...` would result in let-bindings getting
+           simplified away (in a backend like Lean). *)
+   | Discriminant  (** Discriminant read *)
++  | OptionUnwrapMut
++      (** Lean-only Option<&mut T>::unwrap specialization, with borrow-free T. *)
+   | ResultUnwrapMut
+       (** Temporary fix: the
+           [core::result::{core::result::Result<@T, @E>}::unwrap] instantiated
+--- a/src/pure/PureMicroPassesAnnots.ml
++++ b/src/pure/PureMicroPassesAnnots.ml
+@@ -204,7 +204,7 @@
+                     { types = [ hole ]; const_generics; trait_refs = [] } )
+               in
+               (known_f_ty, [ collection_ty; TLiteral (TUInt Usize) ], false)
+-          | ResultUnwrapMut -> (hole, mk_holes (), false)
++          | OptionUnwrapMut | ResultUnwrapMut -> (hole, mk_holes (), false)
+           | GetTarget -> (f.ty, mk_known (), false)
+           | TargetFeatureEnabled -> (f.ty, mk_known (), false)
+         end
+--- a/src/pure/PrintPure.ml
++++ b/src/pure/PrintPure.ml
+@@ -865,6 +865,7 @@
+       | Slice -> "@sliceIndexMut"
+     end
+   | Discriminant -> "@discriminant"
++  | OptionUnwrapMut -> "@optionUnwrapMut"
+   | ResultUnwrapMut -> "@resultUnwrapMut"
+   | GetTarget -> "@getTarget"
+   | TargetFeatureEnabled -> "@targetFeatureEnabled"
+--- a/src/extract/ExtractBase.ml
++++ b/src/extract/ExtractBase.ml
+@@ -1255,6 +1255,7 @@
+         (IndexMutAtIndex Slice, "Slice.index_mut_usize");
+         (IndexMutAtIndex Array, "Array.index_mut_usize");
+         (ToResult, "lift");
++        (OptionUnwrapMut, "core.option.Option.unwrap.mut");
+         (ResultUnwrapMut, "core.result.Result.unwrap.mut");
+         (GetTarget, "get_target");
+         (TargetFeatureEnabled, "target_feature_enabled");
+--- a/src/extract/Extract.ml
++++ b/src/extract/Extract.ml
+@@ -1046,6 +1046,9 @@
+           | Pure ToResult ->
+               Some
+                 { explicit_types = [ Implicit ]; explicit_const_generics = [] }
++          | Pure OptionUnwrapMut ->
++              Some
++                { explicit_types = [ Implicit ]; explicit_const_generics = [] }
+           | Pure ResultUnwrapMut ->
+               Some
+                 {
+--- a/src/symbolic/SymbolicToPureExpressions.ml
++++ b/src/symbolic/SymbolicToPureExpressions.ml
+@@ -771,6 +771,34 @@
+             else call_e)
+     | _ -> call_e
+   in
++  (* Narrow special case, deliberately more restrictive than ResultUnwrapMut:
++     only the Lean backend and one direct mutable reference with a borrow-free
++     referent. Nested borrow shapes need separate backward-signature analysis.
++     Other shapes remain on the existing translation path. *)
++  let call_e =
++    match (call.call_id, call.generics.types) with
++    | S.Fun (Fun fid, _), [ T.TRef (_, ref_ty, T.RMut) ]
++      when Config.backend () = Lean
++           && not (TypesUtils.ty_has_borrows (Some ctx.span)
++                     ctx.type_ctx.type_infos ref_ty) -> (
++        match FunDeclId.Map.find_opt fid ctx.decls_ctx.fun_ctx.fun_decls with
++        | None -> call_e
++        | Some fun_decl ->
++            let pat = NameMatcher.parse_pattern
++              "core::option::{core::option::Option<@T>}::unwrap" in
++            if ExtractName.match_name ctx.decls_ctx.crate pat
++                 fun_decl.item_meta.name then
++              let app, args = destruct_apps call_e in
++              (match app.e with
++               | Qualif { id = _; generics } ->
++                   [%add_loc] mk_apps ctx.span
++                     { e = Qualif {
++                         id = FunOrOp (Fun (Pure OptionUnwrapMut)); generics };
++                       ty = app.ty } args
++               | _ -> [%internal_error] ctx.span)
++            else call_e)
++    | _ -> call_e
++  in
+   [%ldebug "call_e: " ^ texpr_to_string ctx call_e];
+   [%ldebug
+     "- dest_v.ty: "
+--- a/backends/lean/Aeneas/Std/Core/Core.lean
++++ b/backends/lean/Aeneas/Std/Core/Core.lean
+@@ -75,6 +75,14 @@
+ def core.option.Option.unwrap {T : Type _} (x : Option T) : Result T :=
+   Result.ofOption x Error.panic
+ 
++/-- Candidate model for a direct mutable-reference payload; not nested borrows. -/
++@[expose]
++def core.option.Option.unwrap.mut {T : Type _} (x : Option T) :
++    Result (T × (T → Option T)) :=
++  match x with
++  | none => .fail .panic
++  | some v => .ok (v, fun v => some v)
++
+ @[step]
+ theorem core.option.Option.unwrap.spec {T : Type _} (x : Option T) (h : x.isSome) :
+   unwrap x ⦃ v => x = some v ⦄ := by
+--- a/src/extract/ExtractBase.ml
++++ b/src/extract/ExtractBase.ml
+@@ -2108,6 +2108,10 @@
+        the backend allows such collisions *)
+     StringSet.mem s ctx.names_maps.names_map.names_set
+     || StringSet.mem s ctx.names_maps.strict_names_map.names_set
++    || (backend () = Lean &&
++        let shadows name = String.starts_with ~prefix:(s ^ ".") name in
++        (StringSet.exists shadows ctx.names_maps.names_map.names_set
++         || StringSet.exists shadows ctx.names_maps.strict_names_map.names_set))
+   in
+   basename_to_unique_aux collision name_append_index name
+ 

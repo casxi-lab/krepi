@@ -3,6 +3,7 @@
 
 mod check;
 mod docs;
+mod formal;
 mod manifests;
 mod receipt;
 mod repo;
@@ -26,6 +27,11 @@ pub const COMMANDS: &[Command] = &[
         name: "check",
         about: "Run the toolchain, manifest, format, Clippy, test, documentation and workflow checks; with --receipt <path>, also write a JSON receipt of the run",
         subcommands: &[],
+    },
+    Command {
+        name: "formal",
+        about: "The proof tooling; without a subcommand, list its commands",
+        subcommands: formal::COMMANDS,
     },
     Command {
         name: "help",
@@ -62,6 +68,7 @@ fn main() -> ExitCode {
             // The command exits with 0, 2, 120 or 130.
             ExitCode::from(u8::try_from(code).unwrap_or(2))
         }
+        ["formal", rest @ ..] => formal::run(&repo::root(), rest),
         [] | ["help"] => {
             print_help();
             ExitCode::SUCCESS
