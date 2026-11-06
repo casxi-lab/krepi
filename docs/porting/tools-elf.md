@@ -80,7 +80,8 @@ foundations, which exercised this reader on a synthetic image.
 
 The tests `examples::ex1_...` to `examples::ex4_...` of the same file test
 the serial record parsers of the legacy `tools/src/receipt.rs`. They are
-carried over with that module and recorded in its record, not here.
+carried over with that module and recorded in
+[its record](tools-receipt.md#tests-carried-over), not here.
 
 ## Behaviour changes
 

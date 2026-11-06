@@ -13,12 +13,13 @@ rust-version = "1.99"
 
 [dependencies]
 # The host tooling crate of this repository, whose serial capture is the
-# command `cargo xtask serial-capture`.
+# command `cargo xtask serial-capture` and whose QEMU runner is the command
+# `cargo xtask qemu`; the tests of the latter write its test image.
 krepi-tools = { path = "../tools" }
-# The receipt keeps its fields in the order in which they are written, and
-# the manifests step reads the output of `cargo metadata`. Both are text in
-# memory, so the standard-library support of the default feature is left
-# out.
+# The receipt keeps its fields in the order in which they are written, the
+# manifests step reads the output of `cargo metadata`, and the test of
+# `cargo xtask qemu` reads the receipt of a run. All are text in memory, so
+# the standard-library support of the default feature is left out.
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
 # `verification/toolchain.json` is read into types that derive `Deserialize`;
 # nothing is serialized through `serde` itself, so only the derive macros and

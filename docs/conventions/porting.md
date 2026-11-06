@@ -48,9 +48,9 @@ Each area of the legacy `src/` tree is ported, redesigned or retired.
 
 Legacy areas that this table does not list, and the tooling crates, are
 classified in the porting record of the first change that takes code from
-them. The QEMU runner, serial, serial capture, receipt and ELF modules of the
-legacy tooling crate `tools/` are ported with their tests; its SHA modules
-are not, because a crate provides the digests
+them. The `qemu`, `serial`, `serial_capture`, `receipt` and `elf` modules
+of the legacy tooling crate `tools/` are ported with their tests; its SHA
+modules are not, because a crate provides the digests
 ([dependencies](../../CONTRIBUTING.md#dependencies)).
 
 ## Porting records

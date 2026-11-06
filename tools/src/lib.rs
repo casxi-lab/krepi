@@ -2,20 +2,29 @@
 //! that tool reports are written from, the serial port transport with the
 //! interrupt flag of a session, the serial capture of a board's serial port
 //! behind `cargo xtask serial-capture`, the serial link over the standard
-//! streams of a process with the process helpers it uses, and the time
+//! streams of a process, the QEMU virt command with the serial capture of a
+//! guest on QEMU or behind a board's serial port and the process helpers,
+//! the run of an image on QEMU behind `cargo xtask qemu`, the test image that
+//! it boots in the tests, the terminal that both commands share, the line
+//! matchers and record parsers of a guest's serial output, and the time
 //! values of these tools per platform.
 //!
 //! The library runs on the development host and in CI, both Unix hosts. It
-//! is not part of any krepi image and never executes the files it reads.
+//! is not part of any krepi image and never runs the files that it reads on
+//! the host: an image runs only inside QEMU.
 
 #[cfg(not(unix))]
 compile_error!("krepi-tools runs on Unix hosts only");
 
+pub mod console;
 pub mod elf;
 pub mod qemu;
+pub mod qemu_run;
+pub mod receipt;
 pub mod report;
 pub mod serial;
 pub mod serial_capture;
+pub mod test_elf;
 pub mod timing;
 pub mod tty;
 

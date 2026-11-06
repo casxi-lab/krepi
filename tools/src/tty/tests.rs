@@ -1,8 +1,8 @@
 use super::*;
 use crate::TEST_WAIT;
 use crate::child::{ChildTest, child_part};
-use crate::pty::Pty;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use crate::pty::{Pty, exclusive_open_refused, lock_refused, open_read_only};
+use std::os::fd::AsRawFd;
 use std::sync::mpsc::{RecvTimeoutError, channel};
 
 /// The time values of these tests: the slices of a Pi 5 session, and a
@@ -11,50 +11,6 @@ const TIMING: Timing = Timing {
     request_transmit: TEST_WAIT,
     ..Timing::PI5
 };
-
-/// The text of a refused advisory lock: `EWOULDBLOCK`, 35 on Darwin and 11
-/// on Linux, whose text is the same on both.
-fn lock_refused() -> Failure {
-    Failure::new(format!(
-        "Resource temporarily unavailable (os error {})",
-        libc::EWOULDBLOCK
-    ))
-}
-
-/// Opens `path` as the receiver opens it, outside the code under test.
-fn open_read_only(path: &str) -> std::io::Result<OwnedFd> {
-    let name = CString::new(path).unwrap();
-    let flags = libc::O_RDONLY | libc::O_NOCTTY | libc::O_NONBLOCK | libc::O_CLOEXEC;
-    // SAFETY: `name` is a NUL-terminated string that lives until the call
-    // returns, and the call only reads it.
-    let fd = unsafe { libc::open(name.as_ptr(), flags) };
-    if fd < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    // SAFETY: `fd` is an open descriptor that nothing else owns.
-    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-}
-
-/// Whether the kernel refuses this process a new open of a terminal that a
-/// descriptor holds with `TIOCEXCL`, found on a pair of its own, outside the
-/// code under test. Linux refuses it with `EBUSY` unless the process has
-/// `CAP_SYS_ADMIN` in the initial user namespace, which root in a container
-/// may lack and a process in a user namespace of its own does not have;
-/// Darwin lets the open through, so there the advisory lock of a port
-/// refuses a second port.
-fn exclusive_open_refused() -> bool {
-    let pty = Pty::open();
-    let held = open_read_only(pty.path()).expect("open the tty");
-    // SAFETY: TIOCEXCL takes no argument, so the call passes no pointer and
-    // touches no memory of this process; the descriptor is an open terminal.
-    let taken = unsafe { libc::ioctl(held.as_raw_fd(), libc::TIOCEXCL as libc::c_ulong) };
-    assert_eq!(taken, 0, "TIOCEXCL: {}", std::io::Error::last_os_error());
-    match open_read_only(pty.path()) {
-        Ok(_) => false,
-        Err(error) if error.raw_os_error() == Some(libc::EBUSY) => true,
-        Err(error) => panic!("a new open of a held tty: {error}"),
-    }
-}
 
 #[test]
 fn raw_attributes_select_115200_8n1_without_flow_control_or_processing() {

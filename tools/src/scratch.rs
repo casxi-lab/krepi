@@ -1,8 +1,13 @@
 //! A directory for the files of one unit test, below the build directory and
 //! removed with its value.
 
+use crate::TEST_WAIT;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 /// Distinguishes the directories of one test process.
 static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -52,6 +57,47 @@ impl Scratch {
         let path = self.path(name);
         std::fs::write(&path, data).expect("write a scratch file");
         path
+    }
+
+    /// Writes the shell script `text` to the new file `name` inside the
+    /// directory, executable by everyone, and returns its path once it can be
+    /// run. The script must end at once when its first argument is
+    /// `--version`, as a fake QEMU does: it is run so until its start no
+    /// longer fails with `ETXTBSY`. A child process that another test forks
+    /// while the file is open for writing holds a copy of the descriptor until
+    /// its own exec, and Linux refuses to execute a file that is open for
+    /// writing. A test fails when the script cannot be run within
+    /// [`TEST_WAIT`].
+    #[track_caller]
+    pub fn script(&self, name: &str, text: &str) -> PathBuf {
+        let path = self.path(name);
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o755)
+            .open(&path)
+            .unwrap_or_else(|error| panic!("cannot create {path:?}: {error}"));
+        file.write_all(text.as_bytes())
+            .unwrap_or_else(|error| panic!("cannot write {path:?}: {error}"));
+        drop(file);
+        let deadline = Instant::now() + TEST_WAIT;
+        loop {
+            let started = Command::new(&path)
+                .arg("--version")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            match started {
+                Err(error)
+                    if error.raw_os_error() == Some(libc::ETXTBSY) && Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("cannot run {path:?}: {error}"),
+                Ok(_) => return path,
+            }
+        }
     }
 
     /// The bytes of `name` inside the directory.

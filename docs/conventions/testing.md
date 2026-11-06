@@ -128,6 +128,81 @@ reads the command line: `--help` prints its help with the options and
 their defaults on standard output, and a usage error is its error text on
 standard error.
 
+`cargo xtask qemu <ELF>` runs an image on QEMU virt and records what the
+guest writes to its serial port, without evaluating it; it is a tool and is
+not part of the check, whose tests run it on the test image described
+below. It starts `qemu-system-aarch64` from the search path, or the
+executable that `--qemu` names, with this command line, where `<image>` is
+the canonical path of `<ELF>`:
+
+```text
+qemu-system-aarch64 -accel tcg,thread=single \
+    -machine virt-8.2,secure=off,virtualization=off,gic-version=2 \
+    -cpu cortex-a76 -smp 1 -m 128M -nic none -display none \
+    -serial stdio -monitor none -kernel <image>
+```
+
+`virt-8.2` is a versioned machine type that QEMU 8.2 and its later versions
+provide alike; the guest has no EL2, no EL3 and no network card, and its
+PL011 is on QEMU's standard streams. The guest runs on the host clock;
+`--clock icount` adds `-icount shift=3,align=off,sleep=off` after the
+accelerator, a functional reproduction as described under
+[environments](#environments). The run ends when QEMU ends by itself, when
+it has run for `--timeout` seconds (default 60, greater than 0 and at most
+600), when more than `--max-bytes` bytes of serial output have arrived
+(default 262144, at most 16777216), or at SIGINT, SIGTERM or SIGHUP, which
+the command catches from immediately before QEMU starts. The command stops a
+QEMU that still runs with SIGTERM, and kills it if it has not ended within
+the stop grace, then collects the rest of its output. It writes three files
+into the new directory `--output-dir`, by default
+`artifacts/qemu/<UTC time>Z-<12 hexadecimal digits>`: `transcript.bin`, the
+serial output; `qemu-stderr.txt`, QEMU's standard error, which never joins
+the serial output; and `summary.json`, the receipt below, with sorted keys.
+It prints the exit reason, the count of serial bytes and the path of the
+receipt. It exits with 0 for `guest_shutdown`, 1 for `qemu_exit`, `deadline`
+and `output_limit`, 130 for `interrupted`, 2 for `error`, for a receipt with
+`errors`, for a usage error and for a run that fails before QEMU starts,
+such as for a missing image or QEMU or an existing output directory, which
+writes no receipt, and 120 when it cannot write its own output. `clap`
+reads the command line as for `cargo xtask serial-capture`.
+
+The receipt of `cargo xtask qemu` has these keys:
+
+| Key | Value |
+| --- | --- |
+| `schema_version` | `1` |
+| `exit_reason` | Why the run ended. `guest_shutdown`: QEMU ended by itself with status 0 and reported no signal, as it does when the guest powers the machine off. `qemu_exit`: QEMU ended by itself with another status, by a signal that the command did not send, or with status 0 after it reported such a signal on its standard error as `<program>: terminating on signal <N>`, as it does when SIGINT, SIGTERM or SIGHUP from another process ends it. `deadline`: QEMU still ran at the timeout, and the command stopped it. `output_limit`: more than `max_bytes` bytes of serial output arrived, while QEMU ran or while the command collected the rest of the output, and the command stopped QEMU if it still ran. `interrupted`: SIGINT, SIGTERM or SIGHUP reached the command, which stopped QEMU if it still ran. `error`: QEMU did not start, as it or the interrupt handlers could not be started or installed. `interrupted` takes precedence over `output_limit`, and `output_limit` over the others. The reason follows from what the command did and from QEMU's report of a signal, as QEMU exits with status 0 when one of those signals ends it |
+| `errors` | The text of each step that failed, such as the start of QEMU or a write of the transcript; present only when one failed |
+| `started_at`, `finished_at` | UTC times in RFC 3339 form with six fraction digits, such as `2026-10-14T07:45:17.000123Z`: immediately before QEMU starts, and once the files are written |
+| `elapsed_seconds` | Seconds from immediately before QEMU starts until it has ended or been stopped, on the monotonic clock |
+| `timeout_seconds`, `max_bytes`, `clock` | The limits and the time source of the run: `--timeout` as a number, `--max-bytes` and `host` or `icount` |
+| `image` | The image as the command read it before QEMU started: `path`, its canonical path, `bytes` and `sha256` |
+| `qemu` | `executable`, the canonical path of the QEMU executable; `version`, the first line of its `--version` output; and `command`, the exact arguments of the run, the executable first |
+| `process` | How QEMU ended: `exit_code`, the code it exited with, and `signal`, the number of the signal that ended it, of which one is null; both are null when it had not ended within the kill grace. `intentional_shutdown` tells whether the command signalled a QEMU that still ran, and `forced_kill` whether it killed it. `null` when QEMU did not start |
+| `transcript` | `file`, `transcript.bin`, with the `bytes` and `sha256` of the file as it is on disk once the run has ended: every byte that the guest wrote to its UART, up to and including the read that passed the limit, which may hold up to 64 KiB more; `null`, with an entry in `errors`, if the file cannot be read |
+| `stderr` | `file`, `qemu-stderr.txt`, with its `bytes` and `sha256` in the same way |
+
+The receipt names the image and its digest, the QEMU version and command
+line, and the inputs of the run; the command builds no image and records no
+toolchain, which whatever builds an image records. The output is not read:
+whether a guest booted or passed a check is for the suite that runs it to
+decide.
+
+The test image, which the function `test_elf::write` of the host tooling
+crate writes to a given path, is an AArch64 executable for QEMU virt that
+writes `krepi test image: PL011 output, then PSCI SYSTEM_OFF` and a carriage
+return and line feed to the PL011 UART, then powers the machine off with
+PSCI `SYSTEM_OFF` through `hvc #0`. Host code writes it: the program is a
+fixed list of AArch64 instruction words, and the ELF writer of the `object`
+crate lays out the executable around it, with one read and execute segment
+for the program and its message at `0x4020_0000`, where it starts, one
+read-only segment for the GNU build-id note, and the symbols `_start` and
+`message`. It needs no bare-metal target, assembler, compiler or linker,
+and the image is the same on every host. The test of the `xtask` binary
+runs `cargo xtask qemu` on it with the QEMU of the host, which shows that
+the image boots, that its output reaches the transcript and that its
+power-off ends the run as `guest_shutdown`.
+
 `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` checks the
 tool manifest `verification/toolchain.json` against checkouts of Aeneas and
 Charon and the reviewed Aeneas patch: the Lean, Charon and Rust versions
@@ -147,11 +222,10 @@ every push to `main`, which does the same and publishes the image
 the build record, with the disk measurement, as a workflow artifact.
 
 QEMU suites and board suites have their own entry points (planned), built on
-the serial port transport and the serial link of the host tooling crate and
-on the QEMU runner, with its serial capture, and the receipt module, which
-are still to be ported from the legacy tooling crate. Each suite writes its
-report and the raw serial bytes under `artifacts/`, together with the
-identity of the image it ran.
+the serial port transport, the serial link, the QEMU command and the serial
+capture of a guest, the QEMU runner, and the serial record parsers of the
+host tooling crate. Each suite writes its report and the raw serial bytes
+under `artifacts/`, together with the identity of the image it ran.
 
 ## Evidence and receipts
 
@@ -161,7 +235,10 @@ identity of the image it ran.
   (planned) and is not edited by hand. A failure stays on the list until a
   receipt shows the fixed behaviour.
 - A receipt records the identity and digest of the image, the toolchain,
-  the QEMU version or the board configuration, and the inputs.
+  the QEMU version or the board configuration, and the inputs. The toolchain
+  is recorded by whatever builds the image; a run of an image that it did
+  not build, such as `cargo xtask qemu`, records the image's digest, the
+  QEMU version and command line and its inputs.
 
 ## Board runs
 
@@ -233,10 +310,11 @@ not execution, and execution on QEMU is not execution on the board.
 
 The host tools take their time slices, polling intervals and timeouts from a
 `Timing` value of `tools/src/timing.rs`, which a caller chooses for the
-platform it talks to; `cargo xtask serial-capture` takes the Pi 5 set. The
-values for the Pi 5 are those of the legacy tooling crate, which used the
-same values on QEMU and on the board; they have not yet been measured
-against a board run of krepi.
+platform it talks to; `cargo xtask serial-capture` takes the Pi 5 set and
+`cargo xtask qemu` the QEMU virt set. The values of both sets are those of
+the legacy tooling crate, which used the same values on QEMU and on the
+board; the values for the Pi 5 have not yet been measured against a board
+run of krepi.
 
 | Field | Use | QEMU virt | Pi 5 |
 | --- | --- | ---: | ---: |
@@ -247,15 +325,20 @@ against a board run of krepi.
 | `link_drain` | How long a serial link collects the output that follows a failure | 250 ms | 250 ms |
 | `link_finish` | Longest final read of a finished serial link, until its output ends | 1 s | 1 s |
 | `link_finish_slice` | Longest wait in one look of that final read | 50 ms | 50 ms |
+| `guest_slice` | Longest wait of a guest's serial capture for output in one look: while it waits for an expected response, while it collects the diagnostics that follow a failure, and while `cargo xtask qemu` supervises QEMU | 100 ms | 100 ms |
+| `guest_idle` | How long a guest's serial capture may keep receiving output at a phase boundary before the guest counts as not idle | 250 ms | 250 ms |
+| `guest_finish` | Longest final collection of a guest's serial output once the guest has stopped, until its output ends, such as the collection of the rest of QEMU's output by `cargo xtask qemu` | 1 s | 1 s |
+| `guest_finish_slice` | Longest wait in one look of that final collection | 50 ms | 50 ms |
 | `stop_grace` | How long a stopped process may take to end after SIGTERM before it is killed | 1 s | 1 s |
 | `kill_grace` | How long a killed process may take to end before its status is given up | 1 s | 1 s |
 | `reap_poll` | Interval between two looks at whether a process has ended | 10 ms | 10 ms |
 
 The unit tests of these tools wait at most 60 s for an event that they
 expect, which only a failing test reaches, and pass sets of their own whose
-bounds for an expected event are as long; a capture that a test ends by its
-byte limit, the end of its stream or an interrupt has a deadline of 120 s.
-No test bounds the time that a step takes.
+bounds for an expected event are as long; a capture or a QEMU run that a
+test ends by its byte limit, the end of its stream or of the process, or an
+interrupt has a deadline of 120 s. No test bounds the time that a step
+takes.
 
 ## Dependencies
 
@@ -265,10 +348,11 @@ to an exact version in the manifest of the crate that uses it:
 
 | Manifest | Dependency | License | Purpose |
 | --- | --- | --- | --- |
-| `tools/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command line of `cargo xtask serial-capture`, defined with the builder, with its help, usage and error texts, which have no colour and are not wrapped to the terminal |
-| `tools/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The terminal, lock and signal calls of the serial port transport, the signal that the process helpers send, and the pseudo-terminals, signals, file-size limits and child processes of the tests of the transport, the serial capture and the process helpers |
+| `tools/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask serial-capture` and `cargo xtask qemu`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
+| `tools/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The terminal, lock and signal calls of the serial port transport, the signal that the process helpers send, and the pseudo-terminals, signals, file-size limits and child processes of the tests of the transport, the serial capture, the QEMU capture and runner and the process helpers |
+| `tools/Cargo.toml` | `object` without default features, with `write_core` and `elf` | MIT OR Apache-2.0 | The ELF writer that lays out and encodes the test image around its instruction words: the ELF header, the program and section headers, the symbol table and the string tables |
 | `tools/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | Report values, whose objects keep the order of their keys, and their JSON text |
-| `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching and in the receipt of the serial capture, and the suffix of the capture's run directory |
+| `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching and in the receipts of the serial capture and of `cargo xtask qemu`, the suffix of their run directories, and the build-id of the test image |
 | `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json` |
 | `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipt of `cargo xtask check`, reading the output of `cargo metadata` in the `manifests` step, and reading `verification/toolchain.json` and the Lake lock of the Aeneas Lean library |
 | `xtask/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests of the Aeneas patch and the Lake lock that `cargo xtask formal toolchain-check` compares with `verification/toolchain.json` |

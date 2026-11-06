@@ -1,7 +1,7 @@
 [package]
 name = "krepi-tools"
 version = "0.0.0"
-description = "Host tooling for krepi tests: ELF reading, JSON report values, the serial port transport and the serial capture"
+description = "Host tooling for krepi tests: ELF reading, JSON report values, the serial port transport, the serial capture, the QEMU runner, serial record parsers and a test image"
 edition = "2024"
 license = "MIT"
 publish = false
@@ -12,25 +12,34 @@ rust-version = "1.99"
 [workspace]
 
 [dependencies]
-# The command line of the serial capture, `cargo xtask serial-capture`, with
-# its help, usage and error texts. It is defined with the builder, so the
-# derive macros are left out. Its texts are plain and do not depend on the
-# terminal, so colour and wrapping to the terminal width are left out, and
-# so are the suggestions of similar options, which need another crate.
+# The command lines of the serial capture, `cargo xtask serial-capture`, and
+# of the QEMU runner, `cargo xtask qemu`, with their help, usage and error
+# texts. They are defined with the builder, so the derive macros are left
+# out. Their texts are plain and do not depend on the terminal, so colour
+# and wrapping to the terminal width are left out, and so are the
+# suggestions of similar options, which need another crate.
 clap = { version = "=4.6.7", default-features = false, features = ["std", "help", "usage", "error-context"] }
 # The terminal, lock and signal calls of the serial port transport, the
 # signal that the process helpers send, and the pseudo-terminals, signals,
 # file-size limits and child processes of the tests of the transport, the
-# serial capture and the process helpers. Only the C declarations are used,
-# which need no standard-library support, so the default feature is left
-# out.
+# serial capture, the QEMU capture and runner and the process helpers. Only
+# the C declarations are used, which need no standard-library support, so
+# the default feature is left out.
 libc = { version = "=0.2.191", default-features = false }
+# The ELF writer that lays out and encodes the test image around its
+# instruction words: the ELF header, the program and section headers, the
+# symbol table and the string tables. Only that writer is used, which needs
+# `write_core` and `elf`, so the readers, the other object formats, the
+# compression and the standard-library support of the default features are
+# left out.
+object = { version = "=0.40.0", default-features = false, features = ["write_core", "elf"] }
 # Report objects keep the order in which their keys were inserted. Reports
 # are written to strings, so the standard-library support of the default
 # feature is left out.
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
-# Digests are taken of byte slices in memory, so the allocation and
-# object-identifier support of the default features is left out.
+# Digests are taken of byte slices in memory, and of files read in pieces,
+# so the allocation and object-identifier support of the default features
+# is left out.
 sha2 = { version = "=0.11.1", default-features = false }
 
 [lints.rust]

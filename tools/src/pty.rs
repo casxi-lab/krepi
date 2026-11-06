@@ -9,9 +9,14 @@
 //! slave's attributes on Darwin and on Linux alike. Every descriptor here is
 //! opened close-on-exec, so that no process that another test spawns
 //! meanwhile inherits it.
+//!
+//! The module also gives what the tests of a second open of a held terminal
+//! need on each host: an open of a terminal outside the code under test, the
+//! text of a refused advisory lock, and whether the kernel refuses this
+//! process a new open of a terminal held with `TIOCEXCL`.
 
-use crate::TEST_WAIT;
-use std::ffi::CStr;
+use crate::{Failure, TEST_WAIT};
+use std::ffi::{CStr, CString};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -177,6 +182,13 @@ impl Master {
                 }
             }
         }
+    }
+
+    /// Exactly `count` bytes that the port sent, as the board reads them. A
+    /// test fails when they have not arrived within [`TEST_WAIT`].
+    #[track_caller]
+    pub fn read(&self, count: usize) -> Vec<u8> {
+        read_exactly(self.fd.as_raw_fd(), count)
     }
 
     /// The attributes that the code under test gave the slave, read on the
@@ -367,6 +379,47 @@ impl Pty {
         self.master = None;
     }
 
+    /// Waits until the device has hung up, which the slave reports to `poll`.
+    /// A process that another test starts holds a copy of every descriptor of
+    /// this process until its exec closes the copies, so the device can hang
+    /// up a moment after the last master descriptor of the test was closed.
+    /// Linux reports a hang-up as soon as the master has closed, and an error
+    /// condition as well once every open file of the slave is hung up, after
+    /// which a write to the slave fails with `EIO` and a read finds the end
+    /// of the stream; the wait lasts until both are reported there. A test
+    /// fails when the device has not hung up within [`TEST_WAIT`].
+    #[track_caller]
+    pub fn await_hang_up(&self) {
+        let hung_up = if cfg!(target_os = "linux") {
+            libc::POLLHUP | libc::POLLERR
+        } else {
+            libc::POLLHUP
+        };
+        let deadline = Instant::now() + TEST_WAIT;
+        loop {
+            let mut poll = libc::pollfd {
+                fd: self.slave.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: `poll` is one initialized, properly aligned pollfd on
+            // this frame, exclusively borrowed for the call, so the pointer
+            // and the count 1 describe valid memory that the call may write.
+            let ready = unsafe { libc::poll(&mut poll, 1, 10) };
+            if ready > 0 && poll.revents & hung_up == hung_up {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the device did not hang up within {TEST_WAIT:?}"
+            );
+            if ready > 0 {
+                // Input that the code under test has not read yet.
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }
+
     /// Runs `script` on a thread of its own over a second master descriptor,
     /// as a board that sends and reads.
     #[track_caller]
@@ -379,5 +432,53 @@ impl Pty {
         Script {
             handle: std::thread::spawn(move || script(&master)),
         }
+    }
+}
+
+/// Opens `path` read-only, as a receiver opens it, outside the code under
+/// test.
+pub fn open_read_only(path: &str) -> std::io::Result<OwnedFd> {
+    let name = CString::new(path).unwrap();
+    let flags = libc::O_RDONLY | libc::O_NOCTTY | libc::O_NONBLOCK | libc::O_CLOEXEC;
+    // SAFETY: `name` is a NUL-terminated string that lives until the call
+    // returns, and the call only reads it; no mode argument is needed
+    // without `O_CREAT`.
+    let fd = unsafe { libc::open(name.as_ptr(), flags) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `fd` is an open descriptor that nothing else owns, so the
+    // `OwnedFd` is its only owner and closes it once.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// The text of a refused advisory lock: `EWOULDBLOCK`, 35 on Darwin and 11
+/// on Linux, whose text is the same on both.
+pub fn lock_refused() -> Failure {
+    Failure::new(format!(
+        "Resource temporarily unavailable (os error {})",
+        libc::EWOULDBLOCK
+    ))
+}
+
+/// Whether the kernel refuses this process a new open of a terminal that a
+/// descriptor holds with `TIOCEXCL`, found on a pair of its own, outside the
+/// code under test. Linux refuses it with `EBUSY` unless the process has
+/// `CAP_SYS_ADMIN` in the initial user namespace, which root in a container
+/// may lack and a process in a user namespace of its own does not have;
+/// Darwin lets the open through, so there the advisory lock of a port
+/// refuses a second port.
+#[track_caller]
+pub fn exclusive_open_refused() -> bool {
+    let pty = Pty::open();
+    let held = open_read_only(pty.path()).expect("open the tty");
+    // SAFETY: TIOCEXCL takes no argument, so the call passes no pointer and
+    // touches no memory of this process; the descriptor is an open terminal.
+    let taken = unsafe { libc::ioctl(held.as_raw_fd(), libc::TIOCEXCL as libc::c_ulong) };
+    assert_eq!(taken, 0, "TIOCEXCL: {}", std::io::Error::last_os_error());
+    match open_read_only(pty.path()) {
+        Ok(_) => false,
+        Err(error) if error.raw_os_error() == Some(libc::EBUSY) => true,
+        Err(error) => panic!("a new open of a held tty: {error}"),
     }
 }

@@ -15,6 +15,7 @@ paths:
 destination:
   - tools/src/serial_capture.rs
   - tools/src/serial_capture/tests.rs
+  - tools/src/console.rs
   - tools/src/pty.rs
   - tools/src/child.rs
   - tools/src/scratch.rs
@@ -144,6 +145,16 @@ functions of this module.
   exception's class name; the exit status stays 120.
 - `random_hex`, which names a run directory, is a private function of this
   module and takes its digests from `sha2`.
+- The QEMU runner of `cargo xtask qemu`, `tools/src/qemu_run.rs`, shares
+  the parts of this module that a command with a run directory and a
+  receipt needs: `file_error`, `pure_path`, `create_output`, `write_new`,
+  `read_max_bytes`, `render` and `render_name`, and `run_directory`, the
+  name of a new run directory below a given directory of the repository
+  root, which both commands take. `Console`, the output streams with the exit
+  status 120 of a failed write, and the writing of clap's help and usage
+  errors are in `tools/src/console.rs`, which both commands use; this
+  module keeps `Console` under its own name, and the report of a failed
+  write names the command that failed.
 - `xtask/src/main.rs` registers `serial-capture` in `COMMANDS` and runs the
   command with the arguments after its name; the help of `cargo xtask`
   gives the command names a column of 14 characters. `xtask/Cargo.toml`

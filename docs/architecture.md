@@ -536,10 +536,10 @@ Cargo workspaces of their own, each in its own directory:
 | Path | Contents |
 | --- | --- |
 | `kernel/` | The kernel workspace: the EL1 kernel, board support, the ABI crate and the operation inventory; the input of proof extraction. It holds the ABI crate `kernel/abi` (`krepi-abi`), which defines no interface yet. |
-| `tools/` | The host tooling crate `krepi-tools`, a Cargo workspace of its own: a bounded ELF64 reader, the JSON values of tool reports, the serial port transport, the serial capture behind `cargo xtask serial-capture`, the serial link over the standard streams of a guest's process with the process helpers it uses, and the time values of these tools per platform |
+| `tools/` | The host tooling crate `krepi-tools`, a Cargo workspace of its own: a bounded ELF64 reader, the JSON values of tool reports, the serial port transport, the serial capture behind `cargo xtask serial-capture`, the serial link over the standard streams of a guest's process with the process helpers it uses, the QEMU virt command with the serial capture of a guest on QEMU or behind a board's serial port, the QEMU runner behind `cargo xtask qemu` and the test image that its tests boot, the line matchers and record parsers of a guest's serial output, and the time values of these tools per platform |
 | `user/` | The user-space workspace: the resident root, services, drivers, the SDK and workers, which are members outside `default-members`. It holds the SDK crate `user/sdk` (`krepi-sdk`). |
 | `verification/` | The Lean proof project and its registries, and the definition of the proof tools: their manifest, the reviewed patches and the recipe of the image that holds them, kept beside the proof project that the tools check ([formal verification](formal-verification.md#tools)) |
-| `xtask/` | The `cargo xtask` commands, a Cargo workspace of its own; it depends on the host tooling crate, which implements `cargo xtask serial-capture` |
+| `xtask/` | The `cargo xtask` commands, a Cargo workspace of its own; it depends on the host tooling crate, which implements `cargo xtask serial-capture` and `cargo xtask qemu` |
 
 Each workspace has its own `Cargo.lock`. Neither workspace directory contains
 the other or is the repository root, and `xtask` and host tool crates live
