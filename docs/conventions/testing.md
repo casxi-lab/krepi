@@ -203,6 +203,24 @@ runs `cargo xtask qemu` on it with the QEMU of the host, which shows that
 the image boots, that its output reaches the transcript and that its
 power-off ends the run as `guest_shutdown`.
 
+`cargo xtask formal toolchain-check --aeneas DIR --charon DIR` checks the
+tool manifest `verification/toolchain.json` against checkouts of Aeneas and
+Charon and the reviewed Aeneas patch: the Lean, Charon and Rust versions
+that the sources name, the digests of the patch and of the Lake lock, the
+Mathlib commit and the host columns
+([tool checks](../formal-verification.md#tool-checks)). Its unit tests run
+in the `test` step above. Two more workflows run it, each for a change of
+the tool manifest, the patches, the image recipe below `verification/image/`
+or the two workflows themselves, on a GitHub-hosted `ubuntu-24.04-arm`
+runner: `formal image build`
+(`.github/workflows/formal-image-build.yml`) on every pull request to
+`main`, which then checks that a missing license notice fails the image
+build and builds the image of the proof tools without publishing it; and
+`formal image publish` (`.github/workflows/formal-image-publish.yml`) on
+every push to `main`, which does the same and publishes the image
+([changing a tool](../formal-verification.md#changing-a-tool)). Both upload
+the build record, with the disk measurement, as a workflow artifact.
+
 QEMU suites and board suites have their own entry points (planned), built on
 the serial port transport, the serial link, the QEMU command and the serial
 capture of a guest, the QEMU runner, and the serial record parsers of the
@@ -335,8 +353,10 @@ to an exact version in the manifest of the crate that uses it:
 | `tools/Cargo.toml` | `object` without default features, with `write_core` and `elf` | MIT OR Apache-2.0 | The ELF writer that lays out and encodes the test image around its instruction words: the ELF header, the program and section headers, the symbol table and the string tables |
 | `tools/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | Report values, whose objects keep the order of their keys, and their JSON text |
 | `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching and in the receipts of the serial capture and of `cargo xtask qemu`, the suffix of their run directories, and the build-id of the test image |
-| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipt of `cargo xtask check`, reading the output of `cargo metadata` in the `manifests` step, and reading the receipt of `cargo xtask qemu` in its test |
-| `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `toolchains.toml` and `rust-toolchain.toml` |
+| `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json` |
+| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipt of `cargo xtask check`, reading the output of `cargo metadata` in the `manifests` step, and reading `verification/toolchain.json` and the Lake lock of the Aeneas Lean library |
+| `xtask/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests of the Aeneas patch and the Lake lock that `cargo xtask formal toolchain-check` compares with `verification/toolchain.json` |
+| `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `toolchains.toml`, `rust-toolchain.toml` and Charon's `rust-toolchain` |
 | `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step |
 
 No test has a development dependency yet. Development dependencies are added

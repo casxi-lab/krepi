@@ -29,7 +29,10 @@ tests holds an ELF reader, report values, a serial port transport, a serial
 link, the serial capture behind `cargo xtask serial-capture`, the QEMU runner
 behind `cargo xtask qemu` and the parsers of serial records, ported from the
 prototype with their porting records, and a test image that the checks boot
-with the runner. There is no kernel source yet, and no krepi kernel boots.
+with the runner. The proof tools are pinned by a manifest, a reviewed Aeneas
+patch and the recipe of a container image that CI builds and publishes
+([formal verification](docs/formal-verification.md#tools)); no proof exists
+yet. There is no kernel source yet, and no krepi kernel boots.
 Continuous integration runs the repository checks on every pull request to
 `main` and on every push to `main`.
 

@@ -17,7 +17,10 @@ git diff --cached --check
 [Testing](docs/conventions/testing.md#entry-points) describes what the check
 runs. CI runs the same check on every pull request to `main` and on every
 push to `main`. A change that updates a tool version updates
-`toolchains.toml` in the same change.
+`toolchains.toml` in the same change. The proof tools are pinned separately,
+in `verification/toolchain.json`: a change to them runs
+`cargo xtask formal toolchain-check` and builds their image in CI, as
+[formal verification](docs/formal-verification.md#tool-checks) describes.
 
 `cargo xtask serial-capture` is a tool for the bench, not a check: it
 records what a board sends over a serial port into a new directory below
@@ -35,8 +38,8 @@ receipt.
 When a command lands, this page and [testing](docs/conventions/testing.md)
 describe what it runs. Do not write a command into a document before it works.
 A command that does not exist yet, such as `cargo xtask docs check` (planned)
-or the `cargo xtask formal` (planned) family, carries the marker `(planned)`
-right after its code span. The documentation check rejects any other mention
+or `cargo xtask formal run` (planned), carries the marker `(planned)` right
+after its code span. The documentation check rejects any other mention
 of a command that `cargo xtask` does not provide, a mention outside code, and
 the marker once the command exists.
 
