@@ -53,6 +53,26 @@ layouts or unmanaged pointers.
 Inspect the working tree before editing and preserve unrelated changes. Use a
 topic branch for changes. Do not modify global Git configuration.
 
+## Dependencies
+
+The host tools (the repository tasks in `xtask/` and the host tooling crate
+in `tools/`) do not hand-write general functionality that a mature crate
+provides, such as hashes, JSON, compression and regular expressions. They
+take it from the crate, pinned to an exact version (`version = "=x.y.z"`),
+with only the features they use and under a license that permits its use in
+an MIT-licensed project, such as MIT or Apache-2.0. Their tests cover how
+krepi uses the crate, not the crate itself.
+[Testing](docs/conventions/testing.md#dependencies) lists each dependency
+with its purpose.
+
+This rule covers the host tools only. Crates of the kernel workspace use no
+external crate at all, whether from a registry, a Git repository or a path
+outside `kernel/`: proof extraction and the image take their input from the
+kernel workspace's own tracked files, and code from elsewhere would run in
+EL1 without a specification or a proof. What the kernel needs, such as a
+hash, is written inside the kernel workspace and follows the
+[provable Rust subset](docs/conventions/provable-subset.md).
+
 ## One image
 
 Each supported board has one system image that serves every product function.

@@ -529,23 +529,27 @@ conventions.
 
 ## Source layout
 
-The repository holds two Cargo workspaces, the proof project and the
-repository tasks, each in its own directory:
+The repository holds the kernel and user-space Cargo workspaces, the proof
+project, and the repository tasks and the host tooling crate, which are
+Cargo workspaces of their own, each in its own directory:
 
 | Path | Contents |
 | --- | --- |
 | `kernel/` | The kernel workspace: the EL1 kernel, board support, the ABI crate and the operation inventory; the input of proof extraction. It holds the ABI crate `kernel/abi` (`krepi-abi`), which defines no interface yet. |
+| `tools/` | The host tooling crate `krepi-tools`, a Cargo workspace of its own: a bounded ELF64 reader and the JSON values of tool reports |
 | `user/` | The user-space workspace: the resident root, services, drivers, the SDK and workers, which are members outside `default-members`. It holds the SDK crate `user/sdk` (`krepi-sdk`). |
 | `verification/` | The Lean proof project and its registries ([formal verification](formal-verification.md)) |
 | `xtask/` | The `cargo xtask` commands, a Cargo workspace of its own |
 
 Each workspace has its own `Cargo.lock`. Neither workspace directory contains
 the other or is the repository root, and `xtask` and host tool crates live
-outside both. Crates of the kernel workspace reach only paths inside
-`kernel/`: path dependencies of every kind, tracked symbolic links and the
-literal paths of `include!`, `include_bytes!`, `include_str!` and `#[path]`
-stay inside it. User-space crates reach the kernel workspace only through the
-ABI crate. Every crate is licensed MIT, and both workspaces build releases with
-`overflow-checks = true`. `cargo xtask check` enforces these rules
-([testing](conventions/testing.md#entry-points)). The crates and modules inside
-each workspace are described here as they land.
+outside both. Crates of the kernel workspace use no external crate
+([dependencies](../CONTRIBUTING.md#dependencies)), reach only paths inside
+`kernel/` and are all members of the kernel workspace, and tracked Cargo
+configuration that applies to the kernel workspace passes rustc no crate.
+User-space crates reach the kernel workspace only through the ABI crate.
+Every crate is licensed MIT, and both workspaces build releases with
+`overflow-checks = true`. `cargo xtask check` checks these rules as
+[testing](conventions/testing.md#entry-points) describes, which also names
+what the check does not cover. The crates and modules inside each workspace
+are described here as they land.

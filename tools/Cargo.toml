@@ -1,0 +1,27 @@
+[package]
+name = "krepi-tools"
+version = "0.0.0"
+description = "Host tooling for krepi tests: ELF reading and JSON report values"
+edition = "2024"
+license = "MIT"
+publish = false
+rust-version = "1.99"
+
+# The host tooling crate is a workspace of its own, outside the kernel,
+# user-space and xtask workspaces.
+[workspace]
+
+[dependencies]
+# Report objects keep the order in which their keys were inserted. Reports
+# are written to strings, so the standard-library support of the default
+# feature is left out.
+serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
+# Digests are taken of byte slices in memory, so the allocation and
+# object-identifier support of the default features is left out.
+sha2 = { version = "=0.11.1", default-features = false }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

@@ -12,7 +12,7 @@ use crate::{docs, manifests, receipt, toolchain, workflows};
 
 /// The Cargo workspaces that the format, Clippy and test steps cover, as
 /// repository-relative directories.
-pub const WORKSPACES: [&str; 3] = ["kernel", "user", "xtask"];
+pub const WORKSPACES: [&str; 4] = ["kernel", "user", "xtask", "tools"];
 
 /// A command run in the repository root.
 #[derive(Debug, Clone)]
@@ -62,7 +62,9 @@ pub struct Outcome {
     pub facts: Facts,
 }
 
-fn cargo() -> OsString {
+/// The Cargo that the steps run: `CARGO`, which Cargo sets for the commands it
+/// runs, or else `cargo` from the search path.
+pub fn cargo() -> OsString {
     std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into())
 }
 
@@ -290,7 +292,12 @@ mod tests {
                     .collect();
                 assert_eq!(
                     targets,
-                    ["kernel/Cargo.toml", "user/Cargo.toml", "xtask/Cargo.toml"]
+                    [
+                        "kernel/Cargo.toml",
+                        "user/Cargo.toml",
+                        "xtask/Cargo.toml",
+                        "tools/Cargo.toml"
+                    ]
                 );
             }
         }

@@ -1,8 +1,9 @@
 # Testing
 
-Tests and test tooling are written in Rust. No test or test tool exists yet;
-this page states the rules that the first ones follow, and its command
-sections are filled in when the commands work.
+Tests and test tooling are written in Rust. So far the repository tasks in
+`xtask/` and the host tooling crate in `tools/`, which holds the first test
+tools, have host tests; this page states the rules that every test follows,
+and its command sections are filled in when the commands work.
 
 ## Environments
 
@@ -30,9 +31,43 @@ the failed step:
    `linux-aarch64`), and every host pins the rustc of `rust-toolchain.toml`;
 2. `manifests`: every crate is licensed MIT, both workspace root manifests
    build releases with `overflow-checks = true`, and the dependency rules of
-   the [source layout](../architecture.md#source-layout) hold;
+   the [source layout](../architecture.md#source-layout) hold, as far as the
+   following checks reach:
+   - Cargo resolves the kernel workspace with
+     `cargo metadata --locked --offline --all-features`, so a dependency that
+     it cannot resolve offline, or a `Cargo.lock` that the manifests no longer
+     match, fails the step. In what Cargo reports, the workspace root must be
+     `kernel/`; every package must be a member of the kernel workspace, which
+     a package from a registry or a Git repository never is; and the
+     manifest of every package and the source of every target must lie
+     inside `kernel/`. Paths are compared with symbolic links resolved, and
+     one that cannot be resolved fails. Every feature of every member is on,
+     and every package is a member, so no choice of features adds a package.
+   - In the tracked manifests, path dependencies of every kind keep to the
+     rules. Below `kernel/`, tracked symbolic links stay inside `kernel/`,
+     and so does a string literal that starts the argument of `include!(`,
+     `include_bytes!(` or `include_str!(`, or follows `#[path =`, on the
+     same line; a path written another way, such as on the next line,
+     through `concat!` or in `cfg_attr`, is not seen.
+   - Every tracked `.cargo/config.toml` or `.cargo/config` at the repository
+     root or in a directory below `kernel/`, whatever the case of its name,
+     is a regular file of TOML, and no string in it, split at whitespace,
+     has a word that starts with `--extern` or `-L`; a tracked `.cargo`
+     entry in those places that is a symbolic link or a submodule fails.
+     Cargo reads this configuration when it runs from the repository root,
+     as `cargo xtask` does, or from a directory below `kernel/`.
+   - These checks catch an external crate added by mistake, not one hidden
+     on purpose. The step does not see the environment, such as `RUSTFLAGS`
+     or `RUSTC_WRAPPER`, Cargo configuration that is outside the
+     repository, untracked or in another directory, or the command line,
+     including what an alias runs. Nor does it see other ways to hand rustc
+     code from elsewhere: in Cargo configuration, argument files,
+     `--sysroot`, a compiler wrapper, an included configuration file or a
+     build-script override; in a build script, a library search path it
+     prints; and in a procedural macro, files it reads;
 3. `fmt`, `clippy` with warnings as errors, and `test`, each in the kernel
-   workspace, the user-space workspace and `xtask`;
+   workspace, the user-space workspace, `xtask` and the host tooling crate
+   `tools`;
 4. `docs`: relative links and anchors in Markdown and the `cargo xtask`
    commands that documents mention;
 5. `workflows`: every `.yml` or `.yaml` file below `.github/workflows/` is
@@ -43,9 +78,11 @@ the failed step:
    `pull_request`, no job requests write access and nothing outside `on`
    references `secrets`.
 
-The checks read only files that Git tracks, so a fresh clone and a working
-copy with build output give the same result. The proof gate joins the check
-once the formal tooling exists.
+The checks that `xtask` implements itself read only files that Git tracks,
+so a fresh clone and a working copy with build output give the same result;
+the Cargo commands, including the resolution in `manifests`, read the
+working copy. The proof gate joins the check once the formal tooling
+exists.
 
 `cargo xtask check --receipt <path>` also writes a JSON receipt of the run to
 `<path>`, whether the check passes or fails. It records the commit, whether
@@ -147,6 +184,18 @@ not execution, and execution on QEMU is not execution on the board.
 
 ## Dependencies
 
-There is no package yet. Development dependencies are added only when a
-test category needs them, are pinned to an exact version and are listed here
-with their purpose.
+The test tooling takes general functionality from crates, as
+[contributing](../../CONTRIBUTING.md#dependencies) requires. Each is pinned
+to an exact version in the manifest of the crate that uses it:
+
+| Manifest | Dependency | License | Purpose |
+| --- | --- | --- | --- |
+| `tools/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | Report values, whose objects keep the order of their keys, and their JSON text |
+| `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching |
+| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipt of `cargo xtask check`, and reading the output of `cargo metadata` in the `manifests` step |
+| `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `toolchains.toml` and `rust-toolchain.toml` |
+| `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step |
+
+No test has a development dependency yet. Development dependencies are added
+only when a test category needs them, are pinned to an exact version and are
+listed here with their purpose.

@@ -48,16 +48,21 @@ Each area of the legacy `src/` tree is ported, redesigned or retired.
 
 Legacy areas that this table does not list, and the tooling crates, are
 classified in the porting record of the first change that takes code from
-them. The QEMU runner, serial, serial capture, receipt, ELF and SHA modules
-of the legacy tooling crate `tools/` are ported with their tests.
+them. The QEMU runner, serial, serial capture, receipt and ELF modules of the
+legacy tooling crate `tools/` are ported with their tests; its SHA modules
+are not, because a crate provides the digests
+([dependencies](../../CONTRIBUTING.md#dependencies)).
 
 ## Porting records
 
 Every change that takes code, tests or data from the legacy tree adds or
 updates a porting record in the same change. A record lives at
 `docs/porting/<module>.md`, where `<module>` is the destination module path
-below `src/` (or below the tooling crate) with `/` written as `-`, for example
-`docs/porting/fdt.md`. One record may cover a module directory and its
+below `src/` with `/` written as `-`, for example `docs/porting/fdt.md`. A
+module of the host tooling crate `tools/` takes the prefix `tools-`, so that
+its record is not taken for that of a kernel module: `tools/src/elf.rs` has
+`docs/porting/tools-elf.md`, and the crate root and manifest have
+`docs/porting/tools-lib.md`. One record may cover a module directory and its
 children.
 
 A record starts with a metadata block:
@@ -79,10 +84,11 @@ Its level-two sections are, in this order:
 3. `Tests carried over`: the legacy tests that were taken, with their legacy
    path and their krepi path, and any whose expected values changed.
 4. `Behaviour changes`: observable differences from the legacy behaviour, each
-   with the test that fixes the new behaviour. Behaviour differences that the
-   legacy tree itself records, such as the differences between its Rust
-   suites and the Python runners they replaced, listed in the module
-   documentation of the suites (for example
+   with the test that fixes the new behaviour, or, for behaviour that a
+   dependency now provides and krepi tests leave to it, that dependency.
+   Behaviour differences that the legacy tree itself records, such as the
+   differences between its Rust suites and the Python runners they replaced,
+   listed in the module documentation of the suites (for example
    `tools/src/suites/platform/pi5_kernel.rs`), each get a test.
 5. `Hardware evidence to re-obtain`: the QEMU and board results that the
    legacy code had and that krepi has to obtain again on its own image, with

@@ -1,7 +1,7 @@
 //! The repository as Git tracks it.
 //!
-//! Checks read tracked files only, so a fresh clone and a working copy with
-//! build output or ignored files give the same result.
+//! Checks that read a tree see tracked files only, so a fresh clone and a
+//! working copy with build output or ignored files give the same result.
 
 use std::collections::BTreeMap;
 use std::fs;
