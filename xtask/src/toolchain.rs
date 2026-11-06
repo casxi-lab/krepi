@@ -6,6 +6,8 @@ use std::process::Command;
 
 use toml::{Table, Value};
 
+use crate::check::Facts;
+
 /// The manifest of exact tool versions, at the repository root.
 pub const MANIFEST: &str = "toolchains.toml";
 /// The rustup toolchain file, at the repository root.
@@ -161,13 +163,24 @@ fn output_of(dir: &Path, program: &str, args: &[&str]) -> Result<String, String>
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// Finds the version of each tool of `column` on this host.
-fn observe(root: &Path, column: &Column) -> Result<Observed, String> {
+/// The first line of `output`, which names the version, as a fact for the
+/// receipt. It keeps the vendor revision, such as `1ubuntu1`, that the
+/// comparison ignores.
+fn record(facts: &mut Facts, tool: &str, output: &str) {
+    let line = output.lines().next().unwrap_or_default().trim();
+    facts.push((tool.to_string(), line.to_string()));
+}
+
+/// Finds the version of each tool of `column` on this host and records the
+/// version output in `facts`.
+fn observe(root: &Path, column: &Column, facts: &mut Facts) -> Result<Observed, String> {
     let rustc_version = output_of(root, "rustc", &["--version"])?;
+    record(facts, "rustc", &rustc_version);
     let rustc = version_after(&rustc_version, "rustc")
         .ok_or_else(|| format!("cannot read the rustc version from `{rustc_version}`"))?;
 
     let clang_version = output_of(root, &column.clang.command, &["--version"])?;
+    record(facts, "clang", &clang_version);
     let clang = version_after(&clang_version, "clang version")
         .ok_or_else(|| format!("cannot read the Clang version from `{clang_version}`"))?;
 
@@ -188,10 +201,12 @@ fn observe(root: &Path, column: &Column) -> Result<Observed, String> {
     } else {
         output_of(root, &column.lld.command, &["--version"])?
     };
+    record(facts, "lld", &lld_version);
     let lld = version_after(&lld_version, "LLD")
         .ok_or_else(|| format!("cannot read the lld version from `{lld_version}`"))?;
 
     let qemu_version = output_of(root, &column.qemu.command, &["--version"])?;
+    record(facts, "qemu", &qemu_version);
     let qemu = version_after(&qemu_version, "version")
         .ok_or_else(|| format!("cannot read the QEMU version from `{qemu_version}`"))?;
 
@@ -203,8 +218,9 @@ fn observe(root: &Path, column: &Column) -> Result<Observed, String> {
     })
 }
 
-/// The toolchain step.
-pub fn run(root: &Path) -> Result<(), String> {
+/// The toolchain step. The host section and the first line of each tool's
+/// version output become facts.
+pub fn run(root: &Path, facts: &mut Facts) -> Result<(), String> {
     let read = |name: &str| {
         std::fs::read_to_string(root.join(name))
             .map_err(|error| format!("cannot read {name}: {error}"))
@@ -222,7 +238,8 @@ pub fn run(root: &Path) -> Result<(), String> {
     let column = columns
         .get(host)
         .ok_or_else(|| format!("{MANIFEST} has no [{host}] section"))?;
-    let observed = observe(root, column)?;
+    facts.push(("host".to_string(), host.to_string()));
+    let observed = observe(root, column, facts)?;
     problems.extend(compare(host, column, &observed));
     if problems.is_empty() {
         println!(
@@ -324,5 +341,26 @@ mod tests {
             Some("8.2.2")
         );
         assert_eq!(version_after("no number here", "version"), None);
+    }
+
+    #[test]
+    fn records_the_first_line_of_version_output() {
+        let mut facts = Facts::new();
+        record(
+            &mut facts,
+            "qemu",
+            "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)\nCopyright (c) 2003-2023\n",
+        );
+        record(&mut facts, "lld", "");
+        assert_eq!(
+            facts,
+            [
+                (
+                    "qemu".to_string(),
+                    "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)".to_string()
+                ),
+                ("lld".to_string(), String::new()),
+            ]
+        );
     }
 }

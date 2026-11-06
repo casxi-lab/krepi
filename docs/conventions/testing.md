@@ -34,13 +34,33 @@ the failed step:
 3. `fmt`, `clippy` with warnings as errors, and `test`, each in the kernel
    workspace, the user-space workspace and `xtask`;
 4. `docs`: relative links and anchors in Markdown and the `cargo xtask`
-   commands that documents mention.
+   commands that documents mention;
+5. `workflows`: every `.yml` or `.yaml` file below `.github/workflows/` is
+   YAML without anchors, aliases, merge keys, repeated keys or characters
+   that YAML parsers read differently, and never mentions
+   `pull_request_target`, not even in a comment or through an escape; every
+   job sets its own `permissions`; and in a workflow that runs on
+   `pull_request`, no job requests write access and nothing outside `on`
+   references `secrets`.
 
 The checks read only files that Git tracks, so a fresh clone and a working
 copy with build output give the same result. The proof gate joins the check
-once the formal tooling exists. A receipt of each run, with each command, its
-exit status, duration and log, the toolchain versions and the Git state under
-`artifacts/validation/<UTC timestamp>/`, is planned.
+once the formal tooling exists.
+
+`cargo xtask check --receipt <path>` also writes a JSON receipt of the run to
+`<path>`, whether the check passes or fails. It records the commit, whether
+the working tree was clean before and after the run, each step with its
+status and duration, the version output of the tools that the toolchain step
+found, the runner image (`ImageOS`, `ImageVersion`) and the GitHub Actions
+run (`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_EVENT_NAME`, `GITHUB_REF`,
+`GITHUB_SHA`); a value the environment does not provide is `null`.
+
+CI runs the check as the job `cargo xtask check` of
+`.github/workflows/check.yml` on a GitHub-hosted `ubuntu-24.04-arm` runner,
+for the head commit of every pull request to `main` and for every push to
+`main`. The job installs `clang-18` and `qemu-system-arm` from the Ubuntu
+archive and the toolchain of `rust-toolchain.toml` with rustup, and uploads
+the receipt as the artifact `check-receipt-<commit>-<attempt>`.
 
 QEMU suites and board suites have their own entry points (planned), built on
 the QEMU runner, serial capture and receipt modules ported from the legacy

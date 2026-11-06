@@ -15,8 +15,9 @@ git diff --cached --check
 ```
 
 [Testing](docs/conventions/testing.md#entry-points) describes what the check
-runs. A change that updates a tool version updates `toolchains.toml` in the
-same change.
+runs. CI runs the same check on every pull request to `main` and on every
+push to `main`. A change that updates a tool version updates
+`toolchains.toml` in the same change.
 
 When a command lands, this page and [testing](docs/conventions/testing.md)
 describe what it runs. Do not write a command into a document before it works.

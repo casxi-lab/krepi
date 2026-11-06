@@ -2,10 +2,13 @@
 //! first failure.
 
 use std::ffi::OsString;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use std::time::{Duration, Instant};
 
-use crate::{docs, manifests, toolchain};
+use crate::repo::{Entry, Tree};
+use crate::{docs, manifests, receipt, toolchain, workflows};
 
 /// The Cargo workspaces that the format, Clippy and test steps cover, as
 /// repository-relative directories.
@@ -18,8 +21,12 @@ pub struct Cmd {
     pub args: Vec<String>,
 }
 
+/// Named values that a step observed, in the order it observed them, for the
+/// receipt. A step adds them as it goes, so they are kept when it fails.
+pub type Facts = Vec<(String, String)>;
+
 /// A check written in this crate, run with the repository root.
-pub type Check = Box<dyn Fn(&Path) -> Result<(), String>>;
+pub type Check = Box<dyn Fn(&Path, &mut Facts) -> Result<(), String>>;
 
 /// What a step does.
 pub enum Action {
@@ -35,11 +42,24 @@ pub struct Step {
     pub action: Action,
 }
 
-/// A failed step and why it failed.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Failure {
+/// How a step ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Status {
+    /// The step passed.
+    Passed,
+    /// The step failed, and why.
+    Failed(String),
+    /// An earlier step failed, so this one did not run.
+    NotRun,
+}
+
+/// The result of one step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Outcome {
     pub step: &'static str,
-    pub detail: String,
+    pub status: Status,
+    pub duration: Duration,
+    pub facts: Facts,
 }
 
 fn cargo() -> OsString {
@@ -72,7 +92,7 @@ pub fn steps() -> Vec<Step> {
         },
         Step {
             name: "manifests",
-            action: Action::Internal(Box::new(manifests::run)),
+            action: Action::Internal(Box::new(|root, _| manifests::run(root))),
         },
         Step {
             name: "fmt",
@@ -91,27 +111,102 @@ pub fn steps() -> Vec<Step> {
         },
         Step {
             name: "docs",
-            action: Action::Internal(Box::new(docs::run)),
+            action: Action::Internal(Box::new(|root, _| docs::run(root))),
+        },
+        Step {
+            name: "workflows",
+            action: Action::Internal(Box::new(check_workflows)),
         },
     ]
 }
 
-/// Runs `steps` in order in `root` and stops at the first failure.
-pub fn run_steps(root: &Path, steps: &[Step]) -> Result<(), Failure> {
+/// The workflows step on the tracked files; the files it read become facts.
+fn check_workflows(root: &Path, facts: &mut Facts) -> Result<(), String> {
+    let tree = Tree::load(root)?;
+    let tracked = || {
+        tree.entries().map(|(path, entry)| match entry {
+            Entry::File(bytes) => (path, Some(bytes.as_slice())),
+            Entry::Symlink(_) | Entry::Submodule => (path, None),
+        })
+    };
+    let files: Vec<&str> = tracked()
+        .map(|(path, _)| path)
+        .filter(|path| workflows::is_workflow(path))
+        .collect();
+    if files.is_empty() {
+        println!("workflows: no workflow files");
+    } else {
+        println!("workflows: {}", files.join(", "));
+    }
+    facts.push(("files".to_string(), files.join(", ")));
+    let problems = workflows::check(tracked());
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("\n"))
+    }
+}
+
+/// Runs `steps` in order in `root` and stops at the first failure. Every
+/// step has an outcome; those after a failure did not run.
+pub fn run_steps(root: &Path, steps: &[Step]) -> Vec<Outcome> {
+    let mut outcomes = Vec::new();
+    let mut failed = false;
     for step in steps {
+        let mut facts = Facts::new();
+        if failed {
+            outcomes.push(Outcome {
+                step: step.name,
+                status: Status::NotRun,
+                duration: Duration::ZERO,
+                facts,
+            });
+            continue;
+        }
         println!("==> {}", step.name);
+        let started = Instant::now();
         let result = match &step.action {
             Action::Commands(commands) => {
                 commands.iter().try_for_each(|cmd| run_command(root, cmd))
             }
-            Action::Internal(check) => check(root),
+            Action::Internal(check) => run_internal(check, root, &mut facts),
         };
-        result.map_err(|detail| Failure {
+        let status = match result {
+            Ok(()) => Status::Passed,
+            Err(detail) => {
+                failed = true;
+                Status::Failed(detail)
+            }
+        };
+        outcomes.push(Outcome {
             step: step.name,
-            detail,
-        })?;
+            status,
+            duration: started.elapsed(),
+            facts,
+        });
     }
-    Ok(())
+    outcomes
+}
+
+/// Runs a check written in this crate. A panic in it fails the step like an
+/// error, so that the receipt is still written.
+fn run_internal(check: &Check, root: &Path, facts: &mut Facts) -> Result<(), String> {
+    panic::catch_unwind(AssertUnwindSafe(|| check(root, facts))).unwrap_or_else(|payload| {
+        let message = payload
+            .downcast_ref::<&str>()
+            .map(|text| text.to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_default();
+        Err(format!("panicked: {message}"))
+    })
+}
+
+/// The failed step and why it failed, if one did.
+pub fn failure(outcomes: &[Outcome]) -> Option<(&'static str, &str)> {
+    outcomes.iter().find_map(|outcome| match &outcome.status {
+        Status::Failed(detail) => Some((outcome.step, detail.as_str())),
+        _ => None,
+    })
 }
 
 fn run_command(root: &Path, cmd: &Cmd) -> Result<(), String> {
@@ -129,19 +224,34 @@ fn run_command(root: &Path, cmd: &Cmd) -> Result<(), String> {
     }
 }
 
-/// Entry point of `cargo xtask check`.
-pub fn run(root: PathBuf) -> ExitCode {
-    match run_steps(&root, &steps()) {
-        Ok(()) => {
+/// Entry point of `cargo xtask check`. With `receipt`, the run is recorded
+/// there whether it passes or fails.
+pub fn run(root: PathBuf, receipt: Option<PathBuf>) -> ExitCode {
+    let before = receipt.as_ref().map(|_| receipt::GitState::read(&root));
+    let outcomes = run_steps(&root, &steps());
+    let mut code = match failure(&outcomes) {
+        None => {
             println!("check passed");
             ExitCode::SUCCESS
         }
-        Err(failure) => {
-            eprintln!("{}", failure.detail);
-            eprintln!("check failed at step {}", failure.step);
+        Some((step, detail)) => {
+            eprintln!("{detail}");
+            eprintln!("check failed at step {step}");
             ExitCode::FAILURE
         }
+    };
+    if let (Some(path), Some(before)) = (receipt, before) {
+        let after = receipt::GitState::read(&root);
+        let text = receipt::render(&before, &after, &outcomes, &receipt::Environment::read());
+        match receipt::write(&path, &text) {
+            Ok(()) => println!("receipt written to {}", path.display()),
+            Err(error) => {
+                eprintln!("cannot write the receipt {}: {error}", path.display());
+                code = ExitCode::FAILURE;
+            }
+        }
     }
+    code
 }
 
 #[cfg(test)]
@@ -151,7 +261,15 @@ mod tests {
 
     use super::*;
 
-    const ORDER: [&str; 6] = ["toolchain", "manifests", "fmt", "clippy", "test", "docs"];
+    const ORDER: [&str; 7] = [
+        "toolchain",
+        "manifests",
+        "fmt",
+        "clippy",
+        "test",
+        "docs",
+        "workflows",
+    ];
 
     #[test]
     fn steps_run_in_the_documented_order() {
@@ -179,7 +297,8 @@ mod tests {
     }
 
     /// The real step list with `failing` replaced by a failing action and
-    /// every other step replaced by one that records that it ran.
+    /// every other step replaced by one that records that it ran and adds a
+    /// fact.
     fn with_failure(failing: &str, ran: &Rc<RefCell<Vec<&'static str>>>) -> Vec<Step> {
         steps()
             .into_iter()
@@ -192,14 +311,16 @@ mod tests {
                             program: "sh".into(),
                             args: vec!["-c".into(), "exit 3".into()],
                         }]),
-                        Action::Internal(_) => {
-                            Action::Internal(Box::new(|_| Err("forced failure".to_string())))
-                        }
+                        Action::Internal(_) => Action::Internal(Box::new(|_, facts| {
+                            facts.push(("seen".to_string(), "before failing".to_string()));
+                            Err("forced failure".to_string())
+                        })),
                     }
                 } else {
                     let ran = Rc::clone(ran);
-                    Action::Internal(Box::new(move |_| {
+                    Action::Internal(Box::new(move |_, facts| {
                         ran.borrow_mut().push(name);
+                        facts.push(("ran".to_string(), name.to_string()));
                         Ok(())
                     }))
                 };
@@ -211,8 +332,9 @@ mod tests {
     fn assert_fails_at(failing: &'static str) {
         let ran = Rc::new(RefCell::new(Vec::new()));
         let steps = with_failure(failing, &ran);
-        let failure = run_steps(Path::new("."), &steps).expect_err("the check fails");
-        assert_eq!(failure.step, failing);
+        let outcomes = run_steps(Path::new("."), &steps);
+        let (step, _) = failure(&outcomes).expect("the check fails");
+        assert_eq!(step, failing);
         let before: Vec<&str> = ORDER
             .iter()
             .copied()
@@ -223,6 +345,29 @@ mod tests {
             before,
             "steps after the failure must not run"
         );
+        let names: Vec<&str> = outcomes.iter().map(|outcome| outcome.step).collect();
+        assert_eq!(names, ORDER, "every step has an outcome");
+        for outcome in &outcomes {
+            let index = ORDER.iter().position(|name| *name == outcome.step).unwrap();
+            let failed_at = ORDER.iter().position(|name| *name == failing).unwrap();
+            match index.cmp(&failed_at) {
+                std::cmp::Ordering::Less => {
+                    assert_eq!(outcome.status, Status::Passed);
+                    assert_eq!(
+                        outcome.facts,
+                        [("ran".to_string(), outcome.step.to_string())]
+                    );
+                }
+                std::cmp::Ordering::Equal => {
+                    assert!(matches!(outcome.status, Status::Failed(_)), "{outcome:?}");
+                }
+                std::cmp::Ordering::Greater => {
+                    assert_eq!(outcome.status, Status::NotRun);
+                    assert_eq!(outcome.duration, Duration::ZERO);
+                    assert!(outcome.facts.is_empty());
+                }
+            }
+        }
     }
 
     #[test]
@@ -243,5 +388,45 @@ mod tests {
     #[test]
     fn a_docs_failure_stops_the_check() {
         assert_fails_at("docs");
+    }
+
+    #[test]
+    fn a_workflows_failure_fails_the_check_after_every_other_step() {
+        assert_fails_at("workflows");
+    }
+
+    #[test]
+    fn a_panicking_step_fails_like_an_error_and_keeps_its_facts() {
+        let ran = Rc::new(RefCell::new(Vec::new()));
+        let mut steps = with_failure("docs", &ran);
+        let docs = ORDER.iter().position(|name| *name == "docs").unwrap();
+        steps[docs].action = Action::Internal(Box::new(|_, facts| {
+            facts.push(("seen".to_string(), "before panicking".to_string()));
+            panic!("forced {}", "panic");
+        }));
+        let outcomes = run_steps(Path::new("."), &steps);
+        assert_eq!(
+            outcomes[docs].status,
+            Status::Failed("panicked: forced panic".to_string())
+        );
+        assert_eq!(
+            outcomes[docs].facts,
+            [("seen".to_string(), "before panicking".to_string())]
+        );
+        assert_eq!(outcomes[docs + 1].status, Status::NotRun);
+    }
+
+    #[test]
+    fn a_failing_step_keeps_the_facts_it_added() {
+        let ran = Rc::new(RefCell::new(Vec::new()));
+        let outcomes = run_steps(Path::new("."), &with_failure("toolchain", &ran));
+        assert_eq!(
+            outcomes[0].facts,
+            [("seen".to_string(), "before failing".to_string())]
+        );
+        assert_eq!(
+            outcomes[0].status,
+            Status::Failed("forced failure".to_string())
+        );
     }
 }
