@@ -6,13 +6,29 @@
 //! fake tools that a test installs, and a file for each other gate input.
 //! Commits have a fixed identity and date, and Git reads no system or global
 //! configuration.
+//!
+//! The fixture of the qualification adds the qualification crate with its
+//! cases and the stand-ins for the tools: shell scripts in the installation.
+//! Charon writes the LLBC file that it is asked for. Aeneas writes, for the
+//! module path of its `-subdir`, what the pinned Aeneas wrote for a captured
+//! shape of the qualification crate (the fixtures of `extract.rs`) when the
+//! test names one, and otherwise a translation without items in an empty
+//! `Types.lean` and `Funs.lean`; it prints the log and exits with the status
+//! that the test gives the module. Lake and `lean` are described at
+//! [`LAKE`] and [`LEAN`].
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use serde_json::{Value, json};
+
+use super::lean;
+use super::outcome::Status;
 use super::paths::Git;
+use super::receipt;
+use super::run::tests::Done;
 use super::toolchain::environment::SYSTEM_PATH;
 use crate::scratch::Scratch;
 
@@ -164,4 +180,274 @@ impl Git for Fixture {
             .collect();
         self.run_git(&args, stdin)
     }
+}
+
+/// The theorem of the case `arithmetic`.
+pub const MUL_MOD: &str = "Krepi.Qualification.Arithmetic.mul_mod_spec";
+
+/// The manifest of a qualification crate that the gate accepts.
+pub const CRATE_MANIFEST: &str = "[package]\nname = \"formal-qualification\"\nversion = \"0.0.0\"\n\
+    edition = \"2024\"\nlicense = \"MIT\"\npublish = false\n\n[workspace]\n";
+
+/// A Charon stand-in that writes the LLBC file it is asked for.
+const CHARON: &str = "while [ $# -gt 0 ]; do\n  \
+    if [ \"$1\" = --dest-file ]; then : > \"$2\"; fi\n  shift\ndone";
+
+/// The Aeneas stand-in of the fixture at `root`.
+fn aeneas(root: &str) -> String {
+    format!(
+        "while [ $# -gt 0 ]; do\n  \
+           case \"$1\" in -subdir) subdir=$2 ;; -dest) dest=$2 ;; esac\n  \
+           shift\n\
+         done\n\
+         shape='{root}/artifacts/shapes/'$(echo \"$subdir\" | tr / .)\n\
+         mkdir -p \"$dest/$subdir\"\n\
+         if [ -f \"$shape.from\" ]; then\n  \
+           cp -R \"$(cat \"$shape.from\")/.\" \"$dest\"\n\
+         else\n  \
+           : > \"$dest/$subdir/Types.lean\"\n  \
+           : > \"$dest/$subdir/Funs.lean\"\n  \
+           echo '{{\"functions\": [], \"types\": []}}' > \"$dest/translation.json\"\n\
+         fi\n\
+         if [ -f \"$shape.log\" ]; then cat \"$shape.log\"; fi\n\
+         if [ -f \"$shape.status\" ]; then exit \"$(cat \"$shape.status\")\"; fi"
+    )
+}
+
+/// The Lake stand-in, whose `@ROOT@` is the root of the fixture. It
+/// records each call and keys it: in the stage of the base round by what it
+/// runs, `build`, `planned` (a build without `--wfail`), `audit`,
+/// `heartbeats` or `leanchecker-<prefix>`; elsewhere by the target that it
+/// builds, or `Audit`. It runs the script `<key>.sh` of `artifacts/lake` that
+/// a test gives, then answers. A build completes. The case audit reports
+/// `propext` and `Quot.sound` for each theorem that `Audit.lean` names. The
+/// base audit prints, for each own module of `Audit.lean`, its marker and,
+/// for each `public theorem` of its file but planned ones, the axioms in
+/// `artifacts/lake/axioms/<theorem>` (none without the file, no line when it
+/// says `none`), and for every one its line; then for each proved statement
+/// the module and whether its theorem has its type: those in
+/// `artifacts/lake/statements/<statement>`, else the name without its last
+/// component when that file exists, and `true`. A
+/// heartbeat copy is counted ten heartbeats per line at each inserted line.
+/// `leanchecker` passes.
+const LAKE: &str = r##"lake='@ROOT@/artifacts/lake'
+mkdir -p "$lake"
+echo "$PWD $*" >> "$lake/calls"
+file=$4
+case "$PWD $1 $2 $3" in
+  */base/stage/*" build "*) key=planned; case " $* " in *" --wfail "*) key=build ;; esac ;;
+  */base/stage/*" env lean --json") key=heartbeats ;;
+  */base/stage/*" env lean "*) key=audit ;;
+  */base/stage/*" env leanchecker "*) key=leanchecker-$3 ;;
+  *" build "*) for argument; do key=$argument; done ;;
+  *) key=Audit ;;
+esac
+if [ -f "$lake/$key.sh" ]; then . "$lake/$key.sh"; fi
+names() { sed -n "s/^  let $1 : Array Name := #\[\(.*\)\]\$/\1/p" Audit.lean | tr -d '`,'; }
+path() { echo "$1" | tr . /; }
+case $key in
+  Audit)
+    while read -r first rest; do
+      if [ "$first" = '#print' ]; then
+        echo "'${rest#axioms }' depends on axioms: [propext, Quot.sound]"
+      fi
+    done < Audit.lean ;;
+  audit)
+    planned=" $(names planned) "
+    for module in $(names own); do
+      echo "krepi-audit module $module"
+      grep -n '^public theorem ' "$(path "$module").lean" | while IFS=: read -r line text; do
+        name=$module.$(echo "$text" | cut -d ' ' -f 3)
+        axioms="$lake/axioms/$name"
+        case "$planned" in
+          *" $name "*) ;;
+          *) if [ ! -f "$axioms" ]; then echo "'$name' does not depend on any axioms"
+             elif [ "$(cat "$axioms")" != none ]; then echo "'$name' depends on axioms: [$(cat "$axioms")]"; fi ;;
+        esac
+        echo "krepi-audit range $name $line"
+      done
+    done
+    pairs=$(sed -n 's/^  for (statement, thm) in (#\[\(.*\)\] : Array (Name × Name)) do$/\1/p' Audit.lean)
+    set -- $(echo "$pairs" | tr -d '`(),')
+    while [ $# -gt 1 ]; do
+      statement=$1 module=${1%.*} exact=true
+      shift 2
+      if [ ! -f "$(path "$module").lean" ]; then module='[anonymous]'; fi
+      if [ -f "$lake/statements/$statement" ]; then read -r module exact < "$lake/statements/$statement"; fi
+      echo "krepi-audit statement $statement $module ${exact:-true}"
+    done ;;
+  heartbeats)
+    grep -n '^#count_heartbeats in$' "$file" | while IFS=: read -r line rest; do
+      data="Used $((line * 10)) heartbeats, which is less than the current maximum of 200000."
+      echo "{\"severity\":\"information\",\"data\":\"$data\",\"pos\":{\"line\":$line,\"column\":0}}"
+    done ;;
+  leanchecker-*) ;;
+  *) echo 'Build completed successfully (2 jobs).' ;;
+esac"##;
+
+/// The stand-in of `lean`, which records each call, runs the script
+/// `lean.sh` of `artifacts/lake` that a test gives, and prints what the
+/// pinned Lean prints for `--version`.
+const LEAN: &str = r##"echo "$PWD lean $*" >> '@ROOT@/artifacts/lake/calls'
+if [ -f '@ROOT@/artifacts/lake/lean.sh' ]; then . '@ROOT@/artifacts/lake/lean.sh'; fi
+echo '@VERSION@'"##;
+
+/// The directory of the captured shape `shape`.
+pub fn captured(shape: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/formal/fixtures/extraction")
+        .join(shape)
+}
+
+/// The text of `cases.json` with `cases`.
+pub fn cases_text(cases: &Value) -> String {
+    let document = json!({"schema": 1, "cases": cases});
+    let mut text = serde_json::to_string_pretty(&document).expect("JSON");
+    text.push('\n');
+    text
+}
+
+/// A case `name` of `module` that expects `expect`, with no items.
+pub fn case(name: &str, module: &str, expect: &str) -> Value {
+    json!({
+        "name": name,
+        "module": module,
+        "start_from": [format!("crate::{}", name.replace('-', "_"))],
+        "expect": expect,
+        "diagnostics": [],
+        "external_functions": [],
+        "external_types": [],
+    })
+}
+
+/// The case of the captured shape `arithmetic`, with its loop and its
+/// theorem.
+pub fn arithmetic() -> Value {
+    let mut case = case("arithmetic", "Qual.Arithmetic", "translated");
+    case["loop_sources"] = json!(["arithmetic.pow_mod_loop src/lib.rs"]);
+    case["proof"] = json!({"module": "Krepi.Qualification.Arithmetic", "theorems": [MUL_MOD]});
+    case
+}
+
+/// The case of the captured shape `shared-pointers`.
+pub fn shared_pointers() -> Value {
+    let mut case = case("shared-pointers", "Qual.SharedPointers", "translated");
+    case["external_functions"] = json!([
+        "alloc::sync::{alloc::sync::Arc<T>}::ptr_eq",
+        "alloc::sync::{impl core::ops::deref::Deref<T> for alloc::sync::Arc<T>}::deref",
+    ]);
+    case["external_types"] = json!(["alloc::sync::Arc"]);
+    case
+}
+
+/// The case of the captured shape `nested-loop`, which Aeneas rejects.
+pub fn nested_loop() -> Value {
+    let mut case = case("nested-loop", "Qual.NestedLoop", "rejected");
+    case["diagnostics"] = json!([
+        "[Error] Ignoring the body of 'formal_qualification::nested_loop::charge_grid' because of previous error",
+        "[Error] Returns inside of nested loops are not supported yet",
+    ]);
+    case["external_functions"] = json!(["formal_qualification::nested_loop::charge_grid"]);
+    case
+}
+
+/// An ill-typed case, whose type error the Lake stand-in prints.
+pub fn ill() -> Value {
+    let mut case = case("ill", "Qual.Ill", "ill-typed");
+    case["type_errors_in"] = json!("Funs.lean");
+    case
+}
+
+/// A build log of Lake that reports `lines` of the module `module` and
+/// fails, with the status `status`.
+pub fn failing(module: &str, lines: &[&str], status: i32) -> String {
+    let mut script = format!("echo '\u{2716} [2/2] Building {module} (1.6s)'\n");
+    for line in lines {
+        script.push_str(&format!("echo '{line}'\n"));
+    }
+    script.push_str(&format!(
+        "echo 'Some required targets logged failures:'\necho '- {module}'\n\
+         echo 'error: build failed'\nexit {status}\n"
+    ));
+    script
+}
+
+/// A fixture with the qualification `cases`, not committed: the
+/// qualification crate, the Lake project files, the extraction
+/// configuration, the proof module of `arithmetic`, the Aeneas Lean
+/// library of the installation, the stand-ins, and the shapes and Lake
+/// scripts of the cases above.
+pub fn qualification(label: &str, cases: &Value) -> Fixture {
+    let fixture = Fixture::new(label);
+    let root = fixture.root().to_str().expect("a UTF-8 path").to_string();
+    assert!(!root.contains('\''), "{root}");
+    fixture.write(".gitignore", "/artifacts/\n/verification/.lake/\n");
+    fixture.write("verification/qualification/Cargo.toml", CRATE_MANIFEST);
+    fixture.write("verification/qualification/src/lib.rs", "");
+    fixture.write("verification/qualification/cases.json", &cases_text(cases));
+    fixture.write(
+        "verification/extraction.toml",
+        include_str!("../../../verification/extraction.toml"),
+    );
+    for file in lean::PROJECT_FILES {
+        fixture.write(&format!("verification/{file}"), &format!("-- {file}\n"));
+    }
+    fixture.write(
+        "verification/Krepi/Qualification/Arithmetic.lean",
+        "module\n",
+    );
+    fixture.write("artifacts/formal/tools/backend/.lake/packages/README", "");
+    fixture.write("artifacts/formal/tools/lean/bin/README", "");
+    fixture.write(
+        "artifacts/formal/tools/lean/bin/leanchecker",
+        "leanchecker\n",
+    );
+    fixture.tool("charon", CHARON);
+    fixture.tool("aeneas", &aeneas(&root));
+    fixture.tool("lake", &LAKE.replace("@ROOT@", &root));
+    let version = include_str!("fixtures/base/lean-version.txt")
+        .lines()
+        .nth(1);
+    let lean = LEAN.replace("@VERSION@", version.expect("the version"));
+    fixture.tool("lean", &lean.replace("@ROOT@", &root));
+    for name in ["arithmetic", "shared-pointers", "nested-loop"] {
+        let module = match name {
+            "arithmetic" => "Qual.Arithmetic",
+            "shared-pointers" => "Qual.SharedPointers",
+            _ => "Qual.NestedLoop",
+        };
+        let key = format!("artifacts/shapes/KrepiGen.{module}");
+        let directory = captured(name);
+        fixture.write(&format!("{key}.from"), directory.to_str().expect("UTF-8"));
+        if name == "nested-loop" {
+            let log = fs::read_to_string(directory.join("aeneas.log")).expect("the log");
+            fixture.write(&format!("{key}.log"), &log);
+            fixture.write(&format!("{key}.status"), "1\n");
+        }
+    }
+    let type_error = "error: KrepiGen/Qual/Ill/Funs.lean:3:8: type mismatch";
+    lake_script(
+        &fixture,
+        "KrepiGen.Qual.Ill.Funs",
+        &failing("KrepiGen.Qual.Ill.Funs", &[type_error], 1),
+    );
+    fixture
+}
+
+/// Makes Lake run `script` for the calls of `key`.
+pub fn lake_script(fixture: &Fixture, key: &str, script: &str) {
+    fixture.write(&format!("artifacts/lake/{key}.sh"), script);
+}
+
+/// The conclusion of `unit`.
+pub fn status<'a>(done: &'a Done, unit: &str) -> (Status, Option<&'a str>) {
+    let entry = &done.receipt.units[unit];
+    (entry.status, entry.reason.as_deref())
+}
+
+/// The commands of `unit`.
+pub fn commands<'a>(done: &'a Done, unit: &str) -> Vec<&'a receipt::Command> {
+    (done.receipt.commands.iter())
+        .filter(|command| command.unit.as_deref() == Some(unit))
+        .collect()
 }

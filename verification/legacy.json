@@ -1,6 +1,6 @@
 {
   "baseline": null,
-  "description": "Production functions without a proof when the formal inventory was adopted. Entries leave when a registered target proves them or, with review, when they are no longer production functions. The baseline is the commit of the adoption and stays null until the inventory is adopted.",
+  "description": "Empty by design and kept so: no production function is admitted without a proof as a legacy function. Production functions without a proof are to be listed in verification/open.json, generated from the OPEN tables of the contracts of the components.",
   "functions": {},
   "schema": 1
 }

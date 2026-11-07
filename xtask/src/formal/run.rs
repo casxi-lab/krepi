@@ -17,10 +17,10 @@ use super::Layout;
 use super::outcome::{self, Class, Conclusion, Site, Status, Verdict, word};
 use super::paths::{self, Files, Git, Snapshot};
 use super::process::{self, Ended, Limit, LimitBy, Ran, Spec};
-use super::receipt::{self, Budgets, Failure, Mode, Qualification, Receipt, Trigger};
-use super::toolchain::environment::{self, RunDirs, Tool};
+use super::receipt::{self, Budgets, Failure, Mode, Receipt, Trigger};
+use super::toolchain::environment::{self, Installation, RunDirs, Tool};
 use super::toolchain::{self, Manifest};
-use super::{qualify, registry};
+use super::{base, guard, lean, qualify, registry};
 use crate::manifests;
 
 /// The two phases of 3,600 s that the gate runs, from the start of a run.
@@ -142,7 +142,12 @@ pub struct Gate {
     /// The phase that runs, and its deadline.
     phase: Option<(String, Instant)>,
     conclusions: Vec<(String, Conclusion)>,
-    receipt: Receipt,
+    /// Phases fill only their own records and read the rest; commands, units
+    /// and failures are written by the gate.
+    pub(super) receipt: Receipt,
+    /// The modules whose errors and warnings make a failed base build a
+    /// proof failure, which the base round sets.
+    pub(super) own: Vec<String>,
     progress: Box<dyn Write>,
     /// The site, limit and program that a test gives the commands there.
     #[cfg(test)]
@@ -210,8 +215,9 @@ impl Gate {
                     (Class::ToolFailure, reason)
                 })
         };
+        let own = |ran: &Ran| lean::proof_messages(&ran.output, &self.own).len();
         let verdict = match &ran {
-            Ok(ran) => outcome::classify(request.site, ran, 0, read(ran).as_deref()),
+            Ok(ran) => outcome::classify(request.site, ran, own(ran), read(ran).as_deref()),
             Err((class, reason)) => Verdict {
                 class: *class,
                 reason: Some(reason.clone()),
@@ -291,15 +297,15 @@ impl Gate {
         self.command(Some(unit), request, Some(reason), &mut |_| None);
     }
 
-    /// Concludes `unit` with `status` and `reason`, unless a command of the
-    /// unit forces another conclusion ([`outcome::forced`]).
-    pub fn conclude(&mut self, unit: &str, status: Status, reason: Option<String>) {
-        self.conclude_from(unit, unit, status, reason);
+    /// Concludes `unit` with `conclusion`, unless a command of the unit
+    /// forces another one ([`outcome::forced`]), and returns its status.
+    pub fn conclude(&mut self, unit: &str, conclusion: Conclusion) -> Status {
+        self.conclude_from(unit, unit, conclusion)
     }
 
     /// Concludes `unit` as [`Gate::conclude`] does, from the commands of the
     /// unit `of`, such as a theorem from those of its case.
-    pub fn conclude_from(&mut self, unit: &str, of: &str, status: Status, reason: Option<String>) {
+    pub fn conclude_from(&mut self, unit: &str, of: &str, conclusion: Conclusion) -> Status {
         // A command skipped with its limit left forces nothing: the command
         // that should have written its input decides.
         let skipped = |command: &receipt::Command| {
@@ -312,8 +318,10 @@ impl Gate {
                 reason: command.reason.clone(),
             })
             .collect();
-        let conclusion = outcome::forced(&own).unwrap_or((status, reason));
-        self.conclusions.push((unit.to_string(), conclusion));
+        let conclusion = outcome::forced(&own).unwrap_or(conclusion);
+        self.conclusions
+            .push((unit.to_string(), conclusion.clone()));
+        conclusion.0
     }
 
     pub fn source(&self) -> PathBuf {
@@ -329,16 +337,11 @@ impl Gate {
         &self.layout
     }
 
-    /// The Aeneas Lean library of the installation that the run uses.
-    pub fn backend(&self) -> Result<PathBuf, String> {
+    /// The tool installation that the run uses.
+    pub fn installation(&self) -> Result<Installation, String> {
         let (manifest, _) = (self.manifest.as_ref()).expect("phases run after the start");
         let host = self.receipt.host.as_deref().unwrap_or_default();
-        environment::backend(manifest, host, &self.root)
-    }
-
-    /// The record of the qualification in the receipt, which a phase fills.
-    pub fn qualification(&mut self) -> &mut Qualification {
-        (self.receipt.qualification).get_or_insert_with(Default::default)
+        environment::installation(manifest, host, &self.root)
     }
 }
 
@@ -424,6 +427,7 @@ pub(crate) fn execute(
         phase: None,
         conclusions: Vec::new(),
         receipt: blank(context, targets, &run.id, &directory),
+        own: Vec::new(),
         progress,
         #[cfg(test)]
         overrides: None,
@@ -702,7 +706,8 @@ pub fn command(root: &Path, layout: &Layout, targets: BTreeSet<String>) -> ExitC
     let run = RunDir::create(root);
     let receipt = match &run {
         Ok(run) => {
-            let phases = vec![qualify::phase(root, layout)];
+            let mut phases = Vec::from_iter(guard::phase(&var));
+            phases.extend([qualify::phase(root, layout), base::phase(root, layout)]);
             execute(&context, run, &targets, phases, Box::new(io::stdout()))
         }
         Err(error) => {
@@ -878,7 +883,7 @@ pub(crate) mod tests {
         let fixture = Fixture::new("hang");
         let phases = vec![phase("base", Duration::from_secs(1), &["base"], |run| {
             shell(run, "base", "exec sleep 86400");
-            run.conclude("base", Status::Verified, None);
+            run.conclude("base", (Status::Verified, None));
             Ok(())
         })];
         let done = gate(&fixture, &[], phases);
@@ -949,7 +954,7 @@ pub(crate) mod tests {
     fn a_unit_without_a_conclusion_fails_the_run() {
         let fixture = Fixture::new("missing");
         let phases = vec![phase("checks", LONG, &["u1", "u2"], |run| {
-            run.conclude("u1", Status::Verified, None);
+            run.conclude("u1", (Status::Verified, None));
             Ok(())
         })];
         let done = gate(&fixture, &[], phases);
@@ -966,9 +971,9 @@ pub(crate) mod tests {
     fn a_unit_with_two_conclusions_fails_the_run() {
         let fixture = Fixture::new("duplicate");
         let phases = vec![phase("checks", LONG, &["u1", "u2"], |run| {
-            run.conclude("u1", Status::Verified, None);
-            run.conclude("u2", Status::Verified, None);
-            run.conclude("u1", Status::Rejected, Some("again".to_string()));
+            run.conclude("u1", (Status::Verified, None));
+            run.conclude("u2", (Status::Verified, None));
+            run.conclude("u1", (Status::Rejected, Some("again".to_string())));
             Ok(())
         })];
         let done = gate(&fixture, &[], phases);
@@ -1018,7 +1023,7 @@ pub(crate) mod tests {
             let mut text = fs::read_to_string(&registry).map_err(|error| error.to_string())?;
             text.push('\n');
             fs::write(&registry, text).map_err(|error| error.to_string())?;
-            run.conclude("u1", Status::Verified, None);
+            run.conclude("u1", (Status::Verified, None));
             Ok(())
         })];
         let done = gate(&fixture, &[], phases);
@@ -1037,7 +1042,7 @@ pub(crate) mod tests {
         let phases = vec![phase("commit", LONG, &["u1"], |run| {
             fixture.write("xtask/README", "Changed.\n");
             fixture.commit_all();
-            run.conclude("u1", Status::Verified, None);
+            run.conclude("u1", (Status::Verified, None));
             Ok(())
         })];
         let done = gate(&fixture, &[], phases);
@@ -1280,7 +1285,7 @@ pub(crate) mod tests {
             let progress = Box::new(Panicking { after });
             // The phase runs no command, so it writes no progress line.
             let phases = vec![phase("checks", LONG, &["u1"], |run| {
-                run.conclude("u1", Status::Verified, None);
+                run.conclude("u1", (Status::Verified, None));
                 Ok(())
             })];
             let targets = BTreeSet::new();
@@ -1343,7 +1348,7 @@ pub(crate) mod tests {
         fixture.write("verification/Krepi/KrepiGen/Funs.lean", "module\n");
         fixture.commit_all();
         let phases = vec![phase("checks", LONG, &["u1"], |run| {
-            run.conclude("u1", Status::Verified, None);
+            run.conclude("u1", (Status::Verified, None));
             Ok(())
         })];
         let done = gate(&fixture, &[], phases);
@@ -1373,7 +1378,7 @@ pub(crate) mod tests {
         fixture.write("kernel/.cargo/config.toml.orig", flags);
         fixture.commit_all();
         let phases = vec![phase("checks", LONG, &["u1"], |run| {
-            run.conclude("u1", Status::Verified, None);
+            run.conclude("u1", (Status::Verified, None));
             Ok(())
         })];
         let done = gate(&fixture, &[], phases);
@@ -1395,7 +1400,7 @@ pub(crate) mod tests {
         fixture.write("docs/notes.py", "print()\n");
         fixture.commit_all();
         let phases = vec![phase("checks", LONG, &["u1"], |run| {
-            run.conclude("u1", Status::Verified, None);
+            run.conclude("u1", (Status::Verified, None));
             Ok(())
         })];
         let done = gate(&fixture, &[], phases);
@@ -1435,7 +1440,7 @@ pub(crate) mod tests {
         let phases = vec![phase("late", Duration::ZERO, &["u1"], |run| {
             let verdict = shell(run, "u1", "exit 0");
             assert_eq!(verdict.class, Class::NotRun);
-            run.conclude("u1", Status::Verified, None);
+            run.conclude("u1", (Status::Verified, None));
             Ok(())
         })];
         let done = gate(&fixture, &[], phases);
@@ -1468,7 +1473,7 @@ pub(crate) mod tests {
             };
             run.overrides = Some((Site::BaseBuild, limit, "/bin/sh".to_string()));
             assert_eq!(shell(run, "u1", "exit 0").class, Class::NotRun);
-            run.conclude("u1", Status::Verified, None);
+            run.conclude("u1", (Status::Verified, None));
             Ok(())
         })];
         let done = gate(&fixture, &[], phases);
@@ -1516,14 +1521,17 @@ pub(crate) mod tests {
             phase("first", LONG, &["u1"], |run| {
                 build(run, "u1", "exit 1", false);
                 skip(run, "u1");
-                run.conclude("u1", Status::Rejected, Some("nothing to build".to_string()));
+                run.conclude(
+                    "u1",
+                    (Status::Rejected, Some("nothing to build".to_string())),
+                );
                 Ok(())
             }),
             // Without a limit left, a command that would be skipped does
             // not start for the budget.
             phase("late", Duration::ZERO, &["u2"], |run| {
                 skip(run, "u2");
-                run.conclude("u2", Status::Verified, None);
+                run.conclude("u2", (Status::Verified, None));
                 Ok(())
             }),
         ];
@@ -1563,8 +1571,11 @@ pub(crate) mod tests {
         let phases = vec![phase("base", LONG, &["base", "other"], |run| {
             shell(run, "base", "kill -9 $$");
             shell(run, "other", "exit 0");
-            run.conclude("base", Status::Verified, None);
-            run.conclude("other", Status::Rejected, Some("a proof fails".to_string()));
+            run.conclude("base", (Status::Verified, None));
+            run.conclude(
+                "other",
+                (Status::Rejected, Some("a proof fails".to_string())),
+            );
             Ok(())
         })];
         let done = gate(&fixture, &[], phases);
@@ -1591,11 +1602,11 @@ pub(crate) mod tests {
         let fixture = Fixture::new("internal");
         let phases = vec![
             phase("first", LONG, &["a", "b"], |run| {
-                run.conclude("a", Status::Verified, None);
+                run.conclude("a", (Status::Verified, None));
                 Err("broken".to_string())
             }),
             phase("second", LONG, &["c"], |run| {
-                run.conclude("c", Status::Verified, None);
+                run.conclude("c", (Status::Verified, None));
                 Ok(())
             }),
         ];

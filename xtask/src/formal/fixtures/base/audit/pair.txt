@@ -1,0 +1,6 @@
+# Lean 4.35.0 on darwin-arm64 in the environment of the gate: `lake env lean AuditPair.lean` in the stage `counter`, exit 0
+krepi-audit module Krepi.HB.Pair
+'Krepi.HB.pb' depends on axioms: [propext]
+krepi-audit range Krepi.HB.pb 11
+'Krepi.HB.pa' depends on axioms: [propext]
+krepi-audit range Krepi.HB.pa 7

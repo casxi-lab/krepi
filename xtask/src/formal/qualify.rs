@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use super::Layout;
 use super::extract::{self, Extraction};
-use super::lean::{self, STANDARD_AXIOMS};
+use super::lean::{self, AUDIT, Kind, Sources};
 use super::outcome::{Class, Site, Status, Verdict};
 use super::process::Ran;
 use super::receipt::{self, Observed, QualificationCase, QualificationTheorem};
@@ -33,9 +33,6 @@ pub const PHASE: &str = "qualification";
 
 /// The schema of `cases.json` that this module reads.
 pub const SCHEMA: u32 = 1;
-
-/// The audit file of a case, in the project of its stage.
-const AUDIT: &str = "Audit.lean";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -110,6 +107,11 @@ pub fn unit(case: &str) -> String {
     format!("{PHASE}/{case}")
 }
 
+/// The stage in which the case `case` builds.
+pub fn case_stage(gate: &Gate, case: &str) -> PathBuf {
+    gate.work().join("cases").join(case).join("stage")
+}
+
 /// The unit of the theorem `theorem` of the case `case`.
 pub fn theorem_unit(case: &str, theorem: &str) -> String {
     format!("{PHASE}/{case}/{theorem}")
@@ -129,7 +131,7 @@ fn units(cases: &[Case]) -> Vec<String> {
 
 /// Whether `module` is a Lean module path of components that start with an
 /// ASCII letter and hold ASCII letters, digits and `_`.
-fn is_module(module: &str) -> bool {
+pub(super) fn is_module(module: &str) -> bool {
     module.split('.').all(|component| {
         component
             .chars()
@@ -410,8 +412,11 @@ fn judge_case_audit(
         let code = code.map_or_else(|| "no status".to_string(), |code| code.to_string());
         every.push(format!("the case audit exited with {code}"));
     }
-    let allowed =
-        |axiom: &String| STANDARD_AXIOMS.contains(&axiom.as_str()) || declarations.contains(axiom);
+    let sources = Sources {
+        case: declarations.to_vec(),
+        ..Sources::default()
+    };
+    let allowed = |axiom: &String| lean::allows(Kind::Qualification, axiom, &sources);
     let judge = |theorem: &String| {
         let mut own: Vec<String> = match axioms.get(theorem) {
             None => vec![format!("the case audit did not report {theorem}")],
@@ -536,20 +541,24 @@ fn qualify(gate: &mut Gate, cases: &[Case], text: &str) -> Result<(), String> {
     if !problems.is_empty() {
         return Err(format!("{manifest}: {}", problems.join("; ")));
     }
-    let backend = gate.backend()?;
+    let installation = gate.installation()?;
+    let backend = installation.backend();
     if !backend.is_dir() {
         return Err(format!(
             "the Aeneas Lean library of the installation, {}, is not a directory",
             backend.display()
         ));
     }
-    let record = gate.qualification();
+    // No command may write the library, with its packages, or Lean.
+    let read_only = [backend.clone(), installation.lean_bin().join("..")];
+    let listing = lean::listing(&read_only, None)?;
+    let record = gate.receipt.qualification.get_or_insert_default();
     record.cases_sha256 = sha256(text.as_bytes());
     record.extraction_sha256 = sha256(&configuration);
     for case in cases {
         qualify_case(gate, &backend, case)?;
     }
-    Ok(())
+    lean::listing(&read_only, Some(&listing)).map(|_| ())
 }
 
 /// Extracts, compares and builds one case, and concludes it and its
@@ -597,7 +606,7 @@ fn qualify_case(gate: &mut Gate, backend: &Path, case: &Case) -> Result<(), Stri
     };
     record.differences = differences(case, &record.observed);
     let records = |gate: &mut Gate, record: &QualificationCase| {
-        let cases = &mut gate.qualification().cases;
+        let cases = &mut gate.receipt.qualification.get_or_insert_default().cases;
         cases.insert(case.name.clone(), record.clone());
     };
     records(gate, &record);
@@ -613,9 +622,9 @@ fn qualify_case(gate: &mut Gate, backend: &Path, case: &Case) -> Result<(), Stri
         Expect::IllTyped => Site::IllTypedBuild,
         _ => Site::QualificationBuild,
     };
-    let stage = work.join("stage");
+    let stage = case_stage(gate, &case.name);
     let project = stage.join(layout.project);
-    let arguments = lean::build_args(&target);
+    let arguments = lean::build_args(&[&target], true);
     let build = lake(site, &arguments, &project);
     // Whether the generated code built, as the proofs of the case need.
     let mut built = false;
@@ -653,16 +662,16 @@ fn qualify_case(gate: &mut Gate, backend: &Path, case: &Case) -> Result<(), Stri
     if let Some(proof) = &case.proof {
         prove(gate, case, proof, &record, built, &project)?;
     }
-    let (status, reason) = conclusion(&record.differences);
-    gate.conclude(&unit, status, reason);
+    gate.conclude(&unit, conclusion(&record.differences));
     Ok(())
 }
 
 /// The Lake command with `args` at `site`, in the project `project` of a
 /// stage.
-fn lake<'a>(site: Site, args: &'a [String], project: &'a Path) -> run::Request<'a> {
+pub fn lake<'a>(site: Site, args: &'a [String], project: &'a Path) -> run::Request<'a> {
     let tool = match site {
-        Site::CaseAudit => Tool::LakeEnvLean,
+        Site::CaseAudit | Site::AxiomAudit => Tool::LakeEnvLean,
+        Site::Leanchecker => Tool::Leanchecker,
         _ => Tool::LakeBuild,
     };
     run::Request {
@@ -676,7 +685,7 @@ fn lake<'a>(site: Site, args: &'a [String], project: &'a Path) -> run::Request<'
 }
 
 /// `VERIFIED` without `problems`, and otherwise `REJECTED` for them.
-fn conclusion(problems: &[String]) -> (Status, Option<String>) {
+pub fn conclusion(problems: &[String]) -> (Status, Option<String>) {
     if problems.is_empty() {
         (Status::Verified, None)
     } else {
@@ -729,7 +738,7 @@ fn prove(
     project: &Path,
 ) -> Result<(), String> {
     let unit = unit(&case.name);
-    let build_arguments = lean::build_args(&proof.module);
+    let build_arguments = lean::build_args(&[&proof.module], true);
     let build = lake(Site::QualificationBuild, &build_arguments, project);
     let audit_arguments = lean::check_args(AUDIT);
     let audit = lake(Site::CaseAudit, &audit_arguments, project);
@@ -771,32 +780,23 @@ fn prove(
     for theorem in &proof.theorems {
         let mut problems = judged.get(theorem).cloned().unwrap_or_default();
         problems.extend(every.iter().cloned());
-        let (status, reason) = conclusion(&problems);
         let theorem_unit = theorem_unit(&case.name, theorem);
-        gate.conclude_from(&theorem_unit, &unit, status, reason);
+        gate.conclude_from(&theorem_unit, &unit, conclusion(&problems));
         let entry = QualificationTheorem {
             case: case.name.clone(),
             unit: theorem_unit,
             axioms: axioms.get(theorem).cloned(),
         };
-        gate.qualification().theorems.insert(theorem.clone(), entry);
+        (gate.receipt.qualification.get_or_insert_default().theorems)
+            .insert(theorem.clone(), entry);
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    //! The stand-ins for the tools are shell scripts in the installation of
-    //! a fixture. Charon writes the LLBC file that it is asked for. Aeneas
-    //! writes, for the module path of its `-subdir`, what the pinned Aeneas
-    //! wrote for a captured shape of the qualification crate (the fixtures
-    //! of `extract.rs`) when the test names one, and otherwise a translation
-    //! without items in an empty `Types.lean` and `Funs.lean`; it prints the
-    //! log and exits with the status that the test gives the module. Lake
-    //! records each call, runs the script that the test gives the module it
-    //! builds, or `Audit` for `lake env lean`, and otherwise builds, or
-    //! prints for each theorem of `Audit.lean` that it depends on `propext`
-    //! and `Quot.sound`.
+    //! The fixtures and the stand-ins for the tools are those of
+    //! `fixture.rs`.
 
     use std::collections::BTreeMap;
     use std::process::ExitCode;
@@ -805,202 +805,13 @@ mod tests {
 
     use super::*;
     use crate::formal::extract;
-    use crate::formal::fixture::Fixture;
+    use crate::formal::fixture::{
+        CRATE_MANIFEST, Fixture, MUL_MOD, arithmetic, captured, case, cases_text, commands,
+        failing, ill, lake_script, nested_loop, qualification, shared_pointers, status,
+    };
     use crate::formal::outcome::{conventions, word};
     use crate::formal::receipt::Command;
     use crate::formal::run::tests::{Done, gate};
-
-    /// The theorem of the case `arithmetic`.
-    const MUL_MOD: &str = "Krepi.Qualification.Arithmetic.mul_mod_spec";
-
-    /// The manifest of a qualification crate that the gate accepts.
-    const MANIFEST: &str = "[package]\nname = \"formal-qualification\"\nversion = \"0.0.0\"\n\
-        edition = \"2024\"\nlicense = \"MIT\"\npublish = false\n\n[workspace]\n";
-
-    /// A Charon stand-in that writes the LLBC file it is asked for.
-    const CHARON: &str = "while [ $# -gt 0 ]; do\n  \
-        if [ \"$1\" = --dest-file ]; then : > \"$2\"; fi\n  shift\ndone";
-
-    /// The Aeneas stand-in of the fixture at `root`.
-    fn aeneas(root: &str) -> String {
-        format!(
-            "while [ $# -gt 0 ]; do\n  \
-               case \"$1\" in -subdir) subdir=$2 ;; -dest) dest=$2 ;; esac\n  \
-               shift\n\
-             done\n\
-             shape='{root}/artifacts/shapes/'$(echo \"$subdir\" | tr / .)\n\
-             mkdir -p \"$dest/$subdir\"\n\
-             if [ -f \"$shape.from\" ]; then\n  \
-               cp -R \"$(cat \"$shape.from\")/.\" \"$dest\"\n\
-             else\n  \
-               : > \"$dest/$subdir/Types.lean\"\n  \
-               : > \"$dest/$subdir/Funs.lean\"\n  \
-               echo '{{\"functions\": [], \"types\": []}}' > \"$dest/translation.json\"\n\
-             fi\n\
-             if [ -f \"$shape.log\" ]; then cat \"$shape.log\"; fi\n\
-             if [ -f \"$shape.status\" ]; then exit \"$(cat \"$shape.status\")\"; fi"
-        )
-    }
-
-    /// The Lake stand-in of the fixture at `root`.
-    fn lake(root: &str) -> String {
-        format!(
-            "lake='{root}/artifacts/lake'\n\
-             mkdir -p \"$lake\"\n\
-             echo \"$PWD $*\" >> \"$lake/calls\"\n\
-             case \"$1\" in\n  \
-               build) for argument; do target=$argument; done ;;\n  \
-               env) target=Audit ;;\n\
-             esac\n\
-             if [ -f \"$lake/$target.sh\" ]; then . \"$lake/$target.sh\"; fi\n\
-             if [ \"$target\" = Audit ]; then\n  \
-               while read -r first rest; do\n    \
-                 if [ \"$first\" = '#print' ]; then\n      \
-                   echo \"'${{rest#axioms }}' depends on axioms: [propext, Quot.sound]\"\n    \
-                 fi\n  \
-               done < Audit.lean\n\
-             else\n  \
-               echo 'Build completed successfully (2 jobs).'\n\
-             fi"
-        )
-    }
-
-    /// The directory of the captured shape `shape`.
-    fn captured(shape: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/formal/fixtures/extraction")
-            .join(shape)
-    }
-
-    /// The text of `cases.json` with `cases`.
-    fn cases_text(cases: &Value) -> String {
-        let document = json!({"schema": 1, "cases": cases});
-        let mut text = serde_json::to_string_pretty(&document).expect("JSON");
-        text.push('\n');
-        text
-    }
-
-    /// A case `name` of `module` that expects `expect`, with no items.
-    fn case(name: &str, module: &str, expect: &str) -> Value {
-        json!({
-            "name": name,
-            "module": module,
-            "start_from": [format!("crate::{}", name.replace('-', "_"))],
-            "expect": expect,
-            "diagnostics": [],
-            "external_functions": [],
-            "external_types": [],
-        })
-    }
-
-    /// The case of the captured shape `arithmetic`, with its loop and its
-    /// theorem.
-    fn arithmetic() -> Value {
-        let mut case = case("arithmetic", "Qual.Arithmetic", "translated");
-        case["loop_sources"] = json!(["arithmetic.pow_mod_loop src/lib.rs"]);
-        case["proof"] = json!({"module": "Krepi.Qualification.Arithmetic", "theorems": [MUL_MOD]});
-        case
-    }
-
-    /// The case of the captured shape `shared-pointers`.
-    fn shared_pointers() -> Value {
-        let mut case = case("shared-pointers", "Qual.SharedPointers", "translated");
-        case["external_functions"] = json!([
-            "alloc::sync::{alloc::sync::Arc<T>}::ptr_eq",
-            "alloc::sync::{impl core::ops::deref::Deref<T> for alloc::sync::Arc<T>}::deref",
-        ]);
-        case["external_types"] = json!(["alloc::sync::Arc"]);
-        case
-    }
-
-    /// The case of the captured shape `nested-loop`, which Aeneas rejects.
-    fn nested_loop() -> Value {
-        let mut case = case("nested-loop", "Qual.NestedLoop", "rejected");
-        case["diagnostics"] = json!([
-            "[Error] Ignoring the body of 'formal_qualification::nested_loop::charge_grid' because of previous error",
-            "[Error] Returns inside of nested loops are not supported yet",
-        ]);
-        case["external_functions"] = json!(["formal_qualification::nested_loop::charge_grid"]);
-        case
-    }
-
-    /// An ill-typed case, whose type error the Lake stand-in prints.
-    fn ill() -> Value {
-        let mut case = case("ill", "Qual.Ill", "ill-typed");
-        case["type_errors_in"] = json!("Funs.lean");
-        case
-    }
-
-    /// A build log of Lake that reports `lines` of the module `module` and
-    /// fails, with the status `status`.
-    fn failing(module: &str, lines: &[&str], status: i32) -> String {
-        let mut script = format!("echo '\u{2716} [2/2] Building {module} (1.6s)'\n");
-        for line in lines {
-            script.push_str(&format!("echo '{line}'\n"));
-        }
-        script.push_str(&format!(
-            "echo 'Some required targets logged failures:'\necho '- {module}'\n\
-             echo 'error: build failed'\nexit {status}\n"
-        ));
-        script
-    }
-
-    /// A fixture with the qualification `cases`, not committed: the
-    /// qualification crate, the Lake project files, the extraction
-    /// configuration, the proof module of `arithmetic`, the Aeneas Lean
-    /// library of the installation, the stand-ins, and the shapes and Lake
-    /// scripts of the cases above.
-    fn qualification(label: &str, cases: &Value) -> Fixture {
-        let fixture = Fixture::new(label);
-        let root = fixture.root().to_str().expect("a UTF-8 path").to_string();
-        assert!(!root.contains('\''), "{root}");
-        fixture.write(".gitignore", "/artifacts/\n/verification/.lake/\n");
-        fixture.write("verification/qualification/Cargo.toml", MANIFEST);
-        fixture.write("verification/qualification/src/lib.rs", "");
-        fixture.write("verification/qualification/cases.json", &cases_text(cases));
-        fixture.write(
-            "verification/extraction.toml",
-            include_str!("../../../verification/extraction.toml"),
-        );
-        for file in lean::PROJECT_FILES {
-            fixture.write(&format!("verification/{file}"), &format!("-- {file}\n"));
-        }
-        fixture.write(
-            "verification/Krepi/Qualification/Arithmetic.lean",
-            "module\n",
-        );
-        fixture.write("artifacts/formal/tools/backend/.lake/packages/README", "");
-        fixture.tool("charon", CHARON);
-        fixture.tool("aeneas", &aeneas(&root));
-        fixture.tool("lake", &lake(&root));
-        for name in ["arithmetic", "shared-pointers", "nested-loop"] {
-            let module = match name {
-                "arithmetic" => "Qual.Arithmetic",
-                "shared-pointers" => "Qual.SharedPointers",
-                _ => "Qual.NestedLoop",
-            };
-            let key = format!("artifacts/shapes/KrepiGen.{module}");
-            let directory = captured(name);
-            fixture.write(&format!("{key}.from"), directory.to_str().expect("UTF-8"));
-            if name == "nested-loop" {
-                let log = fs::read_to_string(directory.join("aeneas.log")).expect("the log");
-                fixture.write(&format!("{key}.log"), &log);
-                fixture.write(&format!("{key}.status"), "1\n");
-            }
-        }
-        let type_error = "error: KrepiGen/Qual/Ill/Funs.lean:3:8: type mismatch";
-        lake_script(
-            &fixture,
-            "KrepiGen.Qual.Ill.Funs",
-            &failing("KrepiGen.Qual.Ill.Funs", &[type_error], 1),
-        );
-        fixture
-    }
-
-    /// Makes Lake run `script` for `target`.
-    fn lake_script(fixture: &Fixture, target: &str, script: &str) {
-        fixture.write(&format!("artifacts/lake/{target}.sh"), script);
-    }
 
     /// Commits what changed in `fixture` and runs its qualification.
     fn run(fixture: &Fixture) -> Done {
@@ -1012,19 +823,6 @@ mod tests {
             &[],
             vec![phase(fixture.root(), &Layout::PRODUCTION)],
         )
-    }
-
-    /// The conclusion of `unit`.
-    fn status<'a>(done: &'a Done, unit: &str) -> (Status, Option<&'a str>) {
-        let entry = &done.receipt.units[unit];
-        (entry.status, entry.reason.as_deref())
-    }
-
-    /// The commands of `unit`.
-    fn commands<'a>(done: &'a Done, unit: &str) -> Vec<&'a Command> {
-        (done.receipt.commands.iter())
-            .filter(|command| command.unit.as_deref() == Some(unit))
-            .collect()
     }
 
     /// The sites of the commands of `unit`, with their classes.
@@ -1137,8 +935,8 @@ mod tests {
         assert_eq!(
             argv,
             [
-                lean::build_args("KrepiGen.Qual.Arithmetic.Funs"),
-                lean::build_args("Krepi.Qualification.Arithmetic"),
+                lean::build_args(&["KrepiGen.Qual.Arithmetic.Funs"], true),
+                lean::build_args(&["Krepi.Qualification.Arithmetic"], true),
                 lean::check_args("Audit.lean"),
             ]
             .map(|args| [vec!["lake".to_string()], args].concat())
@@ -1723,6 +1521,67 @@ mod tests {
     }
 
     #[test]
+    fn the_case_audit_judges_through_the_allowlist() {
+        let theorems = [MUL_MOD.to_string()];
+        let judge = |axioms: &[&str], declarations: &[&str]| {
+            let reported = BTreeMap::from([(
+                MUL_MOD.to_string(),
+                axioms.iter().map(|axiom| axiom.to_string()).collect(),
+            )]);
+            let declarations: Vec<String> = declarations.iter().map(|d| d.to_string()).collect();
+            judge_case_audit(&reported, Some(0), &theorems, &declarations)[MUL_MOD].clone()
+        };
+        assert!(
+            judge(
+                &["propext", "Quot.sound", "KrepiGen.Qual.A.f"],
+                &["KrepiGen.Qual.A.f"]
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            judge(&["KrepiGen.Qual.B.g"], &["KrepiGen.Qual.A.f"]),
+            [format!("{MUL_MOD} depends on KrepiGen.Qual.B.g")]
+        );
+        // The allowlist admits the axiom of a native decision for no
+        // qualification theorem, even when its case declares it.
+        let native = "KrepiGen.Qual.A.f._native.decide.ax_1_1";
+        assert_eq!(
+            judge(&[native], &[native]),
+            [format!("{MUL_MOD} depends on {native}")]
+        );
+    }
+
+    #[test]
+    fn a_tool_that_writes_the_backend_stops_the_qualification() {
+        let fixture = qualification("backend-write", &json!([arithmetic()]));
+        // The build of the case writes through the link of its stage.
+        lake_script(
+            &fixture,
+            "KrepiGen.Qual.Arithmetic.Funs",
+            "echo written >> ../artifacts/formal/lake/aeneas/.lake/packages/README",
+        );
+        let done = run(&fixture);
+        assert_eq!(done.code, ExitCode::FAILURE);
+        let receipt = done.written();
+        assert_eq!(receipt.status, Status::ToolFailure);
+        assert!(!receipt.complete);
+        let packages = fs::canonicalize(
+            fixture
+                .root()
+                .join("artifacts/formal/tools/backend/.lake/packages"),
+        )
+        .expect("the packages");
+        let changed = [packages.join("README")];
+        assert_eq!(
+            done.failures(),
+            [format!(
+                "the phase qualification stopped: \
+                 the tool installation changed during the phase; changed paths (1): {changed:?}"
+            )]
+        );
+    }
+
+    #[test]
     fn a_theorem_that_uses_a_declaration_of_another_case_fails_its_audit() {
         let fixture = qualification("borrowed", &json!([arithmetic(), shared_pointers()]));
         // The audit reports an axiom that only the template of the other
@@ -2092,7 +1951,8 @@ mod tests {
         );
         assert_eq!(
             stopped("features", &|fixture| {
-                let features = format!("{MANIFEST}\n[features]\ndefault = [\"pi5\"]\npi5 = []\n");
+                let features =
+                    format!("{CRATE_MANIFEST}\n[features]\ndefault = [\"pi5\"]\npi5 = []\n");
                 fixture.write(manifest, &features);
             }),
             format!("{context}it has [features], which the gate does not allow")

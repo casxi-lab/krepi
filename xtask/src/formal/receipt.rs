@@ -36,6 +36,8 @@ pub struct Receipt {
     pub phases: BTreeMap<String, Phase>,
     pub units: BTreeMap<String, Unit>,
     pub qualification: Option<Qualification>,
+    pub base: Option<super::base::Record>,
+    pub guard: Option<super::guard::Record>,
     pub commands: Vec<Command>,
     pub failures: Vec<Failure>,
 }
@@ -181,7 +183,12 @@ pub fn render(receipt: &Receipt) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
+    use crate::formal::base::{Hash, Heartbeats, Leanchecker, Record, Theorem};
+    use crate::formal::guard::State;
+    use crate::formal::lean::Kind;
     use crate::formal::outcome::conventions::SITES;
     use crate::formal::outcome::word;
     use crate::formal::paths::Entry;
@@ -311,6 +318,8 @@ mod tests {
                 })
                 .collect(),
             qualification: Some(qualification()),
+            base: Some(base()),
+            guard: Some(guard()),
             commands,
             failures: statuses
                 .into_iter()
@@ -376,6 +385,94 @@ mod tests {
         }
     }
 
+    /// The record of a base round with a theorem of every kind and state.
+    fn base() -> Record {
+        let theorem = |kind, state, axioms: Option<&[&str]>, status| Theorem {
+            module: "Krepi.Proofs.C".to_string(),
+            kind,
+            state,
+            axioms: axioms.map(|axioms| axioms.iter().map(|axiom| axiom.to_string()).collect()),
+            status,
+            problems: vec!["Krepi.Proofs.C.t depends on sorryAx".to_string()],
+        };
+        let names = |names: &[&str]| names.iter().map(|name| name.to_string()).collect();
+        Record {
+            statements_sha256: "3".repeat(64),
+            axioms_sha256: "4".repeat(64),
+            tcb_sha256: "5".repeat(64),
+            statement_hash: Hash {
+                recorded: "6".repeat(40),
+                computed: "7".repeat(40),
+            },
+            modules: names(&["Krepi.Proofs.C", "KrepiGen.Qual.C.Funs"]),
+            own: names(&["Krepi.Proofs.C"]),
+            planned: names(&["Krepi.Proofs.C"]),
+            theorems: BTreeMap::from([
+                (
+                    "Krepi.Proofs.C.t".to_string(),
+                    theorem(
+                        Kind::Target,
+                        Some(State::Proved),
+                        Some(&["propext"]),
+                        Status::Rejected,
+                    ),
+                ),
+                (
+                    "Krepi.Proofs.C.u".to_string(),
+                    theorem(Kind::Target, Some(State::Planned), None, Status::NotRun),
+                ),
+                (
+                    "Krepi.Qualification.C.v".to_string(),
+                    theorem(Kind::Qualification, None, Some(&[]), Status::Verified),
+                ),
+                (
+                    "Krepi.Spec.C.w".to_string(),
+                    theorem(Kind::Specification, None, Some(&[]), Status::Verified),
+                ),
+            ]),
+            leanchecker: Leanchecker {
+                version: Some("Lean (version 4.35.0, Release)".to_string()),
+                sha256: "8".repeat(64),
+                mode: "prefix".to_string(),
+                prefixes: names(&["Krepi", "KrepiGen"]),
+            },
+            heartbeats: Heartbeats {
+                method: "count_heartbeats".to_string(),
+                counts: BTreeMap::from([("Krepi.Proofs.C.t".to_string(), 1_326)]),
+                missing: BTreeMap::from([("Krepi/Proofs/D.lean".to_string(), "error".to_string())]),
+            },
+            problems: vec!["leanchecker Krepi: a problem".to_string()],
+        }
+    }
+
+    /// The record of the guard of a pull request on which every rule fails
+    /// but one.
+    fn guard() -> crate::formal::guard::Record {
+        let paths = |paths: &[&str]| paths.iter().map(|path| path.to_string()).collect();
+        let why = |rule: &str| (rule != "spec-approval").then(|| format!("{rule} fails"));
+        crate::formal::guard::Record {
+            base: "1".repeat(40),
+            head: "2".repeat(40),
+            merge_base: "3".repeat(40),
+            labels: BTreeSet::from(["ai-proof".to_string(), "proof".to_string()]),
+            ai_proof: true,
+            statement_hash: "4".repeat(40),
+            statement_side: paths(&["verification/Krepi/Spec/C.lean"]),
+            proofs: paths(&["verification/Krepi/Proofs/C.lean"]),
+            sources: paths(&["kernel/abi/src/lib.rs"]),
+            demoted: paths(&["Krepi.Statements.C.S"]),
+            raised: paths(&["verification/Krepi/Proofs/C.lean"]),
+            rules: [
+                "statement-change-needs-spec",
+                "spec-approval",
+                "no-sources-with-proofs-or-statements",
+                "heartbeats-need-review",
+            ]
+            .map(|rule| (rule.to_string(), why(rule)))
+            .into(),
+        }
+    }
+
     #[test]
     fn a_receipt_reads_back_as_it_was_written() {
         let modes = [
@@ -412,6 +509,14 @@ mod tests {
             "\"expect\": \"translated\"",
             "\"expect\": \"ill-typed\"",
             "\"expect\": \"rejected\"",
+            "\"kind\": \"target\"",
+            "\"kind\": \"qualification\"",
+            "\"kind\": \"specification\"",
+            "\"state\": \"proved\"",
+            "\"state\": \"planned\"",
+            "\"state\": null",
+            "\"ai_proof\": true",
+            "\"spec-approval\": null",
         ] {
             assert!(text.contains(word), "{word} is not in {text}");
         }
@@ -475,6 +580,8 @@ mod tests {
                 ),
             ]),
             qualification: None,
+            base: None,
+            guard: None,
             commands: vec![Command {
                 sequence: 1,
                 phase: None,
@@ -555,6 +662,8 @@ mod tests {
     }}
   }},
   "qualification": null,
+  "base": null,
+  "guard": null,
   "commands": [
     {{
       "sequence": 1,

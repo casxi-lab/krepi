@@ -1,0 +1,24 @@
+{
+  "ref": "refs/heads/main",
+  "before": "2222222222222222222222222222222222222222",
+  "after": "1111111111111111111111111111111111111111",
+  "created": false,
+  "deleted": false,
+  "forced": false,
+  "head_commit": {
+    "id": "1111111111111111111111111111111111111111",
+    "message": "A change"
+  },
+  "repository": {
+    "id": 3001,
+    "name": "krepi",
+    "full_name": "example/krepi",
+    "private": false,
+    "default_branch": "main"
+  },
+  "sender": {
+    "login": "author",
+    "id": 1001,
+    "type": "User"
+  }
+}

@@ -1,0 +1,2 @@
+# Lean 4.35.0 on darwin-arm64 in the environment of the gate: `lake env lean --json .heartbeats/Krepi/Qualification/Arithmetic.lean` in a base stage, exit 0; known count 1301, the smallest maxHeartbeats that elaborates the declaration with Elab.async=false, by bisection
+{"caption":"","data":"Used 1331 heartbeats, which is less than the current maximum of 200000.","endPos":{"column":40,"line":33},"fileName":".heartbeats/Krepi/Qualification/Arithmetic.lean","isSilent":false,"keepFullRange":false,"kind":"[anonymous]","pos":{"column":0,"line":18},"severity":"information"}

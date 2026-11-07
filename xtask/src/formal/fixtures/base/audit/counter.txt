@@ -1,0 +1,46 @@
+# Lean 4.35.0 on darwin-arm64 in the environment of the gate: `lake env lean Audit.lean` in a base stage, exit 1
+Audit.lean:4:40: error: Type mismatch
+  Krepi.Proofs.Counter.t
+has type
+  Krepi.Statements.Counter.W
+but is expected to have type
+  Krepi.Statements.Counter.S
+Audit.lean:6:10: error(lean.unknownIdentifier): Unknown identifier `Krepi.Statements.Counter.Missing`
+krepi-audit module Krepi.HB.Fixture
+'Krepi.HB.fx' depends on axioms: [propext]
+krepi-audit range Krepi.HB.fx 7
+krepi-audit module Krepi.Spec.Counter
+krepi-audit module Krepi.Statements.Counter
+krepi-audit module Krepi.Proofs.Counter
+krepi-audit range _private.Krepi.Proofs.Counter.0.Krepi.Proofs.Counter.helper 15
+'Krepi.Proofs.Counter.t' depends on axioms: [propext, Quot.sound]
+krepi-audit range Krepi.Proofs.Counter.t 9
+'Krepi.Proofs.Counter.s' depends on axioms: [propext, Quot.sound]
+krepi-audit range Krepi.Proofs.Counter.s 20
+krepi-audit module Krepi.Proofs.Coerced
+'Krepi.Proofs.Coerced.c' does not depend on any axioms
+krepi-audit range Krepi.Proofs.Coerced.c 15
+krepi-audit module Krepi.Proofs.Other
+krepi-audit range Krepi.Proofs.Other.u 12
+'Krepi.Proofs.Other.v' does not depend on any axioms
+krepi-audit range Krepi.Proofs.Other.v 15
+krepi-audit module Krepi.Qualification.Arithmetic
+'Krepi.Qualification.Arithmetic.mul_mod_spec' depends on axioms: [propext, Classical.choice, Quot.sound]
+krepi-audit range Krepi.Qualification.Arithmetic.mul_mod_spec 18
+krepi-audit module Krepi.Qualification.Checked
+'Aeneas.Std.U64.checked_add_bv_spec.match_1.congr_eq_2' does not depend on any axioms
+'Krepi.Qualification.Checked.add_within_spec' depends on axioms: [propext, Classical.choice, Quot.sound]
+krepi-audit range Krepi.Qualification.Checked.add_within_spec 16
+'Aeneas.Std.U64.checked_add_bv_spec.match_1.congr_eq_1' does not depend on any axioms
+krepi-audit module Krepi.Qualification.Models.Arc
+'alloc.sync.Arc.mk.sizeOf_spec' does not depend on any axioms
+'alloc.sync.Arc.mk.inj' does not depend on any axioms
+'alloc.sync.Arc.mk.injEq' depends on axioms: [propext]
+krepi-audit module Krepi.Qualification.Models.FromStr
+krepi-audit module Krepi.Qualification.SingleLoop
+'Krepi.Qualification.SingleLoop.charge_each_spec' depends on axioms: [propext, Classical.choice, Quot.sound]
+krepi-audit range Krepi.Qualification.SingleLoop.charge_each_spec 18
+krepi-audit statement Krepi.Statements.Counter.S Krepi.Statements.Counter false
+krepi-audit statement Krepi.Proofs.Other.P Krepi.Proofs.Other true
+krepi-audit statement Krepi.Statements.Counter.Missing [anonymous] false
+krepi-audit statement Krepi.Statements.Counter.W Krepi.Statements.Counter false

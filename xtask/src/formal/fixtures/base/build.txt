@@ -1,0 +1,29 @@
+# Lean 4.35.0 on darwin-arm64 in the environment of the gate: `lake build --no-cache --wfail +Krepi` in a base stage, exit 1; <stage>, <backend> and <lean> replace absolute paths
+✖ [756/1131] Building Krepi.Proofs.Main (283ms)
+trace: .> LEAN_PATH=<backend>/.lake/packages/Cli/.lake/build/lib/lean:<backend>/.lake/packages/batteries/.lake/build/lib/lean:<backend>/.lake/packages/Qq/.lake/build/lib/lean:<backend>/.lake/packages/aesop/.lake/build/lib/lean:<backend>/.lake/packages/proofwidgets/.lake/build/lib/lean:<backend>/.lake/packages/importGraph/.lake/build/lib/lean:<backend>/.lake/packages/LeanSearchClient/.lake/build/lib/lean:<backend>/.lake/packages/plausible/.lake/build/lib/lean:<backend>/.lake/packages/mathlib/.lake/build/lib/lean:<backend>/.lake/build/lib/lean:<stage>/verification/.lake/build/lib/lean <lean>/bin/lean <stage>/verification/Krepi/Proofs/Main.lean -o <stage>/verification/.lake/build/lib/lean/Krepi/Proofs/Main.olean -i <stage>/verification/.lake/build/lib/lean/Krepi/Proofs/Main.ilean -c <stage>/verification/.lake/build/ir/Krepi/Proofs/Main.c --setup <stage>/verification/.lake/build/ir/Krepi/Proofs/Main.setup.json --json
+error: Krepi/Proofs/Main.lean:6:8: Unknown identifier `no_such_lemma`
+⚠ [1804/1816] Building Krepi.Statements.Warn (381ms)
+trace: .> LEAN_PATH=<backend>/.lake/packages/Cli/.lake/build/lib/lean:<backend>/.lake/packages/batteries/.lake/build/lib/lean:<backend>/.lake/packages/Qq/.lake/build/lib/lean:<backend>/.lake/packages/aesop/.lake/build/lib/lean:<backend>/.lake/packages/proofwidgets/.lake/build/lib/lean:<backend>/.lake/packages/importGraph/.lake/build/lib/lean:<backend>/.lake/packages/LeanSearchClient/.lake/build/lib/lean:<backend>/.lake/packages/plausible/.lake/build/lib/lean:<backend>/.lake/packages/mathlib/.lake/build/lib/lean:<backend>/.lake/build/lib/lean:<stage>/verification/.lake/build/lib/lean <lean>/bin/lean <stage>/verification/Krepi/Statements/Warn.lean -o <stage>/verification/.lake/build/lib/lean/Krepi/Statements/Warn.olean -i <stage>/verification/.lake/build/lib/lean/Krepi/Statements/Warn.ilean -c <stage>/verification/.lake/build/ir/Krepi/Statements/Warn.c --setup <stage>/verification/.lake/build/ir/Krepi/Statements/Warn.setup.json --json
+warning: Krepi/Statements/Warn.lean:5:21: declaration uses `sorry`
+✔ [1805/1816] Built KrepiGen.Qual.Arithmetic.Types (6.0s)
+✔ [1806/1816] Built KrepiGen.Qual.Checked.Types (6.0s)
+✔ [1807/1816] Built Krepi.Qualification.Models.Arc (6.0s)
+✔ [1808/1816] Built KrepiGen.Qual.SingleLoop.Types (6.0s)
+✔ [1809/1816] Built Krepi.Qualification.Models.FromStr (6.0s)
+✖ [1810/1816] Building KrepiGen.Qual.Checked.Funs (1.8s)
+trace: .> LEAN_PATH=<backend>/.lake/packages/Cli/.lake/build/lib/lean:<backend>/.lake/packages/batteries/.lake/build/lib/lean:<backend>/.lake/packages/Qq/.lake/build/lib/lean:<backend>/.lake/packages/aesop/.lake/build/lib/lean:<backend>/.lake/packages/proofwidgets/.lake/build/lib/lean:<backend>/.lake/packages/importGraph/.lake/build/lib/lean:<backend>/.lake/packages/LeanSearchClient/.lake/build/lib/lean:<backend>/.lake/packages/plausible/.lake/build/lib/lean:<backend>/.lake/packages/mathlib/.lake/build/lib/lean:<backend>/.lake/build/lib/lean:<stage>/verification/.lake/build/lib/lean <lean>/bin/lean <stage>/verification/KrepiGen/Qual/Checked/Funs.lean -o <stage>/verification/.lake/build/lib/lean/KrepiGen/Qual/Checked/Funs.olean -i <stage>/verification/.lake/build/lib/lean/KrepiGen/Qual/Checked/Funs.ilean -c <stage>/verification/.lake/build/ir/KrepiGen/Qual/Checked/Funs.c --setup <stage>/verification/.lake/build/ir/KrepiGen/Qual/Checked/Funs.setup.json --json
+error: KrepiGen/Qual/Checked/Funs.lean:47:17: Type mismatch
+  "x"
+has type
+  String
+but is expected to have type
+  ℕ
+✔ [1812/1816] Built KrepiGen.Qual.Arithmetic.Funs (1.8s)
+✔ [1813/1816] Built KrepiGen.Qual.SingleLoop.Funs (1.8s)
+✔ [1814/1816] Built Krepi.Qualification.Arithmetic (1.7s)
+✔ [1815/1816] Built Krepi.Qualification.SingleLoop (1.0s)
+Some required targets logged failures:
+- Krepi.Proofs.Main
+- Krepi.Statements.Warn
+- KrepiGen.Qual.Checked.Funs
+error: build failed

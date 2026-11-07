@@ -27,7 +27,7 @@ pub struct Command {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "check",
-        about: "Run the toolchain, manifest, format, Clippy, test, documentation and workflow checks; with --receipt <path>, also write a JSON receipt of the run",
+        about: "Run the toolchain, manifest, format, Clippy, test, documentation, Lean source and workflow checks; with --receipt <path>, also write a JSON receipt of the run",
         subcommands: &[],
     },
     Command {

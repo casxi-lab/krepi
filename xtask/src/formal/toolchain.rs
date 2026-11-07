@@ -405,12 +405,11 @@ pub fn check_targets(manifest: &Manifest, layout: &Layout) -> Finding {
     }
 }
 
-/// Whether `text` is a SHA-256 in lowercase hexadecimal.
-pub fn is_sha256(text: &str) -> bool {
-    text.len() == 64
-        && text
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+/// Whether `text` is `length` lowercase hexadecimal digits: 64 for a
+/// SHA-256, 40 for the name of a Git object.
+pub fn is_hex(text: &str, length: usize) -> bool {
+    let digit = |byte: u8| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte);
+    text.len() == length && text.bytes().all(digit)
 }
 
 /// Whether `prefix` names a directory without `.` or `..` components or
@@ -457,7 +456,7 @@ pub fn check_hosts(manifest: &Manifest) -> Finding {
             ));
         }
         match &host.switch_export_sha256 {
-            Some(digest) if !is_sha256(digest) => problems.push(format!(
+            Some(digest) if !is_hex(digest, 64) => problems.push(format!(
                 "the {name} column's switch_export_sha256 `{digest}` is not a SHA-256 in lowercase hexadecimal"
             )),
             Some(_) => {}
@@ -640,7 +639,7 @@ pub mod environment {
 
     /// The tool installation of a host, laid out as the image lays out
     /// [`IMAGE_PREFIX`](super::IMAGE_PREFIX).
-    struct Installation {
+    pub struct Installation {
         prefix: PathBuf,
     }
 
@@ -654,7 +653,7 @@ pub mod environment {
         }
 
         /// The Lean toolchain's `bin`: `lean`, `lake` and `leanchecker`.
-        fn lean_bin(&self) -> PathBuf {
+        pub fn lean_bin(&self) -> PathBuf {
             self.prefix.join("lean/bin")
         }
 
@@ -675,21 +674,21 @@ pub mod environment {
 
         /// The Aeneas Lean library, built, with the packages of its Lake
         /// lock in `.lake/packages`.
-        fn backend(&self) -> PathBuf {
+        pub fn backend(&self) -> PathBuf {
             self.prefix.join("backend")
         }
     }
 
-    /// The Aeneas Lean library of the installation that the manifest's
-    /// column of `host` names, a relative prefix taken from the repository
-    /// root `root`, with Mathlib and the other packages of its Lake lock in
-    /// its `.lake/packages`.
-    pub fn backend(manifest: &Manifest, host: &str, root: &Path) -> Result<PathBuf, String> {
-        let column = manifest
-            .hosts
-            .get(host)
-            .ok_or_else(|| format!("the manifest has no {host} column"))?;
-        Ok(Installation::of(column, root).backend())
+    /// The installation that the manifest's column of `host` names, a
+    /// relative prefix taken from the repository root `root`.
+    pub fn installation(
+        manifest: &Manifest,
+        host: &str,
+        root: &Path,
+    ) -> Result<Installation, String> {
+        let missing = || format!("the manifest has no {host} column");
+        let column = manifest.hosts.get(host).ok_or_else(missing)?;
+        Ok(Installation::of(column, root))
     }
 
     /// The directories of one gate run that tool commands use.
@@ -704,10 +703,6 @@ pub mod environment {
     /// A command that the proof gate runs. The two extraction commands
     /// carry the Cargo target directory of their extraction alone.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the base round is the first to run leanchecker")
-    )]
     pub enum Tool<'a> {
         /// Charon extracting a crate through Cargo.
         Charon { target_dir: &'a Path },
