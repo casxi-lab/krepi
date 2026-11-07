@@ -1,8 +1,9 @@
-# Builds the proof-tool image from main when its recipe changes, publishes
-# it to the GitHub Container Registry tagged with the commit, prints its
-# digest and measures the disk the build needs. Pull requests build the same
-# recipe without publishing it (formal-image-build.yml). Actions are pinned
-# to full commit SHAs; the comment names the release.
+# Builds the proof-tool image from main when its recipe changes, checks it
+# as a user other than root, publishes it to the GitHub Container Registry
+# tagged with the commit, prints its digest and measures the disk the build
+# needs. Pull requests build and check the same recipe without publishing it
+# (formal-image-build.yml). Actions are pinned to full commit SHAs; the
+# comment names the release.
 name: formal image publish
 
 on:
@@ -157,6 +158,18 @@ jobs:
             > artifacts/image/opam-switch.export
           echo "image size: $(docker image inspect --format '{{.Size}}' "$IMAGE_REF")" \
             | tee -a artifacts/image/disk.txt
+
+      - name: Check the image as a user other than root
+        run: |
+          check="$RUNNER_TEMP/formal-image-check"
+          mkdir -p "$check/verification"
+          cp verification/lakefile.toml verification/lean-toolchain \
+            verification/lake-manifest.json "$check/verification/"
+          cp verification/image/non-root-check.sh "$check/"
+          docker run --rm --user "$(id -u):$(id -g)" --network none --cap-drop ALL \
+            --security-opt no-new-privileges --volume "$check:$check" --workdir "$check" \
+            "$IMAGE_REF" bash "$check/non-root-check.sh" "$check" 2>&1 \
+            | tee artifacts/image/non-root-check.txt
 
       - name: Publish the image and print its digest
         env:

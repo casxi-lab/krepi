@@ -26,7 +26,10 @@
 # Charon's Cargo.lock, and `lake exe cache get` takes Mathlib's build cache,
 # with its `leantar` tool, from Mathlib's cache service by the pinned Lake
 # lock. The image holds the versions it observed in
-# /opt/krepi-formal/versions.json.
+# /opt/krepi-formal/versions.json. Everything below /opt/krepi-formal belongs
+# to root; every user can read it and search its directories, and no user but
+# root can write it, so that the tools run as another user and cannot change
+# it.
 
 ARG BASE=ubuntu:noble-20261024.1@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 
@@ -93,7 +96,7 @@ RUN source /pins/recipe.sh; \
     if [ "$observed_version" != "$version" ] || [ "$observed_commit" != "$commit" ]; then \
       echo "lean reports $line; the manifest pins $version at $commit" >&2; exit 1; \
     fi; \
-    chmod -R a-w /opt/krepi-formal/lean; \
+    chmod -R a+rX,a-w /opt/krepi-formal/lean; \
     mkdir -p /facts; \
     jq --null-input --arg version "$observed_version" --arg commit "$observed_commit" \
       --arg sha256 "$observed_sha256" \
@@ -147,7 +150,7 @@ RUN source /pins/recipe.sh; \
     installed_targets=$(rustup target list --installed --toolchain "$toolchain"); \
     mkdir -p /notices/rust; \
     cp -R "$RUSTUP_HOME/toolchains/$toolchain-aarch64-unknown-linux-gnu/share/doc/." /notices/rust/; \
-    chmod -R a-w "$RUSTUP_HOME" "$CARGO_HOME"; \
+    chmod -R a+rX,a-w "$RUSTUP_HOME" "$CARGO_HOME"; \
     mkdir -p /facts; \
     jq --null-input --arg toolchain "$toolchain" --arg commit "$observed_commit" \
       --arg manifest "$manifest_sha256" --arg rustup "$observed_rustup" \
@@ -280,6 +283,9 @@ RUN source /pins/recipe.sh; \
     rm /facts/opam.sha256
 
 # The Aeneas Lean library, built with Mathlib from the Mathlib cache.
+# `lake exe cache get` unpacks the build outputs of Mathlib and of the
+# packages it depends on readable by their owner only; the build makes them
+# readable by all.
 FROM lean AS backend
 COPY --from=aeneas-source /src/aeneas/backends/lean /opt/krepi-formal/backend
 WORKDIR /opt/krepi-formal/backend
@@ -293,7 +299,7 @@ RUN source /pins/recipe.sh; \
     check_sha256 lake-manifest.json "$lock_sha256"; \
     at_commit .lake/packages/mathlib "$mathlib"; \
     lake_notices lake-manifest.json .lake/packages /notices/lean-packages; \
-    chmod -R a-w /opt/krepi-formal/backend; \
+    chmod -R a+rX,a-w /opt/krepi-formal/backend; \
     mkdir -p /stage; \
     mv .lake/packages/mathlib /stage/mathlib; \
     mv /opt/krepi-formal/backend /stage/backend; \
@@ -329,7 +335,7 @@ COPY --from=runtime /usr/share/doc/bubblewrap/copyright /opt/krepi-formal/notice
 COPY --from=runtime /usr/share/doc/git/copyright /opt/krepi-formal/notices/git/
 RUN source /pins/recipe.sh; \
     check_notices /opt/krepi-formal/notices/README; \
-    chmod -R a-w /opt/krepi-formal/notices
+    chmod -R a+rX,a-w /opt/krepi-formal/notices
 
 # The version manifest, from what the build stages observed.
 FROM base AS versions
@@ -348,7 +354,7 @@ RUN jq --raw-input --slurp \
       'reduce .[] as $facts ({schema: 1, base_image: $base}; . * $facts)' \
       /facts/*.json >/out/versions.json; \
     cp /facts/opam-switch.export /out/; \
-    chmod a-w /out/*; \
+    chmod a+r,a-w /out/*; \
     cat /out/versions.json
 
 # The image.

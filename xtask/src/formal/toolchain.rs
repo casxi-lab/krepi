@@ -760,9 +760,11 @@ pub mod environment {
     /// repository root `root`, and the directories of `run`. Every tool gets
     /// Lake's artifact cache turned off, offline Cargo with the
     /// installation's Cargo and rustup homes and the pinned nightly, the
-    /// host's locale, Git without system or global configuration, a `PATH`
-    /// of the Lean toolchain, the tool directory, the rustup proxies and the
-    /// system directories, and the run's home and temporary directories.
+    /// host's locale, Git without system or global configuration and with
+    /// every repository safe, so that Lake can run Git in the packages of an
+    /// installation that another user owns, a `PATH` of the Lean toolchain,
+    /// the tool directory, the rustup proxies and the system directories,
+    /// and the run's home and temporary directories.
     /// The two extraction commands, Charon and Aeneas, also get incremental
     /// compilation turned off and the target directory of their extraction;
     /// Aeneas runs no Cargo and ignores both.
@@ -797,6 +799,9 @@ pub mod environment {
             ("LC_ALL", column.locale.clone()),
             ("GIT_CONFIG_NOSYSTEM", "1".to_string()),
             ("GIT_CONFIG_GLOBAL", "/dev/null".to_string()),
+            ("GIT_CONFIG_COUNT", "1".to_string()),
+            ("GIT_CONFIG_KEY_0", "safe.directory".to_string()),
+            ("GIT_CONFIG_VALUE_0", "*".to_string()),
             ("PATH", path),
             ("RUSTUP_HOME", text(&install.rustup_home())?),
             ("HOME", text(&run.home)?),
@@ -1185,11 +1190,14 @@ mod tests {
     }
 
     /// Every tool's variables on linux-aarch64 in the image.
-    const EVERY_TOOL: [(&str, &str); 12] = [
+    const EVERY_TOOL: [(&str, &str); 15] = [
         ("CARGO_HOME", "/opt/krepi-formal/cargo"),
         ("CARGO_NET_OFFLINE", "true"),
+        ("GIT_CONFIG_COUNT", "1"),
         ("GIT_CONFIG_GLOBAL", "/dev/null"),
+        ("GIT_CONFIG_KEY_0", "safe.directory"),
         ("GIT_CONFIG_NOSYSTEM", "1"),
+        ("GIT_CONFIG_VALUE_0", "*"),
         ("HOME", "/work/run/home"),
         ("LAKE_ARTIFACT_CACHE", "false"),
         ("LANG", "C.UTF-8"),
@@ -1267,6 +1275,9 @@ mod tests {
         let vars = env.vars();
         assert_eq!(vars["LANG"], "en_US.UTF-8");
         assert_eq!(vars["LC_ALL"], "en_US.UTF-8");
+        assert_eq!(vars["GIT_CONFIG_COUNT"], "1");
+        assert_eq!(vars["GIT_CONFIG_KEY_0"], "safe.directory");
+        assert_eq!(vars["GIT_CONFIG_VALUE_0"], "*");
         assert_eq!(
             vars["CARGO_HOME"],
             "/work/repo/artifacts/formal/tools/cargo"
@@ -1306,7 +1317,11 @@ mod tests {
         let mut command = std::process::Command::new("/usr/bin/env");
         command
             .env("RUSTFLAGS", "-C target-cpu=native")
-            .env("GITHUB_TOKEN", "ghs_not_a_token");
+            .env("GITHUB_TOKEN", "ghs_not_a_token")
+            .env("GIT_CONFIG_COUNT", "2")
+            .env("GIT_CONFIG_KEY_1", "core.fsmonitor")
+            .env("GIT_CONFIG_VALUE_1", "/bin/true")
+            .env("GIT_CONFIG_PARAMETERS", "'core.hookspath'='/tmp'");
         env.apply(&mut command);
         let output = command.output().expect("/usr/bin/env runs");
         assert!(output.status.success());
@@ -1321,5 +1336,48 @@ mod tests {
         assert_eq!(seen, expected(&EXTRACTION));
         assert!(!seen.contains_key("RUSTFLAGS"));
         assert!(!seen.contains_key("GITHUB_TOKEN"));
+        assert_eq!(seen["GIT_CONFIG_COUNT"], "1");
+        assert!(!seen.contains_key("GIT_CONFIG_KEY_1"));
+        assert!(!seen.contains_key("GIT_CONFIG_PARAMETERS"));
+    }
+
+    /// The script with which the image workflows check the image as a user
+    /// other than root.
+    const IMAGE_CHECK: &str = include_str!("../../../verification/image/non-root-check.sh");
+
+    #[test]
+    fn the_image_check_runs_tools_with_the_tool_environment() {
+        let (_, rest) = IMAGE_CHECK
+            .split_once("\ntool_env=(\n")
+            .expect("the script sets tool_env");
+        let (listed, _) = rest.split_once("\n)\n").expect("tool_env ends");
+        let mut script: BTreeMap<String, String> = BTreeMap::new();
+        for line in listed.lines() {
+            let entry = line.trim().replace(['\'', '"'], "");
+            let (name, value) = entry.split_once('=').expect("NAME=value");
+            let earlier = script.insert(name.to_string(), value.to_string());
+            assert_eq!(earlier, None, "{name} is listed twice");
+        }
+        let manifest = parse(COMMITTED).expect("the committed manifest parses");
+        let env = environment(
+            Tool::LakeEnvLean,
+            &manifest,
+            "linux-aarch64",
+            Path::new(ROOT),
+            &run_dirs(),
+        )
+        .expect("the environment is built");
+        let mut gate = owned(env.vars());
+        assert_eq!(
+            script.keys().collect::<Vec<_>>(),
+            gate.keys().collect::<Vec<_>>()
+        );
+        // The script gives the tools a home and a temporary directory of its
+        // own.
+        for name in ["HOME", "TMPDIR"] {
+            script.remove(name);
+            gate.remove(name);
+        }
+        assert_eq!(script, gate);
     }
 }
