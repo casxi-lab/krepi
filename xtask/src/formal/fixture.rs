@@ -2,8 +2,10 @@
 //! tests of `cargo xtask formal run`: a kernel workspace with one crate and
 //! its `Cargo.lock`, a target registry with the target `demo`, the committed
 //! tool manifest with the installation at `artifacts/formal/tools`, which
-//! holds only scripts that start the Cargo and `rustc` of the build and the
-//! fake tools that a test installs, and a file for each other gate input.
+//! holds only scripts that start the Cargo and `rustc` of the build, the
+//! fake tools that a test installs and the version manifest of the pinned
+//! image, which a run on the CI host compares with the tool manifest, and a
+//! file for each other gate input.
 //! Commits have a fixed identity and date, and Git reads no system or global
 //! configuration.
 //!
@@ -34,6 +36,9 @@ use crate::scratch::Scratch;
 
 /// The committed tool manifest.
 const MANIFEST: &str = include_str!("../../../verification/toolchain.json");
+
+/// The version manifest of the pinned image, `/opt/krepi-formal/versions.json`.
+pub const VERSIONS: &str = include_str!("fixtures/image/versions.json");
 
 /// The Cargo that builds the tests.
 const CARGO: &str = env!("CARGO");
@@ -88,6 +93,10 @@ impl Fixture {
             fixture.write(path, &format!("#!/bin/sh\nexec '{program}' \"$@\"\n"));
             fixture.chmod(path, 0o755);
         }
+        // Whatever the umask, the installation has no write bit for the
+        // group or others, which a run on the CI host refuses.
+        fixture.write("artifacts/formal/tools/versions.json", VERSIONS);
+        fixture.chmod("artifacts/formal/tools", 0o755);
         fixture.commit_all();
         fixture
     }

@@ -86,14 +86,20 @@ the failed step:
    `pull_request_target`, not even in a comment or through an escape; every
    job sets its own `permissions`; and in a workflow that runs on
    `pull_request`, no job requests write access and nothing outside `on`
-   references `secrets`.
+   references `secrets`. Besides these rules of `xtask/src/workflows.rs`,
+   which is written to be copied unchanged into another repository, the
+   step checks with `xtask/src/formal/toolchain.rs` that a workflow that
+   runs on `pull_request` names the proof-tool image of
+   `verification/image-pin.json` by its pinned digest, and that every such
+   workflow mentions the image's repository only in that form
+   ([image pin](../formal-verification.md#image-pin)).
 
 The checks that `xtask` implements itself read only files that Git tracks,
 so a fresh clone and a working copy with build output give the same result;
 the Cargo commands, including the resolution in `manifests`, read the
 working copy. The check does not run the proof gate,
-`cargo xtask formal run`, which needs the pinned tools; CI is to run the
-gate in a job of its own on every change (planned).
+`cargo xtask formal run`, which needs the pinned tools; CI runs the gate in
+the job `formal run` of `.github/workflows/formal.yml`, described below.
 
 `cargo xtask check --receipt <path>` also writes a JSON receipt of the run to
 `<path>`, whether the check passes or fails. It records the commit, whether
@@ -238,14 +244,27 @@ a workflow artifact.
 inputs and writes a receipt of the run below `artifacts/formal/runs/`
 ([gate run](../formal-verification.md#gate-run)): the qualification of the
 tools and the base round of krepi's own Lean, with the guard on a pull
-request. It is not part of the check. Its unit tests run in the `test` step
-above, on Git repositories that they create with the gate inputs in a
-minimal form, and with fake tools: shell scripts that hang, exit with a
-given status, end by a signal or print what a tool prints. The texts that
-tests read in the forms of Lean, Lake and `leanchecker` are output of the
-pinned Lean 4.35.0, captured with absolute paths replaced; those stored
-below `xtask/src/formal/fixtures/base/` name the command that printed them,
-and the default answers of the fake tools follow the same forms. The
+request. It is not part of the check: CI runs it in the pinned proof-tool
+image as the job `formal run` of `.github/workflows/formal.yml`, on a
+GitHub-hosted `ubuntu-24.04-arm` runner, on every push to `main` and on
+every pull request to `main`, also when its labels or description change.
+The job is not required, and it uploads the receipt and the logs of the run
+as the artifact `formal-receipt-<commit>-<attempt>`. The same workflow has
+measurement jobs, `leanchecker` in two modes and `lake comparator`, which
+run on a manual run of the workflow and on a pull request with the label
+`formal-measure` ([CI job](../formal-verification.md#ci-job)). Its unit
+tests run in the `test` step above, on Git repositories that they create
+with the gate inputs in a minimal form, and with fake tools: shell scripts
+that hang, exit with a given status, end by a signal or print what a tool
+prints. On the Linux runner of CI the tests run as `linux-aarch64`, so the
+installation of each repository holds the `versions.json` of the pinned
+image, which the run compares with the tool manifest, and the tests give
+the run a user ID other than that of the owner of the installation. The
+texts that tests read in the forms of Lean, Lake and `leanchecker` are
+output of the pinned Lean 4.35.0, captured with absolute paths replaced;
+those stored below `xtask/src/formal/fixtures/base/` name the command that
+printed them, and the default answers of the fake tools follow the same
+forms. The
 repositories lie in the system's temporary directory, outside the
 checkout, whose Cargo configuration the gate would otherwise find above
 their exports. The tests therefore assume that no
@@ -405,11 +424,11 @@ to an exact version in the manifest of the crate that uses it:
 | `tools/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | Report values, whose objects keep the order of their keys, and their JSON text |
 | `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching and in the receipts of the serial capture and of `cargo xtask qemu`, the suffix of their run directories, and the build-id of the test image |
 | `xtask/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask formal run`, `cargo xtask formal guard` and `cargo xtask formal toolchain-check`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
-| `xtask/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The process groups of the commands of `cargo xtask formal run`: killing a command's group, finding whether any of its processes remain, seeing that a command has ended without collecting it, and the default disposition of `SIGCHLD` that this needs; and finding whether SIGHUP is ignored when the run starts |
+| `xtask/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The process groups of the commands of `cargo xtask formal run`: killing a command's group, finding whether any of its processes remain, seeing that a command has ended without collecting it, and the default disposition of `SIGCHLD` that this needs; finding whether SIGHUP is ignored when the run starts; and the effective user of the run, the bytes available on the file system of its run directory and the largest resident set of a process that it collected, which its receipt records |
 | `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json` and `cargo xtask formal run` reads `verification/targets.json`, `verification/qualification/cases.json`, `verification/extraction.toml`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json` and the `translation.json` that Aeneas writes, and the types of the receipt of `cargo xtask formal run` |
-| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, reading the output of `cargo metadata` in the `manifests` step and in `cargo xtask formal run`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the messages that `lean --json` prints and the event of a pull request that `cargo xtask formal guard` reads |
+| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, reading the output of `cargo metadata` in the `manifests` step and in `cargo xtask formal run`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/image-pin.json`, the `versions.json` of the proof-tool image, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the messages that `lean --json` prints and the event of a pull request that `cargo xtask formal guard` reads |
 | `xtask/Cargo.toml` | `signal-hook` without default features | MIT OR Apache-2.0 | The handler that lets SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop `cargo xtask formal run`, and the emulation of their default action with which the run then ends |
-| `xtask/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests of the Aeneas patch and the Lake lock that `cargo xtask formal toolchain-check` compares with `verification/toolchain.json`, and of the output files of the commands of `cargo xtask formal run` and the Lean files that Aeneas writes in it |
+| `xtask/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests of the Aeneas patch and the Lake lock that `cargo xtask formal toolchain-check` compares with `verification/toolchain.json`, and of the output files of the commands of `cargo xtask formal run`, the Lean files that Aeneas writes in it and the `versions.json` of the proof-tool image |
 | `xtask/Cargo.toml` | `tar` without default features | MIT OR Apache-2.0 | Unpacking the tar archive of the gate inputs that `git archive` writes for `cargo xtask formal run` |
 | `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `toolchains.toml`, `rust-toolchain.toml`, Charon's `rust-toolchain` and `verification/extraction.toml` |
 | `xtask/Cargo.toml` | `walkdir` | MIT OR Unlicense | The listing of the tool installation that `cargo xtask formal run` takes at the start and at the end of a phase, without following symbolic links |

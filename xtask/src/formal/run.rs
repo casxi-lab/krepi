@@ -112,12 +112,13 @@ fn relative(base: &Path, path: &Path) -> String {
     }
 }
 
-/// What a run takes from its caller: `host` as [`host`] finds it, and `var`
-/// for the variables of the process environment.
+/// What a run takes from its caller: `host` as [`host`] finds it, `uid`,
+/// the effective user, and `var` for the variables of the process environment.
 pub(crate) struct Context<'a> {
     pub root: &'a Path,
     pub layout: &'a Layout,
     pub host: Option<&'a str>,
+    pub uid: u32,
     pub var: &'a dyn Fn(&str) -> Option<String>,
 }
 
@@ -223,6 +224,9 @@ impl Gate {
                 reason: Some(reason.clone()),
             },
         };
+        let disk = process::disk_available(&self.run.path);
+        let least = &mut self.receipt.resources.disk_least_available;
+        *least = disk.into_iter().chain(*least).min();
         let ran = ran.ok();
         let done = ran.as_ref();
         let mut argv = vec![request.program.to_string()];
@@ -383,6 +387,12 @@ fn blank(context: &Context, targets: &BTreeSet<String>, run: &str, directory: &s
         },
         targets: targets.iter().cloned().collect(),
         host: context.host.map(str::to_string),
+        image: (context.host == Some(toolchain::HOSTS[0])).then(|| receipt::Image {
+            reference: (context.var)("KREPI_FORMAL_IMAGE"),
+            uid: context.uid,
+            os_release: fs::read_to_string("/etc/os-release").ok(),
+            ..Default::default()
+        }),
         run: run.to_string(),
         directory: directory.to_string(),
         started: unix_seconds(),
@@ -432,6 +442,9 @@ pub(crate) fn execute(
         #[cfg(test)]
         overrides: None,
     };
+    let resources = &mut gate.receipt.resources;
+    resources.disk_available_at_start = process::disk_available(&run.path);
+    resources.disk_least_available = resources.disk_available_at_start;
     let inputs = paths::gate_inputs(context.layout);
     let mut phases = Some(phases);
     let steps = caught(|| {
@@ -459,6 +472,8 @@ pub(crate) fn execute(
         }
     }
     let mut receipt = gate.receipt;
+    receipt.resources.largest_process_max_rss = process::largest_child_rss();
+    receipt.resources.cgroup_memory_peak = process::cgroup_memory_peak();
     let scoped = !targets.is_empty();
     let failures = receipt.failures.iter().map(|failure| failure.status);
     let units = receipt.units.values().map(|unit| unit.status);
@@ -522,6 +537,14 @@ fn export_and_check(
         return Err(format!(
             "{toolchain} of the snapshot is not the file that the run read at its start"
         ));
+    }
+    let prefix = gate.installation()?.prefix;
+    let pin = source.join(gate.layout.image_pin);
+    if let Some((image, (_, text))) = gate.receipt.image.as_mut().zip(gate.manifest.as_ref()) {
+        let problems = toolchain::image(image, &prefix, text, &pin);
+        if !problems.is_empty() {
+            return Err(format!("image: {}", problems.join("; ")));
+        }
     }
     let names = fs::read_to_string(source.join(registry))
         .map_err(|error| error.to_string())
@@ -701,6 +724,7 @@ pub fn command(root: &Path, layout: &Layout, targets: BTreeSet<String>) -> ExitC
         root,
         layout,
         host: host(),
+        uid: process::effective_uid(),
         var: &var,
     };
     let run = RunDir::create(root);
@@ -730,7 +754,7 @@ pub(crate) mod tests {
     use std::process::{Command, Stdio};
 
     use super::*;
-    use crate::formal::fixture::Fixture;
+    use crate::formal::fixture::{self, Fixture};
 
     /// The budget of a test phase whose commands end by themselves.
     pub(crate) const LONG: Duration = Duration::from_secs(3_600);
@@ -834,9 +858,27 @@ pub(crate) mod tests {
             root,
             layout: &Layout::PRODUCTION,
             host,
+            uid: other_uid(),
             var: &|_| None,
         };
-        let receipt = execute(&context, &run, targets, phases, progress);
+        gate_with(&context, run, targets, phases, progress)
+    }
+
+    /// A user other than root and the one that runs the tests, which owns
+    /// the fixtures.
+    pub(crate) fn other_uid() -> u32 {
+        process::effective_uid() + 1
+    }
+
+    /// Runs the gate with `context` into `run`, and writes its receipt.
+    fn gate_with(
+        context: &Context,
+        run: RunDir,
+        targets: &BTreeSet<String>,
+        phases: Vec<Phase<'_>>,
+        progress: Box<dyn Write>,
+    ) -> Done {
+        let receipt = execute(context, &run, targets, phases, progress);
         let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
         let code = finish(&receipt, Some(&run), &mut stdout, &mut stderr);
         Done {
@@ -1684,6 +1726,21 @@ pub(crate) mod tests {
         assert_eq!(receipt.run, done.run.id);
         assert_eq!(receipt.directory, format!("{RUNS}/{}", done.run.id));
         assert_eq!(receipt.host.as_deref(), test_host());
+        // Only a run on the CI host records an image.
+        assert_eq!(
+            receipt.image.is_some(),
+            test_host() == Some("linux-aarch64")
+        );
+        let resources = &receipt.resources;
+        let start = resources
+            .disk_available_at_start
+            .expect("the disk at the start");
+        let least = resources.disk_least_available.expect("the least disk");
+        assert!(0 < least && least <= start, "{resources:?}");
+        assert!(resources.largest_process_max_rss.is_some_and(|rss| rss > 0));
+        if cfg!(target_os = "macos") {
+            assert_eq!(resources.cgroup_memory_peak, None);
+        }
         let commit = fixture.git(&["rev-parse", "HEAD"]);
         assert_eq!(receipt.commit.as_deref(), Some(commit.trim()));
         let tree = fixture.git(&["rev-parse", "HEAD^{tree}"]);
@@ -1798,6 +1855,209 @@ pub(crate) mod tests {
             done.has_failure(Status::ToolFailure, "the host is "),
             "{:?}",
             done.failures()
+        );
+    }
+
+    /// Runs the gate on `fixture` on the CI host as the user `uid`, with
+    /// the variables `vars`, and a phase whose unit `u1` is verified.
+    fn on_the_ci_host(fixture: &Fixture, uid: u32, vars: &[(&str, &str)]) -> Done {
+        let var = |name: &str| {
+            let found = vars.iter().find(|(key, _)| *key == name);
+            found.map(|(_, value)| value.to_string())
+        };
+        let context = Context {
+            root: fixture.root(),
+            layout: &Layout::PRODUCTION,
+            host: Some("linux-aarch64"),
+            uid,
+            var: &var,
+        };
+        let run = RunDir::create(fixture.root()).expect("create the run directory");
+        let phases = vec![phase("checks", LONG, &["u1"], |run| {
+            run.conclude("u1", (Status::Verified, None));
+            Ok(())
+        })];
+        gate_with(
+            &context,
+            run,
+            &BTreeSet::new(),
+            phases,
+            Box::new(io::sink()),
+        )
+    }
+
+    /// Asserts that `done` stopped before its phases with the one failure
+    /// `failure`, without running any tool of the installation.
+    fn stopped_by_the_image(done: &Done, failure: &str) {
+        assert_eq!(done.code, ExitCode::FAILURE);
+        let receipt = done.written();
+        assert_eq!(receipt, done.receipt);
+        assert_eq!(receipt.status, Status::ToolFailure);
+        assert!(!receipt.complete);
+        assert_eq!(done.failures(), [failure]);
+        assert_eq!(receipt.units["u1"].status, Status::NotRun);
+        assert!(!receipt.phases["checks"].ran);
+        assert!(!done.sites().contains(&Site::CargoMetadata));
+    }
+
+    #[test]
+    fn an_image_whose_version_manifest_differs_from_the_tool_manifest_fails_the_run() {
+        let fixture = Fixture::new("versions");
+        let commit = "eb6cafb7290e8bd5f2937522d8d804f58f02bafc";
+        let other = "0000000000000000000000000000000000000001";
+        let versions = fixture::VERSIONS.replace(commit, other);
+        assert_ne!(versions, fixture::VERSIONS);
+        fixture.write("artifacts/formal/tools/versions.json", &versions);
+        let done = on_the_ci_host(&fixture, other_uid(), &[]);
+        let failure = format!("image: /lean/commit is \"{other}\", not \"{commit}\"");
+        stopped_by_the_image(&done, &failure);
+        let image = done.receipt.image.as_ref().expect("the image is recorded");
+        assert_eq!(image.versions.as_deref(), Some(versions.as_str()));
+        let digest = toolchain::sha256(versions.as_bytes());
+        assert_eq!(image.versions_sha256, Some(digest));
+        // The published version manifest passes.
+        fixture.write("artifacts/formal/tools/versions.json", fixture::VERSIONS);
+        let done = on_the_ci_host(&fixture, other_uid(), &[]);
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        let image = done.receipt.image.as_ref().expect("the image is recorded");
+        let digest = "8b5e39cb407d4d8f5cf7fd29d0485e43a439276ea6e3808a60e24f4c196a24e6";
+        assert_eq!(image.versions_sha256.as_deref(), Some(digest));
+    }
+
+    #[test]
+    fn an_image_without_a_version_manifest_fails_the_run() {
+        let fixture = Fixture::new("no-versions");
+        fs::remove_file(fixture.root().join("artifacts/formal/tools/versions.json"))
+            .expect("remove the version manifest");
+        let done = on_the_ci_host(&fixture, other_uid(), &[]);
+        assert_eq!(done.failures().len(), 1, "{:?}", done.failures());
+        let failure = done.failures()[0];
+        assert!(
+            failure.starts_with("image: cannot read versions.json: "),
+            "{failure}"
+        );
+        stopped_by_the_image(&done, failure);
+        let image = done.receipt.image.as_ref().expect("the image is recorded");
+        assert_eq!((&image.versions, &image.versions_sha256), (&None, &None));
+    }
+
+    #[test]
+    fn a_run_as_root_or_as_the_owner_of_the_installation_fails_the_run() {
+        let fixture = Fixture::new("owner");
+        let prefix = fixture.root().join("artifacts/formal/tools");
+        for uid in [0, process::effective_uid()] {
+            let done = on_the_ci_host(&fixture, uid, &[]);
+            let failure = format!("image: user {uid} can write {}", prefix.display());
+            stopped_by_the_image(&done, &failure);
+            let image = done.receipt.image.as_ref().expect("the image is recorded");
+            assert_eq!((image.uid, image.writable), (uid, Some(true)));
+        }
+        // Another user passes, unless the group or others may write the
+        // prefix, whatever groups the user is in.
+        let done = on_the_ci_host(&fixture, other_uid(), &[]);
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        let image = done.receipt.image.as_ref().expect("the image is recorded");
+        assert_eq!((image.uid, image.writable), (other_uid(), Some(false)));
+        for mode in [0o775, 0o757] {
+            fixture.chmod("artifacts/formal/tools", mode);
+            let done = on_the_ci_host(&fixture, other_uid(), &[]);
+            let failure = format!("image: user {} can write {}", other_uid(), prefix.display());
+            stopped_by_the_image(&done, &failure);
+        }
+    }
+
+    #[test]
+    fn a_run_that_stops_before_its_export_has_not_checked_the_image() {
+        let fixture = Fixture::new("image-unchecked");
+        fixture.write("xtask/README", "Changed.\n");
+        let done = on_the_ci_host(&fixture, other_uid(), &[("KREPI_FORMAL_IMAGE", "i")]);
+        assert_eq!(done.receipt.status, Status::ToolFailure);
+        let image = done.written().image.expect("the image is recorded");
+        assert_eq!(
+            (image.reference.as_deref(), image.uid),
+            (Some("i"), other_uid())
+        );
+        assert_eq!((image.writable, image.versions), (None, None));
+    }
+
+    #[test]
+    fn an_image_reference_other_than_the_pin_fails_the_run() {
+        let fixture = Fixture::new("reference");
+        let pin = include_str!("../../../verification/image-pin.json");
+        fixture.write("verification/image-pin.json", pin);
+        fixture.commit_all();
+        let (_, pinned) = toolchain::image_pin(pin).expect("the committed pin reads");
+        let trigger = [
+            ("GITHUB_EVENT_NAME", "push"),
+            ("GITHUB_REF", "refs/heads/main"),
+            ("GITHUB_RUN_ID", "42"),
+            ("GITHUB_RUN_ATTEMPT", "2"),
+        ];
+        let done = on_the_ci_host(&fixture, other_uid(), &trigger);
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        assert_eq!(
+            done.receipt.image.as_ref().expect("an image").reference,
+            None
+        );
+        let given = [("KREPI_FORMAL_IMAGE", pinned.as_str())];
+        let done = on_the_ci_host(&fixture, other_uid(), &[&given[..], &trigger].concat());
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        let receipt = done.written();
+        let image = receipt.image.as_ref().expect("the image is recorded");
+        assert_eq!(image.reference.as_deref(), Some(pinned.as_str()));
+        assert_eq!(image.uid, other_uid());
+        assert_eq!(image.os_release, fs::read_to_string("/etc/os-release").ok());
+        let trigger = &receipt.trigger;
+        let found = [
+            &trigger.event,
+            &trigger.reference,
+            &trigger.run_id,
+            &trigger.attempt,
+        ];
+        let found = found.map(|value| value.as_deref());
+        assert_eq!(
+            found,
+            [Some("push"), Some("refs/heads/main"), Some("42"), Some("2")]
+        );
+        // Another digest, a tag, the bare repository or no pin stop the run.
+        let (repository, _) = pinned.split_once('@').expect("a digest");
+        let other = format!("{repository}@sha256:{}", "0".repeat(64));
+        let tag = format!("{repository}:latest");
+        for given in [other.as_str(), tag.as_str(), repository] {
+            let done = on_the_ci_host(&fixture, other_uid(), &[("KREPI_FORMAL_IMAGE", given)]);
+            stopped_by_the_image(
+                &done,
+                "image: the snapshot pins no image or another than the job's",
+            );
+            let image = done.receipt.image.as_ref().expect("the image is recorded");
+            assert_eq!(image.reference.as_deref(), Some(given));
+        }
+        fixture.git(&["rm", "--quiet", "verification/image-pin.json"]);
+        fixture.commit_all();
+        let done = on_the_ci_host(&fixture, other_uid(), &given);
+        stopped_by_the_image(
+            &done,
+            "image: the snapshot pins no image or another than the job's",
         );
     }
 

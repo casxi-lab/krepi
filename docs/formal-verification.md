@@ -22,7 +22,8 @@ The registries `verification/targets.json`, `verification/models.json` and
 `verification/tcb.json`: no target, model, statement, library axiom or
 trusted item is registered. The pinned tools exist: the tool manifest
 `verification/toolchain.json`, the reviewed Aeneas patch, the recipe of the
-image that holds the tools, the workflows that build and publish it, and
+image that holds the tools, the workflows that build and publish it, the
+pin of the published image, `verification/image-pin.json`, and
 `cargo xtask formal toolchain-check`, which checks the manifest against the
 Aeneas and Charon sources ([tools](#tools)).
 `cargo xtask formal run` exists as the proof gate
@@ -37,11 +38,14 @@ a pull request, a first phase records the [guard](#guard), which
 about the kernel. The qualification rejects 27 of the cases taken from the
 CAS project for now: they keep the expectations recorded with the earlier
 Charon and Aeneas, which the pinned tools no longer meet, until each change
-is explained and reviewed. Everything else on this page is planned:
-specifications, statements and targets, the other phases of the gate and
-the other commands of `cargo xtask formal`. They are set up by porting the
-tooling of the CAS project and the prototype tree, and this page changes
-with them. Nothing about the kernel is proved.
+is explained and reviewed. CI runs the gate in the pinned image on every
+pull request to `main` and every push to `main`, in a job that is not
+required ([CI job](#ci-job)); until those cases are revised, it ends
+`REJECTED` and fails. Everything else on this page is planned:
+specifications, statements and targets, the other phases of the gate, the
+required gate and the other commands of `cargo xtask formal`. They are set
+up by porting the tooling of the CAS project and the prototype tree, and
+this page changes with them. Nothing about the kernel is proved.
 
 Proofs of the prototype are proofs about that code.
 They do not carry over: a module taken into krepi is proved again against the
@@ -74,6 +78,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/toolchain.json` | The tool manifest: Lean, the Aeneas source commit with its reviewed patch and the Lake lock of its Lean library, Charon, the Rust nightly used by Charon, opam and GMP, with the downloads of each host ([tools](#tool-manifest)) | Present |
 | `verification/tooling/` | Reviewed tool patches, named by the manifest, and their license texts | Present |
 | `verification/image/` | The recipe of the image that holds the pinned tools, the list of its third-party notices, and the check of the built image as a user other than root ([image](#image)) | Present |
+| `verification/image-pin.json` | The published image that the CI jobs of the gate run, by its digest ([image pin](#image-pin)) | Present |
 | `verification/lakefile.toml`, `lean-toolchain`, `lake-manifest.json` | The Lake project of the hand-written Lean and of the generated definitions, with the Lean toolchain and the packages of the Lake lock of the Aeneas Lean library ([qualification](#qualification)), and the library `KrepiRoot` of the root module that the [base round](#base-round) writes | Present |
 | `verification/extraction.toml` | How Charon compiles each extracted crate ([extraction](#extraction)) | Present |
 | `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there | Planned |
@@ -246,7 +251,11 @@ outputs of Mathlib and of the packages it depends on, which
 `lake exe cache get` unpacks readable by their owner only. The directories
 that hold the trees can be written by root alone. So the tools run as any
 other user, and that user cannot change the installation. The image sets no
-user: whoever runs it chooses one.
+user: whoever runs it chooses one. CI runs every container of the gate as
+the runner's own user, which is not root, without capabilities, new
+privileges or a network, with an init process, on a read-only root file
+system with a temporary `/tmp`, and with the checkout mounted at its path
+on the runner ([CI job](#ci-job)).
 
 The build fails when a component that `notices/README` lists has no license
 text, and also when one of the packages below has none:
@@ -263,6 +272,68 @@ text, and also when one of the packages below has none:
   package without a source, such as a `base-` or `conf-` package, holds no
   code;
 - each package of the Lake lock of the Aeneas Lean library.
+
+### Image pin
+
+`verification/image-pin.json` names the published image that the CI jobs of
+the gate run ([CI job](#ci-job)). It has schema 1:
+
+| Field | Content |
+| --- | --- |
+| `schema` | `1` |
+| `repository` | The repository of the image in the registry, without a tag or a digest |
+| `digest` | The digest of the image: `sha256:` and 64 lowercase hexadecimal digits |
+| `revision` | The commit of `main` from which `formal image publish` built and published the image, for readers; nothing checks it |
+
+The file lies outside `verification/image/` and the other paths that start
+the image workflows, so changing it builds and publishes no image, and the
+image does not contain it. It has three readers:
+
+- `.github/workflows/formal.yml` names the image as
+  `<repository>@<digest>` in its variable `IMAGE`, which every container of
+  the workflow runs, after a pull that takes the image by that digest.
+- The `workflows` step of `cargo xtask check` reads the pin from the tracked
+  files and fails unless a workflow that runs on `pull_request` names that
+  reference and every mention of the repository in such a workflow,
+  comments included, is the reference itself. A tag, another digest and the
+  bare repository each fail with their line. A workflow that does not run
+  on `pull_request`, such as `formal image publish`, which tags what it
+  publishes, is not checked. The check is in `toolchain.rs`;
+  `workflows.rs` only tells which workflows run on `pull_request`, as its
+  third rule does.
+- `cargo xtask formal run` on `linux-aarch64` checks the image that it runs
+  in, after the export of the snapshot and before Cargo or any phase runs.
+  It stops the run as a tool failure, with one failure that starts with
+  `image:` and names each problem, when the job names an image in
+  `KREPI_FORMAL_IMAGE` that is not the reference of the export's pin; when
+  `versions.json` of the installation cannot be read; when an item that
+  both it and the tool manifest pin differs; or when the user of the run is
+  root, owns the directory of the installation, or could write it through
+  the write permission of its group or of others, whatever groups the user
+  is in. Such a user could change the modes of the installation, so the
+  gate does not run as one. Without `KREPI_FORMAL_IMAGE` the receipt
+  records no reference.
+
+The compared items, each as a JSON value: `schema`, the schema of the
+image's own file, which must be 1; of `lean`, `version`, `commit` and
+`sha256`, the digest of the Lean archive of the `linux-aarch64` column; of
+`aeneas`, `commit`, `patch_sha256`,
+`lake_manifest_sha256`, `mathlib_commit`, and `version`, which must be
+`aeneas <the first 7 digits of the commit>+patch-<the first 8 of
+patch_sha256>`; of `charon`, `commit`, and `version`, which must be the
+manifest's `version` followed by the commit in parentheses; of `rust`,
+`toolchain`, `rustc_commit`, `manifest_sha256`, `rustup`, `rustup_commit`
+and `rustup_init_sha256`, the digest of the column's `rustup-init`; of
+`opam`, `version`, `repository_commit`, `sha256` and
+`switch_export_sha256`, the last two from the column, and `ocaml`, the
+version of the manifest's compiler package; and of `gmp`, `version` and
+`sha256`. The image's Rust `targets` and `components` must hold those of
+the manifest, where a component counts bare or with the suffix
+`-aarch64-unknown-linux-gnu`. What the manifest does not pin, such as the
+Ubuntu versions of bubblewrap and Git and the base image, is only recorded,
+with the whole file, in the receipt. A unit test runs the check on the
+`versions.json` of the pinned image, which `xtask/src/formal/fixtures/image/`
+keeps, against the committed manifest.
 
 ### Environment of tool commands
 
@@ -329,10 +400,26 @@ pull requests:
    again from `main`, publishes it as
    `ghcr.io/casxi-lab/krepi-formal:<commit>` and prints its digest. It
    refuses to run while `switch_export_sha256` of `linux-aarch64` is `null`.
-2. The second pins that digest as the image that the CI jobs of the proof
-   gate (planned) pull, and those jobs validate it on its pull request.
+2. The second pins that digest: it sets `digest` and `revision` of
+   `verification/image-pin.json` and the reference in `IMAGE` of
+   `.github/workflows/formal.yml` together, as the `workflows` step requires
+   ([image pin](#image-pin)), and starts no image workflow. The CI job of
+   the gate on its pull request is the first run of the new image
+   ([CI job](#ci-job)).
 
-Both workflows run only for changes to these paths or to the two workflows.
+When the first changes a version or digest that the gate compares with the
+image ([image pin](#image-pin)), the CI job of the gate still runs the image
+of the old pin, so the gate stops as a tool failure on that pull request and
+on every push to `main` until the second is merged. Once the second is
+merged, a pull request runs the workflow of its merge with `main`, and so
+the new image, while the gate compares that image with the pin of the pull
+request's head: on every open pull request that does not yet contain the
+second, the gate stops as a tool failure, `image: the snapshot pins no
+image or another than the job's`, until the pull request is updated from
+`main`. The same failure names a pin that is missing or cannot be read.
+
+The two image workflows run only for changes to these paths or to the two
+workflows.
 The publish workflow runs only on pushes to `main`, and its job alone may
 write packages; a pull request never publishes an image. Both run every
 step with `bash -eo pipefail`. Before the image build, both run the tool
@@ -379,9 +466,10 @@ The commands of `cargo xtask formal` follow the design of the gate.
 | `cargo xtask formal merge` (planned) | Combines the receipts of the shards of a run and of its qualification into the conclusion of the whole gate |
 
 `cargo xtask check` does not run the gate, which needs the pinned tools.
-CI is to run the gate in a job of its own on every change, and a change is
-to merge only when the required gate passes on its head or a committed
-waiver record covers the failure; both are planned.
+CI runs the gate in a job of its own on every pull request to `main` and
+every push to `main` ([CI job](#ci-job)). That job is not required: a
+change is to merge only when a required gate passes on its head or a
+committed waiver record covers the failure, and both are planned.
 
 ## Gate run
 
@@ -417,9 +505,11 @@ in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
    line-ending conversions, therefore cannot change what the run reads; any
    difference is a tool failure. The tool manifest of the export must also
    be the file that the run read from the checkout at its start, for the
-   environment of its commands, and the target registry of the export,
-   `verification/targets.json`, must register every name given with
-   `--target`;
+   environment of its commands. On `linux-aarch64` the run then checks the
+   image that it runs in against the tool manifest and the export's image
+   pin, and the user it runs as ([image pin](#image-pin)). The target
+   registry of the export, `verification/targets.json`, must register every
+   name given with `--target`;
 4. rejects the run when a gate input is a Python source, a file whose name
    ends in `.py` in any case, a Lean file below `verification/KrepiGen/`,
    the directory of the generated definitions, which only stages of the run
@@ -860,8 +950,10 @@ links below them: the path, mode, size, modification and change times and
 link target of each entry. Any difference stops the phase as a tool
 failure that names up to 20 paths, so that a tool that writes to the
 installation is a tool failure of the run. In the image, the installation
-belongs to root, every user can read it and none but root can write it, and
-the gate is to run there as another user (the CI job is planned).
+belongs to root, every user can read it and none but root can write it. CI
+runs the gate there as the runner's user, on a read-only root file system
+([CI job](#ci-job)), and the gate refuses to run as root or as the owner of
+the installation ([image pin](#image-pin)).
 
 **Conclusions.** `base` is `VERIFIED` when the round has no problem and no
 command forced it, and `REJECTED` with its problems otherwise: the
@@ -1096,11 +1188,13 @@ keys; times are seconds, rounded to milliseconds.
 | `trigger` | `mode`, `MANUAL` for a run of the whole gate and `SCOPED` for a run of named targets, with `REQUIRED`, `FORCED_FULL` and `WEEKLY` kept for the jobs of CI; `event`, `ref`, `run_id` and `attempt`, from `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`, or `null` |
 | `targets` | The names given with `--target`, sorted; empty for a run of the whole gate |
 | `host` | `linux-aarch64` or `darwin-arm64`, or `null` on another host |
+| `image` | The image of a run on `linux-aarch64`, below, or `null` on another host |
 | `run`, `directory` | The identifier of the run, and its directory relative to the repository root |
 | `started`, `seconds` | The Unix time in seconds at which the run started, and how long it took |
 | `commit`, `tree` | The snapshot commit and its root tree, or `null` |
 | `inputs` | `before` and `after`, the object of each gate input (`mode`, `type`, `oid`, or `null` when the commit does not have it) at the start and at the end, or `null` when they were not taken; `clean_after`, whether the gate inputs were clean at the end, or `null` |
 | `budgets` | `gate_seconds`, 7200, and `receipt_margin_seconds`, 300 |
+| `resources` | What the run used of the host, below |
 | `phases` | For each phase, `budget_seconds`, `seconds` and `ran` |
 | `units` | For each unit, its `phase`, its `status` and the `reason` for it, or `null` |
 | `qualification` | What the qualification found, below, or `null` when it did not start |
@@ -1108,6 +1202,31 @@ keys; times are seconds, rounded to milliseconds.
 | `guard` | What the guard found on a pull request, below, or `null` without a pull request event or when its phase did not finish |
 | `commands` | Every command, in the order in which they ran |
 | `failures` | Every failure that is not the conclusion of a unit, with its `status` and `message` |
+
+The `image` record has these fields:
+
+| Field | Content |
+| --- | --- |
+| `reference` | The image that the job named in `KREPI_FORMAL_IMAGE`, `<repository>@<digest>`, or `null` without the variable |
+| `uid` | The effective user ID of the run |
+| `writable` | Whether that user could write the directory of the installation, as the [image pin](#image-pin) describes, or `null` when the run stopped before the check |
+| `versions_sha256` | The SHA-256 of `versions.json` of the installation, or `null` when it could not be read |
+| `versions` | The whole text of that file, or `null` |
+| `os_release` | The whole text of `/etc/os-release`, or `null` |
+
+The manifest and `/etc/os-release` are kept as text, as the image wrote
+them, so that the receipt holds the image's own record without a parser
+and without a map in the order of a JSON object.
+
+The `resources` record has these fields, each `null` when the host does not
+report it:
+
+| Field | Content |
+| --- | --- |
+| `disk_available_at_start` | The bytes available to users other than root on the file system of the run directory when the run started |
+| `disk_least_available` | The least of those bytes at the start and after each command |
+| `largest_process_max_rss` | The largest maximum resident set of a single process that the run collected, or that such a process collected, in bytes: the largest one process, not the sum of processes that ran side by side |
+| `cgroup_memory_peak` | `memory.peak` of the run's cgroup under cgroup version 2, in bytes: in CI the container's. It counts the page cache too, such as the build outputs of Mathlib that Lean maps, so it bounds from above what the container held and does not say what the processes needed |
 
 Each command has these fields:
 
@@ -1163,13 +1282,143 @@ The `guard` record has these fields:
 | `raised` | The files with a new raised heartbeat limit |
 | `rules` | Each rule, with why it fails, or `null` when it holds |
 
-Fields are only added to schema 1 while the gate's phases are added, until
-CI keeps receipts; after that, any change of a field takes a new schema.
-Receipts come from two hosts. CI is to run the gate on `linux-aarch64` in
-the image, as a user that cannot write to its read-only installation (the
-job is planned). Local runs on `darwin-arm64`, with the installation at
-`artifacts/formal/tools`, serve development; there the gate only detects
-writes to the installation. Only receipts of CI runs are evidence.
+CI keeps the receipts of its runs, so any change of a field takes a new
+schema. Receipts come from two hosts. CI runs the gate on `linux-aarch64`
+in the pinned image, as the runner's user, which cannot write the image's
+installation, and records the image ([CI job](#ci-job)). Local runs on
+`darwin-arm64`, with the installation at `artifacts/formal/tools`, serve
+development; there the user owns the installation, the receipt records no
+image, and the gate only detects writes to the installation. Only receipts
+of CI runs are evidence.
+
+### CI job
+
+The workflow `formal`, `.github/workflows/formal.yml`, runs the gate in CI.
+Its job `formal run` runs on every push to `main` and on every pull request
+to `main` when it is opened, reopened or updated, when a label is added or
+removed, and when its description is edited, since the guard reads the
+labels and the description. It is not a required check. A newer event of
+the same pull request cancels a run of the job that has not ended. The job
+runs on a GitHub-hosted `ubuntu-24.04-arm` runner, may only read the
+repository's contents, uses no stored credentials, and runs actions pinned
+to full commit SHAs. Its steps:
+
+1. check out the head of the pull request, or the pushed commit, with its
+   whole history, which the guard needs for the merge base;
+2. record the runner (its user, processors, memory, disk, kernel, and
+   Docker's cgroup version and security options), and fail when the
+   runner's user is root or does not own the checkout; pull the image by
+   the digest of `IMAGE` ([image pin](#image-pin)) and record its digests
+   and size; copy the event to `artifacts/formal/event.json`, inside the
+   checkout;
+3. build xtask on the runner with the Rust toolchain of
+   `rust-toolchain.toml`;
+4. probe a container of the image with the flags of the gate: the step
+   fails unless the user is not root, the root file system is read-only, no
+   capability is left in the bounding set, new privileges are off, `lo` is
+   the only network interface, every attempt to create a file in or change
+   the mode of `lean/`, `backend/`, `bin/`, `rustup/` and `cargo/` of the
+   installation fails, and xtask starts in the image;
+5. on a pull request, run `cargo xtask formal guard` with the copied event,
+   as the binary of step 3 on the runner; its failure fails the job, and the
+   gate still runs;
+6. run `cargo xtask formal run`, as the same binary, in a container of the
+   image, as the runner's user and group, with
+   `--pull never --init --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --network none`,
+   the checkout mounted at its own path as the working directory, and the
+   variables `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and
+   `GITHUB_RUN_ATTEMPT` of the run, `GITHUB_EVENT_PATH` naming the copied
+   event, and `KREPI_FORMAL_IMAGE` naming the image of `IMAGE`;
+7. always, remove the container of the gate if a cancelled step left it;
+8. always, write a summary of the receipt to the summary of the workflow
+   run: the status, whether the run is complete, its time and that of each
+   phase, the number of units of each status, the image, the resources, the
+   rules of the guard, every unit that is not `VERIFIED` and every failure.
+   The step fails when the gate's step ran and left no receipt;
+9. always, upload `job.txt`, the record of steps 2 to 4 and of the start
+   and end of the gate, the output of the guard, the event, and the receipt
+   and the logs of the run as the artifact
+   `formal-receipt-<commit>-<attempt>`.
+
+xtask finds the repository through the path at which it was compiled, so
+the checkout is mounted at that path; the runner and the image are the same
+Ubuntu release, so xtask, built on the runner, runs in the image, as the
+probe checks. The runner's user owns the checkout, so
+the run directory is its own and Git works in the checkout, while Lake's
+Git works in the packages of the installation through `safe.directory`
+([environment of tool commands](#environment-of-tool-commands)). The init
+process collects processes that leave their group, which the gate as
+process 1 would not, and `--pull never` makes a missing image an error
+instead of a pull.
+
+The job may take 140 minutes: 15 for the steps before the gate (2 to check
+out, 8 to record the runner and pull, 3 to build xtask, 1 for the probe and
+1 for the guard), and the gate's own 7,200 s with the 300 s of its receipt.
+The gate's step has a limit of 126 minutes, a backstop one minute after the
+gate's own end. When the steps before the gate and the gate use all their
+time, the steps after it have almost none, and the limit of the job may cut
+the upload; the receipt is still written in the checkout. When the gate's
+step is cancelled or reaches its limit, the step after it removes the
+container, and the gate writes no receipt.
+
+The gate's step fails whenever the gate does not exit with 0, `REJECTED`
+included, and nothing marks a failure as expected. While the qualification
+rejects the cases kept from the CAS project, every run of the job fails, and
+the summary shows whether exactly those units are rejected.
+
+The measurement jobs `leanchecker fresh`, `leanchecker prefix` and
+`lake comparator` run on a manual run of the workflow (`workflow_dispatch`,
+which runs the workflow of the branch it is started on) and on a pull
+request that has the label `formal-measure`, when it is opened, reopened or
+updated and when that label is added, but not when its description is
+edited or another label changes; the job `formal run` does not run on a
+manual run. Each waits for an earlier run of itself on the same pull request
+or commit instead of cancelling it.
+
+- `leanchecker fresh` and `leanchecker prefix`, 120 minutes each, prepare
+  and run the gate as `formal run` does, without the probe and the guard
+  step; a gate that exits with 1 passes there, and any other status but 0
+  fails. The gate's step has 75 minutes there, which hold a qualification
+  that uses its whole budget and a base round of the expected length. Then
+  they drop the page cache of the runner and run, in the stage of the base
+  round, in a container with the flags of the gate,
+  `lake env /usr/bin/time -v leanchecker --fresh Krepi`, or
+  `leanchecker Krepi` and then `leanchecker KrepiGen` in the same way, each
+  with the variables of tool commands, which a test keeps equal to those of
+  the gate but for the home and temporary directories. This step has no
+  limit of its own, so only the job's limit bounds it. It fails when the
+  base round did not build its stage or `leanchecker` does not exit with 0.
+  The summary gives the time from the start of the job, which the runner's
+  worker process gives, to the end of the build of xtask; the time of the
+  extraction of the three qualification cases with proofs and that of the
+  base round without its audits and `leanchecker`, both from the receipt;
+  the wall time of the measured `leanchecker` calls; and their sum, an
+  estimate of the time of a job that does only what `leanchecker --fresh`
+  needs, composed of these parts. The extraction and the base round run
+  after the qualification, so on a warm page cache, and `/usr/bin/time`
+  inside `lake env` leaves out Lake's loading of the workspace. As context,
+  the summary also gives how long the container of each call ran, until it
+  was removed when the job's limit cut the call, and the time from the start
+  of the job to the end of the last call and to the summary. The output and
+  the `/usr/bin/time` record of each call, the times and the receipt with
+  its logs are uploaded as `formal-leanchecker-<mode>-<commit>-<attempt>`.
+- `lake comparator`, 30 minutes, writes a Lake project from the counter
+  fixtures of `xtask/src/formal/fixtures/base/counter/`, with two
+  handwritten challenges, and runs `lake comparator` on three
+  configurations: a challenge that the solution proves, the statement
+  module as the challenge, and a challenge that the solution proves only in
+  a weaker form. It runs each, in a new copy of the project, in these
+  container settings in turn: Docker's defaults, as root; those with seccomp
+  and AppArmor unconfined; the container of the gate; and, after
+  `kernel.apparmor_restrict_unprivileged_userns` is set to 0 on the runner,
+  the second setting and the gate's container again, and both once more
+  with an empty `/run`, where bubblewrap creates `/run/user`, the gate's
+  container then also with seccomp and AppArmor unconfined. It records the
+  kernel, the settings of user namespaces, Docker's security options and
+  the version of bubblewrap in the image, and the exit status and output of
+  each run, and uploads them as `formal-comparator-<commit>-<attempt>`. A
+  result of the comparator never fails the job; an error of Docker, exit
+  status 125 to 127, or of the runner does.
 
 ## Proof targets
 

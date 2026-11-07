@@ -32,13 +32,16 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::process::ExitCode;
 
 use serde::Deserialize;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use super::Layout;
+use super::receipt::Image;
 
 /// The schema version of the manifest that this module reads.
 pub const SCHEMA: u32 = 1;
@@ -626,6 +629,98 @@ pub fn command(root: &Path, layout: &Layout, aeneas: &Path, charon: &Path) -> Ex
     }
 }
 
+/// The repository and the reference `<repository>@<digest>` of the image
+/// pin, which has schema 1, a plain repository, a digest and a commit.
+pub fn image_pin(text: &str) -> Option<(String, String)> {
+    let pin: Value = serde_json::from_str(text).ok()?;
+    let field = |key: &str| pin[key].as_str().unwrap_or_default();
+    let (repository, digest) = (field("repository"), field("digest"));
+    let sha256 = is_hex(digest.strip_prefix("sha256:").unwrap_or_default(), 64);
+    let plain = pin["schema"] == 1 && !repository.is_empty() && !repository.contains([':', '@']);
+    let reference = format!("{repository}@{digest}");
+    (plain && sha256 && is_hex(field("revision"), 40)).then(|| (repository.into(), reference))
+}
+
+const IMAGE_ITEMS: &str = "/opam/switch_export_sha256=/hosts/linux-aarch64/switch_export_sha256 \
+    /aeneas/lake_manifest_sha256 /rust/rustup_init_sha256=/hosts/linux-aarch64/rustup_init/sha256 \
+    /lean/sha256=/hosts/linux-aarch64/lean/sha256 /opam/sha256=/hosts/linux-aarch64/opam/sha256 \
+    /rust/rustc_commit /opam/repository_commit /charon/version=/d/charon /aeneas/version=/d/aeneas \
+    /aeneas/patch_sha256 /aeneas/mathlib_commit /rust/manifest_sha256 /opam/ocaml=/d/ocaml \
+    /lean/version /aeneas/commit /charon/commit /rust/toolchain /rust/rustup_commit /opam/version \
+    /lean/commit /rust/rustup /gmp/version /gmp/sha256 /schema=/d/schema";
+
+/// Completes the record of the image of a run on the CI host and finds why
+/// the run stops: the installation at `prefix` has no version manifest, or
+/// one that differs from the tool `manifest` in [`IMAGE_ITEMS`] (image `=`
+/// tool item; `/d` derived or fixed), the Rust targets or the components; the
+/// job's reference is not the pin at `pin`; or the gate's user is root, owns the
+/// prefix or has the group or other write bit, whatever its groups.
+pub fn image(image: &mut Image, prefix: &Path, manifest: &str, pin: &Path) -> Vec<String> {
+    let versions = fs::read_to_string(prefix.join("versions.json"));
+    let parse = |text: &str| serde_json::from_str(text).unwrap_or(Value::Null);
+    let [found, mut tools] = [versions.as_deref().unwrap_or_default(), manifest].map(parse);
+    let get = |pointer| tools.pointer(pointer).and_then(Value::as_str);
+    let both = |one, other| get(one).zip(get(other));
+    tools["d"] = json!({"ocaml": get("/opam/compiler").and_then(|c| c.split_once('.')).map(|v| v.1),
+        "charon": both("/charon/version", "/charon/commit").map(|(v, c)| format!("{v} ({c})")),
+        "schema": 1, "aeneas": both("/aeneas/commit", "/aeneas/patch_sha256")
+            .map(|(commit, patch)| format!("aeneas {commit:.7}+patch-{patch:.8}"))});
+    let at = |pointer| found.pointer(pointer).unwrap_or(&Value::Null);
+    let mut problems = Vec::new();
+    for item in IMAGE_ITEMS.split_whitespace() {
+        let (ours, theirs) = item.split_once('=').unwrap_or((item, item));
+        let pinned = tools.pointer(theirs).unwrap_or(&Value::Null);
+        if pinned.is_null() || at(ours) != pinned {
+            problems.push(format!("{ours} is {}, not {pinned}", at(ours)));
+        }
+    }
+    for pointer in ["/rust/targets", "/rust/components"] {
+        let installed = at(pointer).to_string();
+        let installed = installed.replace("-aarch64-unknown-linux-gnu\"", "\"");
+        let names = tools.pointer(pointer).and_then(Value::as_array);
+        for name in names.into_iter().flatten() {
+            if !installed.contains(&name.to_string()) {
+                problems.push(format!("{pointer} lacks {name}"));
+            }
+        }
+    }
+    if let Err(error) = &versions {
+        problems = vec![format!("cannot read versions.json: {error}")];
+    }
+    let pinned = fs::read_to_string(pin).map(|text| image_pin(&text));
+    if image.reference.is_some() && image.reference != pinned.ok().flatten().map(|pin| pin.1) {
+        problems.push("the snapshot pins no image or another than the job's".into());
+    }
+    let open = |meta: fs::Metadata| meta.uid() == image.uid || meta.mode() & 0o022 != 0;
+    image.writable = Some(image.uid == 0 || fs::metadata(prefix).map_or(true, open));
+    if image.writable == Some(true) {
+        problems.push(format!("user {} can write {}", image.uid, prefix.display()));
+    }
+    image.versions_sha256 = versions.as_ref().ok().map(|text| sha256(text.as_bytes()));
+    image.versions = versions.ok();
+    problems
+}
+
+/// The problems of the image references in the pull request workflows
+/// `files`: one names the image `pin`, and so does each mention of its repository.
+pub fn image_references(pin: &str, files: &[(&str, &str)]) -> Vec<String> {
+    let Some((repository, reference)) = image_pin(pin) else {
+        return vec!["the image pin lacks schema 1, a repository, a digest or a commit".into()];
+    };
+    let named = files.iter().any(|file| file.1.contains(&reference));
+    let mut problems = Vec::from_iter((!named).then(|| format!("no workflow names {reference}")));
+    for (path, text) in files {
+        for (at, _) in text.to_ascii_lowercase().match_indices(&repository) {
+            let rest = text[at..].strip_prefix(&reference);
+            if rest.is_none_or(|rest| rest.starts_with(char::is_alphanumeric)) {
+                let line = text[..at].matches('\n').count() + 1;
+                problems.push(format!("{path}:{line}: not {reference}"));
+            }
+        }
+    }
+    problems
+}
+
 /// The environment of the tool commands.
 pub mod environment {
     use std::collections::BTreeMap;
@@ -640,7 +735,7 @@ pub mod environment {
     /// The tool installation of a host, laid out as the image lays out
     /// [`IMAGE_PREFIX`](super::IMAGE_PREFIX).
     pub struct Installation {
-        prefix: PathBuf,
+        pub prefix: PathBuf,
     }
 
     impl Installation {
@@ -1345,22 +1440,45 @@ mod tests {
     /// other than root.
     const IMAGE_CHECK: &str = include_str!("../../../verification/image/non-root-check.sh");
 
+    /// The workflow of the gate's CI jobs, whose measurement job runs
+    /// `leanchecker` in the stage of a run.
+    const FORMAL_WORKFLOW: &str = include_str!("../../../.github/workflows/formal.yml");
+
     #[test]
     fn the_image_check_runs_tools_with_the_tool_environment() {
-        let (_, rest) = IMAGE_CHECK
-            .split_once("\ntool_env=(\n")
-            .expect("the script sets tool_env");
-        let (listed, _) = rest.split_once("\n)\n").expect("tool_env ends");
+        assert_lists_the_tool_environment(IMAGE_CHECK, Tool::LakeEnvLean);
+    }
+
+    #[test]
+    fn the_measurement_job_runs_leanchecker_with_the_tool_environment() {
+        assert_lists_the_tool_environment(FORMAL_WORKFLOW, Tool::Leanchecker);
+    }
+
+    /// Asserts that the lines of `text` between its only line `tool_env=(`
+    /// and the next line `)`, each `NAME=value` with white space around it
+    /// and quotes in it, list the variables of `tool` on `linux-aarch64`,
+    /// with values of their own for `HOME` and `TMPDIR`.
+    fn assert_lists_the_tool_environment(text: &str, tool: Tool) {
+        let starts = text.lines().filter(|line| line.trim() == "tool_env=(");
+        assert_eq!(starts.count(), 1, "the text sets tool_env once");
+        let mut lines = text.lines().map(str::trim);
+        lines.find(|line| *line == "tool_env=(");
         let mut script: BTreeMap<String, String> = BTreeMap::new();
-        for line in listed.lines() {
-            let entry = line.trim().replace(['\'', '"'], "");
+        let mut ended = false;
+        for line in lines {
+            if line == ")" {
+                ended = true;
+                break;
+            }
+            let entry = line.replace(['\'', '"'], "");
             let (name, value) = entry.split_once('=').expect("NAME=value");
             let earlier = script.insert(name.to_string(), value.to_string());
             assert_eq!(earlier, None, "{name} is listed twice");
         }
+        assert!(ended, "tool_env ends");
         let manifest = parse(COMMITTED).expect("the committed manifest parses");
         let env = environment(
-            Tool::LakeEnvLean,
+            tool,
             &manifest,
             "linux-aarch64",
             Path::new(ROOT),
@@ -1372,12 +1490,297 @@ mod tests {
             script.keys().collect::<Vec<_>>(),
             gate.keys().collect::<Vec<_>>()
         );
-        // The script gives the tools a home and a temporary directory of its
+        // The text gives the tools a home and a temporary directory of its
         // own.
         for name in ["HOME", "TMPDIR"] {
             script.remove(name);
             gate.remove(name);
         }
         assert_eq!(script, gate);
+    }
+
+    /// The committed image pin.
+    const PIN: &str = include_str!("../../../verification/image-pin.json");
+
+    /// The reference of the committed pin, the image that main published.
+    const PINNED: &str = "ghcr.io/casxi-lab/krepi-formal@sha256:cd3bd69b780538593e4cfe247c45145d82a0c351048bcc21882062537300f013";
+
+    /// The version manifest of the pinned image.
+    const VERSIONS: &str = include_str!("fixtures/image/versions.json");
+
+    #[test]
+    fn the_committed_image_pin_names_the_published_image() {
+        let (repository, reference) = image_pin(PIN).expect("the committed pin reads");
+        assert_eq!(repository, "ghcr.io/casxi-lab/krepi-formal");
+        assert_eq!(reference, PINNED);
+    }
+
+    #[test]
+    fn an_image_pin_without_its_schema_repository_digest_or_commit_is_rejected() {
+        let digest = "sha256:cd3bd69b780538593e4cfe247c45145d82a0c351048bcc21882062537300f013";
+        for (from, to) in [
+            ("\"schema\": 1", "\"schema\": 2"),
+            ("\"schema\": 1,", ""),
+            ("krepi-formal\"", "krepi-formal:latest\""),
+            ("krepi-formal\"", "krepi-formal@sha256:0\""),
+            ("ghcr.io/casxi-lab/krepi-formal", ""),
+            (digest, &digest[7..]),
+            (digest, &digest[..70]),
+            (digest, &digest.replace("cd3b", "CD3B")),
+            ("08316d310722d8277604a38e2608d4c9497866fe", "08316d3"),
+            ("\"revision\"", "\"commit\""),
+        ] {
+            let text = PIN.replace(from, to);
+            assert_ne!(text, PIN, "{from}");
+            assert_eq!(image_pin(&text), None, "{text}");
+        }
+        assert_eq!(image_pin("not JSON"), None);
+    }
+
+    /// What [`image`] finds for the version manifest `versions`, if any,
+    /// and the tool manifest `manifest`, as a user that cannot write the
+    /// installation and without a reference.
+    fn image_problems(versions: Option<&str>, manifest: &str) -> (Image, Vec<String>) {
+        let scratch = crate::scratch::Scratch::temporary("image");
+        if let Some(versions) = versions {
+            scratch.write("versions.json", versions);
+        }
+        let mode = std::os::unix::fs::PermissionsExt::from_mode(0o755);
+        fs::set_permissions(&scratch.0, mode).expect("set the mode");
+        let mut found = Image {
+            uid: super::super::process::effective_uid() + 1,
+            ..Image::default()
+        };
+        let problems = image(&mut found, &scratch.0, manifest, &scratch.0.join("pin"));
+        (found, problems)
+    }
+
+    #[test]
+    fn the_published_version_manifest_agrees_with_the_committed_manifest() {
+        let digest = "8b5e39cb407d4d8f5cf7fd29d0485e43a439276ea6e3808a60e24f4c196a24e6";
+        assert_eq!(sha256(VERSIONS.as_bytes()), digest);
+        let (found, problems) = image_problems(Some(VERSIONS), COMMITTED);
+        assert_eq!(problems, Vec::<String>::new());
+        assert_eq!(found.versions.as_deref(), Some(VERSIONS));
+        assert_eq!(found.versions_sha256.as_deref(), Some(digest));
+        assert_eq!(found.writable, Some(false));
+    }
+
+    /// The 25 compared items and the schema: the pointer into the image's
+    /// version manifest, and those into the tool manifest that give it, none
+    /// for the schema, which is 1.
+    const COMPARED: [(&str, &[&str]); 26] = [
+        ("/schema", &[]),
+        ("/lean/version", &["/lean/version"]),
+        ("/lean/commit", &["/lean/commit"]),
+        ("/lean/sha256", &["/hosts/linux-aarch64/lean/sha256"]),
+        ("/aeneas/commit", &["/aeneas/commit"]),
+        ("/aeneas/patch_sha256", &["/aeneas/patch_sha256"]),
+        (
+            "/aeneas/lake_manifest_sha256",
+            &["/aeneas/lake_manifest_sha256"],
+        ),
+        ("/aeneas/mathlib_commit", &["/aeneas/mathlib_commit"]),
+        ("/charon/commit", &["/charon/commit"]),
+        ("/rust/toolchain", &["/rust/toolchain"]),
+        ("/rust/rustc_commit", &["/rust/rustc_commit"]),
+        ("/rust/manifest_sha256", &["/rust/manifest_sha256"]),
+        ("/rust/rustup", &["/rust/rustup"]),
+        ("/rust/rustup_commit", &["/rust/rustup_commit"]),
+        (
+            "/rust/rustup_init_sha256",
+            &["/hosts/linux-aarch64/rustup_init/sha256"],
+        ),
+        ("/opam/version", &["/opam/version"]),
+        ("/opam/repository_commit", &["/opam/repository_commit"]),
+        ("/opam/sha256", &["/hosts/linux-aarch64/opam/sha256"]),
+        (
+            "/opam/switch_export_sha256",
+            &["/hosts/linux-aarch64/switch_export_sha256"],
+        ),
+        ("/gmp/version", &["/gmp/version"]),
+        ("/gmp/sha256", &["/gmp/sha256"]),
+        ("/opam/ocaml", &["/opam/compiler"]),
+        ("/charon/version", &["/charon/version", "/charon/commit"]),
+        (
+            "/aeneas/version",
+            &["/aeneas/commit", "/aeneas/patch_sha256"],
+        ),
+        ("/rust/targets", &["/rust/targets"]),
+        ("/rust/components", &["/rust/components"]),
+    ];
+
+    /// `text` with the item at `pointer` changed by `change`, or removed.
+    fn edited(text: &str, pointer: &str, change: Option<fn(Value) -> Value>) -> String {
+        let mut value: Value = serde_json::from_str(text).expect("JSON");
+        match change {
+            Some(change) => {
+                let item = value.pointer_mut(pointer).expect("the item");
+                *item = change(item.take());
+            }
+            None => {
+                let (parent, key) = pointer.rsplit_once('/').expect("a pointer");
+                let parent = value.pointer_mut(parent).and_then(Value::as_object_mut);
+                parent.expect("the parent").remove(key).expect("the item");
+            }
+        }
+        serde_json::to_string_pretty(&value).expect("JSON")
+    }
+
+    /// Another value of the kind of `value`: a string with another first
+    /// and last character, another number, or a list without its items, or,
+    /// on the side of the tool manifest, with one more.
+    fn other(value: Value, image: bool) -> Value {
+        match value {
+            Value::String(text) => format!("x{text}x").into(),
+            Value::Number(_) => 2.into(),
+            Value::Array(_) if image => json!([]),
+            Value::Array(mut names) => {
+                names.push("x-extra".into());
+                names.into()
+            }
+            other => panic!("unexpected {other}"),
+        }
+    }
+
+    #[test]
+    fn each_compared_version_that_differs_fails() {
+        let mut items: Vec<&str> = (IMAGE_ITEMS.split_whitespace())
+            .map(|item| item.split('=').next().expect("an image item"))
+            .chain(["/rust/targets", "/rust/components"])
+            .collect();
+        let mut compared: Vec<&str> = COMPARED.iter().map(|(ours, _)| *ours).collect();
+        items.sort_unstable();
+        compared.sort_unstable();
+        assert_eq!(compared, items);
+        let names = |ours: &str, problems: &[String]| {
+            !problems.is_empty()
+                && problems
+                    .iter()
+                    .all(|problem| problem.starts_with(&format!("{ours} ")))
+        };
+        let lists = ["/rust/targets", "/rust/components"];
+        for (ours, theirs) in COMPARED {
+            // A value of the image that differs, and a missing one, which
+            // is one problem but for a list, where each missing name is.
+            let changed: fn(Value) -> Value = |value| other(value, true);
+            for change in [Some(changed), None] {
+                let versions = edited(VERSIONS, ours, change);
+                let (_, problems) = image_problems(Some(&versions), COMMITTED);
+                assert!(
+                    names(ours, &problems),
+                    "{ours} {}: {problems:?}",
+                    change.is_some()
+                );
+                if !lists.contains(&ours) {
+                    assert_eq!(problems.len(), 1, "{ours}: {problems:?}");
+                }
+            }
+            // A value of the tool manifest that differs, and a missing one,
+            // but for a list, which pins nothing when it is missing.
+            for pointer in theirs {
+                let changed: fn(Value) -> Value = |value| other(value, false);
+                for change in [Some(changed), None]
+                    .into_iter()
+                    .filter(|change| change.is_some() || !lists.contains(&ours))
+                {
+                    let manifest = edited(COMMITTED, pointer, change);
+                    let (_, problems) = image_problems(Some(VERSIONS), &manifest);
+                    let named = problems
+                        .iter()
+                        .any(|problem| problem.starts_with(&format!("{ours} ")));
+                    assert!(named, "{ours} {pointer}: {problems:?}");
+                }
+            }
+        }
+        // The image's file has schema 1, whatever that of the tool manifest.
+        let changed: fn(Value) -> Value = |value| other(value, false);
+        let manifest = edited(COMMITTED, "/schema", Some(changed));
+        let (_, problems) = image_problems(Some(VERSIONS), &manifest);
+        assert_eq!(problems, Vec::<String>::new());
+        // Not JSON: each of the 24 items and each pinned target and component.
+        let (found, problems) = image_problems(Some("not JSON"), COMMITTED);
+        assert_eq!(problems.len(), 24 + 1 + 3, "{problems:?}");
+        assert_eq!(found.versions.as_deref(), Some("not JSON"));
+        let (found, problems) = image_problems(None, COMMITTED);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].starts_with("cannot read versions.json: "),
+            "{problems:?}"
+        );
+        assert_eq!((found.versions, found.versions_sha256), (None, None));
+    }
+
+    #[test]
+    fn a_component_counts_bare_or_for_the_host() {
+        for (from, to) in [
+            ("\"rust-src\"", "\"rust-src-aarch64-unknown-linux-gnu\""),
+            ("\"llvm-tools-aarch64-unknown-linux-gnu\"", "\"llvm-tools\""),
+        ] {
+            let versions = VERSIONS.replace(from, to);
+            assert_ne!(versions, VERSIONS);
+            let (_, problems) = image_problems(Some(&versions), COMMITTED);
+            assert_eq!(problems, Vec::<String>::new());
+        }
+        let versions = VERSIONS.replace(
+            "rustc-dev-aarch64-unknown-linux-gnu",
+            "rustc-dev-x86_64-unknown-linux-gnu",
+        );
+        let (_, problems) = image_problems(Some(&versions), COMMITTED);
+        assert_eq!(problems, ["/rust/components lacks \"rustc-dev\""]);
+    }
+
+    #[test]
+    fn a_workflow_image_reference_other_than_the_pinned_digest_fails() {
+        let job = format!("on: pull_request\nenv:\n  IMAGE: {PINNED}\n");
+        let check = |text: &str| image_references(PIN, &[("a.yml", &job), ("b.yml", text)]);
+        // The pinned reference passes, wherever it is mentioned.
+        assert_eq!(
+            check(&format!("# pulls {PINNED}\nrun: docker pull {PINNED}\n")),
+            Vec::<String>::new()
+        );
+        let (repository, digest) = PINNED.split_once('@').expect("a digest");
+        for (line, other) in [
+            (
+                format!("{repository}@sha256:{}", "0".repeat(64)),
+                "another digest",
+            ),
+            (format!("{repository}:latest"), "a tag"),
+            (
+                format!("{repository}:latest@{digest}"),
+                "a tag and the digest",
+            ),
+            (format!("{repository}\n"), "the bare repository"),
+            (format!("# pulled from {repository}"), "a comment"),
+            (format!("{}:main", repository.to_uppercase()), "upper case"),
+            (format!("{PINNED}0"), "a longer digest"),
+        ] {
+            let text = format!("on: pull_request\njobs:\n  {line}\n");
+            assert_eq!(check(&text), [format!("b.yml:3: not {PINNED}")], "{other}");
+        }
+        // Two mentions on separate lines are reported each with its line.
+        let text = format!("{repository}:a\n\n{repository}:b {PINNED}\n");
+        assert_eq!(
+            check(&text),
+            [
+                format!("b.yml:1: not {PINNED}"),
+                format!("b.yml:3: not {PINNED}")
+            ]
+        );
+        // One workflow must name the pinned image.
+        assert_eq!(
+            image_references(PIN, &[("b.yml", "on: push\n")]),
+            [format!("no workflow names {PINNED}")]
+        );
+        let other = format!("{repository}@sha256:{}", "0".repeat(64));
+        assert_eq!(
+            image_references(PIN, &[("b.yml", &other)]),
+            [
+                format!("no workflow names {PINNED}"),
+                format!("b.yml:1: not {PINNED}")
+            ]
+        );
+        let pin = PIN.replace("\"schema\": 1", "\"schema\": 2");
+        assert_eq!(image_references(&pin, &[("a.yml", &job)]).len(), 1);
     }
 }

@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "base_image": "ubuntu:noble-20261024.1@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852",
+  "aeneas": {
+    "version": "aeneas 4acbb6d+patch-9656c257",
+    "commit": "4acbb6d73abe9082e45cf49ba6d6229a2c7d5836",
+    "patch_sha256": "9656c257a42a96af3b7f1660315b2f3c27212b86bb3fc1a332f127b068d04456",
+    "lake_manifest_sha256": "14e04fb0abf42c95fabccc050f11715f9cb7e86316a26a55a87c89b95a72a5a3",
+    "mathlib_commit": "56a005855ea17e0b0958f73ec801ae140b0a1679"
+  },
+  "opam": {
+    "version": "2.6.1",
+    "sha256": "8b24ef2f3f44a31763f54878454fb52afa1f2db7e00abed58b8d4e7ee7e290a6",
+    "repository_commit": "63311767520ac015d77dcde43540889dd663e2c3",
+    "ocaml": "5.5.1",
+    "switch_export_sha256": "6b3b9196c1cf5ff357ddc09d1a830198ff023db676f23934120c2026883bc821"
+  },
+  "apt": {
+    "bubblewrap": "0.9.0-1ubuntu0.3",
+    "git": "1:2.43.0-1ubuntu7.4"
+  },
+  "charon": {
+    "commit": "6cc2b5f80b7edc2383cba3dab1f1e3b4059aebe2",
+    "version": "0.1.312 (6cc2b5f80b7edc2383cba3dab1f1e3b4059aebe2)",
+    "submodules": {
+      "crates/minirust": "c0b555e5b15accc6c1366b1d911a1bfd49c3d9d0"
+    }
+  },
+  "gmp": {
+    "version": "6.3.0",
+    "sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898"
+  },
+  "lean": {
+    "version": "4.35.0",
+    "commit": "eb6cafb7290e8bd5f2937522d8d804f58f02bafc",
+    "sha256": "c8f0f8a3920e839718b1343e6781fd80a3e9b1024fbcd7078eb30f54e806b028"
+  },
+  "rust": {
+    "toolchain": "nightly-2026-09-17",
+    "rustc_commit": "923c95cdf5ba65cea505aa2ea829f578e1506ed8",
+    "manifest_sha256": "9cec46bc6224bd0ff346b0a01a951ba07f9ccb806f89842b897a5a182d0aaccd",
+    "rustup": "1.29.3",
+    "rustup_commit": "edbc831cec44dc2858a4a4dce768c74361d027dc",
+    "rustup_init_sha256": "9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282",
+    "components": [
+      "cargo-aarch64-unknown-linux-gnu",
+      "llvm-tools-aarch64-unknown-linux-gnu",
+      "rust-src",
+      "rust-std-aarch64-unknown-linux-gnu",
+      "rust-std-aarch64-unknown-none",
+      "rustc-aarch64-unknown-linux-gnu",
+      "rustc-dev-aarch64-unknown-linux-gnu"
+    ],
+    "targets": [
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-none"
+    ]
+  }
+}

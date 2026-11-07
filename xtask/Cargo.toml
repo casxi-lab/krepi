@@ -29,7 +29,10 @@ clap = { version = "=4.6.7", default-features = false, features = ["std", "help"
 # processes remain, `waitid` with `WNOWAIT` sees that a command has ended
 # without collecting it, so that the group's number cannot be reused before
 # the kill, `signal` restores the default disposition of `SIGCHLD` that
-# this needs, and `sigaction` reads whether SIGHUP is ignored. Only the C
+# this needs, and `sigaction` reads whether SIGHUP is ignored. For the
+# receipt of a run, `geteuid` gives the effective user, `fstatvfs` the bytes
+# available on the file system of the run directory and `getrusage` the
+# largest resident set of a process that the run collected. Only the C
 # declarations are used, which need no standard-library support, so the
 # default feature is left out.
 libc = { version = "=0.2.191", default-features = false }
@@ -39,10 +42,11 @@ libc = { version = "=0.2.191", default-features = false }
 # manifests step and `cargo xtask formal run` read the output of
 # `cargo metadata`, the qualification cases, the statement, axiom and
 # trusted-base registries, the `translation.json` that Aeneas writes, the
-# messages of `lean --json` and the event of a pull request that
-# `cargo xtask formal guard` reads, and the test of `cargo xtask qemu`
-# reads the receipt of a run. All are text in memory, so the
-# standard-library support of the default feature is left out.
+# messages of `lean --json`, the image pin `verification/image-pin.json`,
+# the `versions.json` of the proof-tool image and the event of a pull
+# request that `cargo xtask formal guard` reads, and the test of
+# `cargo xtask qemu` reads the receipt of a run. All are text in memory, so
+# the standard-library support of the default feature is left out.
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
 # `verification/toolchain.json`, `verification/targets.json`, the
 # qualification cases, the extraction configuration, the statement, axiom
@@ -62,9 +66,9 @@ serde = { version = "=1.0.229", default-features = false, features = ["alloc", "
 signal-hook = { version = "=0.4.6", default-features = false }
 # The SHA-256 of files that `cargo xtask formal toolchain-check` and
 # `cargo xtask formal run` read into memory, among them the output files of
-# the commands of a run and the Lean files that Aeneas writes, so the
-# allocation and object-identifier support of the default features is left
-# out.
+# the commands of a run, the Lean files that Aeneas writes and the
+# `versions.json` of the proof-tool image, so the allocation and
+# object-identifier support of the default features is left out.
 sha2 = { version = "=0.11.1", default-features = false }
 # `git archive` writes the gate inputs of the snapshot commit of
 # `cargo xtask formal run` as a tar archive, which the command unpacks into

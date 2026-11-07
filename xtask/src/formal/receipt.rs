@@ -25,6 +25,7 @@ pub struct Receipt {
     pub trigger: Trigger,
     pub targets: Vec<String>,
     pub host: Option<String>,
+    pub image: Option<Image>,
     pub run: String,
     pub directory: String,
     pub started: u64,
@@ -33,6 +34,7 @@ pub struct Receipt {
     pub tree: Option<String>,
     pub inputs: Inputs,
     pub budgets: Budgets,
+    pub resources: Resources,
     pub phases: BTreeMap<String, Phase>,
     pub units: BTreeMap<String, Unit>,
     pub qualification: Option<Qualification>,
@@ -63,6 +65,19 @@ pub struct Trigger {
     pub attempt: Option<String>,
 }
 
+/// The image of a run on the CI host: the reference that the job gave, the
+/// gate's effective user, whether that user can write the installation, or
+/// `None` before the check, and its version manifest and `/etc/os-release`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Image {
+    pub reference: Option<String>,
+    pub uid: u32,
+    pub writable: Option<bool>,
+    pub versions_sha256: Option<String>,
+    pub versions: Option<String>,
+    pub os_release: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Inputs {
     pub before: Option<Snapshot>,
@@ -74,6 +89,18 @@ pub struct Inputs {
 pub struct Budgets {
     pub gate_seconds: u64,
     pub receipt_margin_seconds: u64,
+}
+
+/// The bytes available on the file system of the run directory at the
+/// start and the least after any command, the largest maximum resident set
+/// of one collected process, and the `memory.peak` of the gate's cgroup,
+/// page cache included; each `None` when the host does not report it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Resources {
+    pub disk_available_at_start: Option<u64>,
+    pub disk_least_available: Option<u64>,
+    pub largest_process_max_rss: Option<u64>,
+    pub cgroup_memory_peak: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -281,6 +308,14 @@ mod tests {
             },
             targets: vec!["alpha".to_string(), "demo".to_string()],
             host: Some("linux-aarch64".to_string()),
+            image: Some(Image {
+                reference: Some(format!("ghcr.io/o/r@sha256:{}", "9".repeat(64))),
+                uid: 1_001,
+                writable: Some(true),
+                versions_sha256: Some("a".repeat(64)),
+                versions: Some("{\n  \"schema\": 1\n}\n".to_string()),
+                os_release: Some("NAME=\"Ubuntu\"\n".to_string()),
+            }),
             run: "1700000000-42".to_string(),
             directory: "artifacts/formal/runs/1700000000-42".to_string(),
             started: 1_700_000_000,
@@ -295,6 +330,12 @@ mod tests {
             budgets: Budgets {
                 gate_seconds: 7_200,
                 receipt_margin_seconds: 300,
+            },
+            resources: Resources {
+                disk_available_at_start: Some(100_000_000_000),
+                disk_least_available: Some(99_000_000_000),
+                largest_process_max_rss: Some(5_850_000_000),
+                cgroup_memory_peak: Some(9_000_000_000),
             },
             phases: BTreeMap::from([(
                 "base".to_string(),
@@ -517,6 +558,9 @@ mod tests {
             "\"state\": null",
             "\"ai_proof\": true",
             "\"spec-approval\": null",
+            "\"writable\": true",
+            "\"versions\": \"{\\n  \\\"schema\\\": 1\\n}\\n\"",
+            "\"cgroup_memory_peak\": 9000000000",
         ] {
             assert!(text.contains(word), "{word} is not in {text}");
         }
@@ -541,6 +585,7 @@ mod tests {
             },
             targets: Vec::new(),
             host: Some("darwin-arm64".to_string()),
+            image: None,
             run: "1700000000-42".to_string(),
             directory: "artifacts/formal/runs/1700000000-42".to_string(),
             started: 1_700_000_000,
@@ -559,6 +604,12 @@ mod tests {
             budgets: Budgets {
                 gate_seconds: 7_200,
                 receipt_margin_seconds: 300,
+            },
+            resources: Resources {
+                disk_available_at_start: Some(2_000),
+                disk_least_available: Some(1_000),
+                largest_process_max_rss: Some(500),
+                cgroup_memory_peak: None,
             },
             phases: BTreeMap::new(),
             units: BTreeMap::from([
@@ -626,6 +677,7 @@ mod tests {
   }},
   "targets": [],
   "host": "darwin-arm64",
+  "image": null,
   "run": "1700000000-42",
   "directory": "artifacts/formal/runs/1700000000-42",
   "started": 1700000000,
@@ -647,6 +699,12 @@ mod tests {
   "budgets": {{
     "gate_seconds": 7200,
     "receipt_margin_seconds": 300
+  }},
+  "resources": {{
+    "disk_available_at_start": 2000,
+    "disk_least_available": 1000,
+    "largest_process_max_rss": 500,
+    "cgroup_memory_peak": null
   }},
   "phases": {{}},
   "units": {{
