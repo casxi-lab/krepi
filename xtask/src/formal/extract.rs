@@ -713,8 +713,11 @@ mod tests {
             ("CARGO_INCREMENTAL", "0"),
             ("CARGO_NET_OFFLINE", "true"),
             ("CARGO_TARGET_DIR", "RUN/work/cases/f/target"),
+            ("GIT_CONFIG_COUNT", "1"),
             ("GIT_CONFIG_GLOBAL", "/dev/null"),
+            ("GIT_CONFIG_KEY_0", "safe.directory"),
             ("GIT_CONFIG_NOSYSTEM", "1"),
+            ("GIT_CONFIG_VALUE_0", "*"),
             ("HOME", "RUN/work/home"),
             ("LAKE_ARTIFACT_CACHE", "false"),
             ("LANG", locale),
@@ -724,7 +727,7 @@ mod tests {
             ("RUSTUP_TOOLCHAIN", "nightly-2026-09-17"),
             ("TMPDIR", "RUN/work/tmp"),
         ]);
-        assert_eq!(expected.len(), 14);
+        assert_eq!(expected.len(), 17);
         for site in [Site::Charon, Site::Aeneas] {
             let text = golden(&extracted.stdout(site));
             let seen: BTreeMap<&str, &str> = text

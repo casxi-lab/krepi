@@ -73,7 +73,7 @@ never moved into the trusted boundary to close a gap.
 | --- | --- | --- |
 | `verification/toolchain.json` | The tool manifest: Lean, the Aeneas source commit with its reviewed patch and the Lake lock of its Lean library, Charon, the Rust nightly used by Charon, opam and GMP, with the downloads of each host ([tools](#tool-manifest)) | Present |
 | `verification/tooling/` | Reviewed tool patches, named by the manifest, and their license texts | Present |
-| `verification/image/` | The recipe of the image that holds the pinned tools, and the list of its third-party notices ([image](#image)) | Present |
+| `verification/image/` | The recipe of the image that holds the pinned tools, the list of its third-party notices, and the check of the built image as a user other than root ([image](#image)) | Present |
 | `verification/lakefile.toml`, `lean-toolchain`, `lake-manifest.json` | The Lake project of the hand-written Lean and of the generated definitions, with the Lean toolchain and the packages of the Lake lock of the Aeneas Lean library ([qualification](#qualification)), and the library `KrepiRoot` of the root module that the [base round](#base-round) writes | Present |
 | `verification/extraction.toml` | How Charon compiles each extracted crate ([extraction](#extraction)) | Present |
 | `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there | Planned |
@@ -238,9 +238,15 @@ The final stage holds the tools only, below `/opt/krepi-formal`:
 GMP's shared library is in `/usr/local/lib`; bubblewrap, Git and `time` come
 from the Ubuntu archive. The source trees, the opam switch and the build
 directories stay in the build stages. Everything below `/opt/krepi-formal`
-belongs to root, and the installed trees and files have no write
-permission, so a tool that runs as another user cannot change the
-installation.
+belongs to root; every user can read it and search its directories, and no
+user but root can write it. The stage that installs a tree or a file makes
+it readable by all and writable by none (`chmod -R a+rX,a-w`, or
+`install -m 0555` for the programs in `bin/`); this also covers the build
+outputs of Mathlib and of the packages it depends on, which
+`lake exe cache get` unpacks readable by their owner only. The directories
+that hold the trees can be written by root alone. So the tools run as any
+other user, and that user cannot change the installation. The image sets no
+user: whoever runs it chooses one.
 
 The build fails when a component that `notices/README` lists has no license
 text, and also when one of the packages below has none:
@@ -274,6 +280,9 @@ variables that `xtask/src/formal/toolchain.rs` gives it:
 | `LANG`, `LC_ALL` | The `locale` of the host's column | All |
 | `GIT_CONFIG_NOSYSTEM` | `1` | All |
 | `GIT_CONFIG_GLOBAL` | `/dev/null` | All |
+| `GIT_CONFIG_COUNT` | `1` | All |
+| `GIT_CONFIG_KEY_0` | `safe.directory` | All |
+| `GIT_CONFIG_VALUE_0` | `*` | All |
 | `PATH` | `lean/bin`, `bin` and `cargo/bin` of the installation, then `/usr/bin:/bin:/usr/sbin:/sbin` | All |
 | `HOME` | A new, empty directory of the run | All |
 | `TMPDIR` | A directory of the run | All |
@@ -290,6 +299,20 @@ extraction commands; Aeneas runs no Cargo and ignores them.
 `LEAN_NUM_THREADS` is not set, so Lean uses every CPU of the host. Because
 `cargo` too comes from the installation, a local run needs the
 `darwin-arm64` installation at `artifacts/formal/tools`.
+
+Lake runs Git in each package of the Lake lock whenever it loads the
+workspace, for every build and every `lake env`. In the image those
+packages belong to root, and Git works in a repository of another user only
+when `safe.directory` allows it in the system, global or command
+configuration. The first two are turned off, so `GIT_CONFIG_COUNT`,
+`GIT_CONFIG_KEY_0` and `GIT_CONFIG_VALUE_0` set `safe.directory` to `*` for
+the command, which makes every repository safe: the repositories that the
+tools meet are the packages of the installation, which they cannot write,
+and the checkout and the directories of the run, which belong to the user
+that runs the gate. On `darwin-arm64` that user owns the installation too,
+and the variables change nothing.
+`verification/image/non-root-check.sh` runs its tools with the same
+variables; a test keeps the two lists equal.
 
 ### Changing a tool
 
@@ -314,13 +337,28 @@ The publish workflow runs only on pushes to `main`, and its job alone may
 write packages; a pull request never publishes an image. Both run every
 step with `bash -eo pipefail`. Before the image build, both run the tool
 checks and a check that `check_notices` of the recipe fails when any
-component that `notices.txt` lists has a missing or empty notice. Both record
-the available disk before and after removing preinstalled software from the
-runner, sample it together with the size of the Docker data directory every
-15 seconds during the build, record Docker's disk use at the end and then
-free its build cache, and upload the samples, the build log, the notice
-check, the layer sizes, `versions.json` and the switch export as a workflow
-artifact.
+component that `notices.txt` lists has a missing or empty notice. After the
+build, both run `verification/image/non-root-check.sh` in the image as the
+runner's user, without network and capabilities, with the variables that
+tool commands get. It fails when an entry below `/opt/krepi-formal` cannot
+be read or can be written, or is a directory that cannot be searched, when a
+Mathlib build output cannot be read, when `lake env lean` cannot check a
+file that imports Aeneas in a Lake project laid out as the gate lays out its
+stages, when `git status` fails in the Mathlib package, when Cargo and rustc
+through the rustup proxies, Charon or Aeneas cannot print their versions, or
+when Charon and Aeneas cannot translate a crate of one function. It also
+records Git's refusal without the `safe.directory` variables, the time of
+`git status` there with and without `core.checkStat=minimal`, and whether
+Lake finds the installed library up to date. The publish workflow publishes
+only an image that passed the check. A test keeps the check's variables
+equal to those of tool commands, so a change of those variables also
+changes the check: its pull request builds the image, and its merge
+publishes one. Both record the available disk before and after removing
+preinstalled software from the runner, sample it together with the size of
+the Docker data directory every 15 seconds during the build, record Docker's
+disk use at the end and then free its build cache, and upload the samples,
+the build log, the notice check, the layer sizes, `versions.json`, the
+switch export and the output of the image check as a workflow artifact.
 
 ## Commands
 
@@ -822,7 +860,8 @@ links below them: the path, mode, size, modification and change times and
 link target of each entry. Any difference stops the phase as a tool
 failure that names up to 20 paths, so that a tool that writes to the
 installation is a tool failure of the run. In the image, the installation
-belongs to root and has no write permission.
+belongs to root, every user can read it and none but root can write it, and
+the gate is to run there as another user (the CI job is planned).
 
 **Conclusions.** `base` is `VERIFIED` when the round has no problem and no
 command forced it, and `REJECTED` with its problems otherwise: the

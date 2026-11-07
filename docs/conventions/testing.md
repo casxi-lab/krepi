@@ -221,16 +221,18 @@ that the sources name, the digests of the patch and of the Lake lock, the
 Mathlib commit and the host columns
 ([tool checks](../formal-verification.md#tool-checks)). Its unit tests run
 in the `test` step above. Two more workflows run it, each for a change of
-the tool manifest, the patches, the image recipe below `verification/image/`
-or the two workflows themselves, on a GitHub-hosted `ubuntu-24.04-arm`
-runner: `formal image build`
+the tool manifest, the patches, the image recipe or the image check below
+`verification/image/` or the two workflows themselves, on a GitHub-hosted
+`ubuntu-24.04-arm` runner: `formal image build`
 (`.github/workflows/formal-image-build.yml`) on every pull request to
 `main`, which then checks that a missing license notice fails the image
-build and builds the image of the proof tools without publishing it; and
-`formal image publish` (`.github/workflows/formal-image-publish.yml`) on
-every push to `main`, which does the same and publishes the image
+build, builds the image of the proof tools without publishing it and checks
+it as a user other than root; and `formal image publish`
+(`.github/workflows/formal-image-publish.yml`) on every push to `main`,
+which does the same and publishes the image only after that check
 ([changing a tool](../formal-verification.md#changing-a-tool)). Both upload
-the build record, with the disk measurement, as a workflow artifact.
+the build record, with the disk measurement and the output of the check, as
+a workflow artifact.
 
 `cargo xtask formal run` runs the proof gate on a snapshot of the gate
 inputs and writes a receipt of the run below `artifacts/formal/runs/`
