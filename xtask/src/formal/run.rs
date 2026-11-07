@@ -17,10 +17,10 @@ use super::Layout;
 use super::outcome::{self, Class, Conclusion, Site, Status, Verdict, word};
 use super::paths::{self, Files, Git, Snapshot};
 use super::process::{self, Ended, Limit, LimitBy, Ran, Spec};
-use super::receipt::{self, Budgets, Failure, Mode, Receipt, Trigger};
-use super::registry;
+use super::receipt::{self, Budgets, Failure, Mode, Qualification, Receipt, Trigger};
 use super::toolchain::environment::{self, RunDirs, Tool};
 use super::toolchain::{self, Manifest};
+use super::{qualify, registry};
 use crate::manifests;
 
 /// The two phases of 3,600 s that the gate runs, from the start of a run.
@@ -121,8 +121,7 @@ pub(crate) struct Context<'a> {
     pub var: &'a dyn Fn(&str) -> Option<String>,
 }
 
-/// A command: `program` with `args` in `cwd` at `site`, with the environment
-/// of `tool` and its input from `stdin` or from nothing.
+/// A command, with the environment of `tool` and its input from `stdin`.
 pub struct Request<'a> {
     pub site: Site,
     pub tool: Tool<'a>,
@@ -145,6 +144,9 @@ pub struct Gate {
     conclusions: Vec<(String, Conclusion)>,
     receipt: Receipt,
     progress: Box<dyn Write>,
+    /// The site, limit and program that a test gives the commands there.
+    #[cfg(test)]
+    pub(crate) overrides: Option<(Site, Limit, String)>,
 }
 
 impl Gate {
@@ -152,23 +154,40 @@ impl Gate {
         self.receipt.failures.push(Failure { status, message });
     }
 
-    /// Runs `request` unless its limit is used up, then classifies, records
-    /// and prints it; a line that cannot be printed is left out.
-    fn command(&mut self, unit: Option<&str>, request: &Request) -> (Option<Ran>, Verdict) {
+    /// Runs `request` unless its limit is used up or `skip` says why it does
+    /// not start, reads with `read` what it wrote, which returns why a file
+    /// could not be read, then classifies, records and prints it; a line
+    /// that cannot be printed is left out.
+    fn command(
+        &mut self,
+        unit: Option<&str>,
+        request: &Request,
+        skip: Option<&str>,
+        read: &mut dyn FnMut(&Ran) -> Option<String>,
+    ) -> (Option<Ran>, Verdict) {
+        #[cfg(test)]
+        let overridden = (self.overrides.clone()).filter(|(site, ..)| *site == request.site);
+        #[cfg(test)]
+        let request = &Request {
+            program: (overridden.as_ref()).map_or(request.program, |(_, _, program)| program),
+            ..*request
+        };
         let sequence = self.receipt.commands.len() as u32 + 1;
         let now = Instant::now();
         let left = |end: Instant| end.saturating_duration_since(now);
         let phase_end = self.phase.as_ref().map_or(self.deadline, |(_, end)| *end);
         let limit = limit(request.site.cap(), left(phase_end), left(self.deadline));
+        #[cfg(test)]
+        let limit = overridden.as_ref().map_or(limit, |(_, set, _)| *set);
         let name = word(&request.site);
-        let ran = if limit.duration.is_zero() {
+        // The receipt writes a limit below half a millisecond as 0.
+        let ran = if receipt::seconds(limit.duration) <= 0.0 {
             let used_up = format!("the {} budget was used up", word(&limit.by));
             Err((Class::NotRun, used_up))
+        } else if let Some(reason) = skip {
+            Err((Class::NotRun, format!("not started: {reason}")))
         } else {
-            let (manifest, _) = self
-                .manifest
-                .as_ref()
-                .expect("commands run after the start");
+            let (manifest, _) = (self.manifest.as_ref()).expect("commands run after the start");
             let host = self.receipt.host.as_deref().unwrap_or_default();
             let [home, tmp] = ["home", "tmp"].map(|dir| self.run.path.join("work").join(dir));
             let dirs = RunDirs { home, tmp };
@@ -192,13 +211,14 @@ impl Gate {
                 })
         };
         let verdict = match &ran {
-            Ok(ran) => outcome::classify(request.site, ran, 0),
+            Ok(ran) => outcome::classify(request.site, ran, 0, read(ran).as_deref()),
             Err((class, reason)) => Verdict {
                 class: *class,
                 reason: Some(reason.clone()),
             },
         };
         let ran = ran.ok();
+        let done = ran.as_ref();
         let mut argv = vec![request.program.to_string()];
         argv.extend_from_slice(request.args);
         let (shown, class) = (argv.join(" "), word(&verdict.class));
@@ -212,7 +232,6 @@ impl Gate {
                 sha256: log.sha256.clone(),
             })
         };
-        let done = ran.as_ref();
         self.receipt.commands.push(receipt::Command {
             sequence,
             phase: self.phase.as_ref().map(|(phase, _)| phase.clone()),
@@ -241,30 +260,53 @@ impl Gate {
     /// Runs a command of the gate itself and returns its standard output, or
     /// why it did not pass.
     fn output(&mut self, request: &Request) -> Result<Vec<u8>, String> {
-        let (ran, verdict) = self.command(None, request);
+        let (ran, verdict) = self.command(None, request, None, &mut |_| None);
         match ran.and_then(|ran| ran.stdout) {
             Some(log) if verdict.class == Class::Passed => fs::read(&log.path)
                 .map_err(|error| format!("cannot read {}: {error}", log.path.display())),
             _ => Err(verdict.reason.unwrap_or_default()),
         }
     }
-}
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the qualification phase is the first caller")
-)]
-impl Gate {
-    /// Runs `request` as a command of `unit`.
-    pub fn run(&mut self, unit: &str, request: &Request) -> Verdict {
-        self.command(Some(unit), request).1
+    /// Runs `request` as a command of `unit`, with `read` reading the files
+    /// that it wrote before it is classified, so that a file that `read`
+    /// cannot read makes it a tool failure; returns what it gave, if it ran,
+    /// its class, and what `read` read.
+    pub fn run<T>(
+        &mut self,
+        unit: &str,
+        request: &Request,
+        mut read: impl FnMut(&Ran) -> Result<T, String>,
+    ) -> (Option<Ran>, Verdict, Option<T>) {
+        let mut value = None;
+        let mut reader = |ran: &Ran| read(ran).map(|read| value = Some(read)).err();
+        let (ran, verdict) = self.command(Some(unit), request, None, &mut reader);
+        (ran, verdict, value)
+    }
+
+    /// Records `request` as a command of `unit` that does not start because
+    /// of `reason`, such as a missing input: `NOT_RUN`, with the limit that
+    /// it would have had.
+    pub fn skip(&mut self, unit: &str, request: &Request, reason: &str) {
+        self.command(Some(unit), request, Some(reason), &mut |_| None);
     }
 
     /// Concludes `unit` with `status` and `reason`, unless a command of the
     /// unit forces another conclusion ([`outcome::forced`]).
     pub fn conclude(&mut self, unit: &str, status: Status, reason: Option<String>) {
+        self.conclude_from(unit, unit, status, reason);
+    }
+
+    /// Concludes `unit` as [`Gate::conclude`] does, from the commands of the
+    /// unit `of`, such as a theorem from those of its case.
+    pub fn conclude_from(&mut self, unit: &str, of: &str, status: Status, reason: Option<String>) {
+        // A command skipped with its limit left forces nothing: the command
+        // that should have written its input decides.
+        let skipped = |command: &receipt::Command| {
+            command.class == Class::NotRun && command.limit_seconds > 0.0
+        };
         let own: Vec<Verdict> = (self.receipt.commands.iter())
-            .filter(|command| command.unit.as_deref() == Some(unit))
+            .filter(|command| command.unit.as_deref() == Some(of) && !skipped(command))
             .map(|command| Verdict {
                 class: command.class,
                 reason: command.reason.clone(),
@@ -274,9 +316,29 @@ impl Gate {
         self.conclusions.push((unit.to_string(), conclusion));
     }
 
-    /// The export of the gate inputs.
     pub fn source(&self) -> PathBuf {
         self.run.source()
+    }
+
+    /// The work directory of the run, which holds the export.
+    pub fn work(&self) -> PathBuf {
+        self.run.path.join("work")
+    }
+
+    pub fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    /// The Aeneas Lean library of the installation that the run uses.
+    pub fn backend(&self) -> Result<PathBuf, String> {
+        let (manifest, _) = (self.manifest.as_ref()).expect("phases run after the start");
+        let host = self.receipt.host.as_deref().unwrap_or_default();
+        environment::backend(manifest, host, &self.root)
+    }
+
+    /// The record of the qualification in the receipt, which a phase fills.
+    pub fn qualification(&mut self) -> &mut Qualification {
+        (self.receipt.qualification).get_or_insert_with(Default::default)
     }
 }
 
@@ -285,9 +347,7 @@ impl Gate {
 impl Git for Gate {
     fn git(&mut self, args: &[&str], stdin: Option<&Path>) -> Result<Vec<u8>, String> {
         let options = ["--literal-pathspecs", "--no-optional-locks"];
-        let args: Vec<String> = options
-            .iter()
-            .chain(args)
+        let args: Vec<String> = (options.iter().chain(args))
             .map(|arg| arg.to_string())
             .collect();
         let root = self.root.clone();
@@ -304,7 +364,6 @@ impl Git for Gate {
 
 /// The receipt of a run that has not done anything yet.
 fn blank(context: &Context, targets: &BTreeSet<String>, run: &str, directory: &str) -> Receipt {
-    let github = context.var;
     Receipt {
         schema: receipt::SCHEMA,
         command: receipt::COMMAND.to_string(),
@@ -314,10 +373,10 @@ fn blank(context: &Context, targets: &BTreeSet<String>, run: &str, directory: &s
             } else {
                 Mode::Scoped
             },
-            event: github("GITHUB_EVENT_NAME"),
-            reference: github("GITHUB_REF"),
-            run_id: github("GITHUB_RUN_ID"),
-            attempt: github("GITHUB_RUN_ATTEMPT"),
+            event: (context.var)("GITHUB_EVENT_NAME"),
+            reference: (context.var)("GITHUB_REF"),
+            run_id: (context.var)("GITHUB_RUN_ID"),
+            attempt: (context.var)("GITHUB_RUN_ATTEMPT"),
         },
         targets: targets.iter().cloned().collect(),
         host: context.host.map(str::to_string),
@@ -366,6 +425,8 @@ pub(crate) fn execute(
         conclusions: Vec::new(),
         receipt: blank(context, targets, &run.id, &directory),
         progress,
+        #[cfg(test)]
+        overrides: None,
     };
     let inputs = paths::gate_inputs(context.layout);
     let mut phases = Some(phases);
@@ -471,10 +532,8 @@ fn export_and_check(
         let unknown = unknown.join(", ");
         return Err(format!("{registry} registers no target named {unknown}"));
     }
-    let python = paths::python_files(&files);
-    if !python.is_empty() {
-        let message = format!("the gate inputs hold Python sources: {}", python.join(", "));
-        gate.fail(Status::Rejected, message);
+    for problem in paths::rejected(&files, &gate.layout) {
+        gate.fail(Status::Rejected, problem);
     }
     check_kernel(gate, &source, &files)
 }
@@ -559,11 +618,9 @@ fn run_phases(gate: &mut Gate, phases: Vec<Phase<'_>>) {
                 stopped = Some(message);
             }
         }
-        let seconds = receipt::seconds(if ran { begin.elapsed() } else { Duration::ZERO });
-        let budget_seconds = phase.budget.as_secs();
         let phase = receipt::Phase {
-            budget_seconds,
-            seconds,
+            budget_seconds: phase.budget.as_secs(),
+            seconds: receipt::seconds(if ran { begin.elapsed() } else { Duration::ZERO }),
             ran,
         };
         gate.receipt.phases.insert(name, phase);
@@ -644,7 +701,10 @@ pub fn command(root: &Path, layout: &Layout, targets: BTreeSet<String>) -> ExitC
     };
     let run = RunDir::create(root);
     let receipt = match &run {
-        Ok(run) => execute(&context, run, &targets, Vec::new(), Box::new(io::stdout())),
+        Ok(run) => {
+            let phases = vec![qualify::phase(root, layout)];
+            execute(&context, run, &targets, phases, Box::new(io::stdout()))
+        }
         Err(error) => {
             let mut receipt = blank(&context, &targets, "", RUNS);
             let message = format!("cannot create a run directory below {RUNS}: {error}");
@@ -660,7 +720,7 @@ pub fn command(root: &Path, layout: &Layout, targets: BTreeSet<String>) -> ExitC
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::os::unix::process::ExitStatusExt;
     use std::process::{Command, Stdio};
 
@@ -668,7 +728,7 @@ mod tests {
     use crate::formal::fixture::Fixture;
 
     /// The budget of a test phase whose commands end by themselves.
-    const LONG: Duration = Duration::from_secs(3_600);
+    pub(crate) const LONG: Duration = Duration::from_secs(3_600);
 
     /// The variable that makes the process of a test the gate that the test
     /// stops, with the fixture that it names.
@@ -697,22 +757,22 @@ mod tests {
     }
 
     /// What a test run gives.
-    struct Done {
-        receipt: Receipt,
-        code: ExitCode,
-        run: RunDir,
+    pub(crate) struct Done {
+        pub(crate) receipt: Receipt,
+        pub(crate) code: ExitCode,
+        pub(crate) run: RunDir,
         stdout: String,
         stderr: String,
     }
 
     impl Done {
         /// The receipt as the run wrote it.
-        fn written(&self) -> Receipt {
+        pub(crate) fn written(&self) -> Receipt {
             let text = fs::read_to_string(self.run.receipt()).expect("the receipt is written");
             serde_json::from_str(&text).expect("the receipt reads back")
         }
 
-        fn failures(&self) -> Vec<&str> {
+        pub(crate) fn failures(&self) -> Vec<&str> {
             self.receipt
                 .failures
                 .iter()
@@ -737,7 +797,7 @@ mod tests {
     }
 
     /// Runs the gate on `fixture` into a new run directory, for `targets`.
-    fn gate(fixture: &Fixture, targets: &[&str], phases: Vec<Phase<'_>>) -> Done {
+    pub(crate) fn gate(fixture: &Fixture, targets: &[&str], phases: Vec<Phase<'_>>) -> Done {
         let run = RunDir::create(fixture.root()).expect("create the run directory");
         let targets = targets.iter().map(|name| name.to_string()).collect();
         gate_in(
@@ -751,13 +811,13 @@ mod tests {
     }
 
     /// The host of the run: this one, or one of the manifest elsewhere.
-    fn test_host() -> Option<&'static str> {
+    pub(crate) fn test_host() -> Option<&'static str> {
         host().or(Some("linux-aarch64"))
     }
 
     /// Runs the gate on the fixture at `root` into `run` on `host`, without
     /// printing its commands, and writes its receipt.
-    fn gate_in(
+    pub(crate) fn gate_in(
         root: &Path,
         run: RunDir,
         targets: &BTreeSet<String>,
@@ -783,7 +843,7 @@ mod tests {
         }
     }
 
-    fn phase<'a>(
+    pub(crate) fn phase<'a>(
         name: &str,
         budget: Duration,
         units: &[&str],
@@ -810,7 +870,7 @@ mod tests {
             cwd: &source,
             stdin: None,
         };
-        run.run(unit, &request)
+        run.run(unit, &request, |_| Ok(())).1
     }
 
     #[test]
@@ -1275,6 +1335,59 @@ mod tests {
     }
 
     #[test]
+    fn a_lean_file_of_the_generated_namespace_in_the_checkout_rejects_the_run() {
+        let fixture = Fixture::new("generated");
+        fixture.write("verification/KrepiGen/Qual/X/Funs.lean", "module\n");
+        // Other files there, and Lean files elsewhere, do not count.
+        fixture.write("verification/KrepiGen/README", "Generated.\n");
+        fixture.write("verification/Krepi/KrepiGen/Funs.lean", "module\n");
+        fixture.commit_all();
+        let phases = vec![phase("checks", LONG, &["u1"], |run| {
+            run.conclude("u1", Status::Verified, None);
+            Ok(())
+        })];
+        let done = gate(&fixture, &[], phases);
+        assert_eq!(done.code, ExitCode::FAILURE);
+        let receipt = done.written();
+        assert_eq!(receipt.status, Status::Rejected);
+        assert!(!receipt.complete);
+        assert_eq!(
+            done.failures(),
+            [
+                "the gate inputs hold Lean files of the generated namespace: \
+                 verification/KrepiGen/Qual/X/Funs.lean"
+            ]
+        );
+        assert!(!receipt.phases["checks"].ran);
+        assert_eq!(receipt.units["u1"].status, Status::NotRun);
+    }
+
+    #[test]
+    fn a_cargo_configuration_below_the_root_in_the_gate_inputs_rejects_the_run() {
+        let fixture = Fixture::new("nested-cargo");
+        // Cargo reads both when it runs in the qualification crate.
+        let flags = "[build]\nrustflags = [\"--cfg\", \"board=\\\"pi5\\\"\"]\n";
+        fixture.write("verification/qualification/.cargo/config.toml", flags);
+        fixture.write("verification/.cargo/config", flags);
+        // A file of another name is not one.
+        fixture.write("kernel/.cargo/config.toml.orig", flags);
+        fixture.commit_all();
+        let phases = vec![phase("checks", LONG, &["u1"], |run| {
+            run.conclude("u1", Status::Verified, None);
+            Ok(())
+        })];
+        let done = gate(&fixture, &[], phases);
+        assert_eq!(done.code, ExitCode::FAILURE);
+        assert_eq!(done.receipt.status, Status::Rejected);
+        assert_eq!(
+            done.failures(),
+            ["the gate inputs hold Cargo configuration below the root: \
+                 verification/.cargo/config, verification/qualification/.cargo/config.toml"]
+        );
+        assert_eq!(done.receipt.units["u1"].status, Status::NotRun);
+    }
+
+    #[test]
     fn a_python_file_in_the_gate_inputs_rejects_the_run() {
         let fixture = Fixture::new("python");
         fixture.write("xtask/helper.py", "print()\n");
@@ -1341,6 +1454,107 @@ mod tests {
         assert_eq!(late.phase.as_deref(), Some("late"));
         assert_eq!(late.unit.as_deref(), Some("u1"));
         assert_eq!(done.receipt.units["u1"].status, Status::Budget);
+    }
+
+    #[test]
+    fn a_command_whose_limit_the_receipt_writes_as_zero_does_not_run() {
+        let fixture = Fixture::new("written-as-zero");
+        let phases = vec![phase("short", LONG, &["u1"], |run| {
+            // Above zero, but below half a millisecond: 0 in the receipt.
+            let duration = Duration::from_micros(400);
+            let limit = Limit {
+                duration,
+                by: LimitBy::Phase,
+            };
+            run.overrides = Some((Site::BaseBuild, limit, "/bin/sh".to_string()));
+            assert_eq!(shell(run, "u1", "exit 0").class, Class::NotRun);
+            run.conclude("u1", Status::Verified, None);
+            Ok(())
+        })];
+        let done = gate(&fixture, &[], phases);
+        let short: Vec<&receipt::Command> = (done.receipt.commands.iter())
+            .filter(|command| command.site == Site::BaseBuild)
+            .collect();
+        let [short] = short.as_slice() else {
+            panic!("{short:?}");
+        };
+        assert_eq!(short.class, Class::NotRun);
+        assert_eq!(
+            short.reason.as_deref(),
+            Some("the phase budget was used up")
+        );
+        assert_eq!((short.limit_seconds, short.limit), (0.0, LimitBy::Phase));
+        assert_eq!((short.exit_code, short.seconds), (None, 0.0));
+        assert_eq!((short.stdout.clone(), short.stderr.clone()), (None, None));
+        assert_eq!(done.receipt.units["u1"].status, Status::Budget);
+        assert_eq!(done.receipt.status, Status::Budget);
+    }
+
+    #[test]
+    fn a_command_skipped_for_a_missing_input_does_not_force_its_unit() {
+        let fixture = Fixture::new("skipped");
+        // The script `script` at the qualification build, run or skipped.
+        let build = |run: &mut Gate, unit: &str, script: &str, skip: bool| {
+            let (source, args) = (run.source(), ["-c".to_string(), script.to_string()]);
+            let request = Request {
+                site: Site::QualificationBuild,
+                tool: Tool::LakeBuild,
+                program: "/bin/sh",
+                args: &args,
+                cwd: &source,
+                stdin: None,
+            };
+            if skip {
+                run.skip(unit, &request, "the command before it wrote nothing");
+            } else {
+                let verdict = run.run(unit, &request, |_| Ok(())).1;
+                assert_eq!(verdict.class, Class::ProofFailure);
+            }
+        };
+        let skip = |run: &mut Gate, unit: &str| build(run, unit, "exit 0", true);
+        let phases = vec![
+            phase("first", LONG, &["u1"], |run| {
+                build(run, "u1", "exit 1", false);
+                skip(run, "u1");
+                run.conclude("u1", Status::Rejected, Some("nothing to build".to_string()));
+                Ok(())
+            }),
+            // Without a limit left, a command that would be skipped does
+            // not start for the budget.
+            phase("late", Duration::ZERO, &["u2"], |run| {
+                skip(run, "u2");
+                run.conclude("u2", Status::Verified, None);
+                Ok(())
+            }),
+        ];
+        let done = gate(&fixture, &[], phases);
+        let units = &done.receipt.units;
+        assert_eq!(units["u1"].status, Status::Rejected);
+        assert_eq!(units["u1"].reason.as_deref(), Some("nothing to build"));
+        assert_eq!(units["u2"].status, Status::Budget);
+        let skipped: Vec<&receipt::Command> = (done.receipt.commands.iter())
+            .filter(|command| command.class == Class::NotRun)
+            .collect();
+        let [first, late] = skipped.as_slice() else {
+            panic!("{skipped:?}");
+        };
+        assert_eq!(
+            first.reason.as_deref(),
+            Some("not started: the command before it wrote nothing")
+        );
+        assert_eq!(first.argv, ["/bin/sh", "-c", "exit 0"]);
+        assert_eq!(
+            (first.phase.as_deref(), first.unit.as_deref()),
+            (Some("first"), Some("u1"))
+        );
+        assert!(first.limit_seconds > 0.0, "{}", first.limit_seconds);
+        assert_eq!(first.limit, LimitBy::Phase);
+        assert_eq!((first.exit_code, first.seconds), (None, 0.0));
+        assert_eq!((first.stdout.clone(), first.stderr.clone()), (None, None));
+        assert_eq!(late.reason.as_deref(), Some("the phase budget was used up"));
+        assert_eq!(late.limit_seconds, 0.0);
+        assert_eq!(done.receipt.status, Status::Budget);
+        assert!(!done.receipt.complete);
     }
 
     #[test]

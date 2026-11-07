@@ -1,0 +1,54 @@
+{
+  "aeneas_version": "4acbb6d+patch-d4bc7d21",
+  "charon_version": "0.1.312",
+  "crate": "formal_qualification",
+  "functions": [
+    {
+      "def_id": 19,
+      "lean_name": "nested_loop.charge_grid",
+      "lean_file": "KrepiGen/Qual/NestedLoop/FunsExternal_Template.lean",
+      "rust_name": "formal_qualification::nested_loop::charge_grid",
+      "is_local": true,
+      "source": { "file": "src/lib.rs", "begin_line": 151, "end_line": 164 },
+      "is_opaque": true,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    },
+    {
+      "def_id": 21,
+      "lean_name": "KrepiGen.Qual.NestedLoop.budget.Budget.take",
+      "lean_file": "KrepiGen/Qual/NestedLoop/Funs.lean",
+      "rust_name": "formal_qualification::budget::{formal_qualification::budget::Budget}::take",
+      "is_local": true,
+      "source": { "file": "src/lib.rs", "begin_line": 123, "end_line": 129 },
+      "is_opaque": false,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    }
+  ],
+  "types": [
+    {
+      "def_id": 6,
+      "lean_name": "KrepiGen.Qual.NestedLoop.budget.Budget",
+      "lean_file": "KrepiGen/Qual/NestedLoop/Types.lean",
+      "rust_name": "formal_qualification::budget::Budget",
+      "is_local": true,
+      "source": { "file": "src/lib.rs", "begin_line": 116, "end_line": 118 }
+    },
+    {
+      "def_id": 8,
+      "lean_name": "KrepiGen.Qual.NestedLoop.budget.Exhausted",
+      "lean_file": "KrepiGen/Qual/NestedLoop/Types.lean",
+      "rust_name": "formal_qualification::budget::Exhausted",
+      "is_local": true,
+      "source": { "file": "src/lib.rs", "begin_line": 120, "end_line": 120 }
+    }
+  ],
+  "globals": [],
+  "trait_decls": [],
+  "trait_impls": []
+}

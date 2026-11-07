@@ -21,15 +21,21 @@ the tool manifest `verification/toolchain.json`, the reviewed Aeneas patch,
 the recipe of the image that holds the tools, the workflows that build and
 publish it, and `cargo xtask formal toolchain-check`, which checks the
 manifest against the Aeneas and Charon sources ([tools](#tools)).
-`cargo xtask formal run` exists as the frame of the proof gate
+`cargo xtask formal run` exists as the proof gate
 ([gate run](#gate-run)): it takes a snapshot of the gate inputs, exports
-them, applies their rules and writes a receipt. Its pipeline has no phases
-yet, with no extraction, qualification or Lean build, so its receipt
-verifies nothing about the code. Everything else on this page is planned:
-the Lake project, the `Krepi` Lean modules, the qualification crate, the
-phases of the gate and the other commands of `cargo xtask formal`. They are
-set up by porting the tooling of the CAS project and the prototype tree, and
-this page changes with them. No target is registered and nothing is proved.
+them, applies their rules, runs its phases and writes a receipt. Its one
+phase is the [qualification](#qualification) of the tools on the code shapes
+of the qualification crate, with the three proofs about them; it verifies
+nothing about the kernel. The qualification rejects 27 of the cases taken
+from the CAS project for now: they keep the expectations recorded with the
+earlier Charon and Aeneas, which the pinned tools no longer meet, until
+each change is explained and reviewed. The Lake project exists with the
+modules of the qualification. Everything else on this page is planned: the
+base round of specifications and proofs, the other `Krepi` Lean modules,
+the other phases of the gate and the other commands of
+`cargo xtask formal`. They are set up by porting the tooling of the CAS
+project and the prototype tree, and this page changes with them. No target
+is registered and nothing about the kernel is proved.
 
 Proofs of the prototype are proofs about that code.
 They do not carry over: a module taken into krepi is proved again against the
@@ -62,16 +68,18 @@ never moved into the trusted boundary to close a gap.
 | `verification/toolchain.json` | The tool manifest: Lean, the Aeneas source commit with its reviewed patch and the Lake lock of its Lean library, Charon, the Rust nightly used by Charon, opam and GMP, with the downloads of each host ([tools](#tool-manifest)) | Present |
 | `verification/tooling/` | Reviewed tool patches, named by the manifest, and their license texts | Present |
 | `verification/image/` | The recipe of the image that holds the pinned tools, and the list of its third-party notices ([image](#image)) | Present |
-| `verification/lakefile.lean`, `lean-toolchain`, `lake-manifest.json` | The Lake project for specifications and proofs | Planned |
+| `verification/lakefile.toml`, `lean-toolchain`, `lake-manifest.json` | The Lake project of the hand-written Lean and of the generated definitions, with the Lean toolchain and the packages of the Lake lock of the Aeneas Lean library ([qualification](#qualification)) | Present |
+| `verification/extraction.toml` | How Charon compiles each extracted crate ([extraction](#extraction)) | Present |
 | `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there | Planned |
 | `verification/Krepi/Proofs/` | Refinement proofs of production targets | Planned |
 | `verification/Krepi/Models/` | Lean models of items that proofs reach without extracting them, and their differential check | Planned |
-| `verification/Krepi/Qualification/` | Proofs about the qualification shapes | Planned |
-| `verification/externals/<Module>/` | Reviewed external declarations of a target or a qualification case (`FunsExternal.lean`, `TypesExternal.lean`), named by its `models` field | Planned |
+| `verification/Krepi/Qualification/` | Proofs about the qualification shapes | Present |
+| `verification/Krepi/Qualification/Models/` | Definitions that the reviewed external declarations of three qualification cases use; they are not models ([qualification](#qualification)) | Present |
+| `verification/externals/<Module>/` | Reviewed external declarations of a target or a qualification case (`FunsExternal.lean`, `TypesExternal.lean`), named by its `models` field | Present for qualification cases |
 | `verification/targets.json` | The proof target registry | Present, empty |
 | `verification/models.json` | The model registry | Present, empty |
 | `verification/legacy.json` | Production functions without proofs, recorded when the inventory is adopted | Present, empty |
-| `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Planned |
+| `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
 | `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check` and `run` present, the others planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
@@ -80,7 +88,8 @@ Generated Lean, extraction outputs, logs and receipts go to the ignored
 directory `artifacts/formal/runs/<id>/`, where `<id>` is the Unix time of
 its start, its process number and a count: `receipt.json`, `logs/` with
 the two output files of each command, and `work/` with the export of the
-gate inputs and the home and temporary directories of the tools.
+gate inputs, the home and temporary directories of the tools and, in
+`cases/`, the extraction and the Lake stage of each qualification case.
 Generated definitions are never edited.
 
 ## Tools
@@ -253,7 +262,7 @@ variables that `xtask/src/formal/toolchain.rs` gives it:
 | `HOME` | A new, empty directory of the run | All |
 | `TMPDIR` | A directory of the run | All |
 | `CARGO_INCREMENTAL` | `0` | Charon and Aeneas, the extraction |
-| `CARGO_TARGET_DIR` | A directory of the run for this extraction alone | Charon and Aeneas, the extraction |
+| `CARGO_TARGET_DIR` | A directory of the run for this extraction alone, removed when the extraction ends | Charon and Aeneas, the extraction |
 
 The installation is the `prefix` of the host's column: `/opt/krepi-formal`
 in the image, and a directory with the same layout on `darwin-arm64`. The
@@ -306,8 +315,7 @@ others are planned.
 | Command | Purpose |
 | --- | --- |
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
-| `cargo xtask formal qualify` (planned) | Tool qualification regression on the code shapes in `verification/qualification` |
-| `cargo xtask formal run [--target NAME]...` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets. Its phases, which are planned, are the qualification, the specifications and every target (or the named ones) with its mutants |
+| `cargo xtask formal run [--target NAME]...` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets. Its phases are the [qualification](#qualification), which every run has, and, planned, the specifications and every target (or the named ones) with its mutants |
 | `cargo xtask formal check` (planned) | Registry, legacy and inventory metadata only; runs no tool and proves nothing |
 | `cargo xtask formal impact --base REV` (planned) | Classifies changed functions since `REV` and reports scope reductions |
 | `cargo xtask formal inventory` (planned) | Lists every production function by inventory key |
@@ -324,8 +332,9 @@ covers the failure.
 snapshot commit, and writes a receipt of the run, whether it passes, fails
 or stops on an internal error. Its code is in `xtask/src/formal/`: the gate
 inputs in `paths.rs`, the commands in `process.rs`, their classes and the
-statuses in `outcome.rs`, the receipt in `receipt.rs` and the run in
-`run.rs`.
+statuses in `outcome.rs`, the receipt in `receipt.rs`, the extraction in
+`extract.rs`, the Lake stages in `lean.rs`, the qualification in
+`qualify.rs` and the run in `run.rs`.
 
 ### Gate inputs and snapshot
 
@@ -354,7 +363,11 @@ in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
    `verification/targets.json`, must register every name given with
    `--target`;
 4. rejects the run when a gate input is a Python source, a file whose name
-   ends in `.py` in any case;
+   ends in `.py` in any case, a Lean file below `verification/KrepiGen/`,
+   the directory of the generated definitions, which only stages of the run
+   hold, or a Cargo configuration below the root, a `.cargo/config.toml` or
+   `.cargo/config` in any directory but the root
+   ([Cargo configuration](#cargo-configuration));
 5. fails when Cargo would read a Cargo configuration in the export that is
    not the snapshot's ([Cargo configuration](#cargo-configuration)), and
    rejects the run when a manifest of the exported kernel workspace has a
@@ -382,9 +395,12 @@ records of `git status`.
 
 Cargo reads the `.cargo/config.toml` or `.cargo/config` of the directory
 where it runs and of each directory above it, up to the root of the file
-system, and the configuration of its Cargo home. Before the run starts
-Cargo in the export, it looks for both files in the export and in every
-directory above it, with symbolic links resolved. Only the snapshot's own
+system, and the configuration of its Cargo home. The gate runs Cargo in the
+export and in directories below it, such as the qualification crate, so a
+gate input that holds either file in a directory other than the root
+rejects the run. Before the run starts Cargo in the export, it looks for
+both files in the export and in every directory above it, with symbolic
+links resolved. Only the snapshot's own
 are allowed: `.cargo/config.toml` of the export when the snapshot holds it
 as a file, not as a symbolic link, and that of the checkout root when it
 has the bytes of the snapshot's. Any other, such as a file below the
@@ -415,14 +431,14 @@ command wrote is kept. Its limit is the smallest of:
 - the rest of the budget of the gate, 7,200 s from the start of the run.
 
 The steps after the phases, the second snapshot and the receipt, have 300 s
-beyond the gate's budget. A command whose limit is used up does not start
-and is `NOT_RUN`. When a command reaches its limit, or ends by itself, the
-run kills its process group, collects the command and waits up to 60 s,
-beyond the command's limit, until no process of the group is left; a
-process that is still there makes the command a tool failure. The run
-restores the default disposition of `SIGCHLD` when it starts, without which
-the system could collect an ended command before the kill. Each command is
-printed when it ends.
+beyond the gate's budget. A command whose limit is used up, 0 s as the
+receipt writes it, does not start and is `NOT_RUN`. When a command reaches
+its limit, or ends by itself, the run kills its process group, collects the
+command and waits up to 60 s, beyond the command's limit, until no process
+of the group is left; a process that is still there makes the command a
+tool failure. The run restores the default disposition of `SIGCHLD` when it
+starts, without which the system could collect an ended command before the
+kill. Each command is printed when it ends.
 
 A signal from the terminal does not reach a running tool, whose group is
 its own. SIGINT and SIGTERM stop the run instead, also when they were
@@ -432,6 +448,180 @@ collects the command, waits for its group as above, and ends by the same
 signal, without a receipt. A signal that comes
 between two commands takes effect before the next command starts or before
 the receipt is written.
+
+### Extraction
+
+An extraction, in `extract.rs`, translates the Rust items that it starts
+from into Lean. It needs at least one root, and a work directory that no
+extraction has used: a request without a root, or a work directory that
+already holds `extract.llbc`, `aeneas/` or `target/`, is an internal error,
+and nothing runs. It runs two commands of its unit:
+
+- Charon, in the package that it extracts:
+  `charon cargo --preset=aeneas --sysroot default --start-from <roots separated by commas> [--opaque <pattern>]... --dest-file <work>/extract.llbc -- --lib --locked`;
+- Aeneas, in the work directory:
+  `aeneas -backend lean -namespace KrepiGen.<module> -split-files -subdir KrepiGen/<module path> -emit-json -no-progress-bar -sequential -dest <work>/aeneas <work>/extract.llbc`.
+
+Aeneas starts only when Charon passed and wrote `extract.llbc`; otherwise
+it is `NOT_RUN` (see [results](#results)). Aeneas runs on one thread,
+because its pool of threads takes a time that varies with the load of the
+machine and, after an internal exception, can go on to report errors in
+other functions. Both commands have `<work>/target` as their Cargo target
+directory, which is removed when they have ended; one that cannot be
+removed is an internal error. Before Aeneas is classified, the gate reads
+`translation.json` and the Lean files in
+`<work>/aeneas/KrepiGen/<module path>`, and takes the SHA-256 of each; a
+file that cannot be read, a `translation.json` that is not one, and a
+missing `translation.json` after Aeneas exited with 0 make Aeneas a tool
+failure. Aeneas writes `translation.json` at the end of every run; after
+any other exit, a missing one is no translation. Of `translation.json` the
+gate reads `rust_name`, `lean_name`, `lean_file`, `is_local`, `is_opaque`,
+`source.file` and `loop.is_body` of each function, and `rust_name` and
+`lean_file` of each type; every one of them but `loop` must be there, and
+other fields are not read.
+
+What the extraction gives:
+
+| Item | Content |
+| --- | --- |
+| Complete | Aeneas exited with 0, reported no `[Error]` and wrote at least one Lean file |
+| Diagnostics | The `[Error]` and `[Warn ]` messages of Aeneas and the lines of Charon that start with `error:` or `error[`, with terminal escapes removed |
+| External functions | The Rust names of the functions translated without a body whose Lean file is `FunsExternal_Template.lean`, local ones among them |
+| External types | The Rust names of the types whose Lean file is `TypesExternal_Template.lean` |
+| Loops | Each local function with a body whose `loop` record is not a body, as its Lean name below the namespace of the extraction and its source file |
+| Local functions | The Rust name, source file and Lean name of each function of the crate, with a body or without one |
+
+`verification/extraction.toml`, schema 1, states how Charon compiles each
+crate that the gate extracts. Its section `qualification` gives the triple of
+each host of the tool manifest, `aarch64-unknown-linux-gnu` and
+`aarch64-apple-darwin`, and empty `features` and `cfg`: Charon is given no
+`--target` and adds the host's triple itself, and the gate passes no
+features and no `cfg` settings. Its section `kernel` gives the triple of the
+production kernel, `aarch64-unknown-none`, and the features and `cfg`
+settings of its release profile, which has none; nothing is extracted from
+the kernel while no target is registered. The qualification stops when the
+file of the export does not have exactly these hosts, names features or
+`cfg` settings for the qualification crate, or gives the kernel another
+triple. The triples of the qualification crate record what Charon chooses
+on each host; nothing passes them to Charon, and the gate does not check
+their values.
+
+### Qualification
+
+The qualification phase, in `qualify.rs`, checks the pinned tools against
+the code shapes of the qualification crate before anything relies on them.
+Every run has it, a run of named targets as well, with a budget of 3,600 s.
+
+The crate `verification/qualification/` holds one module per shape. It is a
+workspace of its own with its own `Cargo.lock` and depends on no crate, so
+that Charon compiles it alone, offline and `--locked`. Its manifest may hold
+only `[package]` with `name`, `version`, `edition`, `license`, `publish` and
+`description`, an empty `[workspace]`, `[lib]` with `path`, and
+`[lints]` with `rust`, and the package has no `build.rs`: dependencies,
+features, a build script, profiles and patches would change what Cargo
+compiles, and Charon reads `[package.metadata.charon]` in addition to its
+arguments. The phase stops when the crate in the export is otherwise. The
+cases are in `verification/qualification/cases.json`, schema 1, in the
+order in which they run:
+
+| Field | Meaning |
+| --- | --- |
+| `name` | The case, a word of ASCII letters, digits, `-` and `_`, given once |
+| `module` | The module path of its translation below `KrepiGen`, such as `Qual.Arithmetic` |
+| `start_from` | The roots of its extraction; empty for a case with `parts` |
+| `parts` | Optional. Modules below the case's, each with its own `start_from`, which are extracted one by one and imported together |
+| `opaque` | Optional. Patterns of items that the extraction translates without their bodies |
+| `expect` | `translated`, `ill-typed` or `rejected` |
+| `type_errors_in` | For an ill-typed case alone: the file of the case's directory of generated modules in which every type error lies, such as `Funs.lean` |
+| `models` | Optional. A directory below `verification/externals/` with the reviewed external declarations that replace the templates of the case |
+| `diagnostics`, `external_functions`, `external_types` | The exact [diagnostics and external items](#extraction) of the extraction |
+| `loop_sources` | Optional. The exact loops of the extraction with their source files |
+| `proof` | Optional, for a translated case: `module`, a module below `Krepi.Qualification`, and `theorems`, the theorems below that module that it proves about the translation |
+
+A field that is not in this table, and a case that does not follow it,
+stop the phase. The phase reads `cases.json` from the checkout at the start
+of the run, to register its units, and stops when the export's file is not
+the same. Its units are each case, `qualification/<case>`, and each theorem
+of a case, `qualification/<case>/<theorem>`.
+
+Each case runs in a new directory of the run, `work/cases/<case>/`:
+
+1. The [extraction](#extraction) of the case in that directory, or of each
+   of its parts in `parts/<n>/`, from the crate of the export. Each
+   extraction's Cargo target directory is removed when it ends; its LLBC
+   file and the output of Aeneas stay with the run directory.
+2. The comparison of the extraction with the case: whether it is complete,
+   with a complete translation expected for `translated` and `ill-typed`
+   and a rejection for `rejected`, and the sets of diagnostics, external
+   functions, external types and, when the case records them, loops. Each
+   item that is missing or extra is a difference, so a shape that starts to
+   translate after a tool change is one too.
+3. For a case that expects a translation and whose extraction is complete,
+   the stage `stage/`: the project files of `verification/` of the export,
+   the Lean files that Aeneas wrote, with the templates of external items
+   renamed to `FunsExternal.lean` and `TypesExternal.lean`, and two links
+   below `artifacts/formal/lake` to the Aeneas Lean library of the
+   installation and to its packages, which are read in place and never
+   copied. A case with `models` gets its reviewed declarations in place of
+   the templates, and the definitions of
+   `verification/Krepi/Qualification/Models/`. A reviewed file may declare
+   with `axiom`, after any attributes and modifiers such as `public`, only
+   what its template declares, and may not use `sorry`; otherwise it is not
+   installed, which is a difference. A case with parts
+   gets the module `KrepiGen.<module>.Check`, written by the gate, which
+   imports the `Funs` module of each part.
+4. The build of the stage with
+   `lake build --no-cache --wfail KrepiGen.<module>.Funs`, or the `Check`
+   module of a case with parts, at the call site of the qualification
+   builds, or of the ill-typed builds for an ill-typed case. A translated
+   case must build. An ill-typed case must exit with 1 with at least one
+   error in the files directly in its directory of generated modules, every
+   one of them in the file that it records, and every `error:` and
+   `warning:` line of the log must name that file, apart from Lake's closing
+   lines; a build that passes, or an error elsewhere, is a difference.
+   Nothing of a case that expects a rejection is built, and when the
+   extraction of a case that expects a translation is not complete, the
+   build is `NOT_RUN`.
+5. For a case with `proof`, when its generated code built: the build of the
+   proof module, copied from the export, with
+   `lake build --no-cache --wfail`, and its audit, a file `Audit.lean` that
+   is not a module, imports the proof module and has one `#print axioms`
+   line for each theorem, checked with `lake env lean Audit.lean` at the
+   call site of the case audits. Otherwise both are `NOT_RUN`.
+
+A case is `VERIFIED` without a difference and `REJECTED` with its
+differences. A theorem is `REJECTED` when its case is not as expected, its
+case did not build its generated code, its proof does not build, the audit
+does not report it, reports a theorem that was not requested or exits with a
+status other than 0, or the theorem depends on an axiom other than
+`propext`, `Classical.choice`, `Quot.sound` and the axioms that the
+templates of its own case declare; each extraction owns its external
+declarations, so a case's theorems are audited in its own Lean environment.
+Otherwise it is `VERIFIED`. The build and the audit of a proof are commands
+of its case, so a tool failure among the commands of a case decides the
+case and each of its theorems. A stage or a file of the run that cannot be
+created or written is an internal error, which stops the phase; the cases
+after it are then `NOT_RUN`.
+
+The proofs `Krepi.Qualification.Arithmetic`, `Checked` and `SingleLoop` are
+module files that import the generated definitions of their case. The
+reviewed external declarations of the cases `str_from`, `match-machine-arc`
+and `term-layout-cut` in `verification/externals/Qual/` use definitions in
+`verification/Krepi/Qualification/Models/`, namespace
+`Krepi.Qualification.Models`: the structure `alloc.sync.Arc` with `clone`
+and `deref`, and the decoding of a `&str` into a `String`. They are written
+from the types that those declarations need and from the documentation of
+the Rust standard library, declare no axiom, and serve only the type
+checking of these cases: they are not [models](#models), are not
+registered in `models.json`, are not compared with the standard library,
+and enter neither a proof target nor the [trusted boundary](#trusted-boundary).
+
+An expectation records what the pinned tools give. When a tool change
+changes the conclusion of a case, its new expectation is explained case by
+case, with an independent review of the explanations, before the case is
+changed. The cases taken from the CAS project still record what its
+earlier Charon and Aeneas gave; those that the pinned tools change are
+rejected until that review.
 
 ### Results
 
@@ -451,6 +641,7 @@ statement about the code. The conventions:
 | Charon exits with 255 | Charon | `TOOL_FAILURE` |
 | Cargo reports a process ended by a signal, as in `(signal: 9, SIGKILL: kill)` | Charon | `TOOL_FAILURE` |
 | Could not start or could not keep its output | All | `TOOL_FAILURE` |
+| Ended by itself, and an output file that the gate reads, `translation.json` or a generated Lean file, cannot be read or is not what the tool writes, or `translation.json` is missing after an exit with 0 | Aeneas | `TOOL_FAILURE` |
 | The base build fails with errors in krepi's own modules | The base build | `PROOF_FAILURE` |
 | The base build fails with warnings only in krepi's own modules | The base build | `PROOF_FAILURE` |
 | The base build fails without an error or a warning in krepi's own modules | The base build | `TOOL_FAILURE` |
@@ -461,15 +652,24 @@ A process of the group that survives the kill is a tool failure as well, and
 so is any failure of Git or `cargo metadata`, which the gate runs itself,
 and any status of the comparator but 0 and 1. Any other non-zero status of
 a tool is a `PROOF_FAILURE`, which its call site compares with what it
-expects. The call sites are the extraction, the qualification builds and
-audits, the base build, the axiom audit, `leanchecker` and the comparator,
-all planned.
+expects. The call sites are Charon and Aeneas, the qualification builds,
+the ill-typed builds and the case audits of the qualification, and,
+planned, the base build, the axiom audit, `leanchecker` and the
+comparator.
+
+A command that does not start because the command before it did not write
+what it needs, such as Aeneas after a Charon that failed, is `NOT_RUN`
+with the reason `not started:` and the limit that it would have had. It
+decides nothing: the command before it does. When the limit is used up as
+well, it is `NOT_RUN` for the budget, as any command whose limit is used
+up.
 
 A unit is a registered piece of work that gets exactly one conclusion: a
 qualification case, an audited theorem, the base round. A phase is a part
 of the pipeline with a budget of its own, such as the qualification. A unit
 with a command that was a tool failure is concluded `TOOL_FAILURE`, and one
-with a command that met a budget `BUDGET`, whatever its phase concludes.
+with a command that met a budget, or did not start because its limit was
+used up, `BUDGET`, whatever its phase concludes.
 
 The status of a run is the first of these that applies: `TOOL_FAILURE`,
 `BUDGET`, `STALE`, `REJECTED`, from its failures and the conclusions of its
@@ -521,6 +721,7 @@ keys; times are seconds, rounded to milliseconds.
 | `budgets` | `gate_seconds`, 7200, and `receipt_margin_seconds`, 300 |
 | `phases` | For each phase, `budget_seconds`, `seconds` and `ran` |
 | `units` | For each unit, its `phase`, its `status` and the `reason` for it, or `null` |
+| `qualification` | What the qualification found, below, or `null` when it did not start |
 | `commands` | Every command, in the order in which they ran |
 | `failures` | Every failure that is not the conclusion of a unit, with its `status` and `message` |
 
@@ -539,6 +740,16 @@ Each command has these fields:
 | `seconds` | How long the command ran |
 | `group_survived` | Whether processes of its group were still there after the kill |
 | `stdout`, `stderr` | `path` relative to the run directory, `bytes` and `sha256` of each output file, or `null` for a command that did not start |
+
+The `qualification` record has `cases_sha256` and `extraction_sha256`, the
+SHA-256 of `verification/qualification/cases.json` and
+`verification/extraction.toml` of the export, and these maps, which hold
+what the phase reached before it ended or stopped:
+
+| Field | Content |
+| --- | --- |
+| `cases` | For each case: `unit`, `module`, `parts`, `expect` and `models` as `cases.json` gives them; `observed`, what the extraction gave (`complete`, `diagnostics`, `external_functions`, `external_types`, `loop_sources`); `type_errors`, for an ill-typed case whose generated code was built, the recorded `file` and the number of type errors in the case's files (`errors`) and in that file (`in_file`), or `null`; `differences`; `generated`, the SHA-256 of each Lean file that Aeneas wrote, by its path below the output of Aeneas; and `declarations`, the axioms of the templates of a case with a proof |
+| `theorems` | For each theorem: its `case`, its `unit`, and the `axioms` that the audit reported for it, or `null` |
 
 Fields are only added to schema 1 while the gate's phases are added, until
 CI keeps receipts; after that, any change of a field takes a new schema.
@@ -628,7 +839,10 @@ registered in `models.json` with these fields:
 | `used_by` | For each target that installs the model, the registered theorems that reach it |
 
 The comparison of a model with the real implementation is evidence for the
-model, not a proof; the modelled source remains an assumption.
+model, not a proof; the modelled source remains an assumption. The
+definitions in `verification/Krepi/Qualification/Models/` are not models:
+they serve only the type checking of three qualification cases
+([qualification](#qualification)).
 
 ## Trusted boundary
 
@@ -656,8 +870,13 @@ configuration, is never upgraded by a later theorem.
 
 `verification/qualification/` holds a small crate of the code shapes that
 targets use, with the expected outcome of the tools for each in
-`cases.json`. Every qualification re-extracts them, so a tool change that
-alters a translation fails before it reaches a target. Some constructs that
+`cases.json`. Every run of the gate extracts them again
+([qualification](#qualification)), so a tool change that alters a
+translation fails before it reaches a target. Besides the shapes taken from
+the CAS project, cases record a body chosen by `cfg` (`cfg-shape`), a const
+generic parameter (`const-generic`) and each construct R1 to R7 of the
+provable subset (`r1-function-item-value` to `r7-private-enum`), with what
+the pinned tools give them. Some constructs that
 the prototype used, such as `Iterator::any` and `flatten`, do not translate
 into code that a proof can rely on; the
 [provable Rust subset](conventions/provable-subset.md) lists them with the

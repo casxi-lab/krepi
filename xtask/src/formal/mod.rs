@@ -6,11 +6,14 @@
 //! the paths that other steps of `cargo xtask check` read from the constants
 //! of those steps. The command line is read with `clap`.
 
+pub mod extract;
 #[cfg(test)]
 mod fixture;
+pub mod lean;
 pub mod outcome;
 pub mod paths;
 pub mod process;
+pub mod qualify;
 pub mod receipt;
 pub mod registry;
 pub mod run;
@@ -34,18 +37,20 @@ pub struct Layout {
     /// The qualification crate, an input of extraction, relative to the
     /// repository root.
     pub qualification: &'static str,
+    /// The qualification cases, relative to the repository root.
+    pub cases: &'static str,
+    /// The extraction configuration, relative to the repository root.
+    pub extraction: &'static str,
+    /// The Lake project, relative to the repository root.
+    pub project: &'static str,
+    /// The directory of the reviewed external declarations, relative to
+    /// the repository root.
+    pub externals: &'static str,
     /// The Lean namespace of the handwritten modules: specifications,
     /// statements, proofs and qualification proofs.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the Lean build is the first reader")
-    )]
     pub namespace: &'static str,
-    /// The Lean namespace of the definitions that Aeneas generates.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the extraction is the first reader")
-    )]
+    /// The Lean namespace of the definitions that Aeneas generates, and
+    /// their directory in the Lake project.
     pub generated: &'static str,
     /// The target triple for which the kernel workspace is extracted.
     pub triple: &'static str,
@@ -63,6 +68,10 @@ impl Layout {
     pub const PRODUCTION: Layout = Layout {
         kernel: crate::manifests::KERNEL,
         qualification: "verification/qualification",
+        cases: "verification/qualification/cases.json",
+        extraction: "verification/extraction.toml",
+        project: "verification",
+        externals: "verification/externals",
         namespace: "Krepi",
         generated: "KrepiGen",
         triple: "aarch64-unknown-none",
@@ -76,7 +85,7 @@ impl Layout {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "run",
-        about: "Run the proof gate on a snapshot of the gate inputs and write its receipt; --target NAME, which may be repeated, runs only the named targets",
+        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, and write its receipt; --target NAME, which may be repeated, runs only the named targets",
         subcommands: &[],
     },
     Command {
@@ -233,11 +242,62 @@ mod tests {
         let layout = Layout::PRODUCTION;
         for path in [
             format!("{}/Cargo.toml", layout.kernel),
+            format!("{}/Cargo.toml", layout.qualification),
+            format!("{}/Cargo.lock", layout.qualification),
+            layout.cases.to_string(),
+            layout.extraction.to_string(),
             layout.registry.to_string(),
             layout.toolchain.to_string(),
             format!("{}/LICENSE-Apache-2.0", layout.tooling),
-        ] {
+        ]
+        .into_iter()
+        .chain(
+            lean::PROJECT_FILES
+                .iter()
+                .map(|file| format!("{}/{file}", layout.project)),
+        ) {
             assert!(tree.exists(&path), "{path} is not tracked");
+        }
+        for path in [
+            layout.qualification,
+            layout.cases,
+            layout.extraction,
+            layout.externals,
+        ] {
+            assert!(
+                path.starts_with(&format!("{}/", layout.project)),
+                "{path} is not in the Lake project"
+            );
+        }
+    }
+
+    #[test]
+    fn the_lake_project_pins_the_lean_and_mathlib_of_the_manifest() {
+        let manifest = toolchain::parse(include_str!("../../../verification/toolchain.json"))
+            .expect("the committed manifest parses");
+        assert_eq!(
+            include_str!("../../../verification/lean-toolchain").trim_end(),
+            manifest.lean.toolchain
+        );
+        let lock: serde_json::Value =
+            serde_json::from_str(include_str!("../../../verification/lake-manifest.json"))
+                .expect("the Lake lock parses");
+        let packages = lock["packages"].as_array().expect("the packages");
+        let package = |name: &str| {
+            (packages.iter())
+                .find(|package| package["name"] == name)
+                .unwrap_or_else(|| panic!("no package {name}"))
+        };
+        assert_eq!(package("mathlib")["rev"], manifest.aeneas.mathlib_commit);
+        assert_eq!(package("aeneas")["type"], "path");
+        assert_eq!(package("aeneas")["dir"], "../artifacts/formal/lake/aeneas");
+        assert_eq!(lock["packagesDir"], "../artifacts/formal/lake/packages");
+        // Every other package is that of the lock of the Aeneas library.
+        for package in packages
+            .iter()
+            .filter(|package| package["name"] != "aeneas")
+        {
+            assert_eq!(package["inherited"], true, "{package}");
         }
     }
 

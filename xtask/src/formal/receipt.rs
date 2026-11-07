@@ -9,11 +9,10 @@ use serde::{Deserialize, Serialize};
 use super::outcome::{Class, Site, Status};
 use super::paths::Snapshot;
 use super::process::LimitBy;
+use super::qualify::Expect;
 
-/// The schema version of the receipt.
 pub const SCHEMA: u32 = 1;
 
-/// The command that writes the receipt.
 pub const COMMAND: &str = "cargo xtask formal run";
 
 /// The receipt of one run; its fields are written in this order.
@@ -36,11 +35,11 @@ pub struct Receipt {
     pub budgets: Budgets,
     pub phases: BTreeMap<String, Phase>,
     pub units: BTreeMap<String, Unit>,
+    pub qualification: Option<Qualification>,
     pub commands: Vec<Command>,
     pub failures: Vec<Failure>,
 }
 
-/// How a run was started; the first three are kept for the jobs of CI.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Mode {
@@ -52,7 +51,6 @@ pub enum Mode {
     Manual,
 }
 
-/// How a run was started, and the GitHub Actions run that started it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Trigger {
     pub mode: Mode,
@@ -111,7 +109,51 @@ pub struct Command {
     pub stderr: Option<Log>,
 }
 
-/// An output file of a command, its path relative to the run directory.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Qualification {
+    pub cases_sha256: String,
+    pub extraction_sha256: String,
+    pub cases: BTreeMap<String, QualificationCase>,
+    pub theorems: BTreeMap<String, QualificationTheorem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QualificationCase {
+    pub unit: String,
+    pub module: String,
+    pub parts: Vec<String>,
+    pub expect: Expect,
+    pub models: Option<String>,
+    pub observed: Observed,
+    pub type_errors: Option<TypeErrors>,
+    pub differences: Vec<String>,
+    pub generated: BTreeMap<String, String>,
+    pub declarations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Observed {
+    pub complete: bool,
+    pub diagnostics: Vec<String>,
+    pub external_functions: Vec<String>,
+    pub external_types: Vec<String>,
+    pub loop_sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TypeErrors {
+    pub file: String,
+    pub errors: u64,
+    pub in_file: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QualificationTheorem {
+    pub case: String,
+    pub unit: String,
+    pub axioms: Option<Vec<String>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Log {
     pub path: String,
@@ -133,10 +175,8 @@ pub fn seconds(duration: Duration) -> f64 {
 
 /// The text of `receipt`, with a final line break.
 pub fn render(receipt: &Receipt) -> String {
-    let mut text = serde_json::to_string_pretty(receipt)
-        .expect("a receipt has string keys and finite numbers");
-    text.push('\n');
-    text
+    let text = serde_json::to_string_pretty(receipt);
+    text.expect("a receipt has string keys and finite numbers") + "\n"
 }
 
 #[cfg(test)]
@@ -270,6 +310,7 @@ mod tests {
                     )
                 })
                 .collect(),
+            qualification: Some(qualification()),
             commands,
             failures: statuses
                 .into_iter()
@@ -278,6 +319,60 @@ mod tests {
                     message: format!("{status:?}"),
                 })
                 .collect(),
+        }
+    }
+
+    /// The record of a qualification with a case of every expectation.
+    fn qualification() -> Qualification {
+        let case = |expect, type_errors| QualificationCase {
+            unit: "qualification/c".to_string(),
+            module: "Qual.C".to_string(),
+            parts: vec!["Qual.C.A".to_string(), "Qual.C.B".to_string()],
+            expect,
+            models: Some("verification/externals/Qual/C".to_string()),
+            observed: Observed {
+                complete: true,
+                diagnostics: vec!["[Warn ] w".to_string()],
+                external_functions: vec!["f".to_string()],
+                external_types: vec!["t".to_string()],
+                loop_sources: vec!["c.f_loop src/lib.rs".to_string()],
+            },
+            type_errors,
+            differences: vec!["diagnostics: expected but absent: x".to_string()],
+            generated: BTreeMap::from([("KrepiGen/Qual/C/Funs.lean".to_string(), "8".repeat(64))]),
+            declarations: vec!["c.f".to_string()],
+        };
+        let errors = TypeErrors {
+            file: "Funs.lean".to_string(),
+            errors: 2,
+            in_file: 1,
+        };
+        Qualification {
+            cases_sha256: "1".repeat(64),
+            extraction_sha256: "2".repeat(64),
+            cases: BTreeMap::from([
+                ("a".to_string(), case(Expect::Translated, None)),
+                ("b".to_string(), case(Expect::IllTyped, Some(errors))),
+                ("c".to_string(), case(Expect::Rejected, None)),
+            ]),
+            theorems: BTreeMap::from([
+                (
+                    "Krepi.Qualification.C.t".to_string(),
+                    QualificationTheorem {
+                        case: "a".to_string(),
+                        unit: "qualification/a/Krepi.Qualification.C.t".to_string(),
+                        axioms: Some(vec!["propext".to_string()]),
+                    },
+                ),
+                (
+                    "Krepi.Qualification.C.u".to_string(),
+                    QualificationTheorem {
+                        case: "a".to_string(),
+                        unit: "qualification/a/Krepi.Qualification.C.u".to_string(),
+                        axioms: None,
+                    },
+                ),
+            ]),
         }
     }
 
@@ -314,6 +409,9 @@ mod tests {
             "\"gate\"",
             "\"ref\": \"refs/pull/7/merge\"",
             "\"type\": \"tree\"",
+            "\"expect\": \"translated\"",
+            "\"expect\": \"ill-typed\"",
+            "\"expect\": \"rejected\"",
         ] {
             assert!(text.contains(word), "{word} is not in {text}");
         }
@@ -376,6 +474,7 @@ mod tests {
                     },
                 ),
             ]),
+            qualification: None,
             commands: vec![Command {
                 sequence: 1,
                 phase: None,
@@ -455,6 +554,7 @@ mod tests {
       "reason": null
     }}
   }},
+  "qualification": null,
   "commands": [
     {{
       "sequence": 1,

@@ -1,0 +1,11 @@
+[[92mInfo[39m ] Imported: WORK/extract.llbc
+[[91mError[39m] Returns inside of nested loops are not supported yet
+Source: 'src/lib.rs', lines 151:4-164:5
+[[91mError[39m] Ignoring the body of 'formal_qualification::nested_loop::charge_grid' because of previous error
+Source: 'src/lib.rs', lines 151:4-164:5
+[[92mInfo[39m ] Creating missing directory: WORK/aeneas/KrepiGen/Qual/NestedLoop
+[[92mInfo[39m ] Generated the partial file (because of 2 errors, including 2 unique errors): WORK/aeneas/KrepiGen/Qual/NestedLoop/Types.lean
+[[92mInfo[39m ] Generated the partial file (because of 2 errors, including 2 unique errors): WORK/aeneas/KrepiGen/Qual/NestedLoop/FunsExternal_Template.lean
+[[92mInfo[39m ] Generated the partial file (because of 2 errors, including 2 unique errors): WORK/aeneas/KrepiGen/Qual/NestedLoop/Funs.lean
+[[92mInfo[39m ] Generated: WORK/aeneas/translation.json
+[[92mInfo[39m ] Total execution time: 0.299186 seconds

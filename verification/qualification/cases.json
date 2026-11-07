@@ -1,0 +1,1811 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "name": "str_from",
+      "module": "Qual.StrFrom",
+      "start_from": [
+        "crate::str_from"
+      ],
+      "expect": "translated",
+      "models": "verification/externals/Qual/StrFrom",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::string::{impl core::convert::From<&'_0 str> for alloc::string::String}::from"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "arithmetic",
+      "module": "Qual.Arithmetic",
+      "start_from": [
+        "crate::arithmetic"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "proof": {
+        "module": "Krepi.Qualification.Arithmetic",
+        "theorems": [
+          "Krepi.Qualification.Arithmetic.mul_mod_spec"
+        ]
+      }
+    },
+    {
+      "name": "checked",
+      "module": "Qual.Checked",
+      "start_from": [
+        "crate::checked"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "proof": {
+        "module": "Krepi.Qualification.Checked",
+        "theorems": [
+          "Krepi.Qualification.Checked.add_within_spec"
+        ]
+      }
+    },
+    {
+      "name": "integer-conversions",
+      "module": "Qual.IntegerConversions",
+      "start_from": [
+        "crate::integer_conversions"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "core::convert::num::{impl core::convert::From<u32> for i64}::from"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "option-combinators",
+      "module": "Qual.OptionCombinators",
+      "start_from": [
+        "crate::option_combinators"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "core::option::{core::option::Option<T>}::filter"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "single-loop",
+      "module": "Qual.SingleLoop",
+      "start_from": [
+        "crate::single_loop"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "proof": {
+        "module": "Krepi.Qualification.SingleLoop",
+        "theorems": [
+          "Krepi.Qualification.SingleLoop.charge_each_spec"
+        ]
+      }
+    },
+    {
+      "name": "nested-loop",
+      "module": "Qual.NestedLoop",
+      "start_from": [
+        "crate::nested_loop"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Ignoring the body of 'formal_qualification::nested_loop::charge_grid' because of previous error",
+        "[Error] Returns inside of nested loops are not supported yet"
+      ],
+      "external_functions": [
+        "formal_qualification::nested_loop::charge_grid"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "split-loop",
+      "module": "Qual.SplitLoop",
+      "start_from": [
+        "crate::split_loop"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "loop-break-tail",
+      "module": "Qual.LoopBreakTail",
+      "start_from": [
+        "crate::loop_break_tail"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "loop-break-branch",
+      "module": "Qual.LoopBreakBranch",
+      "start_from": [
+        "crate::loop_break_branch"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "iterator-adapters",
+      "module": "Qual.IteratorAdapters",
+      "start_from": [
+        "crate::iterator_adapters"
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "Funs.lean",
+      "diagnostics": [
+        "[Warn ] When retrieving the builtin information for trait decl 'core::iter::traits::iterator::Iterator', could not find the information for item 'collect'. The model defined in the Lean library seems to be missing the corresponding field.",
+        "[Warn ] When retrieving the builtin information for trait decl 'core::iter::traits::iterator::Iterator', could not find the information for item 'map'. The model defined in the Lean library seems to be missing the corresponding field."
+      ],
+      "external_functions": [
+        "core::iter::adapters::map::{impl core::iter::traits::iterator::Iterator<B> for core::iter::adapters::map::Map<I, F>}::next",
+        "core::iter::traits::iterator::Iterator::map"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "index-loop",
+      "module": "Qual.IndexLoop",
+      "start_from": [
+        "crate::index_loop"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "option-reference-eq",
+      "module": "Qual.OptionReferenceEq",
+      "start_from": [
+        "crate::option_reference_eq"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Nested borrows are not supported yet",
+        "[Warn ] Could not translate the body of function 'formal_qualification::option_reference_eq::trim because of previous error"
+      ],
+      "external_functions": [
+        "alloc::vec::{alloc::vec::Vec<T>}::pop",
+        "core::option::{impl core::cmp::PartialEq<core::option::Option<T>> for core::option::Option<T>}::eq",
+        "core::slice::{[T]}::last"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "trim-by-index",
+      "module": "Qual.TrimByIndex",
+      "start_from": [
+        "crate::trim_by_index"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::vec::{alloc::vec::Vec<T>}::is_empty",
+        "alloc::vec::{alloc::vec::Vec<T>}::pop"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "vector-operations",
+      "module": "Qual.VectorOperations",
+      "start_from": [
+        "crate::vector_operations"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::vec::{alloc::vec::Vec<T>}::pop",
+        "alloc::vec::{alloc::vec::Vec<T>}::truncate",
+        "core::slice::{[T]}::first_mut"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "closure-parameter",
+      "module": "Qual.ClosureParameter",
+      "start_from": [
+        "crate::closure_parameter"
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "Funs.lean",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "generic-trait",
+      "module": "Qual.GenericTrait",
+      "start_from": [
+        "crate::generic_trait"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "ordered-maps",
+      "module": "Qual.OrderedMaps",
+      "start_from": [
+        "crate::ordered_maps"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::get",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::insert",
+        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow",
+        "core::option::{core::option::Option<&'_0 T>}::copied"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap"
+      ]
+    },
+    {
+      "name": "shared-pointers",
+      "module": "Qual.SharedPointers",
+      "start_from": [
+        "crate::shared_pointers"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::sync::{alloc::sync::Arc<T>}::ptr_eq",
+        "alloc::sync::{impl core::ops::deref::Deref<T> for alloc::sync::Arc<T>}::deref"
+      ],
+      "external_types": [
+        "alloc::sync::Arc"
+      ]
+    },
+    {
+      "name": "recursion",
+      "module": "Qual.Recursion",
+      "start_from": [
+        "crate::recursion"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "formatting",
+      "module": "Qual.Formatting",
+      "start_from": [
+        "crate::formatting"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::fmt::format",
+        "core::fmt::{impl core::fmt::Display for &'_0 T}::fmt",
+        "core::fmt::{impl core::fmt::Display for str}::fmt",
+        "core::hint::must_use"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "floats",
+      "module": "Qual.Floats",
+      "start_from": [
+        "crate::floats"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Invalid inputs for binop",
+        "[Warn ] Could not translate the body of function 'formal_qualification::floats::two_sum because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "binary64-bits",
+      "module": "Qual.Binary64Bits",
+      "start_from": [
+        "crate::binary64_bits"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "formal_qualification::binary64_bits::primitive::add",
+        "formal_qualification::binary64_bits::primitive::fma",
+        "formal_qualification::binary64_bits::primitive::mul",
+        "formal_qualification::binary64_bits::primitive::sub"
+      ],
+      "external_types": [],
+      "opaque": [
+        "crate::binary64_bits::primitive"
+      ]
+    },
+    {
+      "name": "binary64-values",
+      "module": "Qual.Binary64Values",
+      "start_from": [
+        "crate::binary64_values"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "formal_qualification::binary64_values::primitive::add",
+        "formal_qualification::binary64_values::primitive::sub",
+        "core::f64::{f64}::to_bits"
+      ],
+      "external_types": [],
+      "opaque": [
+        "crate::binary64_values::primitive"
+      ]
+    },
+    {
+      "name": "clock",
+      "module": "Qual.Clock",
+      "start_from": [
+        "crate::clock::expired_twice"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "std::time::{impl core::cmp::PartialEq<std::time::Instant> for std::time::Instant}::eq",
+        "std::time::{impl core::cmp::PartialOrd<std::time::Instant> for std::time::Instant}::partial_cmp",
+        "std::time::{std::time::Instant}::now"
+      ],
+      "external_types": [
+        "std::time::Instant"
+      ]
+    },
+    {
+      "name": "atomics",
+      "module": "Qual.Atomics",
+      "start_from": [
+        "crate::atomics"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::sync::{impl core::ops::deref::Deref<T> for alloc::sync::Arc<T>}::deref",
+        "core::sync::atomic::{core::sync::atomic::Atomic<bool, core::sync::atomic::private::Align1<u8>>}::load"
+      ],
+      "external_types": [
+        "alloc::sync::Arc",
+        "core::sync::atomic::Atomic",
+        "core::sync::atomic::private::Align1"
+      ]
+    },
+    {
+      "name": "observations",
+      "module": "Qual.Observations",
+      "start_from": [
+        "crate::observations::observe_twice"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "formal_qualification::observations::{formal_qualification::observations::Probe}::observe"
+      ],
+      "external_types": [
+        "formal_qualification::observations::Probe"
+      ],
+      "opaque": [
+        "crate::observations::Probe",
+        "crate::observations::_::observe"
+      ]
+    },
+    {
+      "name": "slices",
+      "module": "Qual.Slices",
+      "start_from": [
+        "crate::slices"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "field-interface",
+      "module": "Qual.FieldInterface",
+      "start_from": [
+        "crate::field_interface"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "polynomial-interface",
+      "module": "Qual.PolynomialInterface",
+      "start_from": [
+        "crate::polynomial_interface"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::vec::{alloc::vec::Vec<T>}::is_empty",
+        "alloc::vec::{alloc::vec::Vec<T>}::pop"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "default-method",
+      "module": "Qual.DefaultMethod",
+      "start_from": [
+        "crate::default_method"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "default-self-call",
+      "module": "Qual.DefaultSelfCall",
+      "start_from": [
+        "crate::default_self_call"
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "Funs.lean",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "default-direct-call",
+      "module": "Qual.DefaultDirectCall",
+      "start_from": [
+        "crate::default_direct_call"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "checks-before-loop",
+      "module": "Qual.ChecksBeforeLoop",
+      "start_from": [
+        "crate::checks_before_loop"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "return-before-loop",
+      "module": "Qual.ReturnBeforeLoop",
+      "start_from": [
+        "crate::return_before_loop"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Early returns inside of loops are not supported yet",
+        "[Error] Ignoring the body of 'formal_qualification::return_before_loop::charge_pairs' because of previous error"
+      ],
+      "external_functions": [
+        "formal_qualification::return_before_loop::charge_pairs"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "flag-before-loop",
+      "module": "Qual.FlagBeforeLoop",
+      "start_from": [
+        "crate::flag_before_loop"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Early returns inside of loops are not supported yet",
+        "[Error] Ignoring the body of 'formal_qualification::flag_before_loop::charge_pairs' because of previous error"
+      ],
+      "external_functions": [
+        "formal_qualification::flag_before_loop::charge_pairs"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "loop-in-branch",
+      "module": "Qual.LoopInBranch",
+      "start_from": [
+        "crate::loop_in_branch"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Early returns inside of loops are not supported yet",
+        "[Error] Ignoring the body of 'formal_qualification::loop_in_branch::charge_each' because of previous error"
+      ],
+      "external_functions": [
+        "formal_qualification::loop_in_branch::charge_each"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "placement-before-loop",
+      "module": "Qual.PlacementBeforeLoop",
+      "start_from": [
+        "crate::placement_before_loop"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "returns-then-helper",
+      "module": "Qual.ReturnsThenHelper",
+      "start_from": [
+        "crate::returns_then_helper"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "owned-before-loop",
+      "module": "Qual.OwnedBeforeLoop",
+      "start_from": [
+        "crate::owned_before_loop"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Early returns inside of loops are not supported yet",
+        "[Error] Ignoring the body of 'formal_qualification::owned_before_loop::charge_pairs' because of previous error"
+      ],
+      "external_functions": [
+        "formal_qualification::owned_before_loop::charge_pairs"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "owned-then-helper",
+      "module": "Qual.OwnedThenHelper",
+      "start_from": [
+        "crate::owned_then_helper"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "coefficient-map",
+      "module": "Qual.CoefficientMap",
+      "start_from": [
+        "crate::coefficient_map"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::first_key_value",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::insert",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::last_key_value",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::range",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, alloc::alloc::Global>}::new",
+        "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Range<'a, K, V>}::next",
+        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow",
+        "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::end_bound",
+        "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::start_bound"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap",
+        "alloc::collections::btree::map::Range"
+      ]
+    },
+    {
+      "name": "registry-records",
+      "module": "Qual.RegistryRecords",
+      "start_from": [
+        "crate::registry_records"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "registry-static-reference",
+      "module": "Qual.RegistryStaticReference",
+      "start_from": [
+        "crate::registry_static_reference"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Unreachable",
+        "[Warn ] Could not translate the body of function 'formal_qualification::registry_static_reference::arity because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "registry-str-names",
+      "module": "Qual.RegistryStrNames",
+      "start_from": [
+        "crate::registry_str_names"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Assertion failed: new value doesn't have the same type as its destination",
+        "[Warn ] Could not translate the body of function 'formal_qualification::registry_str_names::lookup because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "const-str-names",
+      "module": "Qual.ConstStrNames",
+      "start_from": [
+        "crate::const_str_names"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Assertion failed: new value doesn't have the same type as its destination",
+        "[Warn ] Could not translate the body of function 'formal_qualification::const_str_names::lookup because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "static-str-table",
+      "module": "Qual.StaticStrTable",
+      "start_from": [
+        "crate::static_str_table"
+      ],
+      "expect": "rejected",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "string-match",
+      "module": "Qual.StringMatch",
+      "start_from": [
+        "crate::string_match"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "string-literal-return",
+      "module": "Qual.StringLiteralReturn",
+      "start_from": [
+        "crate::string_literal_return"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] There should be no bottoms in the value",
+        "[Warn ] Could not translate the body of function 'formal_qualification::string_literal_return::name because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "enum-index-cast",
+      "module": "Qual.EnumIndexCast",
+      "start_from": [
+        "crate::enum_index_cast"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "function-pointers",
+      "module": "Qual.FunctionPointers",
+      "start_from": [
+        "crate::function_pointers"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Arrow types are not supported yet",
+        "[Error] Could not find: type name: formal_qualification::function_pointers::Entry",
+        "[Error] Function pointers are not supported yet",
+        "[Error] Invalid input for unop: cast<formal_qualification::function_pointers::halve, fn(u64) -> u64> on formal_qualification::function_pointers::halve",
+        "[Warn ] Could not translate the body of function 'formal_qualification::function_pointers::ENTRIES because of previous error",
+        "[Warn ] Could not translate the body of function 'formal_qualification::function_pointers::apply because of previous error",
+        "[Warn ] Could not translate type decl 'formal_qualification::function_pointers::Entry because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "series-summer",
+      "module": "Qual.SeriesSummer",
+      "start_from": [
+        "crate::series_summer"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "error-conversion",
+      "module": "Qual.ErrorConversion",
+      "start_from": [
+        "crate::error_conversion"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "map-iteration",
+      "module": "Qual.MapIteration",
+      "start_from": [
+        "crate::map_iteration"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::iter",
+        "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Iter<'a, K, V>}::next"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap",
+        "alloc::collections::btree::map::Iter"
+      ]
+    },
+    {
+      "name": "map-reverse-iteration",
+      "module": "Qual.MapReverseIteration",
+      "start_from": [
+        "crate::map_reverse_iteration"
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "Funs.lean",
+      "diagnostics": [
+        "[Warn ] When retrieving the builtin information for trait decl 'core::iter::traits::iterator::Iterator', could not find the information for item 'rev'. The model defined in the Lean library seems to be missing the corresponding field."
+      ],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::iter",
+        "alloc::collections::btree::map::{impl core::iter::traits::double_ended::DoubleEndedIterator<(&'_ K, &'_ V)> for alloc::collections::btree::map::Iter<'a, K, V>}::next_back",
+        "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Iter<'a, K, V>}::next"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap",
+        "alloc::collections::btree::map::Iter"
+      ]
+    },
+    {
+      "name": "map-next-back",
+      "module": "Qual.MapNextBack",
+      "start_from": [
+        "crate::map_next_back"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::iter",
+        "alloc::collections::btree::map::{impl core::iter::traits::double_ended::DoubleEndedIterator<(&'_ K, &'_ V)> for alloc::collections::btree::map::Iter<'a, K, V>}::next_back"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap",
+        "alloc::collections::btree::map::Iter"
+      ]
+    },
+    {
+      "name": "map-entry",
+      "module": "Qual.MapEntry",
+      "start_from": [
+        "crate::map_entry"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::entry::{alloc::collections::btree::map::entry::OccupiedEntry<'a, K, V, A>}::get",
+        "alloc::collections::btree::map::entry::{alloc::collections::btree::map::entry::OccupiedEntry<'a, K, V, A>}::get_mut",
+        "alloc::collections::btree::map::entry::{alloc::collections::btree::map::entry::OccupiedEntry<'a, K, V, A>}::remove",
+        "alloc::collections::btree::map::entry::{alloc::collections::btree::map::entry::VacantEntry<'a, K, V, A>}::insert",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::entry"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap",
+        "alloc::collections::btree::map::entry::OccupiedEntry",
+        "alloc::collections::btree::map::entry::VacantEntry"
+      ]
+    },
+    {
+      "name": "map-last",
+      "module": "Qual.MapLast",
+      "start_from": [
+        "crate::map_last"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::last_key_value"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap"
+      ]
+    },
+    {
+      "name": "map-loop-charge",
+      "module": "Qual.MapLoopCharge",
+      "start_from": [
+        "crate::map_loop_charge"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::entry::{alloc::collections::btree::map::entry::OccupiedEntry<'a, K, V, A>}::get",
+        "alloc::collections::btree::map::entry::{alloc::collections::btree::map::entry::OccupiedEntry<'a, K, V, A>}::get_mut",
+        "alloc::collections::btree::map::entry::{alloc::collections::btree::map::entry::OccupiedEntry<'a, K, V, A>}::remove",
+        "alloc::collections::btree::map::entry::{alloc::collections::btree::map::entry::VacantEntry<'a, K, V, A>}::insert",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::entry",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::iter",
+        "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Iter<'a, K, V>}::next"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap",
+        "alloc::collections::btree::map::Iter",
+        "alloc::collections::btree::map::entry::OccupiedEntry",
+        "alloc::collections::btree::map::entry::VacantEntry"
+      ]
+    },
+    {
+      "name": "map-next-back-charge",
+      "module": "Qual.MapNextBackCharge",
+      "start_from": [
+        "crate::map_next_back_charge"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::iter",
+        "alloc::collections::btree::map::{impl core::iter::traits::double_ended::DoubleEndedIterator<(&'_ K, &'_ V)> for alloc::collections::btree::map::Iter<'a, K, V>}::next_back"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap",
+        "alloc::collections::btree::map::Iter"
+      ]
+    },
+    {
+      "name": "term-walk",
+      "module": "Qual.TermWalk",
+      "start_from": [
+        "crate::term_walk"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::vec::{alloc::vec::Vec<T>}::is_empty"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "map-term-walk",
+      "module": "Qual.MapTermWalk",
+      "start_from": [
+        "crate::map_term_walk"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::first_key_value",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::insert",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::last_key_value",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::range",
+        "alloc::collections::btree::map::{impl core::clone::Clone for alloc::collections::btree::map::BTreeMap<K, V, A>}::clone",
+        "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Range<'a, K, V>}::next",
+        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow",
+        "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::end_bound",
+        "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::start_bound"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap",
+        "alloc::collections::btree::map::Range"
+      ]
+    },
+    {
+      "name": "carried-term-walk",
+      "module": "Qual.CarriedTermWalk",
+      "start_from": [
+        "crate::carried_term_walk"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] There should be no bottoms in the value",
+        "[Warn ] Could not translate the body of function 'formal_qualification::carried_term_walk::fold because of previous error"
+      ],
+      "external_functions": [
+        "alloc::vec::{alloc::vec::Vec<T>}::is_empty"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "view-map-loop",
+      "module": "Qual.ViewMapLoop",
+      "start_from": [
+        "crate::view_map_loop"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Internal error, please file an issue",
+        "[Warn ] Could not translate the body of function 'formal_qualification::view_map_loop::{impl formal_qualification::view_map_loop::LoopRows<u64, alloc::collections::btree::map::BTreeMap<u32, u64, alloc::alloc::Global>> for formal_qualification::view_map_loop::LoopView<'_0>}::add_row because of previous error"
+      ],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::insert",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::iter",
+        "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Iter<'a, K, V>}::next"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap",
+        "alloc::collections::btree::map::Iter"
+      ]
+    },
+    {
+      "name": "view-map-range",
+      "module": "Qual.ViewMapRange",
+      "start_from": [
+        "crate::view_map_range"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Internal error, please file an issue",
+        "[Warn ] Could not translate the body of function 'formal_qualification::view_map_range::{impl formal_qualification::view_map_range::RangeTerms<u64, alloc::collections::btree::map::BTreeMap<u32, u64, alloc::alloc::Global>> for formal_qualification::view_map_range::RangeView<'_0>}::term_after because of previous error"
+      ],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::first_key_value",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::range",
+        "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Range<'a, K, V>}::next",
+        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow",
+        "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::end_bound",
+        "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::start_bound"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap",
+        "alloc::collections::btree::map::Range"
+      ]
+    },
+    {
+      "name": "view-index-loop",
+      "module": "Qual.ViewIndexLoop",
+      "start_from": [
+        "crate::view_index_loop"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Internal error, please file an issue",
+        "[Warn ] Could not translate the body of function 'formal_qualification::view_index_loop::{impl formal_qualification::view_index_loop::IndexSums for formal_qualification::view_index_loop::IndexView<'_0>}::sum because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "view-value-join",
+      "module": "Qual.ViewValueJoin",
+      "start_from": [
+        "crate::view_value_join"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Internal error, please file an issue",
+        "[Warn ] Could not translate the body of function 'formal_qualification::view_value_join::{formal_qualification::view_value_join::JoinView<'_0>}::scaled_next because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "view-borrowed-helper",
+      "module": "Qual.ViewBorrowedHelper",
+      "start_from": [
+        "crate::view_borrowed_helper"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Internal error, please file an issue",
+        "[Warn ] Could not translate the body of function 'formal_qualification::view_borrowed_helper::sum_values because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "view-map-helper",
+      "module": "Qual.ViewMapHelper",
+      "start_from": [
+        "crate::view_map_helper"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::first_key_value",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::insert",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::iter",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::range",
+        "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Iter<'a, K, V>}::next",
+        "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Range<'a, K, V>}::next",
+        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow",
+        "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::end_bound",
+        "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::start_bound"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap",
+        "alloc::collections::btree::map::Iter",
+        "alloc::collections::btree::map::Range"
+      ]
+    },
+    {
+      "name": "monomial-order",
+      "module": "Qual.MonomialOrder",
+      "start_from": [
+        "crate::monomial_order"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::insert",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::last_key_value",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::remove",
+        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap"
+      ]
+    },
+    {
+      "name": "range-loop",
+      "module": "Qual.RangeLoop",
+      "start_from": [
+        "crate::range_loop"
+      ],
+      "expect": "translated",
+      "diagnostics": [
+        "[Warn ] When retrieving the builtin information for trait decl 'core::iter::range::Step', could not find the information for item 'backward_overflowing'. The model defined in the Lean library seems to be missing the corresponding field.",
+        "[Warn ] When retrieving the builtin information for trait decl 'core::iter::range::Step', could not find the information for item 'forward_overflowing'. The model defined in the Lean library seems to be missing the corresponding field."
+      ],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "literal-variant-match",
+      "module": "Qual.LiteralVariantMatch",
+      "start_from": [
+        "crate::literal_variant_match"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "registry-items",
+      "module": "Qual.RegistryItems",
+      "start_from": [
+        "crate::registry_items"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "subtrait-loop",
+      "module": "Qual.SubtraitLoop",
+      "start_from": [
+        "crate::subtrait_loop"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Could not find: type_var_id: 2 from ExtractBase.Item"
+      ],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "elimination-skeleton",
+      "module": "Qual.EliminationSkeleton",
+      "start_from": [
+        "crate::elimination_skeleton"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "shared-term",
+      "module": "Qual.SharedTerm",
+      "start_from": [
+        "crate::shared_term"
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "Types.lean",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::sync::{impl core::clone::Clone for alloc::sync::Arc<T>}::clone",
+        "alloc::sync::{impl core::ops::deref::Deref<T> for alloc::sync::Arc<T>}::deref"
+      ],
+      "external_types": [
+        "alloc::sync::Arc"
+      ]
+    },
+    {
+      "name": "match-machine",
+      "module": "Qual.MatchMachine",
+      "start_from": [
+        "crate::match_machine"
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "Types.lean",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::sync::{impl core::clone::Clone for alloc::sync::Arc<T>}::clone",
+        "alloc::sync::{impl core::ops::deref::Deref<T> for alloc::sync::Arc<T>}::deref"
+      ],
+      "external_types": [
+        "alloc::sync::Arc"
+      ]
+    },
+    {
+      "name": "match-machine-arc",
+      "module": "Qual.MatchMachineArc",
+      "start_from": [
+        "crate::match_machine"
+      ],
+      "expect": "translated",
+      "models": "verification/externals/Qual/MatchMachineArc",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::sync::{impl core::clone::Clone for alloc::sync::Arc<T>}::clone",
+        "alloc::sync::{impl core::ops::deref::Deref<T> for alloc::sync::Arc<T>}::deref"
+      ],
+      "external_types": [
+        "alloc::sync::Arc"
+      ]
+    },
+    {
+      "name": "term-layout-cut",
+      "module": "Qual.TermLayoutCut",
+      "start_from": [
+        "crate::term_layout_cut"
+      ],
+      "expect": "translated",
+      "opaque": [
+        "crate::term_layout_cut::LayoutBindings",
+        "crate::term_layout_cut::LayoutPayload"
+      ],
+      "models": "verification/externals/Qual/TermLayoutCut",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::sync::{impl core::clone::Clone for alloc::sync::Arc<T>}::clone",
+        "alloc::sync::{impl core::ops::deref::Deref<T> for alloc::sync::Arc<T>}::deref"
+      ],
+      "external_types": [
+        "alloc::sync::Arc",
+        "formal_qualification::term_layout_cut::LayoutBindings",
+        "formal_qualification::term_layout_cut::LayoutPayload"
+      ]
+    },
+    {
+      "name": "match-search",
+      "module": "Qual.MatchSearch",
+      "start_from": [
+        "crate::match_search"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "strategy-data",
+      "module": "Qual.StrategyData",
+      "start_from": [
+        "crate::strategy_data"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "strategy-recursive",
+      "module": "Qual.StrategyRecursive",
+      "start_from": [
+        "crate::strategy_recursive"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "strategy-loop",
+      "module": "Qual.StrategyLoop",
+      "start_from": [
+        "crate::strategy_loop"
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "Funs.lean",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "indexed-field-sum",
+      "module": "Qual.IndexedFieldSum",
+      "start_from": [
+        "crate::indexed_field_sum"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Unimplemented binary operation",
+        "[Warn ] Could not translate the body of function 'formal_qualification::indexed_field_sum::{formal_qualification::indexed_field_sum::ChoiceStack}::advance because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "collection-tree-copy",
+      "module": "Qual.CollectionTreeCopy",
+      "start_from": [
+        "crate::collection_tree_copy"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::string::{impl core::clone::Clone for alloc::string::String}::clone",
+        "alloc::string::{impl core::cmp::PartialEq<alloc::string::String> for alloc::string::String}::eq",
+        "alloc::vec::{alloc::vec::Vec<T>}::append",
+        "alloc::vec::{alloc::vec::Vec<T>}::pop",
+        "alloc::vec::{impl core::default::Default for alloc::vec::Vec<T>}::default",
+        "core::mem::take",
+        "core::slice::raw::from_ref"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "collection-tree-map",
+      "module": "Qual.CollectionTreeMap",
+      "start_from": [
+        "crate::collection_tree_map"
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "Types.lean",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::len"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap"
+      ]
+    },
+    {
+      "name": "collection-tree-walk",
+      "module": "Qual.CollectionTreeWalk",
+      "start_from": [
+        "crate::collection_tree_walk"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Internal error, please file an issue.",
+        "[Warn ] Could not translate the body of function 'formal_qualification::collection_tree_walk::push_children because of previous error"
+      ],
+      "external_functions": [
+        "alloc::vec::{alloc::vec::Vec<T>}::pop"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "collection-tree-frame-enum",
+      "module": "Qual.CollectionTreeFrameEnum",
+      "start_from": [
+        "crate::collection_tree_frame_enum"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Internal error, please file an issue",
+        "[Warn ] Could not translate the body of function 'formal_qualification::collection_tree_frame_enum::copy_frames because of previous error",
+        "[Warn ] Could not translate the body of function 'formal_qualification::collection_tree_frame_enum::equal_pairs because of previous error"
+      ],
+      "external_functions": [
+        "alloc::string::{impl core::clone::Clone for alloc::string::String}::clone",
+        "alloc::string::{impl core::cmp::PartialEq<alloc::string::String> for alloc::string::String}::eq",
+        "alloc::vec::{alloc::vec::Vec<T>}::pop"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "string-bytes",
+      "module": "Qual.StringBytes",
+      "start_from": [
+        "crate::string_bytes"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::str::{impl alloc::borrow::ToOwned<alloc::string::String> for str}::to_owned",
+        "core::str::traits::{impl core::ops::index::Index<I, Clause0_Output> for str}::index",
+        "core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::Range<usize>}::get",
+        "core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::Range<usize>}::get_mut",
+        "core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::Range<usize>}::get_unchecked",
+        "core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::Range<usize>}::get_unchecked_mut",
+        "core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::Range<usize>}::index",
+        "core::str::traits::{impl core::slice::index::SliceIndex<str, str> for core::ops::range::Range<usize>}::index_mut",
+        "core::str::{str}::as_bytes"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "string-chars",
+      "module": "Qual.StringChars",
+      "start_from": [
+        "crate::string_chars"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::string::{alloc::string::String}::new",
+        "alloc::string::{alloc::string::String}::push"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "collection-tree-kinds",
+      "module": "Qual.CollectionTreeKinds",
+      "start_from": [
+        "crate::collection_tree_kinds"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::string::{alloc::string::String}::len",
+        "alloc::string::{alloc::string::String}::push_str",
+        "alloc::string::{alloc::string::String}::with_capacity",
+        "alloc::string::{impl core::clone::Clone for alloc::string::String}::clone",
+        "alloc::string::{impl core::cmp::PartialEq<alloc::string::String> for alloc::string::String}::eq",
+        "alloc::vec::{alloc::vec::Vec<T>}::append",
+        "alloc::vec::{alloc::vec::Vec<T>}::pop",
+        "alloc::vec::{impl core::default::Default for alloc::vec::Vec<T>}::default",
+        "core::mem::take",
+        "core::slice::raw::from_ref",
+        "core::str::{str}::len"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "collection-hand-traits",
+      "module": "Qual.CollectionHandTraits",
+      "start_from": [
+        "crate::collection_hand_traits"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::string::{impl core::clone::Clone for alloc::string::String}::clone",
+        "alloc::string::{impl core::cmp::PartialEq<alloc::string::String> for alloc::string::String}::eq",
+        "alloc::string::{impl core::fmt::Debug for alloc::string::String}::fmt",
+        "alloc::vec::{alloc::vec::Vec<T>}::append",
+        "alloc::vec::{alloc::vec::Vec<T>}::is_empty",
+        "alloc::vec::{alloc::vec::Vec<T>}::pop",
+        "alloc::vec::{impl core::default::Default for alloc::vec::Vec<T>}::default",
+        "core::mem::take",
+        "core::slice::raw::from_ref"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "collection-tree-keyed-frames",
+      "module": "Qual.CollectionTreeKeyedFrames",
+      "start_from": [
+        "crate::collection_tree_keyed_frames"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Internal error, please file an issue.",
+        "[Warn ] Could not translate the body of function 'formal_qualification::collection_tree_keyed_frames::key_bytes because of previous error"
+      ],
+      "external_functions": [
+        "alloc::string::{alloc::string::String}::len",
+        "alloc::vec::{alloc::vec::Vec<T>}::pop"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "collection-value-instance",
+      "module": "Qual.CollectionValueInstance",
+      "start_from": [
+        "crate::collection_value_instance"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Could not lookup the translated function, probably because of an error which happened before",
+        "[Error] Detected groups of mixed mutually recursive definitions (such as a type mutually recursive with a function, or a function mutually recursive with a trait implementation):",
+        "[Error] Internal error: please file an issue",
+        "[Error] Mixed declaration groups (which contain both type and function declarations or functions and traits, for instance) are not supported yet: [32, 11, 34]",
+        "[Error] Mixed-recursive declaration groups are not supported",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::copy_value because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::decided because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::element because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::equal_values because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::from_tree because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::into_tree because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::push_value because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::value_check because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::value_cost because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::{impl formal_qualification::collection_tree_kinds::Atom for formal_qualification::collection_value_instance::InstanceVal}::check because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::{impl formal_qualification::collection_tree_kinds::Atom for formal_qualification::collection_value_instance::InstanceVal}::cost because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::{impl formal_qualification::collection_tree_kinds::Atom for formal_qualification::collection_value_instance::InstanceVal}::duplicate because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::{impl formal_qualification::collection_tree_kinds::Atom for formal_qualification::collection_value_instance::InstanceVal}::same because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::{impl core::clone::Clone for formal_qualification::collection_value_instance::InstanceVal}::clone because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::{impl core::clone::Clone for formal_qualification::collection_value_instance::Seq}::clone because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::{impl core::cmp::PartialEq<formal_qualification::collection_value_instance::InstanceVal> for formal_qualification::collection_value_instance::InstanceVal}::eq because of previous error.",
+        "[Warn ] Could not translate the function 'formal_qualification::collection_value_instance::{impl core::cmp::PartialEq<formal_qualification::collection_value_instance::Seq> for formal_qualification::collection_value_instance::Seq}::eq because of previous error.",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::copy_value because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::decided because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::element because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::equal_values because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::from_tree because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::into_tree because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::push_value because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::value_check because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::value_cost because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::{impl formal_qualification::collection_tree_kinds::Atom for formal_qualification::collection_value_instance::InstanceVal}::check because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::{impl formal_qualification::collection_tree_kinds::Atom for formal_qualification::collection_value_instance::InstanceVal}::cost because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::{impl formal_qualification::collection_tree_kinds::Atom for formal_qualification::collection_value_instance::InstanceVal}::duplicate because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::{impl formal_qualification::collection_tree_kinds::Atom for formal_qualification::collection_value_instance::InstanceVal}::same because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::{impl core::clone::Clone for formal_qualification::collection_value_instance::InstanceVal}::clone because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::{impl core::clone::Clone for formal_qualification::collection_value_instance::Seq}::clone because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::{impl core::cmp::PartialEq<formal_qualification::collection_value_instance::InstanceVal> for formal_qualification::collection_value_instance::InstanceVal}::eq because of previous error",
+        "[Warn ] Could not translate the function signature of 'formal_qualification::collection_value_instance::{impl core::cmp::PartialEq<formal_qualification::collection_value_instance::Seq> for formal_qualification::collection_value_instance::Seq}::eq because of previous error"
+      ],
+      "external_functions": [
+        "alloc::string::{alloc::string::String}::len",
+        "alloc::string::{impl core::clone::Clone for alloc::string::String}::clone",
+        "alloc::string::{impl core::cmp::PartialEq<alloc::string::String> for alloc::string::String}::eq",
+        "alloc::string::{impl core::default::Default for alloc::string::String}::default",
+        "alloc::vec::{alloc::vec::Vec<T>}::append",
+        "alloc::vec::{alloc::vec::Vec<T>}::pop",
+        "alloc::vec::{impl core::default::Default for alloc::vec::Vec<T>}::default",
+        "core::cmp::impls::{impl core::cmp::PartialEq<bool> for bool}::ne",
+        "core::mem::take",
+        "core::slice::raw::from_ref"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "iterator-arena",
+      "module": "Qual.IteratorArena",
+      "start_from": [
+        "crate::iterator_arena"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::vec::{alloc::vec::Vec<T>}::pop"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "iterator-owned-stack",
+      "module": "Qual.IteratorOwnedStack",
+      "start_from": [
+        "crate::iterator_owned_stack"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::vec::{alloc::vec::Vec<T>}::pop"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "generic-into-iterator-loop",
+      "module": "Qual.GenericIntoIteratorLoop",
+      "start_from": [
+        "crate::generic_into_iterator_loop"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Could not find: type_var_id: 0 from ExtractBase.Item"
+      ],
+      "external_functions": [
+        "core::array::iter::{impl core::iter::traits::collect::IntoIterator<T, core::array::iter::IntoIter<T, N>> for [T; N]}::into_iter",
+        "core::array::iter::{impl core::iter::traits::iterator::Iterator<T> for core::array::iter::IntoIter<T, N>}::next"
+      ],
+      "external_types": [
+        "core::array::iter::IntoIter"
+      ]
+    },
+    {
+      "name": "generic-into-iterator-step",
+      "module": "Qual.GenericIntoIteratorStep",
+      "start_from": [
+        "crate::generic_into_iterator_step"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "moving-if-join",
+      "module": "Qual.MovingIfJoin",
+      "start_from": [
+        "crate::moving_if_join"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Internal error, please file an issue",
+        "[Warn ] Could not translate the body of function 'formal_qualification::moving_if_join::reduce because of previous error"
+      ],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::last_key_value",
+        "alloc::collections::btree::map::{impl core::clone::Clone for alloc::collections::btree::map::BTreeMap<K, V, A>}::clone",
+        "alloc::str::{impl alloc::borrow::ToOwned<alloc::string::String> for str}::to_owned",
+        "alloc::string::{impl core::clone::Clone for alloc::string::String}::clone",
+        "alloc::string::{impl core::ops::deref::Deref<str> for alloc::string::String}::deref",
+        "core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap"
+      ]
+    },
+    {
+      "name": "moving-if-helper",
+      "module": "Qual.MovingIfHelper",
+      "start_from": [
+        "crate::moving_if_helper"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::last_key_value",
+        "alloc::collections::btree::map::{impl core::clone::Clone for alloc::collections::btree::map::BTreeMap<K, V, A>}::clone",
+        "alloc::str::{impl alloc::borrow::ToOwned<alloc::string::String> for str}::to_owned",
+        "alloc::string::{impl core::clone::Clone for alloc::string::String}::clone",
+        "alloc::string::{impl core::ops::deref::Deref<str> for alloc::string::String}::deref",
+        "core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap"
+      ]
+    },
+    {
+      "name": "unwrap-in-loop",
+      "module": "Qual.UnwrapInLoop",
+      "start_from": [
+        "crate::unwrap_in_loop"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Internal error, please file an issue",
+        "[Warn ] Could not translate the body of function 'formal_qualification::unwrap_in_loop::first_divisor because of previous error"
+      ],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::last_key_value"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap"
+      ]
+    },
+    {
+      "name": "unwrap-in-helper",
+      "module": "Qual.UnwrapInHelper",
+      "start_from": [
+        "crate::unwrap_in_helper"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::last_key_value"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap"
+      ],
+      "loop_sources": [
+        "unwrap_in_helper.first_divisor_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "division-walk",
+      "module": "Qual.DivisionWalk",
+      "start_from": [
+        "crate::division_walk"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::insert",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::last_key_value",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::len",
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::remove",
+        "alloc::collections::btree::map::{impl core::clone::Clone for alloc::collections::btree::map::BTreeMap<K, V, A>}::clone",
+        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow"
+      ],
+      "external_types": [
+        "alloc::collections::btree::map::BTreeMap"
+      ],
+      "loop_sources": [
+        "division_walk.common_factors_loop src/lib.rs",
+        "division_walk.divide_out_loop src/lib.rs",
+        "division_walk.first_divisor_loop src/lib.rs",
+        "division_walk.walk_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "cfg-shape",
+      "module": "Qual.CfgShape",
+      "start_from": [
+        "crate::cfg_shape"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "cfg_shape.map_pages_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "const-generic",
+      "module": "Qual.ConstGeneric",
+      "start_from": [
+        "crate::const_generic"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "const_generic.Ledger.total_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "r1-function-item-value",
+      "module": "Qual.R1FunctionItemValue",
+      "start_from": [
+        "crate::r1_function_item_value"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Internal error: please file an issue",
+        "[Error] Unimplemented",
+        "[Error] Unimplemented: found an occurrence of a lifetime constraint relating",
+        "[Warn ] Could not translate the body of function 'formal_qualification::r1_function_item_value::any_active because of previous error",
+        "[Warn ] Could not translate the function 'core::option::{core::option::Option<T>}::{impl core::ops::function::FnMut<(&'_0 core::option::Option<T>,), bool> for for<'_0_1> core::option::{core::option::Option<T>}::is_some<'_0_1, T>}::call_mut because of previous error.",
+        "[Warn ] Could not translate the function 'core::option::{core::option::Option<T>}::{impl core::ops::function::FnOnce<(&'_0 core::option::Option<T>,), bool> for for<'_0_1> core::option::{core::option::Option<T>}::is_some<'_0_1, T>}::call_once because of previous error.",
+        "[Warn ] Could not translate the function signature of 'core::option::{core::option::Option<T>}::{impl core::ops::function::FnMut<(&'_0 core::option::Option<T>,), bool> for for<'_0_1> core::option::{core::option::Option<T>}::is_some<'_0_1, T>}::call_mut because of previous error",
+        "[Warn ] Could not translate the function signature of 'core::option::{core::option::Option<T>}::{impl core::ops::function::FnOnce<(&'_0 core::option::Option<T>,), bool> for for<'_0_1> core::option::{core::option::Option<T>}::is_some<'_0_1, T>}::call_once because of previous error",
+        "[Warn ] Could not translate the trait instance 'core::option::{core::option::Option<T>}::{impl core::ops::function::FnMut<(&'_0 core::option::Option<T>,), bool> for for<'_0_1> core::option::{core::option::Option<T>}::is_some<'_0_1, T>} because of previous error",
+        "[Warn ] Could not translate the trait instance 'core::option::{core::option::Option<T>}::{impl core::ops::function::FnOnce<(&'_0 core::option::Option<T>,), bool> for for<'_0_1> core::option::{core::option::Option<T>}::is_some<'_0_1, T>} because of previous error"
+      ],
+      "external_functions": [
+        "core::slice::iter::{impl core::iter::traits::iterator::Iterator<&'a T> for core::slice::iter::Iter<'a, T>}::any"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "r2-iterator-any",
+      "module": "Qual.R2IteratorAny",
+      "start_from": [
+        "crate::r2_iterator_any"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [
+        "core::slice::iter::{impl core::iter::traits::iterator::Iterator<&'a T> for core::slice::iter::Iter<'a, T>}::any"
+      ],
+      "external_types": []
+    },
+    {
+      "name": "r3-iterator-flatten",
+      "module": "Qual.R3IteratorFlatten",
+      "start_from": [
+        "crate::r3_iterator_flatten"
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "Funs.lean",
+      "diagnostics": [
+        "[Warn ] When retrieving the builtin information for trait decl 'core::iter::traits::iterator::Iterator', could not find the information for item 'flatten'. The model defined in the Lean library seems to be missing the corresponding field."
+      ],
+      "external_functions": [
+        "core::iter::adapters::flatten::{impl core::iter::traits::iterator::Iterator<Clause2_Item> for core::iter::adapters::flatten::Flatten<I, Clause0_Item, Clause2_Item, U>}::next",
+        "core::iter::traits::iterator::Iterator::flatten",
+        "core::option::{impl core::iter::traits::collect::IntoIterator<&'a T, core::option::Iter<'a, T>> for &'a core::option::Option<T>}::into_iter",
+        "core::option::{impl core::iter::traits::iterator::Iterator<&'a A> for core::option::Iter<'a, A>}::next"
+      ],
+      "external_types": [
+        "core::iter::adapters::flatten::Flatten",
+        "core::option::Iter"
+      ],
+      "loop_sources": [
+        "r3_iterator_flatten.holds_legacy_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "r4-closure-callback",
+      "module": "Qual.R4ClosureCallback",
+      "start_from": [
+        "crate::r4_closure_callback"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "r4_closure_callback.Pool.process_index_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "r5-stop-path-borrow-join",
+      "module": "Qual.R5StopPathBorrowJoin",
+      "start_from": [
+        "crate::r5_stop_path_borrow_join"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "r5_stop_path_borrow_join.Pool.has_survivor_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "r6-same-enum-name",
+      "module": "Qual.R6SameEnumName",
+      "start_from": [],
+      "parts": [
+        {
+          "module": "Qual.R6SameEnumName.Objects",
+          "start_from": [
+            "crate::r6_same_enum_name::objects"
+          ]
+        },
+        {
+          "module": "Qual.R6SameEnumName.Capabilities",
+          "start_from": [
+            "crate::r6_same_enum_name::capabilities"
+          ]
+        }
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "Check.lean",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "r7-private-enum",
+      "module": "Qual.R7PrivateEnum",
+      "start_from": [
+        "crate::r7_private_enum"
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "TypesExternal.lean",
+      "opaque": [
+        "crate::r7_private_enum::Phase"
+      ],
+      "models": "verification/externals/Qual/R7PrivateEnum",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [
+        "formal_qualification::r7_private_enum::Phase"
+      ]
+    }
+  ]
+}
