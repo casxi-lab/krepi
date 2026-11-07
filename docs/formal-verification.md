@@ -1411,9 +1411,11 @@ or commit instead of cancelling it.
   container settings in turn: Docker's defaults, as root; those with seccomp
   and AppArmor unconfined; the container of the gate; and, after
   `kernel.apparmor_restrict_unprivileged_userns` is set to 0 on the runner,
-  the second setting and the gate's container again. It records the kernel,
-  the settings of user namespaces, Docker's security options and the
-  version of bubblewrap in the image, and the exit status and output of
+  the second setting and the gate's container again, and both once more
+  with an empty `/run`, where bubblewrap creates `/run/user`, the gate's
+  container then also with seccomp and AppArmor unconfined. It records the
+  kernel, the settings of user namespaces, Docker's security options and
+  the version of bubblewrap in the image, and the exit status and output of
   each run, and uploads them as `formal-comparator-<commit>-<attempt>`. A
   result of the comparator never fails the job; an error of Docker, exit
   status 125 to 127, or of the runner does.

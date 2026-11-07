@@ -4,7 +4,7 @@
 # check. The measurement jobs run on a manual dispatch, or on a pull request
 # that carries the label formal-measure: `leanchecker`, in two modes, replays
 # the stage of the gate's base round with and without --fresh on a cold page
-# cache, and `lake comparator` judges a small challenge in four container
+# cache, and `lake comparator` judges a small challenge in six container
 # settings. Actions are pinned to full commit SHAs; the comment names the
 # release.
 name: formal
@@ -574,7 +574,9 @@ jobs:
   # 3 in order: Docker's defaults as root; that with seccomp and AppArmor
   # unconfined; and that after unprivileged user namespaces are allowed on
   # the runner; and in setting 4, the container of the gate, before and
-  # after that change. The exit status and the output of each are recorded,
+  # after that change. Settings 5 and 6 repeat 3 and 4 with an empty /run,
+  # where bwrap creates /run/user, and 6 also with seccomp and AppArmor
+  # unconfined. The exit status and the output of each are recorded,
   # whatever they are; only an error of Docker or of the runner fails the job.
   # It runs on the same events as the job `leanchecker`.
   comparator:
@@ -712,8 +714,14 @@ jobs:
             if sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; then
               compare 3-userns --pull never "${unconfined[@]}"
               compare 4-gate-userns "${gate_flags[@]}" --user "$(id -u):$(id -g)"
+              # bwrap creates /run/user below the root, which the image does
+              # not have: with namespaces allowed, these two settings also
+              # mount an empty /run, the second with the gate's other flags.
+              compare 5-userns-run --pull never "${unconfined[@]}" --tmpfs /run
+              compare 6-gate-userns-run "${gate_flags[@]}" "${unconfined[@]}" \
+                --tmpfs /run --user "$(id -u):$(id -g)"
             else
-              echo "the sysctl failed: settings 3 and 4 after it are not measured" >&2
+              echo "the sysctl failed: the settings after it are not measured" >&2
               broken=1
             fi
             exit "$broken"
