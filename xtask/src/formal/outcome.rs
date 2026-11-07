@@ -86,8 +86,10 @@ pub struct Verdict {
 
 /// The class of `ran` at `site` by the conventions under "Results" in
 /// `docs/formal-verification.md`, where `own` counts the errors and warnings
-/// that the base build reported in krepi's own modules.
-pub fn classify(site: Site, ran: &Ran, own: usize) -> Verdict {
+/// that the base build reported in krepi's own modules and `unread` tells
+/// why a file that the command wrote, and that the gate reads, could not be
+/// read or is not what the tool writes.
+pub fn classify(site: Site, ran: &Ran, own: usize, unread: Option<&str>) -> Verdict {
     let name = &ran.name;
     // Each gives a reason for any command that did not exit.
     let killed = match site {
@@ -108,7 +110,11 @@ pub fn classify(site: Site, ran: &Ran, own: usize) -> Verdict {
         let after = GROUP_END.as_secs();
         format!("{name}: processes of its group were still there {after} s after they were killed")
     });
-    let failed: Vec<String> = killed.or(signal).into_iter().chain(survivors).collect();
+    let mut failed: Vec<String> = killed.or(signal).into_iter().chain(survivors).collect();
+    // What a command wrote counts only when it ended by itself.
+    if failed.is_empty() {
+        failed.extend(unread.map(|problem| format!("{name}: {problem}")));
+    }
     let budget = ran.ended == Ended::TimedOut && ran.limit.by != LimitBy::Cap && !ran.survivors;
     let code = ran.code().unwrap_or_default();
     let exited = format!("{name} exited with {code}");
@@ -560,7 +566,7 @@ mod tests {
     }
 
     fn class(site: Site, ran: &Ran) -> Class {
-        classify(site, ran, 0).class
+        classify(site, ran, 0, None).class
     }
 
     #[test]
@@ -592,7 +598,7 @@ mod tests {
             assert!((row.ends)(&ran.ended), "{}: {:?}", row.name, ran.ended);
             assert!(!row.sites.is_empty(), "{} applies nowhere", row.name);
             for &site in row.sites {
-                let verdict = classify(site, &ran, row.own);
+                let verdict = classify(site, &ran, row.own, None);
                 assert_eq!(
                     verdict.class,
                     row.class,
@@ -681,6 +687,7 @@ mod tests {
             Site::Aeneas,
             &at(Duration::from_secs(3_600), LimitBy::Cap),
             0,
+            None,
         );
         assert_eq!(
             verdict,
@@ -695,6 +702,7 @@ mod tests {
             Site::Aeneas,
             &at(Duration::from_millis(1_250), LimitBy::Phase),
             0,
+            None,
         );
         assert_eq!(
             verdict,
@@ -706,7 +714,12 @@ mod tests {
                 ),
             }
         );
-        let verdict = classify(Site::Git, &at(Duration::from_secs(10), LimitBy::Gate), 0);
+        let verdict = classify(
+            Site::Git,
+            &at(Duration::from_secs(10), LimitBy::Gate),
+            0,
+            None,
+        );
         assert_eq!(verdict.class, Class::Budget);
         assert_eq!(
             verdict.reason.as_deref(),
@@ -731,7 +744,7 @@ mod tests {
             let name = word(&site);
             let failed = ran(&name, Ended::Exited(128), "fatal: not a git repository\n");
             assert_eq!(
-                classify(site, &failed, 0),
+                classify(site, &failed, 0, None),
                 Verdict {
                     class: Class::ToolFailure,
                     reason: Some(format!("{name} exited with 128")),
@@ -742,7 +755,7 @@ mod tests {
                 Class::ToolFailure
             );
             assert_eq!(
-                classify(site, &ran(&name, Ended::Exited(0), ""), 0),
+                classify(site, &ran(&name, Ended::Exited(0), ""), 0, None),
                 Verdict {
                     class: Class::Passed,
                     reason: None,
@@ -760,7 +773,7 @@ mod tests {
     fn a_group_that_survives_its_kill_is_a_tool_failure() {
         let mut leanchecker = ran("leanchecker", Ended::Exited(0), "");
         leanchecker.survivors = true;
-        let verdict = classify(Site::Leanchecker, &leanchecker, 0);
+        let verdict = classify(Site::Leanchecker, &leanchecker, 0, None);
         assert_eq!(verdict.class, Class::ToolFailure);
         assert_eq!(
             verdict.reason.as_deref(),
@@ -776,7 +789,7 @@ mod tests {
         let mut build = ran_at("lake-build", Ended::TimedOut, "", budget);
         assert_eq!(class(Site::BaseBuild, &build), Class::Budget);
         build.survivors = true;
-        let verdict = classify(Site::BaseBuild, &build, 0);
+        let verdict = classify(Site::BaseBuild, &build, 0, None);
         assert_eq!(verdict.class, Class::ToolFailure);
         assert_eq!(
             verdict.reason.as_deref(),
@@ -789,6 +802,45 @@ mod tests {
     }
 
     #[test]
+    fn a_result_file_that_cannot_be_read_is_a_tool_failure() {
+        let unread = Some("cannot read work/aeneas/translation.json: Permission denied");
+        for code in [0, 2] {
+            let aeneas = ran("aeneas", Ended::Exited(code), "");
+            assert_eq!(
+                classify(Site::Aeneas, &aeneas, 0, unread),
+                Verdict {
+                    class: Class::ToolFailure,
+                    reason: Some(
+                        "aeneas: cannot read work/aeneas/translation.json: Permission denied"
+                            .to_string()
+                    ),
+                },
+                "{code}"
+            );
+        }
+        // A command that was stopped is reported as stopped, whatever it
+        // left behind.
+        let budget = Limit {
+            duration: Duration::from_secs(5),
+            by: LimitBy::Phase,
+        };
+        let stopped = ran_at("aeneas", Ended::TimedOut, "", budget);
+        assert_eq!(
+            classify(Site::Aeneas, &stopped, 0, unread),
+            classify(Site::Aeneas, &stopped, 0, None)
+        );
+        assert_eq!(
+            classify(Site::Aeneas, &stopped, 0, unread).class,
+            Class::Budget
+        );
+        let killed = ran("aeneas", Ended::Signaled(9), "");
+        assert_eq!(
+            classify(Site::Aeneas, &killed, 0, unread).reason.as_deref(),
+            Some("aeneas was ended by signal 9")
+        );
+    }
+
+    #[test]
     fn a_tool_that_reports_a_failure_by_itself_is_a_proof_failure() {
         for site in conventions::TOOLS
             .iter()
@@ -796,7 +848,7 @@ mod tests {
             .filter(|site| *site != Site::BaseBuild)
         {
             let name = word(&site);
-            let verdict = classify(site, &ran(&name, Ended::Exited(2), "error: x\n"), 0);
+            let verdict = classify(site, &ran(&name, Ended::Exited(2), "error: x\n"), 0, None);
             assert_eq!(
                 verdict,
                 Verdict {
@@ -808,7 +860,7 @@ mod tests {
         // The base build needs the messages of its own modules.
         let build = ran("base-build", Ended::Exited(1), "error: build failed\n");
         assert_eq!(
-            classify(Site::BaseBuild, &build, 0),
+            classify(Site::BaseBuild, &build, 0, None),
             Verdict {
                 class: Class::ToolFailure,
                 reason: Some(
@@ -818,7 +870,7 @@ mod tests {
             }
         );
         assert_eq!(
-            classify(Site::BaseBuild, &build, 3),
+            classify(Site::BaseBuild, &build, 3, None),
             Verdict {
                 class: Class::ProofFailure,
                 reason: Some(

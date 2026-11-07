@@ -1,0 +1,26 @@
+# How Charon compiles each crate that `cargo xtask formal run` extracts. The
+# gate reads this file from the snapshot and stops a run whose configuration
+# it cannot follow; see "Extraction" in docs/formal-verification.md.
+schema = 1
+
+# The qualification crate, verification/qualification. Charon is given no
+# `--target`, so it compiles the crate for the host and adds the host's
+# triple itself: the triples record that choice for each host of the tool
+# manifest, and the gate checks that each host has one but not its value.
+# Only runs on linux-aarch64 are evidence. The gate passes no features and
+# no `cfg` settings, so both lists stay empty.
+[qualification]
+features = []
+cfg = []
+
+[qualification.triples]
+linux-aarch64 = "aarch64-unknown-linux-gnu"
+darwin-arm64 = "aarch64-apple-darwin"
+
+# The kernel workspace, extracted for the triple of the production kernel
+# with the features and `cfg` settings of its release profile, which has
+# none. No target is registered, so nothing is extracted from it yet.
+[kernel]
+triple = "aarch64-unknown-none"
+features = []
+cfg = []

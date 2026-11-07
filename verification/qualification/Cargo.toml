@@ -1,0 +1,21 @@
+# The qualification crate: code shapes whose outcomes with the pinned Charon
+# and Aeneas `verification/qualification/cases.json` records. It is a
+# workspace of its own with its own `Cargo.lock`, so that the proof gate
+# compiles it alone, offline and `--locked`, and it depends on no crate.
+[package]
+name = "formal-qualification"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Code shapes that qualify the pinned Charon and Aeneas tools for the krepi proof gate"
+
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+# `cfg_shape` chooses a body by the board, as the provable subset forbids.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(board, values("pi5"))'] }

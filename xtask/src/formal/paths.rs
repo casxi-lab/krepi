@@ -108,14 +108,36 @@ pub fn changes(git: &mut dyn Git, inputs: &[&str]) -> Result<Vec<String>, String
         .collect())
 }
 
-/// The paths of `files` whose extension is `py`, in any ASCII case.
-pub fn python_files(files: &Files) -> Vec<&str> {
-    let python = |path: &&str| {
-        Path::new(path)
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("py"))
+/// Why the gate inputs `files` reject a run: Python sources, Lean files of
+/// the generated namespace, or Cargo configuration below the root. Cargo
+/// reads the configuration of every directory from where it runs up; only
+/// the snapshot's root has one.
+pub fn rejected(files: &Files, layout: &Layout) -> Vec<String> {
+    let generated = Path::new(layout.project).join(layout.generated);
+    let configs = [".cargo/config", CARGO_CONFIG];
+    let python = |path: &Path| {
+        path.extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("py"))
     };
-    files.keys().map(String::as_str).filter(python).collect()
+    let lean = |path: &Path| {
+        path.starts_with(&generated) && path.extension().is_some_and(|ext| ext == "lean")
+    };
+    let cargo =
+        |path: &Path| !path.starts_with(".cargo") && configs.iter().any(|end| path.ends_with(end));
+    let found = |rule: &dyn Fn(&Path) -> bool| {
+        (files.keys().map(String::as_str))
+            .filter(|path| rule(Path::new(path)))
+            .collect::<Vec<_>>()
+    };
+    [
+        ("Python sources", found(&python)),
+        ("Lean files of the generated namespace", found(&lean)),
+        ("Cargo configuration below the root", found(&cargo)),
+    ]
+    .into_iter()
+    .filter(|(_, found)| !found.is_empty())
+    .map(|(what, found)| format!("the gate inputs hold {what}: {}", found.join(", ")))
+    .collect()
 }
 
 /// Exports `inputs`, the gate inputs that `commit` has, into the new
@@ -448,12 +470,9 @@ mod tests {
         .map(|path| (path.to_string(), entry.clone()))
         .collect();
         assert_eq!(
-            python_files(&files),
-            [
-                "kernel/a/build.Py",
-                "verification/Tool.PY",
-                "xtask/helper.py"
-            ]
+            rejected(&files, &Layout::PRODUCTION),
+            ["the gate inputs hold Python sources: \
+              kernel/a/build.Py, verification/Tool.PY, xtask/helper.py"]
         );
     }
 }

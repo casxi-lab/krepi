@@ -60,11 +60,17 @@ Other pins can change an outcome, and qualification
 ([tools](../formal-verification.md#tools)) checks again only the shapes that
 its cases record.
 
-**Qualification references.** Each item names the nearest cases, where there
-are any, of `verification/qualification/cases.json` and the rules of the
-section "Code shapes" of `docs/formal-verification.md` in the CAS project.
-None of the seven items has a corresponding case there, and each item says
-so.
+**Qualification references.** Each item names the case of krepi's
+`verification/qualification/cases.json` that records it with the pinned
+tools ([tools](../formal-verification.md#tools)), from
+`r1-function-item-value` to `r7-private-enum`. The case `cfg-shape` records
+the violation of [rule 7](#7-no-shape-changing-cfg), and `const-generic` a
+const generic parameter. A case expects what the pinned tools give, which
+can differ from the outcome stated here. Each item also names the nearest
+cases, where there are any, of `verification/qualification/cases.json` and
+the rules of the section "Code shapes" of `docs/formal-verification.md` in
+the CAS project. None of the seven items has a corresponding case there, and
+each item says so.
 
 **Loop shapes.** The alternatives replace adapters and callbacks with loops,
 and the tools accept only some loop shapes. Following the Code shapes
@@ -137,9 +143,10 @@ pub fn any_active(active: &[Option<Activation>]) -> bool {
 }
 ```
 
-**Qualification.** No corresponding case. Nearest: `function-pointers`
-(rejected). The Code shapes rule that a method is called directly, not
-through a local bound to it, notes that no case records this shape.
+**Qualification.** In krepi, the case `r1-function-item-value`. In the CAS
+project, no corresponding case. Nearest: `function-pointers` (rejected). The
+Code shapes rule that a method is called directly, not through a local bound
+to it, notes that no case records this shape.
 
 ### R2 `Iterator::any`
 
@@ -176,10 +183,10 @@ pub fn has_survivor(threads: &[Thread], process: u64) -> bool {
 }
 ```
 
-**Qualification.** No corresponding case. Nearest: `iterator-adapters`
-(ill-typed: the library has no model of `map` and `collect`) and its index
-form `index-loop` (translated). Code shapes: index loops instead of iterator
-adapters.
+**Qualification.** In krepi, the case `r2-iterator-any`. In the CAS project,
+no corresponding case. Nearest: `iterator-adapters` (ill-typed: the library
+has no model of `map` and `collect`) and its index form `index-loop`
+(translated). Code shapes: index loops instead of iterator adapters.
 
 ### R3 `Iterator::flatten`
 
@@ -227,7 +234,8 @@ pub fn holds_legacy(active: &[Option<Activation>]) -> bool {
 }
 ```
 
-**Qualification.** No corresponding case. Nearest: `iterator-adapters` and
+**Qualification.** In krepi, the case `r3-iterator-flatten`. In the CAS
+project, no corresponding case. Nearest: `iterator-adapters` and
 `index-loop`; `iterator-arena` (translated) writes nested iteration as
 stages over an explicit stack, without closures. Code shapes: index loops
 instead of iterator adapters, and nested iterators as stages in one vector.
@@ -270,13 +278,13 @@ A callback becomes a generic parameter bounded by a crate-private trait
 whose `&mut self` methods the function calls, or the caller drives the loop
 and the callee returns what it needs next.
 
-**Qualification.** No corresponding case. Nearest: `option-combinators`
-(translated; `Option::filter` is an external declaration),
-`closure-parameter` (ill-typed), and for callbacks `series-summer` and
-`iterator-arena` (translated). Code shapes: `match` rather than combinators
-with closures, no `FnOnce(&mut Self)` parameters, shared interfaces as
-crate-private traits, and iterator stages that hand a call back to their
-driver.
+**Qualification.** In krepi, the case `r4-closure-callback`. In the CAS
+project, no corresponding case. Nearest: `option-combinators` (translated;
+`Option::filter` is an external declaration), `closure-parameter`
+(ill-typed), and for callbacks `series-summer` and `iterator-arena`
+(translated). Code shapes: `match` rather than combinators with closures, no
+`FnOnce(&mut Self)` parameters, shared interfaces as crate-private traits,
+and iterator stages that hand a call back to their driver.
 
 ### R5 Borrow joins on the stop path
 
@@ -354,12 +362,13 @@ neither that nor the join. Because the failing shape is not isolated, the
 alternative is the conservative form: it keeps to the accepted shapes, but
 no case confirms it.
 
-**Qualification.** No corresponding case. Nearest: `moving-if-join`
-(rejected: after an earlier branch of the same kind, a branch whose arms
-meet again, one arm moving an owned value and the other borrowing it for a
-call with `?`) and `moving-if-helper` (translated: that later branch in a
-helper whose arms both return). Code shapes: the later of two such branches
-goes into a helper whose arms both return.
+**Qualification.** In krepi, the case `r5-stop-path-borrow-join`. In the CAS
+project, no corresponding case. Nearest: `moving-if-join` (rejected: after
+an earlier branch of the same kind, a branch whose arms meet again, one arm
+moving an owned value and the other borrowing it for a call with `?`) and
+`moving-if-helper` (translated: that later branch in a helper whose arms
+both return). Code shapes: the later of two such branches goes into a helper
+whose arms both return.
 
 ### R6 Enumeration names across targets
 
@@ -415,7 +424,8 @@ the target that reaches functions which another target proves lists them as
 `unclosed` and states its theorems in terms of them
 ([proof targets](../formal-verification.md#proof-targets)).
 
-**Qualification.** No corresponding case. Nearest: `series-summer` and
+**Qualification.** In krepi, the case `r6-same-enum-name`. In the CAS
+project, no corresponding case. Nearest: `series-summer` and
 `series-summer-owned` (translated, with proofs), whose enumerations `Halt`
 and `SeriesStop` have distinct names. The rule is the paragraph of the Code
 shapes section on `Discriminant` instances and external declarations.
@@ -471,9 +481,10 @@ inductive Phase where
 end Model
 ```
 
-**Qualification.** No corresponding case and no near one: no case and no
-Lean file of the CAS project declares an enumeration `private`, and the Code
-shapes section has no rule for it.
+**Qualification.** In krepi, the case `r7-private-enum`. In the CAS project,
+no corresponding case and no near one: no case and no Lean file of the CAS
+project declares an enumeration `private`, and the Code shapes section has
+no rule for it.
 
 ## Provable design rules
 

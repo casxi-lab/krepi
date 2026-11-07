@@ -672,6 +672,24 @@ pub mod environment {
         fn rustup_home(&self) -> PathBuf {
             self.prefix.join("rustup")
         }
+
+        /// The Aeneas Lean library, built, with the packages of its Lake
+        /// lock in `.lake/packages`.
+        fn backend(&self) -> PathBuf {
+            self.prefix.join("backend")
+        }
+    }
+
+    /// The Aeneas Lean library of the installation that the manifest's
+    /// column of `host` names, a relative prefix taken from the repository
+    /// root `root`, with Mathlib and the other packages of its Lake lock in
+    /// its `.lake/packages`.
+    pub fn backend(manifest: &Manifest, host: &str, root: &Path) -> Result<PathBuf, String> {
+        let column = manifest
+            .hosts
+            .get(host)
+            .ok_or_else(|| format!("the manifest has no {host} column"))?;
+        Ok(Installation::of(column, root).backend())
     }
 
     /// The directories of one gate run that tool commands use.
@@ -688,10 +706,7 @@ pub mod environment {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     #[cfg_attr(
         not(test),
-        expect(
-            dead_code,
-            reason = "the extraction and the Lean build are the first to run the tools"
-        )
+        expect(dead_code, reason = "the base round is the first to run leanchecker")
     )]
     pub enum Tool<'a> {
         /// Charon extracting a crate through Cargo.

@@ -37,16 +37,18 @@ libc = { version = "=0.2.191", default-features = false }
 # they are written, the receipt of `cargo xtask formal run` is written, and
 # read back by its tests, through the derive macros of `serde`, the
 # manifests step and `cargo xtask formal run` read the output of
-# `cargo metadata`, and the test of `cargo xtask qemu` reads the receipt of
-# a run. All are text in memory, so the standard-library support of the
+# `cargo metadata`, the qualification cases and the `translation.json` that
+# Aeneas writes, and the test of `cargo xtask qemu` reads the receipt of a
+# run. All are text in memory, so the standard-library support of the
 # default feature is left out.
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
-# `verification/toolchain.json` and `verification/targets.json` are read
-# into types that derive `Deserialize`, and the receipt of
-# `cargo xtask formal run`, whose paths are strings, is written through
-# types that derive `Serialize` and, for its tests, `Deserialize`, so only
-# the derive macros and the allocation support for strings, vectors and
-# maps are needed.
+# `verification/toolchain.json`, `verification/targets.json`, the
+# qualification cases, the extraction configuration and the
+# `translation.json` that Aeneas writes are read into types that derive
+# `Deserialize`, and the receipt of `cargo xtask formal run`, whose paths
+# are strings, is written through types that derive `Serialize` and, for
+# its tests, `Deserialize`, so only the derive macros and the allocation
+# support for strings, vectors and maps are needed.
 serde = { version = "=1.0.229", default-features = false, features = ["alloc", "derive"] }
 # SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop
 # `cargo xtask formal run`: the crate's handler sets a flag that the run
@@ -57,8 +59,9 @@ serde = { version = "=1.0.229", default-features = false, features = ["alloc", "
 signal-hook = { version = "=0.4.6", default-features = false }
 # The SHA-256 of files that `cargo xtask formal toolchain-check` and
 # `cargo xtask formal run` read into memory, among them the output files of
-# the commands of a run, so the allocation and object-identifier support of
-# the default features is left out.
+# the commands of a run and the Lean files that Aeneas writes, so the
+# allocation and object-identifier support of the default features is left
+# out.
 sha2 = { version = "=0.11.1", default-features = false }
 # `git archive` writes the gate inputs of the snapshot commit of
 # `cargo xtask formal run` as a tar archive, which the command unpacks into
@@ -66,8 +69,10 @@ sha2 = { version = "=0.11.1", default-features = false }
 # `xattr` feature is left out.
 tar = { version = "=0.4.46", default-features = false }
 # Manifests and Cargo configuration files are parsed into tables, which
-# `serde` defines, and never written, so the writer and the standard-library
-# support of the default features are left out.
+# `serde` defines, and the extraction configuration of
+# `cargo xtask formal run` into a type that derives `Deserialize`; none is
+# written, so the writer and the standard-library support of the default
+# features are left out.
 toml = { version = "=1.2.0", default-features = false, features = ["parse", "serde"] }
 # The workflows step uses the event parser on text that is already UTF-8,
 # so the input-decoding support of the default feature is left out.

@@ -2,9 +2,10 @@
 //! tests of `cargo xtask formal run`: a kernel workspace with one crate and
 //! its `Cargo.lock`, a target registry with the target `demo`, the committed
 //! tool manifest with the installation at `artifacts/formal/tools`, which
-//! holds only scripts that start the Cargo and `rustc` of the build, and a
-//! file for each other gate input. Commits have a fixed identity and date,
-//! and Git reads no system or global configuration.
+//! holds only scripts that start the Cargo and `rustc` of the build and the
+//! fake tools that a test installs, and a file for each other gate input.
+//! Commits have a fixed identity and date, and Git reads no system or global
+//! configuration.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -88,6 +89,15 @@ impl Fixture {
     pub fn chmod(&self, path: &str, mode: u32) {
         fs::set_permissions(self.root().join(path), fs::Permissions::from_mode(mode))
             .expect("set the permissions");
+    }
+
+    /// Installs the fake tool `name`, the shell script `script`, in the
+    /// directory of `aeneas`, `charon` and `charon-driver` of the
+    /// installation, which the tool commands find through `PATH`.
+    pub fn tool(&self, name: &str, script: &str) {
+        let path = format!("artifacts/formal/tools/bin/{name}");
+        self.write(&path, &format!("#!/bin/sh\n{script}\n"));
+        self.chmod(&path, 0o755);
     }
 
     /// Creates the symbolic link `path` to `target`.

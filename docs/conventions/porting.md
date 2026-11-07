@@ -65,6 +65,9 @@ module: `tools/src/elf.rs` has `docs/porting/tools-elf.md`, and the crate
 root and manifest have `docs/porting/tools-lib.md`. A module of the
 repository tasks `xtask/` takes the prefix `xtask-`:
 `xtask/src/formal/outcome.rs` has `docs/porting/xtask-formal-outcome.md`.
+A destination below `verification/` takes the prefix `verification-`: the
+qualification crate `verification/qualification/`, with the Lean files of
+its cases, has `docs/porting/verification-qualification.md`.
 One record may cover a module directory and its children.
 
 A record starts with a metadata block:
