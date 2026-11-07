@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant};
 
-use crate::formal::{Layout, lean};
+use crate::formal::{Layout, lean, toolchain as tools};
 use crate::repo::{Entry, Tree};
 use crate::{docs, manifests, receipt, toolchain, workflows};
 
@@ -146,12 +146,24 @@ fn check_workflows(root: &Path, facts: &mut Facts) -> Result<(), String> {
         println!("workflows: {}", files.join(", "));
     }
     facts.push(("files".to_string(), files.join(", ")));
-    let problems = workflows::check(tracked());
+    let mut problems = workflows::check(tracked());
+    problems.extend(image_problems(&tree));
     if problems.is_empty() {
         Ok(())
     } else {
         Err(problems.join("\n"))
     }
+}
+
+/// The problems of the image references in the workflows of `tree` that run
+/// on pull requests, against its image pin.
+pub fn image_problems(tree: &Tree) -> Vec<String> {
+    let pull = |file: &(&str, &str)| workflows::runs_on_pull_request(file.1);
+    let files = tree
+        .texts()
+        .filter(|file| workflows::is_workflow(file.0) && pull(file));
+    let pin = tree.text(Layout::PRODUCTION.image_pin).unwrap_or_default();
+    tools::image_references(pin, &files.collect::<Vec<_>>())
 }
 
 /// The `lean` step on the tracked files: the source rules of the
@@ -310,6 +322,98 @@ mod tests {
         "lean",
         "workflows",
     ];
+
+    #[test]
+    fn the_committed_workflows_pull_the_pinned_image() {
+        let mut tree = Tree::load(&crate::repo::root()).expect("the tracked files");
+        assert_eq!(image_problems(&tree), Vec::<String>::new());
+        let pin = Layout::PRODUCTION.image_pin;
+        let text = tree.text(pin).expect("the pin is tracked").to_string();
+        let (_, pinned) = tools::image_pin(&text).expect("the pin reads");
+        // A workflow that runs on pull requests only, or on push only.
+        let workflow =
+            |on: &str, image: &str| format!("on: {on}\njobs:\n  j:\n    image: {image}\n");
+        let (repository, digest) = pinned.split_once('@').expect("a digest");
+        let tag = format!("{repository}:latest");
+        tree.insert(
+            ".github/workflows/push.yml",
+            Entry::File(workflow("push", &tag).into()),
+        );
+        tree.insert("docs/image.md", Entry::File(tag.clone().into()));
+        assert_eq!(image_problems(&tree), Vec::<String>::new());
+        let path = ".github/workflows/z.yml";
+        tree.insert(path, Entry::File(workflow("pull_request", &tag).into()));
+        assert_eq!(image_problems(&tree), [format!("{path}:4: not {pinned}")]);
+        // Another pin than the one the workflows name.
+        let other = text.replace(&digest[7..], &"0".repeat(64));
+        tree.insert(path, Entry::File(workflow("pull_request", &pinned).into()));
+        tree.insert(pin, Entry::File(other.clone().into()));
+        let problems = image_problems(&tree);
+        let (_, reference) = tools::image_pin(&other).expect("the other pin reads");
+        assert!(
+            problems.contains(&format!("no workflow names {reference}")),
+            "{problems:?}"
+        );
+        assert!(
+            problems.contains(&format!("{path}:4: not {reference}")),
+            "{problems:?}"
+        );
+        // No pull request workflow names the image.
+        let mut tree = Tree::from_files(&[(pin, &text), (".github/workflows/a.yml", "on: push\n")]);
+        assert_eq!(
+            image_problems(&tree),
+            [format!("no workflow names {pinned}")]
+        );
+        tree.insert(pin, Entry::Symlink("elsewhere".to_string()));
+        assert_eq!(image_problems(&tree).len(), 1);
+    }
+
+    #[test]
+    fn the_workflows_step_checks_the_image_references() {
+        // A repository that tracks the committed pin and the committed
+        // workflow of the gate, which names the pinned image or a tag of it.
+        let root = crate::repo::root();
+        let scratch = crate::scratch::Scratch::temporary("workflows");
+        let pin = Layout::PRODUCTION.image_pin;
+        let text = std::fs::read_to_string(root.join(pin)).expect("the pin");
+        let (repository, pinned) = tools::image_pin(&text).expect("the pin reads");
+        let path = ".github/workflows/formal.yml";
+        let workflow = std::fs::read_to_string(root.join(path)).expect("the workflow");
+        assert!(workflow.contains(&pinned), "{path} names {pinned}");
+        scratch.write(pin, &text);
+        let git = |args: &[&str]| {
+            let status = Command::new("git")
+                .args(args)
+                .current_dir(&scratch.0)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .status()
+                .expect("run git");
+            assert!(status.success(), "git {args:?}");
+        };
+        git(&["init", "--quiet"]);
+        let tag = format!("{repository}:latest");
+        for image in [pinned.as_str(), tag.as_str()] {
+            scratch.write(path, &workflow.replace(&pinned, image));
+            git(&["add", "--all"]);
+            let mut facts = Facts::new();
+            let result = check_workflows(&scratch.0, &mut facts);
+            assert_eq!(facts, [("files".to_string(), path.to_string())]);
+            if image == pinned {
+                assert_eq!(result, Ok(()));
+            } else {
+                let problems = result.expect_err("a tag fails the step");
+                assert!(problems.contains(&format!("no workflow names {pinned}")));
+                let line = workflow.lines().position(|line| line.contains(&pinned));
+                let line = line.expect("the line of the reference") + 1;
+                let named = format!("{path}:{line}: not {pinned}");
+                assert!(
+                    problems.lines().any(|problem| problem == named),
+                    "{problems}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn steps_run_in_the_documented_order() {

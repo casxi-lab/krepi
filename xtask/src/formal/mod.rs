@@ -69,6 +69,9 @@ pub struct Layout {
     pub registry: &'static str,
     /// The tool manifest, relative to the repository root.
     pub toolchain: &'static str,
+    /// The pin of the image that the CI jobs run, relative to the
+    /// repository root.
+    pub image_pin: &'static str,
     /// The directory of the reviewed tool patches, relative to the
     /// repository root.
     pub tooling: &'static str,
@@ -92,6 +95,7 @@ impl Layout {
         triple: "aarch64-unknown-none",
         registry: "verification/targets.json",
         toolchain: "verification/toolchain.json",
+        image_pin: "verification/image-pin.json",
         tooling: "verification/tooling",
     };
 }

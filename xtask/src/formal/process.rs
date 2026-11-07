@@ -5,6 +5,7 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io;
+use std::os::fd::AsRawFd;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -320,6 +321,40 @@ fn group_ended(group: libc::pid_t) -> bool {
     }
 }
 
+/// The effective user ID of the gate.
+pub fn effective_uid() -> u32 {
+    // SAFETY: geteuid touches no memory of this process and cannot fail.
+    unsafe { libc::geteuid() }
+}
+
+/// The bytes available to unprivileged users on the file system of `path`.
+pub fn disk_available(path: &Path) -> Option<u64> {
+    // SAFETY: all bits zero is a valid `statvfs`.
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: the opened file outlives the call, and `stat` is writable.
+    (unsafe { libc::fstatvfs(File::open(path).ok()?.as_raw_fd(), &mut stat) } == 0).then_some(())?;
+    u64::try_from(u128::from(stat.f_bavail) * u128::from(stat.f_frsize)).ok()
+}
+
+/// The largest maximum resident set of a collected child of the gate, or of
+/// a descendant that it collected, in bytes; Linux reports kibibytes.
+pub fn largest_child_rss() -> Option<u64> {
+    // SAFETY: all bits zero is a valid `rusage`.
+    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+    // SAFETY: `usage` is writable for the call.
+    (unsafe { libc::getrusage(libc::RUSAGE_CHILDREN, &mut usage) } == 0).then_some(())?;
+    let unit = if cfg!(target_os = "linux") { 1_024 } else { 1 };
+    u64::try_from(usage.ru_maxrss).ok()?.checked_mul(unit)
+}
+
+/// The `memory.peak` of the gate's cgroup, under cgroup version 2.
+pub fn cgroup_memory_peak() -> Option<u64> {
+    let cgroup = fs::read_to_string("/proc/self/cgroup").ok()?;
+    let path = cgroup.lines().find_map(|line| line.strip_prefix("0::/"))?;
+    let peak = Path::new("/sys/fs/cgroup").join(path).join("memory.peak");
+    fs::read_to_string(peak).ok()?.trim().parse().ok()
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::toolchain::environment::SYSTEM_PATH;
@@ -589,6 +624,43 @@ pub(crate) mod tests {
             let said = String::from_utf8_lossy(&output.stdout);
             assert!(output.status.success(), "{ignored}: {said}");
             assert!(said.contains("test result: ok. 1 passed"), "{said}");
+        }
+    }
+
+    #[test]
+    fn the_effective_user_owns_what_the_gate_creates() {
+        let scratch = Scratch::temporary("owner");
+        scratch.write("file", "");
+        let meta = fs::metadata(scratch.0.join("file")).expect("the file");
+        assert_eq!(std::os::unix::fs::MetadataExt::uid(&meta), effective_uid());
+    }
+
+    #[test]
+    fn the_disk_available_is_read_for_a_directory_and_not_for_a_missing_path() {
+        let scratch = Scratch::temporary("disk");
+        assert!(disk_available(&scratch.0).is_some_and(|bytes| bytes > 0));
+        assert_eq!(disk_available(&scratch.0.join("missing")), None);
+    }
+
+    #[test]
+    fn the_largest_collected_child_is_measured() {
+        let scratch = Scratch::temporary("rss");
+        let ran = shell(&scratch, "exit 0", LONG);
+        assert_eq!(ran.ended, Ended::Exited(0));
+        // The test process ran other children before, so only a lower
+        // bound holds: a process takes at least a page.
+        assert!(largest_child_rss().is_some_and(|bytes| bytes >= 4_096));
+    }
+
+    #[test]
+    fn the_cgroup_memory_peak_is_read_only_under_cgroup_version_2() {
+        let peak = cgroup_memory_peak();
+        let cgroup = fs::read_to_string("/proc/self/cgroup").unwrap_or_default();
+        if !cgroup.lines().any(|line| line.starts_with("0::/")) {
+            assert_eq!(peak, None);
+        }
+        if let Some(bytes) = peak {
+            assert!(bytes > 0);
         }
     }
 }

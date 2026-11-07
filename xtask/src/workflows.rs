@@ -213,6 +213,16 @@ fn check_file(path: &str, text: &str) -> Vec<String> {
     problems
 }
 
+/// Whether rule 3 applies to the workflow `text`, also when it or its `on` cannot be read.
+pub fn runs_on_pull_request(text: &str) -> bool {
+    let root = parse(text.strip_prefix(BOM).unwrap_or(text)).map(|root| root.value);
+    let Ok(Value::Map(top)) = root else {
+        return true;
+    };
+    let names = get(&top, "on").map(|on| triggers(&on.value));
+    !matches!(names, Some(Ok(names)) if !names.iter().copied().any(pull_request_trigger))
+}
+
 /// Whether `text` contains `pull_request_target` in any letter case.
 fn mentions_target(text: &str) -> bool {
     text.to_ascii_lowercase().contains(PULL_REQUEST_TARGET)
@@ -600,6 +610,35 @@ jobs:
 
     fn problems(text: &str) -> Vec<String> {
         check([(PATH, Some(text.as_bytes()))])
+    }
+
+    #[test]
+    fn runs_on_pull_request_answers_as_rule_3() {
+        for (on, expected) in [
+            ("on: pull_request", true),
+            ("on: [push, Pull_Request]", true),
+            ("on:\n  pull_request:\n    branches: [main]\n  push:", true),
+            ("on: pull_request_target", true),
+            ("on:", true),
+            ("on: []", true),
+            ("on: [push, ~]", true),
+            ("name: no triggers", true),
+            ("on: push", false),
+            ("on:\n  push:\n    branches: [main]", false),
+            ("on: [push, workflow_dispatch]", false),
+            ("\u{feff}on: push", false),
+        ] {
+            let text = format!("{on}\njobs:\n  j:\n    permissions:\n      contents: write\n");
+            assert_eq!(runs_on_pull_request(&text), expected, "{on}");
+            // Rule 3 rejects the write grant exactly when it applies.
+            let granted = problems(&text)
+                .iter()
+                .any(|problem| problem.contains("write access"));
+            assert_eq!(granted, expected, "{on}: {:?}", problems(&text));
+        }
+        // Rule 3 is not reached in a text that is not a mapping or not YAML.
+        assert!(runs_on_pull_request("- not a mapping\n"));
+        assert!(runs_on_pull_request("on: {a: [}\njobs: {}\n"));
     }
 
     fn assert_one(text: &str, expected: &str) {
