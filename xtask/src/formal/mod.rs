@@ -6,9 +6,11 @@
 //! the paths that other steps of `cargo xtask check` read from the constants
 //! of those steps. The command line is read with `clap`.
 
+pub mod base;
 pub mod extract;
 #[cfg(test)]
 mod fixture;
+pub mod guard;
 pub mod lean;
 pub mod outcome;
 pub mod paths;
@@ -52,6 +54,15 @@ pub struct Layout {
     /// The Lean namespace of the definitions that Aeneas generates, and
     /// their directory in the Lake project.
     pub generated: &'static str,
+    /// The Lean module of the proofs, whose directory is the only part of
+    /// the Lake project outside the statement side.
+    pub proofs: &'static str,
+    /// The statement registry, relative to the repository root.
+    pub statements: &'static str,
+    /// The registry of library axioms, relative to the repository root.
+    pub axioms: &'static str,
+    /// The registry of the trusted base, relative to the repository root.
+    pub tcb: &'static str,
     /// The target triple for which the kernel workspace is extracted.
     pub triple: &'static str,
     /// The proof target registry, relative to the repository root.
@@ -74,6 +85,10 @@ impl Layout {
         externals: "verification/externals",
         namespace: "Krepi",
         generated: "KrepiGen",
+        proofs: "Krepi.Proofs",
+        statements: "verification/statements.json",
+        axioms: "verification/axioms.json",
+        tcb: "verification/tcb.json",
         triple: "aarch64-unknown-none",
         registry: "verification/targets.json",
         toolchain: "verification/toolchain.json",
@@ -85,7 +100,12 @@ impl Layout {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "run",
-        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, and write its receipt; --target NAME, which may be repeated, runs only the named targets",
+        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the base round and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the named targets",
+        subcommands: &[],
+    },
+    Command {
+        name: "guard",
+        about: "With --event PATH, the JSON of a pull_request event, check the pull request against the rules for changes of statements, proofs and sources",
         subcommands: &[],
     },
     Command {
@@ -123,6 +143,7 @@ fn cli() -> clap::Command {
                     .value_parser(NonEmptyStringValueParser::new()),
             ),
         )
+        .subcommand(guard::cli(about("guard")))
         .subcommand(
             clap::Command::new("toolchain-check")
                 .about(about("toolchain-check"))
@@ -133,12 +154,8 @@ fn cli() -> clap::Command {
 
 /// The targets that `cargo xtask formal run` was given.
 fn targets(matches: &ArgMatches) -> BTreeSet<String> {
-    matches
-        .get_many::<String>("target")
-        .into_iter()
-        .flatten()
-        .cloned()
-        .collect()
+    let targets = matches.get_many::<String>("target").into_iter().flatten();
+    targets.cloned().collect()
 }
 
 /// Entry point of `cargo xtask formal`, with the arguments that follow
@@ -155,6 +172,7 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
         };
     match matches.subcommand() {
         Some(("run", matches)) => run::command(root, &Layout::PRODUCTION, targets(matches)),
+        Some(("guard", matches)) => guard::command(root, &Layout::PRODUCTION, matches),
         Some(("toolchain-check", matches)) => {
             let path = |name| matches.get_one::<PathBuf>(name).expect("a required option");
             toolchain::command(root, &Layout::PRODUCTION, path("aeneas"), path("charon"))
@@ -195,8 +213,19 @@ mod tests {
             matches.get_one::<PathBuf>("aeneas"),
             Some(&PathBuf::from("a"))
         );
+        let matches = read(&["guard", "--event", "event.json"]).expect("a valid command line");
+        let (name, matches) = matches.subcommand().expect("a subcommand");
+        assert_eq!(name, "guard");
+        assert_eq!(
+            matches.get_one::<PathBuf>("event"),
+            Some(&PathBuf::from("event.json"))
+        );
         for args in [
-            &["run", "--target"][..],
+            &["guard"][..],
+            &["guard", "--event"],
+            &["guard", "--event", "a", "b"],
+            &["guard", "a"],
+            &["run", "--target"],
             &["run", "--target", ""],
             &["run", "--keep"],
             &["run", "--targets", "a"],
@@ -210,6 +239,8 @@ mod tests {
         let help = read(&["run", "--help"]).expect_err("the help");
         assert_eq!(help.exit_code(), 0);
         assert!(help.to_string().contains("--target <NAME>"), "{help}");
+        let help = read(&["guard", "--help"]).expect_err("the help");
+        assert!(help.to_string().contains("--event <PATH>"), "{help}");
     }
 
     #[test]
@@ -248,6 +279,9 @@ mod tests {
             layout.extraction.to_string(),
             layout.registry.to_string(),
             layout.toolchain.to_string(),
+            layout.statements.to_string(),
+            layout.axioms.to_string(),
+            layout.tcb.to_string(),
             format!("{}/LICENSE-Apache-2.0", layout.tooling),
         ]
         .into_iter()
@@ -263,6 +297,9 @@ mod tests {
             layout.cases,
             layout.extraction,
             layout.externals,
+            layout.statements,
+            layout.axioms,
+            layout.tcb,
         ] {
             assert!(
                 path.starts_with(&format!("{}/", layout.project)),
@@ -299,6 +336,31 @@ mod tests {
         {
             assert_eq!(package["inherited"], true, "{package}");
         }
+    }
+
+    #[test]
+    fn the_lake_project_can_build_its_root_module() {
+        let lakefile: toml::Table =
+            toml::from_str(include_str!("../../../verification/lakefile.toml"))
+                .expect("the Lake configuration parses");
+        let libraries = lakefile["lean_lib"].as_array().expect("the libraries");
+        let library = |name: &str| {
+            (libraries.iter())
+                .find(|library| library["name"].as_str() == Some(name))
+                .unwrap_or_else(|| panic!("no library {name}"))
+        };
+        let layout = Layout::PRODUCTION;
+        let names =
+            |names: &[&str]| toml::Value::Array(names.iter().map(|name| (*name).into()).collect());
+        // The root module is a library of its own, which the base round
+        // builds as `+Krepi`; the library `Krepi` takes only the modules
+        // below the root, so that a stage without the root builds it.
+        assert_eq!(library("KrepiRoot")["roots"], names(&[layout.namespace]));
+        let below = format!("{}.+", layout.namespace);
+        assert_eq!(library(layout.namespace)["globs"], names(&[&below]));
+        assert_eq!(lakefile["defaultTargets"], names(&[layout.namespace]));
+        let proofs = format!("{}.", layout.namespace);
+        assert!(layout.proofs.starts_with(&proofs), "{}", layout.proofs);
     }
 
     #[test]

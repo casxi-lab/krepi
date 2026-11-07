@@ -578,7 +578,7 @@ mod tests {
             match stopped {
                 Some(error) => Err(error),
                 None => {
-                    gate.conclude(UNIT, Status::Verified, None);
+                    gate.conclude(UNIT, (Status::Verified, None));
                     Ok(())
                 }
             }

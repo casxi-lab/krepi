@@ -1,0 +1,9 @@
+# Lean 4.35.0 on darwin-arm64 in the environment of the gate: `lake env lean AuditNative.lean` in the stage `counter`, exit 0
+krepi-audit module Krepi.Proofs.Native
+'Krepi.Proofs.Native.n' depends on axioms: [_private.Krepi.Proofs.Native.0.Krepi.Proofs.Native.n._native.native_decide.ax_1_1]
+krepi-audit native _private.Krepi.Proofs.Native.0.Krepi.Proofs.Native.n._native.native_decide.ax_1_1 Krepi.Proofs.Native
+krepi-audit range Krepi.Proofs.Native.n 5
+krepi-audit module Krepi.Proofs.Forged
+'Krepi.Proofs.Forged.f' depends on axioms: [Krepi.Proofs.Native.n._native.native_decide.ax_9_9]
+krepi-audit native Krepi.Proofs.Native.n._native.native_decide.ax_9_9 Krepi.Proofs.Forged
+krepi-audit range Krepi.Proofs.Forged.f 13

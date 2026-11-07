@@ -56,8 +56,10 @@ Written in krepi after the CAS project, and not copied:
 
 New in krepi are the units of the cases and their theorems, the `parts`
 form of a case and the module that imports its parts, the check of the
-extraction configuration and of the crate's manifest and build script, and
-the record of the qualification in the receipt.
+extraction configuration and of the crate's manifest and build script, the
+record of the qualification in the receipt, and the check that no command
+of the phase wrote to the Aeneas Lean library, its packages or the Lean
+toolchain of the installation.
 
 ## Changes
 
@@ -117,6 +119,11 @@ the record of the qualification in the receipt.
   failed command; a killed audit is a tool failure that the gate records. A
   theorem that the audit reports twice, which only a shared audit could do,
   is not checked.
+- The axioms that `judge_case_audit` allows are no longer a closure of the
+  function: it asks `allows` of `xtask/src/formal/lean.rs` with the kind of
+  a qualification theorem, so that one table of the base round admits the
+  axioms of every audit, and the axiom of a native decision is never
+  allowed, even when the case declares it.
 - The check of `judge_case_audit` that the audit belongs to the cases that
   it judges (lines 877 to 879), and the fields that `audit_case_proofs`
   recorded for it to check (`qualification_cases`, `audit_source` and
@@ -169,7 +176,9 @@ Other new tests run the phase on fixtures with stand-ins for the tools:
   `tests::the_cases_file_of_the_snapshot_must_be_the_one_read_at_the_start`;
 - `tests::the_parts_of_a_case_are_imported_together`;
 - `tests::an_ignored_lean_file_does_not_reach_a_case_stage`;
-- `tests::a_failed_copy_into_a_case_stage_gives_an_incomplete_tool_failure_receipt`;
+- `tests::a_failed_copy_into_a_case_stage_gives_an_incomplete_tool_failure_receipt`
+  and `tests::a_tool_that_writes_the_backend_stops_the_qualification`;
+- `tests::the_case_audit_judges_through_the_allowlist`;
 - `tests::every_convention_has_its_class_at_the_qualification_sites`, which
   runs each convention of `outcome.rs` through Charon, Aeneas, the
   qualification build, the ill-typed build and the case audit, with a case

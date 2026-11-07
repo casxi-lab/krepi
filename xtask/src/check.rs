@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant};
 
+use crate::formal::{Layout, lean};
 use crate::repo::{Entry, Tree};
 use crate::{docs, manifests, receipt, toolchain, workflows};
 
@@ -116,6 +117,10 @@ pub fn steps() -> Vec<Step> {
             action: Action::Internal(Box::new(|root, _| docs::run(root))),
         },
         Step {
+            name: "lean",
+            action: Action::Internal(Box::new(|root, _| check_lean(root))),
+        },
+        Step {
             name: "workflows",
             action: Action::Internal(Box::new(check_workflows)),
         },
@@ -147,6 +152,38 @@ fn check_workflows(root: &Path, facts: &mut Facts) -> Result<(), String> {
     } else {
         Err(problems.join("\n"))
     }
+}
+
+/// The `lean` step on the tracked files: the source rules of the
+/// hand-written Lean.
+fn check_lean(root: &Path) -> Result<(), String> {
+    let problems = lean_problems(&Tree::load(root)?, &Layout::PRODUCTION);
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("\n"))
+    }
+}
+
+/// The problems of the source rules in the tracked Lean files of the Lake
+/// project in `tree`, each of which must be a UTF-8 regular file, with the
+/// items of its `tcb.json`, which must be read.
+pub fn lean_problems(tree: &Tree, layout: &Layout) -> Vec<String> {
+    let unread = || "it is not a tracked UTF-8 regular file".to_string();
+    let tcb = tree.text(layout.tcb).ok_or_else(unread);
+    let (items, mut problems) = match tcb.and_then(lean::load_tcb) {
+        Ok(items) => (items, Vec::new()),
+        Err(error) => (Vec::new(), vec![format!("{}: {error}", layout.tcb)]),
+    };
+    let project = format!("{}/", layout.project);
+    let file = |path: &&str| path.starts_with(&project) && path.ends_with(".lean");
+    for (path, _) in tree.entries().filter(|(path, _)| file(path)) {
+        match tree.text(path) {
+            Some(text) => problems.extend(lean::source_problems(path, text, &items, layout)),
+            None => problems.push(format!("{path}: {}", unread())),
+        }
+    }
+    problems
 }
 
 /// Runs `steps` in order in `root` and stops at the first failure. Every
@@ -263,13 +300,14 @@ mod tests {
 
     use super::*;
 
-    const ORDER: [&str; 7] = [
+    const ORDER: [&str; 8] = [
         "toolchain",
         "manifests",
         "fmt",
         "clippy",
         "test",
         "docs",
+        "lean",
         "workflows",
     ];
 
@@ -395,6 +433,11 @@ mod tests {
     #[test]
     fn a_docs_failure_stops_the_check() {
         assert_fails_at("docs");
+    }
+
+    #[test]
+    fn a_lean_failure_stops_the_check() {
+        assert_fails_at("lean");
     }
 
     #[test]

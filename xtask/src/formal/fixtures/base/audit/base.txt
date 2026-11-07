@@ -1,0 +1,17 @@
+# Lean 4.35.0 on darwin-arm64 in the environment of the gate: `lake env lean Audit.lean` in a base stage, exit 0
+krepi-audit module Krepi.Qualification.Arithmetic
+'Krepi.Qualification.Arithmetic.mul_mod_spec' depends on axioms: [propext, Classical.choice, Quot.sound]
+krepi-audit range Krepi.Qualification.Arithmetic.mul_mod_spec 18
+krepi-audit module Krepi.Qualification.Checked
+'Aeneas.Std.U64.checked_add_bv_spec.match_1.congr_eq_2' does not depend on any axioms
+'Krepi.Qualification.Checked.add_within_spec' depends on axioms: [propext, Classical.choice, Quot.sound]
+krepi-audit range Krepi.Qualification.Checked.add_within_spec 16
+'Aeneas.Std.U64.checked_add_bv_spec.match_1.congr_eq_1' does not depend on any axioms
+krepi-audit module Krepi.Qualification.Models.Arc
+'alloc.sync.Arc.mk.sizeOf_spec' does not depend on any axioms
+'alloc.sync.Arc.mk.inj' does not depend on any axioms
+'alloc.sync.Arc.mk.injEq' depends on axioms: [propext]
+krepi-audit module Krepi.Qualification.Models.FromStr
+krepi-audit module Krepi.Qualification.SingleLoop
+'Krepi.Qualification.SingleLoop.charge_each_spec' depends on axioms: [propext, Classical.choice, Quot.sound]
+krepi-audit range Krepi.Qualification.SingleLoop.charge_each_spec 18

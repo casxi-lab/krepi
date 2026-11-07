@@ -59,7 +59,7 @@ fn git_on(git: &mut dyn Git, args: &[&str], inputs: &[&str]) -> Result<Vec<u8>, 
 }
 
 /// The records of `git ls-tree -z`.
-fn tree_records(output: &[u8]) -> Result<Files, String> {
+pub(super) fn tree_records(output: &[u8]) -> Result<Files, String> {
     let mut records = Files::new();
     for record in output
         .split(|&byte| byte == 0)

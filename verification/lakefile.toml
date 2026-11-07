@@ -23,3 +23,10 @@ globs = ["Krepi.+"]
 [[lean_lib]]
 name = "KrepiGen"
 globs = ["KrepiGen.+"]
+
+# The root module `Krepi`, which `cargo xtask formal run` writes in the
+# directory of its base round to import every module below `Krepi` and
+# `KrepiGen`. It is never in the checkout.
+[[lean_lib]]
+name = "KrepiRoot"
+roots = ["Krepi"]

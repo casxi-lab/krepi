@@ -1,0 +1,67 @@
+{
+  "action": "synchronize",
+  "number": 7,
+  "pull_request": {
+    "url": "https://api.github.com/repos/example/krepi/pulls/7",
+    "id": 1000007,
+    "number": 7,
+    "state": "open",
+    "locked": false,
+    "title": "Prove a statement",
+    "user": {
+      "login": "author",
+      "id": 1001,
+      "type": "User"
+    },
+    "body": "A description.\r\n",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "labels": [
+      {
+        "id": 2001,
+        "node_id": "LA_label",
+        "url": "https://api.github.com/repos/example/krepi/labels/proof",
+        "name": "proof",
+        "color": "ededed",
+        "default": false,
+        "description": "Changes proofs"
+      }
+    ],
+    "draft": false,
+    "head": {
+      "label": "author:topic",
+      "ref": "topic",
+      "sha": "1111111111111111111111111111111111111111",
+      "user": {
+        "login": "author",
+        "id": 1001,
+        "type": "User"
+      }
+    },
+    "base": {
+      "label": "example:main",
+      "ref": "main",
+      "sha": "2222222222222222222222222222222222222222",
+      "user": {
+        "login": "example",
+        "id": 1002,
+        "type": "Organization"
+      }
+    },
+    "merged": false,
+    "commits": 1,
+    "changed_files": 1
+  },
+  "repository": {
+    "id": 3001,
+    "name": "krepi",
+    "full_name": "example/krepi",
+    "private": false,
+    "default_branch": "main"
+  },
+  "sender": {
+    "login": "author",
+    "id": 1001,
+    "type": "User"
+  }
+}
