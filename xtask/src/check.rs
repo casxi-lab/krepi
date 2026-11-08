@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::formal::{Layout, lean, toolchain as tools};
 use crate::repo::{Entry, Tree};
-use crate::{docs, manifests, receipt, toolchain, workflows};
+use crate::{docs, manifests, receipt, subset, toolchain, workflows};
 
 /// The Cargo workspaces that the format, Clippy and test steps cover, as
 /// repository-relative directories.
@@ -119,6 +119,10 @@ pub fn steps() -> Vec<Step> {
         Step {
             name: "lean",
             action: Action::Internal(Box::new(|root, _| check_lean(root))),
+        },
+        Step {
+            name: "subset",
+            action: Action::Internal(Box::new(subset::run)),
         },
         Step {
             name: "workflows",
@@ -312,7 +316,7 @@ mod tests {
 
     use super::*;
 
-    const ORDER: [&str; 8] = [
+    const ORDER: [&str; 9] = [
         "toolchain",
         "manifests",
         "fmt",
@@ -320,6 +324,7 @@ mod tests {
         "test",
         "docs",
         "lean",
+        "subset",
         "workflows",
     ];
 
@@ -542,6 +547,11 @@ mod tests {
     #[test]
     fn a_lean_failure_stops_the_check() {
         assert_fails_at("lean");
+    }
+
+    #[test]
+    fn a_subset_failure_stops_the_check() {
+        assert_fails_at("subset");
     }
 
     #[test]

@@ -37,8 +37,10 @@ component names its source paths.
   kept in its coordination records, plans a specification, and it changes
   when that plan changes.
 - The `Extractability` section of each component's `contract.md` states
-  which of its code follows this convention
-  ([component documents](documentation.md#component-documents)).
+  which of its code follows this convention and lists its source paths,
+  which the [mechanical checks](#mechanical-checks) read
+  ([component documents](documentation.md#component-documents)). The
+  change that adds or moves a module of the list writes its paths there.
 
 ## Constructs and alternatives
 
@@ -950,25 +952,80 @@ sequential refinement:
   case; or, where a proof of merged code meets it and no local alternative
   exists, a design change removes it.
 
-## Planned mechanical checks
+## Mechanical checks
 
-Four checks of the listed modules are planned as part of
-`cargo xtask check`:
+The `subset` step of `cargo xtask check`, in `xtask/src/subset.rs`
+([testing](testing.md#entry-points)), checks the listed modules by their
+source paths, which the `paths` blocks of the `Extractability` sections of
+the contracts list
+([component documents](documentation.md#component-documents)). It reads
+each listed `.rs` file with `syn`, apart from test code: a file that, for
+the inventory of `cargo xtask formal check`, only test code, a root that is
+not a production root or a build script reaches
+([legacy inventory and admission](../formal-verification.md#legacy-inventory-and-admission)),
+and the content of a module with `#[cfg(test)]`. A listed file must be a
+UTF-8 regular file that parses, and the step fails with the line of each
+place where it has
 
-1. no `static mut` item;
-2. no interior-mutability type: `Cell`, `RefCell`, `UnsafeCell`, `OnceCell`
-   or another type of `core::cell` that provides interior mutability, and no
-   atomic type of `core::sync::atomic`;
-3. no `cfg` attribute outside an allowlist, which admits `#[cfg(test)]` on
-   the unit-test modules that [testing](testing.md#layout) places next to
-   the code;
-4. compile-fail negative tests of the compile-time guards of rule 6: each
-   test changes a guarded type, for example by deriving `Clone` for a handle
-   type, and fails the check when the build still succeeds.
+1. a `static mut` item, wherever it is, in a function body or an `extern`
+   block as well;
+2. an interior-mutability type, found by name: a path with a segment
+   `Cell`, `RefCell`, `UnsafeCell` or `OnceCell`, or with a segment `cell`
+   or `atomic` before another one, such as `core::cell::LazyCell` or
+   `core::sync::atomic::AtomicUsize`, and a `use` tree with any of these six
+   names, so that importing `core::cell`, `core::sync::atomic` or an item of
+   either fails as well. A krepi type or module with one of these names
+   fails too;
+3. a `cfg` attribute, outer or inner, on any item, field, statement or
+   expression, outside the allowlist. The allowlist has one entry:
+   `#[cfg(test)]`, in exactly this form, on a module, which is how
+   [testing](testing.md#layout) places unit-test modules next to the code.
+   The content of such a module is test code and is not checked; its other
+   attributes are. Widening the allowlist changes this item and the step
+   together;
+4. a macro whose tokens hold one of the six names of item 2, `cfg` or
+   `static`, at any depth, since the checks do not see what a macro expands
+   to, and a macro can join a `static` and a `mut` that it is given apart.
+   A macro that holds such a name for another purpose, such as a variable
+   named `cell`, a lifetime `'static` or a `static` item without `mut`,
+   fails as well.
 
-Until the checks exist, and for what they do not see, such as a type that
-wraps an `UnsafeCell`, a `cfg_attr` attribute or the `cfg!` macro, review
-applies rules 3 and 6 to 8.
+The step also runs the compile-fail cases of the compile-time guards of
+rule 6. A case is a TOML file in a directory named `compile-fail` below
+`kernel/`, with these four strings and no other field:
+
+| Field | Content |
+| --- | --- |
+| `file` | The repository path of a tracked file of the kernel workspace |
+| `find` | Text that occurs exactly once in that file |
+| `replace` | The text that takes its place |
+| `error` | The rustc error code, such as `E0283`, of a diagnostic of the failing build |
+
+When there is a case, the step first builds a copy of the tracked files of
+the kernel workspace, unchanged, and fails when that build fails. For each
+case, it copies the same files, makes the change in the copy, and builds
+it. Each copy lies in a directory below `artifacts/subset/`, which the
+step removes after the build, and is built by
+`cargo check --locked --offline --color never --workspace` with the Cargo
+of the other steps, from that directory below the repository root. The
+case fails when `find` does not occur exactly once, when the build
+succeeds, or when no line of the standard error of the build starts with
+`error[`, the code and `]`, so that a quoted source line or a build that
+fails for another reason does not count. A case of the guard of rule 6,
+for example, replaces `pub struct ReplyRight {` by `#[derive(Clone)]` and
+the same line and expects `E0283`, the error that the two implementations
+of `AmbiguousIfClone` give once the handle implements `Clone`.
+
+Review applies rules 3 and 6 to 8 to what the checks do not see: a type
+that wraps an `UnsafeCell` under another name, a `cfg_attr` attribute, the
+`cfg!` macro outside the tokens of another macro, a guard without a
+compile-fail case, and a module whose paths no contract lists, for which
+review checks each module of the list against the contract of its
+component. The checks read names, so they also do not see what a listed
+file takes from code that no contract lists: a type alias, a re-export or
+a name defined there, a macro defined there whose expansion holds a
+refused construct, and a file that `include!` reads, which the inventory
+of `cargo xtask formal check` refuses.
 
 ## References
 

@@ -1,4 +1,4 @@
-//! The receipt of `cargo xtask formal run`, schema 1, as "Receipt" in
+//! The receipt of `cargo xtask formal run`, schema 2, as "Receipt" in
 //! `docs/formal-verification.md` documents it.
 
 use std::collections::BTreeMap;
@@ -11,7 +11,7 @@ use super::paths::Snapshot;
 use super::process::LimitBy;
 use super::qualify::Expect;
 
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 
 pub const COMMAND: &str = "cargo xtask formal run";
 
@@ -502,12 +502,15 @@ mod tests {
             proofs: paths(&["verification/Krepi/Proofs/C.lean"]),
             sources: paths(&["kernel/abi/src/lib.rs"]),
             demoted: paths(&["Krepi.Statements.C.S"]),
+            restated: paths(&["Krepi.Statements.C.S", "Krepi.Statements.C.T"]),
             raised: paths(&["verification/Krepi/Proofs/C.lean"]),
             rules: [
                 "statement-change-needs-spec",
                 "spec-approval",
                 "no-sources-with-proofs-or-statements",
                 "heartbeats-need-review",
+                "phase-and-author",
+                "proof-of-registered-statements",
             ]
             .map(|rule| (rule.to_string(), why(rule)))
             .into(),
@@ -664,7 +667,7 @@ mod tests {
         let e = "e".repeat(64);
         let expected = format!(
             r#"{{
-  "schema": 1,
+  "schema": 2,
   "command": "cargo xtask formal run",
   "status": "VERIFIED",
   "complete": true,
