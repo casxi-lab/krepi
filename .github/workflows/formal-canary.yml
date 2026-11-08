@@ -1,0 +1,485 @@
+# Runs the proof gate once a week, on Saturdays at 09:17 UTC, and on a
+# manual run of main, with the tools of Aeneas main: the Lean release that
+# its backends/lean/lean-toolchain names, and the Charon of its charon-pin
+# with that Charon's Rust nightly, resolved when the job runs. The job
+# derives the tool manifest from verification/toolchain.json, builds the
+# proof-tool image with the recipe of verification/image/ without
+# publishing it, and runs the gate in that image on local commits of the
+# derived files. It records what breaks and changes nothing: it is not a
+# required check, logs in to no registry and pushes nothing. Each step has
+# a limit, and the limits add up to less than the job's, so the steps that
+# record the run always run. Actions are pinned to full commit SHAs; the
+# comment names the release.
+name: formal canary
+
+on:
+  schedule:
+    - cron: "17 9 * * 6"
+  workflow_dispatch:
+
+concurrency:
+  group: formal-canary
+  cancel-in-progress: false
+
+# `bash` runs every step with `-eo pipefail`, so that a failed command in a
+# pipeline, such as `docker build ... | tee`, fails its step.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  canary:
+    name: toolchain canary
+    # A manual run of another branch is skipped: the canary tests main.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    env:
+      # The image that the job builds, by a local tag that names no registry.
+      IMAGE_REF: krepi-formal-canary:${{ github.sha }}
+      IMAGE: krepi-formal-canary:${{ github.sha }}
+      REVISION: ${{ github.sha }}
+      HEAD_SHA: ${{ github.sha }}
+      # The flags of every container that runs the gate, as in formal.yml.
+      GATE_FLAGS: "--pull never --init --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --network none"
+    steps:
+      - name: Check out main with its history
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record the runner
+        id: runner
+        timeout-minutes: 2
+        run: |
+          mkdir -p artifacts/formal artifacts/canary
+          {
+            echo "== prepare started $(date -u +%FT%TZ)"
+            echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT"
+            echo "user: $(id)"
+            echo "processors: $(nproc)"
+            free -b
+            df -B1 /
+            uname -srvm
+            docker info --format 'Docker {{.ServerVersion}}, cgroup version {{.CgroupVersion}}'
+            docker info --format 'security options {{json .SecurityOptions}}'
+            if [ "$(id -u)" = 0 ]; then
+              echo "the runner's user is root; the gate is to run as another user" >&2
+              exit 1
+            fi
+            owner=$(stat -c %u "$GITHUB_WORKSPACE")
+            if [ "$owner" != "$(id -u)" ]; then
+              echo "the checkout belongs to user $owner, not to the runner's user" >&2
+              exit 1
+            fi
+            echo "the checkout belongs to the runner's user"
+            cp "$GITHUB_EVENT_PATH" artifacts/formal/event.json
+            echo "the event is copied to artifacts/formal/event.json"
+          } 2>&1 | tee artifacts/formal/job.txt
+
+      - name: Record the disk and remove preinstalled software
+        id: disk
+        timeout-minutes: 5
+        run: |
+          mkdir -p artifacts/image
+          {
+            echo "started $(date -u +%FT%TZ)"
+            echo "available before removal: $(df -B1 --output=avail / | tail -n 1)"
+            df -B1 /
+            for dir in /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+                /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift \
+                /usr/local/share/powershell /usr/local/share/chromium \
+                /usr/local/lib/node_modules /opt/microsoft /opt/google /opt/az /usr/lib/jvm; do
+              if [ -e "$dir" ]; then
+                echo "removed $dir"
+                sudo rm -rf "$dir"
+              fi
+            done
+            docker image prune --all --force > /dev/null
+            echo "available after removal: $(df -B1 --output=avail / | tail -n 1)"
+            df -B1 /
+            docker version
+          } 2>&1 | tee artifacts/image/disk.txt
+
+      - name: Sample the disk every 15 seconds
+        id: sampler
+        timeout-minutes: 1
+        run: |
+          root=$(docker info --format '{{.DockerRootDir}}')
+          nohup bash -c '
+            while :; do
+              used=$(sudo timeout 10 du -sxb "$1" 2> /dev/null | cut -f 1) || used=
+              printf "%s\t%s\t%s\n" "$(date -u +%FT%TZ)" \
+                "$(df -B1 --output=avail / | tail -n 1 | tr -d " ")" "${used:-unknown}"
+              sleep 15
+            done' sampler "$root" > artifacts/image/disk-samples.tsv 2> /dev/null &
+          echo "$!" > artifacts/image/sampler.pid
+
+      - name: Build xtask
+        id: xtask
+        timeout-minutes: 5
+        run: |
+          {
+            echo "== build xtask, started $(date -u +%FT%TZ)"
+            rustup toolchain install
+            cargo build --locked --manifest-path xtask/Cargo.toml
+            ls -l xtask/target/debug/xtask
+          } 2>&1 | tee -a artifacts/formal/job.txt
+
+      # The head of Aeneas main, its tree, and the tree of Charon at the
+      # commit of its charon-pin, without submodules; then `resolve` names
+      # the downloads, the two Lean archives of the release that Aeneas names
+      # and the channel manifest of Charon's nightly, and the version line of
+      # the linux archive's `lean` is recorded.
+      - name: Resolve the tools of Aeneas main
+        id: resolve
+        timeout-minutes: 6
+        run: |
+          {
+            echo "== resolve started $(date -u +%FT%TZ)"
+            fetch() {
+              git init --quiet "$1"
+              git -C "$1" fetch --quiet --depth 1 "$2" "$3"
+              git -C "$1" checkout --quiet --detach FETCH_HEAD
+            }
+            download() {
+              curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+                --retry 5 --retry-all-errors --output "$1" "$2"
+            }
+            pins=verification/toolchain.json
+            url=$(jq -er .aeneas.source_url "$pins")
+            main=$(git ls-remote --exit-code "$url" refs/heads/main | cut -f 1)
+            echo "Aeneas main: $main"
+            fetch artifacts/canary/aeneas "$url" "$main"
+            # Charon is fetched for a charon-pin of one line that is not a
+            # comment, and a line that Git cannot fetch fails the step;
+            # resolve classes a charon-pin of more or fewer such lines as a
+            # breakage, and a missing one as a failure of the run.
+            pin=artifacts/canary/aeneas/charon-pin
+            charon=$(grep -Ev '^[[:space:]]*(#|$)' "$pin" | tr -d '[:space:]') || true
+            echo "its charon-pin: $charon"
+            if [ "$(grep -cEv '^[[:space:]]*(#|$)' "$pin")" = 1 ]; then
+              fetch artifacts/canary/charon "$(jq -er .charon.source_url "$pins")" "$charon"
+            fi
+            xtask/target/debug/xtask formal canary resolve
+            plan=artifacts/canary/resolve.json
+            for host in linux-aarch64 darwin-arm64; do
+              download "artifacts/canary/lean-$host.tar.zst" \
+                "$(jq -er --arg url "/hosts/$host/lean/url" '.data[$url]' "$plan")"
+            done
+            download artifacts/canary/channel-rust-nightly.toml \
+              "$(jq -er '.data["/rust/manifest_url"]' "$plan")"
+            mkdir artifacts/canary/lean
+            tar --zstd --extract --file artifacts/canary/lean-linux-aarch64.tar.zst \
+              --directory artifacts/canary/lean --strip-components 1 --no-same-owner
+            artifacts/canary/lean/bin/lean --version | tee artifacts/canary/lean-version.txt
+            echo "== resolve ended $(date -u +%FT%TZ)"
+          } 2>&1 | tee artifacts/canary/resolve.txt
+
+      - name: Derive the tool manifest
+        id: derive
+        timeout-minutes: 5
+        run: |
+          xtask/target/debug/xtask formal canary derive 2>&1 | tee artifacts/canary/derive.txt
+          cp verification/toolchain.json artifacts/canary/toolchain-build.json
+          rm -rf artifacts/canary/lean artifacts/canary/lean-*.tar.zst
+
+      - name: Fetch the pinned Aeneas and Charon sources
+        id: fetch
+        timeout-minutes: 5
+        run: |
+          fetch() {
+            git init --quiet "$1"
+            git -C "$1" fetch --quiet --depth 1 "$2" "$3"
+            git -C "$1" checkout --quiet --detach FETCH_HEAD
+          }
+          pins=verification/toolchain.json
+          fetch artifacts/image/aeneas "$(jq -er .aeneas.source_url "$pins")" \
+            "$(jq -er .aeneas.commit "$pins")"
+          fetch artifacts/image/charon "$(jq -er .charon.source_url "$pins")" \
+            "$(jq -er .charon.commit "$pins")"
+          git -C artifacts/image/charon submodule update --init --recursive
+          git -C artifacts/image/charon submodule status --recursive
+
+      - name: Check the sources and the patch against the manifest
+        id: toolchain-check
+        timeout-minutes: 3
+        run: >-
+          cargo xtask formal toolchain-check
+          --aeneas artifacts/image/aeneas --charon artifacts/image/charon
+          2>&1 | tee artifacts/canary/toolchain-check.txt
+
+      - name: Check that the patch applies
+        id: patch
+        timeout-minutes: 1
+        run: xtask/target/debug/xtask formal canary patch
+
+      # The `docker build` of `formal image build`, under a limit of 52
+      # minutes that ends it within the step's limit; its exit status is
+      # kept for the verdict.
+      - name: Build the image
+        id: build
+        timeout-minutes: 55
+        run: |
+          status=0
+          timeout --kill-after 1m 52m docker build --progress=plain --file verification/image/Dockerfile \
+            --build-context aeneas-src=artifacts/image/aeneas \
+            --build-context charon-src=artifacts/image/charon \
+            --build-arg REVISION="$REVISION" --tag "$IMAGE_REF" verification 2>&1 \
+            | tee artifacts/image/build.log || status=$?
+          echo "$status" > artifacts/canary/build-status
+          exit "$status"
+
+      - name: Record the image
+        id: record
+        timeout-minutes: 2
+        run: |
+          docker image inspect "$IMAGE_REF" > artifacts/image/inspect.json
+          docker history --no-trunc --human=false --format '{{.Size}}\t{{.CreatedBy}}' \
+            "$IMAGE_REF" > artifacts/image/layers.tsv
+          docker run --rm "$IMAGE_REF" cat /opt/krepi-formal/versions.json \
+            | tee artifacts/image/versions.json
+          docker run --rm "$IMAGE_REF" cat /opt/krepi-formal/opam-switch.export \
+            > artifacts/image/opam-switch.export
+          echo "image size: $(docker image inspect --format '{{.Size}}' "$IMAGE_REF")" \
+            | tee -a artifacts/image/disk.txt
+
+      # Two local commits, which are never pushed: the derived files, then
+      # the switch export of the image and the statement hash of the first.
+      - name: Fill the build fact and commit the derived files
+        id: fill
+        timeout-minutes: 3
+        run: |
+          commit() {
+            git add verification
+            git -c user.name="formal canary" -c user.email=formal-canary@invalid \
+              commit --quiet --allow-empty --message "$1"
+          }
+          commit "Derive the tool manifest from Aeneas main"
+          xtask/target/debug/xtask formal canary fill
+          commit "Fill the switch export of the image and the statement hash"
+          cp verification/toolchain.json artifacts/canary/toolchain.json
+          git diff HEAD~2 -- verification > artifacts/canary/derived.diff
+          git status --porcelain | tee artifacts/canary/status.txt
+
+      - name: Probe the container of the gate
+        id: probe
+        timeout-minutes: 1
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          echo "== probe: docker run $GATE_FLAGS --user $(id -u):$(id -g)" \
+            | tee -a artifacts/formal/job.txt
+          docker run --rm -i "${gate_flags[@]}" --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE:ro" --workdir "$GITHUB_WORKSPACE" \
+            "$IMAGE" bash -s 2>&1 <<'PROBE' | tee -a artifacts/formal/job.txt
+          status=0
+          fail() { echo "FAILED: $*"; status=1; }
+          echo "user: $(id)"
+          [ "$(id -u)" != 0 ] || fail "the container runs as root"
+          root=$(awk '$2 == "/" { line = $0 } END { print line }' /proc/self/mounts)
+          echo "root file system: $root"
+          case ",$(echo "$root" | awk '{ print $4 }')," in
+            *,ro,*) ;;
+            *) fail "the root file system is not read-only" ;;
+          esac
+          grep -E '^(CapBnd|CapEff|NoNewPrivs):' /proc/self/status
+          grep -q '^CapBnd:[[:space:]]*0*$' /proc/self/status || fail "capabilities are left"
+          grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/self/status || fail "new privileges are allowed"
+          echo "network interfaces: $(ls /sys/class/net)"
+          [ "$(ls /sys/class/net)" = lo ] || fail "the container has a network"
+          echo "process 1: $(cat /proc/1/comm)"
+          for dir in lean backend bin rustup cargo; do
+            path=/opt/krepi-formal/$dir
+            if touch "$path/.probe" 2>&1; then
+              fail "created $path/.probe"
+            fi
+            if chmod u+w "$path" 2>&1; then
+              fail "changed the mode of $path"
+            fi
+          done
+          if "$PWD/xtask/target/debug/xtask" help > /dev/null; then
+            echo "xtask starts in the image"
+          else
+            fail "xtask does not start in the image"
+          fi
+          exit "$status"
+          PROBE
+          echo "== the probe passed; prepare ended $(date -u +%FT%TZ)" \
+            | tee -a artifacts/formal/job.txt
+
+      # As the job `formal run` of formal.yml runs the gate, but in the image
+      # that this job built, which the gate is not given as a reference: the
+      # receipt records none and compares no pin.
+      - name: Run the gate in the image
+        id: gate
+        timeout-minutes: 126
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          echo "== gate started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
+          status=0
+          docker run --rm --name "formal-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --env GITHUB_EVENT_NAME --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            --env GITHUB_EVENT_PATH="$GITHUB_WORKSPACE/artifacts/formal/event.json" \
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run || status=$?
+          echo "$status" > artifacts/canary/gate-status
+          echo "== gate ended $(date -u +%FT%TZ) with exit status $status" \
+            | tee -a artifacts/formal/job.txt
+          exit "$status"
+
+      - name: Remove the container of the gate
+        if: always()
+        timeout-minutes: 1
+        run: |
+          if docker rm --force "formal-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1; then
+            echo "removed the container of the gate"
+          else
+            echo "no container of the gate is left"
+          fi
+
+      - name: Summarize the receipt
+        if: always()
+        timeout-minutes: 2
+        env:
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          shopt -s nullglob
+          receipts=(artifacts/formal/runs/*/receipt.json)
+          {
+            echo "## formal run"
+            echo
+            echo "Image \`$IMAGE\`; the gate step: $GATE_OUTCOME."
+            echo
+            if [ "${#receipts[@]}" = 0 ]; then
+              echo "The gate left no receipt."
+            fi
+            for receipt in "${receipts[@]}"; do
+              jq -r --arg path "$receipt" '
+                "- Receipt `\($path)`: `\(.status)`, complete \(.complete), \(.seconds) s",
+                "- Phases: " + ([.phases | to_entries[] | "\(.key) \(.value.seconds) s"] | join(", ")),
+                "- Units: " + ([.units[].status] | group_by(.) | map("\(length) \(.[0])") | join(", ")),
+                "- Image: " + (.image | if . == null then "none" else
+                  "`\(.reference)`, user \(.uid), writable \(.writable), " +
+                  "versions.json SHA-256 `\(.versions_sha256)`" end),
+                "- Resources: disk available at the start \(.resources.disk_available_at_start) B, " +
+                  "least \(.resources.disk_least_available) B; largest process " +
+                  "\(.resources.largest_process_max_rss) B; cgroup memory peak " +
+                  "\(.resources.cgroup_memory_peak) B",
+                (.guard // empty | .rules | to_entries[] | "- Guard rule `\(.key)`: \(.value // "holds")"),
+                "",
+                "Units that are not VERIFIED:",
+                "",
+                (.units | to_entries[] | select(.value.status != "VERIFIED")
+                  | "- `\(.key)`: \(.value.status)"),
+                "",
+                "Failures:",
+                "",
+                (if .failures == [] then "- none" else
+                  .failures[] | "- \(.status): \(.message | .[0:500])" end)
+              ' "$receipt"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "${#receipts[@]}" = 0 ] && [[ "$GATE_OUTCOME" =~ ^(success|failure)$ ]]; then
+            echo "the gate step ran and left no receipt" >&2
+            exit 1
+          fi
+
+      - name: Summarize the disk measurement
+        if: always()
+        timeout-minutes: 2
+        run: |
+          if [ -f artifacts/image/sampler.pid ]; then
+            kill "$(cat artifacts/image/sampler.pid)" || true
+          fi
+          # Record what Docker holds, then free its build cache, so that the
+          # record can be written and uploaded after a build that filled the disk.
+          docker system df > artifacts/image/docker-df.txt 2>&1 || true
+          docker builder prune --all --force > /dev/null 2>&1 || true
+          if [ -f artifacts/image/disk-samples.tsv ]; then
+            {
+              echo "finished $(date -u +%FT%TZ)"
+              echo "available at the end: $(df -B1 --output=avail / | tail -n 1)"
+              awk -F '\t' '
+                NR == 1 || $2 < low { low = $2 }
+                $3 ~ /^[0-9]+$/ && $3 > high { high = $3 }
+                END {
+                  print "least available during the build: " low
+                  print "largest Docker root: " high
+                  print "samples: " NR
+                }' artifacts/image/disk-samples.tsv
+            } | tee -a artifacts/image/disk.txt | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The verdict: the finding of the first step that did not pass, or of
+      # the gate. The job passes only when the gate verified krepi with the
+      # tools of Aeneas main; a breakage, a defect of the canary and a
+      # failure of the run each fail it, with the finding in verdict.json,
+      # the summary and one annotation. The outcomes reach the command
+      # through the environment, never through the script's text.
+      - name: Conclude the canary run
+        if: always()
+        timeout-minutes: 2
+        env:
+          OUTCOMES: >-
+            runner=${{ steps.runner.outcome }} disk=${{ steps.disk.outcome }}
+            sampler=${{ steps.sampler.outcome }} xtask=${{ steps.xtask.outcome }}
+            resolve=${{ steps.resolve.outcome }} derive=${{ steps.derive.outcome }}
+            fetch=${{ steps.fetch.outcome }} toolchain-check=${{ steps.toolchain-check.outcome }}
+            patch=${{ steps.patch.outcome }} build=${{ steps.build.outcome }}
+            record=${{ steps.record.outcome }} fill=${{ steps.fill.outcome }}
+            probe=${{ steps.probe.outcome }} gate=${{ steps.gate.outcome }}
+        run: |
+          if [ ! -x xtask/target/debug/xtask ]; then
+            echo "::error title=formal canary FAILED::xtask was not built"
+            exit 1
+          fi
+          status=0
+          xtask/target/debug/xtask formal canary verdict --outcomes "$OUTCOMES" || status=$?
+          {
+            echo "## formal canary"
+            echo
+            jq -r '"`\(.verdict)` \(.detail)"' artifacts/canary/verdict.json
+            if [ -f artifacts/canary/derive.txt ]; then
+              echo
+              echo "Derived fields, committed and derived:"
+              echo
+              grep -E '^/[a-z0-9/_-]+: ' artifacts/canary/derive.txt | sed 's/^/- /' || true
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          jq -r '({"PASSED": "notice", "BROKEN": "warning"}[.verdict] // "error") as $level
+            | "::\($level) title=formal canary \(.verdict)::\(.detail | split("\n")[0])"' \
+            artifacts/canary/verdict.json
+          exit "$status"
+
+      - name: Upload the canary record
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-canary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/canary/*.json
+            artifacts/canary/*.txt
+            artifacts/canary/*.diff
+            artifacts/canary/build-status
+            artifacts/canary/gate-status
+            artifacts/image/disk.txt
+            artifacts/image/disk-samples.tsv
+            artifacts/image/inspect.json
+            artifacts/image/layers.tsv
+            artifacts/image/versions.json
+            artifacts/image/build.log
+            artifacts/image/opam-switch.export
+            artifacts/image/docker-df.txt
+            artifacts/formal/job.txt
+            artifacts/formal/event.json
+            artifacts/formal/runs/*/receipt.json
+            artifacts/formal/runs/*/logs/
+          if-no-files-found: warn

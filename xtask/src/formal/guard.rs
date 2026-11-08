@@ -397,7 +397,7 @@ pub fn phase<'a>(var: &dyn Fn(&str) -> Option<String>) -> Option<Phase<'a>> {
 /// Git as `cargo xtask formal guard` runs it in the repository root: with
 /// the caller's `PATH` alone, no system or global configuration, literal
 /// pathspecs and no optional locks.
-struct Standalone<'a>(&'a Path);
+pub(super) struct Standalone<'a>(pub(super) &'a Path);
 
 impl Git for Standalone<'_> {
     fn git(&mut self, args: &[&str], stdin: Option<&Path>) -> Result<Vec<u8>, String> {

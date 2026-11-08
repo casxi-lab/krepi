@@ -41,13 +41,16 @@ against the targets and the open obligations
 ([legacy inventory and admission](#legacy-inventory-and-admission)), and
 `cargo xtask formal vectors` compares a component's frozen test vectors
 through its specification with the results of its host tests
-([test vectors](#test-vectors)), though no contract names vectors yet. None
-of them verifies anything about the kernel. The cases taken from the CAS
-project expect what the pinned tools give; for 27 of them this differs
-from the expectation recorded with the earlier Charon and Aeneas, and each
-such change is explained ([qualification](#qualification)). CI runs the
-gate in the pinned image on every pull request to `main` and every push to
-`main`, in a job that is not required ([CI job](#ci-job)). Everything else
+([test vectors](#test-vectors)), though no contract names vectors yet. A
+weekly toolchain canary runs the gate with the tools of Aeneas main through
+the steps of `cargo xtask formal canary` and records what they would break
+([toolchain canary](#toolchain-canary)). None of them verifies anything
+about the kernel. The cases taken from the CAS project expect what the
+pinned tools give; for 27 of them this differs from the expectation
+recorded with the earlier Charon and Aeneas, and each such change is
+explained ([qualification](#qualification)). CI runs the gate in the
+pinned image on every pull request to `main` and every push to `main`, in
+a job that is not required ([CI job](#ci-job)). Everything else
 on this page is planned: specifications, statements and targets, the other
 phases of the gate, the required gate and the other commands of
 `cargo xtask formal`. They are set up by porting the tooling of the CAS
@@ -103,7 +106,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/legacy.json` | Kept empty: production functions without a proof are listed in `open.json` ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty by design |
 | `verification/open.json` | The open obligations of the production code, generated from the `Open obligations` tables of the contracts of the components ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
-| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check` and `vectors` present, the others planned |
+| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `vectors` and `canary` present, the others planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
 `artifacts/formal/` directory, and the Lake build directory
@@ -123,6 +126,9 @@ has a run directory too, without a receipt: `logs/`, and in `work/` the
 home and temporary directories, its stage, the vector file `vectors` and
 the result file `results` of the replay; the host tests write their result
 files below `artifacts/formal/vectors/` ([test vectors](#test-vectors)).
+The job of the toolchain canary keeps its trees, downloads and records
+below `artifacts/canary/`, and its image build, as the image workflows do,
+below `artifacts/image/` ([toolchain canary](#toolchain-canary)).
 
 ## Tools
 
@@ -458,12 +464,147 @@ disk use at the end and then free its build cache, and upload the samples,
 the build log, the notice check, the layer sizes, `versions.json`, the
 switch export and the output of the image check as a workflow artifact.
 
+A change of the tools belongs to a formal upgrade, a separate task with
+the requalification and the repair of the proofs that the new tools break;
+[formal upgrade](formal-upgrade.md) is its manual. The [toolchain
+canary](#toolchain-canary) shows each week what an upgrade to the tools of
+Aeneas main would break.
+
+### Toolchain canary
+
+The workflow `formal canary`, `.github/workflows/formal-canary.yml`, runs
+the gate once a week, on Saturdays at 09:17 UTC, and on a manual run of
+`main`; a manual run of another branch skips the job. It runs the gate with
+the tools that the pins follow upstream: the head of Aeneas's `main`, the
+Lean release that its `backends/lean/lean-toolchain` names, the Charon
+commit of its `charon-pin` and the Rust nightly of that Charon's
+`charon/rust-toolchain`, each resolved when the job runs. It records what
+an upgrade to them would break, and changes nothing: it is not a required
+check, runs on no pull request and blocks no merge. Its one job,
+`toolchain canary`, runs on a GitHub-hosted `ubuntu-24.04-arm` runner, may
+only read the repository's contents, logs in to no registry, publishes no
+image and pushes nothing. The job has 240 minutes, and every step a limit
+of its own; the limits add up to 234 minutes, so a step's limit, never the
+job's, ends a long step, and the steps that record the run always run.
+
+These steps end the job at the first that fails, each by its id:
+
+1. `runner`, `disk`, `sampler` and `xtask`: record the runner and refuse a
+   root user or a checkout of another owner, record the disk, remove
+   preinstalled software and sample the disk every 15 seconds as the image
+   workflows do, here until the end of the gate, and build xtask;
+2. `resolve`: fetch the head of Aeneas's `main`, which `git ls-remote`
+   gives, into `artifacts/canary/aeneas/`, and, when its `charon-pin` has
+   one line that is not a comment, that Charon commit, without submodules,
+   into `artifacts/canary/charon/`;
+   `cargo xtask formal canary resolve` reads the trees and names the
+   downloads, and the step downloads both Lean archives of the release and
+   the channel manifest of the nightly into `artifacts/canary/`, unpacks
+   the `linux-aarch64` archive and keeps what its `lean --version` prints
+   in `lean-version.txt`;
+3. `derive`: `cargo xtask formal canary derive` writes the manifest of the
+   build into `verification/toolchain.json`, and the Lake project files
+   that Aeneas main changes, below, and prints each derived field with its
+   committed and its derived value;
+4. `fetch` and `toolchain-check`: fetch the derived Aeneas and Charon
+   commits into `artifacts/image/`, Charon with its submodules, and run
+   `cargo xtask formal toolchain-check` on them, as the image workflows do;
+5. `patch`: `cargo xtask formal canary patch` runs `git apply --check`
+   with the reviewed patch on that Aeneas tree; a patch that does not apply
+   is one breakage, and the job ends there;
+6. `build` and `record`: build the image with the committed recipe and the
+   derived manifest, as the first build of [changing a
+   tool](#changing-a-tool) does, under `timeout` with a limit of 52
+   minutes, tag it locally, and record it as the image workflows do;
+7. `fill`: commit the derived files in the job's checkout;
+   `cargo xtask formal canary fill` sets the switch export of
+   `linux-aarch64` to the `opam.switch_export_sha256` of the image and
+   writes the statement hash of that commit into
+   `verification/statements.json` where it differs, and a second commit
+   holds both. The commits are local and never pushed;
+8. `probe` and `gate`: probe a container of the image and run
+   `cargo xtask formal run` in it as the [CI job](#ci-job) does, with its
+   flags and variables but without `KREPI_FORMAL_IMAGE`.
+
+The derived fields, each of the manifest of the build:
+
+| Field | From | When it cannot be read |
+| --- | --- | --- |
+| `aeneas.commit` | The commit of the Aeneas tree | A failure of the run |
+| `aeneas.lake_manifest_sha256`, `aeneas.mathlib_commit` | The SHA-256 of its `backends/lean/lake-manifest.json`, and the revision of its one package `mathlib` | For a missing lock, a failure of the run; for a lock without one package `mathlib`, a breakage |
+| `lean.toolchain`, `lean.version` | Its `backends/lean/lean-toolchain`, which must name a release, `leanprover/lean4:v<version>` | A breakage |
+| `lean.commit` | The commit that `lean --version` of the `linux-aarch64` archive reports for that version | A defect |
+| `url` and `sha256` of `lean` in both host columns | The committed URL with its release replaced, and the SHA-256 of the download | For a URL that does not hold the committed release once, a defect; for a missing download, a failure of the run |
+| `charon.commit` | The one line of `charon-pin` that is not a comment, the commit at which the Charon tree must be | For a `charon-pin` with more or fewer such lines, a breakage; for a missing one, or a line that Git cannot fetch, a failure of the run; for a tree at another commit than that line, a defect |
+| `charon.version` | `package.version` of the Charon tree's `charon/Cargo.toml` | A defect |
+| `rust.toolchain` | The channel of its `charon/rust-toolchain`, which must be a dated nightly, `nightly-YYYY-MM-DD` | A breakage |
+| `rust.manifest_url`, `rust.manifest_sha256`, `rust.rustc_commit` | The committed URL with its date replaced, the SHA-256 of the download and its `pkg.rustc.git_commit_hash`; the manifest's `date` must be the nightly's | A defect |
+
+`switch_export_sha256` of `linux-aarch64` is `null` for the build, as for
+a first build, and `fill` sets it for the gate. Every other field keeps
+its committed value: the patch and its origin, opam, OCaml and GMP,
+rustup, the Rust components and targets, the prefixes and the switch
+export of `darwin-arm64`. The written manifest has the layout of
+`serde_json`. When Aeneas's Lake lock or Lean toolchain differs from the
+committed ones, `derive` also writes `verification/lake-manifest.json`,
+the committed lock with its path package `aeneas` followed by each package
+of Aeneas's lock, inherited, and copies Aeneas's `lean-toolchain` to
+`verification/lean-toolchain`. These files are on the statement side,
+which is why `fill` computes the statement hash. A lock of another Lake
+manifest version than the committed one is a defect: the canary does not
+guess a layout of the lock that Lake may refuse.
+
+Each step of `cargo xtask formal canary` writes
+`artifacts/canary/<step>.json`, with `verdict`, `detail` and `data`, and
+exits with 0 only when its verdict is `PASSED`. The step `verdict` reads
+the outcome of every step of the job and gives the run the finding of the
+first that did not pass, or else that of the gate, with the step and the
+commit of `main` in its detail; the job passes only on `PASSED`:
+
+| Finding | When |
+| --- | --- |
+| `PASSED` | Every step passed, and the gate exited with 0 and left one complete `VERIFIED` receipt |
+| `BROKEN` | The patch does not apply; Aeneas main has a form that the committed checks refuse too; the build failed in a stage of the tools, `aeneas-source`, `lean`, `rust-toolchain`, `charon-build`, `aeneas-build` or `backend`; or the gate exited with 1 and left one receipt that is `REJECTED`, `TOOL_FAILURE`, `BUDGET` or `STALE`; each without a text of the two rows below |
+| `DEFECT` | The tool checks fail on the derived manifest; a field cannot be derived; or the error or the output of the step that the failure block of the build log shows, or a failure or the reason of a unit that is not `VERIFIED` in the receipt, holds a check of what was installed against a pin, such as `lean reports` or `the switch export has SHA-256` of the recipe, a failure of the gate that starts with `image:`, or a statement hash that the snapshot does not have |
+| `FAILED` | A step was cancelled or skipped, has no outcome, or succeeded without a record that passed; any other step failed; the build reached its limit, or the runner ended it, or it failed in another stage or without a BuildKit failure block after its first error; the text holds a full disk, a network error or a cancelled build, or a check of the gate's own inputs; or the gate wrote no exit status, left no single receipt that can be read, or exited with another status, which is an error of the run and not a verdict |
+
+A text of an unknown shape is never a breakage: a breakage needs a failed
+stage of the tools without the text of a defect or a failure, or a verdict
+of the gate on a receipt that can be read. A text of a defect counts before
+one of a failure. Of the build log, the error line and the output lines of
+the failure block are read; only the script that the error line of a failed
+process quotes, which the first line of the block also names, is left out,
+since it holds the recipe's own texts. The summary of the workflow run and
+one annotation give the finding, and the artifact
+`formal-canary-<run>-<attempt>` holds, from `artifacts/canary/`, the
+records, the outputs of `resolve`, `derive` and `toolchain-check`, the
+manifest of the build and that of the gate, the diff of the derived files
+and the exit statuses of the build and the gate; from `artifacts/image/`,
+the build log, `versions.json`, the switch export, the layers and the disk
+measurement, whose least available space and largest Docker root, which its
+summary calls those of the build, cover the probe and the gate too; and the
+record of the job, the event, the receipt and the logs of the gate.
+
+The canary leaves out the notice check of the image workflows, which does
+not depend on the tools, and `verification/image/non-root-check.sh`,
+which is written for the committed nightly; the probe and the gate's check
+of the image cover what the gate needs. The build takes Mathlib's build
+cache for the Mathlib commit of the new lock; without one, it builds
+Mathlib from source and reaches its limit, which fails the run. The
+receipt of the canary has the mode `MANUAL`, the event `schedule` or
+`workflow_dispatch` and no image reference, and the gate compares the
+image with the derived manifest. It is no evidence about krepi, which
+only the gate in the pinned image gives. [Formal
+upgrade](formal-upgrade.md#canary-verdicts) says what follows each
+finding.
+
 ## Commands
 
 The commands of `cargo xtask formal` follow the design of the gate.
 `cargo xtask formal toolchain-check`, `cargo xtask formal run`,
-`cargo xtask formal guard`, `cargo xtask formal check` and
-`cargo xtask formal vectors` exist; the others are planned.
+`cargo xtask formal guard`, `cargo xtask formal check`,
+`cargo xtask formal vectors` and `cargo xtask formal canary` exist; the
+others are planned.
 
 | Command | Purpose |
 | --- | --- |
@@ -473,6 +614,7 @@ The commands of `cargo xtask formal` follow the design of the gate.
 | `cargo xtask formal check [--write]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`. It runs no tool and proves nothing |
 | `cargo xtask formal receipt [--require-fresh]` (planned) | Says whether a receipt is current for the checkout: the same gate inputs and image, one conclusion for each unit, complete and `VERIFIED`; `--require-fresh` also requires a run of the whole gate from a clean checkout without planned statements |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
+| `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its job fetched and built: `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from the outcomes of the steps of the job ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
 | `cargo xtask formal mutants TARGET` (planned) | Generates the source mutants of a target and records the survivors with their classification |
 | `cargo xtask formal impact --base REV` (planned) | Lists the targets that a change since `REV` affects |
 | `cargo xtask formal merge` (planned) | Combines the receipts of the shards of a run and of its qualification into the conclusion of the whole gate |

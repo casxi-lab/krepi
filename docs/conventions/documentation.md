@@ -11,8 +11,12 @@ below `docs/porting/` describe where ported code came from; their form is in
 [porting](porting.md).
 
 Architecture notes (`docs/architecture.md`), the
-[formal verification](../formal-verification.md) page and these conventions
-are neither feature documents nor domain documents.
+[formal verification](../formal-verification.md) page, the
+[formal upgrade](../formal-upgrade.md) manual and these conventions are
+neither feature documents nor domain documents. The formal upgrade manual
+is also an agent skill file: in place of the metadata of a feature
+document, it starts with a block between two `---` lines that holds the
+`name` and the one-line `description` of the skill.
 
 No feature document, domain page or component directory exists yet. A
 feature document is written with the first change that provides the feature;

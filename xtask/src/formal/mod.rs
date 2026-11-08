@@ -7,6 +7,7 @@
 //! of those steps. The command line is read with `clap`.
 
 pub mod base;
+pub mod canary;
 pub mod extract;
 #[cfg(test)]
 mod fixture;
@@ -136,6 +137,7 @@ pub const COMMANDS: &[Command] = &[
         about: "Replay the test vectors of DOMAIN/COMPONENT, or of each component whose contract names a replay, through its specification with the pinned Lean, and compare the results line by line with those that its host tests wrote",
         subcommands: &[],
     },
+    canary::COMMAND,
 ];
 
 /// The command line of `cargo xtask formal`, with the texts of [`COMMANDS`].
@@ -175,6 +177,7 @@ fn cli() -> clap::Command {
         )
         .subcommand(inventory::cli(about("check")))
         .subcommand(vectors::cli(about("vectors")))
+        .subcommand(canary::cli(about("canary")))
 }
 
 /// The targets that `cargo xtask formal run` was given.
@@ -206,6 +209,7 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
             inventory::command(root, &Layout::PRODUCTION, matches.get_flag("write"))
         }
         Some(("vectors", matches)) => vectors::command(root, &Layout::PRODUCTION, matches),
+        Some(("canary", matches)) => canary::command(root, &Layout::PRODUCTION, matches),
         _ => {
             let _ = cli().print_help();
             ExitCode::SUCCESS
@@ -263,6 +267,14 @@ mod tests {
                 ("vectors", component.as_ref())
             );
         }
+        let matches = read(&["canary", "verdict", "--outcomes", "runner=success"]);
+        let matches = matches.expect("a valid command line");
+        let (name, matches) = matches.subcommand().expect("a subcommand");
+        let text = |name| matches.get_one::<String>(name).map(String::as_str);
+        assert_eq!(
+            (name, text("step"), text("outcomes")),
+            ("canary", Some("verdict"), Some("runner=success"))
+        );
         for args in [
             &["guard"][..],
             &["guard", "--event"],
@@ -278,6 +290,10 @@ mod tests {
             &["check", "--frobnicate"],
             &["vectors", "a", "b"],
             &["vectors", "--frobnicate"],
+            &["canary"],
+            &["canary", "frobnicate"],
+            &["canary", "patch", "fill"],
+            &["canary", "verdict", "--outcomes"],
             &["frobnicate"],
         ] {
             let error = read(args).expect_err("a usage error");
@@ -290,6 +306,12 @@ mod tests {
         assert!(help.to_string().contains("--event <PATH>"), "{help}");
         let help = read(&["vectors", "--help"]).expect_err("the help");
         assert!(help.to_string().contains("[DOMAIN/COMPONENT]"), "{help}");
+        let help = read(&["canary", "--help"]).expect_err("the help");
+        let help = help.to_string();
+        assert!(
+            help.contains("<STEP>") && help.contains("--outcomes <TEXT>"),
+            "{help}"
+        );
     }
 
     #[test]
