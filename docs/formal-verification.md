@@ -35,13 +35,13 @@ the qualification crate, with the three proofs about them, and the
 Lean: today the qualification proofs and the definitions that they use. On
 a pull request, a first phase records the [guard](#guard), which
 `cargo xtask formal guard` runs on its own. None of them verifies anything
-about the kernel. The qualification rejects 27 of the cases taken from the
-CAS project for now: they keep the expectations recorded with the earlier
-Charon and Aeneas, which the pinned tools no longer meet, until each change
-is explained and reviewed. CI runs the gate in the pinned image on every
-pull request to `main` and every push to `main`, in a job that is not
-required ([CI job](#ci-job)); until those cases are revised, it ends
-`REJECTED` and fails. Everything else on this page is planned:
+about the kernel. The cases taken from the CAS project expect what the
+pinned tools give; for 27 of them this differs from the expectation
+recorded with the earlier Charon and Aeneas, and each such change is
+explained ([qualification](#qualification)). CI runs the gate in the pinned
+image on every pull request to `main` and every push to `main`, in a job
+that is not required ([CI job](#ci-job)). Everything else on this page is
+planned:
 specifications, statements and targets, the other phases of the gate, the
 required gate and the other commands of `cargo xtask formal`. They are set
 up by porting the tooling of the CAS project and the prototype tree, and
@@ -767,9 +767,11 @@ and enter neither a proof target nor the [trusted boundary](#trusted-boundary).
 An expectation records what the pinned tools give. When a tool change
 changes the conclusion of a case, its new expectation is explained case by
 case, with an independent review of the explanations, before the case is
-changed. The cases taken from the CAS project still record what its
-earlier Charon and Aeneas gave; those that the pinned tools change are
-rejected until that review.
+changed. The cases taken from the CAS project were recorded with its
+earlier Charon and Aeneas; the 27 whose conclusion the pinned tools change
+record what the pinned tools give, and the
+[porting record](porting/verification-qualification.md#revised-expectations)
+explains each with its evidence.
 
 ### Base round
 
