@@ -39,12 +39,12 @@ libc = { version = "=0.2.191", default-features = false }
 # The receipt of `cargo xtask check` keeps its fields in the order in which
 # they are written, the receipt of `cargo xtask formal run` is written, and
 # read back by its tests, through the derive macros of `serde`, the
-# manifests step, `cargo xtask formal run` and `cargo xtask formal check`
-# read the output of `cargo metadata`, the qualification cases, the
-# statement, axiom, trusted-base and model registries, the
-# `translation.json` that Aeneas writes, the messages of `lean --json`, the
-# image pin `verification/image-pin.json`, the `versions.json` of the
-# proof-tool image and the event of a pull request that
+# manifests and subset steps, `cargo xtask formal run` and
+# `cargo xtask formal check` read the output of `cargo metadata`, the
+# qualification cases, the statement, axiom, trusted-base and model
+# registries, the `translation.json` that Aeneas writes, the messages of
+# `lean --json`, the image pin `verification/image-pin.json`, the
+# `versions.json` of the proof-tool image and the event of a pull request that
 # `cargo xtask formal guard` reads, `cargo xtask formal check` writes
 # `verification/open.json` with its keys in order, and the test of
 # `cargo xtask qemu` reads the receipt of a run. All are text in memory, so
@@ -52,19 +52,26 @@ libc = { version = "=0.2.191", default-features = false }
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
 # `verification/toolchain.json`, `verification/targets.json`, the
 # qualification cases, the extraction configuration, the statement, axiom
-# and trusted-base registries and the `translation.json` that Aeneas writes
-# are read into types that derive `Deserialize`, and the receipt of
+# and trusted-base registries, the `translation.json` that Aeneas writes and
+# the compile-fail cases of the `subset` step of `cargo xtask check` are
+# read into types that derive `Deserialize`, and the receipt of
 # `cargo xtask formal run`, whose paths are strings, is written through
 # types that derive `Serialize` and, for its tests, `Deserialize`, so only
 # the derive macros and the allocation support for strings, vectors and maps
 # are needed.
 serde = { version = "=1.0.229", default-features = false, features = ["alloc", "derive"] }
-# The inventory of `cargo xtask formal check` parses each source file of the
-# kernel workspace with the parser of the full syntax, walks its items with
-# the visitor and reads their attributes and tokens. Printing, the `Clone`
+# The inventory of `cargo xtask formal check` and the `subset` step of
+# `cargo xtask check` parse each source file of the kernel workspace that
+# they read with the parser of the full syntax, walk its items with the
+# visitor and read their attributes, paths and tokens. Printing, the `Clone`
 # implementations and the procedural-macro support of the default features
 # are not used, so the default features are left out.
 syn = { version = "=3.0.9", default-features = false, features = ["full", "parsing", "visit"] }
+# The token type under `syn`, already in the lock file through it: the
+# `subset` step reports the line of each problem that it finds, which the
+# span locations give. The step runs outside a procedural macro, so the
+# procedural-macro support of the default feature is left out.
+proc-macro2 = { version = "=1.0.107", default-features = false, features = ["span-locations"] }
 # SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop
 # `cargo xtask formal run`: the crate's handler sets a flag that the run
 # reads while a command runs, and the run ends by the signal through the
@@ -85,7 +92,8 @@ sha2 = { version = "=0.11.1", default-features = false }
 tar = { version = "=0.4.46", default-features = false }
 # Manifests and Cargo configuration files are parsed into tables, which
 # `serde` defines, and the extraction configuration of
-# `cargo xtask formal run` into a type that derives `Deserialize`; none is
+# `cargo xtask formal run` and the compile-fail cases of the `subset` step
+# of `cargo xtask check` into types that derive `Deserialize`; none is
 # written, so the writer and the standard-library support of the default
 # features are left out.
 toml = { version = "=1.2.0", default-features = false, features = ["parse", "serde"] }

@@ -424,6 +424,7 @@ dependencies = [
  "clap",
  "krepi-tools",
  "libc",
+ "proc-macro2",
  "serde",
  "serde_json",
  "sha2",

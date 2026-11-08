@@ -1039,6 +1039,11 @@ From Git alone, the guard finds
 - the statements no longer proved: each `name` that `statements.json`
   registers as proved at the merge base and not at the head, because the
   statement became planned, was removed or was renamed;
+- the statements restated: each `name` that `statements.json` registers at
+  only one of the merge base and the head, that is, a statement added,
+  removed or renamed. A registered statement may change its `theorem`, its
+  `module` or its `state` without being restated. A pull request that does
+  not change `statements.json` restates none;
 - the new raised heartbeat limits: in each changed file of the statement
   side or proof file, each text `maxHeartbeats` with the value after it,
   across white space, line breaks, quotes, `»` and `=`, unless the value is
@@ -1061,6 +1066,9 @@ The description of the pull request gives these fields, each on a line of
 its own as `Name: value`, with spaces around the value allowed. A field
 given twice, or with a value of another form, counts as missing. The ids
 are opaque; the records that they name are kept outside this repository.
+The pull request template, `.github/pull_request_template.md`, ends with
+the six fields, empty, and explains them and the label `ai-proof` in a
+comment, where no line starts with the name of a field.
 
 | Field | Value |
 | --- | --- |
@@ -1068,6 +1076,8 @@ are opaque; the records that they name are kept outside this repository.
 | `Approval` | The id of the owner's approval of the change, in the same form |
 | `Approved-Statement-Hash` | The statement hash that was approved, 40 lowercase hexadecimal digits |
 | `Heartbeats-Review` | The id of the review of a raised heartbeat limit, in the same form as `Review` |
+| `Phase` | The phase of the proof work that the pull request belongs to: `statement`, `proof` or `rewrite` |
+| `Author` | The opaque id of the author of the pull request, in the same form as `Review` |
 
 The labels are `spec` for a change of statements, `proof` for a change of
 proofs, and `ai-proof` for a pull request with proofs that an AI system
@@ -1081,6 +1091,12 @@ theirs:
 | `spec-approval` | The label `spec` is present and `Review`, `Approval` or `Approved-Statement-Hash` is missing, or the approved hash is not the statement hash of the head |
 | `no-sources-with-proofs-or-statements` | A source changed together with the label `proof`, a changed proof file or a changed path of the statement side |
 | `heartbeats-need-review` | A heartbeat limit is newly raised and `Heartbeats-Review` is missing |
+| `phase-and-author` | The label `spec` or `proof` is present and `Phase` or `Author` is missing, or `Phase` is not `statement`, `proof` or `rewrite` |
+| `proof-of-registered-statements` | A statement is restated and the label `spec` is missing: a proof may only prove a statement that the merge base registers |
+
+`proof-of-registered-statements` judges every pull request, whatever its
+labels: adding, removing or renaming a statement needs the label `spec`,
+and with it the fields that `spec-approval` checks.
 
 On a pull request, when `GITHUB_EVENT_NAME` is `pull_request` and
 `GITHUB_EVENT_PATH` names the event, `cargo xtask formal run` runs the same
@@ -1182,13 +1198,13 @@ writes the receipt to standard error and exits with 120.
 
 ### Receipt
 
-`receipt.json` has schema 1. It is the pretty form of `serde_json`, with
+`receipt.json` has schema 2. It is the pretty form of `serde_json`, with
 the fields in the order of the tables below and every map sorted by its
 keys; times are seconds, rounded to milliseconds.
 
 | Field | Content |
 | --- | --- |
-| `schema` | `1` |
+| `schema` | `2` |
 | `command` | `cargo xtask formal run` |
 | `status` | `VERIFIED`, `REJECTED`, `STALE`, `TOOL_FAILURE`, `BUDGET` or `SCOPED` |
 | `complete` | Whether the run is complete, as defined above |
@@ -1286,6 +1302,7 @@ The `guard` record has these fields:
 | `statement_hash` | The statement hash of the head |
 | `statement_side`, `proofs`, `sources` | The paths of the statement side, the proof files and the sources that changed since the merge base |
 | `demoted` | The statements proved at the merge base and not at the head |
+| `restated` | The statements registered at only one of the merge base and the head: added, removed or renamed |
 | `raised` | The files with a new raised heartbeat limit |
 | `rules` | Each rule, with why it fails, or `null` when it holds |
 
@@ -1595,10 +1612,12 @@ appears once, and `name` lies outside `Krepi.Proofs`; unknown fields are
 refused. A planned statement is merged with its proof pending: its module
 builds without `--wfail` and may warn only ``declaration uses `sorry` ``,
 its theorem is not audited, and the comparator is to get no challenge for
-it. A proof pull request changes a statement from planned to proved, or
-moves its proof to another theorem or module; a statement that becomes
-planned again, is removed or is renamed is a statement change
-([guard](#guard)).
+it. A proof pull request, with the label `proof`, proves statements that
+the merge base registers: it may take a statement from planned to proved
+or move its proof to another theorem or module. Adding, removing or
+renaming a statement restates it and needs the label `spec`
+([guard](#guard)). A statement that becomes planned again, is removed or
+is renamed is also a statement change.
 
 ## Models
 

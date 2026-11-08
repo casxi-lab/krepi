@@ -135,7 +135,7 @@ impl<'ast> Visit<'ast> for Scan {
 }
 
 /// Whether `attrs` hold `cfg(test)` in exactly this form.
-fn is_test(attrs: &[Attribute]) -> bool {
+pub fn is_test(attrs: &[Attribute]) -> bool {
     let test = |attr: &Attribute| attr.parse_args::<Ident>().is_ok_and(|word| word == "test");
     let mut cfgs = attrs.iter().filter(|attr| attr.path().is_ident("cfg"));
     cfgs.any(test)
@@ -162,7 +162,7 @@ fn owner(ty: &Type) -> Option<String> {
 }
 
 /// Whether `hit` holds at a token from `cursor` on, at any depth.
-fn finds(cursor: Cursor, hit: fn(Cursor) -> bool) -> bool {
+pub fn finds(cursor: Cursor, hit: fn(Cursor) -> bool) -> bool {
     let mut tokens = std::iter::successors(Some(cursor), |at| Some(at.token_tree()?.1));
     tokens.any(|at| hit(at) || at.any_group().is_some_and(|(group, ..)| finds(group, hit)))
 }
@@ -271,7 +271,7 @@ pub fn inventory(tree: &Tree, roots: &[(String, bool)], kernel: &str) -> (Invent
 
 /// The roots of the targets of the kernel workspace in `cargo metadata`, as
 /// paths below `kernel`, each with whether it is a production root.
-fn roots(metadata: &Json, kernel: &str) -> Result<Vec<(String, bool)>, String> {
+pub fn roots(metadata: &Json, kernel: &str) -> Result<Vec<(String, bool)>, String> {
     let workspace = metadata["workspace_root"].as_str().unwrap_or_default();
     let packages = metadata["packages"].as_array().into_iter().flatten();
     let targets = packages.flat_map(|package| package["targets"].as_array().into_iter().flatten());

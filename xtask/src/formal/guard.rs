@@ -53,7 +53,8 @@ pub enum State {
 /// What the guard read of a pull request: its commits and labels, the
 /// statement hash of its head, the statement-side, proof and source paths
 /// changed since the merge base, the statements proved there and not at the
-/// head, the files with a new raised heartbeat limit, and why each rule
+/// head, the statements whose entry changed otherwise than from planned to
+/// proved, the files with a new raised heartbeat limit, and why each rule
 /// fails, or `None`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Record {
@@ -67,6 +68,7 @@ pub struct Record {
     pub proofs: Vec<String>,
     pub sources: Vec<String>,
     pub demoted: Vec<String>,
+    pub restated: Vec<String>,
     pub raised: Vec<String>,
     pub rules: BTreeMap<String, Option<String>>,
 }
@@ -74,8 +76,11 @@ pub struct Record {
 /// A rule: why it fails on a record with the description's fields, or `None`.
 type Rule = fn(&Record, &BTreeMap<&str, Option<&str>>) -> Option<String>;
 
+/// The phases of the proof work that `Phase` names.
+const PHASES: [&str; 3] = ["statement", "proof", "rewrite"];
+
 /// The rules of the guard, by name; later checks add rows.
-const RULES: [(&str, Rule); 4] = [
+const RULES: [(&str, Rule); 6] = [
     ("statement-change-needs-spec", |record, _| {
         let side = named("it changes", &record.statement_side);
         let changes = [side, named("it no longer proves", &record.demoted)];
@@ -107,6 +112,24 @@ const RULES: [(&str, Rule); 4] = [
         let raised = named("it raises a heartbeat limit in", &record.raised);
         let raised = raised.filter(|_| !reviewed);
         raised.map(|raised| format!("{raised} without a well-formed Heartbeats-Review"))
+    }),
+    ("phase-and-author", |record, fields| {
+        let given = |name: &str| fields.get(name).copied().flatten();
+        let phase = given("Phase").filter(|phase| PHASES.contains(phase));
+        let names = [("Phase", phase), ("Author", given("Author"))];
+        let missing = (names.into_iter()).filter(|(_, value)| value.is_none());
+        let missing = Vec::from_iter(missing.map(|(name, _)| name));
+        let labelled = ["spec", "proof"].map(|label| record.labels.contains(label));
+        let missing = named("the description lacks a well-formed", &missing);
+        missing.filter(|_| labelled.contains(&true))
+    }),
+    ("proof-of-registered-statements", |record, _| {
+        let restated = named(
+            "it adds, removes or renames the statements",
+            &record.restated,
+        );
+        let restated = restated.filter(|_| !record.labels.contains("spec"));
+        restated.map(|it| format!("{it} without the label spec"))
     }),
 ];
 
@@ -308,15 +331,22 @@ fn check(git: &mut dyn Git, text: &str, layout: &Layout, work: &Path) -> Result<
         };
         let (before, after) = (text(&merge_base, "A")?, text(head, "D")?);
         if registry {
-            let proved = |text: &str| {
+            let entries = |text: &str| {
                 let file = (!text.is_empty()).then(|| load_statements(text, layout));
                 let file = file.transpose();
                 let file = file.map_err(|error| format!("{path}: {error}"))?;
-                let proved = file.into_iter().flat_map(|file| file.statements);
-                let names = proved.filter(|s| s.state == State::Proved).map(|s| s.name);
-                Ok::<_, String>(BTreeSet::from_iter(names))
+                let entries = file.into_iter().flat_map(|file| file.statements);
+                Ok::<_, String>(BTreeMap::from_iter(entries.map(|s| (s.name.clone(), s))))
             };
-            record.demoted = Vec::from_iter(proved(&before)?.difference(&proved(&after)?).cloned());
+            let (before, after) = (entries(&before)?, entries(&after)?);
+            let names = BTreeSet::from_iter(before.keys().chain(after.keys()).cloned());
+            let proved = |s: Option<&Statement>| s.is_some_and(|s| s.state == State::Proved);
+            let demoted = |n: &&String| proved(before.get(*n)) && !proved(after.get(*n));
+            record.demoted = Vec::from_iter(names.iter().filter(demoted).cloned());
+            // The statements added, removed or renamed; a registered one may
+            // change its theorem, its module or its state.
+            let restated = |n: &&String| before.contains_key(*n) != after.contains_key(*n);
+            record.restated = Vec::from_iter(names.iter().filter(restated).cloned());
         } else if !raises(&after).is_subset(&raises(&before)) {
             record.raised.push(path.to_string());
         }
@@ -554,14 +584,18 @@ mod tests {
     }
 
     /// The description of a pull request with the label `spec` that was
-    /// reviewed and approved for the statement hash `hash`, with Windows
-    /// line ends.
+    /// reviewed and approved for the statement hash `hash`, with its phase
+    /// and author and with Windows line ends.
     fn approval(hash: &str) -> String {
         format!(
-            "Changes a statement.\r\n\r\nReview: rev42\r\nApproval: app7\r\n\
-             Approved-Statement-Hash: {hash}\r\n"
+            "Changes a statement.\r\n\r\nPhase: statement\r\nAuthor: au1\r\n\
+             Review: rev42\r\nApproval: app7\r\nApproved-Statement-Hash: {hash}\r\n"
         )
     }
+
+    /// The description of a pull request with the label `proof`: its phase
+    /// and its author.
+    const PROVING: Option<&str> = Some("Proves a statement.\n\nPhase: proof\nAuthor: au1\n");
 
     /// Changes `path` without a label and returns the record, after it
     /// checks that the rule for statement changes fails, and only it.
@@ -900,22 +934,34 @@ mod tests {
         let proved = registry(&[("S", "s", "proved"), ("T", "t", "proved")]);
         let base = commit(&fixture, &[(path, &proved)]);
         let why = "it no longer proves Krepi.Statements.Counter.S without the label spec";
-        for (case, after) in [
+        let restated = |names: &str| {
+            format!("it adds, removes or renames the statements {names} without the label spec")
+        };
+        let (removed, renamed) = (
+            restated("Krepi.Statements.Counter.S"),
+            restated("Krepi.Statements.Counter.S, Krepi.Statements.Counter.W"),
+        );
+        for (case, after, also) in [
             (
                 "planned",
                 [("S", "s", "planned"), ("T", "t", "proved")].as_slice(),
+                None,
             ),
-            ("removed", &[("T", "t", "proved")]),
-            ("renamed", &[("W", "s", "proved"), ("T", "t", "proved")]),
+            ("removed", &[("T", "t", "proved")], Some(removed.as_str())),
+            (
+                "renamed",
+                &[("W", "s", "proved"), ("T", "t", "proved")],
+                Some(renamed.as_str()),
+            ),
         ] {
             commit(&fixture, &[(path, &registry(after))]);
             let record = guard(&mut fixture, &base, &[], None);
             assert_eq!(record.demoted, ["Krepi.Statements.Counter.S"], "{case}");
-            assert_eq!(
-                failed(&record),
-                [("statement-change-needs-spec", why)],
-                "{case}"
-            );
+            // A removed or renamed statement is restated as well.
+            let mut expected =
+                Vec::from_iter(also.map(|also| ("proof-of-registered-statements", also)));
+            expected.push(("statement-change-needs-spec", why));
+            assert_eq!(failed(&record), expected, "{case}");
             let hash = hash(&mut fixture, &LAYOUT);
             let labelled = guard(&mut fixture, &base, &["spec"], Some(&approval(&hash)));
             assert_eq!(failed(&labelled), [], "{case}");
@@ -923,7 +969,7 @@ mod tests {
         // A proof of a planned statement changes no statement.
         let planned = commit(&fixture, &[(path, &registry(&[("S", "s", "planned")]))]);
         commit(&fixture, &[(path, &registry(&[("S", "s", "proved")]))]);
-        let record = guard(&mut fixture, &planned, &["proof"], None);
+        let record = guard(&mut fixture, &planned, &["proof"], PROVING);
         assert_eq!(
             (&record.demoted, failed(&record)),
             (&Vec::new(), Vec::new())
@@ -950,7 +996,7 @@ mod tests {
         // The label `proof` with a change of the sources alone.
         let base = head_of(&fixture);
         commit(&fixture, &[(source, "// changed again\n")]);
-        let record = guard(&mut fixture, &base, &["proof"], None);
+        let record = guard(&mut fixture, &base, &["proof"], PROVING);
         let why = format!("it changes the sources {source} with the label proof");
         assert_eq!(failed(&record), [(rule, why.as_str())]);
         assert_eq!(failed(&guard(&mut fixture, &base, &[], None)), []);
@@ -971,7 +1017,7 @@ mod tests {
                 (PROOF, "-- a third proof\n"),
             ],
         );
-        let record = guard(&mut fixture, &base, &["proof"], None);
+        let record = guard(&mut fixture, &base, &["proof"], PROVING);
         assert_eq!(
             (&record.sources, failed(&record)),
             (&Vec::new(), Vec::new())
@@ -1141,7 +1187,7 @@ mod tests {
         for (body, why) in [
             (None, lacks("Review, Approval, Approved-Statement-Hash")),
             (
-                Some("Review: rev42\n".to_string()),
+                Some("Phase: statement\nAuthor: au1\nReview: rev42\n".to_string()),
                 lacks("Approval, Approved-Statement-Hash"),
             ),
             (Some(approved.replace("rev42", "rev-42")), lacks("Review")),
@@ -1162,16 +1208,136 @@ mod tests {
             (Some(approval(&hash[1..])), lacks("Approved-Statement-Hash")),
         ] {
             let record = guard(&mut fixture, &base, &["spec"], body.as_deref());
-            assert_eq!(
-                failed(&record),
-                [("spec-approval", why.as_str())],
-                "{body:?}"
-            );
+            // Without a description, the phase and the author are missing too.
+            let both = lacks("Phase, Author");
+            let phase = body
+                .is_none()
+                .then_some(("phase-and-author", both.as_str()));
+            let expected =
+                Vec::from_iter(phase.into_iter().chain([("spec-approval", why.as_str())]));
+            assert_eq!(failed(&record), expected, "{body:?}");
         }
         // Spaces around a value, and an id of 64 characters, are allowed.
         let spaced = approved.replace("rev42", &format!("  {}  ", "r".repeat(64)));
         let record = guard(&mut fixture, &base, &["spec"], Some(&spaced));
         assert_eq!(failed(&record), []);
+    }
+
+    #[test]
+    fn a_spec_or_proof_label_without_phase_and_author_fails() {
+        let mut fixture = project("phase-and-author");
+        let rule = "phase-and-author";
+        let lacks = |fields: &str| format!("the description lacks a well-formed {fields}");
+        // A statement change with the label `spec` and its approval.
+        let base = head_of(&fixture);
+        commit(&fixture, &[(SPEC, "-- a changed definition\n")]);
+        let approved = approval(&hash(&mut fixture, &LAYOUT));
+        let bare = approved.replace("Phase: statement\r\nAuthor: au1\r\n", "");
+        let record = guard(&mut fixture, &base, &["spec"], Some(&bare));
+        assert_eq!(failed(&record), [(rule, lacks("Phase, Author").as_str())]);
+        assert_eq!(
+            failed(&guard(&mut fixture, &base, &["spec"], Some(&approved))),
+            []
+        );
+        // A proof change with the label `proof`.
+        let base = head_of(&fixture);
+        commit(&fixture, &[(PROOF, "-- a proof\n")]);
+        let mut proof = |body| guard(&mut fixture, &base, &["proof"], body);
+        for body in [Some("Proves a statement.\n"), None] {
+            let record = proof(body);
+            assert_eq!(failed(&record), [(rule, lacks("Phase, Author").as_str())]);
+        }
+        // A phase that is not one of the three, an author of another form,
+        // and a field given twice.
+        for (body, fields) in [
+            ("Phase: review\nAuthor: au1\n", "Phase"),
+            ("Phase: proof\nAuthor: a-1\n", "Author"),
+            ("Phase: proof\nAuthor: au1\nPhase: proof\n", "Phase"),
+            ("Phase: proof\nAuthor: au1\nAuthor: au2\n", "Author"),
+            ("Phase:\nAuthor:\n", "Phase, Author"),
+        ] {
+            let record = proof(Some(body));
+            assert_eq!(failed(&record), [(rule, lacks(fields).as_str())], "{body}");
+        }
+        for body in [
+            "Phase: rewrite\nAuthor: a1\n",
+            "Phase:  statement \r\nAuthor: au1\r\n",
+        ] {
+            assert_eq!(failed(&proof(Some(body))), [], "{body}");
+        }
+        // Without either label, the fields are not needed.
+        let record = guard(&mut fixture, &base, &[], None);
+        assert_eq!(record.rules[rule], None);
+    }
+
+    #[test]
+    fn a_proof_of_an_unregistered_statement_fails() {
+        let mut fixture = project("registered");
+        let path = "verification/statements.json";
+        let base = commit(&fixture, &[(path, &registry(&[("S", "s", "planned")]))]);
+        let rule = "proof-of-registered-statements";
+        let why = |name: &str| {
+            format!(
+                "it adds, removes or renames the statements Krepi.Statements.Counter.{name} \
+                 without the label spec"
+            )
+        };
+        let proved = [("S", "s", "proved"), ("T", "t", "proved")];
+        commit(&fixture, &[(path, &registry(&proved))]);
+        let record = guard(&mut fixture, &base, &["proof"], PROVING);
+        assert_eq!(record.restated, ["Krepi.Statements.Counter.T"]);
+        assert_eq!(failed(&record), [(rule, why("T").as_str())]);
+        // Without the label `proof` the rule fails all the same.
+        let record = guard(&mut fixture, &base, &[], None);
+        assert_eq!(record.restated, ["Krepi.Statements.Counter.T"]);
+        assert_eq!(record.rules[rule].as_deref(), Some(why("T").as_str()));
+        // A registered statement from planned to proved, with another theorem
+        // or another module, and one that stays planned but changes.
+        let module = registry(&[("S", "s", "proved")]).replace(
+            "\"module\": \"Krepi.Proofs.Counter\"",
+            "\"module\": \"Krepi.Proofs.Other\"",
+        );
+        for after in [
+            registry(&[("S", "s", "proved")]),
+            registry(&[("S", "u", "proved")]),
+            module,
+            registry(&[("S", "u", "planned")]),
+        ] {
+            commit(&fixture, &[(path, &after)]);
+            let record = guard(&mut fixture, &base, &["proof"], PROVING);
+            assert_eq!(
+                (&record.restated, failed(&record)),
+                (&Vec::new(), vec![]),
+                "{after}"
+            );
+        }
+        // A removed statement.
+        commit(&fixture, &[(path, &registry(&[]))]);
+        let record = guard(&mut fixture, &base, &["proof"], PROVING);
+        assert_eq!(record.restated, ["Krepi.Statements.Counter.S"]);
+        assert_eq!(failed(&record), [(rule, why("S").as_str())]);
+    }
+
+    #[test]
+    fn the_pull_request_template_holds_the_guard_fields() {
+        let template = include_str!("../../../.github/pull_request_template.md");
+        let given = fields(template);
+        for name in [
+            "Phase",
+            "Author",
+            "Review",
+            "Approval",
+            "Approved-Statement-Hash",
+            "Heartbeats-Review",
+        ] {
+            let named = |line: &&str| line.split_once(':').is_some_and(|(field, _)| field == name);
+            assert_eq!(template.lines().filter(named).count(), 1, "{name}");
+            assert_eq!(given.get(name), Some(&None), "{name}");
+        }
+        assert!(template.contains("`ai-proof`"));
+        for phase in PHASES {
+            assert!(template.contains(&format!("`{phase}`")), "{phase}");
+        }
     }
 
     #[test]
@@ -1214,7 +1380,7 @@ mod tests {
         let base = head_of(&fixture);
         commit(&fixture, &[(PROOF, "-- a proof\n")]);
         let labels = ["proof", "ai-proof", "documentation"];
-        let record = guard(&mut fixture, &base, &labels, None);
+        let record = guard(&mut fixture, &base, &labels, PROVING);
         assert_eq!(record.labels, BTreeSet::from(labels.map(String::from)));
         assert!(record.ai_proof);
         assert_eq!(failed(&record), []);

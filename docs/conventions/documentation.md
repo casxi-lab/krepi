@@ -224,8 +224,24 @@ Each kind of content has one home, and the other documents link it.
   including the operations that it adds to the ABI inventory; the Entry
   points field of a requirement names rows of this table. `Extractability`
   states which of the component's code follows the
-  [provable Rust subset](provable-subset.md). The rule sections of the
-  component come next, among them four that every contract has:
+  [provable Rust subset](provable-subset.md) and lists the source paths of
+  that code, one on each line of a fenced block whose info string is
+  `paths`; the `subset` step of `cargo xtask check` reads these blocks, and
+  only those of this section
+  ([mechanical checks](provable-subset.md#mechanical-checks)). The step
+  ignores white space at the end of each line; a block opens with a line of
+  three or more backticks or tildes followed by `paths`, with white space
+  allowed around it, and runs to the next line of only backticks or
+  tildes, or to the end of the file. Each line of a block, taken as written
+  otherwise, is the repository path of a tracked `.rs` file, or of a
+  directory, which covers every tracked `.rs` file below it; a line that
+  names no tracked `.rs` file, such as an empty line, a path that ends in
+  `/`, one with a `..` component or a heading after a block that is not
+  closed, fails the step. The change that adds or
+  moves a module of the provable subset writes its paths in the same
+  change; a contract written before its code has no such block. The rule
+  sections of the component come next, among them four that every contract
+  has:
   `Check and execute` states, for each operation, that its checks complete
   before its first write and which failures its write phase allows
   ([rule 1](provable-subset.md#1-check-then-execute)); `Work bounds` states
