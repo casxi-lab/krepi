@@ -17,24 +17,25 @@ rust-version = "1.99"
 # `cargo xtask qemu`; the tests of the latter write its test image.
 krepi-tools = { path = "../tools" }
 # The command lines of `cargo xtask formal run`, `cargo xtask formal guard`,
-# `cargo xtask formal toolchain-check` and `cargo xtask formal check`, with
-# their help, usage and error texts, as the host tooling crate reads its
-# command lines. They are defined with the builder, so the derive macros
-# are left out. Their texts are plain and do not depend on the terminal, so
-# colour and wrapping to the terminal width are left out, and so are the
+# `cargo xtask formal toolchain-check`, `cargo xtask formal check`,
+# `cargo xtask formal vectors` and `cargo xtask formal canary`, with their
+# help, usage and error texts, as the host tooling crate reads its command
+# lines. They are defined with the builder, so the derive macros are left
+# out. Their texts are plain and do not depend on the terminal, so colour
+# and wrapping to the terminal width are left out, and so are the
 # suggestions of similar options, which need another crate.
 clap = { version = "=4.6.7", default-features = false, features = ["std", "help", "usage", "error-context"] }
-# The process groups of the commands of `cargo xtask formal run`: `killpg`
-# kills a command's group, `kill` with signal 0 finds whether any of its
-# processes remain, `waitid` with `WNOWAIT` sees that a command has ended
-# without collecting it, so that the group's number cannot be reused before
-# the kill, `signal` restores the default disposition of `SIGCHLD` that
-# this needs, and `sigaction` reads whether SIGHUP is ignored. For the
-# receipt of a run, `geteuid` gives the effective user, `fstatvfs` the bytes
-# available on the file system of the run directory and `getrusage` the
-# largest resident set of a process that the run collected. Only the C
-# declarations are used, which need no standard-library support, so the
-# default feature is left out.
+# The process groups of the commands of `cargo xtask formal run` and
+# `cargo xtask formal vectors`: `killpg` kills a command's group, `kill`
+# with signal 0 finds whether any of its processes remain, `waitid` with
+# `WNOWAIT` sees that a command has ended without collecting it, so that
+# the group's number cannot be reused before the kill, `signal` restores
+# the default disposition of `SIGCHLD` that this needs, and `sigaction`
+# reads whether SIGHUP is ignored. For the receipt of a run, `geteuid` gives
+# the effective user, `fstatvfs` the bytes available on the file system of
+# the run directory and `getrusage` the largest resident set of a process
+# that the run collected. Only the C declarations are used, which need no
+# standard-library support, so the default feature is left out.
 libc = { version = "=0.2.191", default-features = false }
 # The receipt of `cargo xtask check` keeps its fields in the order in which
 # they are written, the receipt of `cargo xtask formal run` is written, and
@@ -46,19 +47,24 @@ libc = { version = "=0.2.191", default-features = false }
 # `lean --json`, the image pin `verification/image-pin.json`, the
 # `versions.json` of the proof-tool image and the event of a pull request that
 # `cargo xtask formal guard` reads, `cargo xtask formal check` writes
-# `verification/open.json` with its keys in order, and the test of
-# `cargo xtask qemu` reads the receipt of a run. All are text in memory, so
-# the standard-library support of the default feature is left out.
+# `verification/open.json` with its keys in order, `cargo xtask formal canary`
+# reads and writes the tool manifest, the Lake locks, the statement
+# registry, the records of its steps and the receipt of the gate, and the
+# test of `cargo xtask qemu` reads the receipt of a run. All are text in
+# memory, so the standard-library support of the default feature is left
+# out.
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
 # `verification/toolchain.json`, `verification/targets.json`, the
 # qualification cases, the extraction configuration, the statement, axiom
-# and trusted-base registries, the `translation.json` that Aeneas writes and
-# the compile-fail cases of the `subset` step of `cargo xtask check` are
-# read into types that derive `Deserialize`, and the receipt of
-# `cargo xtask formal run`, whose paths are strings, is written through
-# types that derive `Serialize` and, for its tests, `Deserialize`, so only
-# the derive macros and the allocation support for strings, vectors and maps
-# are needed.
+# and trusted-base registries, the `translation.json` that Aeneas writes,
+# the compile-fail cases of the `subset` step of `cargo xtask check` and the
+# `vectors` blocks of the contracts that `cargo xtask formal vectors` reads
+# are read into types that derive `Deserialize`, the records of the steps of
+# `cargo xtask formal canary` are written and read through such types, and
+# the receipt of `cargo xtask formal run`, whose paths are strings, is
+# written through types that derive `Serialize` and, for its tests and for
+# the canary, `Deserialize`, so only the derive macros and the allocation
+# support for strings, vectors and maps are needed.
 serde = { version = "=1.0.229", default-features = false, features = ["alloc", "derive"] }
 # The inventory of `cargo xtask formal check` and the `subset` step of
 # `cargo xtask check` parse each source file of the kernel workspace that
@@ -73,17 +79,19 @@ syn = { version = "=3.0.9", default-features = false, features = ["full", "parsi
 # procedural-macro support of the default feature is left out.
 proc-macro2 = { version = "=1.0.107", default-features = false, features = ["span-locations"] }
 # SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop
-# `cargo xtask formal run`: the crate's handler sets a flag that the run
-# reads while a command runs, and the run ends by the signal through the
-# crate's emulation of its default action. Only the flag and that emulation
-# are used, so the iterator and the channel of the default features are left
-# out.
+# `cargo xtask formal run` and `cargo xtask formal vectors`: the crate's
+# handler sets a flag that the command reads while a tool runs, and the
+# command ends by the signal through the crate's emulation of its default
+# action. Only the flag and that emulation are used, so the iterator and the
+# channel of the default features are left out.
 signal-hook = { version = "=0.4.6", default-features = false }
-# The SHA-256 of files that `cargo xtask formal toolchain-check` and
-# `cargo xtask formal run` read into memory, among them the output files of
-# the commands of a run, the Lean files that Aeneas writes and the
-# `versions.json` of the proof-tool image, so the allocation and
-# object-identifier support of the default features is left out.
+# The SHA-256 of files that `cargo xtask formal toolchain-check`,
+# `cargo xtask formal run`, `cargo xtask formal vectors` and
+# `cargo xtask formal canary` read into memory, among them the output files
+# of their commands, the Lean files that Aeneas writes, the `versions.json`
+# of the proof-tool image, and the Lean archives, the channel manifest and
+# the Lake lock of the canary, so the allocation and object-identifier
+# support of the default features is left out.
 sha2 = { version = "=0.11.1", default-features = false }
 # `git archive` writes the gate inputs of the snapshot commit of
 # `cargo xtask formal run` as a tar archive, which the command unpacks into
@@ -92,10 +100,12 @@ sha2 = { version = "=0.11.1", default-features = false }
 tar = { version = "=0.4.46", default-features = false }
 # Manifests and Cargo configuration files are parsed into tables, which
 # `serde` defines, and the extraction configuration of
-# `cargo xtask formal run` and the compile-fail cases of the `subset` step
-# of `cargo xtask check` into types that derive `Deserialize`; none is
-# written, so the writer and the standard-library support of the default
-# features are left out.
+# `cargo xtask formal run`, the compile-fail cases of the `subset` step of
+# `cargo xtask check` and the `vectors` blocks of the contracts that
+# `cargo xtask formal vectors` reads into types that derive `Deserialize`,
+# and `cargo xtask formal canary` reads Charon's `charon/Cargo.toml` and the
+# channel manifest of a nightly into tables; none is written, so the writer
+# and the standard-library support of the default features are left out.
 toml = { version = "=1.2.0", default-features = false, features = ["parse", "serde"] }
 # The listing of the tool installation that `cargo xtask formal run` takes
 # at the start and end of a phase, to find a command that wrote to it: a

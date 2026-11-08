@@ -53,9 +53,9 @@ pub enum State {
 /// What the guard read of a pull request: its commits and labels, the
 /// statement hash of its head, the statement-side, proof and source paths
 /// changed since the merge base, the statements proved there and not at the
-/// head, the statements whose entry changed otherwise than from planned to
-/// proved, the files with a new raised heartbeat limit, and why each rule
-/// fails, or `None`.
+/// head, the statements registered at only one of the merge base and the
+/// head, that is, added, removed or renamed, the files with a new raised
+/// heartbeat limit, and why each rule fails, or `None`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Record {
     pub base: String,
@@ -397,7 +397,7 @@ pub fn phase<'a>(var: &dyn Fn(&str) -> Option<String>) -> Option<Phase<'a>> {
 /// Git as `cargo xtask formal guard` runs it in the repository root: with
 /// the caller's `PATH` alone, no system or global configuration, literal
 /// pathspecs and no optional locks.
-struct Standalone<'a>(&'a Path);
+pub(super) struct Standalone<'a>(pub(super) &'a Path);
 
 impl Git for Standalone<'_> {
     fn git(&mut self, args: &[&str], stdin: Option<&Path>) -> Result<Vec<u8>, String> {
@@ -1247,10 +1247,13 @@ mod tests {
             let record = proof(body);
             assert_eq!(failed(&record), [(rule, lacks("Phase, Author").as_str())]);
         }
-        // A phase that is not one of the three, an author of another form,
-        // and a field given twice.
+        // A phase that is not one of the three, or one of them in another
+        // case, a field after white space, an author of another form, and a
+        // field given twice.
         for (body, fields) in [
             ("Phase: review\nAuthor: au1\n", "Phase"),
+            ("Phase: Proof\nAuthor: au1\n", "Phase"),
+            (" Phase: proof\nAuthor: au1\n", "Phase"),
             ("Phase: proof\nAuthor: a-1\n", "Author"),
             ("Phase: proof\nAuthor: au1\nPhase: proof\n", "Phase"),
             ("Phase: proof\nAuthor: au1\nAuthor: au2\n", "Author"),
@@ -1293,14 +1296,16 @@ mod tests {
         assert_eq!(record.rules[rule].as_deref(), Some(why("T").as_str()));
         // A registered statement from planned to proved, with another theorem
         // or another module, and one that stays planned but changes.
-        let module = registry(&[("S", "s", "proved")]).replace(
-            "\"module\": \"Krepi.Proofs.Counter\"",
-            "\"module\": \"Krepi.Proofs.Other\"",
-        );
+        let elsewhere = |text: String| {
+            text.replace(
+                "\"module\": \"Krepi.Proofs.Counter\"",
+                "\"module\": \"Krepi.Proofs.Other\"",
+            )
+        };
         for after in [
             registry(&[("S", "s", "proved")]),
             registry(&[("S", "u", "proved")]),
-            module,
+            elsewhere(registry(&[("S", "s", "proved")])),
             registry(&[("S", "u", "planned")]),
         ] {
             commit(&fixture, &[(path, &after)]);
@@ -1316,6 +1321,22 @@ mod tests {
         let record = guard(&mut fixture, &base, &["proof"], PROVING);
         assert_eq!(record.restated, ["Krepi.Statements.Counter.S"]);
         assert_eq!(failed(&record), [(rule, why("S").as_str())]);
+        // A proved statement whose proof moves to another theorem or another
+        // module, as a rewrite may move it.
+        let base = commit(&fixture, &[(path, &registry(&[("S", "s", "proved")]))]);
+        let rewrite = Some("Moves a proof.\n\nPhase: rewrite\nAuthor: au1\n");
+        for after in [
+            registry(&[("S", "u", "proved")]),
+            elsewhere(registry(&[("S", "s", "proved")])),
+        ] {
+            commit(&fixture, &[(path, &after)]);
+            let record = guard(&mut fixture, &base, &["proof"], rewrite);
+            assert_eq!(
+                (&record.restated, failed(&record)),
+                (&Vec::new(), vec![]),
+                "{after}"
+            );
+        }
     }
 
     #[test]

@@ -1,0 +1,6 @@
+# Construction: the sum of two natural numbers, for the tests of
+# cargo xtask formal vectors. Each vector is an id, the input a=<m> b=<n>
+# and the sum.
+v1	a=1 b=2	3
+v2	a=0 b=0	0
+v3	a=18446744073709551615 b=1	18446744073709551616

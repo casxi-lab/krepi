@@ -1006,8 +1006,10 @@ the kernel workspace, unchanged, and fails when that build fails. For each
 case, it copies the same files, makes the change in the copy, and builds
 it. Each copy lies in a directory below `artifacts/subset/`, which the
 step removes after the build, and is built by
-`cargo check --locked --offline --color never --workspace` with the Cargo
-of the other steps, from that directory below the repository root. The
+`cargo check --locked --offline --color never --workspace --target-dir target`
+with the Cargo of the other steps, from that directory below the
+repository root, so that the build's output lies in the copy whatever
+`CARGO_TARGET_DIR` or the Cargo setting `build.target-dir` names. The
 case fails when `find` does not occur exactly once, when the build
 succeeds, or when no line of the standard error of the build starts with
 `error[`, the code and `]`, so that a quoted source line or a build that

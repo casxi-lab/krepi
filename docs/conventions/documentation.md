@@ -11,8 +11,12 @@ below `docs/porting/` describe where ported code came from; their form is in
 [porting](porting.md).
 
 Architecture notes (`docs/architecture.md`), the
-[formal verification](../formal-verification.md) page and these conventions
-are neither feature documents nor domain documents.
+[formal verification](../formal-verification.md) page, the
+[formal upgrade](../formal-upgrade.md) manual and these conventions are
+neither feature documents nor domain documents. The formal upgrade manual
+is also an agent skill file: in place of the metadata of a feature
+document, it starts with a block between two `---` lines that holds the
+`name` and the one-line `description` of the skill.
 
 No feature document, domain page or component directory exists yet. A
 feature document is written with the first change that provides the feature;
@@ -228,20 +232,22 @@ Each kind of content has one home, and the other documents link it.
   that code, one on each line of a fenced block whose info string is
   `paths`; the `subset` step of `cargo xtask check` reads these blocks, and
   only those of this section
-  ([mechanical checks](provable-subset.md#mechanical-checks)). The step
-  ignores white space at the end of each line; a block opens with a line of
-  three or more backticks or tildes followed by `paths`, with white space
-  allowed around it, and runs to the next line of only backticks or
-  tildes, or to the end of the file. Each line of a block, taken as written
-  otherwise, is the repository path of a tracked `.rs` file, or of a
-  directory, which covers every tracked `.rs` file below it; a line that
-  names no tracked `.rs` file, such as an empty line, a path that ends in
-  `/`, one with a `..` component or a heading after a block that is not
-  closed, fails the step. The change that adds or
-  moves a module of the provable subset writes its paths in the same
-  change; a contract written before its code has no such block. The rule
-  sections of the component come next, among them four that every contract
-  has:
+  ([mechanical checks](provable-subset.md#mechanical-checks)). A block
+  opens with a line of three or more backticks or tildes followed by
+  `paths`, with white space allowed around it, and runs to the next line
+  of three or more backticks or tildes and nothing else, with white space
+  allowed around them, or to the end of the file. The step ignores white
+  space at the end of each line, and at the start of fence and `## `
+  heading lines; a line of a block keeps its leading white space. Each line
+  of a block, taken as written otherwise, is the repository path of a
+  tracked `.rs` file, or of a directory, which covers every tracked `.rs`
+  file below it; a line that names no tracked `.rs` file, such as an empty
+  line, one that starts with white space, a path that ends in `/`, one with
+  a `..` component or a heading after a block that is not closed, fails
+  the step. The change that adds or moves a module of the provable subset
+  writes its paths in the same change; a contract written before its code
+  has no such block. The rule sections of the component come next, among
+  them four that every contract has:
   `Check and execute` states, for each operation, that its checks complete
   before its first write and which failures its write phase allows
   ([rule 1](provable-subset.md#1-check-then-execute)); `Work bounds` states
@@ -279,7 +285,14 @@ Each kind of content has one home, and the other documents link it.
   row is to be closed or lifted, such as `0.2`. `Legacy test vectors` lists
   the frozen test vectors taken from the legacy tree, each file by its path
   at `prototype@ec8305c618a8f4e84e0707fa56beac5673f4675e` with the number of
-  vectors it holds, every vector with its expected output.
+  vectors it holds, every vector with its expected output. Once the vectors
+  are in a file of the repository, the section holds one fenced block whose
+  info string is `vectors` and whose body is TOML: `vectors`, the path of
+  the vector file, and `replay`, the Lean module that replays the vectors
+  through the specification, which the block names once that module exists
+  and the host tests write their results. `cargo xtask formal vectors`
+  reads the block and fails on any other fenced block of the section
+  ([test vectors](../formal-verification.md#test-vectors)).
   `Current deviations` follows while any deviation remains, and `References`
   when the page cites sources.
 - **Specification.** `specification.md` starts with a metadata block whose only
