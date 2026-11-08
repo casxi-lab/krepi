@@ -281,7 +281,14 @@ Each kind of content has one home, and the other documents link it.
   row is to be closed or lifted, such as `0.2`. `Legacy test vectors` lists
   the frozen test vectors taken from the legacy tree, each file by its path
   at `prototype@ec8305c618a8f4e84e0707fa56beac5673f4675e` with the number of
-  vectors it holds, every vector with its expected output.
+  vectors it holds, every vector with its expected output. Once the vectors
+  are in a file of the repository, the section holds one fenced block whose
+  info string is `vectors` and whose body is TOML: `vectors`, the path of
+  the vector file, and `replay`, the Lean module that replays the vectors
+  through the specification, which the block names once that module exists
+  and the host tests write their results. `cargo xtask formal vectors`
+  reads the block and fails on any other fenced block of the section
+  ([test vectors](../formal-verification.md#test-vectors)).
   `Current deviations` follows while any deviation remains, and `References`
   when the page cites sources.
 - **Specification.** `specification.md` starts with a metadata block whose only

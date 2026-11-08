@@ -1,12 +1,14 @@
 # The proof gate in CI. The job `formal run` runs `cargo xtask formal run`
 # in the pinned proof-tool image on the head of every pull request to main
 # and on every push to main, and uploads its receipt; it is not a required
-# check. The measurement jobs run on a manual dispatch, or on a pull request
-# that carries the label formal-measure: `leanchecker`, in two modes, replays
-# the stage of the gate's base round with and without --fresh on a cold page
-# cache, and `lake comparator` judges a small challenge in six container
-# settings. Actions are pinned to full commit SHAs; the comment names the
-# release.
+# check. Before the gate, on a pull request that changes xtask, the Lake
+# project, a workspace, a component's directory or this workflow, a step of
+# that job compares the test vectors in the image. The measurement jobs run
+# on a manual dispatch, or on a pull request that carries the label
+# formal-measure: `leanchecker`, in two modes, replays the stage of the
+# gate's base round with and without --fresh on a cold page cache, and
+# `lake comparator` judges a small challenge in six container settings.
+# Actions are pinned to full commit SHAs; the comment names the release.
 name: formal
 
 on:
@@ -38,8 +40,9 @@ jobs:
     name: formal run
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-24.04-arm
-    # 15 minutes before the gate, its 7,200 s and the 300 s of its receipt.
-    timeout-minutes: 140
+    # 15 minutes before the vectors step, its 55, then the gate's 7,200 s and
+    # the 300 s of its receipt.
+    timeout-minutes: 195
     permissions:
       contents: read
     concurrency:
@@ -153,6 +156,61 @@ jobs:
           xtask/target/debug/xtask formal guard --event artifacts/formal/event.json 2>&1 \
             | tee artifacts/formal/guard.txt
 
+      # On a pull request that changes the kernel or user-space workspace,
+      # the Lake project, a component's directory, xtask or this workflow
+      # since the merge base: replays the vectors fixture of xtask with the
+      # pinned Lean in a container of the gate, runs the host tests, which
+      # write their result files, and runs `formal vectors` in the image on
+      # every component whose contract names a replay. Each container is
+      # removed when it ends, and its limit, with those of the commands
+      # before it, ends it within the step's. Its failure fails the job; the
+      # gate still runs.
+      - name: Compare the test vectors in the image
+        if: ${{ !cancelled() && steps.probe.outcome == 'success' && github.event_name == 'pull_request' }}
+        timeout-minutes: 55
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          # Runs the command after the first two arguments in a container of
+          # the gate named after the first, for at most the time of the second.
+          in_image() {
+            local name="formal-vectors-$1-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" limit=$2 status=0
+            shift 2
+            timeout --kill-after 1m "$limit" docker run --rm --name "$name" "${gate_flags[@]}" \
+              --user "$(id -u):$(id -g)" \
+              --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+              "$IMAGE" "$@" || status=$?
+            docker rm --force "$name" > /dev/null 2>&1 || true
+            return "$status"
+          }
+          {
+            echo "== vectors started $(date -u +%FT%TZ)"
+            status=0
+            base=$(jq -er .pull_request.base.sha artifacts/formal/event.json)
+            merge_base=$(git merge-base "$base" "$HEAD_SHA")
+            paths=(kernel user verification docs/domains xtask .github/workflows/formal.yml)
+            if git diff --quiet "$merge_base" "$HEAD_SHA" -- "${paths[@]}"; then
+              echo "no change in the paths that select the comparison: 0 components"
+            else
+              timeout 5m cargo test --locked --manifest-path xtask/Cargo.toml --bin xtask --no-run \
+                --message-format=json-render-diagnostics \
+                | jq -r 'select(.profile.test == true and .executable != null) | .executable' \
+                > artifacts/formal/vectors-tests.txt
+              [ "$(wc -l < artifacts/formal/vectors-tests.txt)" = 1 ]
+              in_image fixture 6m "$(cat artifacts/formal/vectors-tests.txt)" --exact --ignored --nocapture \
+                formal::vectors::tests::the_fixture_replays_with_the_pinned_lean \
+                > artifacts/formal/vectors-fixture.txt 2>&1 || status=1
+              cat artifacts/formal/vectors-fixture.txt
+              grep -q '^test result: ok\. 1 passed; 0 failed' artifacts/formal/vectors-fixture.txt || status=1
+              for workspace in kernel user; do
+                KREPI_VECTOR_RESULTS="$GITHUB_WORKSPACE/artifacts/formal/vectors" \
+                  timeout 5m cargo test --locked --workspace --manifest-path "$workspace/Cargo.toml" || status=1
+              done
+              in_image compare 31m "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal vectors || status=1
+            fi
+            echo "== vectors ended $(date -u +%FT%TZ) with exit status $status"
+            exit "$status"
+          } 2>&1 | tee artifacts/formal/vectors.txt
+
       # The gate ends by its own deadline; the step's limit is a backstop one
       # minute after it. The receipt is the gate's verdict, so the step fails
       # whenever the gate does, `REJECTED` included.
@@ -238,6 +296,10 @@ jobs:
           path: |
             artifacts/formal/job.txt
             artifacts/formal/guard.txt
+            artifacts/formal/vectors.txt
+            artifacts/formal/vectors-tests.txt
+            artifacts/formal/vectors-fixture.txt
+            artifacts/formal/vectors/
             artifacts/formal/event.json
             artifacts/formal/runs/*/receipt.json
             artifacts/formal/runs/*/logs/

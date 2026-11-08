@@ -1,0 +1,4 @@
+# What the host tests of the fixture write for sum.vectors.
+v1	3
+v2	0
+v3	18446744073709551616

@@ -38,7 +38,10 @@ a pull request, a first phase records the [guard](#guard), which
 `cargo xtask formal guard` runs on its own. `cargo xtask formal check`
 holds the inventory of the production functions of the kernel workspace
 against the targets and the open obligations
-([legacy inventory and admission](#legacy-inventory-and-admission)). None
+([legacy inventory and admission](#legacy-inventory-and-admission)), and
+`cargo xtask formal vectors` compares a component's frozen test vectors
+through its specification with the results of its host tests
+([test vectors](#test-vectors)), though no contract names vectors yet. None
 of them verifies anything about the kernel. The cases taken from the CAS
 project expect what the pinned tools give; for 27 of them this differs
 from the expectation recorded with the earlier Charon and Aeneas, and each
@@ -100,7 +103,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/legacy.json` | Kept empty: production functions without a proof are listed in `open.json` ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty by design |
 | `verification/open.json` | The open obligations of the production code, generated from the `Open obligations` tables of the contracts of the components ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
-| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard` and `check` present, the others planned |
+| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check` and `vectors` present, the others planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
 `artifacts/formal/` directory, and the Lake build directory
@@ -115,7 +118,11 @@ the run writes, its audit file `Audit.lean` and its heartbeat copies in
 `.heartbeats/`, and `mktree`, the input of `git mktree` for the statement
 hash of the round; and `mktree`, the same input for the guard phase. The
 root module is written only there, never in the checkout. Generated
-definitions are never edited.
+definitions are never edited. A comparison of `cargo xtask formal vectors`
+has a run directory too, without a receipt: `logs/`, and in `work/` the
+home and temporary directories, its stage, the vector file `vectors` and
+the result file `results` of the replay; the host tests write their result
+files below `artifacts/formal/vectors/` ([test vectors](#test-vectors)).
 
 ## Tools
 
@@ -455,8 +462,8 @@ switch export and the output of the image check as a workflow artifact.
 
 The commands of `cargo xtask formal` follow the design of the gate.
 `cargo xtask formal toolchain-check`, `cargo xtask formal run`,
-`cargo xtask formal guard` and `cargo xtask formal check` exist; the others
-are planned.
+`cargo xtask formal guard`, `cargo xtask formal check` and
+`cargo xtask formal vectors` exist; the others are planned.
 
 | Command | Purpose |
 | --- | --- |
@@ -465,7 +472,7 @@ are planned.
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs and sources ([guard](#guard)) |
 | `cargo xtask formal check [--write]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`. It runs no tool and proves nothing |
 | `cargo xtask formal receipt [--require-fresh]` (planned) | Says whether a receipt is current for the checkout: the same gate inputs and image, one conclusion for each unit, complete and `VERIFIED`; `--require-fresh` also requires a run of the whole gate from a clean checkout without planned statements |
-| `cargo xtask formal vectors COMPONENT` (planned) | Replays the test vectors of a component's contract through its specification and compares the results with those of the Rust host tests |
+| `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal mutants TARGET` (planned) | Generates the source mutants of a target and records the survivors with their classification |
 | `cargo xtask formal impact --base REV` (planned) | Lists the targets that a change since `REV` affects |
 | `cargo xtask formal merge` (planned) | Combines the receipts of the shards of a run and of its qualification into the conclusion of the whole gate |
@@ -1346,23 +1353,37 @@ to full commit SHAs. Its steps:
 5. on a pull request, run `cargo xtask formal guard` with the copied event,
    as the binary of step 3 on the runner; its failure fails the job, and the
    gate still runs;
-6. run `cargo xtask formal run`, as the same binary, in a container of the
+6. on a pull request that changes `kernel/`, `user/`, `verification/`,
+   `docs/domains/`, `xtask/` or `.github/workflows/formal.yml` since the
+   merge base, compare the test vectors ([vectors in CI](#vectors-in-ci)):
+   build the test executable of xtask and run its ignored replay of the
+   fixture in a container of the image, run the host tests of the kernel and
+   user-space workspaces with `KREPI_VECTOR_RESULTS` set, and run
+   `cargo xtask formal vectors` in another container. Each container has the
+   flags, the user and the mounted checkout of the gate's and is removed
+   when it ends. Under `timeout`, the build of the test executable has 5
+   minutes, the fixture replay 6, the host tests of each workspace 5 and the
+   comparison 31, and each container a minute more for its kill, so that
+   none outlives the step's 55 minutes. Its failure fails the job, and the
+   gate still runs;
+7. run `cargo xtask formal run`, as the same binary, in a container of the
    image, as the runner's user and group, with
    `--pull never --init --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --network none`,
    the checkout mounted at its own path as the working directory, and the
    variables `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and
    `GITHUB_RUN_ATTEMPT` of the run, `GITHUB_EVENT_PATH` naming the copied
    event, and `KREPI_FORMAL_IMAGE` naming the image of `IMAGE`;
-7. always, remove the container of the gate if a cancelled step left it;
-8. always, write a summary of the receipt to the summary of the workflow
+8. always, remove the container of the gate if a cancelled step left it;
+9. always, write a summary of the receipt to the summary of the workflow
    run: the status, whether the run is complete, its time and that of each
    phase, the number of units of each status, the image, the resources, the
    rules of the guard, every unit that is not `VERIFIED` and every failure.
    The step fails when the gate's step ran and left no receipt;
-9. always, upload `job.txt`, the record of steps 2 to 4 and of the start
-   and end of the gate, the output of the guard, the event, and the receipt
-   and the logs of the run as the artifact
-   `formal-receipt-<commit>-<attempt>`.
+10. always, upload `job.txt`, the record of steps 2 to 4 and of the start
+    and end of the gate, the output of the guard, the output of the vectors
+    step with that of the fixture replay, the path of its test executable
+    and the host results, the event, and the receipt and the logs of the run
+    as the artifact `formal-receipt-<commit>-<attempt>`.
 
 xtask finds the repository through the path at which it was compiled, so
 the checkout is mounted at that path; the runner and the image are the same
@@ -1375,9 +1396,10 @@ process collects processes that leave their group, which the gate as
 process 1 would not, and `--pull never` makes a missing image an error
 instead of a pull.
 
-The job may take 140 minutes: 15 for the steps before the gate (2 to check
-out, 8 to record the runner and pull, 3 to build xtask, 1 for the probe and
-1 for the guard), and the gate's own 7,200 s with the 300 s of its receipt.
+The job may take 195 minutes: 15 for the steps before the vectors step (2
+to check out, 8 to record the runner and pull, 3 to build xtask, 1 for the
+probe and 1 for the guard), the 55 of the vectors step, and the gate's own
+7,200 s with the 300 s of its receipt.
 The gate's step has a limit of 126 minutes, a backstop one minute after the
 gate's own end. When the steps before the gate and the gate use all their
 time, the steps after it have almost none, and the limit of the job may cut
@@ -1506,13 +1528,214 @@ and the invariants that constructors establish and operations preserve.
 Witnesses of success and of every failure are registered as theorems, so an
 unsatisfiable specification is caught. Changing a registered specification
 changes the meaning of the obligations that refine it and is reviewed as
-such.
+such. The frozen test vectors of a component are also replayed through its
+specification and compared with its host tests
+([test vectors](#test-vectors)).
 
 For kernel state, the specification states identity (pool, slot, generation
 and rights together), lifetime (which states are terminal and which
 transitions they allow), the frame of each operation for success and for
 failure, budget accounting including overshoot that preemption causes, and
 reclamation conditions, each tied to a real acknowledgement.
+
+## Test vectors
+
+`cargo xtask formal vectors [DOMAIN/COMPONENT]` replays the frozen test
+vectors of a component through its specification with the pinned Lean and
+compares the results, line by line, with those that the component's Rust
+host tests wrote. The two sides are independent: the host tests run the
+code, the replay runs the specification, and both answer the vectors that
+the legacy tree froze
+([independent evidence](conventions/testing.md#independent-evidence)). No
+contract names vectors yet.
+
+### Contract block
+
+The `Legacy test vectors` section of a component's `contract.md` names its
+files in one fenced block that opens with the line ```` ```vectors ```` and
+ends at the line ```` ``` ````, with white space allowed around either. It
+is the only fenced block of the section: any other line of the section that
+starts with three backticks or tildes, such as another info string, a tilde
+or longer fence, a second block, or a block that is not closed, fails the
+command, so that a misspelt block is not passed over. A block in another
+section is not read, and a section without a block names no vectors. The
+body is TOML with these keys and no others:
+
+| Key | Value |
+| --- | --- |
+| `vectors` | Required: the repository path of the vector file, a tracked UTF-8 file at any path, such as a data directory of the component's workspace |
+| `replay` | The Lean module of the replay; named once the module exists and the host tests write their results |
+
+A contract that is not tracked, a body that is not TOML and a missing or
+unknown key fail as well.
+
+### Vector and result files
+
+A vector file is UTF-8 with LF line ends. Its first line is a `#` comment
+that names its source, as for all frozen data
+([layout](conventions/testing.md#layout)), and lines that start with `#`
+are comments. Every other line is one vector: an id, the input and the
+expected output, separated by tabs. An id is not empty and is not given
+twice, no field holds a tab, and a blank line is malformed. The file holds
+at least one vector, so that a comparison cannot pass on nothing.
+`cargo xtask formal vectors` reads only the ids and the number of fields,
+and the replay gets only the input.
+
+Inputs and outputs use the notation that the contract states, and an
+expected output is in its canonical form, since outputs are compared as
+text. Bytes are written as lowercase hexadecimal digits, two for each byte
+and nothing between them; a structured value is written as `key=value`
+fields separated by single spaces, in the order that the contract gives;
+no field holds a tab or a line break. Whether these forms hold every
+vector of the legacy tree is checked with the first contracts that name
+vectors.
+
+The replay and the host tests write result files of one form: UTF-8 with
+LF line ends, where lines that start with `#` are comments; every other line
+is the id of a vector, a tab and the output, in the order of the vector
+file.
+
+### Host results
+
+When `KREPI_VECTOR_RESULTS` names a directory, the host tests of a component
+write `$KREPI_VECTOR_RESULTS/<domain>/<component>.results` and create the
+directories that they need. They still assert each output against the
+expected output of its vector; the result file only carries the outputs to
+the comparison. Kernel tests write the lines with the standard library
+alone. The command reads `artifacts/formal/vectors/<domain>/<component>.results`
+below the repository root, so a local comparison runs the host tests first
+with the variable set to `artifacts/formal/vectors` of the checkout; a
+result file left by an earlier run may be stale. Result files are not
+committed.
+
+### Replay module
+
+The replay of a component is a module below `verification/Krepi/` and
+outside `verification/Krepi/Proofs/`, by convention `Krepi.SpecTests.<...>`.
+It defines `public def replay (input : String) : String` in the namespace of
+its module name, with Lean core and the statement side only. It is a test,
+not a theorem: `#guard` is allowed, it builds with `--wfail`, and the
+[source rules](#source-rules) apply to it, so `native_decide` is refused. It
+defines no `main`, which would clash with others in the root module, and
+writes nothing to standard error. It lies on the statement side, so a pull
+request that changes it carries the `spec` label ([guard](#guard)).
+
+### Run
+
+The command compares the named component or, without one, every component
+whose block names `replay`; then a block that cannot be read in any contract
+fails the command. For each component it first reads the inputs: the block;
+the replay module, which must be a module name below `Krepi` and outside
+`Krepi.Proofs`, on the statement side, whose file is tracked; the vector
+file; and the host results. A problem with any of them fails the component
+before a tool runs; the comparison, after the replay, checks the form of the
+vector file's lines. It then takes the installation of the host's column of
+the tool manifest and creates a run directory, where it lays out a stage of
+the Lake project as the gate does, with every tracked file below
+`verification/Krepi/`, writes the driver into the project of the stage as
+`Vectors.lean` and the vector file as `work/vectors`. The driver,
+`xtask/src/formal/vectors/Driver.lean`, is a plain Lean file with the name
+of the replay module in place of `KrepiVectorsReplay`: for each vector it
+writes the id, a tab and the output of `replay` for the input to
+`work/results`, and for a line that is not an id, an input and an output an
+empty line, so that the comparison names that vector. It is not a module,
+since `lean --run` of a module file fails with
+`Could not find native implementation`.
+
+Two commands run as the gate runs its commands
+([deadlines and processes](#deadlines-and-processes)), each in a process
+group of its own, with the [environment](#environment-of-tool-commands) of
+`lake env lean` and its output in `logs/0001-build.*` and
+`logs/0002-replay.*`:
+
+1. `lake build --no-cache --wfail +<module>`, with the cap of 7,200 s of a
+   `lake build`;
+2. `lake env lean --run Vectors.lean <work/vectors> <work/results>`, with
+   the cap of 1,800 s of a `lake env lean`.
+
+The commands of one `cargo xtask formal vectors` share a budget of 1,800 s.
+The limit of a command is the smaller of its cap and what is left of the
+budget, and a command that is left no time does not start: the component
+fails with `the budget was used up`. A command that reaches the end of the
+budget is reported, in the words of the gate, as stopped at the rest of the
+budget of the gate. A command fails the component as it fails the gate:
+when it could not start or was stopped, when a signal ended it or a Lean
+process that it ran, when processes of its group outlived it, and when it
+did not exit with 0. The replay also fails it when it wrote anything to
+standard error, since a Lean `panic!` prints `PANIC` there and goes on with
+a default value. The reason names the log directory.
+
+### Comparison and output
+
+Comment lines are dropped, and the lines of the vector file and of the two
+result files are then compared position by position, up to the longest:
+
+- a vector line that is not an id, an input and an output gives
+  `vector N: not an id, input and output`, and one whose id an earlier
+  vector has gives `vector N: an id given twice`;
+- a result after the last vector gives `result N: of no vector`;
+- otherwise the line of the replay must be the id of the vector and an
+  output, with the same bytes as the line of the host tests, or the
+  problem is `<id>: the replay gives "<line>", the host tests "<line>"`,
+  with `nothing` for a missing line.
+
+A vector file without a vector, or whose first line names no source, gives
+one problem more. Outputs are never parsed, so `1` and `1.0` differ and a
+number above `u64::MAX` keeps its digits. Every vector of the file is
+compared: a vector that the specification or the host tests cannot run
+stays out of the file, the contract lists it with its reason, and review
+checks that the vectors of the file and those listed make up the frozen
+count.
+
+The command prints the host and the prefix of the installation, a line
+`compared <component>` for each component that it compares, a line
+`FAILED <component>: <problem>` for each problem, a line
+`not compared <component>: it names no replay` for each component whose
+block names no replay, and `<n> components, <m> problems`. A problem before
+any comparison, such as a block that cannot be read, is then the only line
+before the counts, a `FAILED` line without a component, and the host line
+is not printed. It exits with 1 when there is a problem and with 2 for a
+usage error. It writes no receipt and does not check the image: in CI, the
+gate of the same job checks it ([image pin](#image-pin)).
+
+### Vectors in CI
+
+On a pull request, step 6 of the [CI job](#ci-job) compares the vectors when
+the pull request changes `kernel/`, `user/`, `verification/`,
+`docs/domains/`, `xtask/` or `.github/workflows/formal.yml` since the merge
+base, and otherwise prints that it compares 0 components. Every
+specification module lies below `verification/`, every source below
+`kernel/` or `user/` and every contract below `docs/domains/`, so the rule
+selects every component whose specification or sources changed, and more; a
+vector file outside these paths, such as one below `tools/`, is compared
+only when one of them changes too. `xtask/` and the workflow are in the list
+so that a change of the comparison runs it too. The step runs the fixture
+replay below, then the host tests of the kernel and user-space workspaces
+with `KREPI_VECTOR_RESULTS` set, and then `cargo xtask formal vectors`
+without a component in a container of the image. It does not block a merge,
+since the job is not required. Selecting the components one by one, a
+receipt of the comparison and a check of the image are planned.
+
+### Fixture
+
+The fixture component of the tests lies in
+`xtask/src/formal/fixtures/vectors/`: `sum.vectors`, three vectors of the
+sum of two natural numbers as `a=<m> b=<n>`, one of them above `u64::MAX`;
+`Sum.lean`, its replay, with Lean core only; and `sum.results`, its host
+results. The unit tests write it into Git repositories, with a Lake
+stand-in in place of the pinned Lean. The ignored test
+`formal::vectors::tests::the_fixture_replays_with_the_pinned_lean` replays
+it with the pinned Lean in a stage of the Lake project of the repository,
+which links the Aeneas library and Mathlib but builds neither, and checks
+that equal results pass and that results with one item that differs give
+exactly that problem, within 300 s. Step 6 of the CI job runs it in the
+image, and a local run needs the `darwin-arm64` installation at
+`artifacts/formal/tools`:
+
+```sh
+cargo test --manifest-path xtask/Cargo.toml --bin xtask -- --ignored --exact \
+  formal::vectors::tests::the_fixture_replays_with_the_pinned_lean
+```
 
 ## Statements and proofs
 

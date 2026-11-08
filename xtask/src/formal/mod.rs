@@ -21,6 +21,7 @@ pub mod receipt;
 pub mod registry;
 pub mod run;
 pub mod toolchain;
+pub mod vectors;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -130,6 +131,11 @@ pub const COMMANDS: &[Command] = &[
         about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, and that the registries hold nothing that the gate does not support; --write first writes the file",
         subcommands: &[],
     },
+    Command {
+        name: "vectors",
+        about: "Replay the test vectors of DOMAIN/COMPONENT, or of each component whose contract names a replay, through its specification with the pinned Lean, and compare the results line by line with those that its host tests wrote",
+        subcommands: &[],
+    },
 ];
 
 /// The command line of `cargo xtask formal`, with the texts of [`COMMANDS`].
@@ -168,6 +174,7 @@ fn cli() -> clap::Command {
                 .arg(path("charon")),
         )
         .subcommand(inventory::cli(about("check")))
+        .subcommand(vectors::cli(about("vectors")))
 }
 
 /// The targets that `cargo xtask formal run` was given.
@@ -198,6 +205,7 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
         Some(("check", matches)) => {
             inventory::command(root, &Layout::PRODUCTION, matches.get_flag("write"))
         }
+        Some(("vectors", matches)) => vectors::command(root, &Layout::PRODUCTION, matches),
         _ => {
             let _ = cli().print_help();
             ExitCode::SUCCESS
@@ -246,6 +254,15 @@ mod tests {
             let (name, matches) = matches.subcommand().expect("a subcommand");
             assert_eq!((name, matches.get_flag("write")), ("check", write));
         }
+        for (args, component) in [(&["vectors"][..], None), (&["vectors", "d/c"], Some("d/c"))] {
+            let matches = read(args).expect("a valid command line");
+            let (name, matches) = matches.subcommand().expect("a subcommand");
+            let component = component.map(String::from);
+            assert_eq!(
+                (name, matches.get_one("component")),
+                ("vectors", component.as_ref())
+            );
+        }
         for args in [
             &["guard"][..],
             &["guard", "--event"],
@@ -259,6 +276,8 @@ mod tests {
             &["toolchain-check", "--aeneas", "a"],
             &["check", "a"],
             &["check", "--frobnicate"],
+            &["vectors", "a", "b"],
+            &["vectors", "--frobnicate"],
             &["frobnicate"],
         ] {
             let error = read(args).expect_err("a usage error");
@@ -269,6 +288,8 @@ mod tests {
         assert!(help.to_string().contains("--target <NAME>"), "{help}");
         let help = read(&["guard", "--help"]).expect_err("the help");
         assert!(help.to_string().contains("--event <PATH>"), "{help}");
+        let help = read(&["vectors", "--help"]).expect_err("the help");
+        assert!(help.to_string().contains("[DOMAIN/COMPONENT]"), "{help}");
     }
 
     #[test]
