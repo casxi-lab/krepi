@@ -23,8 +23,11 @@ License as part of krepi, as the
 [porting conventions](../conventions/porting.md#licensing-of-ported-code)
 state for the tooling taken from the CAS project.
 
-The rest of `xtask/src/formal/registry.rs`, the names of the targets that
-`verification/targets.json` registers, is new code.
+The rest of `xtask/src/formal/registry.rs` is new code: the names of the
+targets that `verification/targets.json` registers, the inventory keys that
+they prove or leave unclosed, and the refusal of what the gate does not
+support yet, which `cargo xtask formal check` reports: premises, `exclude`
+cut points and the models of `verification/models.json`.
 
 ## Changes
 

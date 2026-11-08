@@ -16,13 +16,13 @@ rust-version = "1.99"
 # command `cargo xtask serial-capture` and whose QEMU runner is the command
 # `cargo xtask qemu`; the tests of the latter write its test image.
 krepi-tools = { path = "../tools" }
-# The command lines of `cargo xtask formal run`, `cargo xtask formal guard`
-# and `cargo xtask formal toolchain-check`, with their help, usage and error
-# texts, as the host tooling crate reads its command lines. They are defined
-# with the builder, so the derive macros are left out. Their texts are plain
-# and do not depend on the terminal, so colour and wrapping to the terminal
-# width are left out, and so are the suggestions of similar options, which
-# need another crate.
+# The command lines of `cargo xtask formal run`, `cargo xtask formal guard`,
+# `cargo xtask formal toolchain-check` and `cargo xtask formal check`, with
+# their help, usage and error texts, as the host tooling crate reads its
+# command lines. They are defined with the builder, so the derive macros
+# are left out. Their texts are plain and do not depend on the terminal, so
+# colour and wrapping to the terminal width are left out, and so are the
+# suggestions of similar options, which need another crate.
 clap = { version = "=4.6.7", default-features = false, features = ["std", "help", "usage", "error-context"] }
 # The process groups of the commands of `cargo xtask formal run`: `killpg`
 # kills a command's group, `kill` with signal 0 finds whether any of its
@@ -39,12 +39,14 @@ libc = { version = "=0.2.191", default-features = false }
 # The receipt of `cargo xtask check` keeps its fields in the order in which
 # they are written, the receipt of `cargo xtask formal run` is written, and
 # read back by its tests, through the derive macros of `serde`, the
-# manifests step and `cargo xtask formal run` read the output of
-# `cargo metadata`, the qualification cases, the statement, axiom and
-# trusted-base registries, the `translation.json` that Aeneas writes, the
-# messages of `lean --json`, the image pin `verification/image-pin.json`,
-# the `versions.json` of the proof-tool image and the event of a pull
-# request that `cargo xtask formal guard` reads, and the test of
+# manifests step, `cargo xtask formal run` and `cargo xtask formal check`
+# read the output of `cargo metadata`, the qualification cases, the
+# statement, axiom, trusted-base and model registries, the
+# `translation.json` that Aeneas writes, the messages of `lean --json`, the
+# image pin `verification/image-pin.json`, the `versions.json` of the
+# proof-tool image and the event of a pull request that
+# `cargo xtask formal guard` reads, `cargo xtask formal check` writes
+# `verification/open.json` with its keys in order, and the test of
 # `cargo xtask qemu` reads the receipt of a run. All are text in memory, so
 # the standard-library support of the default feature is left out.
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
@@ -57,6 +59,12 @@ serde_json = { version = "=1.0.154", default-features = false, features = ["pres
 # the derive macros and the allocation support for strings, vectors and maps
 # are needed.
 serde = { version = "=1.0.229", default-features = false, features = ["alloc", "derive"] }
+# The inventory of `cargo xtask formal check` parses each source file of the
+# kernel workspace with the parser of the full syntax, walks its items with
+# the visitor and reads their attributes and tokens. Printing, the `Clone`
+# implementations and the procedural-macro support of the default features
+# are not used, so the default features are left out.
+syn = { version = "=3.0.9", default-features = false, features = ["full", "parsing", "visit"] }
 # SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop
 # `cargo xtask formal run`: the crate's handler sets a flag that the run
 # reads while a command runs, and the run ends by the signal through the

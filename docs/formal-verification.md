@@ -16,7 +16,8 @@ the compiled binary or concurrent execution unless a separate layer proves it.
 ## Status
 
 The registries `verification/targets.json`, `verification/models.json` and
-`verification/legacy.json` exist, and so do the statement registry
+`verification/legacy.json` exist, and so do the open obligations
+`verification/open.json`, the statement registry
 `verification/statements.json`, the registry of library axioms
 `verification/axioms.json` and the registry of the trusted base
 `verification/tcb.json`: no target, model, statement, library axiom or
@@ -34,18 +35,21 @@ the qualification crate, with the three proofs about them, and the
 [base round](#base-round), which builds, audits and replays krepi's own
 Lean: today the qualification proofs and the definitions that they use. On
 a pull request, a first phase records the [guard](#guard), which
-`cargo xtask formal guard` runs on its own. None of them verifies anything
-about the kernel. The cases taken from the CAS project expect what the
-pinned tools give; for 27 of them this differs from the expectation
-recorded with the earlier Charon and Aeneas, and each such change is
-explained ([qualification](#qualification)). CI runs the gate in the pinned
-image on every pull request to `main` and every push to `main`, in a job
-that is not required ([CI job](#ci-job)). Everything else on this page is
-planned:
-specifications, statements and targets, the other phases of the gate, the
-required gate and the other commands of `cargo xtask formal`. They are set
-up by porting the tooling of the CAS project and the prototype tree, and
-this page changes with them. Nothing about the kernel is proved.
+`cargo xtask formal guard` runs on its own. `cargo xtask formal check`
+holds the inventory of the production functions of the kernel workspace
+against the targets and the open obligations
+([legacy inventory and admission](#legacy-inventory-and-admission)). None
+of them verifies anything about the kernel. The cases taken from the CAS
+project expect what the pinned tools give; for 27 of them this differs
+from the expectation recorded with the earlier Charon and Aeneas, and each
+such change is explained ([qualification](#qualification)). CI runs the
+gate in the pinned image on every pull request to `main` and every push to
+`main`, in a job that is not required ([CI job](#ci-job)). Everything else
+on this page is planned: specifications, statements and targets, the other
+phases of the gate, the required gate and the other commands of
+`cargo xtask formal`. They are set up by porting the tooling of the CAS
+project and the prototype tree, and this page changes with them. Nothing
+about the kernel is proved.
 
 Proofs of the prototype are proofs about that code.
 They do not carry over: a module taken into krepi is proved again against the
@@ -89,14 +93,14 @@ never moved into the trusted boundary to close a gap.
 | `verification/Krepi/Qualification/Models/` | Definitions that the reviewed external declarations of three qualification cases use; they are not models ([qualification](#qualification)) | Present |
 | `verification/externals/<Module>/` | Reviewed external declarations of a target or a qualification case (`FunsExternal.lean`, `TypesExternal.lean`), named by its `models` field | Present for qualification cases |
 | `verification/targets.json` | The proof target registry | Present, empty |
-| `verification/models.json` | The model registry | Present, empty |
+| `verification/models.json` | The model registry ([models](#models)); `cargo xtask formal check` refuses a registered model | Present, empty |
 | `verification/statements.json` | The statement hash, and each statement with its theorem and state ([statements and proofs](#statements-and-proofs)) | Present, empty |
 | `verification/axioms.json` | The axioms of the Aeneas Lean library that target theorems may use, each with its source and reason ([base round](#base-round)) | Present, empty |
 | `verification/tcb.json` | Items of the trusted base: native decisions and patterns of generated axioms, whose classification comes later ([base round](#base-round)) | Present, empty |
-| `verification/legacy.json` | Kept empty: production functions without a proof are to be listed in `open.json` ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty by design |
-| `verification/open.json` | Production functions without a proof, generated from the contracts of the components | Planned |
+| `verification/legacy.json` | Kept empty: production functions without a proof are listed in `open.json` ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty by design |
+| `verification/open.json` | The open obligations of the production code, generated from the `Open obligations` tables of the contracts of the components ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
-| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run` and `guard` present, the others planned |
+| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard` and `check` present, the others planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
 `artifacts/formal/` directory, and the Lake build directory
@@ -450,15 +454,16 @@ switch export and the output of the image check as a workflow artifact.
 ## Commands
 
 The commands of `cargo xtask formal` follow the design of the gate.
-`cargo xtask formal toolchain-check`, `cargo xtask formal run` and
-`cargo xtask formal guard` exist; the others are planned.
+`cargo xtask formal toolchain-check`, `cargo xtask formal run`,
+`cargo xtask formal guard` and `cargo xtask formal check` exist; the others
+are planned.
 
 | Command | Purpose |
 | --- | --- |
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
 | `cargo xtask formal run [--target NAME]...` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets. Its phases are, on a pull request, the [guard](#guard), which records its rules; the [qualification](#qualification) and the [base round](#base-round), which every run has; and, planned, every target (or the named ones) with its mutants |
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs and sources ([guard](#guard)) |
-| `cargo xtask formal check` (planned) | Registry metadata and the coverage ratchet against `open.json`; runs no tool and proves nothing |
+| `cargo xtask formal check [--write]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`. It runs no tool and proves nothing |
 | `cargo xtask formal receipt [--require-fresh]` (planned) | Says whether a receipt is current for the checkout: the same gate inputs and image, one conclusion for each unit, complete and `VERIFIED`; `--require-fresh` also requires a run of the whole gate from a clean checkout without planned statements |
 | `cargo xtask formal vectors COMPONENT` (planned) | Replays the test vectors of a component's contract through its specification and compares the results with those of the Rust host tests |
 | `cargo xtask formal mutants TARGET` (planned) | Generates the source mutants of a target and records the survivors with their classification |
@@ -1431,14 +1436,14 @@ obligations. The fields are those of the CAS project:
 | --- | --- |
 | `name`, `module`, `feature` | Target name, generated Lean namespace, feature ID (`krepi.<area>.<feature>`) |
 | `description` | What the target proves, in one paragraph |
-| `start_from`, `opaque`, `exclude` | Charon roots and cut points |
+| `start_from`, `opaque`, `exclude` | Charon roots and cut points; `cargo xtask formal check` refuses `exclude`, which the gate does not support |
 | `proves` | Inventory keys (`file#Owner::name`) of local functions whose every path the obligations cover |
 | `unclosed` | Inventory keys of local functions the extraction reaches, translated or cut, that are not proved |
 | `derived` | Reached methods that a `#[derive(..)]` attribute defines; they have no source text and stay unverified |
 | `unconstrained` | Rust names of the external functions and types the extraction reaches |
 | `models` | Optional directory of reviewed external declarations installed in place of the generated templates |
 | `trusted_axioms` | Further axioms the theorems may use, each with a reviewed reason |
-| `premises` | Hypotheses that restate, over this target's generated types, a registered theorem of another target about a function this target cuts |
+| `premises` | Hypotheses that restate, over this target's generated types, a registered theorem of another target about a function this target cuts; `cargo xtask formal check` refuses non-empty `premises`, which the gate does not check yet |
 | `proof_modules`, `obligations` | Lean modules, and the statements with the theorems that establish them |
 | `mutants` | Source edits, each of which must make a named theorem fail |
 
@@ -1611,7 +1616,9 @@ registered in `models.json` with these fields:
 | `used_by` | For each target that installs the model, the registered theorems that reach it |
 
 The comparison of a model with the real implementation is evidence for the
-model, not a proof; the modelled source remains an assumption. The
+model, not a proof; the modelled source remains an assumption. Until the
+gate compares models with their implementations, `cargo xtask formal check`
+refuses a registered model. The
 definitions in `verification/Krepi/Qualification/Models/` are not models:
 they serve only the type checking of three qualification cases
 ([qualification](#qualification)).
@@ -1658,19 +1665,93 @@ instead, for the modules that proofs are to cover.
 ## Legacy inventory and admission
 
 `verification/legacy.json` is empty by design and stays so: no production
-function is admitted without a proof as a legacy function. Production
-functions without a proof are to be listed in `verification/open.json`
-(planned), which is generated from the OPEN tables of the `contract.md` of
-the components, each entry with the later task or stage that takes it over;
-an `unsafe` entry also says whether it reads or writes verified state.
-`cargo xtask formal check` (planned) fails on a production function that is
-in no target's `proves` or `unclosed` list and not in `open.json`, and on
-an `open.json` that differs from what the contracts give. The removal of a
-target, a theorem or a proved function, and any widening of the trusted
-base, are reviewed through the registry rules of the [guard](#guard)
-(planned), and `cargo xtask formal impact --base REV` (planned) lists the
-targets that a change affects. A function without a proof is never trusted
-by a proof and appears in a target's `unclosed` list when reached.
+function is admitted without a proof as a legacy function. Every production
+function of the kernel workspace is instead in the `proves` or `unclosed`
+list of a target or covered by an open obligation that the contract of its
+component lists, and `cargo xtask formal check` holds the inventory of
+these functions against both. It runs no tool and proves nothing.
+
+The inventory reads every tracked `.rs` file below `kernel/`, build
+scripts included, and parses it with `syn`. Its roots are the sources of
+the targets that `cargo metadata` reports for the kernel workspace, with
+the command of the `manifests` step: those of library, binary and
+procedural-macro targets are production roots; those of tests, examples,
+benchmarks and build scripts are not. From the roots it follows `mod`
+declarations by the rules of rustc, `#[path]` and inline modules included,
+only to find the files that production code reaches; a file that two
+declarations load is followed from both:
+
+- A test module file, the file of `#[cfg(test)] mod x;` or of a `mod`
+  declared in an inline `#[cfg(test)]` module, is test code, and so is
+  every file that only test code, a root that is not a production root or
+  a build script reaches. A file that production code reaches as well is
+  production code. Only `#[cfg(test)]` in exactly this form marks test
+  code; `#[cfg(all(test, unix))]` and other forms do not.
+- A file fails the check when it is not a regular file of UTF-8 text, when
+  it does not parse, when the identifier `include`, raw or not, appears in
+  it at any depth of its tokens, or when it is no root and no `mod`
+  declaration reaches it. Every way to call `include!`, through a path, an
+  import that renames it or a macro that is given its name, writes that
+  identifier, so no other use of the name is allowed either; `include_str!`
+  and `include_bytes!` do not count. A `mod` declaration that names no
+  tracked file, or both `x.rs` and `x/mod.rs`, fails as well.
+- The production functions are the functions with a body in production
+  files, outside items marked `#[cfg(test)]` and outside function bodies,
+  including those in the initializers of constants and statics. Functions
+  that a macro generates cannot be seen before expansion, so a production
+  `macro_rules!` macro whose body holds the keyword `fn` fails the check.
+  The key of a function is
+  `<path>#[<inline module>::]...[<Owner>::]<name>`: the owner of a method is
+  the last path segment of the self type of its implementation, under `&`,
+  `*` and parentheses, or the name of its trait for a default method. When
+  methods of trait implementations in one file share a key, the second
+  takes `#2`, the third `#3` and so on, in source order; any other repeated
+  key fails the check, and so does a method whose self type has no path,
+  such as a tuple.
+- The methods that a `#[derive(..)]` of a production type defines, `clone`,
+  `fmt`, `eq`, `assert_fields_are_eq`, `partial_cmp`, `cmp`, `hash` and
+  `default`, are recorded with the same keys for the `derived` list of a
+  target. They have no source text, and the check does not count them.
+
+`verification/open.json` is generated from the `Open obligations` tables of
+the `contract.md` of the components below `docs/domains/`, whose columns
+the [component documents](conventions/documentation.md#component-documents)
+fix. Each entry has the `item`, a function key or the path of a file or
+directory below `kernel/`, which covers every function in it; the `kind`;
+the `verified_state`, one of `reads`, `writes`, `reads and writes` and
+`neither`, or `null` when the row does not say; the `carrier`, a neutral
+description of the planned target and obligation that close the entry or
+of the condition that lifts it; the `stage`, the release by which it is to
+be closed or lifted; and the `contract`. The entries are sorted by item.
+`cargo xtask formal check --write` writes the file first, unless a table
+is malformed, and the check compares the committed file byte for byte with
+what the contracts give.
+
+`cargo xtask formal check` reports every problem and exits with 1 when
+there is any:
+
+- a problem of the inventory;
+- a production function that is in no `proves` or `unclosed` list, is not
+  the item of an entry of `open.json` and is not inside one whose item is a
+  path;
+- a malformed table, a row whose cells are more or fewer than those of the
+  header, an item that two rows list, an entry whose stage is later than
+  `0.2`, compared as numbers, so that `0.10` is later, and an `unsafe`
+  entry that does not say whether it reads or writes verified state. The
+  latest stage is the release after the one in work, and it rises by one
+  release when work on the next release begins;
+- a committed `open.json` that differs from what the contracts give;
+- what the gate does not support yet: non-empty `premises` of a target, an
+  `exclude` cut point and a model in `verification/models.json`.
+
+No CI job runs it yet, nor does `cargo xtask check`: run it before
+proposing a change to the kernel workspace, a contract or the registries.
+The removal of a target, a theorem or a proved function, and any widening
+of the trusted base, are reviewed through the registry rules of the
+[guard](#guard) (planned), and `cargo xtask formal impact --base REV`
+(planned) lists the targets that a change affects. A function without a
+proof is never trusted by a proof and appears in a target's `unclosed` list
+when reached.
 
 ## Editing proofs
 

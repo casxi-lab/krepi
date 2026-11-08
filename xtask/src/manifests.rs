@@ -315,34 +315,38 @@ pub fn kernel_metadata_args() -> Vec<String> {
 }
 
 /// Asks Cargo to resolve the kernel workspace below `root` with
-/// [`kernel_metadata_args`], and checks what it reports. A registry or Git
+/// [`kernel_metadata_args`] and returns what it reports. A registry or Git
 /// package that is not cached, or a stale `Cargo.lock`, fails the
 /// resolution.
-fn check_kernel_workspace(root: &Path) -> Vec<String> {
+pub fn kernel_metadata(root: &Path) -> Result<Json, String> {
     let args = kernel_metadata_args();
     let program = check::cargo();
     let shown = format!("{} {}", program.to_string_lossy(), args.join(" "));
     println!("$ {shown}");
-    let output = match Command::new(&program)
+    let output = Command::new(&program)
         .args(&args)
         .current_dir(root)
         .output()
-    {
-        Ok(output) => output,
-        Err(error) => return vec![format!("cannot run `{shown}`: {error}")],
-    };
+        .map_err(|error| format!("cannot run `{shown}`: {error}"))?;
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {
         let status = output.status;
-        return vec![format!(
+        return Err(format!(
             "`{shown}` exited with {status}:\n{}",
             stderr.trim_end()
-        )];
+        ));
     }
     eprint!("{stderr}");
-    match serde_json::from_slice(&output.stdout) {
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("`{shown}` printed no valid JSON: {error}"))
+}
+
+/// Resolves the kernel workspace below `root` with [`kernel_metadata`] and
+/// checks what Cargo reports.
+fn check_kernel_workspace(root: &Path) -> Vec<String> {
+    match kernel_metadata(root) {
         Ok(metadata) => check_kernel_metadata(&metadata, &root.join(KERNEL)),
-        Err(error) => vec![format!("`{shown}` printed no valid JSON: {error}")],
+        Err(problem) => vec![problem],
     }
 }
 

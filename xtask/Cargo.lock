@@ -428,6 +428,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "signal-hook",
+ "syn",
  "tar",
  "toml",
  "walkdir",

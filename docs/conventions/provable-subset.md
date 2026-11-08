@@ -884,9 +884,9 @@ does not translate it, so the row names what covers it outside the
 sequential refinement:
 
 ```markdown
-| Obligation | Kind | Verified state | Carrier |
-| --- | --- | --- | --- |
-| `store_descriptor` | `unsafe` volatile write | Writes the translation tables that the page-table logic describes | Lifted when the architecture layer proves translation-table stores |
+| Obligation | Kind | Verified state | Carrier | Stage |
+| --- | --- | --- | --- | --- |
+| `kernel/mmu/src/table.rs#store_descriptor` | `unsafe` volatile write | Writes the translation tables that the page-table logic describes | Lifted when the architecture layer proves translation-table stores | 0.2 |
 ```
 
 ## Constructs the tools do not support

@@ -38,7 +38,7 @@ receipt.
 When a command lands, this page and [testing](docs/conventions/testing.md)
 describe what it runs. Do not write a command into a document before it works.
 A command that does not exist yet, such as `cargo xtask docs check` (planned)
-or `cargo xtask formal check` (planned), carries the marker `(planned)` right
+or `cargo xtask formal receipt` (planned), carries the marker `(planned)` right
 after its code span. The documentation check rejects any other mention
 of a command that `cargo xtask` does not provide, a mention outside code, and
 the marker once the command exists.
@@ -109,7 +109,11 @@ Executable specifications, proofs, production-entry mappings and regression
 tools belong here; proposals and review policy are kept in the coordination
 records. Lean 4 +
 Charon/Aeneas is the implementation-refinement toolchain. Follow
-[formal verification](docs/formal-verification.md).
+[formal verification](docs/formal-verification.md). Before proposing a
+change to the kernel workspace, a component contract or the proof
+registries, run `cargo xtask formal check`, which holds every production
+function against the proof targets and the open obligations; it is not
+part of `cargo xtask check` yet.
 
 Code of the modules that the
 [provable Rust subset](docs/conventions/provable-subset.md) lists follows it

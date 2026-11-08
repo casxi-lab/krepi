@@ -1,6 +1,6 @@
 {
   "baseline": null,
-  "description": "Empty by design and kept so: no production function is admitted without a proof as a legacy function. Production functions without a proof are to be listed in verification/open.json, generated from the OPEN tables of the contracts of the components.",
+  "description": "Empty by design and kept so: no production function is admitted without a proof as a legacy function. Production functions without a proof are listed in verification/open.json, generated from the Open obligations tables of the contracts of the components.",
   "functions": {},
   "schema": 1
 }

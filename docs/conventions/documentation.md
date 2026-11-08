@@ -240,15 +240,27 @@ Each kind of content has one home, and the other documents link it.
   in the register of permitted nondeterminism (planned) of the
   [architecture notes](../architecture.md); `State fields` holds the state
   field table of the [SMP design rules](smp.md#s5-state-field-tables). A
-  section of testing obligations follows. `Open obligations` lists, one row
-  each, the obligations of the component's code that no target closes, such
-  as entry points outside the targets, assembly, `unsafe` code, MMIO and
-  each save, restore and clear rule of exception entry, exception return and
-  context switch, whose row also names the test that covers it. Every row
-  names its carrier: the planned target and obligation that close it, or the
-  condition that lifts it; the row of an `unsafe` site also states whether
-  the site reads or writes verified state
-  ([rule 9](provable-subset.md#9-unsafe-sites)). `Legacy test vectors` lists
+  section of testing obligations follows. `Open obligations` holds one
+  table that lists, one row each, the obligations of the component's code
+  that no target closes, such as entry points outside the targets,
+  assembly, `unsafe` code, MMIO and each save, restore and clear rule of
+  exception entry, exception return and context switch, whose row also
+  names the test that covers it. `cargo xtask formal check` generates
+  `verification/open.json` from these tables
+  ([legacy inventory and admission](../formal-verification.md#legacy-inventory-and-admission)),
+  so each table starts with five columns, which further columns, such as
+  `Test`, may follow, and every row has the cells of the header, none of
+  which holds `|`: `Obligation` starts with a code span that holds the
+  key of a function or the path of a file or directory below `kernel/`,
+  which covers every function in it; `Kind` starts with a code span that
+  holds `code`, `unsafe`, `assembly`, `mmio` or `register-state`;
+  `Verified state` starts with `Reads and writes`, `Reads`, `Writes` or
+  `Neither`, followed by a space or the end of the cell, or is empty or `-`
+  when the row does not say, and the row of an `unsafe` site says
+  ([rule 9](provable-subset.md#9-unsafe-sites)); `Carrier` names, in
+  neutral words, the planned target and obligation that close the row, or
+  the condition that lifts it; and `Stage` holds the release by which the
+  row is to be closed or lifted, such as `0.2`. `Legacy test vectors` lists
   the frozen test vectors taken from the legacy tree, each file by its path
   at `prototype@ec8305c618a8f4e84e0707fa56beac5673f4675e` with the number of
   vectors it holds, every vector with its expected output.
@@ -291,8 +303,11 @@ requirements and targets. No document or code comment in this repository uses
 them, in prose or in code spans. The forms to avoid include `krepi/` followed
 by a stage number and a slash and F, V or P with two digits; a task suffix of
 `/T` and two digits; `system/` followed by M or V and two digits; and `CAP-`,
-`IF-` or `ADR-` followed by digits. A document states the technical content
-instead:
+`IF-` or `ADR-` followed by digits. A release version, such as `0.1` or
+`0.2`, is not among them: it is the `Stage` of a row of `Open obligations`
+and of an entry of `verification/open.json`, the release by which that
+obligation is to be closed or lifted. A document states the technical
+content instead:
 
 - an item that does not exist is named by the module or file its contract
   fixes and marked (planned);
