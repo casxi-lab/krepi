@@ -197,7 +197,6 @@
       "expect": "translated",
       "diagnostics": [],
       "external_functions": [
-        "alloc::vec::{alloc::vec::Vec<T>}::is_empty",
         "alloc::vec::{alloc::vec::Vec<T>}::pop"
       ],
       "external_types": []
@@ -251,7 +250,6 @@
       "external_functions": [
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::get",
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::insert",
-        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow",
         "core::option::{core::option::Option<&'_0 T>}::copied"
       ],
       "external_types": [
@@ -437,7 +435,6 @@
       "expect": "translated",
       "diagnostics": [],
       "external_functions": [
-        "alloc::vec::{alloc::vec::Vec<T>}::is_empty",
         "alloc::vec::{alloc::vec::Vec<T>}::pop"
       ],
       "external_types": []
@@ -599,7 +596,6 @@
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::range",
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, alloc::alloc::Global>}::new",
         "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Range<'a, K, V>}::next",
-        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow",
         "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::end_bound",
         "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::start_bound"
       ],
@@ -625,11 +621,8 @@
       "start_from": [
         "crate::registry_static_reference"
       ],
-      "expect": "rejected",
-      "diagnostics": [
-        "[Error] Unreachable",
-        "[Warn ] Could not translate the body of function 'formal_qualification::registry_static_reference::arity because of previous error"
-      ],
+      "expect": "translated",
+      "diagnostics": [],
       "external_functions": [],
       "external_types": []
     },
@@ -641,10 +634,12 @@
       ],
       "expect": "rejected",
       "diagnostics": [
-        "[Error] Assertion failed: new value doesn't have the same type as its destination",
+        "[Error] Found a case of unsupported nested borrows",
         "[Warn ] Could not translate the body of function 'formal_qualification::registry_str_names::lookup because of previous error"
       ],
-      "external_functions": [],
+      "external_functions": [
+        "core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq"
+      ],
       "external_types": []
     },
     {
@@ -655,10 +650,12 @@
       ],
       "expect": "rejected",
       "diagnostics": [
-        "[Error] Assertion failed: new value doesn't have the same type as its destination",
+        "[Error] Found a case of unsupported nested borrows",
         "[Warn ] Could not translate the body of function 'formal_qualification::const_str_names::lookup because of previous error"
       ],
-      "external_functions": [],
+      "external_functions": [
+        "core::str::traits::{impl core::cmp::PartialEq<str> for str}::eq"
+      ],
       "external_types": []
     },
     {
@@ -667,7 +664,7 @@
       "start_from": [
         "crate::static_str_table"
       ],
-      "expect": "rejected",
+      "expect": "translated",
       "diagnostics": [],
       "external_functions": [],
       "external_types": []
@@ -691,11 +688,8 @@
       "start_from": [
         "crate::string_literal_return"
       ],
-      "expect": "rejected",
-      "diagnostics": [
-        "[Error] There should be no bottoms in the value",
-        "[Warn ] Could not translate the body of function 'formal_qualification::string_literal_return::name because of previous error"
-      ],
+      "expect": "translated",
+      "diagnostics": [],
       "external_functions": [],
       "external_types": []
     },
@@ -721,7 +715,7 @@
         "[Error] Arrow types are not supported yet",
         "[Error] Could not find: type name: formal_qualification::function_pointers::Entry",
         "[Error] Function pointers are not supported yet",
-        "[Error] Invalid input for unop: cast<formal_qualification::function_pointers::halve, fn(u64) -> u64> on formal_qualification::function_pointers::halve",
+        "[Error] Invalid input for unop: fn_def_to_fn_ptr on formal_qualification::function_pointers::halve",
         "[Warn ] Could not translate the body of function 'formal_qualification::function_pointers::ENTRIES because of previous error",
         "[Warn ] Could not translate the body of function 'formal_qualification::function_pointers::apply because of previous error",
         "[Warn ] Could not translate type decl 'formal_qualification::function_pointers::Entry because of previous error"
@@ -891,9 +885,7 @@
       ],
       "expect": "translated",
       "diagnostics": [],
-      "external_functions": [
-        "alloc::vec::{alloc::vec::Vec<T>}::is_empty"
-      ],
+      "external_functions": [],
       "external_types": []
     },
     {
@@ -911,7 +903,6 @@
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::range",
         "alloc::collections::btree::map::{impl core::clone::Clone for alloc::collections::btree::map::BTreeMap<K, V, A>}::clone",
         "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Range<'a, K, V>}::next",
-        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow",
         "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::end_bound",
         "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::start_bound"
       ],
@@ -931,9 +922,7 @@
         "[Error] There should be no bottoms in the value",
         "[Warn ] Could not translate the body of function 'formal_qualification::carried_term_walk::fold because of previous error"
       ],
-      "external_functions": [
-        "alloc::vec::{alloc::vec::Vec<T>}::is_empty"
-      ],
+      "external_functions": [],
       "external_types": []
     },
     {
@@ -944,7 +933,7 @@
       ],
       "expect": "rejected",
       "diagnostics": [
-        "[Error] Internal error, please file an issue",
+        "[Error] Joining region abstractions containing shared loans whose shared value contains borrows is not supported yet",
         "[Warn ] Could not translate the body of function 'formal_qualification::view_map_loop::{impl formal_qualification::view_map_loop::LoopRows<u64, alloc::collections::btree::map::BTreeMap<u32, u64, alloc::alloc::Global>> for formal_qualification::view_map_loop::LoopView<'_0>}::add_row because of previous error"
       ],
       "external_functions": [
@@ -963,16 +952,12 @@
       "start_from": [
         "crate::view_map_range"
       ],
-      "expect": "rejected",
-      "diagnostics": [
-        "[Error] Internal error, please file an issue",
-        "[Warn ] Could not translate the body of function 'formal_qualification::view_map_range::{impl formal_qualification::view_map_range::RangeTerms<u64, alloc::collections::btree::map::BTreeMap<u32, u64, alloc::alloc::Global>> for formal_qualification::view_map_range::RangeView<'_0>}::term_after because of previous error"
-      ],
+      "expect": "translated",
+      "diagnostics": [],
       "external_functions": [
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::first_key_value",
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::range",
         "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Range<'a, K, V>}::next",
-        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow",
         "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::end_bound",
         "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::start_bound"
       ],
@@ -989,7 +974,7 @@
       ],
       "expect": "rejected",
       "diagnostics": [
-        "[Error] Internal error, please file an issue",
+        "[Error] Joining region abstractions containing shared loans whose shared value contains borrows is not supported yet",
         "[Warn ] Could not translate the body of function 'formal_qualification::view_index_loop::{impl formal_qualification::view_index_loop::IndexSums for formal_qualification::view_index_loop::IndexView<'_0>}::sum because of previous error"
       ],
       "external_functions": [],
@@ -1001,11 +986,8 @@
       "start_from": [
         "crate::view_value_join"
       ],
-      "expect": "rejected",
-      "diagnostics": [
-        "[Error] Internal error, please file an issue",
-        "[Warn ] Could not translate the body of function 'formal_qualification::view_value_join::{formal_qualification::view_value_join::JoinView<'_0>}::scaled_next because of previous error"
-      ],
+      "expect": "translated",
+      "diagnostics": [],
       "external_functions": [],
       "external_types": []
     },
@@ -1017,7 +999,7 @@
       ],
       "expect": "rejected",
       "diagnostics": [
-        "[Error] Internal error, please file an issue",
+        "[Error] Joining region abstractions containing shared loans whose shared value contains borrows is not supported yet",
         "[Warn ] Could not translate the body of function 'formal_qualification::view_borrowed_helper::sum_values because of previous error"
       ],
       "external_functions": [],
@@ -1038,7 +1020,6 @@
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::range",
         "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Iter<'a, K, V>}::next",
         "alloc::collections::btree::map::{impl core::iter::traits::iterator::Iterator<(&'a K, &'a V)> for alloc::collections::btree::map::Range<'a, K, V>}::next",
-        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow",
         "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::end_bound",
         "core::ops::range::{impl core::ops::range::RangeBounds<T> for (core::ops::range::Bound<T>, core::ops::range::Bound<T>)}::start_bound"
       ],
@@ -1059,8 +1040,7 @@
       "external_functions": [
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::insert",
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::last_key_value",
-        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::remove",
-        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow"
+        "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::remove"
       ],
       "external_types": [
         "alloc::collections::btree::map::BTreeMap"
@@ -1108,10 +1088,8 @@
       "start_from": [
         "crate::subtrait_loop"
       ],
-      "expect": "rejected",
-      "diagnostics": [
-        "[Error] Could not find: type_var_id: 2 from ExtractBase.Item"
-      ],
+      "expect": "translated",
+      "diagnostics": [],
       "external_functions": [],
       "external_types": []
     },
@@ -1251,11 +1229,8 @@
       "start_from": [
         "crate::indexed_field_sum"
       ],
-      "expect": "rejected",
-      "diagnostics": [
-        "[Error] Unimplemented binary operation",
-        "[Warn ] Could not translate the body of function 'formal_qualification::indexed_field_sum::{formal_qualification::indexed_field_sum::ChoiceStack}::advance because of previous error"
-      ],
+      "expect": "translated",
+      "diagnostics": [],
       "external_functions": [],
       "external_types": []
     },
@@ -1318,7 +1293,7 @@
       ],
       "expect": "rejected",
       "diagnostics": [
-        "[Error] Internal error, please file an issue",
+        "[Error] Unimplemented: found a loan and its corresponding borrow in the same region abstraction (this can happen in some situations involving the 'static lifetime)",
         "[Warn ] Could not translate the body of function 'formal_qualification::collection_tree_frame_enum::copy_frames because of previous error",
         "[Warn ] Could not translate the body of function 'formal_qualification::collection_tree_frame_enum::equal_pairs because of previous error"
       ],
@@ -1400,7 +1375,6 @@
         "alloc::string::{impl core::cmp::PartialEq<alloc::string::String> for alloc::string::String}::eq",
         "alloc::string::{impl core::fmt::Debug for alloc::string::String}::fmt",
         "alloc::vec::{alloc::vec::Vec<T>}::append",
-        "alloc::vec::{alloc::vec::Vec<T>}::is_empty",
         "alloc::vec::{alloc::vec::Vec<T>}::pop",
         "alloc::vec::{impl core::default::Default for alloc::vec::Vec<T>}::default",
         "core::mem::take",
@@ -1519,10 +1493,8 @@
       "start_from": [
         "crate::generic_into_iterator_loop"
       ],
-      "expect": "rejected",
-      "diagnostics": [
-        "[Error] Could not find: type_var_id: 0 from ExtractBase.Item"
-      ],
+      "expect": "translated",
+      "diagnostics": [],
       "external_functions": [
         "core::array::iter::{impl core::iter::traits::collect::IntoIterator<T, core::array::iter::IntoIter<T, N>> for [T; N]}::into_iter",
         "core::array::iter::{impl core::iter::traits::iterator::Iterator<T> for core::array::iter::IntoIter<T, N>}::next"
@@ -1548,11 +1520,8 @@
       "start_from": [
         "crate::moving_if_join"
       ],
-      "expect": "rejected",
-      "diagnostics": [
-        "[Error] Internal error, please file an issue",
-        "[Warn ] Could not translate the body of function 'formal_qualification::moving_if_join::reduce because of previous error"
-      ],
+      "expect": "translated",
+      "diagnostics": [],
       "external_functions": [
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::last_key_value",
         "alloc::collections::btree::map::{impl core::clone::Clone for alloc::collections::btree::map::BTreeMap<K, V, A>}::clone",
@@ -1634,8 +1603,7 @@
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::last_key_value",
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::len",
         "alloc::collections::btree::map::{alloc::collections::btree::map::BTreeMap<K, V, A>}::remove",
-        "alloc::collections::btree::map::{impl core::clone::Clone for alloc::collections::btree::map::BTreeMap<K, V, A>}::clone",
-        "core::borrow::{impl core::borrow::Borrow<T> for T}::borrow"
+        "alloc::collections::btree::map::{impl core::clone::Clone for alloc::collections::btree::map::BTreeMap<K, V, A>}::clone"
       ],
       "external_types": [
         "alloc::collections::btree::map::BTreeMap"
