@@ -11,6 +11,7 @@ pub mod extract;
 #[cfg(test)]
 mod fixture;
 pub mod guard;
+pub mod inventory;
 pub mod lean;
 pub mod outcome;
 pub mod paths;
@@ -67,6 +68,11 @@ pub struct Layout {
     pub triple: &'static str,
     /// The proof target registry, relative to the repository root.
     pub registry: &'static str,
+    /// The model registry, relative to the repository root.
+    pub models: &'static str,
+    /// The open obligations that the contracts list, relative to the
+    /// repository root.
+    pub open: &'static str,
     /// The tool manifest, relative to the repository root.
     pub toolchain: &'static str,
     /// The pin of the image that the CI jobs run, relative to the
@@ -94,6 +100,8 @@ impl Layout {
         tcb: "verification/tcb.json",
         triple: "aarch64-unknown-none",
         registry: "verification/targets.json",
+        models: "verification/models.json",
+        open: "verification/open.json",
         toolchain: "verification/toolchain.json",
         image_pin: "verification/image-pin.json",
         tooling: "verification/tooling",
@@ -115,6 +123,11 @@ pub const COMMANDS: &[Command] = &[
     Command {
         name: "toolchain-check",
         about: "With --aeneas <dir> --charon <dir>, check the Aeneas and Charon source trees and the Aeneas patch against verification/toolchain.json",
+        subcommands: &[],
+    },
+    Command {
+        name: "check",
+        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, and that the registries hold nothing that the gate does not support; --write first writes the file",
         subcommands: &[],
     },
 ];
@@ -154,6 +167,7 @@ fn cli() -> clap::Command {
                 .arg(path("aeneas"))
                 .arg(path("charon")),
         )
+        .subcommand(inventory::cli(about("check")))
 }
 
 /// The targets that `cargo xtask formal run` was given.
@@ -180,6 +194,9 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
         Some(("toolchain-check", matches)) => {
             let path = |name| matches.get_one::<PathBuf>(name).expect("a required option");
             toolchain::command(root, &Layout::PRODUCTION, path("aeneas"), path("charon"))
+        }
+        Some(("check", matches)) => {
+            inventory::command(root, &Layout::PRODUCTION, matches.get_flag("write"))
         }
         _ => {
             let _ = cli().print_help();
@@ -224,6 +241,11 @@ mod tests {
             matches.get_one::<PathBuf>("event"),
             Some(&PathBuf::from("event.json"))
         );
+        for (args, write) in [(&["check"][..], false), (&["check", "--write"], true)] {
+            let matches = read(args).expect("a valid command line");
+            let (name, matches) = matches.subcommand().expect("a subcommand");
+            assert_eq!((name, matches.get_flag("write")), ("check", write));
+        }
         for args in [
             &["guard"][..],
             &["guard", "--event"],
@@ -235,6 +257,8 @@ mod tests {
             &["run", "--targets", "a"],
             &["run", "a"],
             &["toolchain-check", "--aeneas", "a"],
+            &["check", "a"],
+            &["check", "--frobnicate"],
             &["frobnicate"],
         ] {
             let error = read(args).expect_err("a usage error");
@@ -282,6 +306,8 @@ mod tests {
             layout.cases.to_string(),
             layout.extraction.to_string(),
             layout.registry.to_string(),
+            layout.models.to_string(),
+            layout.open.to_string(),
             layout.toolchain.to_string(),
             layout.statements.to_string(),
             layout.axioms.to_string(),
