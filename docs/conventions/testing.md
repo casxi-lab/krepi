@@ -86,14 +86,14 @@ the failed step:
    interior-mutability type, no `cfg` attribute outside the allowlist and
    no macro that holds one of their names or `static`; the roots of the
    test code come from `cargo metadata`, which the step runs only when a
-   contract lists a file. When there are compile-fail cases below `kernel/`, the unchanged
-   kernel workspace builds and each case fails its build with its error
-   code; `cargo check` runs each build in a copy of the tracked kernel
-   workspace below `artifacts/subset/` that the step removes. Its unit
-   tests run in the `test` step, on trees of files in memory and, for the
-   compile-fail cases and the step itself, on a workspace and a Git
-   repository of their own that they build below the build directory of
-   `xtask`;
+   contract lists a file. When there are compile-fail cases below
+   `kernel/`, the unchanged kernel workspace builds and each case fails its
+   build with its error code; `cargo check` runs each build in a copy of
+   the tracked kernel workspace below `artifacts/subset/` that the step
+   removes. Its unit tests run in the `test` step, on trees of files in
+   memory and, for the compile-fail cases and the step itself, on a
+   workspace and a Git repository of their own that they build below the
+   build directory of `xtask`;
 7. `workflows`: every `.yml` or `.yaml` file below `.github/workflows/` is
    YAML without anchors, aliases, merge keys, repeated keys or characters
    that YAML parsers read differently, and never mentions

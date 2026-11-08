@@ -177,8 +177,8 @@ pub fn build(tree: &Tree, ws: &str, case: Option<&Case>, work: &Path) -> Result<
     let output = copy(tree, ws, case, work).and_then(|()| {
         let args = "check --locked --offline --color never --workspace --manifest-path".split(' ');
         let mut cargo = std::process::Command::new(check::cargo());
-        let command = (cargo.args(args).arg(format!("{ws}/Cargo.toml"))).current_dir(work);
-        (command.output()).map_err(|error| format!("cannot run cargo: {error}"))
+        (cargo.args(args).arg(format!("{ws}/Cargo.toml"))).args(["--target-dir", "target"]);
+        (cargo.current_dir(work).output()).map_err(|error| format!("cannot run cargo: {error}"))
     });
     let _ = fs::remove_dir_all(work);
     let output = output?;
@@ -600,6 +600,22 @@ mod tests {
         assert!(!work.exists());
     }
 
+    #[test]
+    fn each_build_has_a_target_directory_of_its_own() {
+        // The caller's target directory is a file that no build can use. A
+        // Cargo configuration above the copy names it, as `CARGO_TARGET_DIR`
+        // would, since setting the variable would change the environment of
+        // every test of the process.
+        let scratch = crate::scratch::Scratch::new("compile-fail-target");
+        scratch.write(".cargo/config.toml", "[build]\ntarget-dir = \"taken\"\n");
+        scratch.write("taken", "not a directory\n");
+        let (work, tree) = (scratch.0.join("copy"), workspace(true));
+        assert_eq!(build(&tree, "fixture", None, &work), Ok(()));
+        let case = clone_case("E0283");
+        assert_eq!(build(&tree, "fixture", Some(&case), &work), Ok(()));
+        assert!(!work.exists());
+    }
+
     /// Runs the step on a Git repository of `files` and a lock of its
     /// kernel workspace, below the build directory, so that the pinned
     /// toolchain builds it.
@@ -669,5 +685,10 @@ mod tests {
         let failed = repository(&broken).1.expect_err("the build fails");
         assert!(failed.starts_with("kernel: the build fails:\n"), "{failed}");
         assert!(failed.contains("error[E0308]"), "{failed}");
+        // A refused construct in a listed file fails the step.
+        let mutable = format!("{guarded}\npub static mut S: u8 = 0;\n");
+        let line = guarded.lines().count() + 2;
+        let problem = format!("kernel/x/src/lib.rs:{line}: static mut");
+        assert_eq!(repository(&mutable).1, Err(problem));
     }
 }
