@@ -613,9 +613,10 @@ and writes `record.json` and `summary.md` into it. The record, of `format`
 2, holds the run with its line: `pull request` or `main` for the workflow
 `check` on a pull request or a push, `full`, `nightly` and `weekly` for
 those workflows, `none` for the others. Each job has its runner class,
-`none` for a job that ran on no runner, `self-hosted` by its labels,
-`larger hosted` for a runner group other than `GitHub Actions` and
-`standard hosted` otherwise; its seconds, its minutes, the seconds rounded
+`none` for a job that ran on no runner, which the API gives no runner name
+or, for a job cancelled before a runner took it, an empty one,
+`self-hosted` by its labels, `larger hosted` for a runner group other than
+`GitHub Actions` and `standard hosted` otherwise; its seconds, its minutes, the seconds rounded
 up to whole minutes and 0 for a job that ran on no runner; its limit, its
 conclusion, its result and its annotations. The result is the conclusion, or
 `TIMEOUT` for a job that did not succeed and either ran at least as long as

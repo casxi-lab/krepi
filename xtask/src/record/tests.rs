@@ -817,3 +817,16 @@ fn the_command_writes_the_record_and_the_summary_into_a_new_directory() {
             .is_err_and(|error| error.to_string().contains("unknown field `actor`"))
     );
 }
+
+#[test]
+fn a_job_with_an_empty_runner_name_ran_on_no_runner() {
+    let labels = vec!["ubuntu-24.04-arm".to_string()];
+    for (name, group) in [(None, None), (Some(""), Some("")), (Some(""), None)] {
+        assert_eq!(runner_class(name, &labels, group), "none");
+        assert!(!ran_on_a_runner(name));
+    }
+    let standard = runner_class(Some("GitHub Actions 1"), &labels, Some("GitHub Actions"));
+    assert_eq!(standard, "standard hosted");
+    let larger = runner_class(Some("Larger 1"), &labels, Some("Larger"));
+    assert_eq!(larger, "larger hosted");
+}
