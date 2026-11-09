@@ -417,13 +417,14 @@ pub const CACHE_SAVES: [&str; 2] = ["actions/cache", "actions/cache/save"];
 
 /// The problems of the caches in the workflows of `tree` that run on pull
 /// requests, or whose triggers cannot be read: no step uses an action of
-/// [`CACHE_SAVES`], at any pin, so that such a job only restores a cache,
-/// with `actions/cache/restore`. Both the `uses` of each step, as YAML
+/// [`CACHE_SAVES`], at any pin. Both the `uses` of each step, as YAML
 /// decodes it, and the text of the file, comments included, are read, in
 /// any letter case, so that neither an escape nor a comment hides a use.
 /// As the steps of a reusable workflow or of a local action are not read,
 /// a job of such a file that calls a workflow, and a step that uses a local
-/// action, are problems too.
+/// action, are problems too. Other actions that can save a cache as a side
+/// effect, such as the setup actions of language toolchains with a cache
+/// input, are not read; the workflows of pull requests do not use them.
 pub fn cache_problems(tree: &Tree) -> Vec<String> {
     // The actions of [`CACHE_SAVES`] that `text` names with a pin, and those
     // that it starts with.

@@ -176,11 +176,13 @@ The steps are:
     runs on `pull_request`, or whose triggers cannot be read, it also
     rejects a step that uses `actions/cache` or `actions/cache/save` at any
     pin, both of which save a cache, and any mention of them with a pin in
-    the text, comments included, in any letter case, so that a job of a
-    pull request only restores a cache, with `actions/cache/restore`. As it
-    does not read the steps of a reusable workflow or of a local action, it
-    rejects there a job that calls a workflow and a step that uses a local
-    action.
+    the text, comments included, in any letter case; a job of a pull request
+    restores a cache with `actions/cache/restore`. As it does not read the
+    steps of a reusable workflow or of a local action, it rejects there a
+    job that calls a workflow and a step that uses a local action. It does
+    not read other actions that can save a cache as a side effect, such as
+    the setup actions of language toolchains with a cache input, which the
+    workflows of pull requests do not use.
 
 The checks that `xtask` implements itself read only files that Git tracks,
 so a fresh clone and a working copy with build output give the same result;

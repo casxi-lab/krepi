@@ -2,9 +2,9 @@
 # repositories beside it, kosmo and kalyx. It runs on the second day of each
 # month at 06:19 UTC for the month before, and on a manual run of main for a
 # month that it takes as its input, the current month ending at the time of
-# the run, or, with no input, for the month before. With the read
-# permissions of the workflow token and the public
-# interface of the container registry only, it reads the runs of each
+# the run, or, with no input, for the month before. With the read permissions
+# of the workflow token and the public interface of the container registry
+# only, it reads the runs of each
 # repository in the month, among them the runs of the dynamic workflows such
 # as code scanning, the jobs of every attempt of each run, the artifacts
 # that have not expired and the cache usage, and the tags of the public
