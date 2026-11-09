@@ -17,6 +17,8 @@ EL0   root (supervisor and process manager)
       file service, block driver, stream service, UART service
       job service, display and input services, device drivers
       worker processes: CAS, plotting, Python, proof compile/run/check
+      POSIX environments: a process service and its POSIX processes
+      Linux processes, each with its compatibility runtime
         |  SVC, IPC, notifications, shared pages (all authorized)
 EL1   kernel: threads, budgets, address spaces, capabilities, IPC, IRQs
         |
@@ -30,10 +32,15 @@ HW    CPUs, MMU, GIC, timers, platform protection
 | File service | Authorized namespaces, files and directories, the read-only boot bundle; the endpoint of the block service | Open file sessions fail; data held only in memory may be lost and writes are not replayed |
 | Block driver | Granted MMIO, IRQ and DMA buffers | The device is stopped and in-flight operations drained before memory is reclaimed |
 | Workers | Private heap and stack, an input snapshot, limited file, stream and result rights | Each non-cooperative job runs in a process that can be killed as a whole |
+| Process service | The process IDs, parent relations, exit statuses, process groups and sessions of one POSIX environment, and the creation right and quota from which it creates every process of that environment | Every process of the environment is destroyed with it; other environments continue |
+| Linux process | An unmodified Linux program and the compatibility runtime that loading places in its address space, with the authority of that process only | Only that process is affected, also when the program damages its runtime |
 
 The kernel keeps only the mechanisms that need EL1. Drivers, file systems,
 general executable loading and application policy run in EL0. The kernel does
-not parse file systems or arbitrary ELF files.
+not parse file systems or arbitrary ELF files. The POSIX layer and Linux
+compatibility run in EL0 as well: the kernel keeps no process IDs, signal
+dispositions or other POSIX state and implements no Linux system call
+([processes](#processes-posix-and-linux-compatibility)).
 
 ## Boot and the resident root
 
@@ -54,7 +61,9 @@ not parse file systems or arbitrary ELF files.
    timeout and a diagnostic, so services never wait for each other in a
    cycle.
 5. The root grants each domain the least authority it needs. Later worker
-   processes are created through the process manager.
+   processes are created through the process manager, which also starts the
+   process service of each POSIX environment; the processes of that
+   environment are created through its process service.
 
 A cold boot reaches the resident root without reading the serial port. The
 first service topology is the root with a file, a block, a stream and a UART
@@ -109,7 +118,11 @@ object that can be created. A kind added later gets a pool and a quota item
 of its own, and identities keep their structure. Processes, threads and jobs
 are distinct identities: a job, EL0 work with its input version and result,
 is a service-level object, and running one thread per process at first is a
-limit of the implementation that does not merge processes and threads.
+limit of the implementation that does not merge processes and threads. The
+threads of one process form its POSIX thread group. Process IDs, process
+groups and sessions are records of a process service, not kernel identities,
+and a job of POSIX job control, a process group of a session, is not a job
+of the platform ([processes](#processes-posix-and-linux-compatibility)).
 
 - **Object table.** Each kind has a pool of fixed size that the kernel carves
   out of memory once at boot. No object memory is allocated after that, and
@@ -171,11 +184,12 @@ limit of the implementation that does not merge processes and threads.
   reaped. Endpoints and notifications are freed when the last capability of
   their current generation is deleted, processes and threads when they are
   reaped. When an owner is destroyed, its objects other than processes are
-  destroyed in bounded steps. The usages of different calling domains never
-  overlap and add up to what is allocated. What happens to the children of a
-  destroyed process, and what gates reaping, belong to the process model, an
-  [open design question](#open-design-questions), and to the contract of
-  process lifetime.
+  destroyed in bounded steps, and then its child processes, as process
+  lifetime below states. The usages of different calling domains never
+  overlap and add up to what is allocated, also while processes are
+  destroyed: a parent is reaped only after its children, so their limits
+  return to it before its own limits return to its owner, and no ownership
+  or quota is transferred to another owner.
 - **Transactions.** An entry first makes all its checks and determines its
   write set, and it writes no state while it checks. The write set holds the
   object slots, capability entries, quota records and queue links that the
@@ -194,8 +208,20 @@ limit of the implementation that does not merge processes and threads.
   drained, and only then is revocation complete. Memory reached by DMA that
   has not drained stays pending or quarantined.
 - **Process lifetime.** A process moves through alive, dying, dead and
-  reaped. Reclaiming a thread frees its context and its wait records, and
-  happens only after the thread runs on no CPU.
+  reaped, and its exit reason is exited, killed or faulted. A dying process
+  destroys its objects other than processes and then its child processes,
+  children before their parents and siblings in the order in which they were
+  created, as cascading revocation walks its tree; each step stays within
+  its bound and stores its progress in the dying process, which reaps its
+  children itself. A process becomes dead only once its objects other than
+  processes are destroyed and its children reaped, and only its owner, which
+  holds the control right, reaps it after that; its exit reason and exit
+  code stay readable until it is reaped. A process that is destroyed because
+  its owner is destroyed exits as killed; when its own exit and the
+  destruction of its owner compete, the first to arrive decides
+  ([internal choices](security.md#internal-choices)). Reclaiming a thread
+  frees its context and its wait records, and happens only after the thread
+  runs on no CPU.
 
 Service-level objects, such as files, jobs and surfaces, are validated by the
 service with its instance generation and session authority. A service ID is
@@ -211,7 +237,10 @@ their operation number, the major version that added them, their arguments
 and their error codes, and the dispatch table is generated from the
 inventory, keyed by major version and operation number. EL0 creates
 endpoints, notifications and child processes only by presenting a
-capability that authorizes it.
+capability that authorizes it. The system calls of a Linux program never
+enter this table: the kernel hands each of them to the compatibility runtime
+in the calling process as an upcall
+([Linux programs](#processes-posix-and-linux-compatibility)).
 
 - **Operation numbers.** The low 16 bits of `x8` hold the operation number,
   and the bits above them are zero. Number 0 is not used. Production
@@ -242,15 +271,21 @@ capability that authorizes it.
   with a new major version, after which its number returns
   `UNSUPPORTED_OPERATION`. A major version is retired only at a release
   boundary of the stable ABI, after which it returns `UNSUPPORTED_VERSION`.
-- **SVC immediate.** Native calls use one SVC immediate, and any other
-  immediate returns `UNSUPPORTED_OPERATION` without terminating the caller.
-  Exit and yield are production operations with numbers of their own, not
-  SVC immediates. Linux system calls have a dispatch table of their own.
-  The native immediate is 0, as in `svc #0`, and an ABI attribute that
-  loading fixes for each process decides whether its calls reach the native
-  or the Linux table. Both hold until the approach to Linux compatibility,
-  an [open design question](#open-design-questions), confirms or replaces
-  them.
+- **SVC immediate.** Native calls use `svc #0`, and in native dispatch any
+  other immediate returns `UNSUPPORTED_OPERATION` without terminating the
+  caller. Exit and yield are production operations with numbers of their
+  own, not SVC immediates. Loading fixes an ABI attribute, native or Linux,
+  for each process, and for a Linux process one code range, the code of its
+  compatibility runtime, which lies in an RX segment that the kernel has
+  validated. In a native process every SVC takes native dispatch. In a
+  Linux process an SVC whose exception return address in `ELR_EL1` lies
+  outside that range takes the Linux path whatever its immediate, as Linux
+  dispatches by exception class and ignores the immediate; inside the range
+  the SVC takes native dispatch. A Linux program that jumps into the range
+  makes native calls with the authority of its own process only. Dispatch
+  compares the attribute, the range and the immediate, and the attribute
+  and the range do not change after loading
+  ([Linux programs](#processes-posix-and-linux-compatibility)).
 
 Every entry into EL1 follows one execution model:
 
@@ -280,9 +315,12 @@ Every entry into EL1 follows one execution model:
   sender, signaller, timer or forced kill that completes the wait writes the
   result into the saved context of the thread, in its own transaction, and
   makes the thread ready. Only the first completion takes effect, and a
-  forced kill or a timeout cancels a wait by completing its record.
-  `receive`, a `call` that waits for its reply, waits on notifications and
-  wait sets, and sleeps block this way.
+  forced kill, a timeout or a thread interrupt cancels a wait by completing
+  its record; an asynchronous upcall to a blocked thread also completes its
+  wait, with an interrupted result, before it is delivered
+  ([upcalls](#futexes-and-upcalls)). `receive`, a `call` that waits for its
+  reply, waits on notifications, wait sets and futexes, and sleeps block
+  this way.
 - **Long operations.** Cascading revocation, process destruction and the
   release of a VM object have preemption points that their contracts state.
   When an interrupt is pending at such a point, the operation stores its
@@ -313,7 +351,8 @@ completion and scheduling only at the points above
 - **Calls.** `call`, `receive` and `reply` exchange short messages. When a
   call is received, the kernel creates a one-shot reply right with a
   generation. Reply, timeout, cancellation, revocation and peer death
-  compete, and exactly one of them completes the wait
+  compete, and exactly one of them completes the wait; a thread interrupt
+  counts as a cancellation
   ([internal choices](security.md#internal-choices)).
 - **Budget lending.** A synchronous call lends the caller's remaining budget
   to the server within an authorized priority ceiling. A budget has at most
@@ -324,7 +363,9 @@ completion and scheduling only at the points above
   messages are counted by the queue state.
 - **Timeouts and wait sets.** Waits have deadlines and can be grouped in wait
   sets. A timeout means the caller stopped waiting; it does not mean that the
-  server did not act.
+  server did not act. A futex key can be a source of a wait set; when the
+  region of the key is released, the source is removed and the wait set
+  reports a fixed reason ([futex keys](#futexes-and-upcalls)).
 - **Capability transfer.** Copy and move are distinct. Receive slots are
   reserved before sending, and message data and capabilities become visible
   together at the commit point; failure before that restores a moved source.
@@ -361,7 +402,9 @@ a child object whose chain depth and work per step are bounded, and a shared
 object is one object mapped into several address spaces. A file-backed
 object receives its pages from an EL0 pager through the pager port; when the
 pager fails or dies, a thread that accesses such a page through a mapping
-takes a fatal page fault.
+takes a page fault that the kernel cannot resolve. The fault goes to the
+fault handler of the thread when one is registered, and otherwise
+terminates the process as faulted ([upcalls](#futexes-and-upcalls)).
 
 The first VM objects are the private anonymous objects of a single thread,
 with `reserve`, `commit`, `decommit`, `mprotect` and `release`. `reserve`
@@ -392,6 +435,337 @@ only from the boot bundle. Mapping a VM object executable requires that
 right. Which processes may add the right, and how it is withdrawn, belong to
 the integrity policy for `exec`, an
 [open design question](#open-design-questions).
+
+## Processes, POSIX and Linux compatibility
+
+The kernel provides processes and threads. POSIX processes with their
+relations and state, and the compatibility of Linux programs, are built on
+them in EL0: by a process service for each POSIX environment, by the native
+C library, a port of the GNU C Library (glibc), in each process, and for a
+Linux program by a compatibility runtime in its process.
+
+- **Environments.** A POSIX environment is an interactive shell session, or
+  the worker environment of a job that hosts POSIX processes. The process
+  manager starts one process service for each environment, and the service
+  creates every POSIX process of the environment with its creation right. It
+  is the kernel owner of these processes, their limits are carved out of
+  what it has left, and a POSIX parent holds no kernel capability to its
+  children. The processes of an environment trust its process service for
+  their process relations, as clients trust a service for the semantics of
+  that service ([threat model](security.md#threat-model)); the process
+  service is not part of the trusted base.
+- **Identities.** The thread group of a POSIX process is the set of threads
+  of one kernel process, and its ID is the process ID. Process groups and
+  sessions are records of the process service: a session holds process
+  groups, and a process group holds processes. The pseudo-terminal service
+  binds a controlling terminal to a session. A job of POSIX job control is a
+  process group of a session, which the process service and the
+  pseudo-terminal service move between foreground and background. A job of
+  the platform is a service-level object, distinct from POSIX jobs,
+  processes and threads, and the worker of such a job can host a POSIX
+  environment.
+- **Process IDs.** Process IDs, parent relations, exit statuses and
+  resource limits are records of the process service and mean something
+  only within its environment. A process learns its own process ID from its
+  start message. The kernel assigns no global process ID and identifies
+  processes to EL0 only by handles.
+- **Fork.** The C library sends `fork` to the process service as a call.
+  The service creates the child, asks the kernel to copy the address space
+  of the caller, and writes the saved context of the calling thread, its
+  floating-point state included, as the context of the only thread of the
+  child. The child returns 0 from `fork`, and the parent receives the
+  process ID of the child in the reply.
+- **Spawn.** For `posix_spawn` the service creates the child directly: the
+  EL0 loader loads its image, the kernel validates the image again, and no
+  address space is copied. The file actions apply, in the order in which
+  they were added, to the set of descriptors that the child receives, and
+  the attributes are set before the child starts. The process service
+  checks the permissions of both `fork` and `posix_spawn`.
+- **Exec.** The EL0 loader loads the new image and the kernel validates it
+  again; the execute right follows the exec rule of the
+  [integrity policy](security.md#integrity-policy). The process ID and the
+  records of the service stay as they were. The service may create a new
+  process for the new image, give it the process ID and destroy the old
+  process, so the kernel needs no operation that rebuilds an address space
+  inside a process.
+- **Orphans, zombies and waits.** An orphan is recorded in the service as a
+  child of the adopting process of its environment, the implementation-defined
+  system process of POSIX `_exit`; its kernel owner does not change. Once the
+  service has read the exit reason and exit code of a process, it can reap the
+  kernel process. A zombie is a record of the service that stays until its
+  parent waits for it, and it takes no kernel process slot or quota; `waitid`
+  with `WNOWAIT` reads the record and leaves it.
+- **Cancellation and failure.** When a job of the platform is cancelled,
+  the root or the job service destroys the process service of its
+  environment, and every process of the environment is destroyed with it,
+  as [process lifetime](#kernel-objects-and-capabilities) states. A failure
+  of a process service likewise affects only its own environment.
+- **Order.** The process service handles `fork`, `wait`, `kill` and
+  `setpgid` in the order in which it receives them. The only ordering rule
+  that this process model adds to the kernel is the order of a cascading
+  destruction.
+- **POSIX state.** The C library keeps the POSIX state of each process
+  inside the process: the descriptor table, each entry a capability to a
+  file, pipe, pseudo-terminal or socket session with library state such as
+  an offset; the signal dispositions of the process; the signal mask and the
+  pending signals of each thread; the working directory, a capability to a
+  directory session; the umask and the environment variables. The C library
+  allocates descriptor numbers, which are not kernel identifiers. Process
+  relations and the POSIX operations across processes, `fork`, `wait`,
+  `kill`, `setpgid`, `setsid` and resource limits, belong to the process
+  service, and the file, pseudo-terminal and network services are ordinary
+  services that every environment shares.
+- **Signals.** `kill` goes to the process service, which checks the
+  permission and requests an [asynchronous upcall](#futexes-and-upcalls) to
+  the thread that the target process registered to receive signals. The C
+  library chooses the thread that takes a signal directed to its process
+  and keeps the masks and pending signals; the kernel keeps no signal
+  dispositions or masks. `pthread_kill` requests an upcall to a thread of
+  its own process directly, and when a child dies, the process service
+  sends `SIGCHLD` to its parent. The upcall entry of the C library takes the
+  pending signals, selects by the mask, writes the saved context as a
+  `ucontext_t` on the stack of the thread or its `sigaltstack` and calls the
+  handler; `sigreturn` returns from the upcall with the context that the
+  handler may have changed.
+- **Linux programs.** The EL0 loader recognizes a Linux program by the
+  interpreter path and the attributes of its ELF file, and loading fixes the
+  ABI attribute of its process as Linux; the Linux ABI is kept apart from
+  the native one, and neither poses as the other. The loader also places a
+  native compatibility runtime in a reserved range of the same address
+  space, registers the code range of the runtime for
+  [SVC dispatch](#system-calls-and-the-abi) and registers the runtime as the
+  handler of the Linux system calls of the process.
+- **Linux system calls.** The kernel delivers every Linux system call of a
+  Linux process to its compatibility runtime as a synchronous upcall, and
+  the call returns as an [upcall](#futexes-and-upcalls) returns. The runtime
+  implements Linux semantics with native calls and services, and when it
+  returns from the upcall, it writes the result into the registers of the
+  caller. The kernel implements no Linux semantics and has no entry of its
+  own for Linux system calls.
+- **Linux on native POSIX.** The runtime maps a `clone` that creates a
+  thread to native thread creation, `fork` and `vfork` to the `fork` of the
+  process service, with `vfork` behaving as `fork`, and `mmap` to native VM
+  operations. A Linux futex is a native futex, keyed as
+  [futex keys](#futexes-and-upcalls) state, and its private flag is only a
+  hint. The runtime writes Linux signal frames in EL0 in the format
+  of `rt_sigframe`; `rt_sigreturn` is a Linux system call, which the runtime
+  completes by returning from the upcall with the context of the frame.
+  Linux processes use the native process, file and pseudo-terminal
+  services.
+- **Authority and failure.** The runtime holds only the authority of its
+  process. A Linux program that damages its runtime affects only itself,
+  and the boundary that the kernel enforces stays the process.
+- **Reserved range.** The runtime occupies a reserved range of the address
+  space of a Linux process. A Linux `mmap` with `MAP_FIXED` into that range
+  fails and replaces no mapping, unlike on Linux.
+- **Linux-only interfaces.** The native C library provides no epoll,
+  eventfd, timerfd, pidfd or mount interface: it installs no `sys/epoll.h`,
+  `sys/eventfd.h`, `sys/timerfd.h`, `sys/pidfd.h` or `sys/mount.h`, defines
+  no `EFD_` or `TFD_` constant and none of `PIDFD_NONBLOCK`, `P_PIDFD` and
+  `CLONE_NEWNS`, and a configure probe against an isolated native sysroot
+  finds them missing. Native programs use `poll` and
+  `waitid(P_PID, pid, WEXITED | WNOWAIT)`; the process service accepts no
+  namespace flag, and its `fork` copies only native descriptors. On the
+  Linux path the compatibility runtime provides the five interfaces: epoll
+  on native wait sets and the readiness notifications of the file service;
+  eventfd as a notification with a count word; timerfd with native waits
+  that have deadlines; a pidfd as an observation handle that the process
+  service issues, with `waitid(P_PIDFD)` and `pidfd_send_signal` going
+  through that service; and mounts and mount namespaces through the file
+  service, mapped to the authorized VFS namespace of the environment, so
+  that a namespace belongs to an environment, not to a kernel process. A
+  Linux `fork` also goes through the process service, and the epoll state
+  and eventfd counts that a parent and its child share under Linux
+  semantics live in a shared VM object.
+- **Baselines.** The native POSIX layer follows POSIX.1-2024 (IEEE Std
+  1003.1-2024, Issue 8) with XSI conformance. It provides the options that
+  glibc 2.42 declares as supported, and the other options of Issue 8 are
+  stated as not provided. The GNU extensions are the interfaces that the C and
+  math libraries of glibc 2.42, libc and libm, export for AArch64 Linux, at
+  the default version of each symbol, beyond POSIX and the five Linux-only
+  interfaces; those that the native layer does not provide are stated as such,
+  and Linux programs get them from the Linux user-space libraries. Linux
+  compatibility follows the user-space API and the semantics of Linux 6.18.55
+  with glibc 2.42. The shell and the base tools, which run with it in
+  pipelines, redirections and job control, are all programs of bash 5.3 with
+  its patches up to 020, coreutils 9.12, grep 3.12, sed 4.10, gawk 5.4.1,
+  findutils 4.11.0 and diffutils 3.12, each built in its default
+  configuration, with coreutils also installing `arch` and `hostname`; bash
+  provides `/bin/sh`. The upstream test suites are LTP 20260930, the tests of
+  glibc and the tests that bash and coreutils include.
+- **Not covered here.** These rules do not state the semantics of POSIX and
+  Linux signals or of each Linux system call, the priority-inheritance,
+  robust and requeue operations of Linux futexes, how `/proc` and `/sys`
+  are provided, copy-on-write and the copy of an address space, the
+  implementation of threads, POSIX threads and TLS, what the native C
+  library provides for priority-inheritance mutexes, CPU affinity and
+  real-time scheduling policies, the design of the job service, or the
+  operations and errors of process lifetime. Nor do they give the
+  machine-readable lists of the interfaces and tests of the baselines, or
+  name the network and TLS libraries and the native toolchain of the
+  system. The components of the compatibility personalities, memory and
+  address spaces, runtime ABI and SDK, EL0 services and storage, kernel
+  objects and capabilities, and application platform services domains
+  ([subject domains](domains/README.md#domains)) state them.
+
+## Futexes and upcalls
+
+A futex lets threads wait on a word of their memory, and an upcall lets the
+kernel run a handler of a thread in EL0 with the context that it
+interrupted. At first a process has one thread and the kernel provides
+neither: every user fault of a thread in EL0 terminates its process as
+faulted.
+
+- **Futex keys.** The key of a futex word decides whether a wait and a wake
+  name the same futex. It follows from the memory that holds the word, not
+  from a flag of the operation; a private flag, also `FUTEX_PRIVATE_FLAG` of
+  Linux, is only a hint.
+- **Private keys.** A word in private anonymous memory, copy-on-write child
+  objects included, has a private key: the address space, identified by the
+  pool, slot and generation of its process; the VM region that holds the
+  word, by the slot and generation of the region; and the offset of the
+  word in the region.
+- **Shared keys.** A word in a shared object has a shared key: the VM
+  object, by its pool, slot and generation, and the offset of the word in
+  the object. Every address space that maps the object reaches the same
+  key.
+- **Mappings that the kernel installs.** A word in a mapping that the
+  kernel installs directly, a loaded RW segment, a stack page or a page of
+  the boot bundle, has a key made of the address space, the record of the
+  mapping in the address space and the offset of the word in the mapping.
+  VM operations do not apply to these mappings, and they stay until their
+  process is destroyed, so no other mapping takes their address while the
+  process lives and the record carries no generation. Waits on such a key
+  complete when the process is destroyed, as waits on a destroyed object
+  do. A futex operation on an MMIO page of a device grant fails with a
+  fixed error.
+- **Unmapping.** When `release` of a region completes, every wait on a key
+  of that region completes with a fixed error, by the rule that completes
+  the waits on a destroyed object. The kernel completes them one by one
+  along the chain of waiters on the region, in bounded steps whose progress
+  it stores in the region, and such a completion competes with the other
+  completions of a wait as a revocation does. A shared key lives as long as
+  its object, and its waits complete when the object is destroyed.
+- **Reuse of an address.** A new region at the address of a released one
+  has another slot or generation, so its keys never match the old keys;
+  the waits on the old keys ended when the `release` completed.
+- **After fork.** The regions of the child are new entries of its own
+  region table, so the private keys of a parent and its child differ and
+  their private futexes never wake each other; the same holds for the
+  mappings that the kernel installs in the child. A word in a shared object
+  has one key in both.
+- **Shared operations on private memory.** A shared operation on a word in
+  private memory takes the private key, as a private operation on the word
+  does. This gives the robust mutexes of the C library the shared wait and
+  wake semantics that they need also when they are private to a process. A
+  Linux program that mixes private and shared operations on one word uses
+  one key and so sees at most spurious wake-ups, after which a caller checks
+  the value again as usual.
+- **Order.** A wake of n threads wakes the n waiters registered first, and
+  waits whose deadlines expire in the same transition settle as timeouts
+  before a wake in that transition takes effect. A forced kill, a timeout
+  or a thread interrupt cancels a futex wait by completing its record
+  ([internal choices](security.md#internal-choices)).
+- **Storage and outputs.** A futex wait is a wait record embedded in its
+  thread, with the key in place of an object, and the chains of waiters
+  hang on the regions, mapping records and objects of their keys, so no
+  wait allocates memory
+  ([no allocation at run time](conventions/provable-subset.md#2-no-allocation-at-run-time)).
+  Keys are never visible to EL0: a wait and a wake return only their result
+  and the number of threads woken, and no error code carries a slot number
+  or a generation. Lookup structures and capacities are left to the
+  contracts.
+- **Region generations.** Each slot of the VM region table of a process
+  follows the rule for the [generations](#kernel-objects-and-capabilities)
+  of object slots: its generation increases by one each time the slot is
+  freed, a slot whose generation reaches its maximum retires until the next
+  boot, generations never wrap, and free, allocated and retired slots add
+  up to the capacity of the table. Region slots gain generations together
+  with futexes; before that a region table has none, and `release` has no
+  futex waits to complete.
+- **Upcall areas.** A thread takes upcalls only through an upcall area that
+  it registers: the entry of its handler, a stack for the handler and a
+  fixed number of save slots, up to a limit that the capacity record sets.
+  The kernel checks that these pages are committed when the area is
+  registered and keeps them while it is: `decommit` and `release` of them
+  fail with a fixed error. Delivery writes no other user pages.
+- **Saved context.** Each delivery writes the complete user context that it
+  interrupts, `x0`–`x30`, SP, PC, PSTATE, `q0`–`q31`, FPCR and FPSR, bit for
+  bit into the next free save slot, in the layout of the saved user context
+  of a thread. The return from an upcall reads the context back from its
+  slot, checks PC, SP and PSTATE as every saved context is checked before it
+  is restored, restores it and frees the slot.
+- **Fault handler.** A synchronous exception of a thread in EL0 that is a
+  user fault goes to that thread at the faulting instruction. The kernel
+  writes the context and the cause, that is the cause class, the exception
+  class bits of `ESR_EL1` and the user virtual address of `FAR_EL1`, into a
+  slot and enters the handler at its registered entry and stack, with the
+  cause and the number of the slot in argument registers. When the handler
+  returns, the faulting instruction executes again, or execution continues
+  at a PC that the handler wrote into the slot. A thread without an upcall
+  area, without a free slot or with an invalid entry has no handler, and
+  the fault terminates its process as faulted with a fault record. A fault
+  that a handler takes leaves no fault record, and a fault of the handler
+  itself goes into the next slot. A page fault that the kernel cannot
+  resolve, such as an access to a page whose pager has failed, goes to the
+  handler in the same way. A synchronous fault never terminates another
+  process ([fault isolation](security.md#isolation)).
+- **Asynchronous upcalls.** A holder of the corresponding right to a thread
+  requests an asynchronous upcall, which reaches the thread when it next
+  returns to EL0. When the thread is blocked, its wait record first
+  completes with an interrupted result; then the kernel writes a slot and
+  enters the handler. Pending requests are bits in a fixed bitmap of the
+  thread, one for each kind, so repeated requests of one kind coalesce. The
+  blocking call that the upcall interrupted returns the interrupted result,
+  and EL0 decides whether to restart it, as the C library does for
+  `SA_RESTART`; the kernel never restarts a call that an upcall
+  interrupted. A request to a thread that has registered no upcall area
+  fails with a fixed error, leaves the thread unchanged and sets no pending
+  bit.
+- **Thread interrupts.** A thread interrupt writes no slot and runs no
+  handler. When the thread is blocked, its wait record completes with an
+  interrupted result; when it runs, a pending bit makes its next blocking
+  call return the interrupted result at once. There is no upcall return:
+  the thread goes on in its own context, into which only the interrupted
+  result of its blocking call is written.
+- **Bounds.** The bitmap and the number of slots are fixed when the area is
+  registered, so a flood of requests does not grow kernel memory. Upcalls
+  nested deeper than the number of slots terminate the process as faulted
+  with a fault record.
+- **Order of delivery.** In one transition the synchronous exception of the
+  current instruction comes first; a thread interrupt settles before
+  asynchronous upcalls, and asynchronous upcalls of several kinds are
+  delivered in ascending order of kind. A thread interrupt counts as a
+  cancellation among the completions of a wait. Of a forced kill and a
+  pending upcall, the first to arrive takes effect, and a forced kill
+  discards the upcalls not yet delivered
+  ([internal choices](security.md#internal-choices)).
+- **Outputs.** A handler sees the cause class, the exception class bits of
+  `ESR_EL1` and the user virtual address of `FAR_EL1`, never a physical
+  address or a slot number or generation of the object table or a region
+  table. The sender of an asynchronous upcall appears as a badge or as a
+  handle of the receiver's table
+  ([observable outputs](security.md#observable-outputs)).
+- **Uses.** A Linux system call of a Linux process is a synchronous upcall,
+  as a user fault is: it goes to the compatibility runtime that loading
+  registered as its handler, and its delivery and return follow the rules
+  above ([Linux system calls](#processes-posix-and-linux-compatibility)).
+  POSIX signals and Linux signals ride on asynchronous upcalls, and the
+  compatibility runtime writes a Linux signal frame from the saved context.
+  The signal safe points and asynchronous preemption of the Go runtime use
+  asynchronous upcalls. The cooperative cancellation of a job in the middle
+  of an evaluation uses a thread interrupt for a blocked worker and an
+  asynchronous upcall for a running engine, which checks a cancellation
+  flag at its safe points.
+- **Not covered here.** These rules do not state the semantics of POSIX and
+  Linux signals; futex operations other than wait and wake, such as
+  requeue, priority inheritance and robust lists; the capacities of futexes
+  and upcalls; how they work across CPUs; the proofs of these mechanisms;
+  or the operations and errors of their kernel entries. The components of
+  the IPC and waits domain, which holds futex-style waits, of the multicore
+  domain, of the runtime ABI and SDK and of the compatibility personalities
+  ([subject domains](domains/README.md#domains)) state them in their
+  contracts.
 
 ## Multicore by design
 
@@ -475,23 +849,33 @@ Ethernet interrupt source that krepi does not own.
 
 EL0 uses hardware floating point; the kernel is built softfloat. Binary64
 addition, subtraction, multiplication, division, square root and fused
-multiply-add are the hardware's correctly rounded instructions. Every new
-process and thread starts with the default FPCR: round to nearest even, FZ
-clear, all trap enables clear, and the FEAT_AFP bits AH, FIZ and NEP clear.
-FPCR, FPSR and `q0`–`q31` survive preemption, yield, system calls and IPC,
-signal delivery and return, and migration. The floating-point environment
-belongs to the thread, and the system never changes the environment of a
-worker thread.
+multiply-add are the hardware's correctly rounded instructions. The kernel
+creates every new process and thread with the default FPCR: round to nearest
+even, FZ clear, all trap enables clear, and the FEAT_AFP bits AH, FIZ and NEP
+clear. Where POSIX makes a new thread inherit the environment of its
+creator, EL0 sets the inherited environment when it creates the thread: the
+only thread of the child of `fork` takes the saved context of the calling
+thread, FPCR and FPSR included, and the thread library sets a new POSIX
+thread to the environment of its creator before the thread starts. A new
+program image after `exec` starts with the default, and so does a CAS worker
+thread, whose creation path sets the default. FPCR, FPSR and `q0`–`q31`
+survive preemption, yield, system calls and IPC, signal delivery and return,
+and migration; signals are delivered as [upcalls](#futexes-and-upcalls),
+whose delivery and return save and restore these registers bit for bit. The
+floating-point environment belongs to the thread, and the system never
+changes the environment of a worker thread.
 
 ## Diagnostics and stacks
 
 Fault records carry the domain, thread, service generation, PC, SP and
-exception registers. Frame-pointer backtraces are bounded and check range,
-alignment and monotonic progress. The build reports an upper bound of the
-stack used by every EL1 entry. Besides its guarded kernel stack, each CPU has
-an emergency stack, so fatal diagnostics still run when the kernel stack of
-that CPU is damaged or has overflowed into its guard. IRQ and
-fatal-diagnostic paths do not allocate.
+exception registers. A fault that a registered fault handler takes leaves no
+fault record; a fault that terminates its process leaves one
+([upcalls](#futexes-and-upcalls)). Frame-pointer backtraces are bounded and
+check range, alignment and monotonic progress. The build reports an upper
+bound of the stack used by every EL1 entry. Besides its guarded kernel
+stack, each CPU has an emergency stack, so fatal diagnostics still run when
+the kernel stack of that CPU is damaged or has overflowed into its guard.
+IRQ and fatal-diagnostic paths do not allocate.
 
 ## Security model
 
@@ -513,8 +897,6 @@ each layer is organized and what remains trusted.
 These questions are being decided and the rules they produce will be stated on
 this page when they are made:
 
-- the process model, the architecture of the POSIX layer, the approach to
-  Linux compatibility and the POSIX, GNU and Linux baselines;
 - the storage architecture (read-only system image, VFS, writable file system
   back end) and the trust model for devices without an IOMMU;
 - the GUI, display and input stack with its rendering path, and the
