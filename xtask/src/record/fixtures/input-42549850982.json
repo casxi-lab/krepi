@@ -1,0 +1,59 @@
+{
+  "run": {
+    "id": 42549850982,
+    "attempt": 1,
+    "workflow": "formal",
+    "path": ".github/workflows/formal.yml",
+    "event": "pull_request",
+    "head_branch": "ci/check-lines",
+    "head_sha": "a626aae8108af1666e14441294099e3e99c02191",
+    "conclusion": "cancelled"
+  },
+  "jobs": [
+    {
+      "id": 128942754619,
+      "name": "formal run",
+      "conclusion": "cancelled",
+      "labels": [
+        "ubuntu-24.04-arm"
+      ],
+      "runner_group_name": "GitHub Actions",
+      "runner_name": "GitHub Actions 1000000285",
+      "started_at": 1794190494,
+      "completed_at": 1794191805,
+      "annotations": [
+        {
+          "level": "failure",
+          "title": "",
+          "message": "Canceling since a higher priority waiting request for formal-gate-21 exists"
+        }
+      ]
+    },
+    {
+      "id": 128942756158,
+      "name": "lake comparator",
+      "conclusion": "skipped",
+      "labels": [
+        "ubuntu-24.04-arm"
+      ],
+      "runner_group_name": null,
+      "runner_name": null,
+      "started_at": 1794190490,
+      "completed_at": 1794190490,
+      "annotations": []
+    },
+    {
+      "id": 128942756481,
+      "name": "leanchecker ${{ matrix.mode }}",
+      "conclusion": "skipped",
+      "labels": [
+        "ubuntu-24.04-arm"
+      ],
+      "runner_group_name": null,
+      "runner_name": null,
+      "started_at": 1794190490,
+      "completed_at": 1794190490,
+      "annotations": []
+    }
+  ]
+}

@@ -4,12 +4,15 @@
 mod check;
 mod docs;
 mod formal;
+mod image;
 mod manifests;
 mod receipt;
+mod record;
 mod repo;
 #[cfg(test)]
 mod scratch;
 mod subset;
+mod suite;
 mod toolchain;
 mod workflows;
 
@@ -27,7 +30,7 @@ pub struct Command {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "check",
-        about: "Run the required host checks: the toolchain, manifest, format and Clippy checks, then at once the debug lane (the tests and the documentation, Lean source, provable-subset and workflow checks) and the release tests; the first failure or a stop signal cancels the other steps, and a summary gives the seconds of each step; --help lists the options",
+        about: "Run the required host checks: the toolchain, manifest, format and Clippy checks, Clippy also on the kernel workspace for its bare-metal target, then at once the debug lane (the tests and the documentation, Lean source, provable-subset and workflow checks) and the release tests; the first failure or a stop signal cancels the other steps, and a summary gives the seconds of each step; --help lists the options",
         subcommands: &[],
     },
     Command {
@@ -41,6 +44,11 @@ pub const COMMANDS: &[Command] = &[
         subcommands: &[],
     },
     Command {
+        name: "image",
+        about: "Write the images that the QEMU suites boot into a new directory, with images.json, which gives the size, SHA-256 and commit of each; --help lists the options",
+        subcommands: &[],
+    },
+    Command {
         name: "qemu",
         about: "Run an ELF image on QEMU virt with one Cortex-A76 until the guest powers off or a limit ends the run, writing the serial transcript, QEMU's standard error and a receipt into a new directory; --help lists the options",
         subcommands: &[],
@@ -51,8 +59,18 @@ pub const COMMANDS: &[Command] = &[
         subcommands: &[],
     },
     Command {
+        name: "run-record",
+        about: "Write the record of one workflow run from the data of the GitHub API: the line, each job's runner class, seconds, minutes, limit and result, TIMEOUT included, the wall clock, the 80% mark and the retention, with a Markdown summary, into a new directory; --help lists the options",
+        subcommands: &[],
+    },
+    Command {
         name: "serial-capture",
         about: "Record what a board sends over a serial port for a bounded time into a new directory, without evaluating its boot; --help lists the options",
+        subcommands: &[],
+    },
+    Command {
+        name: "suite",
+        about: "Run the QEMU suites of suites.toml: the smoke cases and the suites that the paths changed since a base select, or every suite, with the slow cases on request, each case judged by its expected output, with a report in a new directory; --help lists the options",
         subcommands: &[],
     },
 ];
@@ -91,6 +109,9 @@ fn main() -> ExitCode {
             ExitCode::from(u8::try_from(code).unwrap_or(2))
         }
         ["formal", rest @ ..] => formal::run(&repo::root(), rest),
+        ["image", rest @ ..] => image::command(&repo::root(), rest),
+        ["suite", rest @ ..] => suite::command(&repo::root(), rest),
+        ["run-record", rest @ ..] => record::command(rest),
         [] | ["help"] => {
             print_help();
             ExitCode::SUCCESS

@@ -29,6 +29,8 @@
 //! `--slow` also runs the slow tests of every workspace: those marked
 //! `#[ignore = "slow"]`, whose names start with [`SLOW`].
 
+#[cfg(test)]
+mod ci;
 mod lanes;
 
 use std::ffi::OsString;
@@ -50,6 +52,10 @@ pub const WORKSPACES: [&str; 4] = ["kernel", "user", "xtask", "tools"];
 /// The workspaces that the release tests cover: the kernel and user-space
 /// workspaces, from which the kernel and user-space images are to be built.
 pub const RELEASE_WORKSPACES: [&str; 2] = ["kernel", "user"];
+
+/// The bare-metal target of the kernel images, for which the Clippy step
+/// also lints the kernel workspace.
+pub const TARGET: &str = "aarch64-unknown-none-softfloat";
 
 /// The start of the name of a slow test, which `--slow` passes to libtest as
 /// the filter of the ignored tests.
@@ -281,6 +287,33 @@ fn per_workspace(workspaces: &[&str], args: &[&str], trailing: &[&str]) -> Vec<C
         .collect()
 }
 
+/// Clippy on every member of the kernel workspace for [`TARGET`], with
+/// warnings as errors: the library, binary and example targets, which are
+/// the targets that build for it, so that the modules compiled only for the
+/// bare-metal target are linted as well. The tests need the standard library
+/// and are linted by the host Clippy only.
+fn target_clippy() -> Cmd {
+    let args = [
+        "clippy",
+        "--manifest-path",
+        "kernel/Cargo.toml",
+        "--workspace",
+        "--lib",
+        "--bins",
+        "--examples",
+        "--locked",
+        "--target",
+        TARGET,
+        "--",
+        "-D",
+        "warnings",
+    ];
+    Cmd {
+        program: cargo(),
+        args: args.map(str::to_string).to_vec(),
+    }
+}
+
 /// The steps of `cargo xtask check`, in the order in which `--sequential`
 /// runs them, each in its lane; with `slow`, the test step also runs the slow
 /// tests of each workspace, after the other tests of every workspace.
@@ -305,6 +338,12 @@ pub fn steps(slow: bool) -> Vec<Step> {
         ));
     }
     let release = ["test", "--release", "--workspace", "--locked"];
+    let mut clippy = per_workspace(
+        &WORKSPACES,
+        &["clippy", "--workspace", "--all-targets", "--locked"],
+        &["--", "-D", "warnings"],
+    );
+    clippy.push(target_clippy());
     vec![
         internal("toolchain", Lane::Lint, Box::new(toolchain::run)),
         internal(
@@ -317,15 +356,7 @@ pub fn steps(slow: bool) -> Vec<Step> {
             Lane::Lint,
             per_workspace(&WORKSPACES, &["fmt", "--all", "--check"], &[]),
         ),
-        commands(
-            "clippy",
-            Lane::Lint,
-            per_workspace(
-                &WORKSPACES,
-                &["clippy", "--workspace", "--all-targets", "--locked"],
-                &["--", "-D", "warnings"],
-            ),
-        ),
+        commands("clippy", Lane::Lint, clippy),
         commands("test", Lane::Debug, tests),
         commands(
             "test-release",
@@ -850,7 +881,33 @@ mod tests {
                     .expect("the step exists")
             };
             assert_eq!(manifests_of(step("fmt")), every);
-            assert_eq!(manifests_of(step("clippy")), every);
+            // The host Clippy of each workspace, then the kernel workspace
+            // for the bare-metal target.
+            let mut clippy = every.to_vec();
+            clippy.push("kernel/Cargo.toml");
+            assert_eq!(manifests_of(step("clippy")), clippy);
+            let Action::Commands(commands) = &step("clippy").action else {
+                unreachable!("checked above");
+            };
+            let target = commands.last().expect("the target Clippy");
+            assert_eq!(
+                target.args,
+                [
+                    "clippy",
+                    "--manifest-path",
+                    "kernel/Cargo.toml",
+                    "--workspace",
+                    "--lib",
+                    "--bins",
+                    "--examples",
+                    "--locked",
+                    "--target",
+                    TARGET,
+                    "--",
+                    "-D",
+                    "warnings",
+                ]
+            );
             let tests = manifests_of(step("test"));
             let runs = if slow { 2 } else { 1 };
             assert_eq!(tests, every.repeat(runs), "slow: {slow}");
@@ -881,6 +938,71 @@ mod tests {
                 assert_eq!(cmd.args.len(), 6, "{:?}", cmd.args);
             }
         }
+    }
+
+    #[test]
+    fn the_target_clippy_rejects_an_undocumented_unsafe_block() {
+        // A kernel workspace of one crate that denies undocumented unsafe
+        // blocks, as the crates of the kernel workspace do, with a module for
+        // the bare-metal target only. Below the build directory, so that the
+        // toolchain of the repository and its Cargo configuration apply as
+        // they do to the step.
+        let scratch = Scratch::new("target-clippy");
+        scratch.write(
+            "kernel/Cargo.toml",
+            "[workspace]\nresolver = \"3\"\nmembers = [\"probe\"]\n",
+        );
+        scratch.write(
+            "kernel/probe/Cargo.toml",
+            "[package]\nname = \"probe\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\
+             publish = false\n\n[lints.clippy]\nundocumented_unsafe_blocks = \"deny\"\n",
+        );
+        let source = |comment: &str| {
+            format!(
+                "//! A probe.\n#![cfg_attr(not(test), no_std)]\n\n\
+                 #[cfg(all(target_arch = \"aarch64\", target_os = \"none\"))]\n\
+                 pub mod target_only {{\n    /// Reads a word.\n    \
+                 pub fn read(word: &u32) -> u32 {{\n        {comment}\
+                 unsafe {{ core::ptr::read_volatile(word) }}\n    }}\n}}\n"
+            )
+        };
+        scratch.write("kernel/probe/src/lib.rs", &source(""));
+        scratch.lock();
+        let steps = steps(false);
+        let clippy = (steps.iter())
+            .find(|step| step.name == "clippy")
+            .expect("the clippy step");
+        let Action::Commands(commands) = &clippy.action else {
+            panic!("the clippy step runs commands");
+        };
+        let kernel: Vec<&Cmd> = (commands.iter())
+            .filter(|cmd| cmd.args.iter().any(|arg| arg == "kernel/Cargo.toml"))
+            .collect();
+        let [host, target] = kernel[..] else {
+            panic!("two commands of the step lint the kernel workspace: {kernel:?}");
+        };
+        let run = |cmd: &Cmd| {
+            Command::new(&cmd.program)
+                .args(&cmd.args)
+                .current_dir(&scratch.0)
+                .stdin(Stdio::null())
+                .output()
+                .expect("run Clippy")
+        };
+        // The host build does not compile the module, so it passes.
+        let output = run(host);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        let output = run(target);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(101), "{stderr}");
+        assert!(stderr.contains("undocumented_unsafe_blocks"), "{stderr}");
+        // With its safety comment, the block passes on the target as well.
+        let comment = "// SAFETY: a reference is valid for reads and aligned.\n        ";
+        scratch.write("kernel/probe/src/lib.rs", &source(comment));
+        let output = run(target);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
     }
 
     /// The problems of the naming rule of slow tests in the Rust source

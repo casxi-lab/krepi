@@ -1,0 +1,107 @@
+# The weekly line: once a week, on Sundays at 11:29 UTC, and on a manual
+# run, on main only. It runs every QEMU suite without the slow cases on the
+# images taken by their digests. Each job has a limit, and the image
+# command and the suite command also stop at a deadline two minutes before
+# the limit of their job. Actions are pinned to full commit SHAs; the
+# comment names the release.
+name: weekly
+
+on:
+  schedule:
+    - cron: "29 11 * * 0"
+  workflow_dispatch:
+
+concurrency:
+  group: weekly-${{ github.sha }}
+  cancel-in-progress: false
+
+# `bash` runs every step with `-eo pipefail`.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  image:
+    name: weekly image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      artifact: weekly-images-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+      test-elf-sha256: ${{ steps.image.outputs.test-elf-sha256 }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Write the images and their digests
+        id: image
+        run: |
+          timeout --signal=TERM --kill-after=60s 3m cargo xtask image --output-dir artifacts/images
+          jq -r '.images[] | "\(.name)-sha256=\(.sha256)"' artifacts/images/images.json >> "$GITHUB_OUTPUT"
+
+      - name: Upload the images
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: weekly-images-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/images
+          if-no-files-found: error
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+  suite:
+    name: weekly suite
+    needs: image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-arm
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      # The name of the artifact comes from the job that uploaded it, so
+      # that a rerun of this job alone still finds it.
+      - name: Download the images
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.image.outputs.artifact }}
+          path: artifacts/images
+
+      # Workflow commands are off while the suite prints.
+      - name: Run every QEMU suite
+        env:
+          TEST_ELF_SHA256: ${{ needs.image.outputs.test-elf-sha256 }}
+        run: |
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          status=0
+          timeout --signal=TERM --kill-after=60s 8m cargo xtask suite --images artifacts/images \
+            --expect "test-elf=$TEST_ELF_SHA256" --output-dir artifacts/suite || status=$?
+          echo "::$token::"
+          exit "$status"
+
+      - name: Upload the suite report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: weekly-suite-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/suite
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
