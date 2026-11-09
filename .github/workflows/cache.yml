@@ -8,9 +8,10 @@
 # GitHub evicted after seven days without use comes back, the job
 # `cache build` looks up each entry; for a missing one it installs or builds
 # what the lines install and build, measures it and saves it when it is
-# within its limit. The job `cache prune` then deletes the older entries of
-# each kind that was saved, so that one entry of each kind stays. Actions are
-# pinned to full commit SHAs; the comment names the release.
+# within its limit. The job `cache prune` then, once the current entry of a
+# kind is on main within its limit, deletes the older entries of that kind,
+# so that one entry of each kind stays. Actions are pinned to full commit
+# SHAs; the comment names the release.
 name: cache
 
 on:
@@ -51,9 +52,7 @@ jobs:
       contents: read
     outputs:
       cargo-key: ${{ steps.cargo.outputs.cache-primary-key }}
-      cargo-saved: ${{ steps.measure.outputs.save-cargo }}
       tools-key: ${{ steps.tools.outputs.cache-primary-key }}
-      tools-saved: ${{ steps.measure.outputs.save-tools }}
     steps:
       - name: Check out main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -202,11 +201,18 @@ jobs:
           }
           prune cargo "$CARGO_KEY" "$CARGO_CACHE_LIMIT"
           prune tools "$TOOLS_KEY" "$TOOLS_CACHE_LIMIT"
+          # The summary sums the list read again after the deletions: the
+          # cache usage that the API reports is refreshed only about every
+          # five minutes.
+          caches=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?per_page=100" \
+            --jq '.actions_caches[] | {ref, size_in_bytes}' | jq -s .)
+          count=$(jq length <<< "$caches")
+          bytes=$(jq '[.[].size_in_bytes] | add // 0' <<< "$caches")
           others=$(jq '[.[] | select(.ref != "refs/heads/main")] | length' <<< "$caches")
-          usage=$(gh api "repos/$GITHUB_REPOSITORY/actions/cache/usage" --jq .active_caches_size_in_bytes)
           {
             echo "## Cache usage"
             echo
-            echo "The caches of the repository hold $usage bytes after the deletions, against"
-            echo "5000000000 bytes in the steady state; $others entries were not saved on main."
+            echo "The list of caches, read after the deletions, holds $count entries with"
+            echo "$bytes bytes, against $((CARGO_CACHE_LIMIT + TOOLS_CACHE_LIMIT)) bytes in the steady"
+            echo "state; $others of them were not saved on main."
           } | tee -a "$GITHUB_STEP_SUMMARY"
