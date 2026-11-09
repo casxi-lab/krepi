@@ -56,7 +56,7 @@ runner, which records its serial output until the timeout:
 ```sh
 cargo xtask qemu-boot
 cd kernel
-cargo build --locked --release --target aarch64-unknown-none-softfloat --bin krepi-qemu-virt
+cargo build --locked --release --target aarch64-unknown-none-softfloat -p krepi-qemu-virt --bin krepi-qemu-virt
 cd ..
 cargo xtask qemu --timeout 5 kernel/target/aarch64-unknown-none-softfloat/release/krepi-qemu-virt
 ```

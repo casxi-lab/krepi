@@ -12,11 +12,12 @@
 //!
 //! The suite builds the image with
 //! `cargo build --locked --release --target aarch64-unknown-none-softfloat
-//! --bin krepi-qemu-virt --message-format=json-render-diagnostics` in
-//! `kernel/`, with the Cargo that `CARGO` names or else `cargo` from the
-//! search path, and takes the image from the artifact message of the
-//! binary. It records the output of `rustc -vV` in `kernel/` as the
-//! toolchain. `--qemu` names the QEMU executable, as for `cargo xtask qemu`.
+//! -p krepi-qemu-virt --bin krepi-qemu-virt
+//! --message-format=json-render-diagnostics` in `kernel/`, with the Cargo
+//! that `CARGO` names or else `cargo` from the search path, and takes the
+//! image from the artifact message of the binary. It records the output of
+//! `rustc -vV` in `kernel/` as the toolchain. `--qemu` names the QEMU
+//! executable, as for `cargo xtask qemu`.
 //! The suite creates the output directory, which must not exist, with its
 //! missing parents: by default `artifacts/qemu-boot/<%Y%m%dT%H%M%SZ>-<12
 //! hex digits>` below the repository root. It holds `build.log`, the
@@ -62,6 +63,8 @@ use std::sync::atomic::AtomicI32;
 
 /// The bare-metal target of the kernel images.
 pub const TARGET: &str = "aarch64-unknown-none-softfloat";
+/// The board crate of QEMU virt, which holds the default image.
+pub const PACKAGE: &str = "krepi-qemu-virt";
 /// The binary of the QEMU virt default image.
 pub const DEFAULT_IMAGE: &str = "krepi-qemu-virt";
 /// The bytes that the case sends once the image is ready: the challenge of
@@ -403,6 +406,7 @@ pub fn executable_from_messages(messages: &str) -> Option<PathBuf> {
 }
 
 /// The command that builds the default image, the Cargo executable first.
+/// It selects the board crate with `-p` and the image with `--bin`.
 pub fn build_command() -> Vec<String> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     [
@@ -412,6 +416,8 @@ pub fn build_command() -> Vec<String> {
         "--release",
         "--target",
         TARGET,
+        "-p",
+        PACKAGE,
         "--bin",
         DEFAULT_IMAGE,
         "--message-format=json-render-diagnostics",

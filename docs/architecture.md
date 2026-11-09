@@ -563,9 +563,11 @@ whole modules under `cfg(all(target_arch = "aarch64", target_os = "none"))`;
 everything else is plain code that the host tests run. The checks lint and
 test only the host build: they format the modules of the bare-metal target
 but do not lint or test them, and `cargo xtask qemu-boot` compiles them.
-Images are built with Cargo in `kernel/` or at the repository root, whose
-`.cargo/config.toml` gives the target its flags: a GNU build-id note of
-SHA-1, the static relocation model and frame pointers.
+Images are built with Cargo in `kernel/`, or at the repository root with
+`--manifest-path kernel/Cargo.toml`, and the command names the board crate
+of the image with `-p`, such as `-p krepi-qemu-virt`. The
+`.cargo/config.toml` of the repository root gives the target its flags: a
+GNU build-id note of SHA-1, the static relocation model and frame pointers.
 
 | Crate | Modules |
 | --- | --- |

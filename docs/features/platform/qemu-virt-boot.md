@@ -42,7 +42,7 @@ handle exceptions.
 
   ```sh
   cd kernel
-  cargo build --locked --release --target aarch64-unknown-none-softfloat --bin krepi-qemu-virt
+  cargo build --locked --release --target aarch64-unknown-none-softfloat -p krepi-qemu-virt --bin krepi-qemu-virt
   ```
 
   QEMU loads it with `-kernel` and enters it at `_start`, `0x4020_0000`.

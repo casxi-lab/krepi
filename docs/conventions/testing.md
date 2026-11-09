@@ -333,10 +333,10 @@ QEMU virt default image, boots it on QEMU virt through the library entry of
 the QEMU runner and judges every run; it is not part of the check, and CI
 runs it after the check as stated above. It builds the image with
 `cargo build --locked --release --target aarch64-unknown-none-softfloat
---bin krepi-qemu-virt --message-format=json-render-diagnostics` in
-`kernel/`, where the `.cargo/config.toml` of the repository root gives the
-target its flags, takes the image from Cargo's artifact message and records
-`rustc -vV`.
+-p krepi-qemu-virt --bin krepi-qemu-virt
+--message-format=json-render-diagnostics` in `kernel/`, where the
+`.cargo/config.toml` of the repository root gives the target its flags,
+takes the image from Cargo's artifact message and records `rustc -vV`.
 Its one case, `cold-boot-echo`, runs the image three times, each in a new
 QEMU process with the command line of `cargo xtask qemu` and the host
 clock, with a window of 20 s and a limit of 4,096 bytes of serial output,

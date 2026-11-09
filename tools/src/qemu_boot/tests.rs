@@ -294,8 +294,8 @@ fn the_image_is_taken_from_the_artifact_message() {
     );
 }
 
-/// The build command builds only the default image, from the lock and in
-/// release, for the bare-metal target.
+/// The build command builds only the default image of the board crate, from
+/// the lock and in release, for the bare-metal target.
 #[test]
 fn the_build_command_names_the_default_image() {
     let command = build_command();
@@ -307,6 +307,8 @@ fn the_build_command_names_the_default_image() {
             "--release",
             "--target",
             "aarch64-unknown-none-softfloat",
+            "-p",
+            "krepi-qemu-virt",
             "--bin",
             "krepi-qemu-virt",
             "--message-format=json-render-diagnostics",
