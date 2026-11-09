@@ -7,6 +7,7 @@ mod formal;
 mod image;
 mod manifests;
 mod receipt;
+mod record;
 mod repo;
 #[cfg(test)]
 mod scratch;
@@ -58,6 +59,11 @@ pub const COMMANDS: &[Command] = &[
         subcommands: &[],
     },
     Command {
+        name: "run-record",
+        about: "Write the record of one workflow run from the data of the GitHub API: the line, each job's runner class, seconds, minutes, limit and result, TIMEOUT included, the wall clock, the 80% mark and the retention, with a Markdown summary, into a new directory; --help lists the options",
+        subcommands: &[],
+    },
+    Command {
         name: "serial-capture",
         about: "Record what a board sends over a serial port for a bounded time into a new directory, without evaluating its boot; --help lists the options",
         subcommands: &[],
@@ -105,6 +111,7 @@ fn main() -> ExitCode {
         ["formal", rest @ ..] => formal::run(&repo::root(), rest),
         ["image", rest @ ..] => image::command(&repo::root(), rest),
         ["suite", rest @ ..] => suite::command(&repo::root(), rest),
+        ["run-record", rest @ ..] => record::command(rest),
         [] | ["help"] => {
             print_help();
             ExitCode::SUCCESS

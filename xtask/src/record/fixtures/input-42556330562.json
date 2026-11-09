@@ -1,0 +1,27 @@
+{
+  "run": {
+    "id": 42556330562,
+    "attempt": 1,
+    "workflow": "check",
+    "path": ".github/workflows/check.yml",
+    "event": "push",
+    "head_branch": "main",
+    "head_sha": "e88909c63ae9696640047df39e0d376ad744037b",
+    "conclusion": "success"
+  },
+  "jobs": [
+    {
+      "id": 128962751974,
+      "name": "cargo xtask check",
+      "conclusion": "success",
+      "labels": [
+        "ubuntu-24.04-arm"
+      ],
+      "runner_group_name": "GitHub Actions",
+      "runner_name": "GitHub Actions 1000000306",
+      "started_at": 1794194736,
+      "completed_at": 1794194929,
+      "annotations": []
+    }
+  ]
+}

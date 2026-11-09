@@ -49,6 +49,12 @@ workflow, run it after the check.
 [Testing](docs/conventions/testing.md#entry-points) describes the manifest,
 the selection and the report.
 
+`cargo xtask run-record` writes the record of one workflow run, its line,
+the runner class, minutes, limit and result of each job and its wall clock,
+from data of the GitHub API; the workflow `run record` runs it after each
+run of the other workflows.
+[Testing](docs/conventions/testing.md#entry-points) describes the record.
+
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
 QEMU virt default image in `kernel/`, boots it three times on QEMU virt
 through the QEMU runner, sends it serial input and judges each transcript
