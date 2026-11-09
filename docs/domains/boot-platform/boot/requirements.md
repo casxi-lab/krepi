@@ -106,7 +106,7 @@ count the attempts and hold the panic record byte for byte.
 - **Specification.** None: no specification covers the component.
 - **Proof path.** None: the [open obligations](contract.md#open-obligations)
   of the contract carry its code.
-- **Evidence.** The host tests of `kernel/qemu-virt/src/console/`: the
+- **Evidence.** The host tests of `kernel/boards/qemu-virt/src/console/`: the
   examples, boundaries and panic records of `console/tests.rs` and the
   tests taken from the prototype tree in `console/polled/tests.rs` and
   `console/emitter/tests.rs`, with their expected values. They show the

@@ -75,7 +75,7 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
-      "item": "kernel/qemu-virt/src",
+      "item": "kernel/boards/qemu-virt/src",
       "kind": "code",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
@@ -83,7 +83,7 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
-      "item": "kernel/qemu-virt/src/main.rs#image::initialize",
+      "item": "kernel/boards/qemu-virt/src/main.rs#image::initialize",
       "kind": "unsafe",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
@@ -91,7 +91,7 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
-      "item": "kernel/qemu-virt/src/main.rs#image::kernel_main",
+      "item": "kernel/boards/qemu-virt/src/main.rs#image::kernel_main",
       "kind": "unsafe",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
@@ -99,7 +99,7 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
-      "item": "kernel/qemu-virt/src/uart.rs#read",
+      "item": "kernel/boards/qemu-virt/src/uart.rs#read",
       "kind": "mmio",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
@@ -107,7 +107,7 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
-      "item": "kernel/qemu-virt/src/uart.rs#write",
+      "item": "kernel/boards/qemu-virt/src/uart.rs#write",
       "kind": "mmio",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",

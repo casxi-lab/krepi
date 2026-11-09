@@ -8,18 +8,18 @@ paths:
   - link.ld
   - .cargo/config.toml
 destination:
-  - kernel/qemu-virt/Cargo.toml
-  - kernel/qemu-virt/build.rs
-  - kernel/qemu-virt/link.ld
-  - kernel/qemu-virt/src/lib.rs
-  - kernel/qemu-virt/src/main.rs
+  - kernel/boards/qemu-virt/Cargo.toml
+  - kernel/boards/qemu-virt/build.rs
+  - kernel/boards/qemu-virt/link.ld
+  - kernel/boards/qemu-virt/src/lib.rs
+  - kernel/boards/qemu-virt/src/main.rs
   - .cargo/config.toml
 treatment: ported
 features:
   - krepi.platform.qemu-virt-boot
 ---
 
-# Porting record: kernel/qemu-virt/src/lib.rs
+# Porting record: kernel/boards/qemu-virt/src/lib.rs
 
 ## Summary
 

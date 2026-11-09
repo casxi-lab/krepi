@@ -8,18 +8,18 @@ paths:
   - src/diagnostics/tests.rs
   - src/fault.rs
 destination:
-  - kernel/qemu-virt/src/console.rs
-  - kernel/qemu-virt/src/console/tests.rs
-  - kernel/qemu-virt/src/console/polled.rs
-  - kernel/qemu-virt/src/console/polled/tests.rs
-  - kernel/qemu-virt/src/console/emitter.rs
-  - kernel/qemu-virt/src/console/emitter/tests.rs
+  - kernel/boards/qemu-virt/src/console.rs
+  - kernel/boards/qemu-virt/src/console/tests.rs
+  - kernel/boards/qemu-virt/src/console/polled.rs
+  - kernel/boards/qemu-virt/src/console/polled/tests.rs
+  - kernel/boards/qemu-virt/src/console/emitter.rs
+  - kernel/boards/qemu-virt/src/console/emitter/tests.rs
 treatment: ported
 features:
   - krepi.platform.qemu-virt-boot
 ---
 
-# Porting record: kernel/qemu-virt/src/console.rs
+# Porting record: kernel/boards/qemu-virt/src/console.rs
 
 ## Summary
 
@@ -102,8 +102,8 @@ controllers used, with its first caller.
 
 | Legacy test | krepi test |
 | --- | --- |
-| `src/diagnostics/polled_tests.rs`: `long_record_survives_more_polls_at_the_same_device_rate`, `deadline_stops_a_busy_device_before_its_poll_cap`, `stopped_clock_still_has_a_finite_stall_bound`, `deadline_is_not_renewed_after_success_and_handles_counter_wrap`, `crlf_counts_against_the_byte_limit`, `ignored_formatter_errors_cannot_restart_output`, `invalid_budgets_never_touch_clock_or_device`, `formatter_failure_is_not_silently_accepted` | The same names in `kernel/qemu-virt/src/console/polled/tests.rs` |
-| `src/diagnostics/tests.rs:264-337`: `permanently_full_output_spends_only_the_total_budget`, `intermittent_output_retries_without_skipping_or_transforming_bytes`, `successful_writes_also_consume_attempts`, `empty_output_and_zero_budget_never_call_device` | The same names in `kernel/qemu-virt/src/console/emitter/tests.rs` |
+| `src/diagnostics/polled_tests.rs`: `long_record_survives_more_polls_at_the_same_device_rate`, `deadline_stops_a_busy_device_before_its_poll_cap`, `stopped_clock_still_has_a_finite_stall_bound`, `deadline_is_not_renewed_after_success_and_handles_counter_wrap`, `crlf_counts_against_the_byte_limit`, `ignored_formatter_errors_cannot_restart_output`, `invalid_budgets_never_touch_clock_or_device`, `formatter_failure_is_not_silently_accepted` | The same names in `kernel/boards/qemu-virt/src/console/polled/tests.rs` |
+| `src/diagnostics/tests.rs:264-337`: `permanently_full_output_spends_only_the_total_budget`, `intermittent_output_retries_without_skipping_or_transforming_bytes`, `successful_writes_also_consume_attempts`, `empty_output_and_zero_budget_never_call_device` | The same names in `kernel/boards/qemu-virt/src/console/emitter/tests.rs` |
 
 No expected value changed.
 

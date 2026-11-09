@@ -30,7 +30,7 @@ behaviour that these rules serve, with its evidence, is in the
 | Entry point | Kind | Called by | Rules |
 | --- | --- | --- | --- |
 | `_start` in `kernel/arch/src/boot.S` | Hardware entry | The machine, at the ELF entry point | [Cold entry](#cold-entry) |
-| `kernel_main` in `kernel/qemu-virt/src/main.rs` | Rust entry, `extern "C" fn() -> !` | `_start`, once, on the boot CPU | [Initialization checks](#initialization-checks), [Echo](#echo) |
+| `kernel_main` in `kernel/boards/qemu-virt/src/main.rs` | Rust entry, `extern "C" fn() -> !` | `_start`, once, on the boot CPU | [Initialization checks](#initialization-checks), [Echo](#echo) |
 | The panic handler of the default image | Rust panic | A failed check or any other panic | [Records](#records), [Console output](#console-output) |
 | `krepi_qemu_virt::uart::print` | Function | Kernel code of the boot CPU | [Console output](#console-output) |
 | `krepi_qemu_virt::uart::write_echo` | Function | The echo loop | [Echo](#echo) |
@@ -219,7 +219,7 @@ Which bytes arrive, and when, is the input of the echo.
 
 ## Testing obligations
 
-- The host tests of `kernel/qemu-virt/src/console/` cover the console
+- The host tests of `kernel/boards/qemu-virt/src/console/` cover the console
   logic: the expansion of LF, the echo of every kind of byte, the panic
   record with a static message, with a message that is not static, without
   a location and with a message too long for a record, each failure of a
@@ -245,11 +245,11 @@ Which bytes arrive, and when, is the input of the echo.
 | `kernel/arch/src/cpu.rs#virtual_counter` | `unsafe` | Neither (reads `CNTVCT_EL0`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs#cpacr` | `unsafe` | Neither (reads `CPACR_EL1`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs#halt` | `unsafe` | Neither (writes `DAIF`, waits with `WFE`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
-| `kernel/qemu-virt/src` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
-| `kernel/qemu-virt/src/uart.rs#read` | `mmio` | Neither (reads a PL011 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
-| `kernel/qemu-virt/src/uart.rs#write` | `mmio` | Neither (writes a PL011 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
-| `kernel/qemu-virt/src/main.rs#image::initialize` | `unsafe` | Neither (reads two words of the image) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
-| `kernel/qemu-virt/src/main.rs#image::kernel_main` | `unsafe` | Neither (exports the unmangled symbol that the cold entry calls) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/boards/qemu-virt/src` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/boards/qemu-virt/src/uart.rs#read` | `mmio` | Neither (reads a PL011 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/boards/qemu-virt/src/uart.rs#write` | `mmio` | Neither (writes a PL011 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/boards/qemu-virt/src/main.rs#image::initialize` | `unsafe` | Neither (reads two words of the image) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/boards/qemu-virt/src/main.rs#image::kernel_main` | `unsafe` | Neither (exports the unmangled symbol that the cold entry calls) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 
 ## Legacy test vectors
 

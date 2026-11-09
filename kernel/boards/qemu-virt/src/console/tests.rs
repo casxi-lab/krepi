@@ -217,7 +217,7 @@ mod panic_record {
 
     /// The location of the panics of these tests.
     const LOCATION: PanicLocation<'static> = PanicLocation {
-        file: "kernel/qemu-virt/src/main.rs",
+        file: "boards/qemu-virt/src/main.rs",
         line: 77,
         column: 9,
     };
@@ -236,7 +236,7 @@ mod panic_record {
             ready(&mut output),
         );
         let expected: &[u8] = b"\r\nCASXI_PANIC BSS not initialized\r\n\
-            CASXI_PANIC_LOCATION file=kernel/qemu-virt/src/main.rs line=77 column=9\r\n\
+            CASXI_PANIC_LOCATION file=boards/qemu-virt/src/main.rs line=77 column=9\r\n\
             CASXI_HALTED\r\n";
         assert_eq!(output, expected);
         assert_eq!(result, Ok(expected.len()));
@@ -255,7 +255,7 @@ mod panic_record {
             ready(&mut output),
         );
         let expected: &[u8] = b"\r\nCASXI_PANIC dynamic_panic_message_omitted\r\n\
-            CASXI_PANIC_LOCATION file=kernel/qemu-virt/src/main.rs line=77 column=9\r\n\
+            CASXI_PANIC_LOCATION file=boards/qemu-virt/src/main.rs line=77 column=9\r\n\
             CASXI_HALTED\r\n";
         assert_eq!(output, expected);
         assert_eq!(result, Ok(expected.len()));

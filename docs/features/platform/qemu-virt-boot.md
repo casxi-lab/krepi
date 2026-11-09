@@ -6,17 +6,17 @@ modules:
   - kernel/arch/src/boot.rs
   - kernel/arch/src/boot.S
   - kernel/arch/src/cpu.rs
-  - kernel/qemu-virt/build.rs
-  - kernel/qemu-virt/src/lib.rs
-  - kernel/qemu-virt/src/main.rs
-  - kernel/qemu-virt/src/uart.rs
-  - kernel/qemu-virt/src/console.rs
-  - kernel/qemu-virt/src/console/polled.rs
-  - kernel/qemu-virt/src/console/emitter.rs
+  - kernel/boards/qemu-virt/build.rs
+  - kernel/boards/qemu-virt/src/lib.rs
+  - kernel/boards/qemu-virt/src/main.rs
+  - kernel/boards/qemu-virt/src/uart.rs
+  - kernel/boards/qemu-virt/src/console.rs
+  - kernel/boards/qemu-virt/src/console/polled.rs
+  - kernel/boards/qemu-virt/src/console/emitter.rs
 tests:
-  - kernel/qemu-virt/src/console/tests.rs
-  - kernel/qemu-virt/src/console/polled/tests.rs
-  - kernel/qemu-virt/src/console/emitter/tests.rs
+  - kernel/boards/qemu-virt/src/console/tests.rs
+  - kernel/boards/qemu-virt/src/console/polled/tests.rs
+  - kernel/boards/qemu-virt/src/console/emitter/tests.rs
 suites:
   - qemu-boot
 theorems: none
@@ -37,8 +37,8 @@ handle exceptions.
 
 ## Interface
 
-- **Image.** `krepi-qemu-virt`, the binary of `kernel/qemu-virt`, built in
-  `kernel/` for `aarch64-unknown-none-softfloat` in release:
+- **Image.** `krepi-qemu-virt`, the binary of `kernel/boards/qemu-virt`,
+  built in `kernel/` for `aarch64-unknown-none-softfloat` in release:
 
   ```sh
   cd kernel
@@ -151,29 +151,31 @@ LF, LF and `0xff`: only the carriage return gains a line feed.
   entry `_start`.
 - `kernel/arch/src/cpu.rs`: the readers of `CurrentEL`, `MIDR_EL1`,
   `SCTLR_EL1`, `CNTFRQ_EL0`, `CNTVCT_EL0` and `CPACR_EL1`, and `halt`.
-- `kernel/qemu-virt/link.ld`, which `kernel/qemu-virt/build.rs` hands the
-  linker for the bare-metal target: the layout of the image at
-  `0x4020_0000`, its 64 KiB stack with a guard page and its build-id note.
+- `kernel/boards/qemu-virt/link.ld`, which
+  `kernel/boards/qemu-virt/build.rs` hands the linker for the bare-metal
+  target: the layout of the image at `0x4020_0000`, its 64 KiB stack with a
+  guard page and its build-id note.
   The `.cargo/config.toml` of the repository root gives the target its
   build-id, relocation model and frame pointers.
-- `kernel/qemu-virt/src/lib.rs`: the PL011 address, the console bounds of
+- `kernel/boards/qemu-virt/src/lib.rs`: the PL011 address, the console bounds of
   QEMU virt and the CPU identity check `verify_cpu`.
-- `kernel/qemu-virt/src/main.rs`: `kernel_main` with the initialization
+- `kernel/boards/qemu-virt/src/main.rs`: `kernel_main` with the initialization
   checks, the boot records and the echo loop, and the panic handler.
-- `kernel/qemu-virt/src/uart.rs`: the PL011 setup, `try_put`, `get`, and
+- `kernel/boards/qemu-virt/src/uart.rs`: the PL011 setup, `try_put`, `get`, and
   `print`, `write_echo` and `report_panic`, which write within the bounds
   and report a failure.
-- `kernel/qemu-virt/src/console.rs` with `console/polled.rs` and
+- `kernel/boards/qemu-virt/src/console.rs` with `console/polled.rs` and
   `console/emitter.rs`: the bounded writes of a record and of bytes, the echo
   rule, the panic record and the failure markers.
 
 ## Verification
 
-- **Host.** The tests of `kernel/qemu-virt/src/console/` run in the `test`
-  step of `cargo xtask check`: the examples above, the boundaries of a write
-  and of the failure marker, and the tests taken from the prototype tree with
-  their expected values. They establish the logic of the bounds with a device
-  and a counter that the tests drive, not the PL011 or a machine's counter.
+- **Host.** The tests of `kernel/boards/qemu-virt/src/console/` run in the
+  `test` step of `cargo xtask check`: the examples above, the boundaries of a
+  write and of the failure marker, and the tests taken from the prototype
+  tree with their expected values. They establish the logic of the bounds
+  with a device and a counter that the tests drive, not the PL011 or a
+  machine's counter.
 - **QEMU.** The case `cold-boot-echo` of the QEMU boot suite,
   `cargo xtask qemu-boot`, runs in the `check` workflow on QEMU virt
   `virt-8.2` with one Cortex-A76, 128 MiB and the host clock, at the QEMU

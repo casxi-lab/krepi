@@ -3,13 +3,13 @@ source: prototype@ec8305c618a8f4e84e0707fa56beac5673f4675e
 paths:
   - src/board/qemu/uart.rs
 destination:
-  - kernel/qemu-virt/src/uart.rs
+  - kernel/boards/qemu-virt/src/uart.rs
 treatment: ported
 features:
   - krepi.platform.qemu-virt-boot
 ---
 
-# Porting record: kernel/qemu-virt/src/uart.rs
+# Porting record: kernel/boards/qemu-virt/src/uart.rs
 
 ## Summary
 
