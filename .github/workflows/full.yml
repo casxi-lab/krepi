@@ -97,13 +97,16 @@ jobs:
     needs: head
     if: github.event.label.name == 'full-check'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 5
+    timeout-minutes: 1
     permissions:
       contents: read
     outputs:
       artifact: full-images-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
       test-elf-sha256: ${{ steps.image.outputs.test-elf-sha256 }}
     steps:
+      - name: Exceed the job limit
+        run: sleep 150
+
       - name: Check out the head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
