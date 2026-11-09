@@ -121,7 +121,8 @@ no file of this component.
   to the 2 KiB that `VBAR_EL1` requires; aligns the stack, 64 KiB with a
   4 KiB guard below it, and the ends of BSS to 4 KiB; requires a GNU
   build-id note of 36 bytes, a SHA-1 build-id; and requires the image to end
-  within the 128 MiB of RAM that QEMU virt has at least. A link that breaks
+  within the 128 MiB of RAM that the runner gives QEMU virt, which is also
+  QEMU's default. A link that breaks
   one of these rules fails. The default image is entered at `_start`; a test
   image names its own entry, `krepi_test_entry`, which branches to `_start`
   or, on the machine with EL2, drops to EL1 and returns to `_start`.
@@ -620,13 +621,13 @@ records of the [console](../../../porting/console.md) and of
 ## References
 
 - Arm Limited, *Arm Architecture Reference Manual for A-profile
-  architecture*, DDI 0487,
-  <https://developer.arm.com/documentation/ddi0487/latest/>: `CurrentEL`,
-  `MIDR_EL1`, `SCTLR_EL1`, `CPACR_EL1`, `CNTFRQ_EL0`, `CNTVCT_EL0`, `DAIF`
-  and `WFE`; the exception entry and return, the vector table and
-  `VBAR_EL1`; `ESR_EL1` with the exception classes `0x07`, `0x2f` and
-  `0x3c`, `ELR_EL1`, `SPSR_EL1` and `FAR_EL1`; and, for the test image that
-  enters at EL2, `HCR_EL2` with RW, AMO and VSE, `VSESR_EL2`,
+  architecture*, DDI 0487, version M.d, 2026,
+  <https://documentation-service.arm.com/static/6abbec2a6db85c5e6614a4a1>:
+  `CurrentEL`, `MIDR_EL1`, `SCTLR_EL1`, `CPACR_EL1`, `CNTFRQ_EL0`,
+  `CNTVCT_EL0`, `DAIF` and `WFE`; the exception entry and return, the vector
+  table and `VBAR_EL1`; `ESR_EL1` with the exception classes `0x07`, `0x2f`
+  and `0x3c`, `ELR_EL1`, `SPSR_EL1` and `FAR_EL1`; and, for the test image
+  that enters at EL2, `HCR_EL2` with RW, AMO and VSE, `VSESR_EL2`,
   `CNTHCTL_EL2`, `CNTVOFF_EL2` and `VMPIDR_EL2`; the generic timer,
   `CNTV_CTL_EL0` and `CNTV_CVAL_EL0`, and `ISR_EL1`; the cache and TLB
   maintenance: `CTR_EL0`, `DC CVAU`, `DC IVAC`, `IC IVAU`, `IC IALLU`,
@@ -642,7 +643,9 @@ records of the [console](../../../porting/console.md) and of
   <https://documentation-service.arm.com/static/670e4dc89fbc7343d3e4cee1>:
   chapter 8, the maintenance of the TLB.
 - Arm Limited, *ARM Generic Interrupt Controller Architecture
-  Specification, GIC architecture version 2.0*, IHI 0048B: the distributor
+  Specification, GIC architecture version 2.0*, IHI 0048B.b, 2013,
+  <https://documentation-service.arm.com/static/5f8ff196f86e16515cdbf969>:
+  the distributor
   and CPU interface registers, the interrupt groups with and without the
   Security Extensions, the acknowledgement, the special interrupt IDs and
   the end of interrupt.
@@ -656,4 +659,7 @@ records of the [console](../../../porting/console.md) and of
   the registers, flags and divisors.
 - The QEMU Project, *'virt' generic virtual platform*,
   <https://www.qemu.org/docs/master/system/arm/virt.html>: the machine, its
-  RAM, its PL011, its GICv2 and the virtual timer interrupt.
+  options and its RAM.
+- The QEMU Project, QEMU 8.2.2, `hw/arm/virt.c` and `include/hw/arm/bsa.h`,
+  <https://gitlab.com/qemu-project/qemu/-/blob/v8.2.2/hw/arm/virt.c>: the
+  addresses of the PL011 and the GICv2 and the interrupts of the timers.

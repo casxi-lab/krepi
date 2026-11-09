@@ -28,9 +28,10 @@ follow are in the [contract](contract.md).
   changes. The cache and TLB maintenance takes the clean, the invalidations
   and the line walks of the prototype tree; its TLB invalidation of a page
   is new.
-- The records, the checks and the bounds follow the Arm Architecture
-  Reference Manual, the Cortex-A76 and PL011 manuals and the QEMU virt
-  documentation that the [contract](contract.md#references) cites.
+- The records, the checks, the bounds and the cache and TLB maintenance
+  follow the Arm Architecture Reference Manual, the Cortex-A76 and PL011
+  manuals and the QEMU virt documentation and source that the
+  [contract](contract.md#references) cites.
 - The echo challenge and the shape of the boot case come from the
   prototype's QEMU boot suite, and the expected fields of the timer IRQ, of
   the registers across it and of the FP/SIMD trap from its suite of

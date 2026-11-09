@@ -248,8 +248,8 @@ input of the walk.
 ## References
 
 - Arm Limited, *Arm Architecture Reference Manual for A-profile
-  architecture*, DDI 0487,
-  <https://developer.arm.com/documentation/ddi0487/latest/>.
+  architecture*, DDI 0487, version M.d, 2026,
+  <https://documentation-service.arm.com/static/6abbec2a6db85c5e6614a4a1>.
 - Arm Limited, *Arm Cortex-A76 Core Technical Reference Manual*, revision
   r4p1, document 100798_0401_00_en, 2020,
   <https://documentation-service.arm.com/static/5f562083235b3560a01e03bc>.
@@ -258,6 +258,8 @@ input of the walk.
   <https://documentation-service.arm.com/static/5e8e36c2fd977155116a90b5>.
 - The QEMU Project, *'virt' generic virtual platform*,
   <https://www.qemu.org/docs/master/system/arm/virt.html>.
+- The QEMU Project, QEMU 8.2.2, `hw/arm/virt.c` and `include/hw/arm/bsa.h`,
+  <https://gitlab.com/qemu-project/qemu/-/blob/v8.2.2/hw/arm/virt.c>.
 
 ## Implementation
 

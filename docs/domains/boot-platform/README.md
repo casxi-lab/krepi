@@ -79,9 +79,11 @@ segments, places the device tree at the start of RAM and enters the ELF
 entry point on the first CPU, at EL1 when the machine has the secure state
 and virtualization off, and at EL2 when it has the secure state off and
 virtualization on. On the Pi 5 the boot firmware enters the kernel at EL2
-with the MMU and the caches off, and BL31 stays resident at EL3 with the
-PSCI services. The handoff does not start secondary CPUs and does not check
-the integrity of the image.
+in Non-secure state with the MMU off, as the Linux arm64 boot protocol that
+it follows requires; that protocol allows the instruction cache to be on,
+so the EL1 entry checks both caches, which the prototype found off. BL31
+stays resident at EL3 with the PSCI services. The handoff does not start
+secondary CPUs and does not check the integrity of the image.
 
 **Design background.** The kernel takes the handoff as a contract of the
 board and checks what it can: the exception level, the control registers and
@@ -260,9 +262,11 @@ rejects a tree that breaks the format or a bound. It does not apply
 overlays or change the tree.
 
 **Design background.** The format is that of the Devicetree Specification.
-The Pi 5 firmware tree has 334 symbol properties, vendor names of 32
-characters and a reserved range for the contiguous memory allocator that
-changes with the configuration, so the bounds are set from the trees of the
+The device tree that the Pi 5 firmware ships (firmware commit `0162538`,
+November 2026) has 334 properties in its symbol node, property names of up
+to 32 characters and a dynamic reservation for the contiguous memory
+allocator, a size and an allowed range rather than an address, whose size
+the configuration sets, so the bounds are set from the trees of the
 supported firmware versions with a margin. The parser follows the
 [provable Rust subset](../../conventions/provable-subset.md).
 
@@ -289,10 +293,12 @@ the device tree itself, the kernel builds the list of usable RAM ranges and
 of the ranges that it must not hand out. Ranges are page aligned, sorted and
 disjoint. It does not allocate pages: the memory domain owns them.
 
-**Design background.** On the Pi 5 the upstream memory node is a placeholder
-of 640 MiB; the 8 GiB of the board come in three banks with a hole of 4 MiB,
-and using all of them needs block mappings and a kernel direct map. QEMU
-virt has one bank at `0x4000_0000`.
+**Design background.** On the Pi 5 the memory node of the device tree that
+Raspberry Pi ships is a placeholder of 640 MiB, which the firmware replaces;
+on the 8 GB model the firmware describes three banks with a hole of 4 MiB
+below 1 GiB, as the prototype measured with its firmware versions, and
+using all of them needs block mappings and a kernel direct map. QEMU virt
+has one bank at `0x4000_0000`.
 
 **Consumers.** The physical page ownership and the kernel direct map of the
 memory domain.
@@ -321,8 +327,11 @@ physical timer and the PCIe link to RP1. Board support does not share an
 address or a route between the two boards.
 
 **Design background.** QEMU virt is described by QEMU's documentation of
-the machine; the Pi 5 by the BCM2712, RP1 and firmware documentation and by
-the measurements of the prototype, recorded with their firmware versions.
+the machine and, for the addresses and interrupts that the documentation
+leaves to the device tree, by the source of the pinned QEMU version; the
+Pi 5 by the RP1 and firmware documentation, by the device trees that
+Raspberry Pi publishes and by the measurements of the prototype, recorded
+with their firmware versions.
 UART10 of the Pi 5 keeps the divisor that the firmware set. The serial
 console polls its UART within platform parameters.
 
@@ -362,8 +371,10 @@ interrupts to EL0 drivers, which the devices and DMA domain does.
 **Design background.** The GICv2 architecture specification fixes the
 registers, the acknowledgement through the interrupt acknowledge register
 and the end of interrupt; an acknowledged interrupt is ended exactly once.
-On the Pi 5 the Group 1 routing of interrupt 30 can only be configured by the
-firmware.
+On the Pi 5 the kernel runs in Non-secure state, where the group registers
+of the GIC-400 read as zero and ignore writes, so only the Secure firmware
+can put interrupt 30, the Non-secure physical timer, and any other
+interrupt that the kernel takes into Group 1.
 
 **Consumers.** The timer and preemption of the scheduling domain, interrupt
 delivery of the devices and DMA domain and inter-processor interrupts of the
@@ -394,17 +405,23 @@ Pi 5 the same through the GIC-400 on the bench.
 ## PCIe and RP1 links
 
 **Description.** On the Pi 5 the kernel brings up the PCIe link to RP1 and
-hands EL0 drivers a known baseline: the reset is released through the
-independent reset controller, the resistor calibration and the PHY are set
-up, the link trains to Gen2 with four lanes, and every base address register
-is zero with every bridge window closed. RP1 interrupts reach the kernel on
-one shared line. QEMU virt has no RP1. The link bring-up does not drive any
+hands EL0 drivers a known baseline: the bridge reset of the root complex is
+released through the reset controller of the SoC rather than through the
+reset register inside the root complex, the resistor calibration and the
+PHY are set up, the link trains to Gen2 with four lanes, and every base
+address register is zero with every bridge window closed. RP1 can signal
+each of its interrupt sources as its own MSI-X message or all of them on
+the shared legacy INTA line of the link; the prototype used the shared
+line, and the kernel's choice between the two is still open. QEMU virt has
+no RP1. The link bring-up does not drive any
 RP1 device.
 
-**Design background.** The reset inside the root complex reads back
-`0xdeaddead` and is not used. RP1 interrupts are demultiplexed by masking
-the interrupt status of each vector with its enable bit; the shared line
-also carries an Ethernet interrupt source that krepi does not own.
+**Design background.** The prototype read `0xdeaddead` from the reset
+register inside the root complex, so that register is not used; Linux
+likewise drives the bridge reset of the BCM2712 through the reset
+controller of the SoC. On the shared line, RP1 interrupts are demultiplexed
+by masking the interrupt status of each vector with its enable bit; that
+line also carries an Ethernet interrupt source that krepi does not own.
 
 **Consumers.** The EL0 drivers of RP1 devices, such as the UART, GPIO,
 storage and USB, through the devices and DMA domain.
@@ -432,8 +449,10 @@ apply to the kernel is recorded with the reason. The kernel reads the model
 and revision from `MIDR_EL1`.
 
 **Design background.** The errata of the Cortex-A76 are those of its
-Software Developer Errata Notice, by revision. QEMU models no erratum, so a
-QEMU run cannot show a workaround.
+Software Developer Errata Notice, by revision. QEMU emulates the
+architecture, not the microarchitecture of the core, and its Cortex-A76
+reports r4p1, so a QEMU run can execute a workaround but cannot show that
+it avoids the erratum.
 
 **Consumers.** Every feature of the kernel that executes an affected
 sequence, such as cache and TLB maintenance and the exception vectors.
@@ -507,26 +526,46 @@ records with matching and mismatching build-ids.
 ## References
 
 - Arm Limited, *Arm Architecture Reference Manual for A-profile
-  architecture*, DDI 0487,
-  <https://developer.arm.com/documentation/ddi0487/latest/>.
+  architecture*, DDI 0487, version M.d, 2026,
+  <https://documentation-service.arm.com/static/6abbec2a6db85c5e6614a4a1>.
 - Arm Limited, *Arm Cortex-A76 Core Technical Reference Manual*, revision
   r4p1, document 100798_0401_00_en, 2020,
   <https://documentation-service.arm.com/static/5f562083235b3560a01e03bc>.
-- Arm Limited, *Arm Cortex-A76 Software Developer Errata Notice*.
+- Arm Limited, *Arm Cortex-A76 (MP052) Software Developer Errata Notice*,
+  SDEN-885749, issue 34, 2026,
+  <https://documentation-service.arm.com/static/6a74aed7ade024537d5a5f2a>.
 - Arm Limited, *PrimeCell UART (PL011) Technical Reference Manual*, revision
   r1p5, DDI 0183G, 2007,
   <https://documentation-service.arm.com/static/5e8e36c2fd977155116a90b5>.
 - Arm Limited, *ARM Generic Interrupt Controller Architecture Specification,
-  version 2.0*, IHI 0048B.
+  GIC architecture version 2.0*, IHI 0048B.b, 2013,
+  <https://documentation-service.arm.com/static/5f8ff196f86e16515cdbf969>.
 - Arm Limited, *CoreLink GIC-400 Generic Interrupt Controller Technical
-  Reference Manual*, DDI 0471.
+  Reference Manual*, revision r0p1, DDI 0471B, 2012,
+  <https://documentation-service.arm.com/static/5e8f15e27100066a414f7424>.
 - Arm Limited, *Arm Power State Coordination Interface*, DEN 0022.
 - Arm Limited, *SMC Calling Convention*, DEN 0028.
 - devicetree.org, *Devicetree Specification*, release v0.4,
   <https://www.devicetree.org/specifications/>.
 - The QEMU Project, *'virt' generic virtual platform*,
   <https://www.qemu.org/docs/master/system/arm/virt.html>.
+- The QEMU Project, QEMU 8.2.2, `hw/arm/virt.c` and `include/hw/arm/bsa.h`,
+  <https://gitlab.com/qemu-project/qemu/-/blob/v8.2.2/hw/arm/virt.c>: the
+  addresses of the PL011 and the GICv2 and the interrupts of the timers.
 - Raspberry Pi Ltd, *Raspberry Pi documentation: config.txt*,
   <https://www.raspberrypi.com/documentation/computers/config_txt.html>.
-- Raspberry Pi Ltd, *RP1 Peripherals*,
+- Raspberry Pi Ltd, *RP1 Peripherals*, release 1.1, 2023,
   <https://datasheets.raspberrypi.com/rp1/rp1-peripherals.pdf>.
+- Raspberry Pi Ltd, the device trees and drivers of the BCM2712 and RP1 in
+  the Raspberry Pi Linux tree, commit
+  `ef71464298cd2dd89f6d190c08e812296240281e`,
+  <https://github.com/raspberrypi/linux/blob/ef71464298cd2dd89f6d190c08e812296240281e/arch/arm64/boot/dts/broadcom/bcm2712.dtsi>,
+  and the device tree that the firmware ships, commit
+  `016253866bbd6c77fcb2a744a97d81e79ad4884f`,
+  <https://github.com/raspberrypi/firmware/blob/016253866bbd6c77fcb2a744a97d81e79ad4884f/boot/bcm2712-rpi-5-b.dtb>.
+- Trusted Firmware-A, *Raspberry Pi 5*,
+  <https://trustedfirmware-a.readthedocs.io/en/latest/plat/rpi5.html>: the
+  BL31 that the firmware keeps resident and its entry at EL2.
+- The Linux kernel, *Booting AArch64 Linux*,
+  <https://docs.kernel.org/arch/arm64/booting.html>: the state in which the
+  Pi 5 firmware enters an image.
