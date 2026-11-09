@@ -7,8 +7,9 @@
 # and every QEMU suite with its slow cases on the images taken by their
 # digests, run on the head. Each job has a limit, and the check, the image
 # command and the suite command also stop at a deadline two minutes before
-# the limit of their job. Actions are pinned to full commit SHAs; the
-# comment names the release.
+# the limit of their job; the script that sets the deadline passes a stop
+# signal of the runner on to the command and waits for it. Actions are
+# pinned to full commit SHAs; the comment names the release.
 name: full
 
 on:
@@ -21,6 +22,10 @@ on:
 concurrency:
   group: full-${{ github.event.pull_request.number }}-${{ github.event.label.name }}
   cancel-in-progress: true
+
+# The jobs restore the caches that the workflow cache saves from main, and
+# save none.
+cache-mode: read
 
 # `bash` runs every step with `-eo pipefail`.
 defaults:
@@ -72,16 +77,43 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
+      - name: Restore the CI tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}
+          path: |
+            ~/.cache/krepi-ci/apt/
+            ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+
+      - name: Restore the Cargo registry and build directories
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            xtask/target/
+            tools/target/
+
+      # apt, which runs as root, leaves a lock and a partial directory that
+      # the runner user cannot read beside the packages; they are removed,
+      # so that the tools cache holds the packages alone, owned by the
+      # runner user.
       - name: Install Clang and QEMU
         run: |
+          mkdir -p ~/.cache/krepi-ci/apt/partial
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-18 qemu-system-arm
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/.cache/krepi-ci/apt" \
+            -o APT::Keep-Downloaded-Packages=true clang-18 qemu-system-arm
+          sudo rm -rf ~/.cache/krepi-ci/apt/partial ~/.cache/krepi-ci/apt/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/.cache/krepi-ci/apt
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
 
       - name: Run cargo xtask check with the slow tests
-        run: timeout --signal=TERM --kill-after=90s 38m cargo xtask check --slow --receipt artifacts/check-receipt.json
+        run: exec bash .github/scripts/deadline.sh 38m 90s cargo xtask check --slow --receipt artifacts/check-receipt.json
 
       - name: Upload the receipt
         if: always()
@@ -110,14 +142,34 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
+      - name: Restore the CI tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}
+          path: |
+            ~/.cache/krepi-ci/apt/
+            ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+
+      - name: Restore the Cargo registry and build directories
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            xtask/target/
+            tools/target/
+
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
 
-      - name: Write the images and their digests
+      - name: Write the images
+        run: exec bash .github/scripts/deadline.sh 3m 60s cargo xtask image --output-dir artifacts/images
+
+      - name: Give the digests of the images as outputs
         id: image
-        run: |
-          timeout --signal=TERM --kill-after=60s 3m cargo xtask image --output-dir artifacts/images
-          jq -r '.images[] | "\(.name)-sha256=\(.sha256)"' artifacts/images/images.json >> "$GITHUB_OUTPUT"
+        run: jq -r '.images[] | "\(.name)-sha256=\(.sha256)"' artifacts/images/images.json >> "$GITHUB_OUTPUT"
 
       - name: Upload the images
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -142,10 +194,37 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
+      - name: Restore the CI tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}
+          path: |
+            ~/.cache/krepi-ci/apt/
+            ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+
+      - name: Restore the Cargo registry and build directories
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            xtask/target/
+            tools/target/
+
+      # apt, which runs as root, leaves a lock and a partial directory that
+      # the runner user cannot read beside the packages; they are removed,
+      # so that the tools cache holds the packages alone, owned by the
+      # runner user.
       - name: Install QEMU
         run: |
+          mkdir -p ~/.cache/krepi-ci/apt/partial
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-arm
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/.cache/krepi-ci/apt" \
+            -o APT::Keep-Downloaded-Packages=true qemu-system-arm
+          sudo rm -rf ~/.cache/krepi-ci/apt/partial ~/.cache/krepi-ci/apt/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/.cache/krepi-ci/apt
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
@@ -163,13 +242,8 @@ jobs:
         env:
           TEST_ELF_SHA256: ${{ needs.image.outputs.test-elf-sha256 }}
         run: |
-          token=$(openssl rand -hex 16)
-          echo "::stop-commands::$token"
-          status=0
-          timeout --signal=TERM --kill-after=60s 23m cargo xtask suite --slow --images artifacts/images \
-            --expect "test-elf=$TEST_ELF_SHA256" --output-dir artifacts/suite || status=$?
-          echo "::$token::"
-          exit "$status"
+          exec bash .github/scripts/deadline.sh --stop-commands 23m 60s cargo xtask suite --slow \
+            --images artifacts/images --expect "test-elf=$TEST_ELF_SHA256" --output-dir artifacts/suite
 
       - name: Upload the suite report
         if: always()

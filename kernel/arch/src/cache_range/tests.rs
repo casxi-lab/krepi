@@ -1,0 +1,137 @@
+//! The tests of the cache-line walks: the tests taken from the prototype
+//! tree, with their expected values, the examples of the feature document,
+//! and the fields of `CTR_EL0` and the limit that the walks of the cache
+//! maintenance take.
+//!
+//! Feature: krepi.platform.qemu-virt-boot
+
+use super::*;
+
+#[test]
+fn firmware_image_walk_uses_the_complete_platform_window() {
+    let pi5 = 0x80000..0x1000000;
+    let bytes = 0x206000;
+    let walk = handoff_lines(pi5.start, bytes, 4, pi5.clone()).unwrap();
+    assert_eq!(walk.clone().count() as u64, bytes / 64);
+    assert_eq!(walk.clone().next(), Some(pi5.start));
+    assert_eq!(walk.last(), Some(pi5.start + bytes - 64));
+    assert!(handoff_lines(pi5.start, pi5.end - pi5.start, 4, pi5.clone()).is_some());
+    for (start, bytes, field) in [
+        (pi5.start, pi5.end - pi5.start + 4096, 4),
+        (pi5.start + 4096, 4096, 4),
+        (pi5.start, 4095, 4),
+        (pi5.start, 0, 4),
+        (pi5.start, 4096, 11),
+    ] {
+        assert!(handoff_lines(start, bytes, field, pi5.clone()).is_none());
+    }
+    let virt = 0x40200000..0x48000000;
+    assert!(handoff_lines(virt.start, 0x300000, 4, virt.clone()).is_some());
+    assert!(handoff_lines(pi5.start, bytes, 4, virt).is_none());
+    assert!(handoff_lines(u64::MAX - 4095, 4096, 4, (u64::MAX - 4095)..u64::MAX).is_none());
+}
+
+#[test]
+fn partial_lines_and_exact_boundaries() {
+    assert!(lines(0x103f, 2, 4, 4096).unwrap().eq([0x1000, 0x1040]));
+    assert!(lines(0x1000, 64, 4, 4096).unwrap().eq([0x1000]));
+    assert!(lines(0x1004, 4, 0, 4096).unwrap().eq([0x1004]));
+}
+
+#[test]
+fn rejects_unbounded_or_wrapping_requests() {
+    for (start, size, field) in [(0, 0, 4), (0, 4097, 4), (u64::MAX, 1, 4), (0, 8, 16)] {
+        assert!(lines(start, size, field, 4096).is_none());
+    }
+    assert_eq!(lines(u64::MAX - 63, 63, 4, 4096).unwrap().count(), 1);
+}
+
+/// ex7: 200 bytes from `0x4020_1005` at 64-byte lines touch the four lines
+/// from `0x4020_1000` to `0x4020_10c0`; the first starts before the range
+/// and the last ends after it.
+#[test]
+fn ex7_a_range_with_unaligned_ends_covers_each_line_it_touches() {
+    let walk = lines(0x4020_1005, 200, 4, MAX_RANGE_BYTES).unwrap();
+    assert!(walk.eq([0x4020_1000, 0x4020_1040, 0x4020_1080, 0x4020_10c0]));
+}
+
+/// ex8: an empty range and a range one byte longer than
+/// [`MAX_RANGE_BYTES`] are refused; a range of exactly that length is
+/// walked, in 1,024 lines of 64 bytes from an aligned start and 1,025 from
+/// an unaligned one.
+#[test]
+fn ex8_an_empty_or_oversized_range_is_refused() {
+    assert!(lines(0x4020_1000, 0, 4, MAX_RANGE_BYTES).is_none());
+    assert!(lines(0x4020_1000, MAX_RANGE_BYTES + 1, 4, MAX_RANGE_BYTES).is_none());
+    let aligned = lines(0x4020_1000, MAX_RANGE_BYTES, 4, MAX_RANGE_BYTES).unwrap();
+    assert_eq!(aligned.count(), 1024);
+    let unaligned = lines(0x4020_1001, MAX_RANGE_BYTES, 4, MAX_RANGE_BYTES).unwrap();
+    assert_eq!(unaligned.count(), 1025);
+}
+
+/// A value of `CTR_EL0` whose four line and granule fields differ, at the
+/// places that the Arm Architecture Reference Manual gives them: `IminLine`
+/// 3 in bits 0 to 3, lines of 32 bytes; `DminLine` 4 in bits 16 to 19, 64
+/// bytes; `ERG` 5 in bits 20 to 23; and `CWG` 6 in bits 24 to 27; with
+/// `L1Ip` 0b11 in bits 14 and 15 and bit 31, which reads as 1. The value of
+/// the Cortex-A76, `0x8444_c004`, has 4 in all four, so a walk that read
+/// another field would give the same lines there.
+const DISTINCT_FIELDS: u64 = (1 << 31) | (6 << 24) | (5 << 20) | (4 << 16) | (0b11 << 14) | 3;
+
+/// The data walk takes its line size from `DminLine` alone: the 200 bytes
+/// of ex7 touch the same four lines of 64 bytes.
+#[test]
+fn the_data_walk_takes_dminline() {
+    let walk = data_lines(DISTINCT_FIELDS, 0x4020_1005, 200).unwrap();
+    assert!(walk.eq([0x4020_1000, 0x4020_1040, 0x4020_1080, 0x4020_10c0]));
+}
+
+/// The instruction walk takes its line size from `IminLine` alone: the 200
+/// bytes of ex7 touch the seven lines of 32 bytes from `0x4020_1000` to
+/// `0x4020_10c0`.
+#[test]
+fn the_instruction_walk_takes_iminline() {
+    let walk = instruction_lines(DISTINCT_FIELDS, 0x4020_1005, 200).unwrap();
+    assert!(walk.eq((0..7).map(|line| 0x4020_1000 + 32 * line)));
+}
+
+/// A value of `CTR_EL0` with bit 3 set in both line fields: `IminLine` 9,
+/// lines of 2 KiB, and `DminLine` 8, lines of 1 KiB, with the other fields
+/// of [`DISTINCT_FIELDS`]. A walk that kept only the low three bits of its
+/// field would take lines of 8 or 4 bytes at this value.
+const WIDE_FIELDS: u64 = (1 << 31) | (6 << 24) | (5 << 20) | (8 << 16) | (0b11 << 14) | 9;
+
+/// Both walks take all four bits of their field: the 200 bytes from
+/// `0x4020_1380` cross the boundary of 1 KiB at `0x4020_1400` and lie in one
+/// line of 2 KiB, and a range of [`MAX_RANGE_BYTES`] from an aligned start
+/// is 64 lines of 1 KiB and 32 of 2 KiB.
+#[test]
+fn the_walks_take_the_full_width_of_the_line_fields() {
+    let data = data_lines(WIDE_FIELDS, 0x4020_1380, 200).unwrap();
+    assert!(data.eq([0x4020_1000, 0x4020_1400]));
+    let instruction = instruction_lines(WIDE_FIELDS, 0x4020_1380, 200).unwrap();
+    assert!(instruction.eq([0x4020_1000]));
+    let data = data_lines(WIDE_FIELDS, 0x4020_1000, MAX_RANGE_BYTES).unwrap();
+    assert_eq!(data.count(), 64);
+    let instruction = instruction_lines(WIDE_FIELDS, 0x4020_1000, MAX_RANGE_BYTES).unwrap();
+    assert_eq!(instruction.count(), 32);
+}
+
+/// Both walks of the maintenance refuse an empty range, a range one byte
+/// longer than [`MAX_RANGE_BYTES`] and a range that wraps, and walk a range
+/// of exactly that length: 1,024 lines of 64 bytes, and 2,048 of 32 bytes.
+#[test]
+fn the_walks_of_the_maintenance_take_the_limit_of_one_call() {
+    for (start, bytes) in [
+        (0x4020_1000, 0),
+        (0x4020_1000, MAX_RANGE_BYTES + 1),
+        (u64::MAX, 1),
+    ] {
+        assert!(data_lines(DISTINCT_FIELDS, start, bytes).is_none());
+        assert!(instruction_lines(DISTINCT_FIELDS, start, bytes).is_none());
+    }
+    let data = data_lines(DISTINCT_FIELDS, 0x4020_1000, MAX_RANGE_BYTES).unwrap();
+    assert_eq!(data.count(), 1024);
+    let instruction = instruction_lines(DISTINCT_FIELDS, 0x4020_1000, MAX_RANGE_BYTES).unwrap();
+    assert_eq!(instruction.count(), 2048);
+}

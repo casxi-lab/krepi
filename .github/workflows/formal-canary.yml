@@ -483,3 +483,4 @@ jobs:
             artifacts/formal/runs/*/receipt.json
             artifacts/formal/runs/*/logs/
           if-no-files-found: warn
+          retention-days: 90
