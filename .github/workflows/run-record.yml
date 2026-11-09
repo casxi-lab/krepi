@@ -18,6 +18,7 @@ name: run record
 on:
   workflow_run:
     workflows:
+      - cache
       - check
       - formal
       - formal canary
@@ -25,6 +26,8 @@ on:
       - formal image publish
       - full
       - nightly
+      - release
+      - usage
       - weekly
     types: [completed]
   workflow_dispatch:

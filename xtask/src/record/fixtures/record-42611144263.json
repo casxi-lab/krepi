@@ -1,0 +1,123 @@
+{
+  "format": 1,
+  "run": {
+    "id": 42611144263,
+    "attempt": 1,
+    "workflow": "full",
+    "path": ".github/workflows/full.yml",
+    "event": "pull_request",
+    "head_branch": "probe/job-limit",
+    "head_sha": "efe14b986cb5f1e76ad235992f13f300a18d2ba7",
+    "conclusion": "cancelled",
+    "line": "full"
+  },
+  "workflow_read": true,
+  "wall_seconds": 140,
+  "minutes": 6,
+  "limit_seconds": 3600,
+  "over_80_percent": false,
+  "over": [],
+  "retention_days": 30,
+  "jobs": [
+    {
+      "id": 129139584818,
+      "name": "full head contains main",
+      "runner": "standard hosted",
+      "labels": [
+        "ubuntu-24.04-arm"
+      ],
+      "runner_group": "GitHub Actions",
+      "started_at": 1794224549,
+      "completed_at": 1794224553,
+      "seconds": 4,
+      "minutes": 1,
+      "timeout_minutes": 3,
+      "conclusion": "success",
+      "result": "success",
+      "annotations": []
+    },
+    {
+      "id": 129139642474,
+      "name": "full cargo xtask check --slow",
+      "runner": "standard hosted",
+      "labels": [
+        "ubuntu-24.04-arm"
+      ],
+      "runner_group": "GitHub Actions",
+      "started_at": 1794224558,
+      "completed_at": 1794224689,
+      "seconds": 131,
+      "minutes": 3,
+      "timeout_minutes": 40,
+      "conclusion": "success",
+      "result": "success",
+      "annotations": []
+    },
+    {
+      "id": 129139642629,
+      "name": "full image",
+      "runner": "standard hosted",
+      "labels": [
+        "ubuntu-24.04-arm"
+      ],
+      "runner_group": "GitHub Actions",
+      "started_at": 1794224558,
+      "completed_at": 1794224632,
+      "seconds": 74,
+      "minutes": 2,
+      "timeout_minutes": 1,
+      "conclusion": "cancelled",
+      "result": "TIMEOUT",
+      "annotations": [
+        {
+          "level": "failure",
+          "title": "",
+          "message": "The job has exceeded the maximum execution time of 1m0s"
+        },
+        {
+          "level": "failure",
+          "title": "",
+          "message": "The operation was canceled."
+        }
+      ]
+    },
+    {
+      "id": 129140203765,
+      "name": "full suite --slow",
+      "runner": "none",
+      "labels": [
+        "ubuntu-24.04-arm"
+      ],
+      "runner_group": null,
+      "started_at": 1794224632,
+      "completed_at": 1794224632,
+      "seconds": null,
+      "minutes": 0,
+      "timeout_minutes": 25,
+      "conclusion": "skipped",
+      "result": "skipped",
+      "annotations": []
+    }
+  ],
+  "record_run": {
+    "id": 42611456904,
+    "attempt": 1,
+    "wall_seconds": 34,
+    "minutes": 1,
+    "jobs": [
+      {
+        "id": 129140643983,
+        "name": "run record",
+        "runner": "standard hosted",
+        "labels": [
+          "ubuntu-24.04-arm"
+        ],
+        "runner_group": "GitHub Actions",
+        "started_at": 1794224698,
+        "completed_at": null,
+        "seconds": 34,
+        "minutes": 1
+      }
+    ]
+  }
+}

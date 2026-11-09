@@ -1,0 +1,228 @@
+# The usage summary of the CI of a month, for krepi and the two public
+# repositories beside it, kosmo and kalyx. It runs on the second day of each
+# month at 06:19 UTC for the month before, and on a manual run of main for a
+# month that it takes as its input, the current month ending at the time of
+# the run, or, with no input, for the month before. With the read permissions
+# of the workflow token and the public interface of the container registry
+# only, it reads the runs of each
+# repository in the month, among them the runs of the dynamic workflows such
+# as code scanning, the jobs of every attempt of each run, the artifacts
+# that have not expired and the cache usage, and the tags of the public
+# packages with the blobs of their manifests through an anonymous pull
+# token. `cargo xtask usage` then writes the summary, which goes to the
+# summary page of the run, and the data and the summary are uploaded. Text
+# from the API is handled only through files and jq, and workflow commands
+# are off while the data is read. Actions are pinned to full commit SHAs;
+# the comment names the release.
+name: usage
+
+on:
+  schedule:
+    - cron: "19 6 2 * *"
+  workflow_dispatch:
+    inputs:
+      month:
+        description: The month to summarize, as YYYY-MM; empty for the last whole month; the current month ends at the time of the run
+        required: false
+        type: string
+
+concurrency:
+  group: usage
+  cancel-in-progress: false
+
+env:
+  # The repositories and the packages of the container registry that the
+  # summary covers.
+  REPOSITORIES: casxi-lab/krepi casxi-lab/kosmo casxi-lab/kalyx
+  PACKAGES: casxi-lab/krepi-formal
+
+# `bash` runs every step with `-eo pipefail`.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  summary:
+    name: usage summary
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Build the repository tasks
+        run: cargo build --quiet --locked --manifest-path xtask/Cargo.toml
+
+      # GNU date does the calendar arithmetic; the summary compares seconds.
+      - name: Choose the month
+        id: month
+        env:
+          INPUT_MONTH: ${{ inputs.month }}
+        run: |
+          current=$(date -u +%Y-%m)
+          if [ -z "$INPUT_MONTH" ]; then
+            month=$(date -u -d "$current-01 -1 month" +%Y-%m)
+          elif [[ "$INPUT_MONTH" =~ ^[0-9]{4}-(0[1-9]|1[0-2])$ && ! "$INPUT_MONTH" > "$current" ]]; then
+            month=$INPUT_MONTH
+          else
+            echo "the input is not a month of the form YYYY-MM up to the current one" >&2
+            exit 1
+          fi
+          start=$(date -u -d "$month-01" +%s)
+          if [ "$month" = "$current" ]; then
+            end=$(date -u +%s)
+            partial=true
+          else
+            end=$(date -u -d "$month-01 +1 month" +%s)
+            partial=false
+          fi
+          {
+            echo "month=$month"
+            echo "start=$start"
+            echo "end=$end"
+            echo "from=$(date -u -d "@$start" +%FT%TZ)"
+            echo "until=$(date -u -d "@$end" +%FT%TZ)"
+            echo "partial=$partial"
+          } >> "$GITHUB_OUTPUT"
+
+      # A request that fails names its repository or package and fails the
+      # step; the token does not reach a repository that it cannot read.
+      - name: Read the usage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MONTH: ${{ steps.month.outputs.month }}
+          START: ${{ steps.month.outputs.start }}
+          END: ${{ steps.month.outputs.end }}
+          FROM: ${{ steps.month.outputs.from }}
+          UNTIL: ${{ steps.month.outputs.until }}
+          PARTIAL: ${{ steps.month.outputs.partial }}
+        run: |
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          data=artifacts/usage/api
+          mkdir -p "$data"
+          read_api() { # <repository> <API path> <jq filter>
+            if ! gh api --paginate "$2" --jq "$3"; then
+              echo "cannot read $1 with the token of the workflow: $2" >&2
+              return 1
+            fi
+          }
+          rate() { gh api rate_limit --jq '.resources.core | {limit, remaining}'; }
+          rate > "$data/rate-before.json"
+          days=()
+          for ((day = START; day < END; day += 86400)); do
+            days+=("$(date -u -d "@$day" +%F)")
+          done
+          seconds='def seconds: if . == null then null else fromdateiso8601 end;'
+          for repository in $REPOSITORIES; do
+            file=$data/${repository#*/}
+            : > "$file-runs.jsonl"
+            # One query a day keeps each below the 1,000 runs that a filtered
+            # list returns.
+            for day in "${days[@]}"; do
+              read_api "$repository" \
+                "repos/$repository/actions/runs?created=${day}T00:00:00Z..${day}T23:59:59Z&per_page=100" \
+                '.workflow_runs[] | {id, created_at, path, event, run_attempt}' >> "$file-runs.jsonl"
+            done
+            : > "$file-jobs.jsonl"
+            for id in $(jq -r .id "$file-runs.jsonl" | sort -u); do
+              [[ "$id" =~ ^[1-9][0-9]*$ ]] || { echo "a run ID of $repository is not a number" >&2; exit 1; }
+              read_api "$repository" "repos/$repository/actions/runs/$id/jobs?filter=all&per_page=100" \
+                ".jobs[] | {run: $id, id, labels, runner_group_name, runner_name, started_at, completed_at}" \
+                >> "$file-jobs.jsonl"
+            done
+            read_api "$repository" "repos/$repository/actions/artifacts?per_page=100" \
+              '.artifacts[] | {size_in_bytes, expired}' > "$file-artifacts.jsonl"
+            read_api "$repository" "repos/$repository/actions/cache/usage" \
+              '{active_caches_count, active_caches_size_in_bytes}' > "$file-cache.json"
+            jq -n --arg repository "$repository" --slurpfile runs "$file-runs.jsonl" \
+              --slurpfile jobs "$file-jobs.jsonl" --slurpfile artifacts "$file-artifacts.jsonl" \
+              --slurpfile cache "$file-cache.json" "$seconds"'
+              ($jobs | group_by(.run) | map({key: (.[0].run | tostring), value: .}) | from_entries) as $by_run
+              | {
+                  repository: $repository,
+                  runs: [$runs[] | . as $run | {id, created_at: (.created_at | seconds), path, event,
+                    run_attempt, jobs: [($by_run[$run.id | tostring] // [])[] | del(.run)
+                      | .started_at |= seconds | .completed_at |= seconds]}],
+                  artifacts: $artifacts,
+                  cache: $cache[0]
+                }' > "$file.json"
+          done
+          # The packages through the anonymous interface of the registry,
+          # each tag with the config and the layers of its manifests.
+          types='application/vnd.oci.image.index.v1+json,application/vnd.oci.image.manifest.v1+json'
+          types="$types,application/vnd.docker.distribution.manifest.list.v2+json"
+          types="$types,application/vnd.docker.distribution.manifest.v2+json"
+          : > "$data/packages.jsonl"
+          registry() { # <registry path>, for $package with the pull token $pull
+            if ! curl -fsS -H "Authorization: Bearer $pull" -H "Accept: $types" "https://ghcr.io/v2/$package/$1"; then
+              echo "cannot read the package $package from the registry: $1" >&2
+              return 1
+            fi
+          }
+          for package in $PACKAGES; do
+            url="https://ghcr.io/token?scope=repository:$package:pull&service=ghcr.io"
+            if ! pull=$(curl -fsS "$url" | jq -er .token); then
+              echo "cannot read the package $package from the registry: no pull token" >&2
+              exit 1
+            fi
+            : > "$data/tags.jsonl"
+            # The tags are read before the loop, so that a failed request
+            # fails the step.
+            tags=$(registry "tags/list?n=1000" | jq -r '.tags // [] | .[]')
+            for tag in $tags; do
+              [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]] || { echo "a tag of $package is not a tag" >&2; exit 1; }
+              manifest=$(registry "manifests/$tag")
+              digests=$(jq -r '.manifests // [] | .[].digest' <<< "$manifest")
+              {
+                jq -c '[(.config // empty), (.layers // [] | .[])] | .[]' <<< "$manifest"
+                for digest in $digests; do
+                  [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "a manifest of $package is not a digest" >&2; exit 1; }
+                  registry "manifests/$digest" | jq -c '[(.config // empty), (.layers // [] | .[])] | .[]'
+                done
+              } | jq -s --arg tag "$tag" '{tag: $tag, blobs: [.[] | {digest, size}]}' >> "$data/tags.jsonl"
+            done
+            jq -s --arg name "$package" '{name: $name, tags: .}' "$data/tags.jsonl" >> "$data/packages.jsonl"
+          done
+          rate > "$data/rate-after.json"
+          jq -n --arg month "$MONTH" --argjson start "$START" --argjson end "$END" --arg from "$FROM" \
+            --arg until "$UNTIL" --argjson partial "$PARTIAL" --slurpfile before "$data/rate-before.json" \
+            --slurpfile after "$data/rate-after.json" --slurpfile packages "$data/packages.jsonl" '
+            {
+              period: {month: $month, start: $start, end: $end, from: $from, until: $until, partial: $partial},
+              rate_limit: {limit: $before[0].limit, remaining_before: $before[0].remaining,
+                remaining_after: $after[0].remaining},
+              repositories: [],
+              packages: $packages
+            }' > artifacts/usage/input.json
+          for repository in $REPOSITORIES; do
+            jq --slurpfile one "$data/${repository#*/}.json" '.repositories += $one' artifacts/usage/input.json \
+              > artifacts/usage/input.next.json
+            mv artifacts/usage/input.next.json artifacts/usage/input.json
+          done
+
+      - name: Write the summary
+        run: |
+          cargo xtask usage --input artifacts/usage/input.json --output-dir artifacts/usage/summary
+          cat artifacts/usage/summary/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the summary and its data
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: usage-${{ steps.month.outputs.month }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/usage/input.json
+            artifacts/usage/summary/
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}

@@ -172,7 +172,17 @@ The steps are:
     runs on `pull_request` names the proof-tool image of
     `verification/image-pin.json` by its pinned digest, and that every such
     workflow mentions the image's repository only in that form
-    ([image pin](../formal-verification.md#image-pin)).
+    ([image pin](../formal-verification.md#image-pin)). In a workflow that
+    runs on `pull_request`, or whose triggers cannot be read, it also
+    rejects a step that uses `actions/cache` or `actions/cache/save` at any
+    pin, both of which save a cache, and any mention of them with a pin in
+    the text, comments included, in any letter case; a job of a pull request
+    restores a cache with `actions/cache/restore`. As it does not read the
+    steps of a reusable workflow or of a local action, it rejects there a
+    job that calls a workflow and a step that uses a local action. It does
+    not read other actions that can save a cache as a side effect, such as
+    the setup actions of language toolchains with a cache input, which the
+    workflows of pull requests do not use.
 
 The checks that `xtask` implements itself read only files that Git tracks,
 so a fresh clone and a working copy with build output give the same result;
@@ -256,11 +266,21 @@ Every job of these lines has a `timeout-minutes`. In the jobs that run
 command also ends at a deadline that `timeout` sets two minutes before the
 limit of its job, so that the uploads still run when the command takes too
 long; `cargo xtask qemu-boot` runs after the check in the same job without
-a deadline of its own. Along the longest chain of jobs that need each
+a deadline of its own. The step starts the command as the last command of
+its script with `exec bash .github/scripts/deadline.sh`, so that this script
+is the process of the step and receives the signals with which the runner
+stops a step: SIGINT when the run is cancelled, SIGTERM some seconds later
+and then SIGKILL. `timeout` runs the command in a process group of its own,
+which those signals do not reach, so the script passes SIGINT and SIGTERM
+on to `timeout`, which passes them on to the command, and does not end
+before the command has: a check that a newer push to its pull request
+cancels writes its receipt with the result `interrupted`, and the upload
+after it finds the receipt. The script exits with the status of the
+command, and with 124 when the deadline stopped it, also when `timeout`
+had to kill it then. Along the longest chain of jobs that need each
 other the limits add up to 18 minutes on the pull request line and to 43
 minutes on the full line, within the 20 and 60 minutes that those lines
-allow. Their artifacts are kept 90 days for a run on `main` and 30 days for
-the others. After each completed run of another workflow of the directory,
+allow. After each completed run of another workflow of the directory,
 the workflow `run record` (`run-record.yml`) writes its record with
 `cargo xtask run-record`, described below, adds the summary to the run's
 summary page and uploads the record as `run-record-<run>-<attempt>`, kept
@@ -271,10 +291,114 @@ it takes. Unit tests of the check read the committed workflows and hold
 them to these limits, to the label of the full line as its only trigger, to
 `--slow` in the full and nightly lines only, to the one job named
 `cargo xtask check` and the summary of the pull request line, to the list
-of workflows that the record workflow follows, to a retention for every
-upload of these files, and to downloads that take the name of their
+of workflows that the record workflow follows, to a retention by the rule
+below for every upload step of every workflow, against a table of those
+steps, to downloads that take the name of their
 artifact from an output of the job that uploaded it, so that a rerun of
-the downloading job alone still finds the artifact.
+the downloading job alone still finds the artifact, and to main commands
+that run under that script as the last command of their step, at a
+deadline one or two minutes before the limit of their job. Where GNU `env`
+and GNU `timeout` are on the path, as on the runners, a unit test also
+sends SIGINT to the script and requires that it ends only after its command
+has, with the status of the command.
+
+Every upload step of every workflow of the directory sets `retention-days`,
+which the repository setting of 90 days bounds. A job that runs on `main`
+and elsewhere writes `${{ github.ref == 'refs/heads/main' && 90 || 30 }}`:
+90 days for a run on `main` and 30 for the others, as in the lines and the
+formal workflow. A job that runs on `main` only, such as the formal canary
+and the publication of the proof-tool image, may write 90; a workflow that
+runs on pull requests only, such as the build of that image, may write 30;
+and the record workflow keeps a record as long as the run that it records.
+The artifacts hold receipts, records, summaries and logs, which the zip of
+the artifact compresses, and the images that the QEMU suites boot.
+
+The lines use two caches, which only the workflow `cache` (`cache.yml`)
+saves, from `main`. The cargo cache holds `~/.cargo/registry/index/`,
+`~/.cargo/registry/cache/`, `xtask/target/` and `tools/target/` under the
+key `cargo-<runner system>-<runner architecture>-<digest>` of
+`rust-toolchain.toml` and the `Cargo.lock` of the four workspaces. The tools
+cache holds the `.deb` packages of `clang-18`, `qemu-system-arm` and their
+dependencies, which apt keeps in `~/.cache/krepi-ci/apt/`, and the Rust
+toolchain of `rust-toolchain.toml` below `~/.rustup/`, under the key
+`tools-<runner system>-<runner architecture>-<digest>` of
+`rust-toolchain.toml` and `toolchains.toml`. apt, which runs as root, also
+leaves a lock file and a directory `partial/` there that the runner user
+cannot read, so each step that installs with apt then removes both and gives
+the directory to the runner user: `du` and the save read the packages alone.
+An entry is used only under its exact key. The line workflows set
+`cache-mode: read`, restore both caches with `actions/cache/restore` in each
+job that builds or installs, and save none. A restored cache is not trusted
+for its versions: apt installs a cached package only when its digest matches
+the index of the archive, and the `toolchain` step of the check still
+compares the versions with `toolchains.toml`. The job `cargo xtask check` of
+the pull request and main lines reports the size of each path of the two
+caches in its summary and marks a size for which `du` failed, as the measure
+of the workflow `cache` would.
+
+The workflow `cache` runs on a push to `main` that changes it,
+`rust-toolchain.toml`, `toolchains.toml` or the `Cargo.lock` of one of the
+four workspaces, and on Mondays at 08:47 UTC, which brings back an entry
+that GitHub removed after seven days without use. Its job `cache build`
+looks up each entry; for a missing one it installs Clang, QEMU and the Rust
+toolchain as the lines do, runs `cargo xtask check`, which builds what the
+lines build, measures the paths with `du` and saves the entry with
+`actions/cache/save` when it is at most 2 GB for the cargo cache and 0.8 GB
+for the tools cache, both decimal, and otherwise reports it over its limit
+and saves nothing. The limits leave room above the sizes that the check job
+measured, 0.68 GB and 0.65 GB. Its job `cache prune`, the only job with `actions: write`,
+runs no code of the repository and lives in a workflow that does not run on
+pull requests: once the current entry of a kind is on `main` within its
+limit, it deletes the older entries of that kind. The caches then hold at
+most 2.8 GB, and at most 5.6 GB between a save and the deletion, within the
+10 GB that GitHub keeps for a repository. A unit test holds the workflows to
+these keys, paths, triggers, permissions and limits.
+
+The workflow `release` (`release.yml`) drafts a release of the check
+receipt and the images of one successful run of the workflow `check` on a
+push to `main`, with their SHA-256 digests, and never publishes one. It runs
+only by hand, on `main`, with the ID of that run, best a run of the commit
+at the head of `main`: GitHub refuses the workflow token a release whose
+commit has workflow files that differ from those of the default branch.
+Its job `release assets`,
+with read permissions only, reads the run through the API, finds its two
+artifacts, `images-<commit>-<attempt>` and
+`check-receipt-<commit>-<attempt>`, exactly one of each, downloads them with
+`actions/download-artifact`, which checks the digest of each artifact, runs
+`cargo xtask release-assets`, described below, and uploads the assets as
+`release-assets-<run>-<attempt>`. Its job `draft release`, the only job
+with a write permission, `contents: write`, runs no code of the repository.
+On the files of that artifact it checks `SHA256SUMS` with
+`sha256sum --check`, requires that the tag `check-<commit>` does not exist,
+creates the release as a draft and as a prerelease that is not the latest,
+and requires that the tag still does not exist; a tag that exists fails the
+run and is left as it is. It then uploads the assets to the draft and
+requires that their names, sizes and digests, as GitHub reads them back, are
+those of the files. GitHub lists a draft only to people with push access;
+the workflow does not rely on it creating no tag for a draft but checks
+that. Publishing a draft, which creates its tag, is a separate step that a
+person takes. A unit test holds the workflow to its trigger, its condition
+on `main`, its permissions, the draft and the checks of the tag around it.
+
+The workflow `usage` (`usage.yml`) writes the usage summary of the CI of a
+month for krepi and the public repositories kosmo and kalyx. It runs on the
+second day of each month at 06:19 UTC for the month before, and on a manual
+run of `main` for the month of its input, as `YYYY-MM`, the current month
+ending at the time of the run, or, with no input, for the month before. Its
+one job has read permissions only and uses no other credential: with the
+workflow token it reads, for each repository, the runs created in the month,
+one query for each day, among them the runs of dynamic workflows such as
+code scanning, the jobs of every attempt of each run, the artifacts that
+have not expired and the cache usage, and with an anonymous pull token of
+the container registry the tags of the package `casxi-lab/krepi-formal` and
+the config and layers of their manifests. A request that fails names its
+repository or package and fails the run. Text from the API goes only through
+files and `jq`, and workflow commands are off while the data is read.
+`cargo xtask usage`, described below, writes the summary, which goes to the
+summary page of the run, and the data and the summary are uploaded as
+`usage-<month>-<run>-<attempt>`. A unit test holds the workflow to its
+schedule and its manual run, its condition on `main`, its read permissions
+and the commands that are off while it reads.
 
 `cargo xtask serial-capture --port <tty>` records what a board sends over a
 serial port, such as the UART of a Pi 5 behind a USB serial adapter, without
@@ -465,48 +589,107 @@ shell script that prints a line and exits. A test of the `xtask` binary runs
 and with another digest, with the QEMU of the host, as the image and suite
 jobs of CI do.
 
-`cargo xtask run-record --input <run.json> --output <dir>` writes the
-record of one run of a workflow from the data of the GitHub API; it is not
-part of the check. The input is what the workflow `run record`, described
-above, writes with `jq`: `run`, with the `id`, `attempt`, `workflow`,
-`path`, `event`, `head_branch`, `head_sha` and `conclusion` of the run, and
-`jobs`, each with its `id`, `name`, `conclusion`, `labels`,
-`runner_group_name`, `runner_name`, `annotations` (`level`, `title` and
-`message`) and its `started_at` and `completed_at`, as seconds since 1970
-that `jq` converts with `fromdateiso8601`, and no other field.
-`--workflow <file>` gives the workflow file at the head of the run, from
-which each job's limit is read: its `timeout-minutes`, 360 without one, and
-none when it is an expression or the job's name is not the one that the
-file gives, apart from the values of a matrix in parentheses.
-`--own <run.json> --now <seconds>` gives
-the run of the record workflow itself. The command creates the new
-directory `<dir>` and writes `record.json` and `summary.md` into it. The
-record holds the run with its line: `pull request` or `main` for the
-workflow `check` on a pull request or a push, `full`, `nightly` and
-`weekly` for those workflows, `none` for the others. Each job has its
-runner class, `none` for a job that ran on no runner, `self-hosted` by its
-labels, `larger hosted` for a runner group other than `GitHub Actions` and
+`cargo xtask run-record --input <run.json> --output <dir>` writes the record
+of one run of a workflow from the data of the GitHub API; it is not part of
+the check. The input is what the workflow `run record`, described above,
+writes with `jq`: `run`, with the `id`, `attempt`, `workflow`, `path`,
+`event`, `head_branch`, `head_sha` and `conclusion` of the run, and `jobs`,
+each with its `id`, `name`, `conclusion`, `labels`, `runner_group_name`,
+`runner_name`, `annotations` (`level`, `title` and `message`) and its
+`started_at` and `completed_at`, as seconds since 1970 that `jq` converts
+with `fromdateiso8601`, and no other field. `--workflow <file>` gives the
+workflow file at the head of the run, from which each job's limit is read:
+its `timeout-minutes`, 360 without one, and none when it is an expression.
+A job takes the limit of the job of the file whose name is its own, also
+followed by the values of a matrix in parentheses. Failing that, a name in
+the file that holds expressions `${{ }}`, such as
+`leanchecker ${{ matrix.mode }}`, fits a job's name when each expression
+stands for some text, possibly empty, between the text around it, also once
+the values of a matrix in parentheses are left out; the names that fit give
+the limit when they all give the same one. Otherwise the job has no known
+limit. `--own <run.json> --now <seconds>` gives the run of
+the record workflow itself. The command creates the new directory `<dir>`
+and writes `record.json` and `summary.md` into it. The record, of `format`
+2, holds the run with its line: `pull request` or `main` for the workflow
+`check` on a pull request or a push, `full`, `nightly` and `weekly` for
+those workflows, `none` for the others. Each job has its runner class,
+`none` for a job that ran on no runner, `self-hosted` by its labels,
+`larger hosted` for a runner group other than `GitHub Actions` and
 `standard hosted` otherwise; its seconds, its minutes, the seconds rounded
 up to whole minutes and 0 for a job that ran on no runner; its limit, its
-conclusion and its result, `TIMEOUT` when the job ran at least as long as
-its limit and did not succeed, and otherwise the conclusion; and its
-annotations. The record also holds the wall clock of the run, from the
-first start to the last end of the jobs that ran on a runner, the sum of
-the minutes, the limit of the line, 1,200 s for the pull request line and
-3,600 s for the full line, whether the run or one of its jobs took more
-than 80% of it, which the summary states as a run that "exceeds 80% of its
-limit", the days for which the record is kept, 90 for a run on `main` that
-a pull request did not trigger and 30 for the others, and with `--own` the
-record workflow's run until `--now`: its wall clock and minutes, and each of
-its jobs with its runner class, seconds and minutes. The
-summary, which the workflow adds to the run's summary page, gives the same
-in Markdown with the text of the run escaped. `cargo xtask run-record --id
-<text>` checks the run ID of a manual run of the record workflow, digits
-without a leading zero, and prints it. The command prints only the paths
-that it writes and exits with 0, or with 2 after a usage error or a
-failure. Its unit tests run in the `test` step above, on the input of two
-runs of the repository read back from the API and on runs written for each
-rule.
+conclusion, its result and its annotations. The result is the conclusion, or
+`TIMEOUT` for a job that did not succeed and either ran at least as long as
+its limit or has the failure annotation
+`Process completed with exit code 124.`, which the runner writes when the
+main command of a step exits with 124, as `timeout` does when it stops the
+command at its deadline; the field `timeout` gives the reason, `limit` or
+`deadline`, and is `null` otherwise. The first condition alone was the rule
+of format 1, so the new rule finds every `TIMEOUT` that the old one found;
+no command that the lines run exits with 124 by itself. The record also
+holds the wall clock of the run, from the first start to the last end of the
+jobs that ran on a runner, the sum of the minutes, the limit of the line,
+1,200 s for the pull request line and 3,600 s for the full line, whether the
+run or one of its jobs took more than 80% of it, which the summary states as
+a run that "exceeds 80% of its limit", the days for which the record is
+kept, 90 for a run on `main` that a pull request did not trigger and 30 for
+the others, and with `--own` the record workflow's run until `--now`: its
+wall clock and minutes, and each of its jobs with its runner class, seconds
+and minutes. The summary, which the workflow adds to the run's summary page,
+gives the same in Markdown with the text of the run escaped, and names each
+job that was stopped at the deadline of its main command.
+`cargo xtask run-record --id <text>` checks the run ID of a manual run of
+the record workflow, digits without a leading zero, and prints it. The
+command prints only the paths that it writes and exits with 0, or with 2
+after a usage error or a failure. Its unit tests run in the `test` step
+above, on the input of two runs of the repository read back from the API, on
+the records of format 1 of two runs in which a job ran past its limit, which
+stay `TIMEOUT` under the new rule, on a grid of jobs on which the new rule
+contains the old one, and on runs written for each rule.
+
+`cargo xtask release-assets --run <run.json> --images <dir> --receipt <file>
+--output-dir <dir>` writes the assets of a draft release; it is not part of
+the check. `--run` is the run as the workflow `release` writes it with `jq`,
+with the fields of the `run` of the input of `cargo xtask run-record`: it
+must be a run of `.github/workflows/check.yml` on a push to `main` that
+succeeded, with a commit of 40 lowercase hexadecimal digits. `--images` is
+the directory of the artifact of its images: its `images.json` must be a
+record of `cargo xtask image` that names that commit for every image and
+gives each image a regular file of the directory by a plain name, with the
+size and SHA-256 of that file, and the directory holds no other file.
+`--receipt` is its check receipt, which must have `format` 2, that commit
+and the result `passed`. The command creates the new directory `<dir>`,
+copies the images, `images.json` and the receipt, as `check-receipt.json`,
+into it and writes `SHA256SUMS`: a line `<SHA-256>  <name>` for each of
+those files, in the order of their names, as `sha256sum --check` reads it.
+It prints the path of each file that it writes and exits with 0, or with 2
+after a usage error or a failure. Its unit tests run in the `test` step
+above, on a run and files written for each check.
+
+`cargo xtask usage --input <input.json> --output-dir <dir>` writes the usage
+summary of a month from the data that the workflow `usage` collects; it is
+not part of the check. The input holds the period, from its start up to but
+not including its end, in seconds since 1970 and as text, the rate limit of
+the API before and after the data was read, the runs of each repository with
+the jobs of every attempt, its artifacts and its cache usage, and the tags
+of each package with their blobs, and no other field. A run counts once, by
+its ID, and only when it was created in the period; a job counts once. The
+minutes of a job are its seconds on its runner rounded up to whole minutes,
+job by job, as in the run record, which approximates the minutes that
+GitHub bills; a job on no runner takes none, and one that has not ended is
+listed and takes none. The command sums the minutes by runner class, as the
+run record classes runners, for each repository and for all of them, and
+lists them by workflow and by runner labels. It sets the bytes of the
+artifacts that have not expired and of the blobs of the packages, each blob
+counted once, against 50 GB, decimal, and the cache of each repository
+against 10 GB, and compares each of five items with its threshold: larger
+hosted minutes above 0, self-hosted minutes above 0, standard hosted
+minutes above 40,000, the artifacts and the packages above 40 GB, and the
+cache of a repository above 8 GB. The summary names each item above its
+threshold in neutral words; a threshold never fails the command. It creates
+the new directory `<dir>` and writes `usage.json` and `summary.md`, the
+same in Markdown with the text of the data escaped, into it, prints only
+those paths and exits with 0, or with 2 after a usage error or a failure.
+Its unit tests run in the `test` step above, on data written for each rule.
 
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
 QEMU virt default image and the test images, boots them on QEMU virt
@@ -874,18 +1057,18 @@ to an exact version in the manifest of the crate that uses it:
 | `tools/Cargo.toml` | `object` without default features, with `write_core` and `elf` | MIT OR Apache-2.0 | The ELF writer that lays out and encodes the test image around its instruction words: the ELF header, the program and section headers, the symbol table and the string tables |
 | `tools/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | Report values, whose objects keep the order of their keys, and their JSON text, and the messages of Cargo from which `cargo xtask qemu-boot` takes the image |
 | `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching and in the receipts of the serial capture, of `cargo xtask qemu` and of `cargo xtask qemu-boot`, the suffix of their run directories, and the build-id of the test image |
-| `xtask/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask check`, `cargo xtask image`, `cargo xtask suite`, `cargo xtask run-record`, `cargo xtask formal run`, `cargo xtask formal guard`, `cargo xtask formal toolchain-check`, `cargo xtask formal check`, `cargo xtask formal vectors` and `cargo xtask formal canary`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
+| `xtask/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask check`, `cargo xtask image`, `cargo xtask suite`, `cargo xtask run-record`, `cargo xtask release-assets`, `cargo xtask usage`, `cargo xtask formal run`, `cargo xtask formal guard`, `cargo xtask formal toolchain-check`, `cargo xtask formal check`, `cargo xtask formal vectors` and `cargo xtask formal canary`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
 | `xtask/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The process groups of the commands of `cargo xtask check`, `cargo xtask formal run` and `cargo xtask formal vectors`: killing a command's group, finding whether any of its processes remain, seeing that a command has ended without collecting it, and the default disposition of `SIGCHLD` that this needs; finding whether SIGHUP is ignored when the run starts; and the effective user of the run, the bytes available on the file system of its run directory and the largest resident set of a process that it collected, which its receipt records |
-| `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json`, `cargo xtask formal check` reads `verification/targets.json` and `cargo xtask formal run` reads `verification/targets.json`, `verification/qualification/cases.json`, `verification/extraction.toml`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json` and the `translation.json` that Aeneas writes, the type into which the `subset` step of `cargo xtask check` reads its compile-fail cases, the type into which `cargo xtask formal vectors` reads the `vectors` block of a contract, the record `images.json` that `cargo xtask image` writes and `cargo xtask suite` reads, the suites of `suites.toml`, the run and jobs that `cargo xtask run-record` reads, the record of a step of `cargo xtask formal canary`, and the types of the receipt of `cargo xtask formal run`, which the canary also reads |
-| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, of `verification/open.json`, of the record `images.json` of `cargo xtask image`, of the report of `cargo xtask suite` and of the record of `cargo xtask run-record`, reading `images.json` and the run and jobs of a record, reading the output of `cargo metadata` in the `manifests` and `subset` steps, in `cargo xtask formal run` and in `cargo xtask formal check`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/models.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/image-pin.json`, the `versions.json` of the proof-tool image, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the messages that `lean --json` prints, the event of a pull request that `cargo xtask formal guard` reads, and the tool manifest, the Lake locks, the statement registry, the records of its steps and the receipt that `cargo xtask formal canary` reads and writes |
+| `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json`, `cargo xtask formal check` reads `verification/targets.json` and `cargo xtask formal run` reads `verification/targets.json`, `verification/qualification/cases.json`, `verification/extraction.toml`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json` and the `translation.json` that Aeneas writes, the type into which the `subset` step of `cargo xtask check` reads its compile-fail cases, the type into which `cargo xtask formal vectors` reads the `vectors` block of a contract, the record `images.json` that `cargo xtask image` writes and `cargo xtask suite` reads, the suites of `suites.toml`, the run and jobs that `cargo xtask run-record` reads, the run that `cargo xtask release-assets` reads, the data of a month that `cargo xtask usage` reads, the record of a step of `cargo xtask formal canary`, and the types of the receipt of `cargo xtask formal run`, which the canary also reads |
+| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, of `verification/open.json`, of the record `images.json` of `cargo xtask image`, of the report of `cargo xtask suite` and of the record of `cargo xtask run-record`, reading `images.json` and the run and jobs of a record, reading the run, `images.json` and the check receipt that `cargo xtask release-assets` checks, the summary of `cargo xtask usage`, reading the output of `cargo metadata` in the `manifests` and `subset` steps, in `cargo xtask formal run` and in `cargo xtask formal check`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/models.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/image-pin.json`, the `versions.json` of the proof-tool image, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the messages that `lean --json` prints, the event of a pull request that `cargo xtask formal guard` reads, and the tool manifest, the Lake locks, the statement registry, the records of its steps and the receipt that `cargo xtask formal canary` reads and writes |
 | `xtask/Cargo.toml` | `syn` without default features, with `full`, `parsing` and `visit` | MIT OR Apache-2.0 | Parsing the source files of the kernel workspace for the inventory of `cargo xtask formal check` and for the `subset` step of `cargo xtask check`, walking their items and reading their attributes, paths and tokens, and in a unit test of the check the Rust files of every workspace for the names of the slow tests |
 | `xtask/Cargo.toml` | `proc-macro2` without default features, with `span-locations` | MIT OR Apache-2.0 | The token type under `syn`, whose span locations give the line of each problem that the `subset` step reports |
 | `xtask/Cargo.toml` | `signal-hook` without default features | MIT OR Apache-2.0 | The handler that lets SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop `cargo xtask check`, `cargo xtask formal run` and `cargo xtask formal vectors`; the emulation of their default action with which the two formal commands then end, whereas the check exits with 128 plus the signal number; and the names of the signals in the output of the check |
-| `xtask/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests of the images that `cargo xtask image` writes into `images.json` and that `cargo xtask suite` checks before it boots them, and of the receipts and transcripts of its runs, of the Aeneas patch and the Lake lock that `cargo xtask formal toolchain-check` compares with `verification/toolchain.json`, and of the output files of the commands of `cargo xtask formal run` and `cargo xtask formal vectors`, the Lean files that Aeneas writes in the former and the `versions.json` of the proof-tool image, and of the Lean archives, the channel manifest and the Lake lock of Aeneas main, which `cargo xtask formal canary` writes into the derived tool manifest |
+| `xtask/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests of the images that `cargo xtask image` writes into `images.json` and that `cargo xtask suite` checks before it boots them and `cargo xtask release-assets` before it writes them into `SHA256SUMS`, and of the receipts and transcripts of its runs, of the Aeneas patch and the Lake lock that `cargo xtask formal toolchain-check` compares with `verification/toolchain.json`, and of the output files of the commands of `cargo xtask formal run` and `cargo xtask formal vectors`, the Lean files that Aeneas writes in the former and the `versions.json` of the proof-tool image, and of the Lean archives, the channel manifest and the Lake lock of Aeneas main, which `cargo xtask formal canary` writes into the derived tool manifest |
 | `xtask/Cargo.toml` | `tar` without default features | MIT OR Apache-2.0 | Unpacking the tar archive of the gate inputs that `git archive` writes for `cargo xtask formal run` |
 | `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `suites.toml`, `toolchains.toml`, `rust-toolchain.toml`, Charon's `rust-toolchain`, `verification/extraction.toml`, the compile-fail cases of the `subset` step, the `vectors` blocks of the contracts, and Charon's `charon/Cargo.toml` and the channel manifest of a nightly that `cargo xtask formal canary` reads |
 | `xtask/Cargo.toml` | `walkdir` | MIT OR Unlicense | The listing of the tool installation that `cargo xtask formal run` takes at the start and at the end of a phase, without following symbolic links |
-| `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step, and the YAML loader with which `cargo xtask run-record` reads the limits of the jobs of a workflow and the unit tests of the check read the committed workflows of the CI lines |
+| `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step, and the YAML loader with which that step reads the actions that the steps of a workflow use, `cargo xtask run-record` reads the limits of the jobs of a workflow and the unit tests of the check read the committed workflows |
 
 No test has a development dependency yet. Development dependencies are added
 only when a test category needs them, are pinned to an exact version and are
