@@ -305,6 +305,40 @@ and the record workflow keeps a record as long as the run that it records.
 The artifacts hold receipts, records, summaries and logs, which the zip of
 the artifact compresses, and the images that the QEMU suites boot.
 
+The lines use two caches, which only the workflow `cache` (`cache.yml`)
+saves, from `main`. The cargo cache holds `~/.cargo/registry/index/`,
+`~/.cargo/registry/cache/`, `xtask/target/` and `tools/target/` under the
+key `cargo-<runner system>-<runner architecture>-<digest>` of
+`rust-toolchain.toml` and the `Cargo.lock` of the four workspaces. The tools
+cache holds the `.deb` packages of `clang-18`, `qemu-system-arm` and their
+dependencies, which apt keeps in `~/.cache/krepi-ci/apt/`, and the Rust
+toolchain of `rust-toolchain.toml` below `~/.rustup/`, under the key
+`tools-<runner system>-<runner architecture>-<digest>` of
+`rust-toolchain.toml` and `toolchains.toml`. An entry is used only under its
+exact key. The line workflows set `cache-mode: read`, restore both caches
+with `actions/cache/restore` in each job that builds or installs, and save
+none. A restored cache is not trusted for its versions: apt installs a
+cached package only when its digest matches the index of the archive, and
+the `toolchain` step of the check still compares the versions with
+`toolchains.toml`. The job `cargo xtask check` of the pull request and main
+lines reports the size of each path of the two caches in its summary.
+
+The workflow `cache` runs on a push to `main` that changes it,
+`rust-toolchain.toml`, `toolchains.toml` or the `Cargo.lock` of one of the
+four workspaces, and on Mondays at 08:47 UTC, which brings back an entry
+that GitHub removed after seven days without use. Its job `cache build`
+looks up each entry; for a missing one it installs Clang, QEMU and the Rust
+toolchain as the lines do, runs `cargo xtask check`, which builds what the
+lines build, measures the paths with `du` and saves the entry with
+`actions/cache/save` when it is at most 4 GB for the cargo cache and 1 GB
+for the tools cache, both decimal, and otherwise reports it over its limit
+and saves nothing. Its job `cache prune`, the only job with `actions: write`,
+runs no code of the repository and lives in a workflow that does not run on
+pull requests: once the current entry of a kind is on `main` within its
+limit, it deletes the older entries of that kind. The caches then hold at
+most 5 GB, and at most 10 GB between a save and the deletion, which is the
+limit that GitHub sets for a repository. A unit test holds the workflows to
+these keys, paths, triggers, permissions and limits.
 `cargo xtask serial-capture --port <tty>` records what a board sends over a
 serial port, such as the UART of a Pi 5 behind a USB serial adapter, without
 evaluating its boot; it is a tool for the bench and is not part of the

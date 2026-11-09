@@ -1,0 +1,206 @@
+# The caches of the lines, saved from main only. The cargo cache holds the
+# Cargo registry and the build directories of xtask and of the host tooling
+# crate, under a key of the Rust toolchain and the lock files of the four
+# workspaces; the tools cache holds the .deb packages of Clang and QEMU and
+# the pinned Rust toolchain, under a key of the toolchain files. The jobs of
+# the lines only restore them. On a push to main that changes one of those
+# files, and once a week, on Mondays at 08:47 UTC, so that an entry that
+# GitHub evicted after seven days without use comes back, the job
+# `cache build` looks up each entry; for a missing one it installs or builds
+# what the lines install and build, measures it and saves it when it is
+# within its limit. The job `cache prune` then deletes the older entries of
+# each kind that was saved, so that one entry of each kind stays. Actions are
+# pinned to full commit SHAs; the comment names the release.
+name: cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/cache.yml
+      - rust-toolchain.toml
+      - toolchains.toml
+      - kernel/Cargo.lock
+      - user/Cargo.lock
+      - xtask/Cargo.lock
+      - tools/Cargo.lock
+  schedule:
+    - cron: "47 8 * * 1"
+
+concurrency:
+  group: cache
+  cancel-in-progress: false
+
+env:
+  # The largest entry of each kind that is saved, in bytes.
+  CARGO_CACHE_LIMIT: "4000000000"
+  TOOLS_CACHE_LIMIT: "1000000000"
+
+# `bash` runs every step with `-eo pipefail`.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: cache build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    outputs:
+      cargo-key: ${{ steps.cargo.outputs.cache-primary-key }}
+      cargo-saved: ${{ steps.measure.outputs.save-cargo }}
+      tools-key: ${{ steps.tools.outputs.cache-primary-key }}
+      tools-saved: ${{ steps.measure.outputs.save-tools }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Look up the CI tools
+        id: tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}
+          path: |
+            ~/.cache/krepi-ci/apt/
+            ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+          lookup-only: true
+
+      - name: Look up the Cargo registry and build directories
+        id: cargo
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            xtask/target/
+            tools/target/
+          lookup-only: true
+
+      - name: Install Clang and QEMU
+        if: steps.tools.outputs.cache-hit != 'true' || steps.cargo.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.cache/krepi-ci/apt/partial
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/.cache/krepi-ci/apt" \
+            -o APT::Keep-Downloaded-Packages=true clang-18 qemu-system-arm
+
+      - name: Install the pinned Rust toolchain
+        if: steps.tools.outputs.cache-hit != 'true' || steps.cargo.outputs.cache-hit != 'true'
+        run: rustup toolchain install
+
+      # The check builds what the jobs of the lines build.
+      - name: Build what the lines build
+        if: steps.cargo.outputs.cache-hit != 'true'
+        run: exec bash .github/scripts/deadline.sh 20m 60s cargo xtask check --receipt artifacts/check-receipt.json
+
+      # A kind whose entry exists is not saved again; one over its limit is
+      # not saved, and the summary says so.
+      - name: Measure the cache paths
+        id: measure
+        env:
+          CARGO_HIT: ${{ steps.cargo.outputs.cache-hit }}
+          TOOLS_HIT: ${{ steps.tools.outputs.cache-hit }}
+        run: |
+          measure() { # <kind> <limit> <whether the entry exists> <path>...
+            local kind=$1 limit=$2 hit=$3 bytes save=false
+            shift 3
+            if [ "$hit" = true ]; then
+              echo "| $kind | - | $limit | the entry exists |"
+            else
+              bytes=$(du -sbc "$@" | tail -n 1 | cut -f 1)
+              if [ "$bytes" -le "$limit" ]; then
+                save=true
+                echo "| $kind | $bytes | $limit | saved |"
+              else
+                echo "| $kind | $bytes | $limit | not saved: over its limit |"
+              fi
+            fi
+            echo "save-$kind=$save" >> "$GITHUB_OUTPUT"
+          }
+          {
+            echo "## Cache entries"
+            echo
+            echo "| Kind | Bytes | Limit | Outcome |"
+            echo "| --- | ---: | ---: | --- |"
+            measure cargo "$CARGO_CACHE_LIMIT" "$CARGO_HIT" ~/.cargo/registry/index/ \
+              ~/.cargo/registry/cache/ xtask/target/ tools/target/
+            measure tools "$TOOLS_CACHE_LIMIT" "$TOOLS_HIT" ~/.cache/krepi-ci/apt/ \
+              ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/ \
+              ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the CI tools
+        if: steps.measure.outputs.save-tools == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}
+          path: |
+            ~/.cache/krepi-ci/apt/
+            ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+
+      - name: Save the Cargo registry and build directories
+        if: steps.measure.outputs.save-cargo == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            xtask/target/
+            tools/target/
+
+  # Deletes the older entries of a kind once its current entry is on main
+  # within its limit, so that the caches hold one entry of each kind: at most
+  # the two limits together, and twice that between a save and this job. It
+  # runs no code of the repository.
+  prune:
+    name: cache prune
+    needs: build
+    if: github.ref == 'refs/heads/main' && needs.build.result == 'success'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete the older entries of each kind
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CARGO_KEY: ${{ needs.build.outputs.cargo-key }}
+          TOOLS_KEY: ${{ needs.build.outputs.tools-key }}
+        run: |
+          caches=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?per_page=100" \
+            --jq '.actions_caches[] | {id, key, ref, size_in_bytes}' | jq -s .)
+          prune() { # <kind> <current key> <limit>
+            local kind=$1 key=$2 limit=$3 id
+            if ! jq -e --arg key "$key" --argjson limit "$limit" \
+              'any(.[]; .key == $key and .ref == "refs/heads/main" and .size_in_bytes <= $limit)' \
+              <<< "$caches" > /dev/null; then
+              echo "$kind: the current entry is not on main within its limit; nothing deleted"
+              return
+            fi
+            for id in $(jq -r --arg kind "$kind-" --arg key "$key" \
+              '.[] | select((.key | startswith($kind)) and .key != $key) | .id' <<< "$caches"); do
+              if [[ "$id" =~ ^[0-9]+$ ]]; then
+                gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$id"
+                echo "$kind: deleted the older entry $id"
+              fi
+            done
+          }
+          prune cargo "$CARGO_KEY" "$CARGO_CACHE_LIMIT"
+          prune tools "$TOOLS_KEY" "$TOOLS_CACHE_LIMIT"
+          others=$(jq '[.[] | select(.ref != "refs/heads/main")] | length' <<< "$caches")
+          usage=$(gh api "repos/$GITHUB_REPOSITORY/actions/cache/usage" --jq .active_caches_size_in_bytes)
+          {
+            echo "## Cache usage"
+            echo
+            echo "The caches of the repository hold $usage bytes after the deletions, against"
+            echo "5000000000 bytes in the steady state; $others entries were not saved on main."
+          } | tee -a "$GITHUB_STEP_SUMMARY"

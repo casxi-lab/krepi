@@ -27,6 +27,10 @@ concurrency:
   group: check-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The jobs restore the caches that the workflow cache saves from main, and
+# save none.
+cache-mode: read
+
 # `bash` runs every step with `-eo pipefail`.
 defaults:
   run:
@@ -46,10 +50,31 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
+      - name: Restore the CI tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}
+          path: |
+            ~/.cache/krepi-ci/apt/
+            ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+
+      - name: Restore the Cargo registry and build directories
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            xtask/target/
+            tools/target/
+
       - name: Install Clang and QEMU
         run: |
+          mkdir -p ~/.cache/krepi-ci/apt/partial
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-18 qemu-system-arm
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/.cache/krepi-ci/apt" \
+            -o APT::Keep-Downloaded-Packages=true clang-18 qemu-system-arm
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
@@ -59,6 +84,28 @@ jobs:
 
       - name: Run the QEMU boot suite
         run: cargo xtask qemu-boot --output-dir artifacts/qemu-boot
+
+      # The size of each path of the two caches and of each cache, against
+      # which the limits of the entries that the workflow cache saves are set.
+      - name: Report the size of the cache paths
+        if: always()
+        run: |
+          size() { du -sbc "$@" 2> /dev/null | tail -n 1 | cut -f 1 || true; }
+          cargo=(~/.cargo/registry/index/ ~/.cargo/registry/cache/ xtask/target/ tools/target/)
+          tools=(~/.cache/krepi-ci/apt/ ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu)
+          {
+            echo "## Cache paths"
+            echo
+            echo "| Path | Bytes |"
+            echo "| --- | ---: |"
+            for path in "${cargo[@]}" "${tools[@]}"; do
+              echo "| ${path#"$HOME"/} | $(size "$path") |"
+            done
+            echo "| cargo cache | $(size "${cargo[@]}") |"
+            echo "| tools cache | $(size "${tools[@]}") |"
+            echo "| .deb packages | $(find ~/.cache/krepi-ci/apt/ -name '*.deb' 2> /dev/null | wc -l) |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the receipt
         if: always()
@@ -93,6 +140,25 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Restore the CI tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}
+          path: |
+            ~/.cache/krepi-ci/apt/
+            ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+
+      - name: Restore the Cargo registry and build directories
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            xtask/target/
+            tools/target/
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
@@ -129,10 +195,31 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Restore the CI tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}
+          path: |
+            ~/.cache/krepi-ci/apt/
+            ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+
+      - name: Restore the Cargo registry and build directories
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            xtask/target/
+            tools/target/
+
       - name: Install QEMU
         run: |
+          mkdir -p ~/.cache/krepi-ci/apt/partial
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-arm
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/.cache/krepi-ci/apt" \
+            -o APT::Keep-Downloaded-Packages=true qemu-system-arm
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install

@@ -971,3 +971,185 @@ fn every_main_command_of_the_lines_runs_under_its_deadline() {
     let early = good.replace("13m 90s", "10m 90s");
     assert_eq!(deadline_problems(&parse(&early), false), (2, Vec::new()));
 }
+
+/// The workflow that saves the caches.
+const CACHE: &str = ".github/workflows/cache.yml";
+/// The key of the cargo cache.
+const CARGO_KEY: &str = "cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', \
+                         'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}";
+/// The paths of the cargo cache, as the steps write them.
+const CARGO_PATHS: &str =
+    "~/.cargo/registry/index/\n~/.cargo/registry/cache/\nxtask/target/\ntools/target/\n";
+/// The key of the tools cache.
+const TOOLS_KEY: &str = "tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}";
+/// The paths of the tools cache, as the steps write them, for the Rust
+/// toolchain of the arm64 Linux runners.
+const TOOLS_PATHS: &str = "~/.cache/krepi-ci/apt/\n~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/\n\
+                           ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu\n";
+/// The largest entry of each kind, in bytes.
+const CACHE_LIMITS: [(&str, u64); 2] = [
+    ("CARGO_CACHE_LIMIT", 4_000_000_000),
+    ("TOOLS_CACHE_LIMIT", 1_000_000_000),
+];
+
+/// The steps of `job` that use the action `action`.
+fn steps_using<'a>(job: &'a Yaml, action: &str) -> Vec<&'a Yaml> {
+    (job["steps"].as_vec().into_iter().flatten())
+        .filter(|step| uses(step, action))
+        .collect()
+}
+
+#[test]
+fn the_caches_are_restored_by_the_lines_and_saved_only_from_main() {
+    let mut restores = Vec::new();
+    let mut saves = Vec::new();
+    for (path, document) in workflows() {
+        for (key, job) in jobs(&document) {
+            assert!(
+                steps_using(job, "actions/cache").is_empty(),
+                "{path}: {key}"
+            );
+            for (action, found) in [
+                ("actions/cache/restore", &mut restores),
+                ("actions/cache/save", &mut saves),
+            ] {
+                for step in steps_using(job, action) {
+                    // Each step names one of the two kinds, with its paths.
+                    let with = &step["with"];
+                    let kind = match with["key"].as_str() {
+                        Some(CARGO_KEY) => "cargo",
+                        Some(TOOLS_KEY) => "tools",
+                        other => panic!("{path}: {key}: the key {other:?}"),
+                    };
+                    let paths = if kind == "cargo" {
+                        CARGO_PATHS
+                    } else {
+                        TOOLS_PATHS
+                    };
+                    assert_eq!(with["path"].as_str(), Some(paths), "{path}: {key}");
+                    assert!(with["restore-keys"].is_badvalue(), "{path}: {key}");
+                    found.push((path.clone(), key.to_string(), kind));
+                }
+            }
+            // A job that writes to the caches through the API runs no code
+            // of the repository and lives in the workflow that saves them.
+            if job["permissions"]["actions"].as_str() == Some("write") {
+                assert_eq!((path.as_str(), key), (CACHE, "prune"));
+                assert!(steps_using(job, "actions/checkout").is_empty());
+                for script in scripts_of(job) {
+                    let builds = ["cargo xtask", "cargo build", "cargo run", "--manifest-path"];
+                    assert!(!builds.iter().any(|text| script.contains(text)), "{script}");
+                    let starts = |line: &str| line.trim_start().starts_with("cargo ");
+                    assert!(!script.lines().any(starts), "{script}");
+                }
+            }
+        }
+    }
+    // The lines restore both kinds in every job that builds or installs.
+    let restored: Vec<(&str, &str)> = (restores.iter())
+        .map(|(path, key, _)| (path.as_str(), key.as_str()))
+        .collect();
+    let mut expected = Vec::new();
+    for (path, keys) in [
+        (LINES[0], &["check", "image", "suite"][..]),
+        (LINES[1], &["check", "image", "suite"]),
+        (LINES[2], &["check", "image", "suite"]),
+        (LINES[3], &["image", "suite"]),
+        (CACHE, &["build"]),
+    ] {
+        for key in keys {
+            expected.extend([(path, *key), (path, *key)]);
+        }
+    }
+    let mut sorted = restored.clone();
+    sorted.sort_unstable();
+    expected.sort_unstable();
+    assert_eq!(sorted, expected);
+    let saved: Vec<_> = saves
+        .iter()
+        .map(|(path, key, kind)| (path.as_str(), key.as_str(), *kind))
+        .collect();
+    assert_eq!(
+        saved,
+        [(CACHE, "build", "tools"), (CACHE, "build", "cargo")]
+    );
+    // The lines restore only.
+    for path in &LINES[..4] {
+        assert_eq!(
+            workflow(path)["cache-mode"].as_str(),
+            Some("read"),
+            "{path}"
+        );
+    }
+    // The workflow that saves runs on pushes to main and on a schedule,
+    // and only on main.
+    let cache = workflow(CACHE);
+    assert_eq!(events(&cache), ["push", "schedule"]);
+    let branches = &cache["on"]["push"]["branches"];
+    assert_eq!(branches.as_vec().map(Vec::len), Some(1));
+    assert_eq!(branches[0].as_str(), Some("main"));
+    let build = &cache["jobs"]["build"];
+    assert!(on_main(build));
+    let prune = &cache["jobs"]["prune"];
+    assert_eq!(
+        prune["if"].as_str(),
+        Some("github.ref == 'refs/heads/main' && needs.build.result == 'success'")
+    );
+    assert_eq!(deadline_problems(&cache, false), (1, Vec::new()));
+    // A push that changes a file of a key builds the caches again.
+    let tree = Tree::load(&crate::repo::root()).expect("the tracked files");
+    let locks: Vec<String> = (crate::check::WORKSPACES.iter())
+        .map(|workspace| format!("{workspace}/Cargo.lock"))
+        .collect();
+    for lock in &locks {
+        assert!(tree.exists(lock), "{lock}");
+        assert!(CARGO_KEY.contains(&format!("'{lock}'")), "{lock}");
+    }
+    let hashed = |key: &str| key.matches("'").count() / 2;
+    assert_eq!(hashed(CARGO_KEY), locks.len() + 1);
+    assert_eq!(hashed(TOOLS_KEY), 2);
+    let mut watched: Vec<&str> = (cache["on"]["push"]["paths"].as_vec().into_iter().flatten())
+        .filter_map(Yaml::as_str)
+        .collect();
+    watched.sort_unstable();
+    let mut files = vec![CACHE, "rust-toolchain.toml", "toolchains.toml"];
+    files.extend(locks.iter().map(String::as_str));
+    files.sort_unstable();
+    assert_eq!(watched, files);
+    assert!(CARGO_KEY.contains("'rust-toolchain.toml'"));
+    for file in ["'rust-toolchain.toml'", "'toolchains.toml'"] {
+        assert!(TOOLS_KEY.contains(file), "{file}");
+    }
+    // The paths of the toolchain name the channel of `rust-toolchain.toml`.
+    let toolchain: toml::Table =
+        toml::from_str(tree.text("rust-toolchain.toml").expect("tracked")).expect("TOML");
+    let channel = toolchain["toolchain"]["channel"]
+        .as_str()
+        .expect("the channel");
+    let host = format!("{channel}-aarch64-unknown-linux-gnu");
+    assert!(TOOLS_PATHS.contains(&format!("~/.rustup/toolchains/{host}/\n")));
+    assert!(TOOLS_PATHS.contains(&format!("~/.rustup/update-hashes/{host}\n")));
+    // So does the report of the sizes of the paths.
+    let check = tree.text(LINES[0]).expect("tracked");
+    assert!(
+        check.contains(&format!("~/.rustup/toolchains/{host}/\n")),
+        "{check}"
+    );
+    // The limits of the entries.
+    for (name, limit) in CACHE_LIMITS {
+        let set = cache["env"][name]
+            .as_str()
+            .and_then(|text| text.parse::<u64>().ok());
+        assert!(
+            set.is_some_and(|set| set > 0 && set <= limit),
+            "{name}: {set:?}"
+        );
+    }
+}
+
+/// The scripts of the steps of `job`.
+fn scripts_of(job: &Yaml) -> Vec<&str> {
+    (job["steps"].as_vec().into_iter().flatten())
+        .filter_map(|step| step["run"].as_str())
+        .collect()
+}

@@ -17,6 +17,10 @@ concurrency:
   group: nightly-${{ github.sha }}
   cancel-in-progress: false
 
+# The jobs restore the caches that the workflow cache saves from main, and
+# save none.
+cache-mode: read
+
 # `bash` runs every step with `-eo pipefail`.
 defaults:
   run:
@@ -36,10 +40,31 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the CI tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}
+          path: |
+            ~/.cache/krepi-ci/apt/
+            ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+
+      - name: Restore the Cargo registry and build directories
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            xtask/target/
+            tools/target/
+
       - name: Install Clang and QEMU
         run: |
+          mkdir -p ~/.cache/krepi-ci/apt/partial
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-18 qemu-system-arm
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/.cache/krepi-ci/apt" \
+            -o APT::Keep-Downloaded-Packages=true clang-18 qemu-system-arm
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
@@ -71,6 +96,25 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Restore the CI tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}
+          path: |
+            ~/.cache/krepi-ci/apt/
+            ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+
+      - name: Restore the Cargo registry and build directories
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            xtask/target/
+            tools/target/
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
@@ -104,10 +148,31 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Restore the CI tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}
+          path: |
+            ~/.cache/krepi-ci/apt/
+            ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+
+      - name: Restore the Cargo registry and build directories
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            xtask/target/
+            tools/target/
+
       - name: Install QEMU
         run: |
+          mkdir -p ~/.cache/krepi-ci/apt/partial
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-arm
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/.cache/krepi-ci/apt" \
+            -o APT::Keep-Downloaded-Packages=true qemu-system-arm
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install

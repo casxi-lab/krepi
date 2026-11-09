@@ -20,7 +20,9 @@ every pull request to `main` and on every push to `main`. Beside it, one
 job writes the images of the QEMU suites, another runs the suites of
 `suites.toml` on those images, and a summary job requires the three jobs to
 succeed; the slow tests run in the full line, which the label `full-check`
-starts on a reviewed head, and every night. A change that updates a tool
+starts on a reviewed head, and every night. The jobs restore a cache of
+the Cargo registry and build directories and a cache of the CI tools, which
+only the workflow `cache` saves, from `main`. A change that updates a tool
 version updates `toolchains.toml` in the same change. The proof tools are
 pinned separately, in `verification/toolchain.json`: a change to them runs
 `cargo xtask formal toolchain-check` and builds their image in CI, as
