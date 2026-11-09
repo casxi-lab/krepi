@@ -1,25 +1,33 @@
 //! The receipt of `cargo xtask check --receipt <path>`: a JSON record of one
-//! run, written whether the check passes or fails.
+//! run, written whether the check passes, fails or is interrupted.
 //!
-//! The receipt holds the commit checked out when the run started, whether the
-//! working tree was clean before and after the run, each step with its
-//! status, duration and facts (the toolchain step's facts are the tool
-//! versions it found), the runner image and the GitHub Actions run. A value
-//! that cannot be read, or an environment variable that is not set, is
-//! `null`. The text is the pretty form of `serde_json`, with two-space
-//! indentation and the fields in the order in which they are written.
+//! The receipt holds the mode of the run (`parallel` or `sequential`),
+//! whether it ran the slow tests, the commit checked out when the run
+//! started, whether the working tree was clean before and after the run, the
+//! result (`passed`, `failed` or `interrupted`) with the number of the stop
+//! signal or `null`, the lanes with the names of their steps (a lane without
+//! steps is listed with none), and each step with its lane, status (`passed`,
+//! `failed`, `cancelled` or `not run`), the milliseconds from the start of
+//! the check to its start (`null` for a step that did not run), its duration,
+//! the detail of a failed or cancelled step and its facts (the toolchain
+//! step's facts are the tool versions it found), then the runner image and
+//! the GitHub Actions run. A value that cannot be read, or an environment
+//! variable that is not set, is `null`. The text is the pretty form of
+//! `serde_json`, with two-space indentation and the fields in the order in
+//! which they are written.
 
 use std::fs;
 use std::io;
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
-use crate::check::{Outcome, Status};
+use crate::check::{Outcome, Report, Status};
 
 /// The version of the receipt format.
-pub const FORMAT: u32 = 1;
+pub const FORMAT: u32 = 2;
 
 /// The variables that name the runner image. GitHub-hosted runners set them
 /// in `/etc/environment`, which is read when the process environment lacks
@@ -133,19 +141,20 @@ fn variables(values: &[(&'static str, Option<String>)]) -> Value {
     )
 }
 
+/// Milliseconds, saturated at the largest number.
+fn millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
 fn step(outcome: &Outcome) -> Value {
-    let status = match outcome.status {
-        Status::Passed => "passed",
-        Status::Failed(_) => "failed",
-        Status::NotRun => "not run",
-    };
-    let duration_ms = u64::try_from(outcome.duration.as_millis()).unwrap_or(u64::MAX);
     let mut step = json!({
         "name": outcome.step,
-        "status": status,
-        "duration_ms": duration_ms,
+        "lane": outcome.lane.name(),
+        "status": outcome.status.name(),
+        "offset_ms": outcome.offset.map(millis),
+        "duration_ms": millis(outcome.duration),
     });
-    if let Status::Failed(detail) = &outcome.status {
+    if let Status::Failed(detail) | Status::Cancelled(detail) = &outcome.status {
         step["detail"] = Value::from(detail.as_str());
     }
     let facts: Map<String, Value> = outcome
@@ -157,24 +166,34 @@ fn step(outcome: &Outcome) -> Value {
     step
 }
 
-/// The receipt of a run, as JSON text ending in a newline.
+/// The receipt of the run `report`, as JSON text ending in a newline.
 pub fn render(
     before: &GitState,
     after: &GitState,
-    outcomes: &[Outcome],
+    report: &Report,
     environment: &Environment,
 ) -> String {
-    let passed = outcomes
-        .iter()
-        .all(|outcome| outcome.status == Status::Passed);
-    let steps: Vec<Value> = outcomes.iter().map(step).collect();
+    let lanes: Vec<Value> = (report.layout.iter())
+        .map(|lane| {
+            json!({
+                "name": lane.lane.name(),
+                "segment": lane.lane.segment(),
+                "steps": lane.steps,
+            })
+        })
+        .collect();
+    let steps: Vec<Value> = report.outcomes.iter().map(step).collect();
     let receipt = json!({
         "format": FORMAT,
         "command": "cargo xtask check",
+        "mode": report.mode.name(),
+        "slow": report.slow,
         "commit": before.commit,
         "clean_before": before.clean,
         "clean_after": after.clean,
-        "result": if passed { "passed" } else { "failed" },
+        "result": report.verdict().name(),
+        "signal": report.signal,
+        "lanes": lanes,
         "steps": steps,
         "image": variables(&environment.image),
         "github": variables(&environment.github),
@@ -192,9 +211,8 @@ pub fn write(path: &Path, text: &str) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
+    use crate::check::{Lane, LaneSteps, Mode};
 
     #[test]
     fn reads_image_variables_from_etc_environment() {
@@ -244,6 +262,37 @@ mod tests {
         );
     }
 
+    /// An outcome of the step `step` in `lane`.
+    fn outcome(step: &'static str, lane: Lane, status: Status, offset: Option<u64>) -> Outcome {
+        Outcome {
+            step,
+            lane,
+            status,
+            offset: offset.map(Duration::from_millis),
+            duration: Duration::ZERO,
+            facts: Vec::new(),
+        }
+    }
+
+    /// A report of `outcomes` in the lanes of the check, with the formal
+    /// lane empty.
+    fn report(outcomes: Vec<Outcome>) -> Report {
+        let lane = |lane, steps| LaneSteps { lane, steps };
+        Report {
+            mode: Mode::Parallel,
+            slow: false,
+            layout: vec![
+                lane(Lane::Lint, vec!["toolchain", "fmt"]),
+                lane(Lane::Debug, vec!["test", "docs"]),
+                lane(Lane::Release, vec!["test-release"]),
+                lane(Lane::Formal, vec![]),
+            ],
+            outcomes,
+            elapsed: Duration::from_secs(20),
+            signal: None,
+        }
+    }
+
     #[test]
     fn renders_every_field() {
         let before = GitState {
@@ -254,47 +303,82 @@ mod tests {
             commit: Some("0123abc".to_string()),
             clean: None,
         };
-        let outcomes = [
-            Outcome {
-                step: "toolchain",
-                status: Status::Passed,
-                duration: Duration::from_millis(1250),
-                facts: vec![
-                    ("host".to_string(), "linux-aarch64".to_string()),
-                    (
-                        "clang".to_string(),
-                        "Ubuntu clang version 18.1.3 (1ubuntu1)".to_string(),
-                    ),
-                ],
-            },
-            Outcome {
-                step: "fmt",
-                status: Status::Failed("`cargo fmt` exited with \"1\"\nsee above".to_string()),
-                duration: Duration::from_micros(7999),
-                facts: Vec::new(),
-            },
-            Outcome {
-                step: "clippy",
-                status: Status::NotRun,
-                duration: Duration::ZERO,
-                facts: Vec::new(),
-            },
+        let mut toolchain = outcome("toolchain", Lane::Lint, Status::Passed, Some(0));
+        toolchain.duration = Duration::from_millis(1250);
+        toolchain.facts = vec![
+            ("host".to_string(), "linux-aarch64".to_string()),
+            (
+                "clang".to_string(),
+                "Ubuntu clang version 18.1.3 (1ubuntu1)".to_string(),
+            ),
         ];
+        let mut test = outcome(
+            "test",
+            Lane::Debug,
+            Status::Cancelled("step test-release failed".to_string()),
+            Some(15_020),
+        );
+        test.duration = Duration::from_micros(3_021_999);
+        let mut release = outcome(
+            "test-release",
+            Lane::Release,
+            Status::Failed("`cargo test` exited with \"101\"\nsee above".to_string()),
+            Some(15_020),
+        );
+        release.duration = Duration::from_millis(3_000);
+        let docs = outcome("docs", Lane::Debug, Status::NotRun, None);
+        let mut report = report(vec![toolchain, test, release, docs]);
+        report.slow = true;
         let environment = Environment::from_sources(
             |name| (name == "GITHUB_EVENT_NAME").then(|| "pull_request".to_string()),
             Some("ImageOS=ubuntu24-arm64\n"),
         );
         let expected = r#"{
-  "format": 1,
+  "format": 2,
   "command": "cargo xtask check",
+  "mode": "parallel",
+  "slow": true,
   "commit": "0123abc",
   "clean_before": true,
   "clean_after": null,
   "result": "failed",
+  "signal": null,
+  "lanes": [
+    {
+      "name": "lint",
+      "segment": 1,
+      "steps": [
+        "toolchain",
+        "fmt"
+      ]
+    },
+    {
+      "name": "debug",
+      "segment": 2,
+      "steps": [
+        "test",
+        "docs"
+      ]
+    },
+    {
+      "name": "release",
+      "segment": 2,
+      "steps": [
+        "test-release"
+      ]
+    },
+    {
+      "name": "formal",
+      "segment": 2,
+      "steps": []
+    }
+  ],
   "steps": [
     {
       "name": "toolchain",
+      "lane": "lint",
       "status": "passed",
+      "offset_ms": 0,
       "duration_ms": 1250,
       "facts": {
         "host": "linux-aarch64",
@@ -302,15 +386,28 @@ mod tests {
       }
     },
     {
-      "name": "fmt",
-      "status": "failed",
-      "duration_ms": 7,
-      "detail": "`cargo fmt` exited with \"1\"\nsee above",
+      "name": "test",
+      "lane": "debug",
+      "status": "cancelled",
+      "offset_ms": 15020,
+      "duration_ms": 3021,
+      "detail": "step test-release failed",
       "facts": {}
     },
     {
-      "name": "clippy",
+      "name": "test-release",
+      "lane": "release",
+      "status": "failed",
+      "offset_ms": 15020,
+      "duration_ms": 3000,
+      "detail": "`cargo test` exited with \"101\"\nsee above",
+      "facts": {}
+    },
+    {
+      "name": "docs",
+      "lane": "debug",
       "status": "not run",
+      "offset_ms": null,
       "duration_ms": 0,
       "facts": {}
     }
@@ -328,7 +425,7 @@ mod tests {
   }
 }
 "#;
-        assert_eq!(render(&before, &after, &outcomes, &environment), expected);
+        assert_eq!(render(&before, &after, &report, &environment), expected);
     }
 
     /// The receipt text read back as JSON.
@@ -342,20 +439,58 @@ mod tests {
             commit: None,
             clean: Some(false),
         };
-        let outcomes = [Outcome {
-            step: "docs",
-            status: Status::Passed,
-            duration: Duration::ZERO,
-            facts: Vec::new(),
-        }];
+        let docs = outcome("docs", Lane::Debug, Status::Passed, Some(0));
+        let mut sequential = report(vec![docs]);
+        sequential.mode = Mode::Sequential;
         let environment = Environment::from_sources(|_| None, None);
-        let receipt = parsed(&render(&state, &state, &outcomes, &environment));
+        let receipt = parsed(&render(&state, &state, &sequential, &environment));
         assert_eq!(receipt["commit"], Value::Null);
         assert_eq!(receipt["clean_before"], false);
         assert_eq!(receipt["result"], "passed");
-        let empty = parsed(&render(&state, &state, &[], &environment));
+        assert_eq!(receipt["mode"], "sequential");
+        assert_eq!(receipt["slow"], false);
+        assert_eq!(receipt["signal"], Value::Null);
+        let empty = parsed(&render(&state, &state, &report(Vec::new()), &environment));
         assert_eq!(empty["steps"], json!([]));
         assert_eq!(empty["result"], "passed");
+        assert_eq!(
+            empty["lanes"][3],
+            json!({"name": "formal", "segment": 2, "steps": []})
+        );
+    }
+
+    #[test]
+    fn an_interrupted_run_records_its_signal() {
+        let state = GitState {
+            commit: None,
+            clean: None,
+        };
+        let environment = Environment::from_sources(|_| None, None);
+        // Interrupted whatever the steps did: one passed, one was cancelled.
+        let outcomes = vec![
+            outcome("toolchain", Lane::Lint, Status::Passed, Some(0)),
+            outcome(
+                "test",
+                Lane::Debug,
+                Status::Cancelled("SIGTERM".to_string()),
+                Some(2),
+            ),
+        ];
+        for signal in [libc::SIGTERM, libc::SIGINT] {
+            let mut stopped = report(outcomes.clone());
+            stopped.signal = Some(signal);
+            let receipt = parsed(&render(&state, &state, &stopped, &environment));
+            assert_eq!(receipt["result"], "interrupted");
+            assert_eq!(receipt["signal"], signal);
+            assert_eq!(receipt["steps"][1]["status"], "cancelled");
+            assert_eq!(receipt["steps"][1]["detail"], "SIGTERM");
+            assert_eq!(receipt["steps"][0].get("detail"), None);
+        }
+        let mut passed = report(outcomes[..1].to_vec());
+        passed.signal = Some(libc::SIGHUP);
+        let receipt = parsed(&render(&state, &state, &passed, &environment));
+        assert_eq!(receipt["result"], "interrupted");
+        assert_eq!(receipt["signal"], 1);
     }
 
     #[test]
@@ -365,19 +500,16 @@ mod tests {
             commit: Some(text.to_string()),
             clean: None,
         };
-        let outcomes = [Outcome {
-            step: "fmt",
-            status: Status::Failed(text.to_string()),
-            duration: Duration::from_millis(3),
-            facts: vec![(text.to_string(), text.to_string())],
-        }];
+        let mut failed = outcome("fmt", Lane::Lint, Status::Failed(text.to_string()), Some(1));
+        failed.duration = Duration::from_millis(3);
+        failed.facts = vec![(text.to_string(), text.to_string())];
         let environment = Environment::from_sources(
             |name| (name == "GITHUB_REF").then(|| text.to_string()),
             None,
         );
         // The reader rejects a control character that is not escaped inside
         // a string, so reading the receipt back also checks the escapes.
-        let receipt = parsed(&render(&state, &state, &outcomes, &environment));
+        let receipt = parsed(&render(&state, &state, &report(vec![failed]), &environment));
         assert_eq!(receipt["commit"], text);
         assert_eq!(receipt["steps"][0]["detail"], text);
         assert_eq!(receipt["steps"][0]["facts"][text], text);

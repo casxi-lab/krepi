@@ -2,6 +2,11 @@
 //! its output in files. [`run`] sees the end of a command without collecting
 //! it and kills its group before collecting it, so that the kill cannot reach
 //! a group that took over a freed number.
+//!
+//! `cargo xtask check` shares the module: it watches and kills the process
+//! groups of its commands in the same order, through [`leader_ended`],
+//! [`kill_group`] and [`group_ended`], and reads the stop signal that
+//! [`init`] lets in through [`stop_signal`] instead of ending by it.
 
 use std::fs::{self, File, OpenOptions};
 use std::io;
@@ -21,9 +26,9 @@ use super::toolchain::sha256;
 pub const GROUP_END: Duration = Duration::from_secs(60);
 
 /// The pause between two looks at a command or a group.
-const PAUSE: Duration = Duration::from_millis(10);
+pub(crate) const PAUSE: Duration = Duration::from_millis(10);
 
-/// The stop signal that reached the gate, or 0.
+/// The stop signal that reached the gate or `cargo xtask check`, or 0.
 static STOP: AtomicUsize = AtomicUsize::new(0);
 
 /// What set the limit of a command: the cap of its call site, or the rest
@@ -107,7 +112,9 @@ impl Ran {
 
 /// Restores the default disposition of `SIGCHLD`, which [`run`] needs, and
 /// lets SIGINT and SIGTERM stop the gate, and SIGHUP unless it is ignored, as
-/// under `nohup`. Called once, before the gate starts any command.
+/// under `nohup`. Called once, before the gate starts any command, and by
+/// `cargo xtask check` before its first step: the signal then sets the flag
+/// that [`stop_signal`] reads.
 pub fn init() {
     // SAFETY: the default disposition installs no handler and touches no
     // memory of this process.
@@ -126,6 +133,13 @@ pub fn init() {
                 .expect("SIGINT, SIGTERM and SIGHUP can be caught");
         }
     }
+}
+
+/// The stop signal that reached the process since [`init`], if one did.
+pub(crate) fn stop_signal() -> Option<i32> {
+    let signal = STOP.load(Ordering::SeqCst);
+    // Signal numbers are small and positive.
+    (signal != 0).then_some(signal as i32)
 }
 
 /// Ends the gate by the stop signal that reached it, if one did.
@@ -264,7 +278,7 @@ fn supervise(child: &mut Child, group: libc::pid_t, deadline: Instant) -> Ended 
 }
 
 /// Whether the command `leader` has ended, looked at without collecting it.
-fn leader_ended(leader: libc::pid_t) -> io::Result<bool> {
+pub(crate) fn leader_ended(leader: libc::pid_t) -> io::Result<bool> {
     // SAFETY: all bits zero is a valid `siginfo_t`.
     let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
     // SAFETY: `info` is valid and writable for the call. `leader` is an
@@ -294,7 +308,7 @@ fn leader_ended(leader: libc::pid_t) -> io::Result<bool> {
 }
 
 /// Kills every process of `group`, whose leader has not been collected.
-fn kill_group(group: libc::pid_t) {
+pub(crate) fn kill_group(group: libc::pid_t) {
     // SAFETY: killpg touches no memory of this process. The uncollected
     // leader keeps the number of `group` from naming a later group. A
     // failure leaves processes behind, which `group_ended` reports.
@@ -303,7 +317,7 @@ fn kill_group(group: libc::pid_t) {
 
 /// Whether `group`, whose leader has been collected, has no process left
 /// within [`GROUP_END`].
-fn group_ended(group: libc::pid_t) -> bool {
+pub(crate) fn group_ended(group: libc::pid_t) -> bool {
     let deadline = Instant::now() + GROUP_END;
     loop {
         // SAFETY: signal 0 sends nothing and touches no memory of this
