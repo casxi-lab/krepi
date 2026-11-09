@@ -1,7 +1,7 @@
-//! The manifest rules, each row of the mapping, the selection of each line,
-//! the changed paths of a Git repository, the digest check of the images,
-//! the judge of a case over hand-written runs, and runs of the command on a
-//! fake QEMU.
+//! The manifest rules, each row of the mapping in a test of its own, the
+//! union of rows, the selection of each line, the changed paths of a Git
+//! repository, the digest check of the images, the judge of a case over
+//! hand-written runs, and runs of the command on a fake QEMU.
 
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::AtomicI32;
@@ -133,24 +133,42 @@ fn a_manifest_against_the_rules_is_refused() {
     assert!(load(&doubled).is_err_and(|error| error.contains("the case occurs twice")));
 }
 
+/// The suites of the mapping tests: `a` lists a board directory, `b` lists
+/// nothing.
+fn mapped_suites() -> [Suite; 2] {
+    [suite("a", &["kernel/boards/a/"]), suite("b", &[])]
+}
+
+/// The suites of [`mapped_suites`] that `paths` select, apart from their
+/// smoke cases.
+fn selected(paths: &[&str]) -> Vec<String> {
+    let suites = mapped_suites();
+    let plans = choose(&suites, Some(&strings(paths)), false);
+    (plans.iter())
+        .filter(|plan| matches!(&plan.why, Why::Paths(by) if !by.is_empty()))
+        .map(|plan| plan.suite.name.clone())
+        .collect()
+}
+
+/// Both suites of [`mapped_suites`].
+fn every() -> Vec<String> {
+    strings(&["a", "b"])
+}
+
 #[test]
-fn each_row_of_the_mapping_selects_its_suites() {
-    // `a` lists a board directory, `b` lists nothing.
-    let suites = [suite("a", &["kernel/boards/a/"]), suite("b", &[])];
-    let every = || vec!["a".to_string(), "b".to_string()];
-    let selected = |paths: &[&str]| -> Vec<String> {
-        let plans = choose(&suites, Some(&strings(paths)), false);
-        (plans.iter())
-            .filter(|plan| matches!(&plan.why, Why::Paths(by) if !by.is_empty()))
-            .map(|plan| plan.suite.name.clone())
-            .collect()
-    };
-    // 1: the host tooling.
+fn mapping_row_1_the_host_tooling_selects_every_suite() {
     assert_eq!(selected(&["tools/src/qemu_run.rs"]), every());
     assert_eq!(mapping("tools/src/qemu_run.rs"), Selects::Every("tools/"));
-    // 2: the repository tasks.
+}
+
+#[test]
+fn mapping_row_2_the_repository_tasks_select_every_suite() {
     assert_eq!(selected(&["xtask/src/suite.rs"]), every());
-    // 3: the toolchain files and the Cargo configuration.
+    assert_eq!(mapping("xtask/src/suite.rs"), Selects::Every("xtask/"));
+}
+
+#[test]
+fn mapping_row_3_the_toolchain_files_and_the_cargo_configuration_select_every_suite() {
     for path in [
         "rust-toolchain.toml",
         "toolchains.toml",
@@ -158,7 +176,10 @@ fn each_row_of_the_mapping_selects_its_suites() {
     ] {
         assert_eq!(selected(&[path]), every(), "{path}");
     }
-    // 4: the manifest and the workflows, apart from the formal ones.
+}
+
+#[test]
+fn mapping_row_4_the_manifest_and_the_workflows_but_the_formal_ones_select_every_suite() {
     for path in [
         "suites.toml",
         ".github/workflows/check.yml",
@@ -166,7 +187,10 @@ fn each_row_of_the_mapping_selects_its_suites() {
     ] {
         assert_eq!(selected(&[path]), every(), "{path}");
     }
-    // 5: the suites that list a prefix of a path below kernel/ or user/.
+}
+
+#[test]
+fn mapping_row_5_the_kernel_and_user_space_select_the_suites_that_list_the_path() {
     assert_eq!(selected(&["kernel/boards/a/src/main.rs"]), ["a"]);
     assert_eq!(
         mapping("kernel/arch/src/lib.rs"),
@@ -174,7 +198,10 @@ fn each_row_of_the_mapping_selects_its_suites() {
     );
     assert_eq!(selected(&["kernel/arch/src/lib.rs"]), Vec::<String>::new());
     assert_eq!(selected(&["user/Cargo.toml"]), Vec::<String>::new());
-    // 6: any other path, the formal workflows included.
+}
+
+#[test]
+fn mapping_row_6_any_other_path_selects_no_suite() {
     for path in [
         "docs/conventions/testing.md",
         "verification/open.json",
@@ -187,8 +214,12 @@ fn each_row_of_the_mapping_selects_its_suites() {
         assert_eq!(mapping(path), Selects::Nothing, "{path}");
         assert_eq!(selected(&[path]), Vec::<String>::new(), "{path}");
     }
-    // A path that several rows hold selects the union.
+}
+
+#[test]
+fn paths_of_several_rows_select_the_union_of_their_suites() {
     assert_eq!(selected(&["docs/a.md", "kernel/boards/a/x"]), ["a"]);
+    let suites = mapped_suites();
     let plans = choose(
         &suites,
         Some(&strings(&["kernel/boards/a/x", "xtask/y"])),
