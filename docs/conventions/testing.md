@@ -124,8 +124,11 @@ The steps are:
      prints; and in a procedural macro, files it reads;
 3. `fmt` in the kernel workspace, the user-space workspace, `xtask` and the
    host tooling crate `tools`;
-4. `clippy` with warnings as errors in the same four workspaces, which ends
-   the lint lane;
+4. `clippy` with warnings as errors in the same four workspaces on all of
+   their targets for the host, and then on every member of the kernel
+   workspace for the bare-metal target `aarch64-unknown-none-softfloat`, on
+   its library, binary and example targets, which are the ones that build
+   for it; this ends the lint lane;
 5. `test`, the first step of the debug lane: the tests of the same four
    workspaces, and with `--slow` then their slow tests;
 6. `test-release`, the release lane: the tests of the kernel and user-space
@@ -178,11 +181,12 @@ Cargo, in the command steps and in the resolutions of `manifests` and
 cases a copy of its tracked files. The check does not run the proof gate,
 `cargo xtask formal run`, which needs the pinned tools; CI runs the gate in
 the job `formal run` of `.github/workflows/formal.yml`, described below.
-The `fmt` step formats every module, but the `clippy` and `test` steps
-build the kernel workspace for the host only: they do not lint or test the
-modules that are compiled only for the bare-metal target
-`aarch64-unknown-none-softfloat`, which only `cargo xtask qemu-boot`
-compiles.
+The `fmt` step formats every module, and the `clippy` step lints the
+kernel workspace for the bare-metal target `aarch64-unknown-none-softfloat`
+as well as for the host, so it also lints the modules that are compiled only
+for that target. The `test` and `test-release` steps build the kernel
+workspace for the host only and do not test those modules; only
+`cargo xtask qemu-boot` builds them into an image and runs it.
 
 A slow test is a Cargo test marked `#[ignore = "slow"]` whose function name
 starts with `slow_`. `cargo xtask check --slow` runs the slow tests in the

@@ -27,7 +27,7 @@ pub struct Command {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "check",
-        about: "Run the required host checks: the toolchain, manifest, format and Clippy checks, then at once the debug lane (the tests and the documentation, Lean source, provable-subset and workflow checks) and the release tests; the first failure or a stop signal cancels the other steps, and a summary gives the seconds of each step; --help lists the options",
+        about: "Run the required host checks: the toolchain, manifest, format and Clippy checks, Clippy also on the kernel workspace for its bare-metal target, then at once the debug lane (the tests and the documentation, Lean source, provable-subset and workflow checks) and the release tests; the first failure or a stop signal cancels the other steps, and a summary gives the seconds of each step; --help lists the options",
         subcommands: &[],
     },
     Command {

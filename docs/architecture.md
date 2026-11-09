@@ -560,9 +560,10 @@ format, lint and test it, and for the bare-metal target
 the toolchain. Code that means something only on that target, such as
 assembly, register accesses, MMIO and image entry points, is compiled in
 whole modules under `cfg(all(target_arch = "aarch64", target_os = "none"))`;
-everything else is plain code that the host tests run. The checks lint and
-test only the host build: they format the modules of the bare-metal target
-but do not lint or test them, and `cargo xtask qemu-boot` compiles them.
+everything else is plain code that the host tests run. The checks format
+the modules of the bare-metal target and lint them for that target, but test
+only the host build; `cargo xtask qemu-boot` builds them into an image and
+runs it.
 Images are built with Cargo in `kernel/` or at the repository root, whose
 `.cargo/config.toml` gives the target its flags: a GNU build-id note of
 SHA-1, the static relocation model and frame pointers.
