@@ -13,12 +13,14 @@
 //! the bare-metal AArch64 target, so their modules are compiled only for
 //! `target_arch = "aarch64"` with `target_os = "none"`. On the host, where
 //! the repository checks build, lint and test the workspace, the crate holds
-//! the exception frame and the classes of exceptions, which its tests run.
+//! the exception frame, the classes of exceptions and the cache-line walks
+//! of a range, which its tests run.
 
 #![cfg_attr(not(test), no_std)]
 
 #[cfg(all(target_arch = "aarch64", target_os = "none"))]
 mod boot;
+pub mod cache_range;
 #[cfg(all(target_arch = "aarch64", target_os = "none"))]
 pub mod cpu;
 pub mod exception;

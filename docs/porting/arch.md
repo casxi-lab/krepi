@@ -22,8 +22,9 @@ AArch64 modules and compiled those that touch the CPU only for the
 bare-metal target. krepi has one architecture, so the crate is the AArch64
 module itself: its root declares `boot`, `cpu`, `gic` and `timer`, each
 compiled only for `target_arch = "aarch64"` with `target_os = "none"`, as
-the legacy root compiled `cpu`, and `exception`, compiled on the host too,
-as the legacy root compiled it. The manifest makes the crate a member of the
+the legacy root compiled `cpu`, and `exception` and `cache_range`, compiled
+on the host too, as the legacy root compiled them. The record of
+`cache_range` is [cache_range](cache_range.md). The manifest makes the crate a member of the
 kernel workspace. The legacy area `src/arch` is ported, as
 [porting](../conventions/porting.md#classification-of-the-legacy-areas)
 classifies it.
@@ -71,7 +72,6 @@ None of its own; the records of the declared modules name theirs.
   user contexts, user addresses and ASIDs, the GIC-400 and the physical timer
   of the Pi 5 path, SGIs and the CPU-local and transaction adapters are
   ported or redesigned with the code that needs them.
-- The declarations of `cache_range` and `cache`, which are added with those
-  modules.
+- The declaration of `cache`, which is added with that module.
 - The module documentation, which described the legacy modules; the crate
   documentation describes this crate.

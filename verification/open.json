@@ -11,6 +11,14 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
+      "item": "kernel/arch/src/cache_range.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
       "item": "kernel/arch/src/cpu.rs",
       "kind": "code",
       "verified_state": "neither",

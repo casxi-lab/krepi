@@ -3,8 +3,8 @@
 This page governs the code of the `boot` component of the
 [boot and platform](../README.md) domain: the cold entry of a kernel image,
 the exception vectors of EL1 with the frame that they save, the processor
-primitives that EL1 code reads, the GICv2 and the generic timer, and the
-QEMU virt board support with its serial console, its exception record, its
+primitives that EL1 code reads, the cache-line walks of a range, the GICv2
+and the generic timer, and the QEMU virt board support with its serial console, its exception record, its
 interrupt wiring, its default image and its test images. The observable
 behaviour that these rules serve, with its evidence, is in the
 [requirements](requirements.md), the other document of the component.
@@ -38,6 +38,9 @@ behaviour that these rules serve, with its evidence, is in the
   links the production code of the default image and adds its own
   `kernel_main`, dispatch and trigger sequence, for the QEMU boot suite. It
   is test code, not a production image.
+- **Cache-line walk.** The addresses that `krepi_arch::cache_range::lines`
+  gives for a range of bytes: one for each cache line that a byte of the
+  range lies in, from the line of the first byte to the line of the last.
 
 ## Entry points
 
@@ -63,14 +66,15 @@ behaviour that these rules serve, with its evidence, is in the
 | `krepi_arch::timer::stop_virtual` and `arm_virtual` | Functions | The interrupt wiring of a board and the test images | [Interrupts](#interrupts) |
 | `krepi_arch::cpu::exception_level`, `main_id`, `system_control`, `counter_frequency`, `virtual_counter` and `cpacr` | Functions | Kernel code at EL1 | [Processor registers](#processor-registers) |
 | `krepi_arch::cpu::halt` | Function | Fatal paths | [Processor registers](#processor-registers) |
+| `krepi_arch::cache_range::lines`, `handoff_lines` and `MAX_RANGE_BYTES` | Functions and a constant, host-testable | The cache maintenance by address (planned); the invalidation of an image that firmware hands over (planned) | [Cache-line walks](#cache-line-walks) |
 
 ## Extractability
 
 No code of this component follows the
 [provable Rust subset](../../../conventions/provable-subset.md): the cold
-entry, the exception vectors, the processor primitives, the GICv2 and
-timer drivers, the board support and the PL011 driver are none of the
-modules that the subset lists, and
+entry, the exception vectors, the processor primitives, the cache-line
+walks, the GICv2 and timer drivers, the board support and the PL011 driver
+are none of the modules that the subset lists, and
 its page-table logic leaves the barrier, cache and TLB instructions to
 adapters. The section therefore
 lists no source paths, and the `subset` step of `cargo xtask check` checks
@@ -341,6 +345,26 @@ the bounds allow, and `format` for a formatter that failed.
 - `halt` masks every exception of the executing CPU and waits in a `WFE`
   loop forever; other CPUs are not stopped.
 
+## Cache-line walks
+
+- `lines(start, bytes, field, limit)` gives the cache-line walk of
+  `[start, start + bytes)` for lines of `4 << field` bytes, the encoding of
+  `DminLine` and `IminLine` in `CTR_EL0`: the address of the line of
+  `start`, rounded down to a multiple of the line size, and every line
+  after it that starts below `start + bytes`. It gives `None`, before any
+  address, when `bytes` is 0 or above `limit`, when `field` is above 15 or
+  when `start + bytes` does not fit in 64 bits.
+- `handoff_lines(start, bytes, field, window)` gives the same walk for the
+  whole image that firmware hands over, with the length of `window` as the
+  limit, and `None` unless the image starts at `window.start`, the window
+  is not empty, `start`, `bytes` and `window.end` are multiples of 4 KiB,
+  `field` is at most 10, a line of at most 4 KiB, and the image ends within
+  the window.
+- `MAX_RANGE_BYTES`, 64 KiB, is the limit of one call of the cache
+  maintenance by address.
+- The walks touch no memory and execute no maintenance instruction; they
+  are compiled on the host too.
+
 ## Platform parameters
 
 | Parameter | Use | QEMU virt |
@@ -419,6 +443,12 @@ counter as well.
   those of `kernel/arch/src/exception/` the class of each vector and
   syndrome, with syndromes written from the Arm Architecture Reference
   Manual.
+- The host tests of `kernel/arch/src/cache_range/` hold the cache-line
+  walks: the tests taken from the prototype tree, with their expected
+  values, of partial lines, exact boundaries, refused ranges and the walk of
+  a whole image in the windows of the Raspberry Pi 5 and of QEMU virt, and
+  the examples of a range with unaligned ends and of empty and oversized
+  ranges.
 - The QEMU boot suite boots the default image on QEMU virt and holds its
   transcript against the records of this page, written into the suite, not
   taken from an earlier run. Three cold boots give identical transcripts.
@@ -470,6 +500,7 @@ counter as well.
 | `kernel/arch/src/cpu.rs#virtual_counter` | `unsafe` | Neither (reads `CNTVCT_EL0`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs#cpacr` | `unsafe` | Neither (reads `CPACR_EL1`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs#halt` | `unsafe` | Neither (writes `DAIF`, waits with `WFE`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/arch/src/cache_range.rs` | `code` | Neither | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` | - | - |
 | `kernel/boards/qemu-virt/src` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/boards/qemu-virt/src/irq.rs#GIC` | `unsafe` | Neither (names the GICv2 of QEMU virt through `Gic::new`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/boards/qemu-virt/src/uart.rs#read` | `mmio` | Neither (reads a PL011 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
@@ -481,9 +512,10 @@ counter as well.
 ## Legacy test vectors
 
 The component has no specification, so it freezes no test vectors. The
-prototype tests that the console took over are host tests of its code, with
-their expected values, and the
-[porting record of the console](../../../porting/console.md) lists them.
+prototype tests that the console and the cache-line walks took over are
+host tests of their code, with their expected values, and the porting
+records of the [console](../../../porting/console.md) and of
+[cache_range](../../../porting/cache_range.md) list them.
 
 ## References
 

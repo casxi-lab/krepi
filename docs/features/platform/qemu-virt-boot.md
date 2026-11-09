@@ -5,6 +5,7 @@ status: partial
 modules:
   - kernel/arch/src/boot.rs
   - kernel/arch/src/boot.S
+  - kernel/arch/src/cache_range.rs
   - kernel/arch/src/cpu.rs
   - kernel/arch/src/exception.rs
   - kernel/arch/src/exception.S
@@ -20,6 +21,7 @@ modules:
   - kernel/boards/qemu-virt/src/fault.rs
   - kernel/boards/qemu-virt/src/irq.rs
 tests:
+  - kernel/arch/src/cache_range/tests.rs
   - kernel/arch/src/exception/tests.rs
   - kernel/boards/qemu-virt/src/console/tests.rs
   - kernel/boards/qemu-virt/src/console/polled/tests.rs
@@ -171,6 +173,21 @@ record with `class=fp` and then `CASXI_HALTED`, CR LF.
 The syndrome of a breakpoint taken through vector 0, the current level with
 `SP_EL0`, is not a breakpoint of the kernel: the record names the class
 `sync`. This is the degenerate input of the class table.
+
+### ex7: A range with unaligned ends covers each line it touches
+
+The 200 bytes from `0x4020_1005`, at the 64-byte lines of a `CTR_EL0` line
+field of 4, touch the four lines at `0x4020_1000`, `0x4020_1040`,
+`0x4020_1080` and `0x4020_10c0`: the walk starts at the line of the first
+byte and ends at the line of the last, `0x4020_10cc`.
+
+### ex8: An empty or oversized range is refused
+
+A range of 0 bytes, and one of 64 KiB and one byte, are refused before any
+line is given. A range of exactly 64 KiB, the limit of one call of the
+cache maintenance by address, is walked in 1,024 lines of 64 bytes from an
+aligned start and in 1,025 from an unaligned one. This is the degenerate
+input of the walk.
 
 ## Design
 
