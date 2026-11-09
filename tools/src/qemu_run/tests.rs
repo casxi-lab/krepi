@@ -855,3 +855,122 @@ fn the_exit_status_follows_the_reason() {
         assert_eq!(exit_code(&receipt), 2, "{reason:?}");
     }
 }
+
+/// The options of a library run of the bench's image with its fake QEMU
+/// into [`Bench::output`], with a timeout that the run never reaches.
+fn library_options(bench: &Bench) -> Options {
+    Options {
+        image: bench.image.clone(),
+        timeout: 120.0,
+        max_bytes: DEFAULT_MAX_BYTES,
+        clock: Clock::Host,
+        qemu: Some(bench.qemu.clone()),
+        output: None,
+    }
+}
+
+/// An input whose trigger is `after` and whose bytes are `bytes`.
+fn input(after: &[u8], bytes: &[u8]) -> Input {
+    Input {
+        after: after.to_vec(),
+        bytes: bytes.to_vec(),
+    }
+}
+
+/// An input of a library run is sent once its trigger has arrived, and
+/// what the guest does with it reaches the transcript. The receipt lists
+/// the input with its trigger, its bytes, escaped, and the count of output
+/// bytes when it was sent, which is that of the trigger line here, as the
+/// guest writes nothing more until the input arrives. The deadline passes
+/// once the guest has answered.
+#[test]
+fn an_input_is_sent_once_its_trigger_has_arrived() {
+    let bench = Bench::new(
+        "qemu-run-input",
+        "printf 'READY\\r\\n'\nIFS= read -r line\nprintf 'got:%s\\r\\n' \"$line\"\nexec cat",
+    );
+    let _deadline = DeadlineAt::new(b"got:abc\r\n");
+    let receipt = run_image_with(
+        &library_options(&bench),
+        &[input(b"READY\r\n", b"abc\n")],
+        &bench.output(),
+        &TIMING,
+        &mut || Ok(fresh_flag()),
+    )
+    .unwrap();
+    assert_eq!(bench.file(TRANSCRIPT_FILE), b"READY\r\ngot:abc\r\n");
+    assert_eq!(receipt, bench.receipt());
+    assert_eq!(receipt["exit_reason"], "deadline");
+    assert!(receipt.get("errors").is_none(), "{receipt}");
+    assert_eq!(
+        receipt["input"],
+        json!([{"after": "READY\\r\\n", "bytes": "abc\\n", "sent_at": 7}])
+    );
+}
+
+/// The inputs of a run are sent in order, and each waits for its trigger in
+/// the output that follows the trigger of the input before it: two inputs
+/// with the same trigger need it twice.
+#[test]
+fn each_input_waits_for_its_trigger_after_the_previous_one() {
+    let bench = Bench::new(
+        "qemu-run-inputs",
+        "printf 'A\\n'\nIFS= read -r one\nprintf 'A\\n'\nIFS= read -r two\nprintf '%s%s\\n' \"$one\" \"$two\"\nexec cat",
+    );
+    let _deadline = DeadlineAt::new(b"12\n");
+    let receipt = run_image_with(
+        &library_options(&bench),
+        &[input(b"A\n", b"1\n"), input(b"A\n", b"2\n")],
+        &bench.output(),
+        &TIMING,
+        &mut || Ok(fresh_flag()),
+    )
+    .unwrap();
+    assert_eq!(bench.file(TRANSCRIPT_FILE), b"A\nA\n12\n");
+    assert_eq!(
+        receipt["input"],
+        json!([
+            {"after": "A\\n", "bytes": "1\\n", "sent_at": 2},
+            {"after": "A\\n", "bytes": "2\\n", "sent_at": 4},
+        ])
+    );
+}
+
+/// An input whose trigger never arrives is not sent, and the receipt
+/// records it with `sent_at` null; the run ends as it would without it.
+#[test]
+fn an_input_whose_trigger_never_arrives_is_not_sent() {
+    let bench = Bench::new("qemu-run-no-trigger", "printf 'boot\\n'\nexec cat");
+    let _deadline = DeadlineAt::new(b"boot\n");
+    let receipt = run_image_with(
+        &library_options(&bench),
+        &[input(b"READY", b"x")],
+        &bench.output(),
+        &TIMING,
+        &mut || Ok(fresh_flag()),
+    )
+    .unwrap();
+    assert_eq!(bench.file(TRANSCRIPT_FILE), b"boot\n");
+    assert_eq!(receipt["exit_reason"], "deadline");
+    assert_eq!(
+        receipt["input"],
+        json!([{"after": "READY", "bytes": "x", "sent_at": null}])
+    );
+}
+
+/// A library run without inputs is the run of `run_image`: its receipt has
+/// no `input` key, as that of `cargo xtask qemu` has none.
+#[test]
+fn a_run_without_inputs_has_no_input_key() {
+    let bench = Bench::new("qemu-run-no-input", "printf 'hello\\r\\n'\nexit 0");
+    let receipt = run_image_with(
+        &library_options(&bench),
+        &[],
+        &bench.output(),
+        &TIMING,
+        &mut || Ok(fresh_flag()),
+    )
+    .unwrap();
+    assert_eq!(receipt["exit_reason"], "guest_shutdown");
+    assert!(receipt.get("input").is_none(), "{receipt}");
+}
