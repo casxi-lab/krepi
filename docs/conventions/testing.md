@@ -344,6 +344,71 @@ digest of each image and the path of the record, and exits with 0, or with
 tests run in the `test` step above and compare the record with the file and
 with the digest of the test image computed with `shasum -a 256`.
 
+The QEMU suites are listed in `suites.toml` at the repository root. Each
+`[[suite]]` has a `name`, the `image` that it boots, by its name in the
+record of `cargo xtask image`, the `paths`, prefixes of repository paths
+below `kernel/` or `user/` whose change selects it on a pull request, and its
+cases. Each `[[suite.case]]` has a `name`, `smoke`, whether every pull
+request runs it, `slow`, whether only the slow runs do, `runs`, the cold
+boots of the case from 1 to 10, each in a new QEMU process, and `timeout`,
+the limit of one run in seconds from 1 to 600. No case is both smoke and
+slow, and names are unique and made of lowercase letters, digits and
+hyphens. The one suite today, `test-elf`, boots the test image and lists no
+paths; its case `boot` is a smoke case of one run, and `repeat`, a slow
+case, makes three.
+
+`cargo xtask suite` runs the cases of `suites.toml` on QEMU virt through the
+library entry of the QEMU runner, with the command line of
+`cargo xtask qemu`, the host clock, the `timeout` of the case and a limit of
+4,096 bytes of serial output. It is not part of the check. Which cases run
+depends on its options:
+
+- `--base <rev>`: the merge base of `<rev>` and `HEAD`, and the paths that
+  `git diff --name-only --no-renames` gives between it and `HEAD`, both
+  sides of a rename or a deletion included. Each path selects suites by
+  prefix: one below `tools/` or `xtask/`, `rust-toolchain.toml`,
+  `toolchains.toml`, a path below `.cargo/`, `suites.toml` or a path below
+  `.github/workflows/` that does not start with `.github/workflows/formal`
+  selects every suite; one below `kernel/` or `user/` selects the suites that
+  list a prefix of it; any other path, such as one below `docs/` or
+  `verification/`, selects none. The smoke cases run whatever the paths, and
+  a selected suite runs its other cases that are not slow.
+- Without `--base`, every suite runs its cases that are not slow.
+- `--slow` adds the slow cases of the suites that run.
+
+With `--images <dir>`, the images come from `<dir>/images.json`, the record
+of `cargo xtask image`, and each image that a case to run boots needs
+`--expect <name>=<SHA-256>`: the command computes the SHA-256 of the file,
+and a digest that differs from the record's or the expected one, a missing
+entry, file or `--expect` ends the command as `ERROR` before any QEMU starts.
+Without `--images`, it writes the images into `images/` of its output
+directory. A run passes when its receipt has no `errors`, it ended as
+`guest_shutdown`, it booted the image with the expected digest, its receipt
+describes its transcript, and the transcript is what the image writes, for
+the test image its line; a case of more than one run also needs equal exit
+reasons and identical transcripts. Each run writes the directory
+`<suite>/<case>-<n>` of `cargo xtask qemu`. The command writes the report
+`summary.json` into the new directory `--output-dir`, by default
+`artifacts/suite/<UTC time>Z-<process ID>`: the status `PASS`, `FAIL`,
+`ERROR` or `INTERRUPTED`, the start and end times, the commit, the GitHub
+Actions run (`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_EVENT_NAME`,
+`GITHUB_REF`, `GITHUB_SHA`), the base, merge base and changed paths, the
+images with their digests, and each suite with why it runs, the paths that
+select it, and the cases that run, each with why, its runs, their exit
+reasons and the digests of their receipts and transcripts, and its checks.
+A case that does not run is not listed. The command prints a line for each
+suite, run and case, each failed check and the status with the path of the
+report, with control characters escaped, and exits with 0 for `PASS`, 1 for
+`FAIL`, 2 for `ERROR` and for a usage error, 130 for `INTERRUPTED` and 120
+when it cannot write its own output; `--qemu` names the QEMU executable as
+for `cargo xtask qemu`. SIGINT, SIGTERM and SIGHUP are caught from
+immediately before the first QEMU starts. Its unit tests run in the `test`
+step above: one per row of the mapping and per line of CI, on manifests
+written for them; the changed paths of a Git repository that they create;
+the digest check of the images; the judge over hand-written receipts and
+transcripts and weakened forms of them; and the command on a fake QEMU, a
+shell script that prints a line and exits.
+
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
 QEMU virt default image, boots it on QEMU virt through the library entry of
 the QEMU runner and judges every run; it is not part of the check, and CI
@@ -508,11 +573,12 @@ ignored because it needs the pinned Lean: the job runs it in the image, and
 a local run needs the `darwin-arm64` installation at
 `artifacts/formal/tools`.
 
-`cargo xtask qemu-boot` is the QEMU boot suite. Further QEMU suites and
-the board suites have entry points of their own (planned), built on the
-serial port transport, the serial link, the QEMU command and the serial
-capture of a guest, the QEMU runner, and the serial record parsers of the
-host tooling crate. Each suite writes its report and the raw serial bytes under
+`cargo xtask qemu-boot` is the QEMU boot suite of the kernel, and
+`cargo xtask suite` runs the QEMU suites of `suites.toml`. The board suites
+have entry points of their own (planned), built on the serial port
+transport, the serial link, the QEMU command and the serial capture of a
+guest, the QEMU runner, and the serial record parsers of the host tooling
+crate. Each suite writes its report and the raw serial bytes under
 `artifacts/`, together with the identity of the image it ran.
 
 ## Evidence and receipts
@@ -676,14 +742,14 @@ to an exact version in the manifest of the crate that uses it:
 | `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching and in the receipts of the serial capture, of `cargo xtask qemu` and of `cargo xtask qemu-boot`, the suffix of their run directories, and the build-id of the test image |
 | `xtask/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask check`, `cargo xtask formal run`, `cargo xtask formal guard`, `cargo xtask formal toolchain-check`, `cargo xtask formal check`, `cargo xtask formal vectors` and `cargo xtask formal canary`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
 | `xtask/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The process groups of the commands of `cargo xtask check`, `cargo xtask formal run` and `cargo xtask formal vectors`: killing a command's group, finding whether any of its processes remain, seeing that a command has ended without collecting it, and the default disposition of `SIGCHLD` that this needs; finding whether SIGHUP is ignored when the run starts; and the effective user of the run, the bytes available on the file system of its run directory and the largest resident set of a process that it collected, which its receipt records |
-| `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json`, `cargo xtask formal check` reads `verification/targets.json` and `cargo xtask formal run` reads `verification/targets.json`, `verification/qualification/cases.json`, `verification/extraction.toml`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json` and the `translation.json` that Aeneas writes, the type into which the `subset` step of `cargo xtask check` reads its compile-fail cases, the type into which `cargo xtask formal vectors` reads the `vectors` block of a contract, the record `images.json` that `cargo xtask image` writes, the record of a step of `cargo xtask formal canary`, and the types of the receipt of `cargo xtask formal run`, which the canary also reads |
-| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, of `verification/open.json` and of the record `images.json` of `cargo xtask image`, reading the output of `cargo metadata` in the `manifests` and `subset` steps, in `cargo xtask formal run` and in `cargo xtask formal check`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/models.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/image-pin.json`, the `versions.json` of the proof-tool image, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the messages that `lean --json` prints, the event of a pull request that `cargo xtask formal guard` reads, and the tool manifest, the Lake locks, the statement registry, the records of its steps and the receipt that `cargo xtask formal canary` reads and writes |
+| `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json`, `cargo xtask formal check` reads `verification/targets.json` and `cargo xtask formal run` reads `verification/targets.json`, `verification/qualification/cases.json`, `verification/extraction.toml`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json` and the `translation.json` that Aeneas writes, the type into which the `subset` step of `cargo xtask check` reads its compile-fail cases, the type into which `cargo xtask formal vectors` reads the `vectors` block of a contract, the record `images.json` that `cargo xtask image` writes and `cargo xtask suite` reads, the suites of `suites.toml`, the record of a step of `cargo xtask formal canary`, and the types of the receipt of `cargo xtask formal run`, which the canary also reads |
+| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, of `verification/open.json`, of the record `images.json` of `cargo xtask image` and of the report of `cargo xtask suite`, reading that record, reading the output of `cargo metadata` in the `manifests` and `subset` steps, in `cargo xtask formal run` and in `cargo xtask formal check`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/models.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/image-pin.json`, the `versions.json` of the proof-tool image, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the messages that `lean --json` prints, the event of a pull request that `cargo xtask formal guard` reads, and the tool manifest, the Lake locks, the statement registry, the records of its steps and the receipt that `cargo xtask formal canary` reads and writes |
 | `xtask/Cargo.toml` | `syn` without default features, with `full`, `parsing` and `visit` | MIT OR Apache-2.0 | Parsing the source files of the kernel workspace for the inventory of `cargo xtask formal check` and for the `subset` step of `cargo xtask check`, walking their items and reading their attributes, paths and tokens, and in a unit test of the check the Rust files of every workspace for the names of the slow tests |
 | `xtask/Cargo.toml` | `proc-macro2` without default features, with `span-locations` | MIT OR Apache-2.0 | The token type under `syn`, whose span locations give the line of each problem that the `subset` step reports |
 | `xtask/Cargo.toml` | `signal-hook` without default features | MIT OR Apache-2.0 | The handler that lets SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop `cargo xtask check`, `cargo xtask formal run` and `cargo xtask formal vectors`; the emulation of their default action with which the two formal commands then end, whereas the check exits with 128 plus the signal number; and the names of the signals in the output of the check |
-| `xtask/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests of the images that `cargo xtask image` writes into `images.json`, of the Aeneas patch and the Lake lock that `cargo xtask formal toolchain-check` compares with `verification/toolchain.json`, and of the output files of the commands of `cargo xtask formal run` and `cargo xtask formal vectors`, the Lean files that Aeneas writes in the former and the `versions.json` of the proof-tool image, and of the Lean archives, the channel manifest and the Lake lock of Aeneas main, which `cargo xtask formal canary` writes into the derived tool manifest |
+| `xtask/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests of the images that `cargo xtask image` writes into `images.json` and that `cargo xtask suite` checks before it boots them, and of the receipts and transcripts of its runs, of the Aeneas patch and the Lake lock that `cargo xtask formal toolchain-check` compares with `verification/toolchain.json`, and of the output files of the commands of `cargo xtask formal run` and `cargo xtask formal vectors`, the Lean files that Aeneas writes in the former and the `versions.json` of the proof-tool image, and of the Lean archives, the channel manifest and the Lake lock of Aeneas main, which `cargo xtask formal canary` writes into the derived tool manifest |
 | `xtask/Cargo.toml` | `tar` without default features | MIT OR Apache-2.0 | Unpacking the tar archive of the gate inputs that `git archive` writes for `cargo xtask formal run` |
-| `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `toolchains.toml`, `rust-toolchain.toml`, Charon's `rust-toolchain`, `verification/extraction.toml`, the compile-fail cases of the `subset` step, the `vectors` blocks of the contracts, and Charon's `charon/Cargo.toml` and the channel manifest of a nightly that `cargo xtask formal canary` reads |
+| `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `suites.toml`, `toolchains.toml`, `rust-toolchain.toml`, Charon's `rust-toolchain`, `verification/extraction.toml`, the compile-fail cases of the `subset` step, the `vectors` blocks of the contracts, and Charon's `charon/Cargo.toml` and the channel manifest of a nightly that `cargo xtask formal canary` reads |
 | `xtask/Cargo.toml` | `walkdir` | MIT OR Unlicense | The listing of the tool installation that `cargo xtask formal run` takes at the start and at the end of a phase, without following symbolic links |
 | `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step |
 

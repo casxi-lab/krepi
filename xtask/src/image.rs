@@ -51,6 +51,11 @@ pub const SOURCES: [Source; 1] = [Source {
     write: |path| krepi_tools::test_elf::write(path).map_err(|failure| failure.0),
 }];
 
+/// The source named `name`, if there is one.
+pub fn source(name: &str) -> Option<&'static Source> {
+    SOURCES.iter().find(|source| source.name == name)
+}
+
 /// The record of the images of one run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -71,6 +76,32 @@ pub struct Image {
 }
 
 impl Record {
+    /// The record in `text`, which must have the format [`FORMAT`] and name
+    /// each image once.
+    pub fn parse(text: &str) -> Result<Record, String> {
+        let record: Record = serde_json::from_str(text).map_err(|error| error.to_string())?;
+        if record.format != FORMAT {
+            return Err(format!(
+                "format {} is not the format {FORMAT} that this xtask reads",
+                record.format
+            ));
+        }
+        for (at, image) in record.images.iter().enumerate() {
+            if record.images[..at]
+                .iter()
+                .any(|other| other.name == image.name)
+            {
+                return Err(format!("the image {} is named twice", image.name));
+            }
+        }
+        Ok(record)
+    }
+
+    /// The entry of the image `name`, if the record has one.
+    pub fn image(&self, name: &str) -> Option<&Image> {
+        self.images.iter().find(|image| image.name == name)
+    }
+
     /// The JSON text of the record, with two-space indentation and a final
     /// newline.
     pub fn render(&self) -> String {
@@ -221,7 +252,7 @@ mod tests {
             record,
             Record {
                 format: 1,
-                images: vec![image],
+                images: vec![image.clone()],
             }
         );
         // The digest is that of the file on disk, which is the test image.
@@ -240,6 +271,9 @@ mod tests {
                  \"{TEST_ELF_SHA256}\",\n      \"commit\": \"{commit}\"\n    }}\n  ]\n}}\n"
             )
         );
+        assert_eq!(Record::parse(&text), Ok(record.clone()));
+        assert_eq!(record.image("test-elf"), Some(&image));
+        assert_eq!(record.image("kernel"), None);
         let mut names: Vec<String> = (fs::read_dir(&output).expect("the directory"))
             .map(|entry| {
                 entry
@@ -279,5 +313,38 @@ mod tests {
             Err("no image".to_string())
         );
         assert!(!output.join(RECORD).exists());
+    }
+
+    #[test]
+    fn a_record_of_another_form_is_refused() {
+        let image = |name: &str| {
+            format!(
+                "{{\"name\": \"{name}\", \"file\": \"f\", \"bytes\": 1, \"sha256\": \"00\", \
+                 \"commit\": \"c\"}}"
+            )
+        };
+        let record = |format: u32, images: &[String]| {
+            format!(
+                "{{\"format\": {format}, \"images\": [{}]}}",
+                images.join(", ")
+            )
+        };
+        let one = record(1, &[image("a")]);
+        assert_eq!(Record::parse(&one).expect("one image").images.len(), 1);
+        let twice = record(1, &[image("a"), image("a")]);
+        assert_eq!(
+            Record::parse(&twice),
+            Err("the image a is named twice".to_string())
+        );
+        let other = record(2, &[]);
+        assert!(Record::parse(&other).is_err_and(|error| error.starts_with("format 2 ")));
+        let extra = one.replace("\"bytes\"", "\"size\": 1, \"bytes\"");
+        assert!(Record::parse(&extra).is_err());
+        assert!(Record::parse("[]").is_err());
+        assert_eq!(
+            source("test-elf").map(|source| source.file),
+            Some("test-elf.elf")
+        );
+        assert!(source("kernel").is_none());
     }
 }

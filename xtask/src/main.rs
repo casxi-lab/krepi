@@ -11,6 +11,7 @@ mod repo;
 #[cfg(test)]
 mod scratch;
 mod subset;
+mod suite;
 mod toolchain;
 mod workflows;
 
@@ -61,6 +62,11 @@ pub const COMMANDS: &[Command] = &[
         about: "Record what a board sends over a serial port for a bounded time into a new directory, without evaluating its boot; --help lists the options",
         subcommands: &[],
     },
+    Command {
+        name: "suite",
+        about: "Run the QEMU suites of suites.toml: the smoke cases and the suites that the paths changed since a base select, or every suite, with the slow cases on request, each case judged by its expected output, with a report in a new directory; --help lists the options",
+        subcommands: &[],
+    },
 ];
 
 fn print_help() {
@@ -98,6 +104,7 @@ fn main() -> ExitCode {
         }
         ["formal", rest @ ..] => formal::run(&repo::root(), rest),
         ["image", rest @ ..] => image::command(&repo::root(), rest),
+        ["suite", rest @ ..] => suite::command(&repo::root(), rest),
         [] | ["help"] => {
             print_help();
             ExitCode::SUCCESS

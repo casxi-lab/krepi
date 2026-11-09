@@ -1,0 +1,29 @@
+# The QEMU suites that `cargo xtask suite` runs. Each suite names the image
+# source that it boots and the paths below kernel/ or user/ whose change
+# selects it on a pull request; each case says whether every pull request
+# runs it (smoke), whether only the slow runs do (slow), how many cold boots
+# it makes (runs) and the limit of one run in seconds (timeout). The format
+# is described in docs/conventions/testing.md.
+
+# The test image of the host tooling crate, which writes one line to the
+# PL011 and powers QEMU virt off.
+[[suite]]
+name = "test-elf"
+image = "test-elf"
+paths = []
+
+# One boot: the guest powers the machine off and its output is the line.
+[[suite.case]]
+name = "boot"
+smoke = true
+slow = false
+runs = 1
+timeout = 30
+
+# Three cold boots with the same exit reason and identical transcripts.
+[[suite.case]]
+name = "repeat"
+smoke = false
+slow = true
+runs = 3
+timeout = 30
