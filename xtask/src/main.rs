@@ -61,13 +61,12 @@ fn print_help() {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    match args
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>()
-        .as_slice()
-    {
-        ["check", rest @ ..] => check::command(repo::root(), rest),
+    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    // The options of the check may also be written before `check`.
+    if let Some(rest) = check::arguments(&words) {
+        return check::command(repo::root(), &rest);
+    }
+    match words.as_slice() {
         ["qemu", rest @ ..] => {
             let args: Vec<String> = rest.iter().map(|arg| arg.to_string()).collect();
             let code = krepi_tools::qemu_run::main(&repo::root(), &args);

@@ -540,7 +540,33 @@ fn cli() -> clap::Command {
         )
 }
 
-/// The options in `args`, the arguments that follow `check`.
+/// The arguments of the check when `args`, the arguments of `cargo xtask`,
+/// name it: `check` with options of the check after it, before it or both,
+/// in any order. The options before `check` come first, and the value of an
+/// option that takes one is not read as the command, so that
+/// `cargo xtask --receipt check check` writes the receipt `check`. `None`
+/// when no `check` follows the options of the check that start `args`.
+pub fn arguments<'a>(args: &[&'a str]) -> Option<Vec<&'a str>> {
+    let cli = cli();
+    let mut at = 0;
+    loop {
+        let arg = *args.get(at)?;
+        if arg == "check" {
+            return Some([&args[..at], &args[at + 1..]].concat());
+        }
+        let name = arg.strip_prefix("--")?;
+        let (long, inline) = (name.split_once('=')).map_or((name, false), |(long, _)| (long, true));
+        let option = (cli.get_arguments()).find(|option| option.get_long() == Some(long))?;
+        at += if option.get_action().takes_values() && !inline {
+            2
+        } else {
+            1
+        };
+    }
+}
+
+/// The options in `args`, the arguments of the check that [`arguments`]
+/// gives.
 fn options(args: &[&str]) -> Result<Options, clap::Error> {
     let matches =
         cli().try_get_matches_from(std::iter::once("check").chain(args.iter().copied()))?;
@@ -551,9 +577,9 @@ fn options(args: &[&str]) -> Result<Options, clap::Error> {
     })
 }
 
-/// Entry point of `cargo xtask check`, with the arguments that follow
-/// `check`. `--help` prints the help and exits with 0, and a usage error
-/// exits with 2.
+/// Entry point of `cargo xtask check`, with the arguments of the check that
+/// [`arguments`] gives. `--help` prints the help and exits with 0, and a
+/// usage error exits with 2.
 pub fn command(root: PathBuf, args: &[&str]) -> ExitCode {
     match options(args) {
         Err(error) => {
@@ -995,13 +1021,19 @@ mod tests {
             [2, 0, 1],
             [2, 1, 0],
         ] {
-            let line = order.map(|at| all[at]).join(" ");
-            let args: Vec<&str> = line.split(' ').collect();
-            assert_eq!(
-                options(&args).expect("the options parse"),
-                expected,
-                "{line}"
-            );
+            // `check` before all the options, between them and after them.
+            for split in 0..=order.len() {
+                let mut words = order.map(|at| all[at]).to_vec();
+                words.insert(split, "check");
+                let line = words.join(" ");
+                let words: Vec<&str> = line.split(' ').collect();
+                let args = arguments(&words).expect("the line names the check");
+                assert_eq!(
+                    options(&args).expect("the options parse"),
+                    expected,
+                    "{line}"
+                );
+            }
         }
         let none = Options {
             sequential: false,
@@ -1026,6 +1058,41 @@ mod tests {
         let text = help.to_string();
         for option in ["--sequential", "--slow", "--receipt <PATH>"] {
             assert!(text.contains(option), "{text}");
+        }
+    }
+
+    #[test]
+    fn only_options_of_the_check_come_before_it() {
+        let cases: [(&[&str], &[&str]); 4] = [
+            (&["check"], &[]),
+            (
+                &["--receipt=p", "check", "--slow"],
+                &["--receipt=p", "--slow"],
+            ),
+            (&["--receipt", "check", "check"], &["--receipt", "check"]),
+            (&["--slow", "check", "--slow"], &["--slow", "--slow"]),
+        ];
+        for (line, args) in cases {
+            assert_eq!(arguments(line).as_deref(), Some(args), "{line:?}");
+        }
+        let receipt = options(&arguments(&["--receipt", "check", "check"]).expect("the check"));
+        assert_eq!(
+            receipt.expect("a receipt").receipt,
+            Some(PathBuf::from("check"))
+        );
+        let twice = options(&arguments(&["--slow", "check", "--slow"]).expect("the check"));
+        assert_eq!(twice.expect_err("a usage error").exit_code(), 2);
+        for other in [
+            &[][..],
+            &["help"],
+            &["--slow"],
+            &["--receipt", "check"],
+            &["--fast", "check"],
+            &["extra", "check"],
+            &["qemu", "--slow", "check"],
+            &["formal", "run", "check"],
+        ] {
+            assert_eq!(arguments(other), None, "{other:?}");
         }
     }
 

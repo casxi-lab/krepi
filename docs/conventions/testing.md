@@ -77,7 +77,8 @@ such a check can fail.
 
 `cargo xtask check --slow` also runs the slow tests, described after the
 list. The options `--sequential`, `--slow` and `--receipt <path>` can be
-combined and given in any order.
+combined and given in any order, before `check` as well as after it, as in
+`cargo xtask --slow check --sequential`.
 
 The steps are:
 
