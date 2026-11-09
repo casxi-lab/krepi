@@ -366,3 +366,22 @@ fn the_command_reads_a_strict_input_into_a_new_directory() {
     let error = cli().try_get_matches_from(args).expect_err("a usage error");
     assert_eq!(error.exit_code(), 2);
 }
+
+#[test]
+fn a_job_cancelled_before_a_runner_took_it_takes_no_minutes() {
+    let mut cancelled = job(2, 1);
+    cancelled.runner_name = Some(String::new());
+    cancelled.runner_group_name = Some(String::new());
+    let runs = vec![run(
+        1,
+        START,
+        ".github/workflows/formal.yml",
+        vec![job(1, 61), cancelled],
+    )];
+    let usage = usage(&input(vec![repository("casxi-lab/krepi", runs)]));
+    assert_eq!(
+        usage["minutes"],
+        json!({"standard hosted": 2, "larger hosted": 0, "self-hosted": 0})
+    );
+    assert_eq!(threshold(&usage, "larger hosted"), (0, false));
+}

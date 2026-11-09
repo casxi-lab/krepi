@@ -167,11 +167,11 @@ pub fn runner(job: &JobData) -> &'static str {
     )
 }
 
-/// The class of the runner of a job with the runner name `name`, which is
-/// `None` for a job that ran on no runner, the labels `labels` and the
-/// runner group `group`, as [`runner`] gives it.
+/// The class of the runner of a job with the runner name `name`, the labels
+/// `labels` and the runner group `group`, as [`runner`] gives it. A job ran
+/// on no runner when it has no runner name ([`ran_on_a_runner`]).
 pub fn runner_class(name: Option<&str>, labels: &[String], group: Option<&str>) -> &'static str {
-    if name.is_none() {
+    if !ran_on_a_runner(name) {
         "none"
     } else if labels.iter().any(|label| label == "self-hosted") {
         "self-hosted"
@@ -180,6 +180,13 @@ pub fn runner_class(name: Option<&str>, labels: &[String], group: Option<&str>) 
     } else {
         "standard hosted"
     }
+}
+
+/// Whether a job with the runner name `name` ran on a runner. The API gives
+/// a job that no runner took no name, as `null` or, for a job cancelled
+/// before a runner took it, as an empty name.
+pub fn ran_on_a_runner(name: Option<&str>) -> bool {
+    name.is_some_and(|name| !name.is_empty())
 }
 
 /// The days that the record of a run of `event` on the branch `branch` is
@@ -196,7 +203,9 @@ pub fn retention(event: &str, branch: Option<&str>) -> u64 {
 /// The seconds of `job`, if it ran on a runner and both its times are
 /// known; a job still running counts until `now`.
 fn seconds(job: &JobData, now: Option<u64>) -> Option<u64> {
-    job.runner_name.as_ref()?;
+    if !ran_on_a_runner(job.runner_name.as_deref()) {
+        return None;
+    }
     let end = job.completed_at.or(now)?;
     Some(end.saturating_sub(job.started_at?))
 }

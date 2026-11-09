@@ -612,12 +612,14 @@ the record workflow itself. The command creates the new directory `<dir>`
 and writes `record.json` and `summary.md` into it. The record, of `format`
 2, holds the run with its line: `pull request` or `main` for the workflow
 `check` on a pull request or a push, `full`, `nightly` and `weekly` for
-those workflows, `none` for the others. Each job has its runner class,
-`none` for a job that ran on no runner, `self-hosted` by its labels,
-`larger hosted` for a runner group other than `GitHub Actions` and
-`standard hosted` otherwise; its seconds, its minutes, the seconds rounded
-up to whole minutes and 0 for a job that ran on no runner; its limit, its
-conclusion, its result and its annotations. The result is the conclusion, or
+those workflows, `none` for the others. Each job has its runner class:
+`none` for a job that ran on no runner, to which the API gives no runner
+name, or an empty one when it was cancelled before a runner took it;
+`self-hosted` by its labels; `larger hosted` for a runner group other than
+`GitHub Actions`; and `standard hosted` otherwise. It also has its seconds;
+its minutes, the seconds rounded up to whole minutes and 0 for a job that
+ran on no runner; its limit, its conclusion, its result and its
+annotations. The result is the conclusion, or
 `TIMEOUT` for a job that did not succeed and either ran at least as long as
 its limit or has the failure annotation
 `Process completed with exit code 124.`, which the runner writes when the
