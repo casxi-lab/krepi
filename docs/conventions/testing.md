@@ -486,9 +486,15 @@ each with its `id`, `name`, `conclusion`, `labels`, `runner_group_name`,
 `started_at` and `completed_at`, as seconds since 1970 that `jq` converts
 with `fromdateiso8601`, and no other field. `--workflow <file>` gives the
 workflow file at the head of the run, from which each job's limit is read:
-its `timeout-minutes`, 360 without one, and none when it is an expression or
-the job's name is not the one that the file gives, apart from the values of
-a matrix in parentheses. `--own <run.json> --now <seconds>` gives the run of
+its `timeout-minutes`, 360 without one, and none when it is an expression.
+A job takes the limit of the job of the file whose name is its own, also
+followed by the values of a matrix in parentheses. Failing that, a name in
+the file that holds expressions `${{ }}`, such as
+`leanchecker ${{ matrix.mode }}`, fits a job's name when each expression
+stands for some text, possibly empty, between the text around it, also once
+the values of a matrix in parentheses are left out; the names that fit give
+the limit when they all give the same one. Otherwise the job has no known
+limit. `--own <run.json> --now <seconds>` gives the run of
 the record workflow itself. The command creates the new directory `<dir>`
 and writes `record.json` and `summary.md` into it. The record, of `format`
 2, holds the run with its line: `pull request` or `main` for the workflow

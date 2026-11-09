@@ -484,6 +484,80 @@ fn the_deadline_rule_contains_the_limit_rule() {
 }
 
 #[test]
+fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
+    // The jobs of the formal workflow, as the record reads them and as the
+    // committed file gives them: a job of a matrix is named by its mode.
+    let path = ".github/workflows/formal.yml";
+    let committed = fs::read_to_string(crate::repo::root().join(path)).expect("the workflow");
+    for text in [FORMAL, committed.as_str()] {
+        let limits = limits(text).expect("the workflow reads");
+        for (name, limit) in [
+            ("leanchecker fresh", Some(120)),
+            ("leanchecker prefix", Some(120)),
+            ("leanchecker ${{ matrix.mode }}", Some(120)),
+            ("leanchecker ", Some(120)),
+            ("formal run", Some(195)),
+            ("lake comparator", Some(30)),
+            ("leanchecker", None),
+            ("lake", None),
+        ] {
+            assert_eq!(job_limit(&limits, name), limit, "{name}");
+        }
+    }
+    let limit = |limits: &[(&str, Option<u64>)], name: &str| {
+        let limits: Vec<(String, Option<u64>)> = (limits.iter())
+            .map(|(display, limit)| (display.to_string(), *limit))
+            .collect();
+        job_limit(&limits, name)
+    };
+    // Each expression stands for some text, possibly empty, between the
+    // literal text around it.
+    let one = [("a ${{ x }} b", Some(1))];
+    assert_eq!(limit(&one, "a 1 b"), Some(1));
+    assert_eq!(limit(&one, "a  b"), Some(1));
+    assert_eq!(limit(&one, "a 1 c"), None);
+    assert_eq!(limit(&one, "b 1 b"), None);
+    let two = [("x ${{ a }} y ${{ b }} z", Some(4))];
+    assert_eq!(limit(&two, "x 1 y 2 z"), Some(4));
+    assert_eq!(limit(&two, "x  y  z"), Some(4));
+    assert_eq!(limit(&two, "x 1 z"), None);
+    // The literal text at both ends must not overlap.
+    let ends = [("ab${{ x }}ba", Some(6))];
+    assert_eq!(limit(&ends, "abba"), Some(6));
+    assert_eq!(limit(&ends, "aba"), None);
+    // An exact name wins over a name with an expression.
+    let exact = [("a ${{ x }}", Some(1)), ("a b", Some(2))];
+    assert_eq!(limit(&exact, "a b"), Some(2));
+    assert_eq!(limit(&exact, "a c"), Some(1));
+    // Names with expressions that give different limits give none.
+    let different = [("a ${{ x }}", Some(1)), ("${{ y }} b", Some(2))];
+    assert_eq!(limit(&different, "a b"), None);
+    assert_eq!(limit(&different, "a c"), Some(1));
+    assert_eq!(limit(&different, "c b"), Some(2));
+    let same = [("a ${{ x }}", Some(3)), ("${{ y }} b", Some(3))];
+    assert_eq!(limit(&same, "a b"), Some(3));
+    // A limit that is an expression is unknown here too.
+    assert_eq!(limit(&[("a ${{ x }}", None)], "a b"), None);
+    // GitHub adds the values of a matrix that the name does not use.
+    let matrix = [("name ${{ github.event_name }}", Some(7))];
+    assert_eq!(limit(&matrix, "name push (1, 2)"), Some(7));
+    assert_eq!(limit(&matrix, "name push (1, (2))"), Some(7));
+    assert_eq!(limit(&[("other", Some(8))], "name push (1, 2)"), None);
+    // A `${{` without its end is text.
+    let open = [("a ${{ b", Some(5))];
+    assert_eq!(limit(&open, "a ${{ b"), Some(5));
+    assert_eq!(limit(&open, "a c"), None);
+    // The record of a job of the matrix of the formal workflow.
+    let mut checked = job("leanchecker fresh", "failure", 7200);
+    checked.annotations = vec![exit("124")];
+    let input = run("formal", "pull_request", "topic", vec![checked]);
+    let limits = limits(FORMAL).expect("the workflow reads");
+    let record = record(&input, Some(&limits), None);
+    assert_eq!(record["jobs"][0]["timeout_minutes"], 120);
+    assert_eq!(record["jobs"][0]["timeout"], "limit");
+}
+
+#[test]
 fn a_run_over_80_percent_of_its_limit_is_marked() {
     let over = |workflow: &str, event: &str, seconds: u64| {
         let input = run(workflow, event, "topic", vec![job("a", "success", seconds)]);

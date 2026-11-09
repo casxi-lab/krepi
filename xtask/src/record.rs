@@ -18,9 +18,13 @@
 //! is a count of seconds since 1970, which `jq` computes with
 //! `fromdateiso8601`, or null; no other field may be present. `--workflow`
 //! names the text of the workflow file at the head of the run, from which
-//! the limit of each job is read: its `timeout-minutes`, or 360 without one;
-//! a job whose name the text does not give as written, or whose limit is an
-//! expression, has no known limit.
+//! the limit of each job is read: its `timeout-minutes`, or 360 without one,
+//! and none when it is an expression. A job takes the limit of the job of
+//! the text whose name is its name, also followed by the values of a matrix
+//! in parentheses; failing that, of the jobs whose names hold expressions
+//! `${{ }}` and fit its name, with or without the values of a matrix in
+//! parentheses, when each expression stands for some text and all of them
+//! give the same limit ([`job_limit`]); otherwise it has no known limit.
 //! `--own` names the same object for the run of the record workflow itself,
 //! with `--now` the current time.
 //!
@@ -222,14 +226,63 @@ pub fn limits(text: &str) -> Result<Vec<(String, Option<u64>)>, String> {
         .collect())
 }
 
-/// The limit in minutes of the job `name` in `limits`: the job whose
-/// display name is `name`, or with a matrix, `name` followed by ` (`.
+/// The literal pieces of the display name `display` around its expressions
+/// `${{ … }}`, if it has one. A `${{` without a following `}}` is text.
+fn pieces(display: &str) -> Option<Vec<&str>> {
+    let mut pieces = Vec::new();
+    let mut rest = display;
+    while let Some(start) = rest.find("${{") {
+        let Some(length) = rest[start + 3..].find("}}") else {
+            break;
+        };
+        pieces.push(&rest[..start]);
+        rest = &rest[start + 3 + length + 2..];
+    }
+    pieces.push(rest);
+    (pieces.len() > 1).then_some(pieces)
+}
+
+/// Whether `name` is the display name of `pieces`, at least two, with each
+/// expression between them evaluated to some text, possibly empty.
+fn fits(pieces: &[&str], name: &str) -> bool {
+    let (first, last) = (pieces[0], pieces[pieces.len() - 1]);
+    if name.len() < first.len() + last.len() || !name.starts_with(first) || !name.ends_with(last) {
+        return false;
+    }
+    let mut middle = &name[first.len()..name.len() - last.len()];
+    for piece in &pieces[1..pieces.len() - 1] {
+        match middle.find(piece) {
+            Some(at) => middle = &middle[at + piece.len()..],
+            None => return false,
+        }
+    }
+    true
+}
+
+/// The limit in minutes of the job `name` in `limits`. A job whose display
+/// name is `name`, or `name` followed by ` (` with the values of a matrix,
+/// gives its limit. Otherwise the display names that hold expressions and
+/// fit `name`, or `name` without the values of a matrix in parentheses,
+/// give the limit when they all give the same one.
 fn job_limit(limits: &[(String, Option<u64>)], name: &str) -> Option<u64> {
     let matches = |display: &str| {
         name == display || (name.strip_prefix(display)).is_some_and(|rest| rest.starts_with(" ("))
     };
-    let found = limits.iter().find(|(display, _)| matches(display));
-    found.and_then(|(_, timeout)| *timeout)
+    if let Some((_, timeout)) = limits.iter().find(|(display, _)| matches(display)) {
+        return *timeout;
+    }
+    let mut names = vec![name];
+    if name.ends_with(')') {
+        names.extend(name.match_indices(" (").map(|(at, _)| &name[..at]));
+    }
+    let fit = |display: &str| {
+        pieces(display).is_some_and(|pieces| names.iter().any(|name| fits(&pieces, name)))
+    };
+    let mut found = (limits.iter())
+        .filter(|(display, _)| fit(display))
+        .map(|(_, timeout)| *timeout);
+    let first = found.next()?;
+    found.all(|timeout| timeout == first).then_some(first)?
 }
 
 /// Why the job `job`, which ran for `seconds` against a limit of `limit`
