@@ -75,8 +75,96 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
+      "item": "kernel/arch/src/exception.S",
+      "kind": "assembly",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#clear-and-load",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#frame",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#mask",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#no-fp-state",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#release",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#restore-elr-spsr",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#save-general",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#save-system",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
       "item": "kernel/boards/qemu-virt/src",
       "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/boards/qemu-virt/src/main.rs#image::exception_dispatch",
+      "kind": "unsafe",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
       "stage": "0.2",

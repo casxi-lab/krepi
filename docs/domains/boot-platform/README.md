@@ -117,11 +117,12 @@ each with its versions.
 **Description.** The cold entry brings the boot CPU from the ELF entry point
 into Rust at EL1. It masks every exception, parks every CPU but the boot CPU
 and a CPU at an unexpected exception level, makes FP/SIMD instructions trap,
-selects the EL1 stack, clears BSS and the stack and calls the Rust entry,
-which never returns. The Rust entry sets the serial console up and checks
-the entry state: BSS cleared, data initialized, EL1, the MMU and the caches
-off, little-endian data, the expected CPU and FP/SIMD trapping. A failed
-check halts the CPU with a record. A board whose firmware enters at EL2
+selects the EL1 stack, clears BSS, installs the exception vectors, clears
+the stack and calls the Rust entry, which never returns. The Rust entry
+sets the serial console up and checks the entry state: BSS cleared, data
+initialized, EL1, the MMU and the caches off, little-endian data, the
+expected CPU and FP/SIMD trapping. A failed check halts the CPU with a
+record. A board whose firmware enters at EL2
 first drops to EL1. The entry does not set up memory translation or
 interrupts.
 
@@ -162,12 +163,13 @@ with the MMU on or on another CPU model.
 **Description.** The vector table of EL1 has sixteen entries: synchronous,
 IRQ, FIQ and SError exceptions from the current exception level with `SP_EL0`
 and with `SP_ELx`, and from a lower exception level in AArch64 and in
-AArch32. An entry from the current level with `SP_ELx` saves the general
-registers and `ELR_EL1`, `SPSR_EL1`, `ESR_EL1` and `FAR_EL1` in an exception
-frame on the stack, calls the dispatch of the image and restores the frame
-on return. The report of a fatal exception is a record with the exception
-class, the syndrome, the return address, the fault address, the saved
-program status and the vector, after which the CPU halts. Entries that the
+AArch32. Every entry saves the general registers and `ELR_EL1`, `SPSR_EL1`,
+`ESR_EL1` and `FAR_EL1` in an exception frame on the stack and calls the
+dispatch of the image; after the dispatch, an entry from the current level
+with `SP_ELx` restores the frame and returns. The report of a fatal
+exception is a record with the exception class, the syndrome, the return
+address, the fault address, the saved program status and the vector, after
+which the CPU halts. Entries that the
 kernel does not handle report and halt. The vectors do not save FP/SIMD
 state, which traps at EL1.
 

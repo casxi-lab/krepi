@@ -562,15 +562,16 @@ assembly, register accesses, MMIO and image entry points, is compiled in
 whole modules under `cfg(all(target_arch = "aarch64", target_os = "none"))`;
 everything else is plain code that the host tests run. The checks format
 the modules of the bare-metal target and lint them for that target, but test
-only the host build; `cargo xtask qemu-boot` builds them into an image and
-runs it.
+only the host build; `cargo xtask qemu-boot` builds them into the images
+and runs those.
 Images are built with Cargo in `kernel/`, or at the repository root with
 `--manifest-path kernel/Cargo.toml`, and the command names the board crate
-of the image with `-p`, such as `-p krepi-qemu-virt`. The
+of the image with `-p`, such as `-p krepi-qemu-virt`, and a test image with
+`--example`. The
 `.cargo/config.toml` of the repository root gives the target its flags: a
 GNU build-id note of SHA-1, the static relocation model and frame pointers.
 
 | Crate | Modules |
 | --- | --- |
-| `kernel/arch` (`krepi-arch`) | The AArch64 processor primitives: `boot`, the cold entry `_start` of an image in `boot.S`, and `cpu`, the processor registers that EL1 code reads and the halt of a CPU. Both are compiled only for the bare-metal target. |
-| `kernel/boards/qemu-virt` (`krepi-qemu-virt`) | The QEMU virt board support and its default image. The library holds `console`, the host-testable bounded writes of the serial console with `console::polled` and `console::emitter`, the PL011 driver `uart` and the platform parameters and CPU check of the board. The binary `krepi-qemu-virt`, from `src/main.rs`, is the default image, with the Rust entry `kernel_main`; `build.rs` hands the linker `link.ld`, the layout of the image, for the bare-metal target. |
+| `kernel/arch` (`krepi-arch`) | The AArch64 processor primitives: `boot`, the cold entry `_start` of an image in `boot.S`; `cpu`, the processor registers that EL1 code reads and the halt of a CPU; and `exception`, the exception vectors of EL1 in `exception.S`, the frame that they save and the class of an exception. `boot`, `cpu` and the vectors are compiled only for the bare-metal target; the frame and the classes are plain code. |
+| `kernel/boards/qemu-virt` (`krepi-qemu-virt`) | The QEMU virt board support, its default image and its test images. The library holds `console`, the host-testable bounded writes of the serial console with `console::polled` and `console::emitter`, `fault`, the host-testable exception record, the PL011 driver `uart` and the platform parameters of the board. The binary `krepi-qemu-virt`, from `src/main.rs`, is the default image, with the Rust entry `kernel_main`, the CPU check and the exception dispatch; the examples in `examples/` are the test images of the QEMU boot suite; `build.rs` hands the linker `link.ld`, the layout of the images, for the bare-metal target. |

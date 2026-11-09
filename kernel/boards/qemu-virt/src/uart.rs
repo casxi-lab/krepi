@@ -1,16 +1,25 @@
 //! The PL011 UART of QEMU virt, which the kernel polls: its setup, single
-//! bytes in each direction, and the bounded console writes on top of them.
+//! bytes in each direction, and the bounded console writes on top of them,
+//! with the panic and exception records.
 //!
 //! Feature: krepi.platform.qemu-virt-boot
 //!
 //! The address and the clock of the UART are those of QEMU virt, not of the
-//! Raspberry Pi 5. One CPU owns the device; no interrupt handler accesses it.
+//! Raspberry Pi 5. One CPU owns the device. An exception dispatch writes the
+//! exception record with every exception masked, while the code that the
+//! exception interrupted is not in a write of its own.
 
 use core::{fmt, ptr};
 
 use crate::console::{self, PanicLocation, PolledError};
-use crate::{CONSOLE_BOUNDS, UART_BASE, counter};
+use crate::{CONSOLE_BOUNDS, UART_BASE, fault};
 use krepi_arch::cpu;
+use krepi_arch::exception::Frame;
+
+// The counter that bounds console output: the virtual count. EL1 reads it
+// on QEMU virt with or without EL2; a test image that enters at EL2 sets
+// the virtual offset to 0 before it enters EL1.
+use krepi_arch::cpu::virtual_counter as counter;
 
 /// The data register.
 const DR: usize = 0x00;
@@ -40,8 +49,9 @@ fn read(offset: usize) -> u32 {
     // SAFETY: `UART_BASE + offset` is a 4-byte aligned register of the PL011
     // of QEMU virt, which the MMU, while it is off, reaches as Device memory;
     // a later MMU setup keeps the range mapped with Device attributes. One CPU
-    // owns the device and no interrupt handler accesses it, so the read races
-    // with no other access.
+    // owns the device; an exception dispatch that writes it runs between two
+    // accesses of the interrupted code with every exception masked, so no two
+    // accesses overlap.
     unsafe { ptr::read_volatile((UART_BASE + offset) as *const u32) }
 }
 
@@ -138,6 +148,41 @@ pub fn report_panic(message: Option<&str>, location: Option<PanicLocation<'_>>) 
     if let Err(error) = result {
         fail(error);
     }
+}
+
+/// Writes the exception record of `frame` within [`CONSOLE_BOUNDS`], as
+/// [`fault::report`] describes it, for an exception after which the
+/// dispatch returns. A write that fails writes the failure marker within
+/// its own bound and halts the CPU.
+pub fn report_exception(frame: &Frame) {
+    let result = fault::report(
+        frame,
+        &CONSOLE_BOUNDS,
+        cpu::counter_frequency(),
+        counter,
+        try_put,
+    );
+    if let Err(error) = result {
+        fail(error);
+    }
+}
+
+/// Writes the exception record of `frame` and `CASXI_HALTED` within
+/// [`CONSOLE_BOUNDS`], as [`fault::report_fatal`] describes them, and halts
+/// the CPU. A write that fails writes the failure marker within its own
+/// bound before the halt.
+pub fn report_fatal(frame: &Frame) -> ! {
+    let result = fault::report_fatal(
+        frame,
+        &CONSOLE_BOUNDS,
+        cpu::counter_frequency(),
+        counter,
+        try_put,
+    );
+    if let Err(error) = result {
+        fail(error);
+    }
+    cpu::halt()
 }
 
 /// Writes the marker of the failed write `error` and halts. The marker needs

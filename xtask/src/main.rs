@@ -55,7 +55,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "qemu-boot",
-        about: "Build the QEMU virt default image and run the QEMU boot suite on it: three cold boots with the serial echo, each judged against fixed expected records, with a receipt of each run and of the suite in a new directory; --help lists the options",
+        about: "Build the QEMU virt default image and test images and run the QEMU boot suite on them: three cold boots of the default image with the serial echo and one boot of each test image, each judged against fixed expected records, with a receipt of each run and of the suite in a new directory; --help lists the options",
         subcommands: &[],
     },
     Command {

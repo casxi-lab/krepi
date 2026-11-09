@@ -60,8 +60,9 @@ run of the other workflows.
 [Testing](docs/conventions/testing.md#entry-points) describes the record.
 
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
-QEMU virt default image in `kernel/`, boots it three times on QEMU virt
-through the QEMU runner, sends it serial input and judges each transcript
+QEMU virt default image and the test images in `kernel/`, boots the default
+image three times and each test image once on QEMU virt through the QEMU
+runner, sends the default image serial input and judges each transcript
 against the fixed records of the boot contract, and writes the receipts of
 the runs and of the suite into a new directory below `artifacts/`. Before
 proposing a change to the kernel workspace or to the suite, run it after the

@@ -1,5 +1,5 @@
 //! The QEMU virt board support of the krepi kernel: the PL011 serial
-//! console, the CPU identity check and the platform parameters of the
+//! console, the exception record and the platform parameters of the
 //! machine.
 //!
 //! Feature: krepi.platform.qemu-virt-boot
@@ -7,13 +7,14 @@
 //! The addresses and values here are those of the QEMU virt machine with one
 //! Cortex-A76. They are not Raspberry Pi 5 values and are never used for it.
 //!
-//! The console logic in [`console`] is plain code that the host tests run.
-//! The PL011 driver, [`uart`], and the functions that read the CPU are
+//! The console logic in [`console`] and the exception record in [`fault`]
+//! are plain code that the host tests run. The PL011 driver, [`uart`], is
 //! compiled only for the bare-metal target.
 
 #![cfg_attr(not(test), no_std)]
 
 pub mod console;
+pub mod fault;
 #[cfg(all(target_arch = "aarch64", target_os = "none"))]
 pub mod uart;
 
@@ -45,27 +46,3 @@ pub const MIDR_PART_MASK: u64 = 0xff00_fff0;
 /// The identifying bits of a Cortex-A76: implementer `0x41` (Arm) and part
 /// number `0xd0b`.
 pub const MIDR_CORTEX_A76: u64 = 0x4100_d0b0;
-
-/// The counter that bounds console output: the virtual count, which EL1 reads
-/// on QEMU virt without EL2.
-#[cfg(all(target_arch = "aarch64", target_os = "none"))]
-pub use krepi_arch::cpu::virtual_counter as counter;
-
-/// Checks the CPU identity independently of the QEMU command line and the
-/// device tree, and writes the CPU identity record: the CPU must be a
-/// Cortex-A76 of any variant and revision.
-///
-/// # Panics
-///
-/// Panics with `QEMU Cortex-A76 required` on any other CPU.
-#[cfg(all(target_arch = "aarch64", target_os = "none"))]
-pub fn verify_cpu() {
-    let midr = krepi_arch::cpu::main_id();
-    assert!(
-        midr & MIDR_PART_MASK == MIDR_CORTEX_A76,
-        "QEMU Cortex-A76 required"
-    );
-    uart::print(format_args!(
-        "CASXI_CPU model={CPU_MODEL} midr={midr:#018x}\n"
-    ));
-}

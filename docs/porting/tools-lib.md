@@ -72,9 +72,9 @@ krepi modules that receive them.
   transcript, QEMU's standard error and a receipt into a new run directory;
   [testing](../conventions/testing.md#entry-points) describes it and its
   receipt. Its library entry `run_image_with` also sends input to the guest,
-  for the QEMU boot suite of [`qemu_boot`](tools-qemu_boot.md), and
-  `run_image_on` runs the guest on the machine with EL2, for a test image
-  that enters at EL2.
+  and `run_image_on` runs the guest on the machine with EL2, for a test image
+  that enters at EL2; the QEMU boot suite of
+  [`qemu_boot`](tools-qemu_boot.md) runs every case through `run_image_on`.
   `tools/src/test_elf.rs` writes the test image, an AArch64 executable for
   QEMU virt that writes one line to the PL011 UART and powers the machine
   off with PSCI `SYSTEM_OFF` through HVC. Its program is a fixed list of

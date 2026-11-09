@@ -1,11 +1,11 @@
 //! Feature: krepi.platform.qemu-virt-boot
 //
-// The cold entry of a krepi image, the ELF entry point. Contract: one
-// Cortex-A76 enters it at EL1h with the MMU and the caches off. The link
-// script provides __stack_top, __stack_bottom, __bss_start and __bss_end,
-// each 8-byte aligned, and the image provides kernel_main, which never
-// returns. A CPU other than CPU 0, or one that is not at EL1, parks here and
-// never enters Rust.
+// The cold entry of a krepi image. Contract: one Cortex-A76 enters it at
+// EL1h with the MMU and the caches off. The link script provides
+// __stack_top, __stack_bottom, __bss_start and __bss_end, each 8-byte
+// aligned, exception.S provides __exception_vectors and the image provides
+// kernel_main, which never returns. A CPU other than CPU 0, or one that is
+// not at EL1, parks here and never enters Rust.
 .section .text.boot, "ax"
 .global _start
 .type _start, %function
@@ -39,6 +39,11 @@ _start:
     str xzr, [x1], #8
     b .Lbss
 .Lbss_done:
+    // Install the exception vectors of exception.S.
+    adrp x1, __exception_vectors
+    add x1, x1, :lo12:__exception_vectors
+    msr vbar_el1, x1
+    isb
     // Clear the whole stack before the first Rust frame is created, so that
     // a bounded read of frame records never finds stale bytes.
     adrp x1, __stack_bottom

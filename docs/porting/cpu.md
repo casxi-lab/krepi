@@ -55,13 +55,16 @@ None: the instructions and their options are those of the legacy functions.
 
 - The diagnostic triggers `diagnostic_breakpoint`, `fp_probe`,
   `register_probe` with `irq_probe_check`, and `bad_frame_probe`: the
-  default image holds no fault probe. The tests of the exception vectors
-  trigger a breakpoint, an FP/SIMD trap and a register check in test images
-  of their own.
+  default image holds no fault probe. The test images of the QEMU boot
+  suite trigger a breakpoint and an FP/SIMD trap with sequences of their
+  own.
 - `physical_counter`, the counter of the physical-entry profile of the Pi 5
   path.
 - `stack_registers`, which the backtraces of the fault records use; it comes
   with fault symbolization.
-- `irq_mask`, `irq_restore` and `irq_enable`: no code of this change masks or
-  unmasks IRQs. They come with the interrupt handling that calls them.
-- The re-export of `ExceptionFrame`, which comes with the exception vectors.
+- `irq_mask`, `irq_restore` and `irq_enable`: no code of the kernel masks or
+  unmasks IRQs in Rust. The cold entry masks every exception, the exception
+  entry keeps them masked during the dispatch, and the default image never
+  unmasks one. They come with the first kernel code that calls them.
+- The re-export of `ExceptionFrame`: the frame is `Frame` of the module
+  `exception`, which the [exception](exception.md) record covers.

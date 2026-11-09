@@ -2,8 +2,10 @@
 
 This page governs the code of the `boot` component of the
 [boot and platform](../README.md) domain: the cold entry of a kernel image,
-the processor primitives that EL1 code reads, and the QEMU virt board
-support with its serial console and its default image. The observable
+the exception vectors of EL1 with the frame that they save, the processor
+primitives that EL1 code reads, and the QEMU virt board support with its
+serial console, its exception record, its default image and its test
+images. The observable
 behaviour that these rules serve, with its evidence, is in the
 [requirements](requirements.md), the other document of the component.
 
@@ -24,20 +26,37 @@ behaviour that these rules serve, with its evidence, is in the
   one record on the counter.
 - **Platform parameter.** A spin limit, timeout or window that a board
   gives with a documented value, never a constant tuned on one machine.
+- **Exception vectors.** `__exception_vectors`, the table of the 16 entries
+  that the CPU branches to through `VBAR_EL1` when it takes an exception to
+  EL1.
+- **Frame.** The 304 bytes that an entry saves on `SP_EL1`: the general
+  registers, the stack pointer above the frame and the exception registers,
+  the `Frame` of `krepi_arch::exception`.
+- **Dispatch.** `exception_dispatch`, the function of each image that the
+  vectors call with the frame.
+- **Test image.** An example of the QEMU virt board crate: an image that
+  links the production code of the default image and adds its own
+  `kernel_main`, dispatch and trigger sequence, for the QEMU boot suite. It
+  is test code, not a production image.
 
 ## Entry points
 
 | Entry point | Kind | Called by | Rules |
 | --- | --- | --- | --- |
 | `_start` in `kernel/arch/src/boot.S` | Hardware entry | The machine, at the ELF entry point | [Cold entry](#cold-entry) |
+| `__exception_vectors` in `kernel/arch/src/exception.S` | Hardware entry, 16 entries | The CPU, through `VBAR_EL1`, at an exception taken to EL1 | [Exception vectors](#exception-vectors), [Frames](#frames) |
 | `kernel_main` in `kernel/boards/qemu-virt/src/main.rs` | Rust entry, `extern "C" fn() -> !` | `_start`, once, on the boot CPU | [Initialization checks](#initialization-checks), [Echo](#echo) |
+| `exception_dispatch` in `kernel/boards/qemu-virt/src/main.rs` | Rust entry, `extern "C" fn(&mut Frame)` | The vectors, with every exception masked | [Dispatch](#dispatch) |
 | The panic handler of the default image | Rust panic | A failed check or any other panic | [Records](#records), [Console output](#console-output) |
 | `krepi_qemu_virt::uart::print` | Function | Kernel code of the boot CPU | [Console output](#console-output) |
 | `krepi_qemu_virt::uart::write_echo` | Function | The echo loop | [Echo](#echo) |
 | `krepi_qemu_virt::uart::report_panic` | Function | The panic handler | [Records](#records), [Console output](#console-output) |
+| `krepi_qemu_virt::uart::report_exception` and `report_fatal` | Functions | The dispatches | [Records](#records), [Dispatch](#dispatch) |
+| `krepi_qemu_virt::fault::report` and `report_fatal` | Functions, host-testable | The PL011 driver of a board | [Records](#records), [Console output](#console-output) |
 | `krepi_qemu_virt::uart::init`, `try_put` and `get` | Functions | `kernel_main` and the console functions | [Console output](#console-output) |
 | `krepi_qemu_virt::console::print`, `write`, `echo`, `report_panic`, `failure_marker`, `report_failure` and `window_ticks` | Functions, host-testable | The PL011 driver of a board | [Console output](#console-output), [Echo](#echo) |
-| `krepi_qemu_virt::verify_cpu` | Function | `kernel_main` | [Initialization checks](#initialization-checks) |
+| `verify_cpu` in `kernel/boards/qemu-virt/src/main.rs` | Function | `kernel_main` | [Initialization checks](#initialization-checks) |
+| `krepi_arch::exception::Class::of`, `Class::name` and `exception_class` | Functions, host-testable | The exception record | [Records](#records) |
 | `krepi_arch::cpu::exception_level`, `main_id`, `system_control`, `counter_frequency`, `virtual_counter` and `cpacr` | Functions | Kernel code at EL1 | [Processor registers](#processor-registers) |
 | `krepi_arch::cpu::halt` | Function | Fatal paths | [Processor registers](#processor-registers) |
 
@@ -45,9 +64,10 @@ behaviour that these rules serve, with its evidence, is in the
 
 No code of this component follows the
 [provable Rust subset](../../../conventions/provable-subset.md): the cold
-entry, the processor primitives, the board support and the PL011 driver are
-none of the modules that the subset lists, and its page-table logic leaves
-the barrier, cache and TLB instructions to adapters. The section therefore
+entry, the exception vectors, the processor primitives, the board support
+and the PL011 driver are none of the modules that the subset lists, and
+its page-table logic leaves the barrier, cache and TLB instructions to
+adapters. The section therefore
 lists no source paths, and the `subset` step of `cargo xtask check` checks
 no file of this component.
 
@@ -60,18 +80,97 @@ no file of this component.
 - The boot CPU sets `CPACR_EL1.FPEN` to 0, so that FP/SIMD instructions trap
   at EL0 and EL1, clears `TPIDR_EL1`, selects `SP_EL1` and sets the stack
   pointer to `__stack_top`.
-- It clears `[__bss_start, __bss_end)` and then the whole stack,
-  `[__stack_bottom, __stack_top)`, with 8-byte stores, clears the frame
-  pointer and the link register and calls `kernel_main`. If `kernel_main`
-  returned, the CPU would wait in the same `WFE` loop.
+- It clears `[__bss_start, __bss_end)` with 8-byte stores, writes the
+  address of `__exception_vectors` to `VBAR_EL1` followed by an `ISB`, then
+  clears the whole stack, `[__stack_bottom, __stack_top)`, with 8-byte
+  stores, clears the frame pointer and the link register and calls
+  `kernel_main`. If `kernel_main` returned, the CPU would wait in the same
+  `WFE` loop.
+- Every exception stays masked: neither the cold entry nor the default
+  image clears a bit of `DAIF`. An exception before `VBAR_EL1` is written is
+  outside these rules: no code of the component handles it.
 - The link script places `_start` first, at the start of the image's RAM,
-  `0x4020_0000` on QEMU virt; aligns the stack, 64 KiB with a 4 KiB guard
-  below it, and the ends of BSS to 4 KiB; requires a GNU build-id note of 36
-  bytes, a SHA-1 build-id; and requires the image to end within the 128 MiB
-  of RAM that QEMU virt has at least. A link that breaks one of these rules
-  fails.
-- The image installs no exception vector table. An exception before one is
-  installed is outside these rules: no code of the component handles it.
+  `0x4020_0000` on QEMU virt, and the exception vectors after it, aligned
+  to the 2 KiB that `VBAR_EL1` requires; aligns the stack, 64 KiB with a
+  4 KiB guard below it, and the ends of BSS to 4 KiB; requires a GNU
+  build-id note of 36 bytes, a SHA-1 build-id; and requires the image to end
+  within the 128 MiB of RAM that QEMU virt has at least. A link that breaks
+  one of these rules fails. The default image is entered at `_start`; a test
+  image names its own entry, `krepi_test_entry`, which branches to `_start`
+  or, on the machine with EL2, drops to EL1 and returns to `_start`.
+
+## Exception vectors
+
+- `__exception_vectors`, in the section `.text.vectors`, holds the 16
+  entries of the architecture, 128 bytes apart: vectors 0 to 3 for the
+  current exception level with `SP_EL0`, 4 to 7 for the current level with
+  `SP_ELx`, 8 to 11 for a lower level in AArch64 and 12 to 15 for a lower
+  level in AArch32, each four in the order synchronous, IRQ, FIQ and SError.
+- Every entry needs a valid `SP_EL1` with 304 bytes below it. It moves
+  `SP_EL1` down by 304 bytes, stores `x0` and `x1` at the new stack pointer,
+  puts its own number into `x0` and branches to the common save path.
+- The save path stores `x2` to `x30` and the vector number in the frame,
+  keeps the vector number in `x19`, stores the stack pointer above the
+  frame, `ELR_EL1`, `SPSR_EL1`, `ESR_EL1` and `FAR_EL1`, and 0 in the
+  reserved word, sets D, A, I and F in `DAIF` and calls
+  `exception_dispatch` with the address of the frame.
+- When the dispatch returns, the path returns only for vectors 4 to 7,
+  which it tells by the number in `x19`, not by the frame: it writes the
+  frame's `ELR` and `SPSR` to `ELR_EL1` and `SPSR_EL1`, clears `x0` to `x30`,
+  loads each of them from the frame, releases the frame and executes
+  `ERET`. For any other vector it masks every exception and waits in a
+  `WFE` loop forever.
+- The entries save no FP/SIMD state, `SP_EL0` or other system register. For
+  the entries of `SP_EL0` and of a lower level, the stack pointer in the
+  frame is the address above the frame on `SP_EL1`, not the interrupted
+  stack pointer.
+
+The rules of the saved and restored state, each an
+[open obligation](#open-obligations) with its test:
+
+| Label | Statement |
+| --- | --- |
+| `frame` | The entry allocates the 304-byte frame on `SP_EL1`, 16-byte aligned, just below the interrupted stack pointer, and records that stack pointer, the top of the frame. |
+| `save-general` | `x0` to `x30` are stored in the frame before any of them is changed: the entry stores `x0` and `x1` before it writes the vector number, and the save path the others before it uses them. |
+| `save-system` | `ELR_EL1`, `SPSR_EL1`, `ESR_EL1`, `FAR_EL1` and the vector number are stored in the frame, and the reserved word is 0. |
+| `mask` | The dispatch runs with D, A, I and F set, so exceptions do not nest. |
+| `restore-elr-spsr` | Before the return, `ELR_EL1` and `SPSR_EL1` are loaded from the frame: a change of the frame's `ELR` by the dispatch takes effect, and the interrupted `PSTATE`, NZCV, DAIF and the mode, comes back. |
+| `clear-and-load` | Before the return, `x0` to `x30` are cleared and then each loaded from the frame, so no value that the dispatch left reaches the interrupted code. |
+| `release` | The return releases the frame: after it, the stack pointer is that of the interrupted code. |
+| `no-fp-state` | Entry and return save and restore no FP/SIMD state: FP/SIMD instructions at EL1 trap through `CPACR_EL1.FPEN`, which no code of the kernel changes after the cold entry. |
+
+## Frames
+
+The frame is the `repr(C)` structure `Frame` of `krepi_arch::exception`,
+304 bytes, a multiple of 16; constant assertions fix each offset, and
+`exception.S` writes and reads the frame at the same offsets.
+
+| Offset | Field | Content |
+| ---: | --- | --- |
+| 0 | `x` | `x0` to `x30`, 8 bytes each |
+| 248 | `sp` | The stack pointer above the frame |
+| 256 | `elr` | `ELR_EL1`, which the return loads back |
+| 264 | `spsr` | `SPSR_EL1`, which the return loads back |
+| 272 | `esr` | `ESR_EL1` |
+| 280 | `far` | `FAR_EL1` |
+| 288 | `vector` | The number of the entry, 0 to 15 |
+| 296 | `reserved` | 0 |
+
+## Dispatch
+
+- Each image defines `exception_dispatch` as an unmangled
+  `extern "C" fn(&mut Frame)`. The vectors call it on `SP_EL1` below the
+  frame with every exception masked; it may change the frame, and after a
+  return from vectors 4 to 7 the changes of `elr`, `spsr` and `x` become the
+  state of the interrupted code.
+- The dispatch of the default image writes the exception record of the
+  frame and `CASXI_HALTED` with `uart::report_fatal` and halts. The default
+  image never unmasks an exception, so only a synchronous exception of its
+  own code reaches it.
+- A dispatch writes the console only through the exception record, and the
+  code that it interrupts is then between two console accesses: the
+  default image takes no asynchronous exception, and a test image unmasks
+  one only in code that does not write.
 
 ## Initialization checks
 
@@ -98,8 +197,10 @@ the records. Once all have passed, the image writes `CASXI_BOOT` and
 
 ## Records
 
-Every record is one line that ends in CR LF. The text of a record holds no
-count, time or address; the `midr` field is the value that the CPU reports.
+Every record is one line that ends in CR LF. The text of a boot record
+holds no count, time or address; the `midr` field is the value that the CPU
+reports, and the fields of the exception record are the registers of the
+exception.
 
 | Record | Form | Written | Then |
 | --- | --- | --- | --- |
@@ -108,8 +209,26 @@ count, time or address; the `midr` field is the value that the CPU reports.
 | `CASXI_READY` | `CASXI_READY` | Once, after `CASXI_BOOT` | The echo; no other record follows unless a console write fails or the kernel panics |
 | `CASXI_PANIC` | A line break, then `CASXI_PANIC` and, after a space, the message of the panic when it is a static text, or `dynamic_panic_message_omitted` | At a panic | `CASXI_PANIC_LOCATION` when the panic has a location, then `CASXI_HALTED` |
 | `CASXI_PANIC_LOCATION` | `CASXI_PANIC_LOCATION file=<path> line=<line> column=<column>`, the numbers in decimal | After `CASXI_PANIC` | `CASXI_HALTED` |
+| `CASXI_EXCEPTION` | A line break, then `CASXI_EXCEPTION vector=<n> ESR=0x<16> ELR=0x<16> FAR=0x<16> SPSR=0x<16> class=<class>`: the vector number in decimal, the four registers of the frame in 16 lowercase hexadecimal digits, and the class of the table below | When a dispatch reports an exception | `CASXI_HALTED` on a fatal path; otherwise the dispatch returns |
 | `CASXI_UART_FAIL` | A line break, then `CASXI_UART_FAIL reason=` and `clock`, `length`, `deadline`, `stalled` or `format` | When a console write fails | `CASXI_HALTED` |
 | `CASXI_HALTED` | `CASXI_HALTED` | Last, on a fatal path | The CPU masks every exception and waits forever |
+
+The class of an exception follows from its vector and, at vector 4, from
+the exception class `EC`, bits 26 to 31 of `ESR_EL1`, as the Arm
+Architecture Reference Manual encodes it:
+
+| Class | Vectors | Syndrome |
+| --- | --- | --- |
+| `brk` | 4 | EC `0x3c`: a `BRK` instruction in AArch64 state |
+| `fp` | 4 | EC `0x07`: an FP/SIMD access that `CPACR_EL1.FPEN` traps |
+| `sync` | 4 with any other EC; 0, 8 and 12 with any syndrome | - |
+| `irq` | 1, 5, 9 and 13 | - |
+| `fiq` | 2, 6, 10 and 14 | - |
+| `serror` | 3, 7, 11 and 15 | EC `0x2f` |
+
+The architecture defines no value of `FAR_EL1` for a breakpoint, an FP/SIMD
+trap, an IRQ or an SError, and none of `ESR_EL1` for an IRQ or an FIQ; the
+record writes the registers as the frame holds them.
 
 The reasons of `CASXI_UART_FAIL` stand for the failures of a console write:
 `clock` for bounds or a counter that give no valid window, `length` for a
@@ -141,8 +260,13 @@ the bounds allow, and `format` for a formatter that failed.
   location, and `CASXI_HALTED`. A line that fails ends the panic record, and
   the PL011 driver writes the failure marker and halts; a message too long
   for one record fails with `length`.
-- Only the boot CPU writes, and no interrupt handler writes or reads the
-  console.
+- The exception record and, on a fatal path, `CASXI_HALTED` are written as
+  records of their own within the bounds; a line that fails is followed by
+  the failure marker and the halt, not by the next line.
+- Only the boot CPU writes. An exception dispatch writes only the
+  exception record, with every exception masked, between two console
+  accesses of the code that it interrupted ([Dispatch](#dispatch)), and no
+  dispatch reads the console.
 
 ## Echo
 
@@ -198,6 +322,9 @@ The Raspberry Pi 5 values are given by its board support.
   attempts.
 - The echo loop does not end: each pass reads the receive FIFO once and
   writes at most two bytes within the bounds of a record.
+- An exception entry and its return run a fixed sequence of instructions
+  without a loop. The dispatch of the default image writes two records
+  within the console bounds and halts.
 
 ## Determinism
 
@@ -215,7 +342,9 @@ Which bytes arrive, and when, is the input of the echo.
 | The PL011 registers | Shared | The boot CPU alone; no interrupt handler accesses them | The volatile access to the register | `none`: its single owner never changes |
 | The BSS and data probe words of the default image | Shared, read-only after load | The boot CPU, which only reads them | Their initialization by the cold entry and the load of the image | `none`: no CPU writes them after the cold entry |
 | The boot stack, `[__stack_bottom, __stack_top)` | Per-CPU, of the boot CPU | The boot CPU | - | `none` |
-| `DAIF`, `CPACR_EL1`, `SCTLR_EL1`, `TPIDR_EL1` and the stack pointer of EL1 | Per-CPU | The executing CPU | The `ISB` after the cold entry's writes | `none` |
+| `DAIF`, `CPACR_EL1`, `SCTLR_EL1`, `TPIDR_EL1`, `VBAR_EL1` and the stack pointer of EL1 | Per-CPU | The executing CPU | The `ISB` after the cold entry's writes | `none` |
+| The frame of an exception, 304 bytes on `SP_EL1` | Per-CPU, of the CPU that took the exception | Its exception entry, then its dispatch, then its return | - | `none`: the return releases it |
+| `ELR_EL1`, `SPSR_EL1`, `ESR_EL1` and `FAR_EL1` | Per-CPU | The exception entry and the return path of the executing CPU | The `ERET` | `none` |
 
 ## Testing obligations
 
@@ -226,9 +355,23 @@ Which bytes arrive, and when, is the input of the echo.
   write with its marker, the bounds of the failure marker and the
   conversion of the window into ticks, with values written from this page.
   The tests taken from the prototype tree keep their expected values.
+- The host tests of `kernel/boards/qemu-virt/src/fault/` hold the bytes of
+  the exception record and of the fatal path against the record table, and
+  those of `kernel/arch/src/exception/` the class of each vector and
+  syndrome, with syndromes written from the Arm Architecture Reference
+  Manual.
 - The QEMU boot suite boots the default image on QEMU virt and holds its
   transcript against the records of this page, written into the suite, not
   taken from an earlier run. Three cold boots give identical transcripts.
+- The suite also boots the test images, each once, and holds each
+  transcript against an exact sequence of records: the start record
+  `CASXI_TEST image=<image>`, the exception records of the case, and then
+  `CASXI_HALTED` or the self-check records `CASXI_CHECK name=<check>
+  failures=0x<16>` of the image, each with no failure, and
+  `CASXI_RESUMED`. The return address of each exception record must be that
+  of a symbol of the image, or lie between two. Each rule of the saved and
+  restored state has one test, a self-check of a test image or a case of
+  the suite, named in the [open obligations](#open-obligations).
 - No test bounds the time that a step takes, and the guest takes its
   windows and spin limits from the platform parameters.
 
@@ -236,7 +379,17 @@ Which bytes arrive, and when, is the input of the echo.
 
 | Obligation | Kind | Verified state | Carrier | Stage | Test | Lines |
 | --- | --- | --- | --- | --- | --- | --- |
-| `kernel/arch/src/boot.S` | `assembly` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | 59 |
+| `kernel/arch/src/boot.S` | `assembly` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | 64 |
+| `kernel/arch/src/exception.S` | `assembly` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | 133 |
+| `kernel/arch/src/exception.S#frame` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `frame-records-interrupted-sp` | - |
+| `kernel/arch/src/exception.S#save-general` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `entry-saves-general-registers` | - |
+| `kernel/arch/src/exception.S#save-system` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `frame-records-system-registers` | - |
+| `kernel/arch/src/exception.S#mask` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | - | - |
+| `kernel/arch/src/exception.S#restore-elr-spsr` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `return-restores-elr-and-pstate` | - |
+| `kernel/arch/src/exception.S#clear-and-load` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | - | - |
+| `kernel/arch/src/exception.S#release` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `return-restores-sp` | - |
+| `kernel/arch/src/exception.S#no-fp-state` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `el1-fp-trap` | - |
+| `kernel/arch/src/exception.rs` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs#exception_level` | `unsafe` | Neither (reads `CurrentEL`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs#main_id` | `unsafe` | Neither (reads `MIDR_EL1`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
@@ -250,6 +403,7 @@ Which bytes arrive, and when, is the input of the echo.
 | `kernel/boards/qemu-virt/src/uart.rs#write` | `mmio` | Neither (writes a PL011 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/boards/qemu-virt/src/main.rs#image::initialize` | `unsafe` | Neither (reads two words of the image) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/boards/qemu-virt/src/main.rs#image::kernel_main` | `unsafe` | Neither (exports the unmangled symbol that the cold entry calls) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/boards/qemu-virt/src/main.rs#image::exception_dispatch` | `unsafe` | Neither (exports the unmangled symbol that the vectors call) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 
 ## Legacy test vectors
 
@@ -264,7 +418,11 @@ their expected values, and the
   architecture*, DDI 0487,
   <https://developer.arm.com/documentation/ddi0487/latest/>: `CurrentEL`,
   `MIDR_EL1`, `SCTLR_EL1`, `CPACR_EL1`, `CNTFRQ_EL0`, `CNTVCT_EL0`, `DAIF`
-  and `WFE`.
+  and `WFE`; the exception entry and return, the vector table and
+  `VBAR_EL1`; `ESR_EL1` with the exception classes `0x07`, `0x2f` and
+  `0x3c`, `ELR_EL1`, `SPSR_EL1` and `FAR_EL1`; and, for the test image that
+  enters at EL2, `HCR_EL2` with RW, AMO and VSE, `VSESR_EL2`,
+  `CNTHCTL_EL2`, `CNTVOFF_EL2` and `VMPIDR_EL2`.
 - Arm Limited, *Arm Cortex-A76 Core Technical Reference Manual*, revision
   r4p1, document 100798_0401_00_en, 2020,
   <https://documentation-service.arm.com/static/5f562083235b3560a01e03bc>:

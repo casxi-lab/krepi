@@ -42,12 +42,14 @@ and the text that replaces a message that is not static.
 does not list. It is ported: the allocation-free records, the bounded
 writers, the frame-pointer walk and the counter watchdog of the prototype
 kernel are plain code with host tests, which krepi takes with the code that
-uses each. This change takes the polled writer and `emit_bounded`; the
+uses each. This change takes the polled writer and `emit_bounded`. The
 fixed-capacity record of `src/diagnostics/record.rs`,
-`emit_progress_bounded` and their tests come with the fault records, the
-frame walk of `src/diagnostics/frames.rs` with fault symbolization, and the
-watchdog of `src/diagnostics/watchdog.rs`, which only diagnostic
-controllers used, with its first caller.
+`emit_progress_bounded` and their tests are not carried over: the exception
+record of [fault](fault.md) writes each of its lines through the bounded
+writes of this module instead. The frame walk of `src/diagnostics/frames.rs`
+comes with fault symbolization, and the watchdog of
+`src/diagnostics/watchdog.rs`, which only diagnostic controllers used, with
+its first caller.
 
 ## Changes
 
@@ -126,13 +128,18 @@ No expected value changed.
 
 ## Not carried over
 
-- From `src/diagnostics/emitter.rs`: `emit_progress_bounded`, which no code
-  of this change calls; it comes with the fault records, with the tests of
-  `src/diagnostics/emitter_tests.rs`.
+- From `src/diagnostics/emitter.rs`: `emit_progress_bounded`, with the tests
+  of `src/diagnostics/emitter_tests.rs`. The legacy fault record wrote its
+  whole text through it with a fixed allowance per byte; the exception
+  record writes each line as a record within the console bounds, so no code
+  calls it.
+- `src/diagnostics/record.rs`, the fixed-capacity record buffer of the
+  legacy fault record, for the same reason.
 - From `src/diagnostics/tests.rs`: the 11 tests of the frame walk at lines
   1-215, which come with fault symbolization, and the 4 tests of `Record` at
-  lines 216-262, which come with the fault records.
+  lines 216-262, whose record buffer is not carried over.
 - From `src/fault.rs`: everything but the lines of the panic record; the
-  [qemu-virt](qemu-virt.md) record lists it.
+  [qemu-virt](qemu-virt.md) record lists it, and the [fault](fault.md)
+  record the exception record.
 - The legacy feature annotation `system.kernel.foundations` of the
   diagnostics module and of `src/fault.rs`.

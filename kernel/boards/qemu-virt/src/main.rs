@@ -3,11 +3,13 @@
 //! Feature: krepi.platform.qemu-virt-boot
 //!
 //! The cold entry `_start` of `krepi-arch` calls `kernel_main` at EL1 on
-//! CPU 0, with every exception masked, the MMU and the caches off, BSS and
-//! the stack cleared and FP/SIMD instructions trapping. The image checks that
-//! state, writes its boot records to the PL011 console and then echoes every
-//! byte that it receives. It holds no diagnostic operation, fault probe or
-//! command that a received byte triggers.
+//! CPU 0, with every exception masked, the exception vectors installed, the
+//! MMU and the caches off, BSS and the stack cleared and FP/SIMD
+//! instructions trapping. The image checks that state, writes its boot
+//! records to the PL011 console and then echoes every byte that it receives.
+//! Its exception dispatch reports every exception that the vectors take and
+//! halts. It holds no diagnostic operation, fault probe or command that a
+//! received byte triggers.
 //!
 //! The image runs only on the bare-metal target. On the host, where the
 //! repository checks build and lint the crate, the binary is an empty
@@ -21,8 +23,9 @@ mod image {
     use core::ptr;
 
     use krepi_arch::cpu;
+    use krepi_arch::exception::Frame;
     use krepi_qemu_virt::console::PanicLocation;
-    use krepi_qemu_virt::{uart, verify_cpu};
+    use krepi_qemu_virt::{CPU_MODEL, MIDR_CORTEX_A76, MIDR_PART_MASK, uart};
 
     /// The value of [`DATA_PROBE`] in the image.
     const DATA_PATTERN: u64 = 0x4341_5358_4900_0001;
@@ -83,6 +86,34 @@ mod image {
         verify_cpu();
         assert!(control & BIG_ENDIAN == 0, "EL1 data must be little-endian");
         assert!(cpu::cpacr() & FP_ENABLE == 0, "FP/SIMD must trap");
+    }
+
+    /// Checks the CPU identity independently of the QEMU command line and
+    /// the device tree, and writes the CPU identity record: the CPU must be
+    /// a Cortex-A76 of any variant and revision.
+    ///
+    /// # Panics
+    ///
+    /// Panics with `QEMU Cortex-A76 required` on any other CPU.
+    fn verify_cpu() {
+        let midr = cpu::main_id();
+        assert!(
+            midr & MIDR_PART_MASK == MIDR_CORTEX_A76,
+            "QEMU Cortex-A76 required"
+        );
+        uart::print(format_args!(
+            "CASXI_CPU model={CPU_MODEL} midr={midr:#018x}\n"
+        ));
+    }
+
+    /// The exception dispatch of the image, which the vectors of
+    /// `krepi-arch` call with every exception masked: it writes the
+    /// exception record of `frame` and `CASXI_HALTED` and halts. The image
+    /// never unmasks an exception, so only a synchronous exception of its
+    /// own code reaches it.
+    #[unsafe(no_mangle)]
+    extern "C" fn exception_dispatch(frame: &mut Frame) {
+        uart::report_fatal(frame)
     }
 
     /// Writes the panic record and halts. Only a static message is written:
