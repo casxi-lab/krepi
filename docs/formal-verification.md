@@ -202,8 +202,9 @@ the repository, prints one line per check and fails when any check fails:
 - the patch has the pinned SHA-256;
 - Aeneas's `backends/lean/lake-manifest.json` has the pinned SHA-256 and
   pins the pinned Mathlib commit;
-- the Rust targets include `aarch64-unknown-none`, the triple for which the
-  kernel is extracted;
+- the Rust targets include `aarch64-unknown-none`, the extraction triple of
+  the kernel, which is not the target of the kernel images
+  ([extraction](#extraction));
 - the manifest has exactly the two host columns, each with a UTF-8 locale, a
   prefix without `.` or `..` components, `/opt/krepi-formal` on
   `linux-aarch64`, and a `switch_export_sha256` that is `null` or a SHA-256
@@ -798,15 +799,27 @@ crate that the gate extracts. Its section `qualification` gives the triple of
 each host of the tool manifest, `aarch64-unknown-linux-gnu` and
 `aarch64-apple-darwin`, and empty `features` and `cfg`: Charon is given no
 `--target` and adds the host's triple itself, and the gate passes no
-features and no `cfg` settings. Its section `kernel` gives the triple of the
-production kernel, `aarch64-unknown-none`, and the features and `cfg`
-settings of its release profile, which has none; nothing is extracted from
+features and no `cfg` settings. Its section `kernel` gives the extraction
+triple, `aarch64-unknown-none`, and the features and `cfg` settings of the
+release profile of the kernel, which has none; nothing is extracted from
 the kernel while no target is registered. The qualification stops when the
 file of the export does not have exactly these hosts, names features or
 `cfg` settings for the qualification crate, or gives the kernel another
 triple. The triples of the qualification crate record what Charon chooses
 on each host; nothing passes them to Charon, and the gate does not check
 their values.
+
+The extraction triple is a pin of the gate, whose standard library the
+image that holds the tools installs ([tool checks](#tool-checks)). It is
+not the target of the kernel images, `aarch64-unknown-none-softfloat`,
+whose soft-float ABI keeps compiled kernel code off the FP/SIMD registers
+at EL1, where FP/SIMD instructions trap
+([floating-point state](architecture.md#floating-point-state)). The two
+triples have the same architecture, OS and data layout and differ in the
+floating-point ABI, the target feature `neon` and linker arguments. The
+kernel crates use no floating point and no `cfg` condition on the ABI or
+on a target feature, so Charon translates the same source for both
+triples.
 
 ### Qualification
 

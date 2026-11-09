@@ -17,9 +17,18 @@ cfg = []
 linux-aarch64 = "aarch64-unknown-linux-gnu"
 darwin-arm64 = "aarch64-apple-darwin"
 
-# The kernel workspace, extracted for the triple of the production kernel
-# with the features and `cfg` settings of its release profile, which has
-# none. No target is registered, so nothing is extracted from it yet.
+# The kernel workspace, extracted for the extraction triple with the
+# features and `cfg` settings of its release profile, which has none. No
+# target is registered, so nothing is extracted from it yet. The triple is
+# a pin of the gate, whose standard library the image of the proof tools
+# installs. It is not the target of the kernel images,
+# aarch64-unknown-none-softfloat, whose soft-float ABI keeps compiled
+# kernel code off the FP/SIMD registers at EL1, where FP/SIMD instructions
+# trap. The two triples have the same architecture, OS and data layout and
+# differ in the floating-point ABI, the target feature `neon` and linker
+# arguments; the kernel crates use no floating point and no `cfg` on the
+# ABI or on a target feature, so Charon translates the same source for
+# both.
 [kernel]
 triple = "aarch64-unknown-none"
 features = []
