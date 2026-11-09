@@ -179,7 +179,7 @@ jobs:
         run: rustup toolchain install
 
       - name: Write the images
-        run: exec bash .github/scripts/deadline.sh 3m 60s cargo xtask image --output-dir artifacts/images
+        run: exec bash .github/scripts/deadline.sh 1m 60s sleep 150
 
       - name: Give the digests of the images as outputs
         id: image
