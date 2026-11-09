@@ -35,6 +35,11 @@ check run it on the test image of the host tooling crate.
 [Testing](docs/conventions/testing.md#entry-points) describes it and its
 receipt.
 
+`cargo xtask image --output-dir <dir>` writes the images that the QEMU
+suites boot, today the test image, into a new directory, with a record of
+the size, SHA-256 digest and commit of each in `images.json`.
+[Testing](docs/conventions/testing.md#entry-points) describes the record.
+
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
 QEMU virt default image in `kernel/`, boots it three times on QEMU virt
 through the QEMU runner, sends it serial input and judges each transcript

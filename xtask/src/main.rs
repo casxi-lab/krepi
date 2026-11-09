@@ -4,6 +4,7 @@
 mod check;
 mod docs;
 mod formal;
+mod image;
 mod manifests;
 mod receipt;
 mod repo;
@@ -38,6 +39,11 @@ pub const COMMANDS: &[Command] = &[
     Command {
         name: "help",
         about: "List the commands",
+        subcommands: &[],
+    },
+    Command {
+        name: "image",
+        about: "Write the images that the QEMU suites boot into a new directory, with images.json, which gives the size, SHA-256 and commit of each; --help lists the options",
         subcommands: &[],
     },
     Command {
@@ -91,6 +97,7 @@ fn main() -> ExitCode {
             ExitCode::from(u8::try_from(code).unwrap_or(2))
         }
         ["formal", rest @ ..] => formal::run(&repo::root(), rest),
+        ["image", rest @ ..] => image::command(&repo::root(), rest),
         [] | ["help"] => {
             print_help();
             ExitCode::SUCCESS

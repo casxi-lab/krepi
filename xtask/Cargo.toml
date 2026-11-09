@@ -40,7 +40,8 @@ clap = { version = "=4.6.7", default-features = false, features = ["std", "help"
 # default feature is left out.
 libc = { version = "=0.2.191", default-features = false }
 # The receipt of `cargo xtask check` keeps its fields in the order in which
-# they are written, the receipt of `cargo xtask formal run` is written, and
+# they are written, `cargo xtask image` writes the record of its images, the
+# receipt of `cargo xtask formal run` is written, and
 # read back by its tests, through the derive macros of `serde`, the
 # manifests and subset steps, `cargo xtask formal run` and
 # `cargo xtask formal check` read the output of `cargo metadata`, the
@@ -65,8 +66,9 @@ serde_json = { version = "=1.0.154", default-features = false, features = ["pres
 # `cargo xtask formal canary` are written and read through such types, and
 # the receipt of `cargo xtask formal run`, whose paths are strings, is
 # written through types that derive `Serialize` and, for its tests and for
-# the canary, `Deserialize`, so only the derive macros and the allocation
-# support for strings, vectors and maps are needed.
+# the canary, `Deserialize`, and so is the record of the images of
+# `cargo xtask image`, so only the derive macros and the allocation support
+# for strings, vectors and maps are needed.
 serde = { version = "=1.0.229", default-features = false, features = ["alloc", "derive"] }
 # The inventory of `cargo xtask formal check` and the `subset` step of
 # `cargo xtask check` parse each source file of the kernel workspace that
@@ -91,10 +93,11 @@ proc-macro2 = { version = "=1.0.107", default-features = false, features = ["spa
 # which the crate gives. Only the flag, that emulation and the names are
 # used, so the iterator and the channel of the default features are left out.
 signal-hook = { version = "=0.4.6", default-features = false }
-# The SHA-256 of files that `cargo xtask formal toolchain-check`,
-# `cargo xtask formal run`, `cargo xtask formal vectors` and
-# `cargo xtask formal canary` read into memory, among them the output files
-# of their commands, the Lean files that Aeneas writes, the `versions.json`
+# The SHA-256 of files that `cargo xtask image`,
+# `cargo xtask formal toolchain-check`, `cargo xtask formal run`,
+# `cargo xtask formal vectors` and `cargo xtask formal canary` read into
+# memory, among them the images of the first, the output files of their
+# commands, the Lean files that Aeneas writes, the `versions.json`
 # of the proof-tool image, and the Lean archives, the channel manifest and
 # the Lake lock of the canary, so the allocation and object-identifier
 # support of the default features is left out.
