@@ -829,4 +829,27 @@ fn a_job_with_an_empty_runner_name_ran_on_no_runner() {
     assert_eq!(standard, "standard hosted");
     let larger = runner_class(Some("Larger 1"), &labels, Some("Larger"));
     assert_eq!(larger, "larger hosted");
+    // A runner with a name but no group is not a standard runner.
+    let unnamed_group = runner_class(Some("GitHub Actions 1"), &labels, Some(""));
+    assert_eq!(unnamed_group, "larger hosted");
+}
+
+#[test]
+fn the_record_gives_a_job_with_an_empty_runner_name_no_time() {
+    let mut cancelled = job("formal run", "cancelled", 1);
+    (cancelled.id, cancelled.started_at, cancelled.completed_at) = (2, Some(2000), Some(2001));
+    cancelled.runner_name = Some(String::new());
+    cancelled.runner_group_name = Some(String::new());
+    let input = run(
+        "formal",
+        "push",
+        "main",
+        vec![job("a", "success", 61), cancelled],
+    );
+    let record = record(&input, None, None);
+    assert_eq!(record["jobs"][1]["runner"], "none");
+    assert_eq!(record["jobs"][1]["seconds"], json!(null));
+    assert_eq!(record["jobs"][1]["minutes"], 0);
+    assert_eq!(record["minutes"], 2);
+    assert_eq!(record["wall_seconds"], 61);
 }
