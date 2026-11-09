@@ -1,0 +1,226 @@
+# Drafts a release of the check receipt and the images of one successful run
+# of the workflow check on a push to main, with their SHA-256 digests. A
+# person with write access starts it by hand on main with the ID of that
+# run, best a run of the commit at the head of main: GitHub refuses the
+# workflow token a release whose commit has workflow files that differ from
+# those of the default branch. The job `release assets` reads the run and
+# its two artifacts with read permissions only, checks them with
+# `cargo xtask release-assets`, which writes SHA256SUMS, and uploads the
+# assets as an artifact of this run. The job `draft release`, the only job
+# with a write permission, runs no code of the repository: it checks the
+# digests again, requires that the tag of the release does not exist before
+# and after it creates the release as a draft, which is not published,
+# uploads the assets to the draft and reads them back. The workflow never
+# publishes a release; publishing the draft, which creates its tag, is a
+# separate step that a person takes. Actions are pinned to full commit SHAs;
+# the comment names the release.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: The ID of a successful run of the workflow check on a push to main, whose check receipt and images become the assets
+        required: true
+        type: string
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# `bash` runs every step with `-eo pipefail`.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  assets:
+    name: release assets
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      artifact: release-assets-${{ steps.run.outputs.id }}-${{ github.run_attempt }}
+      commit: ${{ steps.artifacts.outputs.commit }}
+      run: ${{ steps.run.outputs.id }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Check the ID of the run
+        id: run
+        env:
+          INPUT_RUN: ${{ inputs.run }}
+        run: |
+          id=$(cargo xtask run-record --id "$INPUT_RUN")
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      # The artifacts of the run are those of the attempt that uploaded
+      # them; the run must have exactly one artifact of the images and one of
+      # the receipt of its commit.
+      - name: Read the run and find its artifacts
+        id: artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.run.outputs.id }}
+        run: |
+          input=artifacts/release-input
+          mkdir -p "$input"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" \
+            --jq '{id, attempt: .run_attempt, workflow: .name, path, event, head_branch, head_sha, conclusion}' \
+            > "$input/run.json"
+          commit=$(jq -r .head_sha "$input/run.json")
+          if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "the run $RUN_ID has no commit" >&2
+            exit 1
+          fi
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
+            --jq '.artifacts[] | {id, name, expired}' | jq -s . > "$input/artifacts.json"
+          pick() { # <name of the artifact without its commit and attempt>
+            jq -er --arg prefix "$1-$commit-" '
+              [.[] | select((.name | startswith($prefix))
+                and (.name | ltrimstr($prefix) | test("^[1-9][0-9]*$")) and (.expired | not))]
+              | if length == 1 then .[0].id else error("not exactly one artifact \($prefix)<attempt>") end
+            ' "$input/artifacts.json"
+          }
+          images=$(pick images)
+          receipt=$(pick check-receipt)
+          {
+            echo "commit=$commit"
+            echo "images=$images"
+            echo "receipt=$receipt"
+          } >> "$GITHUB_OUTPUT"
+
+      # The action checks the digest of each artifact that it downloads.
+      - name: Download the images
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ steps.artifacts.outputs.images }}
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ github.token }}
+          path: artifacts/release-input/images
+
+      - name: Download the check receipt
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ steps.artifacts.outputs.receipt }}
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ github.token }}
+          path: artifacts/release-input/receipt
+
+      - name: Check the run, the images and the receipt and write the assets
+        run: |
+          cargo xtask release-assets --run artifacts/release-input/run.json \
+            --images artifacts/release-input/images \
+            --receipt artifacts/release-input/receipt/check-receipt.json --output-dir artifacts/release
+
+      - name: Upload the assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets-${{ steps.run.outputs.id }}-${{ github.run_attempt }}
+          path: artifacts/release
+          if-no-files-found: error
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+  # Creates the draft and uploads the assets with a write permission and no
+  # code of the repository: only gh, jq, sha256sum and curl on the files of
+  # the artifact of the job above. A tag that exists, before or after the
+  # draft is created, fails the job and is left as it is.
+  draft:
+    name: draft release
+    needs: assets
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download the assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.assets.outputs.artifact }}
+          path: release
+
+      - name: Create the draft release and upload the assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ needs.assets.outputs.commit }}
+          RUN_ID: ${{ needs.assets.outputs.run }}
+        run: |
+          if [[ ! "$COMMIT" =~ ^[0-9a-f]{40}$ || ! "$RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "the commit or the run of the assets is not valid" >&2
+            exit 1
+          fi
+          cd release
+          # The digests right before the upload, of exactly the files of the
+          # directory.
+          sha256sum --check --strict SHA256SUMS
+          listed=$(cut -c 67- SHA256SUMS | sort)
+          present=$(ls | grep -vx SHA256SUMS | sort)
+          if [ "$listed" != "$present" ]; then
+            echo "SHA256SUMS does not list exactly the files of the assets" >&2
+            exit 1
+          fi
+          for file in $present SHA256SUMS; do
+            if [[ ! "$file" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "an asset has a name that is not plain" >&2
+              exit 1
+            fi
+          done
+          tag=check-$COMMIT
+          tags() {
+            gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" \
+              | jq --arg ref "refs/tags/$tag" '[.[] | select(.ref == $ref)] | length'
+          }
+          if [ "$(tags)" != 0 ]; then
+            echo "the tag $tag exists already; no release is created" >&2
+            exit 1
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+            -f tag_name="$tag" -f target_commitish="$COMMIT" \
+            -f name="Check receipt and images of ${COMMIT:0:12}" \
+            -f body="The check receipt and the images of the run $RUN_ID of the workflow check on the commit $COMMIT of main, with their SHA-256 digests in SHA256SUMS." \
+            -F draft=true -F prerelease=true -f make_latest=false > ../release.json
+          id=$(jq -r .id ../release.json)
+          if [[ ! "$id" =~ ^[1-9][0-9]*$ ]] || ! jq -e '.draft == true and .published_at == null' ../release.json > /dev/null; then
+            echo "the release is not a draft" >&2
+            exit 1
+          fi
+          if [ "$(tags)" != 0 ]; then
+            echo "creating the draft $id created the tag $tag, which is left as it is" >&2
+            exit 1
+          fi
+          for file in $present SHA256SUMS; do
+            curl --fail-with-body --silent --show-error --request POST \
+              --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" \
+              --header "Content-Type: application/octet-stream" --data-binary "@$file" \
+              "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$id/assets?name=$file" > /dev/null
+          done
+          # The assets as GitHub keeps them: their names, sizes and digests.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" \
+            --jq '.[] | {name, size, digest}' | jq -s 'sort_by(.name)' > ../assets.json
+          for file in $present SHA256SUMS; do
+            jq -n --arg name "$file" --argjson size "$(stat -c %s "$file")" \
+              --arg digest "sha256:$(sha256sum "$file" | cut -c 1-64)" '{name: $name, size: $size, digest: $digest}'
+          done | jq -s 'sort_by(.name)' > ../expected.json
+          if ! jq -e --slurpfile expected ../expected.json '. == $expected[0]' ../assets.json > /dev/null; then
+            echo "the assets of the draft $id are not the files with their digests" >&2
+            exit 1
+          fi
+          {
+            echo "## Draft release"
+            echo
+            echo "The draft release $id for the tag $tag, which does not exist, holds:"
+            echo
+            echo "| Asset | Bytes | Digest |"
+            echo "| --- | ---: | --- |"
+            jq -r '.[] | "| \(.name) | \(.size) | \(.digest) |"' ../expected.json
+          } >> "$GITHUB_STEP_SUMMARY"

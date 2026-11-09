@@ -356,7 +356,7 @@ const BY_RECORD: &str = "${{ steps.record.outputs.retention }}";
 
 /// Every upload step of the tracked workflows: the file, the key of the
 /// job, the name of the step and its `retention-days` as written.
-const RETENTION: [(&str, &str, &str, &str); 19] = [
+const RETENTION: [(&str, &str, &str, &str); 20] = [
     (
         ".github/workflows/check.yml",
         "check",
@@ -451,6 +451,12 @@ const RETENTION: [(&str, &str, &str, &str); 19] = [
         ".github/workflows/nightly.yml",
         "suite",
         "Upload the suite report",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/release.yml",
+        "assets",
+        "Upload the assets",
         BY_REF,
     ),
     (
@@ -1152,4 +1158,90 @@ fn scripts_of(job: &Yaml) -> Vec<&str> {
     (job["steps"].as_vec().into_iter().flatten())
         .filter_map(|step| step["run"].as_str())
         .collect()
+}
+
+/// The workflow that drafts a release.
+const RELEASE: &str = ".github/workflows/release.yml";
+
+#[test]
+fn the_release_workflow_runs_on_main_by_hand_and_only_drafts() {
+    let release = workflow(RELEASE);
+    assert_eq!(events(&release), ["workflow_dispatch"]);
+    let input = &release["on"]["workflow_dispatch"]["inputs"]["run"];
+    assert_eq!(input["required"].as_bool(), Some(true));
+    let all = jobs(&release);
+    assert_eq!(
+        all.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
+        ["assets", "draft"]
+    );
+    for (key, job) in &all {
+        assert!(on_main(job), "{key}");
+        let permissions = job["permissions"].as_hash().expect("the permissions");
+        let grants: Vec<(&str, &str)> = (permissions.iter())
+            .map(|(scope, level)| {
+                (
+                    scope.as_str().expect("a scope"),
+                    level.as_str().expect("a level"),
+                )
+            })
+            .collect();
+        if *key == "draft" {
+            assert_eq!(grants, [("contents", "write")]);
+        } else {
+            assert!(
+                grants.iter().all(|(_, level)| *level == "read"),
+                "{grants:?}"
+            );
+        }
+    }
+    // The assets are written by the repository's code with read permissions.
+    let assets = &release["jobs"]["assets"];
+    let script = scripts_of(assets).join("\n");
+    assert!(
+        script.contains("cargo xtask release-assets --run"),
+        "{script}"
+    );
+    assert!(
+        script.contains("cargo xtask run-record --id \"$INPUT_RUN\""),
+        "{script}"
+    );
+    // The job with the write permission runs no code of the repository and
+    // creates a draft only, between two checks that its tag does not exist.
+    let draft = &release["jobs"]["draft"];
+    assert_eq!(needs(draft), ["assets"]);
+    assert!(steps_using(draft, "actions/checkout").is_empty());
+    let script = scripts_of(draft).join("\n");
+    for text in [
+        "cargo ",
+        "gh release",
+        "draft=false",
+        "PATCH",
+        "--method PUT",
+        "/git/refs",
+    ] {
+        assert!(!script.contains(text), "{text}");
+    }
+    let created = script
+        .find("--method POST \"repos/$GITHUB_REPOSITORY/releases\"")
+        .expect("the release is created");
+    assert!(script.contains("-F draft=true -F prerelease=true -f make_latest=false"));
+    let checks: Vec<usize> = script
+        .match_indices("if [ \"$(tags)\" != 0 ]; then")
+        .map(|(at, _)| at)
+        .collect();
+    assert_eq!(checks.len(), 2, "{script}");
+    assert!(checks[0] < created && created < checks[1]);
+    assert!(script.contains("sha256sum --check --strict SHA256SUMS"));
+    let downloads = steps_using(draft, "actions/download-artifact");
+    assert_eq!(downloads.len(), 1);
+    assert_eq!(
+        downloads[0]["with"]["name"].as_str(),
+        Some("${{ needs.assets.outputs.artifact }}")
+    );
+    // That name is the name of the upload of the job that wrote the assets.
+    let uploads = steps_using(assets, "actions/upload-artifact");
+    assert_eq!(uploads.len(), 1);
+    let name = uploads[0]["with"]["name"].as_str();
+    assert!(name.is_some());
+    assert_eq!(name, assets["outputs"]["artifact"].as_str());
 }

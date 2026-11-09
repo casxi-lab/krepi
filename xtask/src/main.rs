@@ -8,6 +8,7 @@ mod image;
 mod manifests;
 mod receipt;
 mod record;
+mod release;
 mod repo;
 #[cfg(test)]
 mod scratch;
@@ -56,6 +57,11 @@ pub const COMMANDS: &[Command] = &[
     Command {
         name: "qemu-boot",
         about: "Build the QEMU virt default image and test images and run the QEMU boot suite on them: three cold boots of the default image with the serial echo and one boot of each test image, each judged against fixed expected records, with a receipt of each run and of the suite in a new directory; --help lists the options",
+        subcommands: &[],
+    },
+    Command {
+        name: "release-assets",
+        about: "Check one successful run of the workflow check on a push to main, its images by their size and SHA-256 and its check receipt by its commit and result, and write them as the assets of a draft release with SHA256SUMS into a new directory; --help lists the options",
         subcommands: &[],
     },
     Command {
@@ -112,6 +118,7 @@ fn main() -> ExitCode {
         ["image", rest @ ..] => image::command(&repo::root(), rest),
         ["suite", rest @ ..] => suite::command(&repo::root(), rest),
         ["run-record", rest @ ..] => record::command(rest),
+        ["release-assets", rest @ ..] => release::command(rest),
         [] | ["help"] => {
             print_help();
             ExitCode::SUCCESS

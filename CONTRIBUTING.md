@@ -61,6 +61,14 @@ from data of the GitHub API; the workflow `run record` runs it after each
 run of the other workflows.
 [Testing](docs/conventions/testing.md#entry-points) describes the record.
 
+`cargo xtask release-assets` checks one successful run of the workflow
+`check` on a push to `main`, its images by their sizes and digests and its
+check receipt, and writes them with `SHA256SUMS` into a new directory as
+the assets of a draft release. The workflow `release`, which a person
+starts by hand on `main`, runs it and creates the draft; it never
+publishes a release.
+[Testing](docs/conventions/testing.md#entry-points) describes both.
+
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
 QEMU virt default image and the test images in `kernel/`, boots the default
 image three times and each test image once on QEMU virt through the QEMU

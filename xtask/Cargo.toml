@@ -18,7 +18,8 @@ rust-version = "1.99"
 # image is the image that `cargo xtask image` writes.
 krepi-tools = { path = "../tools" }
 # The command lines of `cargo xtask check`, `cargo xtask image`,
-# `cargo xtask suite`, `cargo xtask run-record`, `cargo xtask formal run`,
+# `cargo xtask suite`, `cargo xtask run-record`,
+# `cargo xtask release-assets`, `cargo xtask formal run`,
 # `cargo xtask formal guard`, `cargo xtask formal toolchain-check`,
 # `cargo xtask formal check`, `cargo xtask formal vectors` and
 # `cargo xtask formal canary`, with their help, usage and error texts, as
@@ -45,6 +46,8 @@ libc = { version = "=0.2.191", default-features = false }
 # they are written, `cargo xtask image` writes the record of its images,
 # which `cargo xtask suite` reads before it writes its report,
 # `cargo xtask run-record` reads a run with its jobs and writes its record,
+# `cargo xtask release-assets` reads a run, an `images.json` and a check
+# receipt,
 # the receipt of `cargo xtask formal run` is written, and
 # read back by its tests, through the derive macros of `serde`, the
 # manifests and subset steps, `cargo xtask formal run` and
@@ -72,7 +75,8 @@ serde_json = { version = "=1.0.154", default-features = false, features = ["pres
 # written through types that derive `Serialize` and, for its tests and for
 # the canary, `Deserialize`, and so is the record of the images of
 # `cargo xtask image`; `cargo xtask suite` reads `suites.toml` and
-# `cargo xtask run-record` a run with its jobs into such types. So only the
+# `cargo xtask run-record` a run with its jobs and
+# `cargo xtask release-assets` a run into such types. So only the
 # derive macros and the allocation support for strings, vectors and maps
 # are needed.
 serde = { version = "=1.0.229", default-features = false, features = ["alloc", "derive"] }
@@ -103,7 +107,8 @@ signal-hook = { version = "=0.4.6", default-features = false }
 # `cargo xtask formal toolchain-check`, `cargo xtask formal run`,
 # `cargo xtask formal vectors` and `cargo xtask formal canary` read into
 # memory, among them the images of the first, which `cargo xtask suite`
-# checks before it boots them, the output files of their
+# checks before it boots them and `cargo xtask release-assets` before it
+# writes their digests into `SHA256SUMS`, the output files of their
 # commands, the Lean files that Aeneas writes, the `versions.json`
 # of the proof-tool image, and the Lean archives, the channel manifest and
 # the Lake lock of the canary, so the allocation and object-identifier

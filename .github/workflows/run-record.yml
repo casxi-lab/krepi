@@ -26,6 +26,7 @@ on:
       - formal image publish
       - full
       - nightly
+      - release
       - weekly
     types: [completed]
   workflow_dispatch:
