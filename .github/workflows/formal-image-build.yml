@@ -199,3 +199,4 @@ jobs:
             artifacts/image/*.log
             artifacts/image/*.export
           if-no-files-found: warn
+          retention-days: 30

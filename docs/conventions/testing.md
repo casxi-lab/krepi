@@ -259,8 +259,7 @@ long; `cargo xtask qemu-boot` runs after the check in the same job without
 a deadline of its own. Along the longest chain of jobs that need each
 other the limits add up to 18 minutes on the pull request line and to 43
 minutes on the full line, within the 20 and 60 minutes that those lines
-allow. Their artifacts are kept 90 days for a run on `main` and 30 days for
-the others. After each completed run of another workflow of the directory,
+allow. After each completed run of another workflow of the directory,
 the workflow `run record` (`run-record.yml`) writes its record with
 `cargo xtask run-record`, described below, adds the summary to the run's
 summary page and uploads the record as `run-record-<run>-<attempt>`, kept
@@ -271,10 +270,22 @@ it takes. Unit tests of the check read the committed workflows and hold
 them to these limits, to the label of the full line as its only trigger, to
 `--slow` in the full and nightly lines only, to the one job named
 `cargo xtask check` and the summary of the pull request line, to the list
-of workflows that the record workflow follows, to a retention for every
-upload of these files, and to downloads that take the name of their
+of workflows that the record workflow follows, to a retention by the rule
+below for every upload step of every workflow, against a table of those
+steps, and to downloads that take the name of their
 artifact from an output of the job that uploaded it, so that a rerun of
 the downloading job alone still finds the artifact.
+
+Every upload step of every workflow of the directory sets `retention-days`,
+which the repository setting of 90 days bounds. A job that runs on `main`
+and elsewhere writes `${{ github.ref == 'refs/heads/main' && 90 || 30 }}`:
+90 days for a run on `main` and 30 for the others, as in the lines and the
+formal workflow. A job that runs on `main` only, such as the formal canary
+and the publication of the proof-tool image, may write 90; a workflow that
+runs on pull requests only, such as the build of that image, may write 30;
+and the record workflow keeps a record as long as the run that it records.
+The artifacts hold receipts, records, summaries and logs, which the zip of
+the artifact compresses, and the images that the QEMU suites boot.
 
 `cargo xtask serial-capture --port <tty>` records what a board sends over a
 serial port, such as the UART of a Pi 5 behind a USB serial adapter, without

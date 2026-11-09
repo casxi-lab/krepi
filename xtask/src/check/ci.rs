@@ -1,7 +1,8 @@
-//! Tests of the committed workflows of the CI lines: the pull request line
-//! and the main line in `check.yml`, the full line, the nightly line, the
-//! weekly line and the record workflow. They run in the `test` step; the
-//! rules hold for these files only and are not part of the workflows step.
+//! Tests of the committed workflows: those of the CI lines, the pull request
+//! line and the main line in `check.yml`, the full line, the nightly line
+//! and the weekly line, of the record workflow, and the retention of the
+//! artifacts of every workflow. They run in the `test` step; the rules hold
+//! for these files only and are not part of the workflows step.
 
 use yaml_rust2::{Yaml, YamlLoader};
 
@@ -346,21 +347,310 @@ fn the_pull_request_line_keeps_its_required_check_and_its_summary() {
     }
 }
 
-#[test]
-fn every_upload_of_the_lines_keeps_its_artifact_for_a_set_time() {
-    let mut uploads = 0;
-    for path in LINES {
-        let document = workflow(path);
-        for step in steps(&document) {
-            let action = step["uses"].as_str().unwrap_or_default();
-            if action.starts_with("actions/upload-artifact@") {
-                uploads += 1;
-                let days = &step["with"]["retention-days"];
-                assert!(!days.is_badvalue() && !days.is_null(), "{path}: {step:?}");
+/// The retention of the artifacts of a job that runs on `main` and
+/// elsewhere: 90 days for a run on `main`, 30 days for the others.
+const BY_REF: &str = "${{ github.ref == 'refs/heads/main' && 90 || 30 }}";
+/// The retention that the record workflow takes from the record of the run
+/// that it records.
+const BY_RECORD: &str = "${{ steps.record.outputs.retention }}";
+
+/// Every upload step of the tracked workflows: the file, the key of the
+/// job, the name of the step and its `retention-days` as written.
+const RETENTION: [(&str, &str, &str, &str); 19] = [
+    (
+        ".github/workflows/check.yml",
+        "check",
+        "Upload the receipt",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/check.yml",
+        "check",
+        "Upload the QEMU boot suite receipts",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/check.yml",
+        "image",
+        "Upload the images",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/check.yml",
+        "suite",
+        "Upload the suite report",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal-canary.yml",
+        "canary",
+        "Upload the canary record",
+        "90",
+    ),
+    (
+        ".github/workflows/formal-image-build.yml",
+        "build",
+        "Upload the build record",
+        "30",
+    ),
+    (
+        ".github/workflows/formal-image-publish.yml",
+        "publish",
+        "Upload the build record",
+        "90",
+    ),
+    (
+        ".github/workflows/formal.yml",
+        "gate",
+        "Upload the receipt and the logs",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal.yml",
+        "leanchecker",
+        "Upload the measurement",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal.yml",
+        "comparator",
+        "Upload the results",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/full.yml",
+        "check",
+        "Upload the receipt",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/full.yml",
+        "image",
+        "Upload the images",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/full.yml",
+        "suite",
+        "Upload the suite report",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/nightly.yml",
+        "check",
+        "Upload the receipt",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/nightly.yml",
+        "image",
+        "Upload the images",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/nightly.yml",
+        "suite",
+        "Upload the suite report",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/run-record.yml",
+        "record",
+        "Upload the record",
+        BY_RECORD,
+    ),
+    (
+        ".github/workflows/weekly.yml",
+        "image",
+        "Upload the images",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/weekly.yml",
+        "suite",
+        "Upload the suite report",
+        BY_REF,
+    ),
+];
+
+/// The events of the `on` of `document`, whether it is one event, a list
+/// or a mapping.
+fn events(document: &Yaml) -> Vec<&str> {
+    match &document["on"] {
+        Yaml::String(event) => vec![event.as_str()],
+        Yaml::Array(events) => events.iter().filter_map(Yaml::as_str).collect(),
+        Yaml::Hash(events) => events.keys().filter_map(Yaml::as_str).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Whether the condition `if` of `job` is `github.ref == 'refs/heads/main'`,
+/// written with or without `${{ }}`.
+fn on_main(job: &Yaml) -> bool {
+    job["if"].as_str().is_some_and(|text| {
+        let text = text.trim();
+        let text = (text.strip_prefix("${{"))
+            .and_then(|text| text.strip_suffix("}}"))
+            .unwrap_or(text);
+        text.trim() == "github.ref == 'refs/heads/main'"
+    })
+}
+
+/// Whether `job` of `document` runs on `main` only: the workflow runs on
+/// pushes to `main`, on a schedule, which runs the default branch, or on a
+/// manual run, and then the job requires `main`.
+fn main_only(document: &Yaml, job: &Yaml) -> bool {
+    let events = events(document);
+    let known = |event: &&str| ["push", "schedule", "workflow_dispatch"].contains(event);
+    let push = &document["on"]["push"];
+    let branches = push["branches"]
+        .as_vec()
+        .map(|branches| branches.iter().filter_map(Yaml::as_str).collect::<Vec<_>>());
+    !events.is_empty()
+        && events.iter().all(known)
+        && (!events.contains(&"push") || branches == Some(vec!["main"]))
+        && (!events.contains(&"workflow_dispatch") || on_main(job))
+}
+
+/// The values of `retention-days` that the rule allows for an upload of
+/// `job` in `document`: in the record workflow, the retention of the
+/// recorded run alone; elsewhere [`BY_REF`], 90 for a job that runs on
+/// `main` only and 30 in a workflow that runs on pull requests only.
+fn allowed_retention(document: &Yaml, job: &Yaml) -> Vec<&'static str> {
+    let events = events(document);
+    if events.contains(&"workflow_run") {
+        return vec![BY_RECORD];
+    }
+    let mut allowed = vec![BY_REF];
+    if main_only(document, job) {
+        allowed.push("90");
+    }
+    if events == ["pull_request"] {
+        allowed.push("30");
+    }
+    allowed
+}
+
+/// The upload steps of `document`: the key of the job, the name of the
+/// step and its `retention-days` as text, if it has one.
+fn uploads(document: &Yaml) -> Vec<(&str, &Yaml, &str, Option<String>)> {
+    let mut found = Vec::new();
+    for (key, job) in jobs(document) {
+        for step in job["steps"].as_vec().into_iter().flatten() {
+            if !uses(step, "actions/upload-artifact") {
+                continue;
             }
+            let days = match &step["with"]["retention-days"] {
+                Yaml::String(text) => Some(text.clone()),
+                Yaml::Integer(days) => Some(days.to_string()),
+                _ => None,
+            };
+            let name = step["name"].as_str().unwrap_or("(unnamed)");
+            found.push((key, job, name, days));
         }
     }
-    assert_eq!(uploads, 13);
+    found
+}
+
+/// The problems of the retention of the uploads of `document`: each upload
+/// writes a `retention-days` that the rule allows.
+fn retention_problems(document: &Yaml) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (key, job, name, days) in uploads(document) {
+        match days {
+            None => problems.push(format!("job {key}, step {name}: no retention-days")),
+            Some(days) if !allowed_retention(document, job).contains(&days.as_str()) => {
+                problems.push(format!(
+                    "job {key}, step {name}: retention-days {days} does not follow the rule"
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    problems
+}
+
+#[test]
+fn every_upload_keeps_its_artifact_by_the_retention_rule() {
+    let mut found = Vec::new();
+    for (path, document) in workflows() {
+        assert_eq!(
+            retention_problems(&document),
+            Vec::<String>::new(),
+            "{path}"
+        );
+        for (key, _, name, days) in uploads(&document) {
+            found.push((path.clone(), key.to_string(), name.to_string(), days));
+        }
+    }
+    found.sort();
+    let mut expected: Vec<_> = (RETENTION.iter())
+        .map(|(path, key, name, days)| {
+            let days = Some(days.to_string());
+            (path.to_string(), key.to_string(), name.to_string(), days)
+        })
+        .collect();
+    expected.sort();
+    assert_eq!(found, expected);
+    // Each row of the table keeps to the rule of its workflow.
+    let pull_request = "on:\n  pull_request:\n    branches: [main]\n";
+    let both = "on:\n  pull_request:\n  push:\n    branches: [main]\n";
+    let main = "on:\n  push:\n    branches: [main]\n  schedule:\n    - cron: \"1 2 * * *\"\n";
+    let manual = "on:\n  workflow_dispatch:\n";
+    let record = "on:\n  workflow_run:\n    workflows: [a]\n  workflow_dispatch:\n";
+    let upload = |on: &str, condition: &str, days: &str| {
+        parse(&format!(
+            "{on}jobs:\n  a:\n{condition}    steps:\n      - name: Upload\n        \
+             uses: actions/upload-artifact@1\n        with:\n          name: a\n{days}"
+        ))
+    };
+    let days = |value: &str| format!("          retention-days: {value}\n");
+    let main_job = "    if: github.ref == 'refs/heads/main'\n";
+    for (on, condition, value) in [
+        (both, "", BY_REF),
+        (pull_request, "", BY_REF),
+        (pull_request, "", "30"),
+        (main, "", "90"),
+        (main, "", BY_REF),
+        (manual, main_job, "90"),
+        (
+            manual,
+            "    if: ${{ github.ref == 'refs/heads/main' }}\n",
+            "90",
+        ),
+        (record, "", BY_RECORD),
+    ] {
+        let document = upload(on, condition, &days(value));
+        assert_eq!(
+            retention_problems(&document),
+            Vec::<String>::new(),
+            "{on}{value}"
+        );
+    }
+    let wrong = |value: &str| {
+        format!("job a, step Upload: retention-days {value} does not follow the rule")
+    };
+    for (on, condition, value, problem) in [
+        (
+            both,
+            "",
+            None,
+            "job a, step Upload: no retention-days".to_string(),
+        ),
+        (both, "", Some("30"), wrong("30")),
+        (main, "", Some("30"), wrong("30")),
+        (both, "", Some("90"), wrong("90")),
+        (pull_request, "", Some("90"), wrong("90")),
+        (manual, "", Some("90"), wrong("90")),
+        ("on:\n  push:\n", "", Some("90"), wrong("90")),
+        ("on: push\n", "", Some("90"), wrong("90")),
+        (both, "", Some(BY_RECORD), wrong(BY_RECORD)),
+        (record, "", Some(BY_REF), wrong(BY_REF)),
+        (record, "", Some("90"), wrong("90")),
+    ] {
+        let document = upload(on, condition, &value.map(days).unwrap_or_default());
+        assert_eq!(retention_problems(&document), [problem], "{on}{value:?}");
+    }
 }
 
 /// Whether `step` uses the action `action`, such as
