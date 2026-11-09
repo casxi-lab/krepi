@@ -2,7 +2,7 @@
 # the ABI manifest. Its crates depend only on crates inside this directory.
 [workspace]
 resolver = "3"
-members = ["abi", "arch", "qemu-virt"]
+members = ["abi", "arch", "boards/qemu-virt"]
 
 [workspace.package]
 edition = "2024"

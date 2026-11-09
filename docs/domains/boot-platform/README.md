@@ -117,11 +117,12 @@ each with its versions.
 **Description.** The cold entry brings the boot CPU from the ELF entry point
 into Rust at EL1. It masks every exception, parks every CPU but the boot CPU
 and a CPU at an unexpected exception level, makes FP/SIMD instructions trap,
-selects the EL1 stack, clears BSS and the stack and calls the Rust entry,
-which never returns. The Rust entry sets the serial console up and checks
-the entry state: BSS cleared, data initialized, EL1, the MMU and the caches
-off, little-endian data, the expected CPU and FP/SIMD trapping. A failed
-check halts the CPU with a record. A board whose firmware enters at EL2
+selects the EL1 stack, clears BSS, installs the exception vectors, clears
+the stack and calls the Rust entry, which never returns. The Rust entry
+sets the serial console up and checks the entry state: BSS cleared, data
+initialized, EL1, the MMU and the caches off, little-endian data, the
+expected CPU and FP/SIMD trapping. A failed check halts the CPU with a
+record. A board whose firmware enters at EL2
 first drops to EL1. The entry does not set up memory translation or
 interrupts.
 
@@ -162,12 +163,13 @@ with the MMU on or on another CPU model.
 **Description.** The vector table of EL1 has sixteen entries: synchronous,
 IRQ, FIQ and SError exceptions from the current exception level with `SP_EL0`
 and with `SP_ELx`, and from a lower exception level in AArch64 and in
-AArch32. An entry from the current level with `SP_ELx` saves the general
-registers and `ELR_EL1`, `SPSR_EL1`, `ESR_EL1` and `FAR_EL1` in an exception
-frame on the stack, calls the dispatch of the image and restores the frame
-on return. The report of a fatal exception is a record with the exception
-class, the syndrome, the return address, the fault address, the saved
-program status and the vector, after which the CPU halts. Entries that the
+AArch32. Every entry saves the general registers and `ELR_EL1`, `SPSR_EL1`,
+`ESR_EL1` and `FAR_EL1` in an exception frame on the stack and calls the
+dispatch of the image; after the dispatch, an entry from the current level
+with `SP_ELx` restores the frame and returns. The report of a fatal
+exception is a record with the exception class, the syndrome, the return
+address, the fault address, the saved program status and the vector, after
+which the CPU halts. Entries that the
 kernel does not handle report and halt. The vectors do not save FP/SIMD
 state, which traps at EL1.
 
@@ -190,10 +192,11 @@ interrupt returns to the interrupted code.
 [boot](boot/contract.md) component.
 
 **Engineering notes.** The frame lies below the interrupted stack pointer
-and records it; the dispatch runs with every exception masked, so
-exceptions do not nest. The fatal path writes its record within the console
-bounds and does not allocate. Exceptions from EL0, with the save and restore
-of `SP_EL0`, belong to the user context of the runtime domain.
+and records it; the dispatch and the return run with every exception
+masked, so no SError, IRQ or FIQ nests, while a synchronous exception of
+the dispatch itself would. The fatal path writes its record within the
+console bounds and does not allocate. Exceptions from EL0, with the save and
+restore of `SP_EL0`, belong to the user context of the runtime domain.
 
 **Verification.** QEMU tests trigger each handled kind once, a breakpoint,
 a timer interrupt, an injected SError and an FP/SIMD access, check the
@@ -366,16 +369,19 @@ handler ignores, not an error.
 [QEMU virt and Pi 5 board support](#qemu-virt-and-pi-5-board-support); the
 [boot](boot/contract.md) component for the GICv2 of QEMU virt.
 
-**Engineering notes.** The distributor is configured once, at boot. The
-handler of an interrupt is bounded and does not allocate. The state of the
+**Engineering notes.** The distributor is configured once, with IRQs
+masked, before the first interrupt is taken. The handler of an interrupt is
+bounded and does not allocate. The GICv2 driver is shared by the boards that
+have one, and each board gives its addresses and interrupt IDs. The state of the
 controller is classified in the state fields of the contract of its
 board's support: for the GICv2 of QEMU virt, the
 [State fields](boot/contract.md#state-fields) of the boot contract; for the
 GIC-400 of the Pi 5, those of the Pi 5 board support.
 
-**Verification.** A QEMU test that takes a timer interrupt, acknowledges and
-ends it and returns to the interrupted code; on the Pi 5 the same through
-the GIC-400 on the bench.
+**Verification.** QEMU tests that take the timer interrupt, acknowledge
+and end it and return to the interrupted code, twice, and that take it at
+one known instruction and find every register unchanged after it; on the
+Pi 5 the same through the GIC-400 on the bench.
 
 ## PCIe and RP1 links
 

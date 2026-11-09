@@ -186,7 +186,7 @@ kernel workspace for the bare-metal target `aarch64-unknown-none-softfloat`
 as well as for the host, so it also lints the modules that are compiled only
 for that target. The `test` and `test-release` steps build the kernel
 workspace for the host only and do not test those modules; only
-`cargo xtask qemu-boot` builds them into an image and runs it.
+`cargo xtask qemu-boot` builds them into the images and runs those.
 
 A slow test is a Cargo test marked `#[ignore = "slow"]` whose function name
 starts with `slow_`. `cargo xtask check --slow` runs the slow tests in the
@@ -321,7 +321,12 @@ qemu-system-aarch64 -accel tcg,thread=single \
 
 `virt-8.2` is a versioned machine type that QEMU 8.2 and its later versions
 provide alike; the guest has no EL2, no EL3 and no network card, and its
-PL011 is on QEMU's standard streams. The guest runs on the host clock;
+PL011 is on QEMU's standard streams. The library entry `run_image_on` of
+the runner can instead run an image on the same machine with EL2,
+`virt-8.2,secure=off,virtualization=on,gic-version=2`, with the command line
+otherwise unchanged and a receipt with the same keys, for a test image that
+enters at EL2; the QEMU boot suite uses it, and `cargo xtask qemu` has no
+option for it. The guest runs on the host clock;
 `--clock icount` adds `-icount shift=3,align=off,sleep=off` after the
 accelerator, a functional reproduction as described under
 [environments](#environments). The run ends when QEMU ends by itself, when
@@ -504,55 +509,84 @@ runs of the repository read back from the API and on runs written for each
 rule.
 
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
-QEMU virt default image, boots it on QEMU virt through the library entry of
-the QEMU runner and judges every run; it is not part of the check, and CI
-runs it after the check as stated above. It builds the image with
-`cargo build --locked --release --target aarch64-unknown-none-softfloat
---bin krepi-qemu-virt --message-format=json-render-diagnostics` in
-`kernel/`, where the `.cargo/config.toml` of the repository root gives the
-target its flags, takes the image from Cargo's artifact message and records
-`rustc -vV`.
-Its one case, `cold-boot-echo`, runs the image three times, each in a new
-QEMU process with the command line of `cargo xtask qemu` and the host
-clock, with a window of 20 s and a limit of 4,096 bytes of serial output,
-the QEMU virt values of the suite; once the transcript holds `CASXI_READY`
-and CR LF, the runner sends the 16 bytes `casxi-sim-check` and CR. The
-image never stops by itself, so each run ends at its window. The case
-passes when every run ended at its window with no errors, on the runner's
-machine with one Cortex-A76 and without an instruction count, booted the
-image of the build and holds exactly the records of the
+QEMU virt default image and the test images, boots them on QEMU virt
+through the library entry of the QEMU runner and judges every run; it is
+not part of the check, and CI runs it after the check as stated above. It
+builds the images with one command, `cargo build --locked --release
+--target aarch64-unknown-none-softfloat -p krepi-qemu-virt --bin
+krepi-qemu-virt --example el1-brk --example injected-serror --example
+el1-fp-trap --example timer-irq --example irq-registers --example
+sp-el0-brk --example unexpected-irq
+--message-format=json-render-diagnostics` in `kernel/`, where
+the `.cargo/config.toml` of the repository root gives the target its flags,
+takes each image from Cargo's artifact message and records `rustc -vV`.
+The test images are the examples of `kernel/boards/qemu-virt/examples`:
+each links the production code of the default image and adds its own
+`kernel_main`, exception dispatch and trigger sequence, and on the host it
+is an empty program. The cases run in order, each run in a new QEMU process
+with the command line of `cargo xtask qemu` and the host clock, with a
+window of 20 s and a limit of 4,096 bytes of serial output, the QEMU virt
+values of the suite. No image stops by itself, so each run ends at its
+window.
+
+The case `cold-boot-echo` runs the default image three times; once the
+transcript holds `CASXI_READY` and CR LF, the runner sends the 16 bytes
+`casxi-sim-check` and CR. It passes when every run ended at its window with
+no errors, on the runner's machine with one Cortex-A76 and without an
+instruction count, booted the image of the build and holds exactly the
+records of the
 [boot contract](../domains/boot-platform/boot/contract.md#records), a
 Cortex-A76 identity record, `CASXI_BOOT kernel=krepi board=qemu-virt el=1`
 and `CASXI_READY`, followed by the 16 bytes sent, a line feed and nothing
 else; and when the three image digests are equal and the three transcripts
-identical. The expected records are written into the suite from the
-contract. Each run writes a directory `cold-boot-echo-<n>` with the files
-and the receipt of `cargo xtask qemu`, whose receipt has one more key,
-`input`: for each input, its trigger `after` and its `bytes`, in the
+identical. The cases `el1-brk`, `injected-serror`, `el1-fp-trap`,
+`timer-irq`, `irq-preserves-registers`, `sp-el0-brk` and `unexpected-irq`
+run their test image once each, `irq-preserves-registers` the image
+`irq-registers` and the others the image of their own name:
+`injected-serror` on the machine with EL2, the others on the runner's
+machine. Each passes when its run ended at its
+window with no errors and no input, on the machine of the case with one
+Cortex-A76, without an instruction count, booted the image of the build,
+and its transcript holds exactly, each line ending in CR LF, the start
+record `CASXI_TEST image=<image>`, for each expected exception an empty line
+and the exception record of the contract, and then `CASXI_HALTED`, or one
+record `CASXI_CHECK name=<check> failures=0x<16 hexadecimal digits>` for
+each self-check of the image in order, each with no failure, and
+`CASXI_RESUMED`, or, for `sp-el0-brk`, whose vectors halt after its
+dispatch, its self-check records alone. Each exception record must have
+the vector, class and syndrome of the case and a return address at a
+symbol of the image's ELF file, or between two of them. The expected
+records are written into the suite from the contract and the exception
+classes of the Arm Architecture Reference Manual; each record and each
+self-check is a check of its own.
+
+Each run writes a directory `<case>-<n>` with the files and the receipt of
+`cargo xtask qemu`; the receipt of a run of `cold-boot-echo` has one more
+key, `input`: for each input, its trigger `after` and its `bytes`, in the
 escapes of `<[u8]>::escape_ascii`, and `sent_at`, the count of serial bytes
 that had arrived when the runner sent it, or null when it did not. A send
 that fails adds its error to `errors`. The suite writes `build.log`, the
 standard error of the build, and the suite receipt `summary.json`, with
 sorted keys, into the new directory `--output-dir`, by default
 `artifacts/qemu-boot/<UTC time>Z-<12 hexadecimal digits>`: the status
-`PASS`, `FAIL`, `ERROR` or `INTERRUPTED`, the start and end times, the
-commit, the GitHub Actions run (`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`,
-`GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_SHA`, null outside CI), the
-toolchain, the build with its command and exit code, the image with its
-path, size and SHA-256 digest, and the case with its criterion, each run's
-directory, exit reason and the digests of its receipt and transcript, and
-each check with its status and, when it failed, why. `--qemu` names the
-QEMU executable as for `cargo xtask qemu`. The command prints a line for
-each run, each failed check and the status with the path of the receipt,
-and exits with 0 for `PASS`, 1 for `FAIL`, 130 for `INTERRUPTED`, 2 for
-`ERROR`, such as a failed build or a run that could not start, and for a
-usage error or an output directory that exists, and 120 when it cannot
-write its own output. SIGINT, SIGTERM and SIGHUP are caught from
-immediately before the first QEMU starts. Its unit tests run in the `test`
-step above: they hold hand-written receipts and transcripts, and weakened
-and misattributed forms of them, against the checks of the case, and run
-the case with a fake QEMU, a shell script that writes the records and
-echoes its input.
+`PASS`, `FAIL`, `ERROR` or `INTERRUPTED`, the worst of its cases, the start
+and end times, the commit, the GitHub Actions run (`GITHUB_RUN_ID`,
+`GITHUB_RUN_ATTEMPT`, `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_SHA`, null
+outside CI), the toolchain, the build with its command and exit code, the
+images by target with their path, size and SHA-256 digest, and each case
+with its criterion, image, machine, each run's directory, exit reason and
+the digests of its receipt and transcript, and each check with its status
+and, when it failed, why. `--qemu` names the QEMU executable as for
+`cargo xtask qemu`. The command prints a line for each run, each failed
+check and the status with the path of the receipt, and exits with 0 for
+`PASS`, 1 for `FAIL`, 130 for `INTERRUPTED`, 2 for `ERROR`, such as a failed
+build or a run that could not start, and for a usage error or an output
+directory that exists, and 120 when it cannot write its own output. SIGINT,
+SIGTERM and SIGHUP are caught from immediately before the first QEMU
+starts. Its unit tests run in the `test` step above: they hold hand-written
+receipts and transcripts, and weakened and misattributed forms of them,
+against the checks of the cases, and run a case with a fake QEMU, a shell
+script that writes the records and echoes its input.
 
 `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` checks the
 tool manifest `verification/toolchain.json` against checkouts of Aeneas and

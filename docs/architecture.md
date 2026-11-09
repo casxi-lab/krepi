@@ -535,7 +535,7 @@ Cargo workspaces of their own, each in its own directory:
 
 | Path | Contents |
 | --- | --- |
-| `kernel/` | The kernel workspace: the EL1 kernel, board support, the ABI crate and the operation inventory; the input of proof extraction. It holds the ABI crate `kernel/abi` (`krepi-abi`), which defines no interface yet, the architecture crate `kernel/arch` (`krepi-arch`) and the QEMU virt board crate `kernel/qemu-virt` (`krepi-qemu-virt`), described below. |
+| `kernel/` | The kernel workspace: the EL1 kernel, board support, the ABI crate and the operation inventory; the input of proof extraction. It holds the ABI crate `kernel/abi` (`krepi-abi`), which defines no interface yet, the architecture crate `kernel/arch` (`krepi-arch`) and the QEMU virt board crate `kernel/boards/qemu-virt` (`krepi-qemu-virt`), described below. |
 | `tools/` | The host tooling crate `krepi-tools`, a Cargo workspace of its own: a bounded ELF64 reader, the JSON values of tool reports, the serial port transport, the serial capture behind `cargo xtask serial-capture`, the serial link over the standard streams of a guest's process with the process helpers it uses, the QEMU virt command with the serial capture of a guest on QEMU or behind a board's serial port, the QEMU runner behind `cargo xtask qemu` and the test image that its tests boot, the QEMU boot suite behind `cargo xtask qemu-boot`, the line matchers and record parsers of a guest's serial output, and the time values of these tools per platform |
 | `user/` | The user-space workspace: the resident root, services, drivers, the SDK and workers, which are members outside `default-members`. It holds the SDK crate `user/sdk` (`krepi-sdk`). |
 | `verification/` | The Lean proof project and its registries, and the definition of the proof tools: their manifest, the reviewed patches and the recipe of the image that holds them, kept beside the proof project that the tools check ([formal verification](formal-verification.md#tools)) |
@@ -562,13 +562,16 @@ assembly, register accesses, MMIO and image entry points, is compiled in
 whole modules under `cfg(all(target_arch = "aarch64", target_os = "none"))`;
 everything else is plain code that the host tests run. The checks format
 the modules of the bare-metal target and lint them for that target, but test
-only the host build; `cargo xtask qemu-boot` builds them into an image and
-runs it.
-Images are built with Cargo in `kernel/` or at the repository root, whose
-`.cargo/config.toml` gives the target its flags: a GNU build-id note of
-SHA-1, the static relocation model and frame pointers.
+only the host build; `cargo xtask qemu-boot` builds them into the images
+and runs those.
+Images are built with Cargo in `kernel/`, or at the repository root with
+`--manifest-path kernel/Cargo.toml`, and the command names the board crate
+of the image with `-p`, such as `-p krepi-qemu-virt`, and a test image with
+`--example`. The
+`.cargo/config.toml` of the repository root gives the target its flags: a
+GNU build-id note of SHA-1, the static relocation model and frame pointers.
 
 | Crate | Modules |
 | --- | --- |
-| `kernel/arch` (`krepi-arch`) | The AArch64 processor primitives: `boot`, the cold entry `_start` of an image in `boot.S`, and `cpu`, the processor registers that EL1 code reads and the halt of a CPU. Both are compiled only for the bare-metal target. |
-| `kernel/qemu-virt` (`krepi-qemu-virt`) | The QEMU virt board support and its default image. The library holds `console`, the host-testable bounded writes of the serial console with `console::polled` and `console::emitter`, the PL011 driver `uart` and the platform parameters and CPU check of the board. The binary `krepi-qemu-virt`, from `src/main.rs`, is the default image, with the Rust entry `kernel_main`; `build.rs` hands the linker `link.ld`, the layout of the image, for the bare-metal target. |
+| `kernel/arch` (`krepi-arch`) | The AArch64 processor layer with the ARM interrupt controller and timer that the boards share: `boot`, the cold entry `_start` of an image in `boot.S`; `cpu`, the processor registers that EL1 code reads and the halt of a CPU; `exception`, the exception vectors of EL1 in `exception.S`, the frame that they save and the class of an exception; `gic`, the GICv2 driver; and `timer`, the generic timer. The boards give the addresses, interrupt IDs and timers that they use. `boot`, `cpu`, `gic`, `timer` and the vectors are compiled only for the bare-metal target; the frame and the classes are plain code. |
+| `kernel/boards/qemu-virt` (`krepi-qemu-virt`) | The QEMU virt board support, its default image and its test images. The library holds `console`, the host-testable bounded writes of the serial console with `console::polled` and `console::emitter`, `fault`, the host-testable exception record, the PL011 driver `uart`, `irq`, the wiring of the GICv2 and the virtual timer, and the addresses and platform parameters of the board. The binary `krepi-qemu-virt`, from `src/main.rs`, is the default image, with the Rust entry `kernel_main`, the CPU check and the exception dispatch; the examples in `examples/` are the test images of the QEMU boot suite; `build.rs` hands the linker `link.ld`, the layout of the images, for the bare-metal target. |

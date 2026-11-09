@@ -1,19 +1,22 @@
 //! The QEMU virt board support of the krepi kernel: the PL011 serial
-//! console, the CPU identity check and the platform parameters of the
-//! machine.
+//! console, the exception record, the wiring of the interrupt controller
+//! and the timer, and the platform parameters of the machine.
 //!
 //! Feature: krepi.platform.qemu-virt-boot
 //!
 //! The addresses and values here are those of the QEMU virt machine with one
 //! Cortex-A76. They are not Raspberry Pi 5 values and are never used for it.
 //!
-//! The console logic in [`console`] is plain code that the host tests run.
-//! The PL011 driver, [`uart`], and the functions that read the CPU are
-//! compiled only for the bare-metal target.
+//! The console logic in [`console`] and the exception record in [`fault`]
+//! are plain code that the host tests run. The PL011 driver, [`uart`], and
+//! the interrupt wiring, `irq`, are compiled only for the bare-metal target.
 
 #![cfg_attr(not(test), no_std)]
 
 pub mod console;
+pub mod fault;
+#[cfg(all(target_arch = "aarch64", target_os = "none"))]
+pub mod irq;
 #[cfg(all(target_arch = "aarch64", target_os = "none"))]
 pub mod uart;
 
@@ -46,26 +49,21 @@ pub const MIDR_PART_MASK: u64 = 0xff00_fff0;
 /// number `0xd0b`.
 pub const MIDR_CORTEX_A76: u64 = 0x4100_d0b0;
 
-/// The counter that bounds console output: the virtual count, which EL1 reads
-/// on QEMU virt without EL2.
-#[cfg(all(target_arch = "aarch64", target_os = "none"))]
-pub use krepi_arch::cpu::virtual_counter as counter;
+/// The base address of the distributor of the GICv2 of QEMU virt.
+pub const GIC_DISTRIBUTOR: usize = 0x0800_0000;
 
-/// Checks the CPU identity independently of the QEMU command line and the
-/// device tree, and writes the CPU identity record: the CPU must be a
-/// Cortex-A76 of any variant and revision.
-///
-/// # Panics
-///
-/// Panics with `QEMU Cortex-A76 required` on any other CPU.
-#[cfg(all(target_arch = "aarch64", target_os = "none"))]
-pub fn verify_cpu() {
-    let midr = krepi_arch::cpu::main_id();
-    assert!(
-        midr & MIDR_PART_MASK == MIDR_CORTEX_A76,
-        "QEMU Cortex-A76 required"
-    );
-    uart::print(format_args!(
-        "CASXI_CPU model={CPU_MODEL} midr={midr:#018x}\n"
-    ));
-}
+/// The base address of the CPU interface of the GICv2 of QEMU virt.
+pub const GIC_CPU: usize = 0x0801_0000;
+
+/// The interrupt ID of the virtual timer of the CPU on QEMU virt, the
+/// private peripheral interrupt 27.
+pub const TIMER_INTID: u32 = 27;
+
+/// The priority of the timer interrupt in the GIC, in the middle of the
+/// range that the priority mask lets through.
+pub const TIMER_PRIORITY: u8 = 0x80;
+
+/// The ticks of the timer interrupt per second, a platform parameter of
+/// QEMU virt: the period is the counter frequency divided by it, rounded
+/// up, so 10 ms.
+pub const TIMER_RATE: u64 = 100;

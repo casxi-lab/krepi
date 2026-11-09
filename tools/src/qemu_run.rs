@@ -74,6 +74,13 @@
 //! `errors`. The command `cargo xtask qemu` sends nothing, and its receipt
 //! has no `input` key.
 //!
+//! [`run_image_on`] is the run of [`run_image_with`] on a [`Machine`] of the
+//! caller's choice: a suite runs a test image that enters at EL2 on
+//! [`Machine::VirtEl2`]. Only the machine in the QEMU command line differs,
+//! and the receipt has the same keys. The command `cargo xtask qemu` has no
+//! option for it and always runs on [`Machine::Virt`], as
+//! [`run_image_with`] does.
+//!
 //! `clap` reads the command line as it reads that of `cargo xtask
 //! serial-capture`: an option with a value takes it as `--option=value` or
 //! as the next argument, a repeated option keeps its last value,
@@ -90,7 +97,7 @@
 //! itself, so that such an interrupt counts as `interrupted`.
 
 use crate::console::{Console, Streams, with_process_console};
-use crate::qemu::{self, Clock, SerialCapture};
+use crate::qemu::{self, Clock, Machine, SerialCapture};
 use crate::report::{Value, to_json, utc_now};
 use crate::serial_capture::{
     BYTES_BOUND, DEFAULT_MAX_BYTES, MAX_BYTES, create_output, file_error, pure_path,
@@ -585,9 +592,23 @@ pub fn run_image_with<'a>(
     timing: &Timing,
     arm: &mut dyn FnMut() -> Result<&'a AtomicI32, Failure>,
 ) -> Result<Value, Failure> {
+    run_image_on(Machine::Virt, options, inputs, output, timing, arm)
+}
+
+/// [`run_image_with`] on `machine`: the QEMU command line names `machine`,
+/// and nothing else of the run or of its receipt changes.
+pub fn run_image_on<'a>(
+    machine: Machine,
+    options: &Options,
+    inputs: &[Input],
+    output: &Path,
+    timing: &Timing,
+    arm: &mut dyn FnMut() -> Result<&'a AtomicI32, Failure>,
+) -> Result<Value, Failure> {
     check_limits(options.timeout, options.max_bytes)?;
     let executable = qemu::resolve_qemu(options.qemu.as_deref())?;
-    let command = qemu::build_command(&options.image, Some(&executable), options.clock)?;
+    let command =
+        qemu::build_command_on(&options.image, Some(&executable), options.clock, machine)?;
     // The command ends with the canonical path of the image.
     let image = PathBuf::from(command.last().map_or("", String::as_str));
     let (image_bytes, image_sha256) =

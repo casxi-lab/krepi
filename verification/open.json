@@ -75,7 +75,79 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
-      "item": "kernel/qemu-virt/src",
+      "item": "kernel/arch/src/exception.S",
+      "kind": "assembly",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#clear-and-load",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#frame",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#mask",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#no-fp-state",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#release",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#restore-elr-spsr",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#save-general",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.S#save-system",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/exception.rs",
       "kind": "code",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
@@ -83,7 +155,15 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
-      "item": "kernel/qemu-virt/src/main.rs#image::initialize",
+      "item": "kernel/arch/src/gic.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/gic.rs#Gic::new",
       "kind": "unsafe",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
@@ -91,7 +171,7 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
-      "item": "kernel/qemu-virt/src/main.rs#image::kernel_main",
+      "item": "kernel/arch/src/gic.rs#barrier",
       "kind": "unsafe",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
@@ -99,7 +179,7 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
-      "item": "kernel/qemu-virt/src/uart.rs#read",
+      "item": "kernel/arch/src/gic.rs#read",
       "kind": "mmio",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
@@ -107,7 +187,87 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
-      "item": "kernel/qemu-virt/src/uart.rs#write",
+      "item": "kernel/arch/src/gic.rs#write",
+      "kind": "mmio",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/timer.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/timer.rs#arm_virtual",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/timer.rs#stop_virtual",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/boards/qemu-virt/src",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/boards/qemu-virt/src/irq.rs#GIC",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/boards/qemu-virt/src/main.rs#image::exception_dispatch",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/boards/qemu-virt/src/main.rs#image::initialize",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/boards/qemu-virt/src/main.rs#image::kernel_main",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/boards/qemu-virt/src/uart.rs#read",
+      "kind": "mmio",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/boards/qemu-virt/src/uart.rs#write",
       "kind": "mmio",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",

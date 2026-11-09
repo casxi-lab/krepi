@@ -59,8 +59,9 @@ pub fn counter_frequency() -> u64 {
 /// The virtual count `CNTVCT_EL0`, read after the instructions before it.
 pub fn virtual_counter() -> u64 {
     let value: u64;
-    // SAFETY: EL1 may read `CNTVCT_EL0` when EL2 is absent or disabled, as on
-    // QEMU virt without virtualization. The `ISB` keeps the read after the
+    // SAFETY: EL1 may read `CNTVCT_EL0` unless EL2 traps the read, which only
+    // `CNTHCTL_EL2.EL1TVCT` of FEAT_ECV does and no krepi entry sets; the
+    // Cortex-A76 lacks FEAT_ECV. The `ISB` keeps the read after the
     // instructions before it; it is not a barrier for data accesses. The asm
     // is not marked pure or `nomem`, so that the compiler neither merges two
     // reads nor moves one across a memory access; `CNTVCTSS_EL0`, which needs

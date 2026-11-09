@@ -8,18 +8,18 @@ paths:
   - src/diagnostics/tests.rs
   - src/fault.rs
 destination:
-  - kernel/qemu-virt/src/console.rs
-  - kernel/qemu-virt/src/console/tests.rs
-  - kernel/qemu-virt/src/console/polled.rs
-  - kernel/qemu-virt/src/console/polled/tests.rs
-  - kernel/qemu-virt/src/console/emitter.rs
-  - kernel/qemu-virt/src/console/emitter/tests.rs
+  - kernel/boards/qemu-virt/src/console.rs
+  - kernel/boards/qemu-virt/src/console/tests.rs
+  - kernel/boards/qemu-virt/src/console/polled.rs
+  - kernel/boards/qemu-virt/src/console/polled/tests.rs
+  - kernel/boards/qemu-virt/src/console/emitter.rs
+  - kernel/boards/qemu-virt/src/console/emitter/tests.rs
 treatment: ported
 features:
   - krepi.platform.qemu-virt-boot
 ---
 
-# Porting record: kernel/qemu-virt/src/console.rs
+# Porting record: kernel/boards/qemu-virt/src/console.rs
 
 ## Summary
 
@@ -42,12 +42,14 @@ and the text that replaces a message that is not static.
 does not list. It is ported: the allocation-free records, the bounded
 writers, the frame-pointer walk and the counter watchdog of the prototype
 kernel are plain code with host tests, which krepi takes with the code that
-uses each. This change takes the polled writer and `emit_bounded`; the
+uses each. This change takes the polled writer and `emit_bounded`. The
 fixed-capacity record of `src/diagnostics/record.rs`,
-`emit_progress_bounded` and their tests come with the fault records, the
-frame walk of `src/diagnostics/frames.rs` with fault symbolization, and the
-watchdog of `src/diagnostics/watchdog.rs`, which only diagnostic
-controllers used, with its first caller.
+`emit_progress_bounded` and their tests are not carried over: the exception
+record of [fault](fault.md) writes each of its lines through the bounded
+writes of this module instead. The frame walk of `src/diagnostics/frames.rs`
+comes with fault symbolization, and the watchdog of
+`src/diagnostics/watchdog.rs`, which only diagnostic controllers used, with
+its first caller.
 
 ## Changes
 
@@ -102,8 +104,8 @@ controllers used, with its first caller.
 
 | Legacy test | krepi test |
 | --- | --- |
-| `src/diagnostics/polled_tests.rs`: `long_record_survives_more_polls_at_the_same_device_rate`, `deadline_stops_a_busy_device_before_its_poll_cap`, `stopped_clock_still_has_a_finite_stall_bound`, `deadline_is_not_renewed_after_success_and_handles_counter_wrap`, `crlf_counts_against_the_byte_limit`, `ignored_formatter_errors_cannot_restart_output`, `invalid_budgets_never_touch_clock_or_device`, `formatter_failure_is_not_silently_accepted` | The same names in `kernel/qemu-virt/src/console/polled/tests.rs` |
-| `src/diagnostics/tests.rs:264-337`: `permanently_full_output_spends_only_the_total_budget`, `intermittent_output_retries_without_skipping_or_transforming_bytes`, `successful_writes_also_consume_attempts`, `empty_output_and_zero_budget_never_call_device` | The same names in `kernel/qemu-virt/src/console/emitter/tests.rs` |
+| `src/diagnostics/polled_tests.rs`: `long_record_survives_more_polls_at_the_same_device_rate`, `deadline_stops_a_busy_device_before_its_poll_cap`, `stopped_clock_still_has_a_finite_stall_bound`, `deadline_is_not_renewed_after_success_and_handles_counter_wrap`, `crlf_counts_against_the_byte_limit`, `ignored_formatter_errors_cannot_restart_output`, `invalid_budgets_never_touch_clock_or_device`, `formatter_failure_is_not_silently_accepted` | The same names in `kernel/boards/qemu-virt/src/console/polled/tests.rs` |
+| `src/diagnostics/tests.rs:264-337`: `permanently_full_output_spends_only_the_total_budget`, `intermittent_output_retries_without_skipping_or_transforming_bytes`, `successful_writes_also_consume_attempts`, `empty_output_and_zero_budget_never_call_device` | The same names in `kernel/boards/qemu-virt/src/console/emitter/tests.rs` |
 
 No expected value changed.
 
@@ -126,13 +128,18 @@ No expected value changed.
 
 ## Not carried over
 
-- From `src/diagnostics/emitter.rs`: `emit_progress_bounded`, which no code
-  of this change calls; it comes with the fault records, with the tests of
-  `src/diagnostics/emitter_tests.rs`.
+- From `src/diagnostics/emitter.rs`: `emit_progress_bounded`, with the tests
+  of `src/diagnostics/emitter_tests.rs`. The legacy fault record wrote its
+  whole text through it with a fixed allowance per byte; the exception
+  record writes each line as a record within the console bounds, so no code
+  calls it.
+- `src/diagnostics/record.rs`, the fixed-capacity record buffer of the
+  legacy fault record, for the same reason.
 - From `src/diagnostics/tests.rs`: the 11 tests of the frame walk at lines
   1-215, which come with fault symbolization, and the 4 tests of `Record` at
-  lines 216-262, which come with the fault records.
+  lines 216-262, whose record buffer is not carried over.
 - From `src/fault.rs`: everything but the lines of the panic record; the
-  [qemu-virt](qemu-virt.md) record lists it.
+  [qemu-virt](qemu-virt.md) record lists it, and the [fault](fault.md)
+  record the exception record.
 - The legacy feature annotation `system.kernel.foundations` of the
   diagnostics module and of `src/fault.rs`.

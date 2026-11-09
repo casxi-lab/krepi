@@ -3,8 +3,11 @@
 //! [`build_command`] gives the command line of a guest on QEMU virt: one
 //! Cortex-A76 under single-threaded TCG, GICv2, 128 MiB, no network, and the
 //! PL011 on the standard streams of the QEMU process, with the host clock or
-//! a fixed instruction count as the guest's time source. [`Guest`] is the far
-//! end of a serial capture, which tells whether the guest is still there.
+//! a fixed instruction count as the guest's time source. The machine has no
+//! EL2; [`build_command_on`] gives the same command line on a [`Machine`],
+//! which may instead be the variant with EL2 that test images entering at
+//! EL2 use. [`Guest`] is the far end of a serial capture, which tells whether
+//! the guest is still there.
 //!
 //! A [`SerialCapture`] keeps every byte that a guest wrote, lets each phase of
 //! a check match from an offset of its own and sends input. It reads the
@@ -68,6 +71,29 @@ impl Clock {
     }
 }
 
+/// The machine of a guest on QEMU virt: the versioned `virt-8.2`, which
+/// QEMU 8.2 and its later versions provide alike, without EL3, with GICv2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Machine {
+    /// Without EL2: the machine of `cargo xtask qemu`, on which the guest
+    /// enters at EL1.
+    Virt,
+    /// With EL2, on which the guest enters at EL2: only for test images
+    /// that drop to EL1 themselves, such as one that injects a virtual
+    /// SError from EL2.
+    VirtEl2,
+}
+
+impl Machine {
+    /// The value of the `-machine` option.
+    pub fn option(self) -> &'static str {
+        match self {
+            Machine::Virt => "virt-8.2,secure=off,virtualization=off,gic-version=2",
+            Machine::VirtEl2 => "virt-8.2,secure=off,virtualization=on,gic-version=2",
+        }
+    }
+}
+
 /// The canonical path of the QEMU executable: `qemu`, the value of the
 /// `--qemu` option, or `qemu-system-aarch64` without one. A name without a
 /// `/` is looked for in the directories of `PATH`, in order, and a name with
@@ -104,15 +130,26 @@ fn executable(path: &Path) -> bool {
 /// The command line of a guest on QEMU virt with the image `elf`, which must
 /// be a regular file and is given by its canonical path. `qemu` is the
 /// executable, taken as it is; without one, [`resolve_qemu`] finds it. The
-/// machine is the versioned `virt-8.2`, which QEMU 8.2 and its later versions
-/// provide alike, without EL2 and EL3, with GICv2 and without a network
-/// card; one Cortex-A76 runs under single-threaded TCG with 128 MiB, and the
-/// PL011 is on the standard streams. [`Clock::Icount`] adds a fixed
-/// instruction count of 2^3 ns per instruction.
+/// machine is [`Machine::Virt`], the versioned `virt-8.2` without EL2 and
+/// EL3, with GICv2 and without a network card; one Cortex-A76 runs under
+/// single-threaded TCG with 128 MiB, and the PL011 is on the standard
+/// streams. [`Clock::Icount`] adds a fixed instruction count of 2^3 ns per
+/// instruction.
 pub fn build_command(
     elf: &Path,
     qemu: Option<&Path>,
     clock: Clock,
+) -> Result<Vec<String>, Failure> {
+    build_command_on(elf, qemu, clock, Machine::Virt)
+}
+
+/// The command line of [`build_command`] on `machine`: only the value of
+/// `-machine` differs.
+pub fn build_command_on(
+    elf: &Path,
+    qemu: Option<&Path>,
+    clock: Clock,
+    machine: Machine,
 ) -> Result<Vec<String>, Failure> {
     let image = elf.canonicalize().map_err(|_| {
         Failure::new(format!(
@@ -140,7 +177,7 @@ pub fn build_command(
     command.extend(
         [
             "-machine",
-            "virt-8.2,secure=off,virtualization=off,gic-version=2",
+            machine.option(),
             "-cpu",
             "cortex-a76",
             "-smp",

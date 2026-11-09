@@ -1,14 +1,16 @@
 [package]
 name = "krepi-qemu-virt"
 version = "0.0.0"
-description = "The QEMU virt board support of the krepi kernel and its default image"
+description = "The QEMU virt board support of the krepi kernel, its default image and its test images"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
 # The default image of QEMU virt, the only binary of the crate. It runs only
-# on QEMU; on the host it is an empty program, so it has no tests.
+# on QEMU; on the host it is an empty program, so it has no tests. The
+# examples in examples/ are the test images of the QEMU boot suite, which
+# are empty programs on the host as well.
 [[bin]]
 name = "krepi-qemu-virt"
 path = "src/main.rs"
@@ -16,7 +18,7 @@ test = false
 bench = false
 
 [dependencies]
-krepi-arch = { path = "../arch" }
+krepi-arch = { path = "../../arch" }
 
 [lints.rust]
 missing_docs = "warn"

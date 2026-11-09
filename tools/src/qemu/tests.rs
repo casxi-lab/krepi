@@ -299,6 +299,30 @@ fn the_command_follows_the_fixed_profile() {
     );
 }
 
+/// The command on the machine with EL2 differs from the default command only
+/// in the value of `-machine`, for both clocks, and the default command is
+/// the one on the machine without EL2.
+#[test]
+fn the_el2_machine_differs_only_in_the_machine() {
+    let scratch = Scratch::new("qemu-machine");
+    let elf = scratch.write("image.elf", b"ELF");
+    let qemu = Some(Path::new("/fixture/qemu"));
+    for clock in [Clock::Host, Clock::Icount] {
+        let default = build_command(&elf, qemu, clock).unwrap();
+        assert_eq!(
+            build_command_on(&elf, qemu, clock, Machine::Virt).unwrap(),
+            default
+        );
+        let machine = default.iter().position(|arg| arg == "-machine").unwrap();
+        let mut expected = default.clone();
+        expected[machine + 1] = "virt-8.2,secure=off,virtualization=on,gic-version=2".to_string();
+        assert_eq!(
+            build_command_on(&elf, qemu, clock, Machine::VirtEl2).unwrap(),
+            expected
+        );
+    }
+}
+
 /// A timeout is written in seconds as Rust writes an `f64`, which never uses
 /// an exponent.
 #[test]

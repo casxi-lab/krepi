@@ -20,7 +20,8 @@ The cold entry `_start` of the QEMU virt image: the assembly of
 `src/entry.rs`, and that include. `_start` masks every exception, parks
 every CPU but CPU 0 and a CPU that is not at EL1, makes FP/SIMD
 instructions trap, clears `TPIDR_EL1`, selects `SP_EL1`, sets the stack
-pointer, clears BSS and the whole stack, and calls `kernel_main`. The module
+pointer, clears BSS, installs the exception vectors in `VBAR_EL1`, clears
+the whole stack, and calls `kernel_main`. The module
 `boot` of `krepi-arch` holds the include, and its documentation states the
 entry contract; the [boot contract](../domains/boot-platform/boot/contract.md#cold-entry)
 states the rules. The file `src/boot.S` lies at the root of the legacy
@@ -31,9 +32,9 @@ ported with it.
 
 ## Changes
 
-- The install of the exception vectors, `__exception_vectors` written to
-  `VBAR_EL1` with an `ISB` after BSS was cleared, is left out: this image
-  installs no vector table, and the symbol does not exist.
+- The install of the exception vectors is kept: `__exception_vectors` of
+  [exception](exception.md) is written to `VBAR_EL1` with an `ISB` after BSS
+  was cleared, as in the legacy entry, with a comment that names it.
 - The comments are written again: the entry contract names the symbols that
   the link script and the image provide, and the line
   `//! Feature: krepi.platform.qemu-virt-boot`, an assembly comment, names
@@ -48,9 +49,10 @@ None: the legacy tree had no host test of the entry.
 
 ## Behaviour changes
 
-- `VBAR_EL1` keeps its reset value: an exception after the cold entry is not
-  handled. The QEMU boot suite, case `cold-boot-echo`, shows that the image
-  reaches its records and echo without an exception.
+None: the instructions are those of the legacy entry. The QEMU boot suite,
+case `cold-boot-echo`, shows that the default image reaches its records and
+echo, and the cases of the test images show that the installed vectors take
+their exceptions.
 
 ## Hardware evidence to re-obtain
 
@@ -64,10 +66,10 @@ None: the legacy tree had no host test of the entry.
 ## Not carried over
 
 - From `src/entry.rs`: the include of the vector assembly
-  `src/arch/aarch64/kernel_vectors.S`, which comes with the exception
-  vectors; the Pi 5 entry `src/board/pi5/boot.S` with
-  `src/arch/aarch64/boot_el1.S` under the `pi5-kernel` and
-  `physical-kernel-test` features and the fixture entry
+  `src/arch/aarch64/kernel_vectors.S`, which is in the module `exception`
+  that the [exception](exception.md) record covers; the Pi 5 entry
+  `src/board/pi5/boot.S` with `src/arch/aarch64/boot_el1.S` under the
+  `pi5-kernel` and `physical-kernel-test` features and the fixture entry
   `src/board/boot_test/entry.S`, all feature-profile branches or Pi 5 code;
   `Info` and `pi5_probe_main`, the entry record of the Pi 5 path; and
   `kernel_main`, which the record [qemu-virt](qemu-virt.md) covers.
