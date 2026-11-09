@@ -46,6 +46,11 @@ pub const COMMANDS: &[Command] = &[
         subcommands: &[],
     },
     Command {
+        name: "qemu-boot",
+        about: "Build the QEMU virt default image and run the QEMU boot suite on it: three cold boots with the serial echo, each judged against fixed expected records, with a receipt of each run and of the suite in a new directory; --help lists the options",
+        subcommands: &[],
+    },
+    Command {
         name: "serial-capture",
         about: "Record what a board sends over a serial port for a bounded time into a new directory, without evaluating its boot; --help lists the options",
         subcommands: &[],
@@ -70,6 +75,12 @@ fn main() -> ExitCode {
         ["qemu", rest @ ..] => {
             let args: Vec<String> = rest.iter().map(|arg| arg.to_string()).collect();
             let code = krepi_tools::qemu_run::main(&repo::root(), &args);
+            // The command exits with 0, 1, 2, 120 or 130.
+            ExitCode::from(u8::try_from(code).unwrap_or(2))
+        }
+        ["qemu-boot", rest @ ..] => {
+            let args: Vec<String> = rest.iter().map(|arg| arg.to_string()).collect();
+            let code = krepi_tools::qemu_boot::main(&repo::root(), &args);
             // The command exits with 0, 1, 2, 120 or 130.
             ExitCode::from(u8::try_from(code).unwrap_or(2))
         }

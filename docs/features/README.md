@@ -7,5 +7,11 @@ edited by hand once that command exists. See the
 [documentation conventions](../conventions/documentation.md) for the form of
 a feature document.
 
-No feature document exists yet: krepi provides no feature so far. The
-[subject domains](../domains/README.md) describe the target scope.
+The [subject domains](../domains/README.md) describe the target scope,
+whether krepi provides a feature or not.
+
+## platform
+
+| Feature | Title | Status | Modules | Theorems |
+| --- | --- | --- | --- | --- |
+| [`krepi.platform.qemu-virt-boot`](platform/qemu-virt-boot.md) | QEMU virt boot | `partial` | `kernel/arch/src/boot.rs`, `kernel/arch/src/boot.S`, `kernel/arch/src/cpu.rs`, `kernel/qemu-virt/build.rs`, `kernel/qemu-virt/src/lib.rs`, `kernel/qemu-virt/src/main.rs`, `kernel/qemu-virt/src/uart.rs`, `kernel/qemu-virt/src/console.rs`, `kernel/qemu-virt/src/console/polled.rs`, `kernel/qemu-virt/src/console/emitter.rs` | none |

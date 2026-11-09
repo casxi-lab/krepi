@@ -3,14 +3,15 @@
 Every mechanism, service or runtime adaptation that krepi provides is
 described by exactly one feature document. Feature documents are the entry
 point for its interface, semantics, tested examples, design, implementation
-and verification. The complete target scope of the system is described by
-the domain documents below `docs/domains/`: one page per subject domain, and
-four documents for each component that has a component directory, stating
-its requirements, contract, specification and proof path. Porting records
-below `docs/porting/` describe where ported code came from; their form is in
-[porting](porting.md).
+and verification. The complete target scope of the system is described by the
+domain documents below `docs/domains/`: one page per subject domain, and for
+each component that has a component directory its requirements and its
+contract, with its specification and proof path once specification work on
+the component starts. Porting records below `docs/porting/` describe where
+ported code came from; their form is in [porting](porting.md).
 
 Architecture notes (`docs/architecture.md`), the
+[security model](../security.md), the
 [formal verification](../formal-verification.md) page, the
 [formal upgrade](../formal-upgrade.md) manual and these conventions are
 neither feature documents nor domain documents. The formal upgrade manual
@@ -18,10 +19,11 @@ is also an agent skill file: in place of the metadata of a feature
 document, it starts with a block between two `---` lines that holds the
 `name` and the one-line `description` of the skill.
 
-No feature document, domain page or component directory exists yet. A
-feature document is written with the first change that provides the feature;
-a domain page when the first work in its domain starts; a component directory
-with its four documents when the first work on that component starts.
+A feature document is written with the first change that provides the
+feature; a domain page when the first work in its domain starts; a component
+directory, with its `requirements.md` and `contract.md`, when the first work
+on that component starts; and its `specification.md` and `proof.md` when
+specification work on the component starts.
 
 ## Location and identity
 
@@ -116,8 +118,9 @@ features build on and that has its own contract, such as the object table or
 the capability table. The domain documents describe the complete feature set
 of every subject domain, whether krepi provides a feature or not, and state
 for each component with a component directory its requirements, the rules its
-code follows, the design of its Lean specification and the proof path of its
-code. Feature documents remain the description of what the system provides.
+code follows and, where it has them, the design of its Lean specification
+and the proof path of its code. Feature documents remain the description of
+what the system provides.
 
 ### Directory tree
 
@@ -127,10 +130,10 @@ docs/domains/
   <domain>/
     README.md               the domain page
     <component>/
-      requirements.md
-      contract.md
-      specification.md
-      proof.md
+      requirements.md       from the first work on the component
+      contract.md           from the first work on the component
+      specification.md      from the start of its specification work
+      proof.md              from the start of its specification work
 ```
 
 - **Index.** `docs/domains/README.md` lists every domain with its scope,
@@ -139,8 +142,10 @@ docs/domains/
 - **Domains.** Each subject domain has one directory, named in lowercase with
   hyphens, as the index lists it; `cross-cutting` comes last.
 - **Contents.** A domain directory holds its `README.md` and the directories of
-  its components, nothing else. A component directory holds exactly the four
-  component documents.
+  its components, nothing else. A component directory holds its
+  `requirements.md` and `contract.md`, and from the start of specification
+  work on the component also its `specification.md` and `proof.md`, nothing
+  else.
 - **Placement.** A component that several domains use lives below
   `cross-cutting/`; a component that serves one domain lives in the directory
   of that domain. A component directory takes the name of its contract.
@@ -174,7 +179,7 @@ A sub-feature section has seven parts, in this order:
 | Consumers | The services, runtimes and applications that build on it, in this and other domains |
 | Interface | Operations, results and errors, which failures are errors and which are states |
 | Prerequisites | Links to sections of the page, other domain pages, components and feature documents |
-| Engineering notes | Pitfalls, bounds and budgets, cancellation points, per-CPU and shared state, expected sizes |
+| Engineering notes | Pitfalls, bounds and budgets, cancellation points and expected sizes; for per-CPU and shared state, a link to the `State fields` of the contract of the component, which alone classifies that state and states how it is protected |
 | Verification | Independent evidence: invariants, required counterexamples, environments, and links to the specification and proof path of a component where one exists |
 
 Each part starts a paragraph with its label in bold, as in **Consumers.**, and
@@ -209,6 +214,7 @@ Each kind of content has one home, and the other documents link it.
 | Model, design rationale, and the correspondence of contract clauses and requirements to Lean | `specification.md` | The contract |
 | Targets, obligations, premises, trusted items, mutants and what is not proved | `proof.md` | The Verification sections of feature documents |
 | Gate mechanics, receipts, the trusted-boundary table and library models | [Formal verification](../formal-verification.md) | `proof.md`, which names the rows it relies on |
+| The threat model, the rules for internal choices, the observable outputs and the register of permitted nondeterminism | [Security model](../security.md) | Contracts, which cite its entries, and domain pages |
 | Interface, tested examples and status of a provided capability | Its feature document | Domain pages, which link it |
 | Proposal records, decisions, task mapping | The coordination repository | Any document in this repository |
 
@@ -223,7 +229,8 @@ Each kind of content has one home, and the other documents link it.
   `Configurations` names the boards, CPU counts and image configurations a
   requirement holds for.
 - **Contract.** `contract.md` has no metadata. Its introduction says what the
-  page governs and links the other three documents. `Terms` comes first.
+  page governs and links the other documents of the component that exist.
+  `Terms` comes first.
   `Entry points` follows with a table of every entry point of the component,
   including the operations that it adds to the ABI inventory; the Entry
   points field of a requirement names rows of this table. `Extractability`
@@ -259,8 +266,9 @@ Each kind of content has one home, and the other documents link it.
   outcome of a deadline that coincides with an event, by a fixed rule or by
   the caller, and, for every choice that the specification leaves open,
   cites, by its registered label and with a link, the entry that allows it
-  in the register of permitted nondeterminism (planned) of the
-  [architecture notes](../architecture.md); `State fields` holds the state
+  in the register of
+  [permitted nondeterminism](../security.md#permitted-nondeterminism) of the
+  security model; `State fields` holds the state
   field table of the [SMP design rules](smp.md#s5-state-field-tables). A
   section of testing obligations follows. `Open obligations` holds one
   table that lists, one row each, the obligations of the component's code

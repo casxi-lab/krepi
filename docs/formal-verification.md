@@ -4,8 +4,8 @@ Selected kernel functions are to be proved correct in Lean 4. Charon extracts
 the actual Rust source of the kernel, Aeneas translates the extraction into
 Lean definitions, and handwritten Lean proofs show that those generated
 definitions satisfy independently written specifications. The organization
-follows the one used for the casξ CAS library, adapted to an
-operating-system kernel.
+follows the one used for the CAS project, adapted to an operating-system
+kernel.
 
 A proof covers exactly the functions and statements registered for it. Code
 outside a registered target is unverified, and a theorem says nothing beyond
@@ -91,7 +91,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/image-pin.json` | The published image that the CI jobs of the gate run, by its digest ([image pin](#image-pin)) | Present |
 | `verification/lakefile.toml`, `lean-toolchain`, `lake-manifest.json` | The Lake project of the hand-written Lean and of the generated definitions, with the Lean toolchain and the packages of the Lake lock of the Aeneas Lean library ([qualification](#qualification)), and the library `KrepiRoot` of the root module that the [base round](#base-round) writes | Present |
 | `verification/extraction.toml` | How Charon compiles each extracted crate ([extraction](#extraction)) | Present |
-| `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there | Planned |
+| `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there, where it has one | Planned |
 | `verification/Krepi/Statements/` | Statements: the propositions that registered theorems prove ([statements and proofs](#statements-and-proofs)) | Planned |
 | `verification/Krepi/Proofs/` | Proofs of statements and refinement proofs of production targets; the only directory of the Lake project outside the statement side ([statements and proofs](#statements-and-proofs)) | Planned |
 | `verification/Krepi/Models/` | Lean models of items that proofs reach without extracting them, and their differential check | Planned |
@@ -104,7 +104,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/axioms.json` | The axioms of the Aeneas Lean library that target theorems may use, each with its source and reason ([base round](#base-round)) | Present, empty |
 | `verification/tcb.json` | Items of the trusted base: native decisions and patterns of generated axioms, whose classification comes later ([base round](#base-round)) | Present, empty |
 | `verification/legacy.json` | Kept empty: production functions without a proof are listed in `open.json` ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty by design |
-| `verification/open.json` | The open obligations of the production code, generated from the `Open obligations` tables of the contracts of the components ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty |
+| `verification/open.json` | The open obligations of the production code, generated from the `Open obligations` tables of the contracts of the components ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
 | `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `vectors` and `canary` present, the others planned |
 
@@ -202,8 +202,9 @@ the repository, prints one line per check and fails when any check fails:
 - the patch has the pinned SHA-256;
 - Aeneas's `backends/lean/lake-manifest.json` has the pinned SHA-256 and
   pins the pinned Mathlib commit;
-- the Rust targets include `aarch64-unknown-none`, the triple for which the
-  kernel is extracted;
+- the Rust targets include `aarch64-unknown-none`, the extraction triple of
+  the kernel, which is not the target of the kernel images
+  ([extraction](#extraction));
 - the manifest has exactly the two host columns, each with a UTF-8 locale, a
   prefix without `.` or `..` components, `/opt/krepi-formal` on
   `linux-aarch64`, and a `switch_export_sha256` that is `null` or a SHA-256
@@ -798,15 +799,27 @@ crate that the gate extracts. Its section `qualification` gives the triple of
 each host of the tool manifest, `aarch64-unknown-linux-gnu` and
 `aarch64-apple-darwin`, and empty `features` and `cfg`: Charon is given no
 `--target` and adds the host's triple itself, and the gate passes no
-features and no `cfg` settings. Its section `kernel` gives the triple of the
-production kernel, `aarch64-unknown-none`, and the features and `cfg`
-settings of its release profile, which has none; nothing is extracted from
+features and no `cfg` settings. Its section `kernel` gives the extraction
+triple, `aarch64-unknown-none`, and the features and `cfg` settings of the
+release profile of the kernel, which has none; nothing is extracted from
 the kernel while no target is registered. The qualification stops when the
 file of the export does not have exactly these hosts, names features or
 `cfg` settings for the qualification crate, or gives the kernel another
 triple. The triples of the qualification crate record what Charon chooses
 on each host; nothing passes them to Charon, and the gate does not check
 their values.
+
+The extraction triple is a pin of the gate, whose standard library the
+image that holds the tools installs ([tool checks](#tool-checks)). It is
+not the target of the kernel images, `aarch64-unknown-none-softfloat`,
+whose soft-float ABI keeps compiled kernel code off the FP/SIMD registers
+at EL1, where FP/SIMD instructions trap
+([floating-point state](architecture.md#floating-point-state)). The two
+triples have the same architecture, OS and data layout and differ in the
+floating-point ABI, the target feature `neon` and linker arguments. The
+kernel crates use no floating point and no `cfg` condition on the ABI or
+on a target feature, so Charon translates the same source for both
+triples.
 
 ### Qualification
 

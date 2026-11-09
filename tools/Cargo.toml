@@ -1,7 +1,7 @@
 [package]
 name = "krepi-tools"
 version = "0.0.0"
-description = "Host tooling for krepi tests: ELF reading, JSON report values, the serial port transport, the serial capture, the QEMU runner, serial record parsers and a test image"
+description = "Host tooling for krepi tests: ELF reading, JSON report values, the serial port transport, the serial capture, the QEMU runner, the QEMU boot suite, serial record parsers and a test image"
 edition = "2024"
 license = "MIT"
 publish = false
@@ -12,12 +12,13 @@ rust-version = "1.99"
 [workspace]
 
 [dependencies]
-# The command lines of the serial capture, `cargo xtask serial-capture`, and
-# of the QEMU runner, `cargo xtask qemu`, with their help, usage and error
-# texts. They are defined with the builder, so the derive macros are left
-# out. Their texts are plain and do not depend on the terminal, so colour
-# and wrapping to the terminal width are left out, and so are the
-# suggestions of similar options, which need another crate.
+# The command lines of the serial capture, `cargo xtask serial-capture`, of
+# the QEMU runner, `cargo xtask qemu`, and of the QEMU boot suite,
+# `cargo xtask qemu-boot`, with their help, usage and error texts. They are
+# defined with the builder, so the derive macros are left out. Their texts
+# are plain and do not depend on the terminal, so colour and wrapping to the
+# terminal width are left out, and so are the suggestions of similar
+# options, which need another crate.
 clap = { version = "=4.6.7", default-features = false, features = ["std", "help", "usage", "error-context"] }
 # The terminal, lock and signal calls of the serial port transport, the
 # signal that the process helpers send, and the pseudo-terminals, signals,
@@ -33,9 +34,10 @@ libc = { version = "=0.2.191", default-features = false }
 # compression and the standard-library support of the default features are
 # left out.
 object = { version = "=0.40.0", default-features = false, features = ["write_core", "elf"] }
-# Report objects keep the order in which their keys were inserted. Reports
-# are written to strings, so the standard-library support of the default
-# feature is left out.
+# Report objects keep the order in which their keys were inserted, and the
+# QEMU boot suite reads the JSON messages of Cargo. Reports are written to
+# strings, so the standard-library support of the default feature is left
+# out.
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
 # Digests are taken of byte slices in memory, and of files read in pieces,
 # so the allocation and object-identifier support of the default features
