@@ -172,7 +172,12 @@ The steps are:
     runs on `pull_request` names the proof-tool image of
     `verification/image-pin.json` by its pinned digest, and that every such
     workflow mentions the image's repository only in that form
-    ([image pin](../formal-verification.md#image-pin)).
+    ([image pin](../formal-verification.md#image-pin)). In a workflow that
+    runs on `pull_request`, or whose triggers cannot be read, it also
+    rejects a step that uses `actions/cache` or `actions/cache/save` at any
+    pin, both of which save a cache, and any mention of them with a pin in
+    the text, comments included, in any letter case, so that a job of a
+    pull request only restores a cache, with `actions/cache/restore`.
 
 The checks that `xtask` implements itself read only files that Git tracks,
 so a fresh clone and a working copy with build output give the same result;
@@ -917,7 +922,7 @@ to an exact version in the manifest of the crate that uses it:
 | `xtask/Cargo.toml` | `tar` without default features | MIT OR Apache-2.0 | Unpacking the tar archive of the gate inputs that `git archive` writes for `cargo xtask formal run` |
 | `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `suites.toml`, `toolchains.toml`, `rust-toolchain.toml`, Charon's `rust-toolchain`, `verification/extraction.toml`, the compile-fail cases of the `subset` step, the `vectors` blocks of the contracts, and Charon's `charon/Cargo.toml` and the channel manifest of a nightly that `cargo xtask formal canary` reads |
 | `xtask/Cargo.toml` | `walkdir` | MIT OR Unlicense | The listing of the tool installation that `cargo xtask formal run` takes at the start and at the end of a phase, without following symbolic links |
-| `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step, and the YAML loader with which `cargo xtask run-record` reads the limits of the jobs of a workflow and the unit tests of the check read the committed workflows of the CI lines |
+| `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step, and the YAML loader with which that step reads the actions that the steps of a workflow use, `cargo xtask run-record` reads the limits of the jobs of a workflow and the unit tests of the check read the committed workflows |
 
 No test has a development dependency yet. Development dependencies are added
 only when a test category needs them, are pinned to an exact version and are

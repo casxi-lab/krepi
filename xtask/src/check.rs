@@ -40,6 +40,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Arg, ArgAction, value_parser};
+use yaml_rust2::YamlLoader;
 
 use crate::formal::{Layout, lean, process, toolchain as tools};
 use crate::repo::{Entry, Tree};
@@ -391,6 +392,7 @@ fn check_workflows(root: &Path, facts: &mut Facts) -> Result<(), String> {
     facts.push(("files".to_string(), files.join(", ")));
     let mut problems = workflows::check(tracked());
     problems.extend(image_problems(&tree));
+    problems.extend(cache_problems(&tree));
     if problems.is_empty() {
         Ok(())
     } else {
@@ -407,6 +409,60 @@ pub fn image_problems(tree: &Tree) -> Vec<String> {
         .filter(|file| workflows::is_workflow(file.0) && pull(file));
     let pin = tree.text(Layout::PRODUCTION.image_pin).unwrap_or_default();
     tools::image_references(pin, &files.collect::<Vec<_>>())
+}
+
+/// The actions that save a cache: `actions/cache` saves one when its job
+/// ends, and `actions/cache/save` saves one in its step.
+pub const CACHE_SAVES: [&str; 2] = ["actions/cache", "actions/cache/save"];
+
+/// The problems of the caches in the workflows of `tree` that run on pull
+/// requests, or whose triggers cannot be read: no step uses an action of
+/// [`CACHE_SAVES`], at any pin, so that such a job only restores a cache,
+/// with `actions/cache/restore`. Both the `uses` of each step, as YAML
+/// decodes it, and the text of the file, comments included, are read, in
+/// any letter case, so that neither an escape nor a comment hides a use.
+pub fn cache_problems(tree: &Tree) -> Vec<String> {
+    // The actions of [`CACHE_SAVES`] that `text` names with a pin, and those
+    // that it starts with.
+    let named = |text: &str| {
+        let text = text.to_ascii_lowercase();
+        (CACHE_SAVES.into_iter()).filter(move |action| text.contains(&format!("{action}@")))
+    };
+    let used = |uses: &str| {
+        let uses = uses.to_ascii_lowercase();
+        (CACHE_SAVES.into_iter()).filter(move |action| uses.starts_with(&format!("{action}@")))
+    };
+    let saves = |action: &str| {
+        format!("{action}, which saves a cache, in a workflow that runs on pull_request")
+    };
+    let mut problems = Vec::new();
+    let files = (tree.texts()).filter(|(path, text)| {
+        workflows::is_workflow(path) && workflows::runs_on_pull_request(text)
+    });
+    for (path, text) in files {
+        for (at, line) in text.lines().enumerate() {
+            for action in named(line) {
+                problems.push(format!("{path}:{}: names {}", at + 1, saves(action)));
+            }
+        }
+        let documents = YamlLoader::load_from_str(text).unwrap_or_default();
+        let jobs = (documents.iter())
+            .filter_map(|document| document["jobs"].as_hash())
+            .flatten();
+        for (key, job) in jobs {
+            let key = key.as_str().unwrap_or_default();
+            let uses = (job["steps"].as_vec().into_iter().flatten())
+                .filter_map(|step| step["uses"].as_str());
+            for action in uses.flat_map(used) {
+                problems.push(format!(
+                    "{path}: job `{key}` uses {}; such a job restores a cache with \
+                     actions/cache/restore",
+                    saves(action)
+                ));
+            }
+        }
+    }
+    problems
 }
 
 /// The `lean` step on the tracked files: the source rules of the
@@ -811,6 +867,112 @@ mod tests {
                     problems.lines().any(|problem| problem == named),
                     "{problems}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn cache_problems_reject_a_save_in_a_pull_request_workflow() {
+        let tree = Tree::load(&crate::repo::root()).expect("the tracked files");
+        assert_eq!(cache_problems(&tree), Vec::<String>::new());
+        let path = ".github/workflows/a.yml";
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        let workflow = |on: &str, uses: &str| {
+            format!("on: {on}\njobs:\n  j:\n    steps:\n      - uses: {uses}\n")
+        };
+        let problems =
+            |text: &str| cache_problems(&Tree::from_files(&[(path, text), ("README.md", text)]));
+        let saves = "which saves a cache, in a workflow that runs on pull_request";
+        let named = |line: usize, action: &str| format!("{path}:{line}: names {action}, {saves}");
+        let used = |action: &str| {
+            format!(
+                "{path}: job `j` uses {action}, {saves}; such a job restores a cache with \
+                 actions/cache/restore"
+            )
+        };
+        for action in CACHE_SAVES {
+            let uses = format!("{action}@{sha}");
+            let both = [named(5, action), used(action)];
+            assert_eq!(problems(&workflow("pull_request", &uses)), both);
+            assert_eq!(problems(&workflow("[push, pull_request]", &uses)), both);
+            assert_eq!(problems(&workflow("Pull_Request", &uses)), both);
+            let upper = uses.to_ascii_uppercase();
+            assert_eq!(problems(&workflow("pull_request", &upper)), both);
+            // A workflow whose triggers cannot be read counts as one that
+            // runs on pull requests.
+            assert_eq!(problems(&workflow("", &uses)), both);
+            // A workflow that does not run on pull requests may save.
+            assert_eq!(problems(&workflow("push", &uses)), Vec::<String>::new());
+            assert_eq!(
+                problems(&workflow(
+                    "{push: {branches: [main]}, schedule: [{cron: '1 2 * * *'}]}",
+                    &uses
+                )),
+                Vec::<String>::new()
+            );
+        }
+        // Restoring is what a pull request workflow does.
+        let restore = format!("actions/cache/restore@{sha}");
+        assert_eq!(
+            problems(&workflow("pull_request", &restore)),
+            Vec::<String>::new()
+        );
+        // A comment counts, and so does a use that an escape hides.
+        let comment = format!(
+            "on: pull_request\n# then actions/cache/save@{sha}\njobs:\n  j:\n    steps:\n      \
+             - uses: {restore}\n"
+        );
+        assert_eq!(problems(&comment), [named(2, "actions/cache/save")]);
+        let escaped = format!(
+            "on: pull_request\njobs:\n  j:\n    steps:\n      - uses: \"actions/cache\\x2Fsave@{sha}\"\n"
+        );
+        assert_eq!(problems(&escaped), [used("actions/cache/save")]);
+    }
+
+    #[test]
+    fn the_workflows_step_rejects_a_cache_save_in_a_pull_request_workflow() {
+        // A repository with the committed pin and the committed workflow of
+        // the gate, as in the test of the image references, and a workflow
+        // that runs on pull requests and uses a cache.
+        let root = crate::repo::root();
+        let scratch = Scratch::temporary("workflows-cache");
+        let pin = Layout::PRODUCTION.image_pin;
+        let formal = ".github/workflows/formal.yml";
+        for file in [pin, formal] {
+            let text = std::fs::read_to_string(root.join(file)).expect("a committed file");
+            scratch.write(file, &text);
+        }
+        let git = |args: &[&str]| {
+            let status = Command::new("git")
+                .args(args)
+                .current_dir(&scratch.0)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .status()
+                .expect("run git");
+            assert!(status.success(), "git {args:?}");
+        };
+        git(&["init", "--quiet"]);
+        let path = ".github/workflows/cache.yml";
+        let sha = "0123456789abcdef0123456789abcdef01234567";
+        for (action, saves) in [
+            ("actions/cache/save", true),
+            ("actions/cache", true),
+            ("actions/cache/restore", false),
+        ] {
+            let workflow = format!(
+                "on: pull_request\njobs:\n  j:\n    permissions: {{}}\n    steps:\n      \
+                 - uses: {action}@{sha}\n"
+            );
+            scratch.write(path, &workflow);
+            git(&["add", "--all"]);
+            let result = check_workflows(&scratch.0, &mut Facts::new());
+            if saves {
+                let problems = result.expect_err("a save fails the step");
+                let expected = format!("{path}: job `j` uses {action}, which saves a cache");
+                assert!(problems.contains(&expected), "{problems}");
+            } else {
+                assert_eq!(result, Ok(()));
             }
         }
     }
