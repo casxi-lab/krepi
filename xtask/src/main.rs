@@ -8,12 +8,14 @@ mod image;
 mod manifests;
 mod receipt;
 mod record;
+mod release;
 mod repo;
 #[cfg(test)]
 mod scratch;
 mod subset;
 mod suite;
 mod toolchain;
+mod usage;
 mod workflows;
 
 use std::process::ExitCode;
@@ -59,6 +61,11 @@ pub const COMMANDS: &[Command] = &[
         subcommands: &[],
     },
     Command {
+        name: "release-assets",
+        about: "Check one successful run of the workflow check on a push to main, its images by their size and SHA-256 and its check receipt by its commit and result, and write them as the assets of a draft release with SHA256SUMS into a new directory; --help lists the options",
+        subcommands: &[],
+    },
+    Command {
         name: "run-record",
         about: "Write the record of one workflow run from the data of the GitHub API: the line, each job's runner class, seconds, minutes, limit and result, TIMEOUT included, the wall clock, the 80% mark and the retention, with a Markdown summary, into a new directory; --help lists the options",
         subcommands: &[],
@@ -71,6 +78,11 @@ pub const COMMANDS: &[Command] = &[
     Command {
         name: "suite",
         about: "Run the QEMU suites of suites.toml: the smoke cases and the suites that the paths changed since a base select, or every suite, with the slow cases on request, each case judged by its expected output, with a report in a new directory; --help lists the options",
+        subcommands: &[],
+    },
+    Command {
+        name: "usage",
+        about: "Write the CI usage summary of a month from the data of the GitHub API and the container registry: the minutes of each runner class, rounded up per job, by repository, workflow and runner label, the bytes of the artifacts and the packages against 50 GB, the cache of each repository against 10 GB and the thresholds, into a new directory; --help lists the options",
         subcommands: &[],
     },
 ];
@@ -111,7 +123,9 @@ fn main() -> ExitCode {
         ["formal", rest @ ..] => formal::run(&repo::root(), rest),
         ["image", rest @ ..] => image::command(&repo::root(), rest),
         ["suite", rest @ ..] => suite::command(&repo::root(), rest),
+        ["usage", rest @ ..] => usage::command(rest),
         ["run-record", rest @ ..] => record::command(rest),
+        ["release-assets", rest @ ..] => release::command(rest),
         [] | ["help"] => {
             print_help();
             ExitCode::SUCCESS

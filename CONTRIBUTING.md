@@ -20,7 +20,9 @@ every pull request to `main` and on every push to `main`. Beside it, one
 job writes the images of the QEMU suites, another runs the suites of
 `suites.toml` on those images, and a summary job requires the three jobs to
 succeed; the slow tests run in the full line, which the label `full-check`
-starts on a reviewed head, and every night. A change that updates a tool
+starts on a reviewed head, and every night. The jobs restore a cache of
+the Cargo registry and build directories and a cache of the CI tools, which
+only the workflow `cache` saves, from `main`. A change that updates a tool
 version updates `toolchains.toml` in the same change. The proof tools are
 pinned separately, in `verification/toolchain.json`: a change to them runs
 `cargo xtask formal toolchain-check` and builds their image in CI, as
@@ -58,6 +60,21 @@ the runner class, minutes, limit and result of each job and its wall clock,
 from data of the GitHub API; the workflow `run record` runs it after each
 run of the other workflows.
 [Testing](docs/conventions/testing.md#entry-points) describes the record.
+
+`cargo xtask release-assets` checks one successful run of the workflow
+`check` on a push to `main`, its images by their sizes and digests and its
+check receipt, and writes them with `SHA256SUMS` into a new directory as
+the assets of a draft release. The workflow `release`, which a person
+starts by hand on `main`, runs it and creates the draft; it never
+publishes a release.
+[Testing](docs/conventions/testing.md#entry-points) describes both.
+
+`cargo xtask usage` writes the usage summary of the CI of a month from data
+of the GitHub API and the container registry: the minutes of each runner
+class, the storage of the artifacts and the packages and the cache of each
+repository, against their thresholds. The workflow `usage` runs it once a
+month and on a manual run.
+[Testing](docs/conventions/testing.md#entry-points) describes both.
 
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
 QEMU virt default image and the test images in `kernel/`, boots the default

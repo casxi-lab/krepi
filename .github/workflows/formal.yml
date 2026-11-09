@@ -304,6 +304,7 @@ jobs:
             artifacts/formal/runs/*/receipt.json
             artifacts/formal/runs/*/logs/
           if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
   # Runs the gate as the job above does, then replays the stage of its base
   # round with `leanchecker` on a cold page cache: `--fresh Krepi`, or the
@@ -628,6 +629,7 @@ jobs:
             artifacts/formal/runs/*/receipt.json
             artifacts/formal/runs/*/logs/
           if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
   # Runs `lake comparator` on a challenge written from the tracked counter
   # fixtures, in three configurations: a challenge that the solution meets,
@@ -811,3 +813,4 @@ jobs:
           name: formal-comparator-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: artifacts/comparator/
           if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}

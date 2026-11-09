@@ -18,9 +18,13 @@
 //! is a count of seconds since 1970, which `jq` computes with
 //! `fromdateiso8601`, or null; no other field may be present. `--workflow`
 //! names the text of the workflow file at the head of the run, from which
-//! the limit of each job is read: its `timeout-minutes`, or 360 without one;
-//! a job whose name the text does not give as written, or whose limit is an
-//! expression, has no known limit.
+//! the limit of each job is read: its `timeout-minutes`, or 360 without one,
+//! and none when it is an expression. A job takes the limit of the job of
+//! the text whose name is its name, also followed by the values of a matrix
+//! in parentheses; failing that, of the jobs whose names hold expressions
+//! `${{ }}` and fit its name, with or without the values of a matrix in
+//! parentheses, when each expression stands for some text and all of them
+//! give the same limit ([`job_limit`]); otherwise it has no known limit.
 //! `--own` names the same object for the run of the record workflow itself,
 //! with `--now` the current time.
 //!
@@ -31,16 +35,20 @@
 //! with its line ([`line`]); each job with its runner class ([`runner`]),
 //! seconds, minutes (the seconds rounded up to whole minutes, 0 for a job
 //! that ran on no runner), limit, conclusion and result, which is `TIMEOUT`
-//! when the job ran at least as long as its limit and did not succeed, and
-//! otherwise the conclusion; its annotations; the wall clock of the run, from
-//! the first start to the last end of the jobs that ran on a runner; the sum
-//! of the minutes; the limit of the line and whether the run or one of its
-//! jobs took more than 80% of it ([`over`]); the days that the record is kept
-//! ([`retention`]); and, with `--own`, the record workflow's run until
-//! `--now`: its wall clock and minutes, and each of its jobs with its runner
-//! class, seconds and minutes, a job still running counting until `--now`.
-//! The summary is the same in Markdown, with the text of the run escaped,
-//! and states in neutral words a run that exceeds 80% of its limit.
+//! when the job did not succeed and either ran at least as long as its limit
+//! or has the failure annotation of a command that `timeout` stopped at its
+//! deadline ([`timeout`]), and otherwise the conclusion, with the reason of a
+//! `TIMEOUT`, `limit` or `deadline`, in `timeout`; its annotations; the wall
+//! clock of the run, from the first start to the last end of the jobs that
+//! ran on a runner; the sum of the minutes; the limit of the line and
+//! whether the run or one of its jobs took more than 80% of it ([`over`]);
+//! the days that the record is kept ([`retention`]); and, with `--own`, the
+//! record workflow's run until `--now`: its wall clock and minutes, and each
+//! of its jobs with its runner class, seconds and minutes, a job still
+//! running counting until `--now`.
+//! The summary is the same in Markdown, with the text of the run escaped;
+//! it states in neutral words a run that exceeds 80% of its limit, and names
+//! each job that was stopped at the deadline of its main command.
 //!
 //! `--id TEXT` checks the run ID that a manual run of the record workflow
 //! takes as its input and prints it: digits only, without a leading zero,
@@ -61,7 +69,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 use crate::image;
 
 /// The version of the record format.
-pub const FORMAT: u32 = 1;
+pub const FORMAT: u32 = 2;
 /// The record in the output directory.
 pub const RECORD_FILE: &str = "record.json";
 /// The summary in the output directory.
@@ -74,6 +82,9 @@ pub const PULL_REQUEST_LIMIT: u64 = 20 * 60;
 pub const FULL_LIMIT: u64 = 3600;
 /// The words of the summary for a run over 80% of its limit.
 pub const OVER: &str = "exceeds 80% of its limit";
+/// The annotation of a step whose command `timeout` stopped at its deadline:
+/// `timeout` then exits with 124, and the runner reports that status.
+pub const DEADLINE_EXIT: &str = "Process completed with exit code 124.";
 
 /// The data of a run, as `jq` writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -149,11 +160,22 @@ pub fn limit(line: &str) -> Option<u64> {
 /// runner group other than the one of the standard runners, `GitHub
 /// Actions`, and otherwise `standard hosted`.
 pub fn runner(job: &JobData) -> &'static str {
-    if job.runner_name.is_none() {
+    runner_class(
+        job.runner_name.as_deref(),
+        &job.labels,
+        job.runner_group_name.as_deref(),
+    )
+}
+
+/// The class of the runner of a job with the runner name `name`, which is
+/// `None` for a job that ran on no runner, the labels `labels` and the
+/// runner group `group`, as [`runner`] gives it.
+pub fn runner_class(name: Option<&str>, labels: &[String], group: Option<&str>) -> &'static str {
+    if name.is_none() {
         "none"
-    } else if job.labels.iter().any(|label| label == "self-hosted") {
+    } else if labels.iter().any(|label| label == "self-hosted") {
         "self-hosted"
-    } else if job.runner_group_name.as_deref() != Some("GitHub Actions") {
+    } else if group != Some("GitHub Actions") {
         "larger hosted"
     } else {
         "standard hosted"
@@ -215,14 +237,83 @@ pub fn limits(text: &str) -> Result<Vec<(String, Option<u64>)>, String> {
         .collect())
 }
 
-/// The limit in minutes of the job `name` in `limits`: the job whose
-/// display name is `name`, or with a matrix, `name` followed by ` (`.
+/// The literal pieces of the display name `display` around its expressions
+/// `${{ … }}`, if it has one. A `${{` without a following `}}` is text.
+fn pieces(display: &str) -> Option<Vec<&str>> {
+    let mut pieces = Vec::new();
+    let mut rest = display;
+    while let Some(start) = rest.find("${{") {
+        let Some(length) = rest[start + 3..].find("}}") else {
+            break;
+        };
+        pieces.push(&rest[..start]);
+        rest = &rest[start + 3 + length + 2..];
+    }
+    pieces.push(rest);
+    (pieces.len() > 1).then_some(pieces)
+}
+
+/// Whether `name` is the display name of `pieces`, at least two, with each
+/// expression between them evaluated to some text, possibly empty.
+fn fits(pieces: &[&str], name: &str) -> bool {
+    let (first, last) = (pieces[0], pieces[pieces.len() - 1]);
+    if name.len() < first.len() + last.len() || !name.starts_with(first) || !name.ends_with(last) {
+        return false;
+    }
+    let mut middle = &name[first.len()..name.len() - last.len()];
+    for piece in &pieces[1..pieces.len() - 1] {
+        match middle.find(piece) {
+            Some(at) => middle = &middle[at + piece.len()..],
+            None => return false,
+        }
+    }
+    true
+}
+
+/// The limit in minutes of the job `name` in `limits`. A job whose display
+/// name is `name`, or `name` followed by ` (` with the values of a matrix,
+/// gives its limit. Otherwise the display names that hold expressions and
+/// fit `name`, or `name` without the values of a matrix in parentheses,
+/// give the limit when they all give the same one.
 fn job_limit(limits: &[(String, Option<u64>)], name: &str) -> Option<u64> {
     let matches = |display: &str| {
         name == display || (name.strip_prefix(display)).is_some_and(|rest| rest.starts_with(" ("))
     };
-    let found = limits.iter().find(|(display, _)| matches(display));
-    found.and_then(|(_, timeout)| *timeout)
+    if let Some((_, timeout)) = limits.iter().find(|(display, _)| matches(display)) {
+        return *timeout;
+    }
+    let mut names = vec![name];
+    if name.ends_with(')') {
+        names.extend(name.match_indices(" (").map(|(at, _)| &name[..at]));
+    }
+    let fit = |display: &str| {
+        pieces(display).is_some_and(|pieces| names.iter().any(|name| fits(&pieces, name)))
+    };
+    let mut found = (limits.iter())
+        .filter(|(display, _)| fit(display))
+        .map(|(_, timeout)| *timeout);
+    let first = found.next()?;
+    found.all(|timeout| timeout == first).then_some(first)?
+}
+
+/// Why the job `job`, which ran for `seconds` against a limit of `limit`
+/// minutes, is a `TIMEOUT`, if it is one: a job that did not succeed is one
+/// when it ran at least as long as its limit (`limit`), or when one of its
+/// annotations is the failure [`DEADLINE_EXIT`] of a command that `timeout`
+/// stopped at its deadline (`deadline`). The first condition alone is the
+/// rule of format 1, so every job that it judged a `TIMEOUT` is still one.
+pub fn timeout(job: &JobData, seconds: Option<u64>, limit: Option<u64>) -> Option<&'static str> {
+    if job.conclusion.as_deref() == Some("success") {
+        return None;
+    }
+    if seconds
+        .zip(limit)
+        .is_some_and(|(seconds, minutes)| seconds >= minutes.saturating_mul(60))
+    {
+        return Some("limit");
+    }
+    let deadline = |note: &Annotation| note.level == "failure" && note.message == DEADLINE_EXIT;
+    job.annotations.iter().any(deadline).then_some("deadline")
 }
 
 /// What took more than 80% of `limit` seconds: `run` for the wall clock of
@@ -257,15 +348,11 @@ pub fn record(
         let seconds = seconds(job, None);
         let used = seconds.map_or(0, minutes);
         total += used;
-        let timeout = limits.and_then(|limits| job_limit(limits, &job.name));
-        let reached = seconds
-            .zip(timeout)
-            .map(|(seconds, minutes)| seconds >= minutes * 60);
-        let failed = job.conclusion.as_deref() != Some("success");
-        let result = if reached == Some(true) && failed {
-            Some("TIMEOUT")
-        } else {
-            job.conclusion.as_deref()
+        let limit = limits.and_then(|limits| job_limit(limits, &job.name));
+        let stopped = timeout(job, seconds, limit);
+        let result = match stopped {
+            Some(_) => Some("TIMEOUT"),
+            None => job.conclusion.as_deref(),
         };
         durations.push((job.name.clone(), seconds));
         jobs.push(json!({
@@ -278,9 +365,10 @@ pub fn record(
             "completed_at": job.completed_at,
             "seconds": seconds,
             "minutes": used,
-            "timeout_minutes": timeout,
+            "timeout_minutes": limit,
             "conclusion": job.conclusion,
             "result": result,
+            "timeout": stopped,
             "annotations": (job.annotations.iter())
                 .map(|note| json!({"level": note.level, "title": note.title, "message": note.message}))
                 .collect::<Vec<_>>(),
@@ -342,7 +430,7 @@ pub fn record(
 
 /// `text` for a cell of a Markdown table: control characters escaped and
 /// `|` and backquotes taken out of the table's syntax.
-fn cell(text: &str) -> String {
+pub fn cell(text: &str) -> String {
     crate::suite::printable(text)
         .replace('\\', "\\\\")
         .replace('|', "\\|")
@@ -391,6 +479,18 @@ pub fn summary(record: &Value) -> String {
             text(&job["timeout_minutes"]),
             text(&job["conclusion"]),
             text(&job["result"]),
+        ));
+    }
+    let stopped: Vec<String> = (record["jobs"].as_array().into_iter().flatten())
+        .filter(|job| job["timeout"] == "deadline")
+        .map(|job| text(&job["name"]))
+        .collect();
+    if !stopped.is_empty() {
+        summary.push('\n');
+    }
+    for name in stopped {
+        summary.push_str(&format!(
+            "Job {name} was stopped at the deadline of its main command.\n"
         ));
     }
     let own = &record["record_run"];
