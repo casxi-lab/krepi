@@ -269,7 +269,12 @@ qemu-system-aarch64 -accel tcg,thread=single \
 
 `virt-8.2` is a versioned machine type that QEMU 8.2 and its later versions
 provide alike; the guest has no EL2, no EL3 and no network card, and its
-PL011 is on QEMU's standard streams. The guest runs on the host clock;
+PL011 is on QEMU's standard streams. The library entry `run_image_on` of
+the runner can instead run an image on the same machine with EL2,
+`virt-8.2,secure=off,virtualization=on,gic-version=2`, with the command line
+otherwise unchanged and a receipt with the same keys, for a test image that
+enters at EL2; `cargo xtask qemu` has no option for it. The guest runs on
+the host clock;
 `--clock icount` adds `-icount shift=3,align=off,sleep=off` after the
 accelerator, a functional reproduction as described under
 [environments](#environments). The run ends when QEMU ends by itself, when

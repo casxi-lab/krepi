@@ -54,6 +54,14 @@ over; see [Changes](#changes).
   later versions provide alike, in place of `virt`, which names another
   machine version on each QEMU release; the options of the machine are
   unchanged.
+- `build_command_on` gives the command line on a `Machine`: `Machine::Virt`,
+  the machine above, which `build_command` uses, or `Machine::VirtEl2`, the
+  same machine with EL2, `virt-8.2,secure=off,virtualization=on,gic-version=2`,
+  for test images that enter at EL2 and drop to EL1 themselves. Only the
+  value of `-machine` differs, as
+  `qemu::tests::the_el2_machine_differs_only_in_the_machine` shows. The
+  variant is new code; the prototype's runner of its EL2 entries is not
+  taken.
 - The command has `-nic none` before `-display`: the guest has no network
   card. The default network card of `virt` loads an option ROM, which an
   installation of QEMU without its recommended packages may lack.

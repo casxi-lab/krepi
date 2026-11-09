@@ -657,9 +657,10 @@ fn problems_before_qemu_starts_leave_no_directory() {
 
 /// Clap reads the command line: the help names the command, the image and
 /// the options with their defaults, without colour; a missing or second
-/// image, a clock that is not one of the two and limits out of bounds are
-/// usage errors; a repeated option keeps its last value, and the limits take
-/// a sign.
+/// image, a clock that is not one of the two, limits out of bounds and an
+/// option for the machine, which the command does not have, are usage
+/// errors; a repeated option keeps its last value, and the limits take a
+/// sign.
 #[test]
 fn the_command_line_takes_the_image_and_its_options() {
     let root = Scratch::new("qemu-run-cli");
@@ -708,6 +709,12 @@ fn the_command_line_takes_the_image_and_its_options() {
             &["a", "--max-bytes", "1e3"][..],
             "invalid value '1e3'",
             false,
+        ),
+        // The command has no option for the machine.
+        (
+            &["a", "--machine", "virt-el2"][..],
+            "unexpected argument '--machine'",
+            true,
         ),
     ] {
         let (code, out, err) = command(root.root(), &arguments(args), fresh_flag(), &TIMING);
@@ -973,4 +980,50 @@ fn a_run_without_inputs_has_no_input_key() {
     .unwrap();
     assert_eq!(receipt["exit_reason"], "guest_shutdown");
     assert!(receipt.get("input").is_none(), "{receipt}");
+}
+
+/// A library run on the machine with EL2 names that machine in its QEMU
+/// command, which is otherwise the command of a run on the machine without
+/// EL2, and its receipt has the keys of a run of `run_image_with`, which
+/// `cargo xtask qemu` makes.
+#[test]
+fn a_run_on_the_el2_machine_names_it_and_keeps_the_receipt_keys() {
+    let body = "printf 'hello\\r\\n'\nexit 0";
+    let el2 = Bench::new("qemu-run-el2", body);
+    let receipt = run_image_on(
+        Machine::VirtEl2,
+        &library_options(&el2),
+        &[],
+        &el2.output(),
+        &TIMING,
+        &mut || Ok(fresh_flag()),
+    )
+    .unwrap();
+    let virt = Bench::new("qemu-run-virt", body);
+    let default = run_image_with(
+        &library_options(&virt),
+        &[],
+        &virt.output(),
+        &TIMING,
+        &mut || Ok(fresh_flag()),
+    )
+    .unwrap();
+    assert_eq!(receipt, el2.receipt());
+    assert_eq!(receipt["exit_reason"], "guest_shutdown");
+    let keys = |receipt: &Value| {
+        receipt
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(keys(&receipt), keys(&default));
+    let mut command = qemu_command(&el2.qemu, &el2.image);
+    command[4] = "virt-8.2,secure=off,virtualization=on,gic-version=2".to_string();
+    assert_eq!(receipt["qemu"]["command"], json!(command));
+    assert_eq!(
+        default["qemu"]["command"],
+        json!(qemu_command(&virt.qemu, &virt.image))
+    );
 }
