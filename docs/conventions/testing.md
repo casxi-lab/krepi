@@ -476,48 +476,56 @@ shell script that prints a line and exits. A test of the `xtask` binary runs
 and with another digest, with the QEMU of the host, as the image and suite
 jobs of CI do.
 
-`cargo xtask run-record --input <run.json> --output <dir>` writes the
-record of one run of a workflow from the data of the GitHub API; it is not
-part of the check. The input is what the workflow `run record`, described
-above, writes with `jq`: `run`, with the `id`, `attempt`, `workflow`,
-`path`, `event`, `head_branch`, `head_sha` and `conclusion` of the run, and
-`jobs`, each with its `id`, `name`, `conclusion`, `labels`,
-`runner_group_name`, `runner_name`, `annotations` (`level`, `title` and
-`message`) and its `started_at` and `completed_at`, as seconds since 1970
-that `jq` converts with `fromdateiso8601`, and no other field.
-`--workflow <file>` gives the workflow file at the head of the run, from
-which each job's limit is read: its `timeout-minutes`, 360 without one, and
-none when it is an expression or the job's name is not the one that the
-file gives, apart from the values of a matrix in parentheses.
-`--own <run.json> --now <seconds>` gives
-the run of the record workflow itself. The command creates the new
-directory `<dir>` and writes `record.json` and `summary.md` into it. The
-record holds the run with its line: `pull request` or `main` for the
-workflow `check` on a pull request or a push, `full`, `nightly` and
-`weekly` for those workflows, `none` for the others. Each job has its
-runner class, `none` for a job that ran on no runner, `self-hosted` by its
-labels, `larger hosted` for a runner group other than `GitHub Actions` and
+`cargo xtask run-record --input <run.json> --output <dir>` writes the record
+of one run of a workflow from the data of the GitHub API; it is not part of
+the check. The input is what the workflow `run record`, described above,
+writes with `jq`: `run`, with the `id`, `attempt`, `workflow`, `path`,
+`event`, `head_branch`, `head_sha` and `conclusion` of the run, and `jobs`,
+each with its `id`, `name`, `conclusion`, `labels`, `runner_group_name`,
+`runner_name`, `annotations` (`level`, `title` and `message`) and its
+`started_at` and `completed_at`, as seconds since 1970 that `jq` converts
+with `fromdateiso8601`, and no other field. `--workflow <file>` gives the
+workflow file at the head of the run, from which each job's limit is read:
+its `timeout-minutes`, 360 without one, and none when it is an expression or
+the job's name is not the one that the file gives, apart from the values of
+a matrix in parentheses. `--own <run.json> --now <seconds>` gives the run of
+the record workflow itself. The command creates the new directory `<dir>`
+and writes `record.json` and `summary.md` into it. The record, of `format`
+2, holds the run with its line: `pull request` or `main` for the workflow
+`check` on a pull request or a push, `full`, `nightly` and `weekly` for
+those workflows, `none` for the others. Each job has its runner class,
+`none` for a job that ran on no runner, `self-hosted` by its labels,
+`larger hosted` for a runner group other than `GitHub Actions` and
 `standard hosted` otherwise; its seconds, its minutes, the seconds rounded
 up to whole minutes and 0 for a job that ran on no runner; its limit, its
-conclusion and its result, `TIMEOUT` when the job ran at least as long as
-its limit and did not succeed, and otherwise the conclusion; and its
-annotations. The record also holds the wall clock of the run, from the
-first start to the last end of the jobs that ran on a runner, the sum of
-the minutes, the limit of the line, 1,200 s for the pull request line and
-3,600 s for the full line, whether the run or one of its jobs took more
-than 80% of it, which the summary states as a run that "exceeds 80% of its
-limit", the days for which the record is kept, 90 for a run on `main` that
-a pull request did not trigger and 30 for the others, and with `--own` the
-record workflow's run until `--now`: its wall clock and minutes, and each of
-its jobs with its runner class, seconds and minutes. The
-summary, which the workflow adds to the run's summary page, gives the same
-in Markdown with the text of the run escaped. `cargo xtask run-record --id
-<text>` checks the run ID of a manual run of the record workflow, digits
-without a leading zero, and prints it. The command prints only the paths
-that it writes and exits with 0, or with 2 after a usage error or a
-failure. Its unit tests run in the `test` step above, on the input of two
-runs of the repository read back from the API and on runs written for each
-rule.
+conclusion, its result and its annotations. The result is the conclusion, or
+`TIMEOUT` for a job that did not succeed and either ran at least as long as
+its limit or has the failure annotation
+`Process completed with exit code 124.`, which the runner writes when the
+main command of a step exits with 124, as `timeout` does when it stops the
+command at its deadline; the field `timeout` gives the reason, `limit` or
+`deadline`, and is `null` otherwise. The first condition alone was the rule
+of format 1, so the new rule finds every `TIMEOUT` that the old one found;
+no command that the lines run exits with 124 by itself. The record also
+holds the wall clock of the run, from the first start to the last end of the
+jobs that ran on a runner, the sum of the minutes, the limit of the line,
+1,200 s for the pull request line and 3,600 s for the full line, whether the
+run or one of its jobs took more than 80% of it, which the summary states as
+a run that "exceeds 80% of its limit", the days for which the record is
+kept, 90 for a run on `main` that a pull request did not trigger and 30 for
+the others, and with `--own` the record workflow's run until `--now`: its
+wall clock and minutes, and each of its jobs with its runner class, seconds
+and minutes. The summary, which the workflow adds to the run's summary page,
+gives the same in Markdown with the text of the run escaped, and names each
+job that was stopped at the deadline of its main command.
+`cargo xtask run-record --id <text>` checks the run ID of a manual run of
+the record workflow, digits without a leading zero, and prints it. The
+command prints only the paths that it writes and exits with 0, or with 2
+after a usage error or a failure. Its unit tests run in the `test` step
+above, on the input of two runs of the repository read back from the API, on
+the records of format 1 of two runs in which a job ran past its limit, which
+stay `TIMEOUT` under the new rule, on a grid of jobs on which the new rule
+contains the old one, and on runs written for each rule.
 
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
 QEMU virt default image and the test images, boots them on QEMU virt

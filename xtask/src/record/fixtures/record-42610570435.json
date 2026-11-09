@@ -1,0 +1,129 @@
+{
+  "format": 1,
+  "run": {
+    "id": 42610570435,
+    "attempt": 1,
+    "workflow": "check",
+    "path": ".github/workflows/check.yml",
+    "event": "pull_request",
+    "head_branch": "probe/job-limit",
+    "head_sha": "efe14b986cb5f1e76ad235992f13f300a18d2ba7",
+    "conclusion": "cancelled",
+    "line": "pull request"
+  },
+  "workflow_read": true,
+  "wall_seconds": 199,
+  "minutes": 7,
+  "limit_seconds": 1200,
+  "over_80_percent": false,
+  "over": [],
+  "retention_days": 30,
+  "jobs": [
+    {
+      "id": 129137625924,
+      "name": "image",
+      "runner": "standard hosted",
+      "labels": [
+        "ubuntu-24.04-arm"
+      ],
+      "runner_group": "GitHub Actions",
+      "started_at": 1794224280,
+      "completed_at": 1794224353,
+      "seconds": 73,
+      "minutes": 2,
+      "timeout_minutes": 1,
+      "conclusion": "cancelled",
+      "result": "TIMEOUT",
+      "annotations": [
+        {
+          "level": "failure",
+          "title": "",
+          "message": "The job has exceeded the maximum execution time of 1m0s"
+        },
+        {
+          "level": "failure",
+          "title": "",
+          "message": "The operation was canceled."
+        }
+      ]
+    },
+    {
+      "id": 129137626186,
+      "name": "cargo xtask check",
+      "runner": "standard hosted",
+      "labels": [
+        "ubuntu-24.04-arm"
+      ],
+      "runner_group": "GitHub Actions",
+      "started_at": 1794224280,
+      "completed_at": 1794224471,
+      "seconds": 191,
+      "minutes": 4,
+      "timeout_minutes": 15,
+      "conclusion": "success",
+      "result": "success",
+      "annotations": []
+    },
+    {
+      "id": 129138191401,
+      "name": "suite",
+      "runner": "none",
+      "labels": [
+        "ubuntu-24.04-arm"
+      ],
+      "runner_group": null,
+      "started_at": 1794224354,
+      "completed_at": 1794224354,
+      "seconds": null,
+      "minutes": 0,
+      "timeout_minutes": 10,
+      "conclusion": "skipped",
+      "result": "skipped",
+      "annotations": []
+    },
+    {
+      "id": 129139044993,
+      "name": "check summary",
+      "runner": "standard hosted",
+      "labels": [
+        "ubuntu-24.04-arm"
+      ],
+      "runner_group": "GitHub Actions",
+      "started_at": 1794224475,
+      "completed_at": 1794224479,
+      "seconds": 4,
+      "minutes": 1,
+      "timeout_minutes": 3,
+      "conclusion": "failure",
+      "result": "failure",
+      "annotations": [
+        {
+          "level": "failure",
+          "title": "",
+          "message": "Process completed with exit code 1."
+        }
+      ]
+    }
+  ],
+  "record_run": {
+    "id": 42611013698,
+    "attempt": 1,
+    "wall_seconds": 26,
+    "minutes": 1,
+    "jobs": [
+      {
+        "id": 129139132946,
+        "name": "run record",
+        "runner": "standard hosted",
+        "labels": [
+          "ubuntu-24.04-arm"
+        ],
+        "runner_group": "GitHub Actions",
+        "started_at": 1794224487,
+        "completed_at": null,
+        "seconds": 26,
+        "minutes": 1
+      }
+    ]
+  }
+}

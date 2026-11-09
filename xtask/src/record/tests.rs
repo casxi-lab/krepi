@@ -3,18 +3,25 @@
 //! limits and `TIMEOUT`, the 80% mark, the retention, the run of the record
 //! workflow, the summary, the input of a manual run and the command.
 //!
-//! The two fixtures are the output of the `jq` program of the workflow
-//! `run record` on `gh api repos/casxi-lab/krepi/actions/runs/<id>`,
+//! The two input fixtures are the output of the `jq` program of the
+//! workflow `run record` on `gh api repos/casxi-lab/krepi/actions/runs/<id>`,
 //! `.../attempts/1/jobs` and `repos/casxi-lab/krepi/check-runs/<job>/annotations`,
 //! read on 2026-11-09: `input-42556330562.json`, the check of a push to
 //! `main`, and `input-42549850982.json`, a run of the formal workflow on a
-//! pull request that a later push cancelled.
+//! pull request that a later push cancelled. The two record fixtures are
+//! records of format 1 that the record workflow uploaded on 2026-11-09 as
+//! the artifacts `run-record-42610570435-1` and `run-record-42611144263-1`:
+//! the runs of the pull request line and of the full line of a pull request
+//! in which the job `image` and the job `full image` ran past a limit of one
+//! minute.
 
 use super::*;
 use crate::scratch::Scratch;
 
 const MAIN: &str = include_str!("fixtures/input-42556330562.json");
 const CANCELLED: &str = include_str!("fixtures/input-42549850982.json");
+const PROBE: &str = include_str!("fixtures/record-42610570435.json");
+const PROBE_FULL: &str = include_str!("fixtures/record-42611144263.json");
 
 /// The jobs and limits of the formal workflow at the head of the cancelled
 /// run, as far as the record reads them.
@@ -78,7 +85,7 @@ fn a_main_run_of_the_check_is_recorded() {
     assert_eq!(
         record,
         json!({
-            "format": 1,
+            "format": 2,
             "run": {
                 "id": 42556330562u64,
                 "attempt": 1,
@@ -110,6 +117,7 @@ fn a_main_run_of_the_check_is_recorded() {
                 "timeout_minutes": 360,
                 "conclusion": "success",
                 "result": "success",
+                "timeout": null,
                 "annotations": [],
             }],
             "record_run": null,
@@ -218,6 +226,261 @@ fn a_job_at_its_limit_that_did_not_succeed_is_a_timeout() {
     assert_eq!(result("check summary", "failure", 3600), "failure");
     assert!(super::limits("jobs: []\n").is_err());
     assert!(super::limits("jobs: [\n").is_err());
+}
+
+/// The record `text` of format 1 with the input and the limits from which
+/// it was written: the run, each job with a runner name when it ran on a
+/// runner, and the limit that it recorded for each job.
+fn rebuilt(text: &str) -> (Value, Input, Vec<(String, Option<u64>)>) {
+    let written: Value = serde_json::from_str(text).expect("the record is JSON");
+    let string = |value: &Value| value.as_str().map(str::to_string);
+    let number = |value: &Value| value.as_u64().expect("a number");
+    let run = &written["run"];
+    let jobs = written["jobs"].as_array().expect("the jobs");
+    let input = Input {
+        run: RunData {
+            id: number(&run["id"]),
+            attempt: number(&run["attempt"]),
+            workflow: string(&run["workflow"]).expect("the workflow"),
+            path: string(&run["path"]).expect("the path"),
+            event: string(&run["event"]).expect("the event"),
+            head_branch: string(&run["head_branch"]),
+            head_sha: string(&run["head_sha"]).expect("the head"),
+            conclusion: string(&run["conclusion"]),
+        },
+        jobs: (jobs.iter())
+            .map(|job| JobData {
+                id: number(&job["id"]),
+                name: string(&job["name"]).expect("the name"),
+                conclusion: string(&job["conclusion"]),
+                labels: (job["labels"].as_array().into_iter().flatten())
+                    .filter_map(string)
+                    .collect(),
+                runner_group_name: string(&job["runner_group"]),
+                runner_name: (job["runner"] != "none").then(|| "GitHub Actions 1".to_string()),
+                started_at: job["started_at"].as_u64(),
+                completed_at: job["completed_at"].as_u64(),
+                annotations: (job["annotations"].as_array().into_iter().flatten())
+                    .map(|note| Annotation {
+                        level: string(&note["level"]).expect("the level"),
+                        title: string(&note["title"]),
+                        message: string(&note["message"]).expect("the message"),
+                    })
+                    .collect(),
+            })
+            .collect(),
+    };
+    let limits = (jobs.iter())
+        .map(|job| {
+            let name = string(&job["name"]).expect("the name");
+            (name, job["timeout_minutes"].as_u64())
+        })
+        .collect();
+    (written, input, limits)
+}
+
+#[test]
+fn the_probe_records_stay_timeout_under_the_deadline_rule() {
+    let results = [
+        (
+            PROBE,
+            vec![
+                ("image", "TIMEOUT"),
+                ("cargo xtask check", "success"),
+                ("suite", "skipped"),
+                ("check summary", "failure"),
+            ],
+        ),
+        (
+            PROBE_FULL,
+            vec![
+                ("full head contains main", "success"),
+                ("full cargo xtask check --slow", "success"),
+                ("full image", "TIMEOUT"),
+                ("full suite --slow", "skipped"),
+            ],
+        ),
+    ];
+    for (text, expected) in results {
+        let (written, input, limits) = rebuilt(text);
+        assert_eq!(written["format"], 1);
+        let again = record(&input, Some(&limits), None);
+        assert_eq!(again["format"], FORMAT);
+        // Everything that the record of format 1 holds stays as it was,
+        // apart from the run of the record workflow, which is not rebuilt.
+        for key in [
+            "run",
+            "workflow_read",
+            "wall_seconds",
+            "minutes",
+            "limit_seconds",
+            "over_80_percent",
+            "over",
+            "retention_days",
+        ] {
+            assert_eq!(again[key], written[key], "{key}");
+        }
+        let jobs = again["jobs"].as_array().expect("the jobs");
+        let old = written["jobs"].as_array().expect("the jobs");
+        assert_eq!(jobs.len(), old.len());
+        for ((job, old), (name, result)) in jobs.iter().zip(old).zip(&expected) {
+            let mut job = job.clone();
+            let reason = job.as_object_mut().and_then(|job| job.remove("timeout"));
+            assert_eq!(job, *old);
+            assert_eq!(
+                (&job["name"], &job["result"]),
+                (&json!(name), &json!(result))
+            );
+            // The job ran past its limit of one minute.
+            let expected = if *result == "TIMEOUT" {
+                assert_eq!(job["timeout_minutes"], 1);
+                json!("limit")
+            } else {
+                Value::Null
+            };
+            assert_eq!(reason, Some(expected), "{name}");
+        }
+        assert!(!summary(&again).contains("deadline"));
+    }
+}
+
+/// A failure annotation that reports the exit status `code`.
+fn exit(code: &str) -> Annotation {
+    Annotation {
+        level: "failure".to_string(),
+        title: Some(String::new()),
+        message: format!("Process completed with exit code {code}."),
+    }
+}
+
+#[test]
+fn a_command_stopped_at_its_deadline_is_a_timeout() {
+    assert_eq!(exit("124").message, DEADLINE_EXIT);
+    let limits = [("image".to_string(), Some(5))];
+    let judge = |conclusion: Option<&str>, seconds: u64, notes: Vec<Annotation>| {
+        let mut job = job("image", "unused", seconds);
+        job.conclusion = conclusion.map(str::to_string);
+        job.annotations = notes;
+        let record = record(
+            &run("check", "pull_request", "topic", vec![job]),
+            Some(&limits),
+            None,
+        );
+        let job = &record["jobs"][0];
+        (job["result"].clone(), job["timeout"].clone())
+    };
+    let timed_out = |reason: &str| (json!("TIMEOUT"), json!(reason));
+    let kept = |conclusion: &str| (json!(conclusion), Value::Null);
+    // Below its limit of 300 s.
+    assert_eq!(
+        judge(Some("failure"), 200, vec![exit("124")]),
+        timed_out("deadline")
+    );
+    assert_eq!(
+        judge(Some("cancelled"), 200, vec![exit("124")]),
+        timed_out("deadline")
+    );
+    assert_eq!(judge(None, 200, vec![exit("124")]), timed_out("deadline"));
+    assert_eq!(
+        judge(Some("failure"), 200, vec![exit("1"), exit("124")]),
+        timed_out("deadline")
+    );
+    assert_eq!(
+        judge(Some("success"), 200, vec![exit("124")]),
+        kept("success")
+    );
+    assert_eq!(
+        judge(Some("failure"), 200, vec![exit("1")]),
+        kept("failure")
+    );
+    assert_eq!(judge(Some("failure"), 200, vec![]), kept("failure"));
+    for level in ["warning", "notice"] {
+        let mut note = exit("124");
+        note.level = level.to_string();
+        assert_eq!(judge(Some("failure"), 200, vec![note]), kept("failure"));
+    }
+    let mut near = exit("1240");
+    assert_eq!(
+        judge(Some("failure"), 200, vec![near.clone()]),
+        kept("failure")
+    );
+    near.message = "Process completed with exit code 124".to_string();
+    assert_eq!(judge(Some("failure"), 200, vec![near]), kept("failure"));
+    // At its limit the limit is the reason.
+    assert_eq!(
+        judge(Some("failure"), 300, vec![exit("124")]),
+        timed_out("limit")
+    );
+    assert_eq!(judge(Some("cancelled"), 300, vec![]), timed_out("limit"));
+    // The summary names a job stopped at its deadline.
+    let mut stopped = job("image", "failure", 200);
+    stopped.annotations = vec![exit("124")];
+    let record = record(
+        &run("check", "pull_request", "topic", vec![stopped]),
+        Some(&limits),
+        None,
+    );
+    assert_eq!(record["jobs"][0]["timeout_minutes"], 5);
+    let summary = summary(&record);
+    assert!(
+        summary.ends_with(
+            "| image | standard hosted | 200 | 4 | 5 | failure | TIMEOUT |\n\n\
+             Job image was stopped at the deadline of its main command.\n"
+        ),
+        "{summary}"
+    );
+}
+
+/// The rule of format 1: a job that ran at least as long as its limit and
+/// did not succeed.
+fn limit_rule(job: &JobData, seconds: Option<u64>, limit: Option<u64>) -> bool {
+    let reached = seconds
+        .zip(limit)
+        .map(|(seconds, minutes)| seconds >= minutes * 60);
+    reached == Some(true) && job.conclusion.as_deref() != Some("success")
+}
+
+#[test]
+fn the_deadline_rule_contains_the_limit_rule() {
+    let limit_note = Annotation {
+        level: "failure".to_string(),
+        title: Some(String::new()),
+        message: "The job has exceeded the maximum execution time of 5m0s".to_string(),
+    };
+    let notes = [vec![], vec![exit("1")], vec![exit("124")], vec![limit_note]];
+    let mut cases = 0;
+    for limit in [None, Some(5)] {
+        for seconds in [None, Some(0), Some(299), Some(300), Some(301)] {
+            for conclusion in [Some("success"), Some("failure"), Some("cancelled"), None] {
+                for notes in &notes {
+                    let mut job = job("a", "unused", seconds.unwrap_or(0));
+                    job.conclusion = conclusion.map(str::to_string);
+                    job.annotations = notes.clone();
+                    if seconds.is_none() {
+                        job.runner_name = None;
+                    }
+                    assert_eq!(super::seconds(&job, None), seconds);
+                    let old = limit_rule(&job, seconds, limit);
+                    let new = timeout(&job, seconds, limit);
+                    let case = format!("{limit:?} {seconds:?} {conclusion:?} {notes:?}");
+                    // Every TIMEOUT of the old rule is one of the new rule,
+                    // for the same reason.
+                    if old {
+                        assert_eq!(new, Some("limit"), "{case}");
+                    }
+                    // A TIMEOUT that only the new rule finds is a job that
+                    // did not succeed and has the annotation of a deadline.
+                    if new.is_some() && !old {
+                        assert_eq!(new, Some("deadline"), "{case}");
+                        assert_ne!(conclusion, Some("success"), "{case}");
+                        assert!(notes.contains(&exit("124")), "{case}");
+                    }
+                    cases += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(cases, 160);
 }
 
 #[test]
