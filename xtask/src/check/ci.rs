@@ -362,3 +362,99 @@ fn every_upload_of_the_lines_keeps_its_artifact_for_a_set_time() {
     }
     assert_eq!(uploads, 13);
 }
+
+/// Whether `step` uses the action `action`, such as
+/// `actions/upload-artifact`, pinned to some commit.
+fn uses(step: &Yaml, action: &str) -> bool {
+    (step["uses"].as_str()).is_some_and(|uses| {
+        uses.strip_prefix(action)
+            .is_some_and(|rest| rest.starts_with('@'))
+    })
+}
+
+/// The problems of the downloads of `document`: each takes the name of its
+/// artifact from an output of a job that its job needs, and that output is
+/// the name of an upload of that job, so that a rerun of the downloading
+/// job alone finds the artifact of the attempt that wrote it.
+fn download_problems(document: &Yaml) -> Vec<String> {
+    let all = jobs(document);
+    let mut problems = Vec::new();
+    for (key, job) in &all {
+        let downloads = (job["steps"].as_vec().into_iter().flatten())
+            .filter(|step| uses(step, "actions/download-artifact"));
+        for step in downloads {
+            let name = step["with"]["name"].as_str().unwrap_or_default();
+            let output = (name.strip_prefix("${{ needs."))
+                .and_then(|rest| rest.strip_suffix(" }}"))
+                .and_then(|rest| rest.split_once(".outputs."));
+            let Some((from, output)) = output else {
+                problems.push(format!(
+                    "job {key} downloads {name:?}, not an output of a job that it needs"
+                ));
+                continue;
+            };
+            if !needs(job).contains(&from) {
+                problems.push(format!("job {key} does not need job {from}"));
+                continue;
+            }
+            let upstream = (all.iter())
+                .find(|(other, _)| *other == from)
+                .map(|(_, job)| *job);
+            let value = upstream.and_then(|job| job["outputs"][output].as_str());
+            let uploaded = (upstream.into_iter())
+                .flat_map(|job| job["steps"].as_vec().into_iter().flatten())
+                .filter(|step| uses(step, "actions/upload-artifact"))
+                .any(|step| value.is_some() && step["with"]["name"].as_str() == value);
+            if !uploaded {
+                problems.push(format!(
+                    "the output {output} of job {from} is not the name of one of its uploads"
+                ));
+            }
+        }
+    }
+    problems
+}
+
+#[test]
+fn a_download_takes_the_name_of_its_artifact_from_the_job_that_uploaded_it() {
+    let mut downloads = 0;
+    for path in LINES {
+        let document = workflow(path);
+        assert_eq!(download_problems(&document), Vec::<String>::new(), "{path}");
+        downloads += (steps(&document).into_iter())
+            .filter(|step| uses(step, "actions/download-artifact"))
+            .count();
+    }
+    assert_eq!(downloads, 4);
+    let good = "jobs:\n  image:\n    outputs:\n      artifact: images-${{ github.run_attempt }}\n    \
+                steps:\n      - uses: actions/upload-artifact@1\n        with:\n          \
+                name: images-${{ github.run_attempt }}\n  suite:\n    needs: image\n    steps:\n      \
+                - uses: actions/download-artifact@2\n        with:\n          \
+                name: ${{ needs.image.outputs.artifact }}\n";
+    assert_eq!(download_problems(&parse(good)), Vec::<String>::new());
+    let cases = [
+        (
+            good.replace(
+                "name: ${{ needs.image.outputs.artifact }}",
+                "name: images-${{ github.run_attempt }}",
+            ),
+            "job suite downloads \"images-${{ github.run_attempt }}\", not an output of a job that \
+             it needs",
+        ),
+        (
+            good.replace("    needs: image\n", ""),
+            "job suite does not need job image",
+        ),
+        (
+            good.replace("artifact: images-", "artifact: other-"),
+            "the output artifact of job image is not the name of one of its uploads",
+        ),
+        (
+            good.replace("outputs.artifact }}", "outputs.missing }}"),
+            "the output missing of job image is not the name of one of its uploads",
+        ),
+    ];
+    for (text, problem) in cases {
+        assert_eq!(download_problems(&parse(&text)), [problem], "{text}");
+    }
+}

@@ -251,24 +251,30 @@ CI runs in lines, each a workflow of `.github/workflows/` on GitHub-hosted
 - The weekly line, `weekly.yml`, on Sundays at 11:29 UTC and on a manual
   run, on `main` only: the images and `cargo xtask suite`.
 
-Every job of these lines has a `timeout-minutes`, and its main command ends
-at a deadline that `timeout` sets two minutes earlier, so that the uploads
-still run. Along the longest chain of jobs that need each other the limits
-add up to 18 minutes on the pull request line and to 43 minutes on the full
-line, within the 20 and 60 minutes that those lines allow. Their artifacts
-are kept 90 days for a run on `main` and 30 days for the others. After each
-completed run of another workflow of the directory, the workflow
-`run record` (`run-record.yml`) writes its record with
+Every job of these lines has a `timeout-minutes`. In the jobs that run
+`cargo xtask check`, `cargo xtask image` or `cargo xtask suite`, that
+command also ends at a deadline that `timeout` sets two minutes before the
+limit of its job, so that the uploads still run when the command takes too
+long; `cargo xtask qemu-boot` runs after the check in the same job without
+a deadline of its own. Along the longest chain of jobs that need each
+other the limits add up to 18 minutes on the pull request line and to 43
+minutes on the full line, within the 20 and 60 minutes that those lines
+allow. Their artifacts are kept 90 days for a run on `main` and 30 days for
+the others. After each completed run of another workflow of the directory,
+the workflow `run record` (`run-record.yml`) writes its record with
 `cargo xtask run-record`, described below, adds the summary to the run's
-summary page and uploads the record as `run-record-<run>-<attempt>`, kept as
-long as the artifacts of the run that it records; it runs the code of the
-default branch with read permissions only, and a manual run of it on `main`
-records the run whose ID it takes. Unit tests of the check read the
-committed workflows and hold them to these limits, to the label of the full
-line as its only trigger, to `--slow` in the full and nightly lines only, to
-the one job named `cargo xtask check` and the summary of the pull request
-line, to the list of workflows that the record workflow follows, and to a
-retention for every upload of these files.
+summary page and uploads the record as `run-record-<run>-<attempt>`, kept
+90 days for a run on `main` that a pull request did not trigger and 30 days
+for the others; it runs the code of the default branch with read
+permissions only, and a manual run of it on `main` records the run whose ID
+it takes. Unit tests of the check read the committed workflows and hold
+them to these limits, to the label of the full line as its only trigger, to
+`--slow` in the full and nightly lines only, to the one job named
+`cargo xtask check` and the summary of the pull request line, to the list
+of workflows that the record workflow follows, to a retention for every
+upload of these files, and to downloads that take the name of their
+artifact from an output of the job that uploaded it, so that a rerun of
+the downloading job alone still finds the artifact.
 
 `cargo xtask serial-capture --port <tty>` records what a board sends over a
 serial port, such as the UART of a Pi 5 behind a USB serial adapter, without

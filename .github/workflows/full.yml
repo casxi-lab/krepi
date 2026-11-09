@@ -5,9 +5,10 @@
 # to contain the main of that moment, so that the merge commit has the tree
 # of the head that was checked; then the host checks with the slow tests,
 # and every QEMU suite with its slow cases on the images taken by their
-# digests, run on the head. Each job has a limit, and its main command a
-# deadline two minutes before it. Actions are pinned to full commit SHAs;
-# the comment names the release.
+# digests, run on the head. Each job has a limit, and the check, the image
+# command and the suite command also stop at a deadline two minutes before
+# the limit of their job. Actions are pinned to full commit SHAs; the
+# comment names the release.
 name: full
 
 on:
@@ -80,7 +81,7 @@ jobs:
         run: rustup toolchain install
 
       - name: Run cargo xtask check with the slow tests
-        run: timeout --signal=TERM --kill-after=60s 38m cargo xtask check --slow --receipt artifacts/check-receipt.json
+        run: timeout --signal=TERM --kill-after=90s 38m cargo xtask check --slow --receipt artifacts/check-receipt.json
 
       - name: Upload the receipt
         if: always()
@@ -100,6 +101,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      artifact: full-images-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
       test-elf-sha256: ${{ steps.image.outputs.test-elf-sha256 }}
     steps:
       - name: Check out the head
@@ -148,10 +150,12 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
 
+      # The name of the artifact comes from the job that uploaded it, so
+      # that a rerun of this job alone still finds it.
       - name: Download the images
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: full-images-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          name: ${{ needs.image.outputs.artifact }}
           path: artifacts/images
 
       # Workflow commands are off while the suite prints.
