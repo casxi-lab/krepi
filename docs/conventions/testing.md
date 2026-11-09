@@ -295,7 +295,10 @@ steps, to downloads that take the name of their
 artifact from an output of the job that uploaded it, so that a rerun of
 the downloading job alone still finds the artifact, and to main commands
 that run under that script as the last command of their step, at a
-deadline one or two minutes before the limit of their job.
+deadline one or two minutes before the limit of their job. Where GNU `env`
+and GNU `timeout` are on the path, as on the runners, a unit test also
+sends SIGINT to the script and requires that it ends only after its command
+has, with the status of the command.
 
 Every upload step of every workflow of the directory sets `retention-days`,
 which the repository setting of 90 days bounds. A job that runs on `main`

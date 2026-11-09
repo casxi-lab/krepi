@@ -60,11 +60,13 @@ if [ -n "$stop_commands" ]; then
   echo "::stop-commands::$token"
 fi
 
-# A signal that arrives before the command has started is passed on as soon
-# as it has. Bash starts a command in the background with SIGINT and SIGQUIT
-# ignored, and `timeout` keeps a signal ignored that was ignored when it
-# started, so GNU `env` gives the two signals their default action before it
-# runs `timeout`.
+# Bash starts a command in the background with SIGINT and SIGQUIT ignored,
+# and `timeout` keeps a signal ignored that was ignored when it started, so
+# GNU `env` gives the two signals their default action before it runs
+# `timeout`. A signal that arrives before the script knows the process ID of
+# `env` is passed on as soon as it does. A SIGINT that reaches the new
+# process before `env` has reset it is lost, and the command starts; the
+# SIGTERM that the runner sends after it is passed on.
 pending=
 trap 'pending=INT' INT
 trap 'pending=TERM' TERM

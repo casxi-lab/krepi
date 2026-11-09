@@ -984,6 +984,64 @@ fn every_main_command_of_the_lines_runs_under_its_deadline() {
     assert_eq!(deadline_problems(&parse(&early), false), (2, Vec::new()));
 }
 
+#[test]
+fn the_deadline_script_passes_on_a_stop_signal_and_waits_for_the_command() {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    // The script needs GNU `env` and GNU `timeout`, as on the runners;
+    // elsewhere the test has nothing to run.
+    let output = |program: &str, args: &[&str]| {
+        let output = Command::new(program)
+            .args(args)
+            .stdin(Stdio::null())
+            .output();
+        output.ok().filter(|output| output.status.success())
+    };
+    let gnu_env = output("env", &["--default-signal=INT", "true"]).is_some();
+    let gnu_timeout = output("timeout", &["--version"])
+        .is_some_and(|output| String::from_utf8_lossy(&output.stdout).contains("GNU coreutils"));
+    if !gnu_env || !gnu_timeout {
+        eprintln!("skipped: GNU env and GNU timeout are not on the path");
+        return;
+    }
+    // A command that, on SIGINT, takes a second to write a file and then
+    // exits with 3.
+    let scratch = crate::scratch::Scratch::temporary("deadline");
+    scratch.write(
+        "command.sh",
+        "trap 'sleep 1; echo stopped > \"$1\"; exit 3' INT\necho started > \"$2\"\n\
+         while :; do sleep 0.1; done\n",
+    );
+    let path = |name: &str| scratch.0.join(name);
+    let said = || std::fs::read_to_string(path("stderr")).unwrap_or_default();
+    // The script starts with SIGINT not ignored, as the process of a step.
+    let mut script = Command::new("env")
+        .arg("--default-signal=INT")
+        .arg("bash")
+        .arg(crate::repo::root().join(DEADLINE))
+        .args(["30s", "5s", "bash"])
+        .args([path("command.sh"), path("stopped"), path("started")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(std::fs::File::create(path("stderr")).expect("create the error file"))
+        .spawn()
+        .expect("start the script");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !path("started").exists() {
+        let ended = script.try_wait().expect("look at the script").is_some();
+        assert!(!ended && Instant::now() < deadline, "{}", said());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // SAFETY: kill touches no memory of this process; the script is a child
+    // of it that has not been collected.
+    unsafe { libc::kill(script.id() as libc::pid_t, libc::SIGINT) };
+    let status = script.wait().expect("collect the script");
+    // The script ended after the command had written its file, with the
+    // status of the command.
+    assert!(path("stopped").exists(), "{}", said());
+    assert_eq!(status.code(), Some(3), "{}", said());
+}
+
 /// The workflow that saves the caches.
 const CACHE: &str = ".github/workflows/cache.yml";
 /// The key of the cargo cache.
