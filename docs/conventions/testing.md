@@ -449,7 +449,10 @@ step above: one per row of the mapping and per line of CI, on manifests
 written for them; the changed paths of a Git repository that they create;
 the digest check of the images; the judge over hand-written receipts and
 transcripts and weakened forms of them; and the command on a fake QEMU, a
-shell script that prints a line and exits.
+shell script that prints a line and exits. A test of the `xtask` binary runs
+`cargo xtask image` and then `cargo xtask suite` on the image by its digest,
+and with another digest, with the QEMU of the host, as the image and suite
+jobs of CI do.
 
 `cargo xtask run-record --input <run.json> --output <dir>` writes the
 record of one run of a workflow from the data of the GitHub API; it is not
