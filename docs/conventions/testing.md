@@ -700,7 +700,8 @@ builds the images with one command, `cargo build --locked --release
 --target aarch64-unknown-none-softfloat -p krepi-qemu-virt --bin
 krepi-qemu-virt --example el1-brk --example injected-serror --example
 el1-fp-trap --example timer-irq --example irq-registers --example
-sp-el0-brk --example unexpected-irq
+sp-el0-brk --example unexpected-irq --example clean-code-to-pou --example
+invalidate-to-poc --example invalidate-tlb-page --example code-publication
 --message-format=json-render-diagnostics` in `kernel/`, where
 the `.cargo/config.toml` of the repository root gives the target its flags,
 takes each image from Cargo's artifact message and records `rustc -vV`.
@@ -739,7 +740,12 @@ each self-check of the image in order, each with no failure, and
 `CASXI_RESUMED`, or, for `sp-el0-brk`, whose vectors halt after its
 dispatch, its self-check records alone. Each exception record must have
 the vector, class and syndrome of the case and a return address at a
-symbol of the image's ELF file, or between two of them. The expected
+symbol of the image's ELF file, or between two of them. The cases
+`clean-code-to-pou`, `invalidate-to-poc`, `invalidate-tlb-page` and
+`code-publication` run the test image of their own name once each on the
+runner's machine and are judged in the same way, with no exception record:
+the transcript holds the start record, the self-check of the image with no
+failure and `CASXI_RESUMED`. The expected
 records are written into the suite from the contract and the exception
 classes of the Arm Architecture Reference Manual; each record and each
 self-check is a check of its own.

@@ -25,11 +25,12 @@ the target architecture, the documentation conventions, empty proof
 registries, a commit-message hook and the build tooling: a pinned Rust
 toolchain, the kernel and user-space Cargo workspaces and the repository
 checks. The kernel workspace holds an empty ABI crate, the AArch64 processor
-primitives with the cold entry of an image and the exception vectors of
-EL1, and the QEMU virt board support with its PL011 serial console, its
-exception record, its default image, which boots on QEMU virt into EL1,
-writes its boot records and echoes its serial input, and test images that
-take exceptions at EL1 and report them; the
+primitives with the cold entry of an image, the exception vectors of EL1
+and the cache and TLB maintenance of the executing CPU, and the QEMU virt
+board support with its PL011 serial console, its exception record, its
+default image, which boots on QEMU virt into EL1, writes its boot records
+and echoes its serial input, and test images that take exceptions at EL1
+and report them and that exercise the cache and TLB maintenance; the
 user-space workspace holds an empty SDK crate. A host tooling crate for
 tests holds an ELF reader, report values, a serial port transport, a serial
 link, the serial capture behind `cargo xtask serial-capture`, the QEMU

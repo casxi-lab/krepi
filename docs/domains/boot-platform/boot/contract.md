@@ -3,11 +3,13 @@
 This page governs the code of the `boot` component of the
 [boot and platform](../README.md) domain: the cold entry of a kernel image,
 the exception vectors of EL1 with the frame that they save, the processor
-primitives that EL1 code reads, the GICv2 and the generic timer, and the
-QEMU virt board support with its serial console, its exception record, its
-interrupt wiring, its default image and its test images. The observable
-behaviour that these rules serve, with its evidence, is in the
-[requirements](requirements.md), the other document of the component.
+primitives that EL1 code reads, the cache and TLB maintenance of the
+executing CPU with the cache-line walks of a range, the GICv2 and the
+generic timer, and the QEMU virt board support with its serial console, its
+exception record, its interrupt wiring, its default image and its test
+images. The observable behaviour that these rules serve, with its evidence,
+is in the [requirements](requirements.md), the other document of the
+component.
 
 ## Terms
 
@@ -37,7 +39,22 @@ behaviour that these rules serve, with its evidence, is in the
 - **Test image.** An example of the QEMU virt board crate: an image that
   links the production code of the default image and adds its own
   `kernel_main`, dispatch and trigger sequence, for the QEMU boot suite. It
-  is test code, not a production image.
+  is test code, not a production image; the translation tables of the test
+  image that turns the MMU on are test code too.
+- **Cache-line walk.** The addresses that `krepi_arch::cache_range::lines`
+  gives for a range of bytes: one for each cache line that a byte of the
+  range lies in, from the line of the first byte to the line of the last.
+- **Point of unification.** For a CPU, the point by which its instruction
+  and data caches and its translation table walks see the same copy of a
+  memory location; for an inner-shareable domain, the point by which those
+  of all its CPUs do, as the Arm Architecture Reference Manual defines it.
+- **Point of coherency.** The point at which all observers that can access a
+  memory location see the same copy of it, for accesses of any memory type
+  and cacheability, as the manual defines it; often the main memory.
+- **Inner-shareable domain.** The CPUs to which an inner-shareable
+  maintenance instruction is broadcast and for which `DSB ISH` waits; the
+  [SMP design rules](../../../conventions/smp.md#s6c-tlb-invalidation) use
+  it for TLB invalidation. On QEMU virt with one CPU it holds that CPU.
 
 ## Entry points
 
@@ -63,14 +80,19 @@ behaviour that these rules serve, with its evidence, is in the
 | `krepi_arch::timer::stop_virtual` and `arm_virtual` | Functions | The interrupt wiring of a board and the test images | [Interrupts](#interrupts) |
 | `krepi_arch::cpu::exception_level`, `main_id`, `system_control`, `counter_frequency`, `virtual_counter` and `cpacr` | Functions | Kernel code at EL1 | [Processor registers](#processor-registers) |
 | `krepi_arch::cpu::halt` | Function | Fatal paths | [Processor registers](#processor-registers) |
+| `krepi_arch::cache::clean_code_to_pou` and `invalidate_code_to_pou` | Functions | Kernel code that publishes code that it wrote, on the executing CPU; the test images | [Cache and TLB maintenance](#cache-and-tlb-maintenance) |
+| `krepi_arch::cache::invalidate_to_poc` | `unsafe` function | Kernel code that owns the blocks of a range whose cached data it discards; the test images | [Cache and TLB maintenance](#cache-and-tlb-maintenance) |
+| `krepi_arch::cache::invalidate_tlb_page` | Function | Kernel code that changed a translation of the executing CPU's tables; the test images | [Cache and TLB maintenance](#cache-and-tlb-maintenance) |
+| `krepi_arch::cache_range::lines`, `data_lines`, `instruction_lines`, `handoff_lines` and `MAX_RANGE_BYTES` | Functions and a constant, host-testable | The cache maintenance of `krepi_arch::cache`; the invalidation of an image that firmware hands over (planned) | [Cache-line walks](#cache-line-walks) |
 
 ## Extractability
 
 No code of this component follows the
 [provable Rust subset](../../../conventions/provable-subset.md): the cold
-entry, the exception vectors, the processor primitives, the GICv2 and
-timer drivers, the board support and the PL011 driver are none of the
-modules that the subset lists, and
+entry, the exception vectors, the processor primitives, the cache and TLB
+maintenance and its cache-line walks, the GICv2 and timer drivers, the
+board support and the PL011 driver are none of the modules that the subset
+lists, and
 its page-table logic leaves the barrier, cache and TLB instructions to
 adapters. The section therefore
 lists no source paths, and the `subset` step of `cargo xtask check` checks
@@ -99,7 +121,8 @@ no file of this component.
   to the 2 KiB that `VBAR_EL1` requires; aligns the stack, 64 KiB with a
   4 KiB guard below it, and the ends of BSS to 4 KiB; requires a GNU
   build-id note of 36 bytes, a SHA-1 build-id; and requires the image to end
-  within the 128 MiB of RAM that QEMU virt has at least. A link that breaks
+  within the 128 MiB of RAM that the runner gives QEMU virt, which is also
+  QEMU's default. A link that breaks
   one of these rules fails. The default image is entered at `_start`; a test
   image names its own entry, `krepi_test_entry`, which branches to `_start`
   or, on the machine with EL2, drops to EL1 and returns to `_start`.
@@ -341,6 +364,81 @@ the bounds allow, and `format` for a formatter that failed.
 - `halt` masks every exception of the executing CPU and waits in a `WFE`
   loop forever; other CPUs are not stopped.
 
+## Cache and TLB maintenance
+
+The functions of `krepi_arch::cache` maintain the caches and the TLB for
+the executing CPU, at EL1, by address. A CPU calls each for its own
+maintenance: the final `ISB`, where there is one, synchronizes only that
+CPU, and maintenance on behalf of another CPU, with its acknowledgement, is
+not provided. No function reports a result.
+
+| Function | Sequence | Shareability |
+| --- | --- | --- |
+| `clean_code_to_pou(start, bytes)` | `DC CVAU` on each line of the walk at `CTR_EL0.DminLine`, then `DSB ISH` | The cleans reach the data caches of every CPU of the inner-shareable domain for Inner or Outer Shareable memory, which includes every data access with the MMU off, and of the executing CPU alone for Non-shareable memory; `DSB ISH` waits for them in the inner-shareable domain |
+| `invalidate_to_poc(start, bytes)` | `DSB SY`, `DC IVAC` on each line of the walk at `CTR_EL0.DminLine`, `DSB SY`, `IC IALLU`, `DSB SY`, `ISB` | Each `DC IVAC` invalidates its line up to the point of coherency in the data caches of every CPU of the Outer Shareable domain for Device, Non-cacheable or Write-Through memory, which includes every data access with the MMU off, and of the domain of its Shareability attribute for other Normal memory; `DSB SY` waits in the whole system; `IC IALLU` acts on the executing CPU alone |
+| `invalidate_tlb_page(address)` | `DSB ISH`, `TLBI VAAE1IS` with bits 12 to 55 of the address, `DSB ISH`, `ISB` | The entries of the EL1&0 regime for the address, with any ASID and from any level of the walk, on every CPU of the inner-shareable domain; the barriers act there |
+| `invalidate_code_to_pou(start, bytes)` | `IC IVAU` on each line of the walk at `CTR_EL0.IminLine`, then `DSB ISH` and `ISB` | The invalidations reach the instruction caches of every CPU of the inner-shareable domain for Inner or Outer Shareable memory, which includes Non-cacheable memory and every instruction fetch with the MMU off, and of the executing CPU alone for Non-shareable memory |
+
+- The line sizes come from `CTR_EL0` at each call: the smallest data cache
+  line, `DminLine`, and the smallest instruction cache line, `IminLine`.
+  The two data cache functions walk `[start, start + bytes)` with
+  `cache_range::data_lines` and `invalidate_code_to_pou` with
+  `cache_range::instruction_lines`, each given the value of `CTR_EL0` and
+  limited to `MAX_RANGE_BYTES` ([Cache-line walks](#cache-line-walks)).
+- Code is published by `clean_code_to_pou` and then
+  `invalidate_code_to_pou` of the same range; another CPU that is to
+  execute the code executes its own `ISB`, or another context
+  synchronization event, after the publication. The invalidation of the
+  instruction cache is needed also for Non-cacheable memory and with the
+  caches off.
+- A changed translation is followed by `invalidate_tlb_page` of each page
+  that it translates; the change itself, such as break-before-make, follows
+  the [SMP design rules](../../../conventions/smp.md#s6c-tlb-invalidation)
+  and is the caller's.
+- `invalidate_to_poc` is an `unsafe` function: an invalidation discards
+  data that was written and not yet cleaned, and it may act on as much as a
+  cache writeback granule, `CTR_EL0.CWG`, at most 2 KiB, around each line.
+  Its caller owns every naturally aligned 2 KiB block that the range
+  touches, and no cache holds data of those blocks that must be kept.
+- With the MMU off, every address below the implemented physical address
+  size is mapped, writable and executable, and a larger one makes a data
+  cache function raise an Address size fault and may make
+  `invalidate_code_to_pou` raise one. With the MMU on, an address that the
+  current translation does not map makes a data cache function raise a
+  Translation fault and may make `invalidate_code_to_pou` raise one, an
+  entry whose access flag is 0 may make any range function raise an Access
+  flag fault, as the implementation defines, and an address without write
+  permission makes `invalidate_to_poc` raise a Permission fault; each fault
+  is taken as a Data Abort, which the vectors report. A TLB invalidation
+  never raises an abort.
+- The asm of the maintenance instructions is not `nomem`, so the memory
+  accesses of the code before a call stay before its instructions.
+
+## Cache-line walks
+
+- `lines(start, bytes, field, limit)` gives the cache-line walk of
+  `[start, start + bytes)` for lines of `4 << field` bytes, the encoding of
+  `DminLine` and `IminLine` in `CTR_EL0`: the address of the line of
+  `start`, rounded down to a multiple of the line size, and every line
+  after it that starts below `start + bytes`. It gives `None`, before any
+  address, when `bytes` is 0 or above `limit`, when `field` is above 15 or
+  when `start + bytes` does not fit in 64 bits.
+- `data_lines(ctr, start, bytes)` gives the walk of `lines` at the field
+  `DminLine`, bits 16 to 19, of `ctr`, a value of `CTR_EL0`, with the limit
+  `MAX_RANGE_BYTES`; `instruction_lines(ctr, start, bytes)` gives it at the
+  field `IminLine`, bits 0 to 3. They are the walks of the
+  [cache maintenance](#cache-and-tlb-maintenance) by address.
+- `handoff_lines(start, bytes, field, window)` gives the same walk for the
+  whole image that firmware hands over, with the length of `window` as the
+  limit, and `None` unless the image starts at `window.start`, the window
+  is not empty, `start`, `bytes` and `window.end` are multiples of 4 KiB,
+  `field` is at most 10, a line of at most 4 KiB, and the image ends within
+  the window.
+- `MAX_RANGE_BYTES`, 64 KiB, is the limit of one call of the
+  [cache maintenance](#cache-and-tlb-maintenance) by address.
+- The walks touch no memory and execute no maintenance instruction; they
+  are compiled on the host too.
+
 ## Platform parameters
 
 | Parameter | Use | QEMU virt |
@@ -364,6 +462,12 @@ The Raspberry Pi 5 values are given by its board support.
 - `kernel_main` sets the console up, which writes the PL011, before its
   checks, so that a failed check can be reported. The checks themselves
   write nothing but records.
+- The range functions of the cache maintenance check the range with
+  `cache_range::data_lines` or `instruction_lines` before any maintenance
+  instruction, and panic when it refuses the range: `clean_code_to_pou` and
+  `invalidate_code_to_pou` with `bounded code cache walk`,
+  `invalidate_to_poc` with `bounded cache walk`. The TLB function checks
+  nothing and does not fail.
 
 ## Work bounds
 
@@ -379,6 +483,10 @@ The Raspberry Pi 5 values are given by its board support.
   without a loop. The dispatch of the default image writes two records
   within the console bounds and halts.
 - `irq::init` and `irq::handle` make a fixed number of register accesses
+  without a loop.
+- A range function of the cache maintenance walks at most
+  `MAX_RANGE_BYTES / line + 1` lines, 1,025 at 64-byte lines, and runs a
+  fixed sequence of barriers; the TLB function runs a fixed sequence
   without a loop.
 
 ## Determinism
@@ -404,6 +512,7 @@ counter as well.
 | `ELR_EL1`, `SPSR_EL1`, `ESR_EL1` and `FAR_EL1` | Per-CPU | The exception entry and the return path of the executing CPU | The `ERET` | `none` |
 | The distributor and CPU interface registers of the GICv2 | Shared | The boot CPU alone: `irq::init` with IRQs masked, then `irq::handle` in the dispatch of an IRQ | The volatile access to the register | `none`: its single owner never changes |
 | `CNTV_CTL_EL0` and `CNTV_CVAL_EL0` | Per-CPU | The executing CPU | The `ISB` after the writes | `none` |
+| The cache lines of a maintained range and the TLB entries of a maintained page | Shared: maintained in the inner-shareable domain or, for an invalidation to the point of coherency, in the shareability domain of the memory | The caller, which owns the range or changed the translation | The `DSB` that completes the function | `none`: the functions publish nothing; the protocol of the caller, such as the publication of code or break-before-make, does |
 
 ## Testing obligations
 
@@ -419,6 +528,14 @@ counter as well.
   those of `kernel/arch/src/exception/` the class of each vector and
   syndrome, with syndromes written from the Arm Architecture Reference
   Manual.
+- The host tests of `kernel/arch/src/cache_range/` hold the cache-line
+  walks: the tests taken from the prototype tree, with their expected
+  values, of partial lines, exact boundaries, refused ranges and the walk of
+  a whole image in the windows of the Raspberry Pi 5 and of QEMU virt, the
+  examples of a range with unaligned ends and of empty and oversized
+  ranges, and the walks of the maintenance at a value of `CTR_EL0` whose
+  line fields differ and at one with bit 3 set in both line fields, with
+  the line size of each walk and its limit.
 - The QEMU boot suite boots the default image on QEMU virt and holds its
   transcript against the records of this page, written into the suite, not
   taken from an earlier run. Three cold boots give identical transcripts.
@@ -433,6 +550,16 @@ counter as well.
   rule of the saved and restored state has one test, a self-check of a test
   image or a case of the suite, named in the
   [open obligations](#open-obligations).
+- The suite boots four test images of the cache and TLB maintenance, each
+  testing one function of `krepi_arch::cache` and the publication of code
+  with the clean before it, and holds each transcript against its start
+  record, one self-check with no failure and `CASXI_RESUMED`, with no
+  exception record. One of them turns the MMU on with translation tables of
+  its own to replace the entry of a page by break-before-make; the others
+  run with the MMU off. The caches stay off, and QEMU's TCG does not model
+  them, so the cases show that the instructions execute and, for the TLB,
+  that the page is translated through its new entry, not an effect on a
+  cache.
 - The test images that wait for an interrupt wait for at most 1,000 ms on
   the counter, a platform parameter of QEMU virt for these images, where
   the timer interrupt comes after one period of 10 ms.
@@ -470,6 +597,13 @@ counter as well.
 | `kernel/arch/src/cpu.rs#virtual_counter` | `unsafe` | Neither (reads `CNTVCT_EL0`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs#cpacr` | `unsafe` | Neither (reads `CPACR_EL1`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs#halt` | `unsafe` | Neither (writes `DAIF`, waits with `WFE`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/arch/src/cache.rs` | `code` | Neither | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` | - | - |
+| `kernel/arch/src/cache.rs#ctr` | `unsafe` | Neither (reads `CTR_EL0`) | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` | - | - |
+| `kernel/arch/src/cache.rs#clean_code_to_pou` | `unsafe` | Neither (cleans the data cache lines of a range to the point of unification) | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` | - | - |
+| `kernel/arch/src/cache.rs#invalidate_to_poc` | `unsafe` | Neither (invalidates the data cache lines of a range and the instruction caches of the executing CPU) | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` | - | - |
+| `kernel/arch/src/cache.rs#invalidate_tlb_page` | `unsafe` | Neither (invalidates the TLB entries of one page) | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` | - | - |
+| `kernel/arch/src/cache.rs#invalidate_code_to_pou` | `unsafe` | Neither (invalidates the instruction cache lines of a range) | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` | - | - |
+| `kernel/arch/src/cache_range.rs` | `code` | Neither | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` | - | - |
 | `kernel/boards/qemu-virt/src` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/boards/qemu-virt/src/irq.rs#GIC` | `unsafe` | Neither (names the GICv2 of QEMU virt through `Gic::new`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/boards/qemu-virt/src/uart.rs#read` | `mmio` | Neither (reads a PL011 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
@@ -481,24 +615,39 @@ counter as well.
 ## Legacy test vectors
 
 The component has no specification, so it freezes no test vectors. The
-prototype tests that the console took over are host tests of its code, with
-their expected values, and the
-[porting record of the console](../../../porting/console.md) lists them.
+prototype tests that the console and the cache-line walks took over are
+host tests of their code, with their expected values, and the porting
+records of the [console](../../../porting/console.md) and of
+[cache_range](../../../porting/cache_range.md) list them.
 
 ## References
 
 - Arm Limited, *Arm Architecture Reference Manual for A-profile
-  architecture*, DDI 0487,
-  <https://developer.arm.com/documentation/ddi0487/latest/>: `CurrentEL`,
-  `MIDR_EL1`, `SCTLR_EL1`, `CPACR_EL1`, `CNTFRQ_EL0`, `CNTVCT_EL0`, `DAIF`
-  and `WFE`; the exception entry and return, the vector table and
-  `VBAR_EL1`; `ESR_EL1` with the exception classes `0x07`, `0x2f` and
-  `0x3c`, `ELR_EL1`, `SPSR_EL1` and `FAR_EL1`; and, for the test image that
-  enters at EL2, `HCR_EL2` with RW, AMO and VSE, `VSESR_EL2`,
+  architecture*, DDI 0487, version M.d, 2026,
+  <https://documentation-service.arm.com/static/6abbec2a6db85c5e6614a4a1>:
+  `CurrentEL`, `MIDR_EL1`, `SCTLR_EL1`, `CPACR_EL1`, `CNTFRQ_EL0`,
+  `CNTVCT_EL0`, `DAIF` and `WFE`; the exception entry and return, the vector
+  table and `VBAR_EL1`; `ESR_EL1` with the exception classes `0x07`, `0x2f`
+  and `0x3c`, `ELR_EL1`, `SPSR_EL1` and `FAR_EL1`; and, for the test image
+  that enters at EL2, `HCR_EL2` with RW, AMO and VSE, `VSESR_EL2`,
   `CNTHCTL_EL2`, `CNTVOFF_EL2` and `VMPIDR_EL2`; the generic timer,
-  `CNTV_CTL_EL0` and `CNTV_CVAL_EL0`, and `ISR_EL1`.
+  `CNTV_CTL_EL0` and `CNTV_CVAL_EL0`, and `ISR_EL1`; the cache and TLB
+  maintenance: `CTR_EL0`, `DC CVAU`, `DC IVAC`, `IC IVAU`, `IC IALLU`,
+  `TLBI VAAE1IS`, `DSB` and `ISB`, the points of unification and of
+  coherency and the scope of the maintenance instructions, the publication
+  of code with Non-cacheable memory and the concurrent modification of
+  instructions, the TLB maintenance and the attributes of memory with the
+  MMU off; and, for the test image that turns the MMU on, the VMSAv8-64
+  descriptors of the 4 KiB granule, `MAIR_EL1`, `TCR_EL1`, `TTBR0_EL1`,
+  `SCTLR_EL1` and `TLBI VMALLE1`.
+- Arm Limited, *Learn the architecture - AArch64 memory management Guide*,
+  version 1.4, document 101811_0104_01_en, 2024,
+  <https://documentation-service.arm.com/static/670e4dc89fbc7343d3e4cee1>:
+  chapter 8, the maintenance of the TLB.
 - Arm Limited, *ARM Generic Interrupt Controller Architecture
-  Specification, GIC architecture version 2.0*, IHI 0048B: the distributor
+  Specification, GIC architecture version 2.0*, IHI 0048B.b, 2013,
+  <https://documentation-service.arm.com/static/5f8ff196f86e16515cdbf969>:
+  the distributor
   and CPU interface registers, the interrupt groups with and without the
   Security Extensions, the acknowledgement, the special interrupt IDs and
   the end of interrupt.
@@ -512,4 +661,7 @@ their expected values, and the
   the registers, flags and divisors.
 - The QEMU Project, *'virt' generic virtual platform*,
   <https://www.qemu.org/docs/master/system/arm/virt.html>: the machine, its
-  RAM, its PL011, its GICv2 and the virtual timer interrupt.
+  options and its RAM.
+- The QEMU Project, QEMU 8.2.2, `hw/arm/virt.c` and `include/hw/arm/bsa.h`,
+  <https://gitlab.com/qemu-project/qemu/-/blob/v8.2.2/hw/arm/virt.c>: the
+  addresses of the PL011 and the GICv2 and the interrupts of the timers.

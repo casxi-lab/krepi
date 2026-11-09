@@ -11,6 +11,62 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
+      "item": "kernel/arch/src/cache.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/cache.rs#clean_code_to_pou",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/cache.rs#ctr",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/cache.rs#invalidate_code_to_pou",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/cache.rs#invalidate_tlb_page",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/cache.rs#invalidate_to_poc",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/cache_range.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
       "item": "kernel/arch/src/cpu.rs",
       "kind": "code",
       "verified_state": "neither",

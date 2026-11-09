@@ -83,7 +83,10 @@ command.
   image's own checks, and an IRQ taken at one known instruction with every
   register checked by the image after it. The cases `sp-el0-brk` and
   `unexpected-irq`, the halt of vector 0 and an interrupt that the board
-  does not expect, are new.
+  does not expect, are new, and so are the four cases of the cache and TLB
+  maintenance, `clean-code-to-pou`, `invalidate-to-poc`,
+  `invalidate-tlb-page` and `code-publication`, which expect no exception
+  record; the legacy suites had no case of their own for the maintenance.
 - The receipt of a test image's run must name the machine of its case: the
   machine with EL2 for the SError, the runner's machine for the others.
 - The three runs must use the same image and give identical transcripts; the
@@ -119,6 +122,7 @@ them.
 | The images come from Cargo's artifact messages | `qemu_boot::tests::the_image_is_taken_from_the_artifact_message`, `qemu_boot::tests::the_build_command_names_the_images` |
 | A test image passes only with its exact records: an exception record with another vector, class, syndrome or return address, a malformed record, a failed self-check, a missing or extra record, output after the halt, a missing end or a halt in a returning case fail | `qemu_boot::tests::records::good_runs_of_the_test_images_pass`, `qemu_boot::tests::records::a_record_with_other_fields_fails`, `qemu_boot::tests::records::the_serror_must_return_into_the_unmasking_code`, `qemu_boot::tests::records::malformed_records_are_refused`, `qemu_boot::tests::records::a_failed_self_check_fails`, `qemu_boot::tests::records::a_wrong_end_or_order_of_records_fails`, `qemu_boot::tests::records::a_missing_symbol_or_run_fails` |
 | The case whose vectors halt after its dispatch passes only when nothing follows its self-check, and an unexpected interrupt only once | `qemu_boot::tests::records::a_case_that_halts_after_its_dispatch_fails_with_more_or_less` |
+| A case of the cache and TLB maintenance passes only with its start record, its self-check with no failure and its end, and fails with an exception record, a failed self-check, a missing end or another image | `qemu_boot::tests::records::good_runs_of_the_test_images_pass`, `qemu_boot::tests::records::a_case_without_exceptions_fails_with_an_exception_record` |
 | The receipt of a test image must name the machine of its case and no input | `qemu_boot::tests::records::a_receipt_of_another_machine_or_with_input_fails` |
 | The suite takes the worst outcome of its cases | `qemu_boot::tests::the_cases_name_their_symbols_images_and_outcome` |
 | The case runs each boot through the runner into a directory of its own and passes, or fails or ends as an error, as a whole | `qemu_boot::tests::the_case_passes_with_a_guest_that_boots_and_echoes`, `qemu_boot::tests::the_case_fails_with_a_guest_at_another_level`, `qemu_boot::tests::a_run_that_cannot_start_is_an_error` |
