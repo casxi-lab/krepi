@@ -39,7 +39,8 @@ pub struct Crate {
     pub cfg: Vec<String>,
 }
 
-/// The kernel workspace, extracted for the triple of the production kernel.
+/// The kernel workspace, extracted for the extraction triple of the
+/// [`Layout`], which is not the target of the kernel images.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Kernel {
@@ -1398,6 +1399,50 @@ mod tests {
             unknown.starts_with("not an extraction configuration: "),
             "{unknown}"
         );
+    }
+
+    #[test]
+    fn the_extraction_triple_is_named_apart_from_the_target_of_the_images() {
+        // The kernel images are built for the bare-metal target that
+        // `rust-toolchain.toml` installs, another triple, which the
+        // configuration and "Extraction" in the docs name beside the
+        // extraction triple.
+        let triple = Layout::PRODUCTION.triple;
+        let toolchain: Table =
+            toml::from_str(include_str!("../../../rust-toolchain.toml")).expect("the toolchain");
+        let targets = toolchain["toolchain"]["targets"].as_array();
+        let Some([image]) = targets.map(Vec::as_slice) else {
+            panic!("not one target: {targets:?}");
+        };
+        let image = image.as_str().expect("a target");
+        assert_ne!(triple, image);
+        let text = include_str!("../../../verification/extraction.toml");
+        let (_, kernel) = text
+            .split_once("[qualification.triples]")
+            .expect("the kernel");
+        let kernel = kernel.replace("\n# ", " ");
+        let docs = include_str!("../../../docs/formal-verification.md");
+        let (_, section) = docs.split_once("\n### Extraction\n").expect("the section");
+        let section = section
+            .split("\n### ")
+            .next()
+            .expect("the section")
+            .replace('\n', " ");
+        let named = [
+            (&kernel, "extracted for the extraction triple".to_string()),
+            (
+                &kernel,
+                format!("the target of the kernel images, {image},"),
+            ),
+            (&section, format!("the extraction triple, `{triple}`,")),
+            (
+                &section,
+                format!("the target of the kernel images, `{image}`,"),
+            ),
+        ];
+        for (text, name) in named {
+            assert!(text.contains(&name), "{name}: {text}");
+        }
     }
 
     #[test]

@@ -16,7 +16,8 @@
 //! parents: by default `artifacts/qemu/<%Y%m%dT%H%M%SZ>-<12 hex digits>`
 //! below the repository root. QEMU's standard error goes to
 //! `qemu-stderr.txt` in it, never into the serial output, and its standard
-//! input is a pipe that stays open and unused.
+//! input is a pipe that stays open: `cargo xtask qemu` sends nothing on it,
+//! and a run through [`run_image_with`] sends its inputs.
 //!
 //! The run ends when QEMU ends by itself, when it has run for `--timeout`
 //! seconds (default 60, greater than 0 and at most 600), when more than
@@ -63,6 +64,15 @@
 //! executable, a failed version query or an output directory that exists or
 //! cannot be created. The output streams follow the rules of
 //! [`crate::console`], which give status 120 for a failed write.
+//!
+//! A suite that drives a guest runs it through [`run_image_with`], the same
+//! run with a list of [`Input`]s: each sends its bytes once to the guest's
+//! serial input, as soon as the output that follows the previous input's
+//! trigger holds its own trigger. The receipt of such a run has one more
+//! key, `input`, which lists each input with its trigger, its bytes and the
+//! count of output bytes when it was sent; a failed send adds its error to
+//! `errors`. The command `cargo xtask qemu` sends nothing, and its receipt
+//! has no `input` key.
 //!
 //! `clap` reads the command line as it reads that of `cargo xtask
 //! serial-capture`: an option with a value takes it as `--option=value` or
@@ -279,7 +289,7 @@ fn exit_code(report: &Value) -> i32 {
 /// A fault that the unit tests inject on their own thread: a deadline that
 /// the guest's output, not the clock, decides.
 #[cfg(test)]
-mod seams {
+pub(crate) mod seams {
     use std::cell::Cell;
 
     thread_local! {
@@ -362,6 +372,86 @@ fn describe(output: &Path, name: &str, errors: &mut Vec<String>) -> Value {
     }
 }
 
+/// Bytes that a run sends to the guest's serial input once its output holds
+/// a trigger.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Input {
+    /// The trigger: bytes that must arrive in the output after the trigger of
+    /// the previous input, or from the start for the first input.
+    pub after: Vec<u8>,
+    /// The bytes sent once the trigger has arrived.
+    pub bytes: Vec<u8>,
+}
+
+/// The inputs of a run and how far each got: the output offset just after
+/// the latest trigger found, for each input the count of output bytes when
+/// it was sent, and the errors of failed sends.
+struct Inputs<'a> {
+    inputs: &'a [Input],
+    from: usize,
+    sent_at: Vec<Option<usize>>,
+    errors: Vec<String>,
+}
+
+impl<'a> Inputs<'a> {
+    fn new(inputs: &'a [Input]) -> Self {
+        Inputs {
+            inputs,
+            from: 0,
+            sent_at: vec![None; inputs.len()],
+            errors: Vec::new(),
+        }
+    }
+
+    /// Sends every input, in order, whose trigger the output of `capture`
+    /// holds after the trigger of the input before it. A failed send keeps
+    /// its error and still counts as sent, so that it is not repeated.
+    fn send_due(&mut self, child: &mut Child, capture: &mut SerialCapture) {
+        while let Some(index) = self.sent_at.iter().position(Option::is_none) {
+            let input = &self.inputs[index];
+            let rest = &capture.received[self.from.min(capture.received.len())..];
+            let Some(found) = find(rest, &input.after) else {
+                return;
+            };
+            self.from += found + input.after.len();
+            self.sent_at[index] = Some(capture.received.len());
+            if let Err(Failure(error)) = capture.send(child, &input.bytes) {
+                self.errors
+                    .push(format!("send of input {}: {error}", index + 1));
+            }
+        }
+    }
+
+    /// The entry of the receipt: each input with `after` and `bytes` in the
+    /// escapes of `<[u8]>::escape_ascii` and `sent_at`, null for an input
+    /// that was not sent.
+    fn report(&self) -> Value {
+        let entries = self.inputs.iter().zip(&self.sent_at);
+        Value::Array(
+            entries
+                .map(|(input, sent_at)| {
+                    json!({
+                        "after": input.after.escape_ascii().to_string(),
+                        "bytes": input.bytes.escape_ascii().to_string(),
+                        "sent_at": sent_at,
+                    })
+                })
+                .collect(),
+        )
+    }
+}
+
+/// The offset of the first occurrence of `needle`, which is not empty, in
+/// `haystack`; an empty `needle` occurs at 0.
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
 /// Why the loop of [`supervise`] ended.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Stop {
@@ -373,8 +463,8 @@ enum Stop {
 
 /// Supervises the started `child`, whose output `capture` reads, until it
 /// ends, `deadline` passes, its output passes `limit` or `interrupt` holds a
-/// signal, and stops it: the exit reason and the stop report of
-/// [`qemu::stop_process`].
+/// signal, sending `inputs` as their triggers arrive, and stops it: the exit
+/// reason and the stop report of [`qemu::stop_process`].
 fn supervise(
     child: &mut Child,
     capture: &mut SerialCapture,
@@ -382,6 +472,7 @@ fn supervise(
     deadline: Option<Instant>,
     interrupt: &AtomicI32,
     timing: &Timing,
+    inputs: &mut Inputs,
 ) -> (ExitReason, Value) {
     let stop = loop {
         if interrupted(interrupt) {
@@ -397,6 +488,7 @@ fn supervise(
         if deadline_passed(deadline, now, &capture.received) {
             break Stop::Deadline;
         }
+        inputs.send_due(child, capture);
         let left = deadline.map_or(timing.guest_slice, |deadline| {
             deadline.saturating_duration_since(now)
         });
@@ -480,6 +572,19 @@ pub fn run_image<'a>(
     timing: &Timing,
     arm: &mut dyn FnMut() -> Result<&'a AtomicI32, Failure>,
 ) -> Result<Value, Failure> {
+    run_image_with(options, &[], output, timing, arm)
+}
+
+/// [`run_image`] that sends `inputs` to the guest as their triggers arrive.
+/// With inputs, the receipt has the key `input`; without them, the run and
+/// its receipt are those of [`run_image`].
+pub fn run_image_with<'a>(
+    options: &Options,
+    inputs: &[Input],
+    output: &Path,
+    timing: &Timing,
+    arm: &mut dyn FnMut() -> Result<&'a AtomicI32, Failure>,
+) -> Result<Value, Failure> {
     check_limits(options.timeout, options.max_bytes)?;
     let executable = qemu::resolve_qemu(options.qemu.as_deref())?;
     let command = qemu::build_command(&options.image, Some(&executable), options.clock)?;
@@ -497,6 +602,7 @@ pub fn run_image<'a>(
     let limit = usize::try_from(options.max_bytes).unwrap_or(usize::MAX);
     let timeout = Duration::from_secs_f64(options.timeout);
     let mut errors: Vec<String> = Vec::new();
+    let mut sent = Inputs::new(inputs);
     let started_at = utc_now();
     let started = Instant::now();
     let mut stopped = None;
@@ -518,8 +624,16 @@ pub fn run_image<'a>(
                     }
                     Ok(mut capture) => {
                         let deadline = started.checked_add(timeout);
-                        let (reason, process) =
-                            supervise(&mut child, &mut capture, limit, deadline, interrupt, timing);
+                        let (reason, process) = supervise(
+                            &mut child,
+                            &mut capture,
+                            limit,
+                            deadline,
+                            interrupt,
+                            timing,
+                            &mut sent,
+                        );
+                        errors.append(&mut sent.errors);
                         stopped = Some(started.elapsed());
                         let reason = match collect_rest(
                             &mut capture,
@@ -568,6 +682,9 @@ pub fn run_image<'a>(
         "transcript": transcript,
         "stderr": stderr,
     });
+    if !inputs.is_empty() {
+        report["input"] = sent.report();
+    }
     if !errors.is_empty() {
         report["errors"] = errors.into();
     }

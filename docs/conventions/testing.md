@@ -1,8 +1,9 @@
 # Testing
 
-Tests and test tooling are written in Rust. So far the repository tasks in
-`xtask/` and the host tooling crate in `tools/`, which holds the first test
-tools, have host tests; this page states the rules that every test follows,
+Tests and test tooling are written in Rust. The kernel workspace, the
+repository tasks in `xtask/` and the host tooling crate in `tools/`, which
+holds the test tools, have host tests, and the QEMU boot suite runs the
+kernel on QEMU virt; this page states the rules that every test follows,
 and its command sections are filled in when the commands work.
 
 ## Environments
@@ -115,6 +116,11 @@ read the working copy, and the builds of the compile-fail cases a copy of
 its tracked files. The check does not run the proof gate,
 `cargo xtask formal run`, which needs the pinned tools; CI runs the gate in
 the job `formal run` of `.github/workflows/formal.yml`, described below.
+The `fmt` step formats every module, but the `clippy` and `test` steps
+build the kernel workspace for the host only: they do not lint or test the
+modules that are compiled only for the bare-metal target
+`aarch64-unknown-none-softfloat`, which only `cargo xtask qemu-boot`
+compiles.
 
 `cargo xtask check --receipt <path>` also writes a JSON receipt of the run to
 `<path>`, whether the check passes or fails. It records the commit, whether
@@ -128,8 +134,12 @@ CI runs the check as the job `cargo xtask check` of
 `.github/workflows/check.yml` on a GitHub-hosted `ubuntu-24.04-arm` runner,
 for the head commit of every pull request to `main` and for every push to
 `main`. The job installs `clang-18` and `qemu-system-arm` from the Ubuntu
-archive and the toolchain of `rust-toolchain.toml` with rustup, and uploads
-the receipt as the artifact `check-receipt-<commit>-<attempt>`.
+archive and the toolchain of `rust-toolchain.toml` with rustup, with its
+bare-metal target, and uploads the receipt as the artifact
+`check-receipt-<commit>-<attempt>`. After the check, the same job runs
+`cargo xtask qemu-boot --output-dir artifacts/qemu-boot`, described below,
+and uploads that directory as the artifact `qemu-boot-<commit>-<attempt>`,
+also when the suite fails.
 
 `cargo xtask serial-capture --port <tty>` records what a board sends over a
 serial port, such as the UART of a Pi 5 behind a USB serial adapter, without
@@ -234,6 +244,57 @@ and the image is the same on every host. The test of the `xtask` binary
 runs `cargo xtask qemu` on it with the QEMU of the host, which shows that
 the image boots, that its output reaches the transcript and that its
 power-off ends the run as `guest_shutdown`.
+
+`cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
+QEMU virt default image, boots it on QEMU virt through the library entry of
+the QEMU runner and judges every run; it is not part of the check, and CI
+runs it after the check as stated above. It builds the image with
+`cargo build --locked --release --target aarch64-unknown-none-softfloat
+--bin krepi-qemu-virt --message-format=json-render-diagnostics` in
+`kernel/`, where the `.cargo/config.toml` of the repository root gives the
+target its flags, takes the image from Cargo's artifact message and records
+`rustc -vV`.
+Its one case, `cold-boot-echo`, runs the image three times, each in a new
+QEMU process with the command line of `cargo xtask qemu` and the host
+clock, with a window of 20 s and a limit of 4,096 bytes of serial output,
+the QEMU virt values of the suite; once the transcript holds `CASXI_READY`
+and CR LF, the runner sends the 16 bytes `casxi-sim-check` and CR. The
+image never stops by itself, so each run ends at its window. The case
+passes when every run ended at its window with no errors, on the runner's
+machine with one Cortex-A76 and without an instruction count, booted the
+image of the build and holds exactly the records of the
+[boot contract](../domains/boot-platform/boot/contract.md#records), a
+Cortex-A76 identity record, `CASXI_BOOT kernel=krepi board=qemu-virt el=1`
+and `CASXI_READY`, followed by the 16 bytes sent, a line feed and nothing
+else; and when the three image digests are equal and the three transcripts
+identical. The expected records are written into the suite from the
+contract. Each run writes a directory `cold-boot-echo-<n>` with the files
+and the receipt of `cargo xtask qemu`, whose receipt has one more key,
+`input`: for each input, its trigger `after` and its `bytes`, in the
+escapes of `<[u8]>::escape_ascii`, and `sent_at`, the count of serial bytes
+that had arrived when the runner sent it, or null when it did not. A send
+that fails adds its error to `errors`. The suite writes `build.log`, the
+standard error of the build, and the suite receipt `summary.json`, with
+sorted keys, into the new directory `--output-dir`, by default
+`artifacts/qemu-boot/<UTC time>Z-<12 hexadecimal digits>`: the status
+`PASS`, `FAIL`, `ERROR` or `INTERRUPTED`, the start and end times, the
+commit, the GitHub Actions run (`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`,
+`GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_SHA`, null outside CI), the
+toolchain, the build with its command and exit code, the image with its
+path, size and SHA-256 digest, and the case with its criterion, each run's
+directory, exit reason and the digests of its receipt and transcript, and
+each check with its status and, when it failed, why. `--qemu` names the
+QEMU executable as for `cargo xtask qemu`. The command prints a line for
+each run, each failed check and the status with the path of the receipt,
+and exits with 0 for `PASS`, 1 for `FAIL`, 130 for `INTERRUPTED`, 2 for
+`ERROR`, such as a failed build or a run that could not start, and for a
+usage error or an output directory that exists, and 120 when it cannot
+write its own output. SIGINT, SIGTERM and SIGHUP are caught from
+immediately before the first QEMU starts. Its unit tests run in the `test`
+step above: they hold hand-written receipts and transcripts, and weakened
+and misattributed forms of them, against the checks of the case, and run
+the case with a fake QEMU, a shell script that writes the records and
+echoes its input.
 
 `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` checks the
 tool manifest `verification/toolchain.json` against checkouts of Aeneas and
@@ -348,11 +409,12 @@ ignored because it needs the pinned Lean: the job runs it in the image, and
 a local run needs the `darwin-arm64` installation at
 `artifacts/formal/tools`.
 
-QEMU suites and board suites have their own entry points (planned), built on
-the serial port transport, the serial link, the QEMU command and the serial
+`cargo xtask qemu-boot` is the QEMU boot suite. Further QEMU suites and
+the board suites have entry points of their own (planned), built on the
+serial port transport, the serial link, the QEMU command and the serial
 capture of a guest, the QEMU runner, and the serial record parsers of the
-host tooling crate. Each suite writes its report and the raw serial bytes
-under `artifacts/`, together with the identity of the image it ran.
+host tooling crate. Each suite writes its report and the raw serial bytes under
+`artifacts/`, together with the identity of the image it ran.
 
 ## Evidence and receipts
 
@@ -442,11 +504,11 @@ not execution, and execution on QEMU is not execution on the board.
 
 The host tools take their time slices, polling intervals and timeouts from a
 `Timing` value of `tools/src/timing.rs`, which a caller chooses for the
-platform it talks to; `cargo xtask serial-capture` takes the Pi 5 set and
-`cargo xtask qemu` the QEMU virt set. The values of both sets are those of
-the legacy tooling crate, which used the same values on QEMU and on the
-board; the values for the Pi 5 have not yet been measured against a board
-run of krepi.
+platform it talks to; `cargo xtask serial-capture` takes the Pi 5 set, and
+`cargo xtask qemu` and `cargo xtask qemu-boot` the QEMU virt set. The values
+of both sets are those of the legacy tooling crate, which used the same
+values on QEMU and on the board; the values for the Pi 5 have not yet been
+measured against a board run of krepi.
 
 | Field | Use | QEMU virt | Pi 5 |
 | --- | --- | ---: | ---: |
@@ -489,11 +551,11 @@ to an exact version in the manifest of the crate that uses it:
 
 | Manifest | Dependency | License | Purpose |
 | --- | --- | --- | --- |
-| `tools/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask serial-capture` and `cargo xtask qemu`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
+| `tools/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask serial-capture`, `cargo xtask qemu` and `cargo xtask qemu-boot`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
 | `tools/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The terminal, lock and signal calls of the serial port transport, the signal that the process helpers send, and the pseudo-terminals, signals, file-size limits and child processes of the tests of the transport, the serial capture, the QEMU capture and runner and the process helpers |
 | `tools/Cargo.toml` | `object` without default features, with `write_core` and `elf` | MIT OR Apache-2.0 | The ELF writer that lays out and encodes the test image around its instruction words: the ELF header, the program and section headers, the symbol table and the string tables |
-| `tools/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | Report values, whose objects keep the order of their keys, and their JSON text |
-| `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching and in the receipts of the serial capture and of `cargo xtask qemu`, the suffix of their run directories, and the build-id of the test image |
+| `tools/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | Report values, whose objects keep the order of their keys, and their JSON text, and the messages of Cargo from which `cargo xtask qemu-boot` takes the image |
+| `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching and in the receipts of the serial capture, of `cargo xtask qemu` and of `cargo xtask qemu-boot`, the suffix of their run directories, and the build-id of the test image |
 | `xtask/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask formal run`, `cargo xtask formal guard`, `cargo xtask formal toolchain-check`, `cargo xtask formal check`, `cargo xtask formal vectors` and `cargo xtask formal canary`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
 | `xtask/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The process groups of the commands of `cargo xtask formal run` and `cargo xtask formal vectors`: killing a command's group, finding whether any of its processes remain, seeing that a command has ended without collecting it, and the default disposition of `SIGCHLD` that this needs; finding whether SIGHUP is ignored when the run starts; and the effective user of the run, the bytes available on the file system of its run directory and the largest resident set of a process that it collected, which its receipt records |
 | `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json`, `cargo xtask formal check` reads `verification/targets.json` and `cargo xtask formal run` reads `verification/targets.json`, `verification/qualification/cases.json`, `verification/extraction.toml`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json` and the `translation.json` that Aeneas writes, the type into which the `subset` step of `cargo xtask check` reads its compile-fail cases, the type into which `cargo xtask formal vectors` reads the `vectors` block of a contract, the record of a step of `cargo xtask formal canary`, and the types of the receipt of `cargo xtask formal run`, which the canary also reads |

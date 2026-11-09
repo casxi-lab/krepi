@@ -116,7 +116,7 @@ None. The module runs on the host and had no QEMU or board results.
   `properties::real_image_resolves_kernel_main_to_its_source`: the legacy
   test read the built prototype kernel image, when it existed, and found
   `kernel_main` among the sections, build-id note and symbols that the linker
-  produced. No kernel image of this repository exists yet to read.
+  produced. The tests of this crate do not build a kernel image to read.
 - `boundaries::address_and_request_limits_are_enforced` in the same file,
   which tests only the symbolization module.
 - The test helpers of that file for the symbolization tests (`TempElf`,

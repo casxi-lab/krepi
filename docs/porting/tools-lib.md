@@ -38,19 +38,20 @@ krepi modules that receive them.
   the kernel, user-space and xtask workspaces. The format, Clippy and test
   steps of `cargo xtask check` cover it.
 - The crate depends on `serde_json` `=1.0.154` without its default features
-  and with its `preserve_order` feature, for report values and their text,
-  on `sha2` `=0.11.1` without its default features, for the SHA-256
-  digests of the ELF fixture patching, of the serial capture and of the
-  QEMU runner and the build-id of the test image, and on
+  and with its `preserve_order` feature, for report values and their text
+  and for the messages of Cargo that `qemu_boot` reads, on `sha2` `=0.11.1`
+  without its default features, for the SHA-256 digests of the ELF fixture
+  patching, of the serial capture, of the QEMU runner and of the QEMU boot
+  suite and the build-id of the test image, and on
   `libc` `=0.2.191`, the version of the legacy manifest, without its default
   feature, for the terminal, lock and signal calls of `tty`, the signal
   that `qemu` sends, and the pseudo-terminals, signals, file-size limits and
   child processes of the tests of `tty`, `serial_capture`, `qemu` and
   `qemu_run`; on `clap` `=4.6.7` without its default features and with
   its `std`, `help`, `usage` and `error-context` features, for the command
-  lines of `serial_capture` and `qemu_run`; and on `object` `=0.40.0`
-  without its default features and with its `write_core` and `elf`
-  features, for the ELF writer of `test_elf`; see
+  lines of `serial_capture`, `qemu_run` and `qemu_boot`; and on `object`
+  `=0.40.0` without its default features and with its `write_core` and
+  `elf` features, for the ELF writer of `test_elf`; see
   [dependencies](../../CONTRIBUTING.md#dependencies). All five are licensed
   MIT OR Apache-2.0, and the crates they depend on are licensed under MIT,
   Apache-2.0, Zlib or the Unlicense, one of them with the Unicode-3.0
@@ -70,12 +71,14 @@ krepi modules that receive them.
   process helpers of [`qemu`](tools-qemu.md) and writes the serial
   transcript, QEMU's standard error and a receipt into a new run directory;
   [testing](../conventions/testing.md#entry-points) describes it and its
-  receipt. `tools/src/test_elf.rs` writes the test image, an AArch64
-  executable for QEMU virt that writes one line to the PL011 UART and powers
-  the machine off with PSCI `SYSTEM_OFF` through HVC. Its program is a fixed
-  list of instruction words, and the ELF writer of `object` lays out the
-  executable around it, so it needs no bare-metal target, assembler or
-  linker; the ELF reader of [`elf`](tools-elf.md) reads it in its tests.
+  receipt. Its library entry `run_image_with` also sends input to the guest,
+  for the QEMU boot suite of [`qemu_boot`](tools-qemu_boot.md).
+  `tools/src/test_elf.rs` writes the test image, an AArch64 executable for
+  QEMU virt that writes one line to the PL011 UART and powers the machine
+  off with PSCI `SYSTEM_OFF` through HVC. Its program is a fixed list of
+  instruction words, and the ELF writer of `object` lays out the executable
+  around it, so it needs no bare-metal target, assembler or linker; the ELF
+  reader of [`elf`](tools-elf.md) reads it in its tests.
 - `tools/src/console.rs` holds code of the port of `serial_capture`, the
   terminal of a command, moved out of that module so that both commands
   share it; [`serial_capture`](tools-serial_capture.md#changes) records it.
@@ -167,7 +170,10 @@ None. The crate root runs on the host and had no QEMU or board results.
   - `suites`, apart from the items above: the prototype simulation and board
     suites. krepi suites are written against krepi feature documents. The
     tests of [`qemu`](tools-qemu.md) take the fatal records of the board
-    session of `suites/platform/kernel_serial.rs` as a constant.
+    session of `suites/platform/kernel_serial.rs` as a constant, and the
+    QEMU boot suite takes the judgment and the echo challenge of
+    `suites/platform/qemu_boot.rs`, recorded in
+    [`qemu_boot`](tools-qemu_boot.md).
   - `symbolize`, the resolution of fault addresses to functions and source
     lines on top of the ELF reader. It is left to the change that adds a
     fault-symbolization command.

@@ -31,11 +31,12 @@ finds the build records, and `parse_fields` checks a record of `key=value`
 fields against the names it must hold.
 
 The records keep the names of the prototype kernel, which start with
-`CASXI_`. They are kept as the record protocol that the captures of
-[`qemu`](tools-qemu.md) read, over the standard streams of QEMU or a
-board's serial port, until the kernel of this repository defines its own
-records. Apart from `Match`, which the captures return, nothing but the
-tests calls the module yet. The module is ported with its unit tests and
+`CASXI_`, and the kernel of this repository writes its records under the
+same names, as the
+[boot contract](../domains/boot-platform/boot/contract.md#records) fixes
+them. The captures of [`qemu`](tools-qemu.md) return `Match`, and the QEMU
+boot suite of [`qemu_boot`](tools-qemu_boot.md) checks the CPU identity
+record with `check_cpu_identity`. The module is ported with its unit tests and
 with the tests of the legacy integration tests that tested it.
 
 The legacy module wrote the bytes of a rejected line, token or record as

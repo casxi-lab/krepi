@@ -266,8 +266,12 @@ capture reproduced. Each rule is kept and fixed by a test:
 - The prototype ran its images on QEMU virt with one Cortex-A76 through
   this module: the boot to the ready line with the CPU identity record, the
   echo of input, the breakpoint exception with its fault trace and halt,
-  and the QEMU suites that used the plain and the guarded capture. krepi
-  obtains such results again with its own images on QEMU virt (planned).
+  and the QEMU suites that used the plain and the guarded capture. The
+  QEMU boot suite of krepi, `cargo xtask qemu-boot`, obtains the boot to
+  the ready line with the CPU identity record and the echo of input again
+  with the krepi default image, through the QEMU runner; the breakpoint
+  exception and the other results are obtained again with krepi images on
+  QEMU virt (planned).
 - The prototype's board sessions talked to a Raspberry Pi 5 through a
   serial port with the board capture: requests in both directions, the
   failure tail after a fatal record, and the end of a session at its

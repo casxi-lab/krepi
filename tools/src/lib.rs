@@ -5,7 +5,8 @@
 //! streams of a process, the QEMU virt command with the serial capture of a
 //! guest on QEMU or behind a board's serial port and the process helpers,
 //! the run of an image on QEMU behind `cargo xtask qemu`, the test image that
-//! it boots in the tests, the terminal that both commands share, the line
+//! it boots in the tests, the QEMU boot suite of the kernel behind `cargo
+//! xtask qemu-boot`, the terminal that these commands share, the line
 //! matchers and record parsers of a guest's serial output, and the time
 //! values of these tools per platform.
 //!
@@ -19,6 +20,7 @@ compile_error!("krepi-tools runs on Unix hosts only");
 pub mod console;
 pub mod elf;
 pub mod qemu;
+pub mod qemu_boot;
 pub mod qemu_run;
 pub mod receipt;
 pub mod report;

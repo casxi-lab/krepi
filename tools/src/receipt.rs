@@ -4,8 +4,8 @@
 //! records, build-ids and records of `key=value` fields.
 //!
 //! The records are those of the prototype kernel, whose names start with
-//! `CASXI_`. The QEMU and board captures read them until the kernel of this
-//! repository defines its own records.
+//! `CASXI_`; the kernel of this repository writes its records under the same
+//! names.
 //!
 //! A line is a run of bytes terminated by `\n`, with one optional `\r` before
 //! the terminator, that starts at the start of the buffer or after a `\n`. A
