@@ -49,7 +49,8 @@ classifies it.
   module, and two new tests are the examples ex7 and ex8 of the
   [QEMU virt boot](../features/platform/qemu-virt-boot.md) feature
   document. Three new tests hold `data_lines` and `instruction_lines` at a
-  value of `CTR_EL0` whose line fields differ.
+  value of `CTR_EL0` whose line fields differ, and a fourth at a value with
+  bit 3 set in both line fields.
 - The line `//! Feature: krepi.platform.qemu-virt-boot` names the feature in
   both files.
 

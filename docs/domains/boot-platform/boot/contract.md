@@ -401,15 +401,16 @@ not provided. No function reports a result.
   Its caller owns every naturally aligned 2 KiB block that the range
   touches, and no cache holds data of those blocks that must be kept.
 - With the MMU off, every address below the implemented physical address
-  size is mapped, writable and executable, and a larger one faults. With the
-  MMU on, an address that the current translation does not map makes a data
-  cache function raise a Translation fault and may make
-  `invalidate_code_to_pou` raise one, an entry whose access flag is 0 may
-  make any range function raise an Access flag fault, as the implementation
-  defines, and an address without write permission makes
-  `invalidate_to_poc` raise a Permission fault; each fault is taken as a
-  Data Abort, which the vectors report. A TLB invalidation never raises an
-  abort.
+  size is mapped, writable and executable, and a larger one makes a data
+  cache function raise an Address size fault and may make
+  `invalidate_code_to_pou` raise one. With the MMU on, an address that the
+  current translation does not map makes a data cache function raise a
+  Translation fault and may make `invalidate_code_to_pou` raise one, an
+  entry whose access flag is 0 may make any range function raise an Access
+  flag fault, as the implementation defines, and an address without write
+  permission makes `invalidate_to_poc` raise a Permission fault; each fault
+  is taken as a Data Abort, which the vectors report. A TLB invalidation
+  never raises an abort.
 - The asm of the maintenance instructions is not `nomem`, so the memory
   accesses of the code before a call stay before its instructions.
 
@@ -533,7 +534,8 @@ counter as well.
   a whole image in the windows of the Raspberry Pi 5 and of QEMU virt, the
   examples of a range with unaligned ends and of empty and oversized
   ranges, and the walks of the maintenance at a value of `CTR_EL0` whose
-  line fields differ, with the line size of each walk and its limit.
+  line fields differ and at one with bit 3 set in both line fields, with
+  the line size of each walk and its limit.
 - The QEMU boot suite boots the default image on QEMU virt and holds its
   transcript against the records of this page, written into the suite, not
   taken from an earlier run. Three cold boots give identical transcripts.

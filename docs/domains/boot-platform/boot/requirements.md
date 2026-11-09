@@ -434,8 +434,9 @@ tests of `kernel/arch/src/cache_range/` pass.
   boundaries, of empty, oversized, wrapping and wide-field requests and of
   the walk of a whole image in the windows of the Raspberry Pi 5 and of QEMU
   virt, the examples ex7 and ex8, and the walks of the maintenance at a
-  value of `CTR_EL0` whose four line and granule fields differ, which hold
-  the field and the limit of each walk. They show the arithmetic of the
+  value of `CTR_EL0` whose four line and granule fields differ and at a
+  value with bit 3 set in both line fields, which hold the field, its full
+  width and the limit of each walk. They show the arithmetic of the
   walks. They show no maintenance instruction and nothing of a machine.
 
 ### BOOT-R11
@@ -510,8 +511,10 @@ maintenance. The criterion: the case `invalidate-to-poc` passes.
   `SCTLR_EL1` has the MMU and both caches off, that the range starts and
   ends inside data cache lines and touches more than one line, and that the
   data that the image wrote before the invalidation reads back unchanged.
-  The image invalidates only when the caches are off, the condition under
-  which no cache holds data that must be kept. It shows that
+  No cache holds data that must be kept: the caches have been off since
+  entry, by the contract of the cold entry in `boot.S`, and nothing in the
+  image sets `SCTLR_EL1.C`; the check of `SCTLR_EL1` only confirms the
+  current state, and the image invalidates only when it held. It shows that
   `invalidate_to_poc` executes at EL1 on QEMU virt over a range with
   unaligned ends and returns without an exception, and that data written
   with the caches off survives it. It does not show that a stale line is

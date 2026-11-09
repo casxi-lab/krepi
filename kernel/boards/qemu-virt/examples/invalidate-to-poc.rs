@@ -6,13 +6,15 @@
 //!
 //! Feature: krepi.platform.qemu-virt-boot
 //!
-//! The image checks that `SCTLR_EL1` has the MMU, the data cache and the
-//! instruction cache off, as QEMU leaves them, so that no write has gone
-//! through a data cache and no line holds data that must be kept. It fills
-//! a page-aligned buffer of 4 KiB with a pattern and, only when the check
-//! held, invalidates [`BYTES`] bytes from byte [`OFFSET`]. The range crosses
-//! the boundary of 2 KiB in the middle of the buffer, so it touches at
-//! least two lines of any data cache line size up to 2 KiB and the two
+//! The caches have been off since entry, as the contract of the cold entry
+//! in `boot.S` states, and nothing in the image sets `SCTLR_EL1.C`, so no
+//! write has gone through a data cache and no line holds data that must be
+//! kept. The image checks that `SCTLR_EL1` has the MMU, the data cache and
+//! the instruction cache off, which only confirms the current state. It
+//! fills a page-aligned buffer of 4 KiB with a pattern and, only when the
+//! check held, invalidates [`BYTES`] bytes from byte [`OFFSET`]. The range
+//! crosses the boundary of 2 KiB in the middle of the buffer, so it touches
+//! at least two lines of any data cache line size up to 2 KiB and the two
 //! blocks of 2 KiB of the buffer, and both of its ends lie inside a line of
 //! any size from 4 bytes up. The self-check holds the state of `SCTLR_EL1`,
 //! the ends and the lines against the line size of `CTR_EL0.DminLine`, and

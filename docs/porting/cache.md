@@ -68,8 +68,9 @@ classifies it.
 - The field of `CTR_EL0` that gives the line size of a walk, and its limit,
   are chosen by `cache_range::data_lines`, `DminLine`, and
   `cache_range::instruction_lines`, `IminLine`, which take the value of the
-  register, in place of the field extraction and the literal limit inside
-  each legacy function, so that host tests hold them.
+  register, in place of the field extraction inside each legacy function
+  and the literal limit of the legacy code publication functions, so that
+  host tests hold them.
 - Each function documents the shareability domain of its instructions and
   barriers, that the final `ISB` synchronizes only the executing CPU, and
   that a CPU calls it for its own maintenance. The `SAFETY` comments are

@@ -95,6 +95,28 @@ fn the_instruction_walk_takes_iminline() {
     assert!(walk.eq((0..7).map(|line| 0x4020_1000 + 32 * line)));
 }
 
+/// A value of `CTR_EL0` with bit 3 set in both line fields: `IminLine` 9,
+/// lines of 2 KiB, and `DminLine` 8, lines of 1 KiB, with the other fields
+/// of [`DISTINCT_FIELDS`]. A walk that kept only the low three bits of its
+/// field would take lines of 8 or 4 bytes at this value.
+const WIDE_FIELDS: u64 = (1 << 31) | (6 << 24) | (5 << 20) | (8 << 16) | (0b11 << 14) | 9;
+
+/// Both walks take all four bits of their field: the 200 bytes from
+/// `0x4020_1380` cross the boundary of 1 KiB at `0x4020_1400` and lie in one
+/// line of 2 KiB, and a range of [`MAX_RANGE_BYTES`] from an aligned start
+/// is 64 lines of 1 KiB and 32 of 2 KiB.
+#[test]
+fn the_walks_take_the_full_width_of_the_line_fields() {
+    let data = data_lines(WIDE_FIELDS, 0x4020_1380, 200).unwrap();
+    assert!(data.eq([0x4020_1000, 0x4020_1400]));
+    let instruction = instruction_lines(WIDE_FIELDS, 0x4020_1380, 200).unwrap();
+    assert!(instruction.eq([0x4020_1000]));
+    let data = data_lines(WIDE_FIELDS, 0x4020_1000, MAX_RANGE_BYTES).unwrap();
+    assert_eq!(data.count(), 64);
+    let instruction = instruction_lines(WIDE_FIELDS, 0x4020_1000, MAX_RANGE_BYTES).unwrap();
+    assert_eq!(instruction.count(), 32);
+}
+
 /// Both walks of the maintenance refuse an empty range, a range one byte
 /// longer than [`MAX_RANGE_BYTES`] and a range that wraps, and walk a range
 /// of exactly that length: 1,024 lines of 64 bytes, and 2,048 of 32 bytes.
