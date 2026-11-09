@@ -4,8 +4,8 @@ Selected kernel functions are to be proved correct in Lean 4. Charon extracts
 the actual Rust source of the kernel, Aeneas translates the extraction into
 Lean definitions, and handwritten Lean proofs show that those generated
 definitions satisfy independently written specifications. The organization
-follows the one used for the casξ CAS library, adapted to an
-operating-system kernel.
+follows the one used for the CAS project, adapted to an operating-system
+kernel.
 
 A proof covers exactly the functions and statements registered for it. Code
 outside a registered target is unverified, and a theorem says nothing beyond
@@ -91,7 +91,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/image-pin.json` | The published image that the CI jobs of the gate run, by its digest ([image pin](#image-pin)) | Present |
 | `verification/lakefile.toml`, `lean-toolchain`, `lake-manifest.json` | The Lake project of the hand-written Lean and of the generated definitions, with the Lean toolchain and the packages of the Lake lock of the Aeneas Lean library ([qualification](#qualification)), and the library `KrepiRoot` of the root module that the [base round](#base-round) writes | Present |
 | `verification/extraction.toml` | How Charon compiles each extracted crate ([extraction](#extraction)) | Present |
-| `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there | Planned |
+| `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there, where it has one | Planned |
 | `verification/Krepi/Statements/` | Statements: the propositions that registered theorems prove ([statements and proofs](#statements-and-proofs)) | Planned |
 | `verification/Krepi/Proofs/` | Proofs of statements and refinement proofs of production targets; the only directory of the Lake project outside the statement side ([statements and proofs](#statements-and-proofs)) | Planned |
 | `verification/Krepi/Models/` | Lean models of items that proofs reach without extracting them, and their differential check | Planned |
@@ -104,7 +104,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/axioms.json` | The axioms of the Aeneas Lean library that target theorems may use, each with its source and reason ([base round](#base-round)) | Present, empty |
 | `verification/tcb.json` | Items of the trusted base: native decisions and patterns of generated axioms, whose classification comes later ([base round](#base-round)) | Present, empty |
 | `verification/legacy.json` | Kept empty: production functions without a proof are listed in `open.json` ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty by design |
-| `verification/open.json` | The open obligations of the production code, generated from the `Open obligations` tables of the contracts of the components ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty |
+| `verification/open.json` | The open obligations of the production code, generated from the `Open obligations` tables of the contracts of the components ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
 | `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `vectors` and `canary` present, the others planned |
 

@@ -20,21 +20,26 @@ independent specifications and proved in Lean 4.
 
 ## Status
 
-This repository is newly initialized. It contains this README, the krepi logo,
-the contribution rules, the target architecture, the documentation conventions,
-empty proof registries, a commit-message hook and the build tooling: a pinned
-Rust toolchain, the kernel and user-space Cargo workspaces with an empty ABI
-crate and SDK crate, and the repository checks. A host tooling crate for
+The repository holds this README, the krepi logo, the contribution rules,
+the target architecture, the documentation conventions, empty proof
+registries, a commit-message hook and the build tooling: a pinned Rust
+toolchain, the kernel and user-space Cargo workspaces and the repository
+checks. The kernel workspace holds an empty ABI crate, the AArch64 processor
+primitives with the cold entry of an image, and the QEMU virt board support
+with its PL011 serial console and its default image, which boots on QEMU
+virt into EL1, writes its boot records and echoes its serial input; the
+user-space workspace holds an empty SDK crate. A host tooling crate for
 tests holds an ELF reader, report values, a serial port transport, a serial
-link, the serial capture behind `cargo xtask serial-capture`, the QEMU runner
-behind `cargo xtask qemu` and the parsers of serial records, ported from the
-prototype with their porting records, and a test image that the checks boot
-with the runner. The proof tools are pinned by a manifest, a reviewed Aeneas
-patch and the recipe of a container image that CI builds and publishes
+link, the serial capture behind `cargo xtask serial-capture`, the QEMU
+runner behind `cargo xtask qemu`, the QEMU boot suite behind
+`cargo xtask qemu-boot` and the parsers of serial records, and a test image
+that the checks boot with the runner. The kernel code and most of the tools
+are ported from the prototype, with their porting records. The proof tools are
+pinned by a manifest, a reviewed Aeneas patch and the recipe of a container
+image that CI builds and publishes
 ([formal verification](docs/formal-verification.md#tools)); no proof exists
-yet. There is no kernel source yet, and no krepi kernel boots.
-Continuous integration runs the repository checks on every pull request to
-`main` and on every push to `main`.
+yet. Continuous integration runs the repository checks and the QEMU boot
+suite on every pull request to `main` and on every push to `main`.
 
 The required host checks run from the repository root and need the tools that
 `toolchains.toml` lists for the host
@@ -42,6 +47,18 @@ The required host checks run from the repository root and need the tools that
 
 ```sh
 cargo xtask check
+```
+
+The QEMU boot suite builds the default image and boots it three times on
+QEMU virt; the image can also be built in `kernel/` and run with the QEMU
+runner, which records its serial output until the timeout:
+
+```sh
+cargo xtask qemu-boot
+cd kernel
+cargo build --locked --release --target aarch64-unknown-none-softfloat --bin krepi-qemu-virt
+cd ..
+cargo xtask qemu --timeout 5 kernel/target/aarch64-unknown-none-softfloat/release/krepi-qemu-virt
 ```
 
 An earlier prototype of the system is kept read-only and is not public. It is
@@ -113,7 +130,7 @@ None of this works yet.
 
 | Repository | Role |
 | --- | --- |
-| [casxi-lab/kalyx](https://github.com/casxi-lab/kalyx) | The CAS library; its code is still to be moved in |
+| [casxi-lab/kalyx](https://github.com/casxi-lab/kalyx) | The CAS library |
 | [casxi-lab/kosmo](https://github.com/casxi-lab/kosmo) | The user interface and graphical shell |
 
 The CAS library runs on krepi as an ordinary user program; the UI runs on top
@@ -128,7 +145,7 @@ of the system services. Neither is part of the kernel.
 | [Formal verification](docs/formal-verification.md) | How proofs, specifications and registries are organized |
 | [Formal upgrade](docs/formal-upgrade.md) | How the proof tools are upgraded, proofs repaired and canary verdicts triaged |
 | [Subject domains](docs/domains/README.md) | The complete target scope of the system, by subject |
-| [Feature index](docs/features/README.md) | What the system provides today (empty) |
+| [Feature index](docs/features/README.md) | What the system provides |
 | [Documentation conventions](docs/conventions/documentation.md) | Feature documents, domain and component documents |
 | [Testing](docs/conventions/testing.md) | Test layout, environments and evidence |
 | [Porting](docs/conventions/porting.md) | How code is taken from the prototype tree |

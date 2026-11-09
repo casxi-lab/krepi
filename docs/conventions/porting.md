@@ -68,7 +68,12 @@ repository tasks `xtask/` takes the prefix `xtask-`:
 A destination below `verification/` takes the prefix `verification-`: the
 qualification crate `verification/qualification/`, with the Lean files of
 its cases, has `docs/porting/verification-qualification.md`.
-One record may cover a module directory and its children.
+One record may cover a module directory and its children. The record of a
+kernel crate root, with its manifest and the files of the crate outside
+`src/`, takes the name of the crate directory: `kernel/arch/src/lib.rs` has
+`docs/porting/arch.md`. The modules of the crates of the kernel workspace
+have names that differ from each other, so that no two kernel records share
+a name.
 
 A record starts with a metadata block:
 

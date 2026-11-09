@@ -1,2 +1,10 @@
 [alias]
 xtask = "run --quiet --locked --manifest-path xtask/Cargo.toml --"
+
+# The flags of the bare-metal target of the kernel images, which apply when
+# Cargo runs at the repository root or below it: the images carry a GNU
+# build-id note of SHA-1, which the link script of each image requires, use
+# the static relocation model and keep frame pointers. Host builds do not
+# use them.
+[target.aarch64-unknown-none-softfloat]
+rustflags = ["-C", "link-arg=--build-id=sha1", "-C", "relocation-model=static", "-C", "force-frame-pointers=yes"]

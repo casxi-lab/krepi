@@ -15,10 +15,10 @@ git diff --cached --check
 ```
 
 [Testing](docs/conventions/testing.md#entry-points) describes what the check
-runs. CI runs the same check on every pull request to `main` and on every
-push to `main`. A change that updates a tool version updates
-`toolchains.toml` in the same change. The proof tools are pinned separately,
-in `verification/toolchain.json`: a change to them runs
+runs. CI runs the same check, and then the QEMU boot suite, on every pull
+request to `main` and on every push to `main`. A change that updates a tool
+version updates `toolchains.toml` in the same change. The proof tools are
+pinned separately, in `verification/toolchain.json`: a change to them runs
 `cargo xtask formal toolchain-check` and builds their image in CI, as
 [formal verification](docs/formal-verification.md#tool-checks) describes.
 
@@ -34,6 +34,14 @@ directory below `artifacts/`, without evaluating the output. The tests of the
 check run it on the test image of the host tooling crate.
 [Testing](docs/conventions/testing.md#entry-points) describes it and its
 receipt.
+
+`cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
+QEMU virt default image in `kernel/`, boots it three times on QEMU virt
+through the QEMU runner, sends it serial input and judges each transcript
+against the fixed records of the boot contract, and writes the receipts of
+the runs and of the suite into a new directory below `artifacts/`. Before
+proposing a change to the kernel workspace or to the suite, run it after the
+check. [Testing](docs/conventions/testing.md#entry-points) describes it.
 
 When a command lands, this page and [testing](docs/conventions/testing.md)
 describe what it runs. Do not write a command into a document before it works.
