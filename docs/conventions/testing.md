@@ -256,7 +256,18 @@ Every job of these lines has a `timeout-minutes`. In the jobs that run
 command also ends at a deadline that `timeout` sets two minutes before the
 limit of its job, so that the uploads still run when the command takes too
 long; `cargo xtask qemu-boot` runs after the check in the same job without
-a deadline of its own. Along the longest chain of jobs that need each
+a deadline of its own. The step starts the command as the last command of
+its script with `exec bash .github/scripts/deadline.sh`, so that this script
+is the process of the step and receives the signals with which the runner
+stops a step: SIGINT when the run is cancelled, SIGTERM some seconds later
+and then SIGKILL. `timeout` runs the command in a process group of its own,
+which those signals do not reach, so the script passes SIGINT and SIGTERM
+on to `timeout`, which passes them on to the command, and does not end
+before the command has: a check that a newer push to its pull request
+cancels writes its receipt with the result `interrupted`, and the upload
+after it finds the receipt. The script exits with the status of the
+command, and with 124 when the deadline stopped it, also when `timeout`
+had to kill it then. Along the longest chain of jobs that need each
 other the limits add up to 18 minutes on the pull request line and to 43
 minutes on the full line, within the 20 and 60 minutes that those lines
 allow. After each completed run of another workflow of the directory,
@@ -272,9 +283,11 @@ them to these limits, to the label of the full line as its only trigger, to
 `cargo xtask check` and the summary of the pull request line, to the list
 of workflows that the record workflow follows, to a retention by the rule
 below for every upload step of every workflow, against a table of those
-steps, and to downloads that take the name of their
+steps, to downloads that take the name of their
 artifact from an output of the job that uploaded it, so that a rerun of
-the downloading job alone still finds the artifact.
+the downloading job alone still finds the artifact, and to main commands
+that run under that script as the last command of their step, at a
+deadline one or two minutes before the limit of their job.
 
 Every upload step of every workflow of the directory sets `retention-days`,
 which the repository setting of 90 days bounds. A job that runs on `main`

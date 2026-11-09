@@ -748,3 +748,226 @@ fn a_download_takes_the_name_of_its_artifact_from_the_job_that_uploaded_it() {
         assert_eq!(download_problems(&parse(&text)), [problem], "{text}");
     }
 }
+
+/// The script that runs a main command of a step under its deadline.
+const DEADLINE: &str = ".github/scripts/deadline.sh";
+/// The main commands of the jobs of the lines, as `cargo xtask <command>`.
+const MAIN_COMMANDS: [&str; 3] = ["check", "image", "suite"];
+
+/// The lines of `script` that are not blank, each line that ends in `\`
+/// joined to the next.
+fn logical_lines(script: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for line in script.lines() {
+        match line.trim_end().strip_suffix('\\') {
+            Some(start) => current.push_str(start),
+            None => {
+                current.push_str(line);
+                lines.push(std::mem::take(&mut current));
+            }
+        }
+    }
+    lines.push(current);
+    lines.retain(|line| !line.trim().is_empty());
+    lines
+}
+
+/// The main command that the line `line` runs, if it runs one.
+fn main_command(line: &str) -> Option<&str> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    words.windows(3).find_map(|words| {
+        let main = words[0] == "cargo" && words[1] == "xtask" && MAIN_COMMANDS.contains(&words[2]);
+        main.then_some(words[2])
+    })
+}
+
+/// How the line `line` runs its command under [`DEADLINE`]: whether it
+/// turns workflow commands off, its deadline in minutes and its kill-after
+/// in seconds; or why it does not run it so.
+fn deadline_of(line: &str) -> Result<(bool, i64, i64), String> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let rest = (words.strip_prefix(&["exec", "bash", DEADLINE][..]))
+        .ok_or_else(|| format!("does not run as the last command `exec bash {DEADLINE}`"))?;
+    let (stop, rest) = match rest.split_first() {
+        Some((&"--stop-commands", rest)) => (true, rest),
+        _ => (false, rest),
+    };
+    let wrong = || "does not have a deadline in minutes and a kill-after in seconds".to_string();
+    let [deadline, kill, "cargo", "xtask", ..] = rest else {
+        return Err(wrong());
+    };
+    let number = |text: &str, unit: char| text.strip_suffix(unit)?.parse::<i64>().ok();
+    let minutes = number(deadline, 'm').ok_or_else(wrong)?;
+    let seconds = number(kill, 's').ok_or_else(wrong)?;
+    Ok((stop, minutes, seconds))
+}
+
+/// The problems of the main commands of the jobs of `document`, with their
+/// number. Each runs as the last command of its step under [`DEADLINE`],
+/// with `exec` so that the script receives the signals of the runner, with
+/// `--stop-commands` for the suite alone, and at a deadline that with its
+/// kill-after ends before the limit of its job and, when `tight`, one or two
+/// minutes before that limit. No other command of a script calls `timeout`.
+fn deadline_problems(document: &Yaml, tight: bool) -> (usize, Vec<String>) {
+    let mut problems = Vec::new();
+    let mut count = 0;
+    for (key, job) in jobs(document) {
+        let limit = job["timeout-minutes"].as_i64();
+        for script in
+            (job["steps"].as_vec().into_iter().flatten()).filter_map(|step| step["run"].as_str())
+        {
+            let lines = logical_lines(script);
+            let named: Vec<usize> = (0..lines.len())
+                .filter(|at| main_command(&lines[*at]).is_some())
+                .collect();
+            let timeout = |line: &&String| line.split_whitespace().any(|word| word == "timeout");
+            let other = lines.iter().filter(|line| main_command(line).is_none());
+            if other.clone().any(|line| timeout(&line)) {
+                problems.push(format!("job {key}: a script calls timeout itself"));
+            }
+            if named.is_empty() {
+                continue;
+            }
+            count += named.len();
+            if named != [lines.len() - 1] {
+                problems.push(format!(
+                    "job {key}: a main command is not the last command of its step"
+                ));
+                continue;
+            }
+            let line = &lines[lines.len() - 1];
+            let main = main_command(line).expect("a main command");
+            let (stop, minutes, seconds) = match deadline_of(line) {
+                Ok(deadline) => deadline,
+                Err(problem) => {
+                    problems.push(format!("job {key}: cargo xtask {main} {problem}"));
+                    continue;
+                }
+            };
+            if stop != (main == "suite") {
+                problems.push(format!(
+                    "job {key}: cargo xtask {main} {} workflow commands off",
+                    if stop { "turns" } else { "does not turn" }
+                ));
+            }
+            match limit {
+                None => problems.push(format!("job {key} has no timeout-minutes")),
+                Some(limit) if minutes * 60 + seconds >= limit * 60 => problems.push(format!(
+                    "job {key}: the deadline of cargo xtask {main} and its kill-after reach the \
+                     limit of {limit} minutes"
+                )),
+                Some(limit) if tight && !(1..=2).contains(&(limit - minutes)) => {
+                    problems.push(format!(
+                        "job {key}: the deadline of cargo xtask {main} is not one or two minutes \
+                         before the limit of {limit} minutes"
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    (count, problems)
+}
+
+#[test]
+fn every_main_command_of_the_lines_runs_under_its_deadline() {
+    let mut count = 0;
+    for path in &LINES[..4] {
+        let (main, problems) = deadline_problems(&workflow(path), true);
+        assert_eq!(problems, Vec::<String>::new(), "{path}");
+        count += main;
+    }
+    // The check, the images and the suite of the pull request, full and
+    // nightly lines, and the images and the suite of the weekly line.
+    assert_eq!(count, 11);
+    // The script passes both stop signals on to `timeout`, which it starts
+    // with SIGINT not ignored, and waits for the command.
+    let tree = Tree::load(&crate::repo::root()).expect("the tracked files");
+    let script = tree.text(DEADLINE).expect("the script is tracked");
+    for text in [
+        "trap 'forward INT' INT",
+        "trap 'forward TERM' TERM",
+        "env --default-signal=INT,QUIT timeout --signal=TERM",
+        "wait \"$pid\"",
+    ] {
+        assert!(script.contains(text), "{text}");
+    }
+    let good = "jobs:\n  check:\n    timeout-minutes: 15\n    steps:\n      - run: |\n          \
+                echo start\n          exec bash .github/scripts/deadline.sh 13m 90s \\\n            \
+                cargo xtask check --receipt r.json\n  suite:\n    timeout-minutes: 10\n    \
+                steps:\n      - run: exec bash .github/scripts/deadline.sh --stop-commands 8m 60s \
+                cargo xtask suite\n";
+    assert_eq!(deadline_problems(&parse(good), true), (2, Vec::new()));
+    let cases = [
+        (
+            good.replace(
+                "exec bash .github/scripts/deadline.sh 13m 90s",
+                "timeout --kill-after=90s 13m",
+            ),
+            "job check: cargo xtask check does not run as the last command `exec bash \
+             .github/scripts/deadline.sh`",
+        ),
+        (
+            good.replace(
+                "exec bash .github/scripts/deadline.sh 13m",
+                "bash .github/scripts/deadline.sh 13m",
+            ),
+            "job check: cargo xtask check does not run as the last command `exec bash \
+             .github/scripts/deadline.sh`",
+        ),
+        (
+            good.replace(
+                "--receipt r.json\n",
+                "--receipt r.json\n          echo done\n",
+            ),
+            "job check: a main command is not the last command of its step",
+        ),
+        (
+            good.replace("echo start", "timeout 5 sleep 1"),
+            "job check: a script calls timeout itself",
+        ),
+        (
+            good.replace("13m 90s", "15m 90s"),
+            "job check: the deadline of cargo xtask check and its kill-after reach the limit of \
+             15 minutes",
+        ),
+        (
+            good.replace("13m 90s", "13m 120s"),
+            "job check: the deadline of cargo xtask check and its kill-after reach the limit of \
+             15 minutes",
+        ),
+        (
+            good.replace("13m 90s", "10m 90s"),
+            "job check: the deadline of cargo xtask check is not one or two minutes before the \
+             limit of 15 minutes",
+        ),
+        (
+            good.replace("13m 90s", "13 90s"),
+            "job check: cargo xtask check does not have a deadline in minutes and a kill-after \
+             in seconds",
+        ),
+        (
+            good.replace("--stop-commands 8m", "8m"),
+            "job suite: cargo xtask suite does not turn workflow commands off",
+        ),
+        (
+            good.replace("deadline.sh 13m", "deadline.sh --stop-commands 13m"),
+            "job check: cargo xtask check turns workflow commands off",
+        ),
+        (
+            good.replace("    timeout-minutes: 15\n", ""),
+            "job check has no timeout-minutes",
+        ),
+    ];
+    for (text, problem) in cases {
+        assert_eq!(
+            deadline_problems(&parse(&text), true).1,
+            [problem],
+            "{text}"
+        );
+    }
+    // Away from the lines, the deadline may be earlier.
+    let early = good.replace("13m 90s", "10m 90s");
+    assert_eq!(deadline_problems(&parse(&early), false), (2, Vec::new()));
+}
