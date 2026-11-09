@@ -421,6 +421,9 @@ pub const CACHE_SAVES: [&str; 2] = ["actions/cache", "actions/cache/save"];
 /// with `actions/cache/restore`. Both the `uses` of each step, as YAML
 /// decodes it, and the text of the file, comments included, are read, in
 /// any letter case, so that neither an escape nor a comment hides a use.
+/// As the steps of a reusable workflow or of a local action are not read,
+/// a job of such a file that calls a workflow, and a step that uses a local
+/// action, are problems too.
 pub fn cache_problems(tree: &Tree) -> Vec<String> {
     // The actions of [`CACHE_SAVES`] that `text` names with a pin, and those
     // that it starts with.
@@ -434,6 +437,11 @@ pub fn cache_problems(tree: &Tree) -> Vec<String> {
     };
     let saves = |action: &str| {
         format!("{action}, which saves a cache, in a workflow that runs on pull_request")
+    };
+    let unread = |what: String| {
+        format!(
+            "{what}, whose steps this check does not read, in a workflow that runs on pull_request"
+        )
     };
     let mut problems = Vec::new();
     let files = (tree.texts()).filter(|(path, text)| {
@@ -451,9 +459,23 @@ pub fn cache_problems(tree: &Tree) -> Vec<String> {
             .flatten();
         for (key, job) in jobs {
             let key = key.as_str().unwrap_or_default();
-            let uses = (job["steps"].as_vec().into_iter().flatten())
-                .filter_map(|step| step["uses"].as_str());
-            for action in uses.flat_map(used) {
+            if !job["uses"].is_badvalue() {
+                let called = job["uses"].as_str().unwrap_or_default();
+                problems.push(format!(
+                    "{path}: job `{key}` {}",
+                    unread(format!("calls the workflow `{called}`"))
+                ));
+            }
+            let uses: Vec<&str> = (job["steps"].as_vec().into_iter().flatten())
+                .filter_map(|step| step["uses"].as_str())
+                .collect();
+            for local in uses.iter().filter(|uses| uses.starts_with("./")) {
+                problems.push(format!(
+                    "{path}: job `{key}` {}",
+                    unread(format!("uses the local action `{local}`"))
+                ));
+            }
+            for action in uses.into_iter().flat_map(used) {
                 problems.push(format!(
                     "{path}: job `{key}` uses {}; such a job restores a cache with \
                      actions/cache/restore",
@@ -927,6 +949,28 @@ mod tests {
             "on: pull_request\njobs:\n  j:\n    steps:\n      - uses: \"actions/cache\\x2Fsave@{sha}\"\n"
         );
         assert_eq!(problems(&escaped), [used("actions/cache/save")]);
+        // The steps of a reusable workflow or of a local action are not
+        // read, so a pull request workflow uses neither.
+        let unread =
+            "whose steps this check does not read, in a workflow that runs on pull_request";
+        let reusable =
+            |called: &str| format!("on: pull_request\njobs:\n  j:\n    uses: {called}\n");
+        for called in [
+            "./.github/workflows/b.yml".to_string(),
+            format!("owner/repo/.github/workflows/b.yml@{sha}"),
+        ] {
+            let text = reusable(&called);
+            let problem = format!("{path}: job `j` calls the workflow `{called}`, {unread}");
+            assert_eq!(problems(&text), [problem]);
+            assert_eq!(
+                problems(&text.replace("pull_request", "push")),
+                Vec::<String>::new()
+            );
+        }
+        let local = "./.github/actions/x";
+        let problem = format!("{path}: job `j` uses the local action `{local}`, {unread}");
+        assert_eq!(problems(&workflow("pull_request", local)), [problem]);
+        assert_eq!(problems(&workflow("push", local)), Vec::<String>::new());
     }
 
     #[test]
