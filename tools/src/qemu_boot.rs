@@ -46,7 +46,9 @@
 //! syndrome and return address, and then either `CASXI_HALTED`, or the
 //! self-checks of the image, each with no failure, and `CASXI_RESUMED`, or,
 //! for an image whose vectors halt after its dispatch, those self-checks
-//! alone; nothing else. The return address must be that of a symbol of the
+//! alone; nothing else. The cases of the cache and TLB maintenance expect no
+//! exception record: each passes with its start record, its self-check and
+//! `CASXI_RESUMED`. The return address must be that of a symbol of the
 //! image, or lie between two of its symbols, which the suite reads from the
 //! ELF file. The expected records are written here from the contract and
 //! from the exception classes of the Arm Architecture Reference Manual, not
@@ -452,7 +454,7 @@ pub struct Case {
 }
 
 /// The cases of the suite, in the order in which it runs them.
-pub const CASES: [Case; 8] = [
+pub const CASES: [Case; 12] = [
     Case {
         name: CASE,
         criterion: CRITERION,
@@ -565,6 +567,38 @@ pub const CASES: [Case; 8] = [
         machine: Machine::Virt,
         runs: 1,
         judgment: Judgment::Records(&[WAIT_IRQ], End::Resumed(&["unexpected-irq-disabled"])),
+    },
+    Case {
+        name: "clean-code-to-pou",
+        criterion: "The clean of data cache lines to the point of unification runs at EL1 over a range whose ends lie inside lines of the size of CTR_EL0.DminLine and that touches more than one line, returns without an exception, and the buffer reads back unchanged, as the image checks",
+        image: Image::Test("clean-code-to-pou"),
+        machine: Machine::Virt,
+        runs: 1,
+        judgment: Judgment::Records(&[], End::Resumed(&["clean-keeps-data"])),
+    },
+    Case {
+        name: "invalidate-to-poc",
+        criterion: "With the MMU and the caches off, the invalidation of data cache lines to the point of coherency and of the instruction caches runs at EL1 over a range whose ends lie inside lines and that touches more than one line, returns without an exception, and the data written before it reads back unchanged, as the image checks",
+        image: Image::Test("invalidate-to-poc"),
+        machine: Machine::Virt,
+        runs: 1,
+        judgment: Judgment::Records(&[], End::Resumed(&["invalidate-keeps-data"])),
+    },
+    Case {
+        name: "invalidate-tlb-page",
+        criterion: "With translation tables of the image and the MMU on, a page read through a first frame is read through a second frame after its entry is replaced by break-before-make with the TLB invalidation of the page between the invalid and the new entry, without an exception, as the image checks",
+        image: Image::Test("invalidate-tlb-page"),
+        machine: Machine::Virt,
+        runs: 1,
+        judgment: Judgment::Records(&[], End::Resumed(&["remap-reads-new-frame"])),
+    },
+    Case {
+        name: "code-publication",
+        criterion: "Code written across the boundary of two instruction cache lines of the size of CTR_EL0.IminLine and published with the clean to the point of unification and the instruction cache invalidation runs and returns its value, and so does other code written and published at the same address, without an exception, as the image checks",
+        image: Image::Test("code-publication"),
+        machine: Machine::Virt,
+        runs: 1,
+        judgment: Judgment::Records(&[], End::Resumed(&["published-code-runs"])),
     },
 ];
 

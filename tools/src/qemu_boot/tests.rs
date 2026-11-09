@@ -333,6 +333,14 @@ fn the_build_command_names_the_images() {
             "sp-el0-brk",
             "--example",
             "unexpected-irq",
+            "--example",
+            "clean-code-to-pou",
+            "--example",
+            "invalidate-to-poc",
+            "--example",
+            "invalidate-tlb-page",
+            "--example",
+            "code-publication",
             "--message-format=json-render-diagnostics",
         ]
     );
@@ -669,6 +677,22 @@ fn unexpected_transcript(elr: u64) -> Vec<u8> {
     ])
 }
 
+/// The cases of the cache and TLB maintenance, each with its self-check.
+const MAINTENANCE: [(&str, &str); 4] = [
+    ("clean-code-to-pou", "clean-keeps-data"),
+    ("invalidate-to-poc", "invalidate-keeps-data"),
+    ("invalidate-tlb-page", "remap-reads-new-frame"),
+    ("code-publication", "published-code-runs"),
+];
+
+/// The transcript of a run of the test image `image` that takes no
+/// exception and reports its self-check `check` with the mask `failures`.
+fn maintenance_transcript(image: &str, check: &str, failures: u64) -> Vec<u8> {
+    let start = format!("CASXI_TEST image={image}");
+    let record = format!("CASXI_CHECK name={check} failures={failures:#018x}");
+    lines(&[start.as_bytes(), record.as_bytes(), b"CASXI_RESUMED"])
+}
+
 /// The checks of one run of the case `name` with `transcript` on `machine`.
 fn judge_one(name: &str, transcript: Vec<u8>, machine: Machine) -> Vec<Check> {
     let run = Run {
@@ -754,6 +778,72 @@ mod records {
             Machine::Virt,
         );
         assert_eq!(failed(&checks), Vec::<&str>::new());
+        for (name, self_check) in MAINTENANCE {
+            let checks = judge_one(
+                name,
+                maintenance_transcript(name, self_check, 0),
+                Machine::Virt,
+            );
+            assert_eq!(failed(&checks), Vec::<&str>::new(), "{name}");
+            let names: Vec<&str> = checks.iter().map(|check| check.name.as_str()).collect();
+            let own = format!("run 1 {self_check}");
+            assert_eq!(
+                names,
+                ["run 1 receipt", "run 1 transcript", own.as_str(), "runs"],
+                "{name}"
+            );
+        }
+    }
+
+    /// A case of the cache and TLB maintenance expects no exception record:
+    /// an exception record with its halt fails the transcript and the
+    /// self-check, which the record displaces, and a self-check with a
+    /// failure, a missing end or another image fails as well.
+    #[test]
+    fn a_case_without_exceptions_fails_with_an_exception_record() {
+        let record = irq_record(0x4020_1170);
+        let with_exception = lines(&[
+            b"CASXI_TEST image=invalidate-tlb-page",
+            b"",
+            record.as_bytes(),
+            b"CASXI_HALTED",
+        ]);
+        let checks = judge_one("invalidate-tlb-page", with_exception, Machine::Virt);
+        assert_eq!(
+            failed(&checks),
+            ["run 1 transcript", "run 1 remap-reads-new-frame"]
+        );
+        let fatal = lines(&[
+            b"CASXI_TEST image=code-publication",
+            b"",
+            b"CASXI_EXCEPTION vector=4 ESR=0x0000000086000010 ELR=0x0000000040203000 FAR=0x0000000040203000 SPSR=0x00000000000003c5 class=sync",
+            b"CASXI_HALTED",
+        ]);
+        let checks = judge_one("code-publication", fatal, Machine::Virt);
+        assert_eq!(
+            failed(&checks),
+            ["run 1 transcript", "run 1 published-code-runs"]
+        );
+        for (name, self_check) in MAINTENANCE {
+            let failing = maintenance_transcript(name, self_check, 0b100);
+            let checks = judge_one(name, failing, Machine::Virt);
+            let own = format!("run 1 {self_check}");
+            assert_eq!(failed(&checks), [own.as_str()], "{name}");
+            let good = maintenance_transcript(name, self_check, 0);
+            let without_end = good[..good.len() - b"CASXI_RESUMED\r\n".len()].to_vec();
+            let checks = judge_one(name, without_end, Machine::Virt);
+            assert_eq!(
+                failed(&checks),
+                ["run 1 transcript", own.as_str()],
+                "{name}"
+            );
+        }
+        let other = maintenance_transcript("clean-code-to-pou", "clean-keeps-data", 0);
+        let checks = judge_one("invalidate-to-poc", other, Machine::Virt);
+        assert_eq!(
+            failed(&checks),
+            ["run 1 transcript", "run 1 invalidate-keeps-data"]
+        );
     }
 
     /// The timer interrupts must return into the waiting code, two of them,
@@ -1075,7 +1165,11 @@ fn the_cases_name_their_symbols_images_and_outcome() {
             "timer-irq",
             "irq-registers",
             "sp-el0-brk",
-            "unexpected-irq"
+            "unexpected-irq",
+            "clean-code-to-pou",
+            "invalidate-to-poc",
+            "invalidate-tlb-page",
+            "code-publication"
         ]
     );
     let all = |outcomes: &[Outcome]| suite_outcome(outcomes);
