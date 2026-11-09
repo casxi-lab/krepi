@@ -1,0 +1,146 @@
+# The record of each run of the other workflows of this directory. Once a
+# run has completed, this workflow reads the run and the jobs of its attempt
+# with their annotations through the API, and the workflow file at the
+# run's head, writes the record with `cargo xtask run-record` and uploads
+# it, kept 90 days for a run on main that a pull request did not trigger
+# and 30 days for the others. A manual run on main records the run whose ID
+# it takes as its input, which fills in a record that is missing. The
+# workflow runs the code of the default branch, never that of the run it
+# records, reads with read permissions only, handles the text of that run,
+# such as branch and job names, only through files, environment variables
+# and jq, and turns workflow commands off while it prints. It does not
+# record its own runs; each record states the wall clock and minutes of
+# the run that wrote it, with the runner class, seconds and minutes of each
+# of its jobs. Actions are pinned to full commit SHAs; the comment names the
+# release.
+name: run record
+
+on:
+  workflow_run:
+    workflows:
+      - check
+      - formal
+      - formal canary
+      - formal image build
+      - formal image publish
+      - full
+      - nightly
+      - weekly
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run:
+        description: The ID of the workflow run to record
+        required: true
+        type: string
+
+# `bash` runs every step with `-eo pipefail`.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  record:
+    name: run record
+    if: github.event_name == 'workflow_run' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Build the repository tasks
+        run: cargo build --quiet --locked --manifest-path xtask/Cargo.toml
+
+      - name: Choose the run
+        id: run
+        env:
+          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          INPUT_RUN: ${{ inputs.run }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
+            echo "id=$EVENT_RUN_ID" >> "$GITHUB_OUTPUT"
+            echo "attempt=$EVENT_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          else
+            id=$(cargo xtask run-record --id "$INPUT_RUN")
+            echo "id=$id" >> "$GITHUB_OUTPUT"
+            echo "attempt=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Each run becomes the object that `cargo xtask run-record` reads:
+      # the fields that it needs, with every time in seconds since 1970.
+      - name: Read the run, its jobs and the workflow at its head, and write the record
+        id: record
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.run.outputs.id }}
+          RUN_ATTEMPT: ${{ steps.run.outputs.attempt }}
+          OWN_ID: ${{ github.run_id }}
+          OWN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          api=artifacts/run-record/api
+          mkdir -p "$api"
+          read_run() { # <run ID> <attempt or empty> <file prefix>
+            local run=$1 attempt=$2 file=$api/$3 job
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" > "$file-run.json"
+            attempt=${attempt:-$(jq -r .run_attempt "$file-run.json")}
+            gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run/attempts/$attempt/jobs?per_page=100" \
+              --jq '.jobs[]' | jq -s . > "$file-jobs.json"
+            echo '{}' > "$file-notes.json"
+            for job in $(jq -r '.[].id' "$file-jobs.json"); do
+              gh api --paginate "repos/$GITHUB_REPOSITORY/check-runs/$job/annotations?per_page=100" \
+                --jq '.[]' | jq -s --arg job "$job" '{($job): .}' > "$file-note.json"
+              jq -s add "$file-notes.json" "$file-note.json" > "$file-both.json"
+              mv "$file-both.json" "$file-notes.json"
+            done
+            jq -n --argjson attempt "$attempt" --slurpfile run "$file-run.json" \
+              --slurpfile jobs "$file-jobs.json" --slurpfile notes "$file-notes.json" '
+              def seconds: if . == null then null else fromdateiso8601 end;
+              {
+                run: ($run[0] | {id, attempt: $attempt, workflow: .name, path, event,
+                  head_branch, head_sha, conclusion}),
+                jobs: [$jobs[0][] | {
+                  id, name, conclusion, labels, runner_group_name, runner_name,
+                  started_at: (.started_at | seconds),
+                  completed_at: (.completed_at | seconds),
+                  annotations: [($notes[0][.id | tostring] // [])[]
+                    | {level: .annotation_level, title, message}]
+                }]
+              }' > "$file.json"
+          }
+          read_run "$RUN_ID" "$RUN_ATTEMPT" run
+          args=(--input "$api/run.json" --output artifacts/run-record/record)
+          path=$(jq -r .path "$api/run-run.json")
+          sha=$(jq -r .head_sha "$api/run-run.json")
+          if [[ "$path" =~ ^\.github/workflows/[A-Za-z0-9._-]+\.ya?ml$ && "$sha" =~ ^[0-9a-f]{40}$ ]] \
+            && gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=$sha" --jq .content \
+              | base64 -d > "$api/workflow.yml"; then
+            args+=(--workflow "$api/workflow.yml")
+          fi
+          read_run "$OWN_ID" "$OWN_ATTEMPT" own
+          cargo xtask run-record "${args[@]}" --own "$api/own.json" --now "$(date +%s)"
+          echo "::$token::"
+          record=artifacts/run-record/record
+          cat "$record/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "name=run-record-$(jq -r '"\(.run.id)-\(.run.attempt)"' "$record/record.json")" >> "$GITHUB_OUTPUT"
+          echo "retention=$(jq -r .retention_days "$record/record.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the record
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.record.outputs.name }}
+          path: artifacts/run-record/record
+          if-no-files-found: error
+          retention-days: ${{ steps.record.outputs.retention }}

@@ -15,8 +15,12 @@ git diff --cached --check
 ```
 
 [Testing](docs/conventions/testing.md#entry-points) describes what the check
-runs. CI runs the same check, and then the QEMU boot suite, on every pull
-request to `main` and on every push to `main`. A change that updates a tool
+runs. CI runs the same check, and then the QEMU boot suite, in one job on
+every pull request to `main` and on every push to `main`. Beside it, one
+job writes the images of the QEMU suites, another runs the suites of
+`suites.toml` on those images, and a summary job requires the three jobs to
+succeed; the slow tests run in the full line, which the label `full-check`
+starts on a reviewed head, and every night. A change that updates a tool
 version updates `toolchains.toml` in the same change. The proof tools are
 pinned separately, in `verification/toolchain.json`: a change to them runs
 `cargo xtask formal toolchain-check` and builds their image in CI, as
@@ -34,6 +38,26 @@ directory below `artifacts/`, without evaluating the output. The tests of the
 check run it on the test image of the host tooling crate.
 [Testing](docs/conventions/testing.md#entry-points) describes it and its
 receipt.
+
+`cargo xtask image --output-dir <dir>` writes the images that the QEMU
+suites boot, today the test image, into a new directory, with a record of
+the size, SHA-256 digest and commit of each in `images.json`.
+[Testing](docs/conventions/testing.md#entry-points) describes the record.
+
+`cargo xtask suite` runs the QEMU suites of `suites.toml` on QEMU virt
+through the QEMU runner and judges each case by the expected output of its
+image: with `--base <rev>` the smoke cases and the suites that the changed
+paths select, without it every suite, and with `--slow` also the slow
+cases. Before proposing a change to the host tooling, the suites or a
+workflow, run it after the check.
+[Testing](docs/conventions/testing.md#entry-points) describes the manifest,
+the selection and the report.
+
+`cargo xtask run-record` writes the record of one workflow run, its line,
+the runner class, minutes, limit and result of each job and its wall clock,
+from data of the GitHub API; the workflow `run record` runs it after each
+run of the other workflows.
+[Testing](docs/conventions/testing.md#entry-points) describes the record.
 
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
 QEMU virt default image in `kernel/`, boots it three times on QEMU virt

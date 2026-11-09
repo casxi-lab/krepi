@@ -1,6 +1,18 @@
-# The required host checks and the QEMU boot suite on the exact candidate
-# commit: the head of a pull request to main, or the commit pushed to main.
-# Actions are pinned to full commit SHAs; the comment names the release.
+# The pull request line and the main line, on the exact candidate commit:
+# the head of a pull request to main, or the commit pushed to main. The job
+# `cargo xtask check` runs the required host checks and the QEMU boot suite;
+# the job `image` writes the images of the QEMU suites with their SHA-256
+# digests; the job `suite` takes the images by those digests and runs the
+# QEMU suites of suites.toml: on a pull request the smoke cases and the
+# suites that the changed paths select, on main every suite, both without
+# the slow cases. `check summary` succeeds only when the other three jobs
+# did. A newer push to a pull request cancels the run of its older head;
+# runs on main are never cancelled. Each job has a limit. The check, the
+# image command and the suite command also stop at a deadline two minutes
+# before the limit of their job, so that the uploads still run when one of
+# them takes too long; the QEMU boot suite runs after the check without a
+# deadline of its own. Actions are pinned to full commit SHAs; the comment
+# names the release.
 name: check
 
 on:
@@ -9,10 +21,20 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# `bash` runs every step with `-eo pipefail`.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   check:
     name: cargo xtask check
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -31,7 +53,7 @@ jobs:
         run: rustup toolchain install
 
       - name: Run cargo xtask check
-        run: cargo xtask check --receipt artifacts/check-receipt.json
+        run: timeout --signal=TERM --kill-after=90s 13m cargo xtask check --receipt artifacts/check-receipt.json
 
       - name: Run the QEMU boot suite
         run: cargo xtask qemu-boot --output-dir artifacts/qemu-boot
@@ -43,6 +65,7 @@ jobs:
           name: check-receipt-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: artifacts/check-receipt.json
           if-no-files-found: error
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
       - name: Upload the QEMU boot suite receipts
         if: always()
@@ -51,3 +74,112 @@ jobs:
           name: qemu-boot-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: artifacts/qemu-boot
           if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+  image:
+    name: image
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      artifact: images-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+      test-elf-sha256: ${{ steps.image.outputs.test-elf-sha256 }}
+    steps:
+      - name: Check out the candidate commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Write the images and their digests
+        id: image
+        run: |
+          timeout --signal=TERM --kill-after=60s 3m cargo xtask image --output-dir artifacts/images
+          jq -r '.images[] | "\(.name)-sha256=\(.sha256)"' artifacts/images/images.json >> "$GITHUB_OUTPUT"
+
+      - name: Upload the images
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: images-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: artifacts/images
+          if-no-files-found: error
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+  suite:
+    name: suite
+    needs: image
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # The whole history, so that the merge base with the base of a pull
+      # request is there.
+      - name: Check out the candidate commit with its history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-arm
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      # The name of the artifact comes from the job that uploaded it, so
+      # that a rerun of this job alone still finds it.
+      - name: Download the images
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.image.outputs.artifact }}
+          path: artifacts/images
+
+      # The suite checks each image against its digest before QEMU boots
+      # it. Workflow commands are off while it prints.
+      - name: Run the QEMU suites
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TEST_ELF_SHA256: ${{ needs.image.outputs.test-elf-sha256 }}
+        run: |
+          args=(--images artifacts/images --expect "test-elf=$TEST_ELF_SHA256" --output-dir artifacts/suite)
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            args+=(--base "$BASE_SHA")
+          fi
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          status=0
+          timeout --signal=TERM --kill-after=60s 8m cargo xtask suite "${args[@]}" || status=$?
+          echo "::$token::"
+          exit "$status"
+
+      - name: Upload the suite report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: suite-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: artifacts/suite
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+  summary:
+    name: check summary
+    needs: [check, image, suite]
+    if: always()
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 3
+    permissions: {}
+    steps:
+      - name: Require every job of the line to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$NEEDS"
+          jq -e 'all(.[]; .result == "success")' <<< "$NEEDS" > /dev/null

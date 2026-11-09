@@ -14,9 +14,11 @@ rust-version = "1.99"
 [dependencies]
 # The host tooling crate of this repository, whose serial capture is the
 # command `cargo xtask serial-capture` and whose QEMU runner is the command
-# `cargo xtask qemu`; the tests of the latter write its test image.
+# `cargo xtask qemu` and runs the cases of `cargo xtask suite`; its test
+# image is the image that `cargo xtask image` writes.
 krepi-tools = { path = "../tools" }
-# The command lines of `cargo xtask check`, `cargo xtask formal run`,
+# The command lines of `cargo xtask check`, `cargo xtask image`,
+# `cargo xtask suite`, `cargo xtask run-record`, `cargo xtask formal run`,
 # `cargo xtask formal guard`, `cargo xtask formal toolchain-check`,
 # `cargo xtask formal check`, `cargo xtask formal vectors` and
 # `cargo xtask formal canary`, with their help, usage and error texts, as
@@ -40,7 +42,10 @@ clap = { version = "=4.6.7", default-features = false, features = ["std", "help"
 # default feature is left out.
 libc = { version = "=0.2.191", default-features = false }
 # The receipt of `cargo xtask check` keeps its fields in the order in which
-# they are written, the receipt of `cargo xtask formal run` is written, and
+# they are written, `cargo xtask image` writes the record of its images,
+# which `cargo xtask suite` reads before it writes its report,
+# `cargo xtask run-record` reads a run with its jobs and writes its record,
+# the receipt of `cargo xtask formal run` is written, and
 # read back by its tests, through the derive macros of `serde`, the
 # manifests and subset steps, `cargo xtask formal run` and
 # `cargo xtask formal check` read the output of `cargo metadata`, the
@@ -65,8 +70,11 @@ serde_json = { version = "=1.0.154", default-features = false, features = ["pres
 # `cargo xtask formal canary` are written and read through such types, and
 # the receipt of `cargo xtask formal run`, whose paths are strings, is
 # written through types that derive `Serialize` and, for its tests and for
-# the canary, `Deserialize`, so only the derive macros and the allocation
-# support for strings, vectors and maps are needed.
+# the canary, `Deserialize`, and so is the record of the images of
+# `cargo xtask image`; `cargo xtask suite` reads `suites.toml` and
+# `cargo xtask run-record` a run with its jobs into such types. So only the
+# derive macros and the allocation support for strings, vectors and maps
+# are needed.
 serde = { version = "=1.0.229", default-features = false, features = ["alloc", "derive"] }
 # The inventory of `cargo xtask formal check` and the `subset` step of
 # `cargo xtask check` parse each source file of the kernel workspace that
@@ -91,10 +99,12 @@ proc-macro2 = { version = "=1.0.107", default-features = false, features = ["spa
 # which the crate gives. Only the flag, that emulation and the names are
 # used, so the iterator and the channel of the default features are left out.
 signal-hook = { version = "=0.4.6", default-features = false }
-# The SHA-256 of files that `cargo xtask formal toolchain-check`,
-# `cargo xtask formal run`, `cargo xtask formal vectors` and
-# `cargo xtask formal canary` read into memory, among them the output files
-# of their commands, the Lean files that Aeneas writes, the `versions.json`
+# The SHA-256 of files that `cargo xtask image`,
+# `cargo xtask formal toolchain-check`, `cargo xtask formal run`,
+# `cargo xtask formal vectors` and `cargo xtask formal canary` read into
+# memory, among them the images of the first, which `cargo xtask suite`
+# checks before it boots them, the output files of their
+# commands, the Lean files that Aeneas writes, the `versions.json`
 # of the proof-tool image, and the Lean archives, the channel manifest and
 # the Lake lock of the canary, so the allocation and object-identifier
 # support of the default features is left out.
@@ -105,7 +115,7 @@ sha2 = { version = "=0.11.1", default-features = false }
 # `xattr` feature is left out.
 tar = { version = "=0.4.46", default-features = false }
 # Manifests and Cargo configuration files are parsed into tables, which
-# `serde` defines, and the extraction configuration of
+# `serde` defines, and `suites.toml`, the extraction configuration of
 # `cargo xtask formal run`, the compile-fail cases of the `subset` step of
 # `cargo xtask check` and the `vectors` blocks of the contracts that
 # `cargo xtask formal vectors` reads into types that derive `Deserialize`,
@@ -117,6 +127,9 @@ toml = { version = "=1.2.0", default-features = false, features = ["parse", "ser
 # at the start and end of a phase, to find a command that wrote to it: a
 # walk that does not follow symbolic links. The crate has no features.
 walkdir = "=2.5.0"
-# The workflows step uses the event parser on text that is already UTF-8,
-# so the input-decoding support of the default feature is left out.
+# The workflows step uses the event parser, and `cargo xtask run-record`
+# the loader for the limits of the jobs of a workflow, as the tests of the
+# check do for the committed workflows of the CI lines, on text that is
+# already UTF-8, so the input-decoding support of the default feature is
+# left out.
 yaml-rust2 = { version = "=0.13.0", default-features = false }
