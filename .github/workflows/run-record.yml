@@ -27,6 +27,7 @@ on:
       - full
       - nightly
       - release
+      - usage
       - weekly
     types: [completed]
   workflow_dispatch:

@@ -356,7 +356,7 @@ const BY_RECORD: &str = "${{ steps.record.outputs.retention }}";
 
 /// Every upload step of the tracked workflows: the file, the key of the
 /// job, the name of the step and its `retention-days` as written.
-const RETENTION: [(&str, &str, &str, &str); 20] = [
+const RETENTION: [(&str, &str, &str, &str); 21] = [
     (
         ".github/workflows/check.yml",
         "check",
@@ -464,6 +464,12 @@ const RETENTION: [(&str, &str, &str, &str); 20] = [
         "record",
         "Upload the record",
         BY_RECORD,
+    ),
+    (
+        ".github/workflows/usage.yml",
+        "summary",
+        "Upload the summary and its data",
+        BY_REF,
     ),
     (
         ".github/workflows/weekly.yml",
@@ -1244,4 +1250,56 @@ fn the_release_workflow_runs_on_main_by_hand_and_only_drafts() {
     let name = uploads[0]["with"]["name"].as_str();
     assert!(name.is_some());
     assert_eq!(name, assets["outputs"]["artifact"].as_str());
+}
+
+/// The workflow of the monthly usage summary.
+const USAGE: &str = ".github/workflows/usage.yml";
+
+#[test]
+fn the_usage_workflow_runs_monthly_and_by_hand_with_read_permissions() {
+    let usage = workflow(USAGE);
+    assert_eq!(events(&usage), ["schedule", "workflow_dispatch"]);
+    // One schedule, on the second day of each month.
+    let schedules = usage["on"]["schedule"].as_vec().expect("the schedule");
+    assert_eq!(schedules.len(), 1);
+    let cron = schedules[0]["cron"].as_str().expect("a cron");
+    let fields: Vec<&str> = cron.split_whitespace().collect();
+    assert_eq!(fields.len(), 5, "{cron}");
+    assert_eq!(fields[2..], ["2", "*", "*"], "{cron}");
+    let month = &usage["on"]["workflow_dispatch"]["inputs"]["month"];
+    assert_eq!(month["required"].as_bool(), Some(false));
+    let all = jobs(&usage);
+    assert_eq!(all.len(), 1);
+    let (_, job) = all[0];
+    assert!(on_main(job));
+    let permissions = job["permissions"].as_hash().expect("the permissions");
+    assert!(!permissions.is_empty());
+    for (scope, level) in permissions {
+        assert_eq!(level.as_str(), Some("read"), "{scope:?}");
+    }
+    // The step that reads the data turns workflow commands off before it
+    // reads anything and on again when it ends, and the summary is written
+    // by the command.
+    let read = (job["steps"].as_vec().into_iter().flatten())
+        .find(|step| step["name"].as_str() == Some("Read the usage"))
+        .and_then(|step| step["run"].as_str())
+        .expect("the step that reads the data");
+    let lines: Vec<&str> = read.lines().collect();
+    assert_eq!(
+        lines[..3],
+        [
+            "token=$(openssl rand -hex 16)",
+            "echo \"::stop-commands::$token\"",
+            "trap 'echo \"::$token::\"' EXIT",
+        ]
+    );
+    assert!(read.contains("/actions/runs?created="));
+    assert!(read.contains("jobs?filter=all"));
+    assert!(read.contains("https://ghcr.io/token?scope=repository:$package:pull"));
+    let scripts = scripts_of(job).join("\n");
+    assert!(scripts.contains("cargo xtask usage --input artifacts/usage/input.json"));
+    assert_eq!(
+        usage["env"]["REPOSITORIES"].as_str(),
+        Some("casxi-lab/krepi casxi-lab/kosmo casxi-lab/kalyx")
+    );
 }

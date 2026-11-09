@@ -160,11 +160,22 @@ pub fn limit(line: &str) -> Option<u64> {
 /// runner group other than the one of the standard runners, `GitHub
 /// Actions`, and otherwise `standard hosted`.
 pub fn runner(job: &JobData) -> &'static str {
-    if job.runner_name.is_none() {
+    runner_class(
+        job.runner_name.as_deref(),
+        &job.labels,
+        job.runner_group_name.as_deref(),
+    )
+}
+
+/// The class of the runner of a job with the runner name `name`, which is
+/// `None` for a job that ran on no runner, the labels `labels` and the
+/// runner group `group`, as [`runner`] gives it.
+pub fn runner_class(name: Option<&str>, labels: &[String], group: Option<&str>) -> &'static str {
+    if name.is_none() {
         "none"
-    } else if job.labels.iter().any(|label| label == "self-hosted") {
+    } else if labels.iter().any(|label| label == "self-hosted") {
         "self-hosted"
-    } else if job.runner_group_name.as_deref() != Some("GitHub Actions") {
+    } else if group != Some("GitHub Actions") {
         "larger hosted"
     } else {
         "standard hosted"
@@ -419,7 +430,7 @@ pub fn record(
 
 /// `text` for a cell of a Markdown table: control characters escaped and
 /// `|` and backquotes taken out of the table's syntax.
-fn cell(text: &str) -> String {
+pub fn cell(text: &str) -> String {
     crate::suite::printable(text)
         .replace('\\', "\\\\")
         .replace('|', "\\|")

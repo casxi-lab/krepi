@@ -19,7 +19,7 @@ rust-version = "1.99"
 krepi-tools = { path = "../tools" }
 # The command lines of `cargo xtask check`, `cargo xtask image`,
 # `cargo xtask suite`, `cargo xtask run-record`,
-# `cargo xtask release-assets`, `cargo xtask formal run`,
+# `cargo xtask release-assets`, `cargo xtask usage`, `cargo xtask formal run`,
 # `cargo xtask formal guard`, `cargo xtask formal toolchain-check`,
 # `cargo xtask formal check`, `cargo xtask formal vectors` and
 # `cargo xtask formal canary`, with their help, usage and error texts, as
@@ -47,7 +47,8 @@ libc = { version = "=0.2.191", default-features = false }
 # which `cargo xtask suite` reads before it writes its report,
 # `cargo xtask run-record` reads a run with its jobs and writes its record,
 # `cargo xtask release-assets` reads a run, an `images.json` and a check
-# receipt,
+# receipt, `cargo xtask usage` reads the data of a month and writes its
+# summary,
 # the receipt of `cargo xtask formal run` is written, and
 # read back by its tests, through the derive macros of `serde`, the
 # manifests and subset steps, `cargo xtask formal run` and
@@ -76,7 +77,8 @@ serde_json = { version = "=1.0.154", default-features = false, features = ["pres
 # the canary, `Deserialize`, and so is the record of the images of
 # `cargo xtask image`; `cargo xtask suite` reads `suites.toml` and
 # `cargo xtask run-record` a run with its jobs and
-# `cargo xtask release-assets` a run into such types. So only the
+# `cargo xtask release-assets` a run and `cargo xtask usage` the data of a
+# month into such types. So only the
 # derive macros and the allocation support for strings, vectors and maps
 # are needed.
 serde = { version = "=1.0.229", default-features = false, features = ["alloc", "derive"] }
@@ -135,6 +137,6 @@ walkdir = "=2.5.0"
 # The workflows step uses the event parser, and the loader for the actions
 # that the steps of a workflow use, `cargo xtask run-record` the loader for
 # the limits of the jobs of a workflow, as the tests of the check do for
-# the committed workflows, on text that is already UTF-8, so the input-decoding support of the default feature is
-# left out.
+# the committed workflows, on text that is already UTF-8, so the
+# input-decoding support of the default feature is left out.
 yaml-rust2 = { version = "=0.13.0", default-features = false }

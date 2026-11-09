@@ -69,6 +69,13 @@ starts by hand on `main`, runs it and creates the draft; it never
 publishes a release.
 [Testing](docs/conventions/testing.md#entry-points) describes both.
 
+`cargo xtask usage` writes the usage summary of the CI of a month from data
+of the GitHub API and the container registry: the minutes of each runner
+class, the storage of the artifacts and the packages and the cache of each
+repository, against their thresholds. The workflow `usage` runs it once a
+month and on a manual run.
+[Testing](docs/conventions/testing.md#entry-points) describes both.
+
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
 QEMU virt default image and the test images in `kernel/`, boots the default
 image three times and each test image once on QEMU virt through the QEMU

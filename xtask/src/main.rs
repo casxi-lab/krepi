@@ -15,6 +15,7 @@ mod scratch;
 mod subset;
 mod suite;
 mod toolchain;
+mod usage;
 mod workflows;
 
 use std::process::ExitCode;
@@ -79,6 +80,11 @@ pub const COMMANDS: &[Command] = &[
         about: "Run the QEMU suites of suites.toml: the smoke cases and the suites that the paths changed since a base select, or every suite, with the slow cases on request, each case judged by its expected output, with a report in a new directory; --help lists the options",
         subcommands: &[],
     },
+    Command {
+        name: "usage",
+        about: "Write the CI usage summary of a month from the data of the GitHub API and the container registry: the minutes of each runner class, rounded up per job, by repository, workflow and runner label, the bytes of the artifacts and the packages against 50 GB, the cache of each repository against 10 GB and the thresholds, into a new directory; --help lists the options",
+        subcommands: &[],
+    },
 ];
 
 fn print_help() {
@@ -117,6 +123,7 @@ fn main() -> ExitCode {
         ["formal", rest @ ..] => formal::run(&repo::root(), rest),
         ["image", rest @ ..] => image::command(&repo::root(), rest),
         ["suite", rest @ ..] => suite::command(&repo::root(), rest),
+        ["usage", rest @ ..] => usage::command(rest),
         ["run-record", rest @ ..] => record::command(rest),
         ["release-assets", rest @ ..] => release::command(rest),
         [] | ["help"] => {
