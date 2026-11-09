@@ -1,7 +1,10 @@
 //! The commands of the proof gate, each in a process group of its own, with
 //! its output in files. [`run`] sees the end of a command without collecting
 //! it and kills its group before collecting it, so that the kill cannot reach
-//! a group that took over a freed number.
+//! a group that took over a freed number. [`leader_ended`], [`kill_group`],
+//! [`group_ended`] and [`PAUSE`] are open to the rest of the crate, so that
+//! another command can watch and kill its own process groups in the same
+//! order.
 
 use std::fs::{self, File, OpenOptions};
 use std::io;
@@ -21,7 +24,7 @@ use super::toolchain::sha256;
 pub const GROUP_END: Duration = Duration::from_secs(60);
 
 /// The pause between two looks at a command or a group.
-const PAUSE: Duration = Duration::from_millis(10);
+pub(crate) const PAUSE: Duration = Duration::from_millis(10);
 
 /// The stop signal that reached the gate, or 0.
 static STOP: AtomicUsize = AtomicUsize::new(0);
@@ -264,7 +267,7 @@ fn supervise(child: &mut Child, group: libc::pid_t, deadline: Instant) -> Ended 
 }
 
 /// Whether the command `leader` has ended, looked at without collecting it.
-fn leader_ended(leader: libc::pid_t) -> io::Result<bool> {
+pub(crate) fn leader_ended(leader: libc::pid_t) -> io::Result<bool> {
     // SAFETY: all bits zero is a valid `siginfo_t`.
     let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
     // SAFETY: `info` is valid and writable for the call. `leader` is an
@@ -294,7 +297,7 @@ fn leader_ended(leader: libc::pid_t) -> io::Result<bool> {
 }
 
 /// Kills every process of `group`, whose leader has not been collected.
-fn kill_group(group: libc::pid_t) {
+pub(crate) fn kill_group(group: libc::pid_t) {
     // SAFETY: killpg touches no memory of this process. The uncollected
     // leader keeps the number of `group` from naming a later group. A
     // failure leaves processes behind, which `group_ended` reports.
@@ -303,7 +306,7 @@ fn kill_group(group: libc::pid_t) {
 
 /// Whether `group`, whose leader has been collected, has no process left
 /// within [`GROUP_END`].
-fn group_ended(group: libc::pid_t) -> bool {
+pub(crate) fn group_ended(group: libc::pid_t) -> bool {
     let deadline = Instant::now() + GROUP_END;
     loop {
         // SAFETY: signal 0 sends nothing and touches no memory of this
