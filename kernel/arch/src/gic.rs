@@ -9,8 +9,16 @@
 //! its interrupts in the dispatch of an exception, with every exception
 //! masked, so no two accesses overlap. The registers are reached as Device
 //! memory while the MMU is off, and a later MMU setup must keep them mapped
-//! with Device attributes. The module is compiled only for the bare-metal
-//! target.
+//! with Device attributes. The caller of [`Gic::new`] vouches for the
+//! addresses, the memory that reaches them and that one CPU uses them. The
+//! module is compiled only for the bare-metal target.
+//!
+//! [`Gic::init`] puts the private interrupts in group 0 and enables group 0,
+//! which a GICv2 without the Security Extensions, as QEMU virt has with
+//! `secure=off`, signals as IRQs. On a GICv2 with them, where EL1 runs
+//! Non-secure, `GICD_IGROUPR0` ignores the write and bit 0 of the two
+//! control registers enables group 1, so the board of such a GIC must check
+//! that its firmware has put the interrupts in group 1.
 
 use core::arch::asm;
 use core::ptr;
@@ -54,18 +62,38 @@ pub const fn interrupt_id(iar: u32) -> u32 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Gic {
     /// The base address of the 4 KiB register frame of the distributor.
-    pub distributor: usize,
+    distributor: usize,
     /// The base address of the register frame of the CPU interface.
-    pub cpu: usize,
+    cpu: usize,
 }
 
 impl Gic {
-    /// Sets the controller up with no interrupt enabled: disables the
-    /// distributor and the CPU interface, disables the SGIs and PPIs of the
-    /// executing CPU and puts them in group 0, lets every priority through
-    /// the CPU interface with no preemption, and enables the distributor and
+    /// The GICv2 whose distributor and CPU interface have their register
+    /// frames at `distributor` and `cpu`.
+    ///
+    /// # Safety
+    ///
+    /// `distributor` and `cpu` must be the base addresses of the register
+    /// frames of the distributor and of the CPU interface of a GICv2, which
+    /// the executing CPU reaches as Device memory: with the MMU off, or
+    /// through a mapping with Device attributes. Only one CPU may use the
+    /// controller through the value and its copies, and only with IRQs
+    /// masked, so that no two of its accesses overlap.
+    pub const unsafe fn new(distributor: usize, cpu: usize) -> Gic {
+        Gic { distributor, cpu }
+    }
+
+    /// Sets the controller up for the executing CPU with none of its PPIs
+    /// enabled: disables the distributor and the CPU interface, disables the
+    /// PPIs of the executing CPU, and its SGIs where the GIC lets them be
+    /// disabled, puts them in group 0, lets every priority through the CPU
+    /// interface with the binary point 0, and enables the distributor and
     /// the CPU interface again, the CPU interface with an end of interrupt
-    /// that drops the priority and deactivates together.
+    /// that drops the priority and deactivates together. It leaves the SPIs
+    /// and the active state of every interrupt as it finds them, disabled
+    /// and inactive after a reset. The binary point 0 lets interrupts of a
+    /// higher priority preempt; they do not nest because the dispatch runs
+    /// with IRQs masked.
     pub fn init(&self) {
         write(self.distributor + GICD_CTLR, 0);
         write(self.cpu + GICC_CTLR, 0);
@@ -80,8 +108,12 @@ impl Gic {
     /// Enables the private peripheral interrupt `intid`, 16 to 31, of the
     /// executing CPU, level-sensitive with `priority`, after clearing a
     /// pending state that it may have kept.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `intid` is not a PPI, before any access.
     pub fn enable_ppi(&self, intid: u32, priority: u8) {
-        debug_assert!((16..32).contains(&intid), "a PPI is 16 to 31");
+        assert!((16..32).contains(&intid), "a PPI is 16 to 31");
         let bit = 1 << (intid % 32);
         write(self.distributor + GICD_ICPENDR, bit);
         let index = intid as usize;
@@ -109,7 +141,12 @@ impl Gic {
     }
 
     /// Disables the interrupt `intid`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `intid` is not below [`SPECIAL`], before any access.
     pub fn disable(&self, intid: u32) {
+        assert!(intid < SPECIAL, "an interrupt ID is below 1020");
         let word = self.distributor + GICD_ICENABLER + (intid as usize / 32) * 4;
         write(word, 1 << (intid % 32));
     }
@@ -126,11 +163,11 @@ pub fn barrier() {
 }
 
 fn read(address: usize) -> u32 {
-    // SAFETY: `address` is a 4-byte aligned register of the GICv2 whose base
-    // addresses the board gives; the MMU, while it is off, reaches it as
-    // Device memory, and a later MMU setup keeps it mapped with Device
-    // attributes. One CPU accesses the controller, with IRQs masked, so the
-    // read races with no other access.
+    // SAFETY: `address` is a 4-byte aligned register in the register frames
+    // of a GICv2, at an offset below 4 KiB from a base address that the
+    // caller of `Gic::new` vouched for, together with the Device memory
+    // that reaches it. As `Gic::new` requires, one CPU accesses the
+    // controller, with IRQs masked, so the read races with no other access.
     unsafe { ptr::read_volatile(address as *const u32) }
 }
 

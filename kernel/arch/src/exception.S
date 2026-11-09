@@ -68,6 +68,9 @@ __exception_vectors:
     msr daifset, #0xf
     mov x0, sp
     bl exception_dispatch
+    // The dispatch may have unmasked exceptions; mask them again, so that
+    // none is taken between the writes of ELR_EL1 and SPSR_EL1 and the ERET.
+    msr daifset, #0xf
     sub x0, x19, #4
     cmp x0, #3
     b.hi .Lhalt

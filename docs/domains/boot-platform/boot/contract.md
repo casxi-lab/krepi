@@ -57,8 +57,9 @@ behaviour that these rules serve, with its evidence, is in the
 | `krepi_qemu_virt::console::print`, `write`, `echo`, `report_panic`, `failure_marker`, `report_failure` and `window_ticks` | Functions, host-testable | The PL011 driver of a board | [Console output](#console-output), [Echo](#echo) |
 | `verify_cpu` in `kernel/boards/qemu-virt/src/main.rs` | Function | `kernel_main` | [Initialization checks](#initialization-checks) |
 | `krepi_arch::exception::Class::of`, `Class::name` and `exception_class` | Functions, host-testable | The exception record | [Records](#records) |
-| `krepi_qemu_virt::irq::init` and `handle` | Functions | The test images that take the timer interrupt: their `kernel_main` and their dispatch | [Interrupts](#interrupts) |
-| `krepi_arch::gic::Gic::init`, `enable_ppi`, `acknowledge`, `end` and `disable`, `krepi_arch::gic::barrier` and `interrupt_id` | Functions | The interrupt wiring of a board | [Interrupts](#interrupts) |
+| `krepi_qemu_virt::irq::init` and `handle` | Functions | The test images that take an interrupt: their `kernel_main` and their dispatch | [Interrupts](#interrupts) |
+| `krepi_arch::gic::Gic::new` | `unsafe` function | The interrupt wiring of a board and the test images | [Interrupts](#interrupts) |
+| `krepi_arch::gic::Gic::init`, `enable_ppi`, `acknowledge`, `end` and `disable`, `krepi_arch::gic::barrier` and `interrupt_id` | Functions | The interrupt wiring of a board and the test images | [Interrupts](#interrupts) |
 | `krepi_arch::timer::stop_virtual` and `arm_virtual` | Functions | The interrupt wiring of a board and the test images | [Interrupts](#interrupts) |
 | `krepi_arch::cpu::exception_level`, `main_id`, `system_control`, `counter_frequency`, `virtual_counter` and `cpacr` | Functions | Kernel code at EL1 | [Processor registers](#processor-registers) |
 | `krepi_arch::cpu::halt` | Function | Fatal paths | [Processor registers](#processor-registers) |
@@ -118,11 +119,12 @@ no file of this component.
   frame, `ELR_EL1`, `SPSR_EL1`, `ESR_EL1` and `FAR_EL1`, and 0 in the
   reserved word, sets D, A, I and F in `DAIF` and calls
   `exception_dispatch` with the address of the frame.
-- When the dispatch returns, the path returns only for vectors 4 to 7,
+- When the dispatch returns, the path sets D, A, I and F in `DAIF` again,
+  whatever the dispatch unmasked. It returns only for vectors 4 to 7,
   which it tells by the number in `x19`, not by the frame: it writes the
   frame's `ELR` and `SPSR` to `ELR_EL1` and `SPSR_EL1`, clears `x0` to `x30`,
   loads each of them from the frame, releases the frame and executes
-  `ERET`. For any other vector it masks every exception and waits in a
+  `ERET`. For any other vector it waits with every exception masked in a
   `WFE` loop forever.
 - The entries save no FP/SIMD state, `SP_EL0` or other system register. For
   the entries of `SP_EL0` and of a lower level, the stack pointer in the
@@ -137,7 +139,7 @@ The rules of the saved and restored state, each an
 | `frame` | The entry allocates the 304-byte frame on `SP_EL1`, 16-byte aligned, just below the interrupted stack pointer, and records that stack pointer, the top of the frame. |
 | `save-general` | `x0` to `x30` are stored in the frame before any of them is changed: the entry stores `x0` and `x1` before it writes the vector number, and the save path the others before it uses them. |
 | `save-system` | `ELR_EL1`, `SPSR_EL1`, `ESR_EL1`, `FAR_EL1` and the vector number are stored in the frame, and the reserved word is 0. |
-| `mask` | The dispatch runs with D, A, I and F set, so exceptions do not nest. |
+| `mask` | The dispatch is entered with D, A, I and F set, and the return path sets them again before it loads `ELR_EL1` and `SPSR_EL1`, so no SError, IRQ, FIQ or debug exception that D masks is taken during the dispatch or the return; a synchronous exception of the dispatch itself is taken and nests, with a frame of its own below the first. |
 | `restore-elr-spsr` | Before the return, `ELR_EL1` and `SPSR_EL1` are loaded from the frame: a change of the frame's `ELR` by the dispatch takes effect, and the interrupted `PSTATE`, NZCV, DAIF and the mode, comes back. |
 | `clear-and-load` | Before the return, `x0` to `x30` are cleared and then each loaded from the frame, so no value that the dispatch left reaches the interrupted code. |
 | `release` | The return releases the frame: after it, the stack pointer is that of the interrupted code. |
@@ -166,15 +168,17 @@ The frame is the `repr(C)` structure `Frame` of `krepi_arch::exception`,
   `extern "C" fn(&mut Frame)`. The vectors call it on `SP_EL1` below the
   frame with every exception masked; it may change the frame, and after a
   return from vectors 4 to 7 the changes of `elr`, `spsr` and `x` become the
-  state of the interrupted code.
+  state of the interrupted code. Exceptions that it unmasks are masked
+  again when it returns.
 - The dispatch of the default image writes the exception record of the
   frame and `CASXI_HALTED` with `uart::report_fatal` and halts. The default
   image never unmasks an exception, so only a synchronous exception of its
   own code reaches it.
-- A dispatch writes the console only through the exception record, and the
-  code that it interrupts is then between two console accesses: the
-  default image takes no asynchronous exception, and a test image unmasks
-  one only in code that does not write.
+- A dispatch writes the console only through the exception record and, in
+  a test image, its self-check records, and the code that it interrupts is
+  then between two console accesses: the default image takes no
+  asynchronous exception, and a test image unmasks one only in code that
+  does not write.
 
 ## Interrupts
 
@@ -184,13 +188,24 @@ The frame is the `repr(C)` structure `Frame` of `krepi_arch::exception`,
   `Gic::enable_ppi` at `TIMER_PRIORITY`, arms the virtual timer for one
   period after the virtual count of now and completes the writes with
   `barrier`.
+- `Gic::new`, an `unsafe` function, names a GICv2 by the base addresses of
+  its distributor and its CPU interface; its caller vouches that they are
+  the register frames of a GICv2 reached as Device memory, and that one CPU
+  uses the controller with IRQs masked. `irq` names the GICv2 of QEMU virt
+  so.
 - `Gic::init` disables the distributor and the CPU interface, disables the
-  SGIs and PPIs of the executing CPU and puts them in group 0, sets the
-  priority mask to `0xff` and the binary point to 0, and enables the
-  distributor and the CPU interface again, with an end of interrupt that
-  drops the priority and deactivates together. `Gic::enable_ppi` clears the
-  pending state of a PPI, sets its priority, makes it level-sensitive and
-  enables it.
+  PPIs of the executing CPU, and its SGIs where the GIC lets them be
+  disabled, puts them in group 0, sets the priority mask to `0xff` and the
+  binary point to 0, and enables the distributor and the CPU interface
+  again, with an end of interrupt that drops the priority and deactivates
+  together. It leaves the SPIs and the active state of every interrupt as
+  the reset of the machine left them, disabled and inactive. Group 0 is
+  signalled as IRQs on a GICv2 without the Security Extensions, as QEMU virt
+  has with `secure=off`; a board whose GIC has them and runs EL1 Non-secure
+  depends on its firmware for group 1. `Gic::enable_ppi` clears the pending
+  state of a PPI, sets its priority, makes it level-sensitive and enables
+  it. `Gic::enable_ppi` with an ID that is not a PPI, and `Gic::disable`
+  with a special ID, panic before any access.
 - `irq::handle` runs in the dispatch of an IRQ with every exception masked.
   It acknowledges the interrupt with `GICC_IAR`. A special ID, 1020 to 1023,
   returns without an end of interrupt. The timer interrupt re-arms the
@@ -237,12 +252,15 @@ exception.
 | --- | --- | --- | --- |
 | `CASXI_CPU` | `CASXI_CPU model=cortex-a76 midr=0x` and the 16 lowercase hexadecimal digits of `MIDR_EL1` | Once, when the CPU check passes | The last two checks |
 | `CASXI_BOOT` | `CASXI_BOOT kernel=krepi board=qemu-virt el=` and the exception level from `CurrentEL` in decimal, `1` | Once, after every check has passed | `CASXI_READY` |
-| `CASXI_READY` | `CASXI_READY` | Once, after `CASXI_BOOT` | The echo; no other record follows unless a console write fails or the kernel panics |
+| `CASXI_READY` | `CASXI_READY` | Once, after `CASXI_BOOT` | The echo; no other record follows unless a console write fails, the kernel panics or an exception is taken |
 | `CASXI_PANIC` | A line break, then `CASXI_PANIC` and, after a space, the message of the panic when it is a static text, or `dynamic_panic_message_omitted` | At a panic | `CASXI_PANIC_LOCATION` when the panic has a location, then `CASXI_HALTED` |
 | `CASXI_PANIC_LOCATION` | `CASXI_PANIC_LOCATION file=<path> line=<line> column=<column>`, the numbers in decimal | After `CASXI_PANIC` | `CASXI_HALTED` |
 | `CASXI_EXCEPTION` | A line break, then `CASXI_EXCEPTION vector=<n> ESR=0x<16> ELR=0x<16> FAR=0x<16> SPSR=0x<16> class=<class>`: the vector number in decimal, the four registers of the frame in 16 lowercase hexadecimal digits, and the class of the table below | When a dispatch reports an exception | `CASXI_HALTED` on a fatal path; otherwise the dispatch returns |
 | `CASXI_UART_FAIL` | A line break, then `CASXI_UART_FAIL reason=` and `clock`, `length`, `deadline`, `stalled` or `format` | When a console write fails | `CASXI_HALTED` |
 | `CASXI_HALTED` | `CASXI_HALTED` | Last, on a fatal path | The CPU masks every exception and waits forever |
+| `CASXI_TEST` | `CASXI_TEST image=<image>`, the name of the test image | First, in a test image only | The records of the exceptions that the image takes |
+| `CASXI_CHECK` | `CASXI_CHECK name=<check> failures=0x<16>`: the name of a self-check and the mask of its failed checks in 16 lowercase hexadecimal digits, 0 when every check held | In a test image only, once for each self-check | The next self-check, `CASXI_RESUMED`, or nothing when the vectors halt after the dispatch that wrote it |
+| `CASXI_RESUMED` | `CASXI_RESUMED` | Last, in a test image only, when its code resumes after the exceptions | The CPU masks every exception and waits forever |
 
 The class of an exception follows from its vector and, at vector 4, from
 the exception class `EC`, bits 26 to 31 of `ESR_EL1`, as the Arm
@@ -255,7 +273,10 @@ Architecture Reference Manual encodes it:
 | `sync` | 4 with any other EC; 0, 8 and 12 with any syndrome | - |
 | `irq` | 1, 5, 9 and 13 | - |
 | `fiq` | 2, 6, 10 and 14 | - |
-| `serror` | 3, 7, 11 and 15 | EC `0x2f` |
+| `serror` | 3, 7, 11 and 15 | - |
+
+The class `serror` follows from the vector alone; the syndrome of an
+SError has the exception class `0x2f`.
 
 The architecture defines no value of `FAR_EL1` for a breakpoint, an FP/SIMD
 trap, an IRQ or an SError, and none of `ESR_EL1` for an IRQ or an FIQ; the
@@ -295,9 +316,9 @@ the bounds allow, and `format` for a formatter that failed.
   records of their own within the bounds; a line that fails is followed by
   the failure marker and the halt, not by the next line.
 - Only the boot CPU writes. An exception dispatch writes only the
-  exception record, with every exception masked, between two console
-  accesses of the code that it interrupted ([Dispatch](#dispatch)), and no
-  dispatch reads the console.
+  exception record and, in a test image, its self-check records, with every
+  exception masked, between two console accesses of the code that it
+  interrupted ([Dispatch](#dispatch)), and no dispatch reads the console.
 
 ## Echo
 
@@ -375,7 +396,7 @@ counter as well.
 
 | Field | Class | Lock or owner | Linearization point | Publication |
 | --- | --- | --- | --- | --- |
-| The PL011 registers | Shared | The boot CPU alone; no interrupt handler accesses them | The volatile access to the register | `none`: its single owner never changes |
+| The PL011 registers | Shared | The boot CPU alone; a dispatch writes them only between two accesses of the code that it interrupted, with every exception masked ([Dispatch](#dispatch)) | The volatile access to the register | `none`: its single owner never changes |
 | The BSS and data probe words of the default image | Shared, read-only after load | The boot CPU, which only reads them | Their initialization by the cold entry and the load of the image | `none`: no CPU writes them after the cold entry |
 | The boot stack, `[__stack_bottom, __stack_top)` | Per-CPU, of the boot CPU | The boot CPU | - | `none` |
 | `DAIF`, `CPACR_EL1`, `SCTLR_EL1`, `TPIDR_EL1`, `VBAR_EL1` and the stack pointer of EL1 | Per-CPU | The executing CPU | The `ISB` after the cold entry's writes | `none` |
@@ -404,15 +425,17 @@ counter as well.
 - The suite also boots the test images, each once, and holds each
   transcript against an exact sequence of records: the start record
   `CASXI_TEST image=<image>`, the exception records of the case, and then
-  `CASXI_HALTED` or the self-check records `CASXI_CHECK name=<check>
+  `CASXI_HALTED`, or the self-check records `CASXI_CHECK name=<check>
   failures=0x<16>` of the image, each with no failure, and
-  `CASXI_RESUMED`. The return address of each exception record must be that
-  of a symbol of the image, or lie between two. Each rule of the saved and
-  restored state has one test, a self-check of a test image or a case of
-  the suite, named in the [open obligations](#open-obligations).
-- The test images that take the timer interrupt wait for it for at most
-  1,000 ms on the counter, a platform parameter of QEMU virt for these
-  images, where the interrupt comes after one period of 10 ms.
+  `CASXI_RESUMED`, or, for an image whose vectors halt after its dispatch,
+  those self-check records alone. The return address of each exception
+  record must be that of a symbol of the image, or lie between two. Each
+  rule of the saved and restored state has one test, a self-check of a test
+  image or a case of the suite, named in the
+  [open obligations](#open-obligations).
+- The test images that wait for an interrupt wait for at most 1,000 ms on
+  the counter, a platform parameter of QEMU virt for these images, where
+  the timer interrupt comes after one period of 10 ms.
 - No test bounds the time that a step takes, and the guest takes its
   windows and spin limits from the platform parameters.
 
@@ -421,7 +444,7 @@ counter as well.
 | Obligation | Kind | Verified state | Carrier | Stage | Test | Lines |
 | --- | --- | --- | --- | --- | --- | --- |
 | `kernel/arch/src/boot.S` | `assembly` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | 64 |
-| `kernel/arch/src/exception.S` | `assembly` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | 133 |
+| `kernel/arch/src/exception.S` | `assembly` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | 136 |
 | `kernel/arch/src/exception.S#frame` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `frame-records-interrupted-sp` | - |
 | `kernel/arch/src/exception.S#save-general` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `entry-saves-general-registers` | - |
 | `kernel/arch/src/exception.S#save-system` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `frame-records-system-registers` | - |
@@ -432,6 +455,7 @@ counter as well.
 | `kernel/arch/src/exception.S#no-fp-state` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `el1-fp-trap` | - |
 | `kernel/arch/src/exception.rs` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/gic.rs` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/arch/src/gic.rs#Gic::new` | `unsafe` | Neither (its caller vouches for the register frames of a GICv2 and their use by one CPU) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/gic.rs#read` | `mmio` | Neither (reads a GICv2 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/gic.rs#write` | `mmio` | Neither (writes a GICv2 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/gic.rs#barrier` | `unsafe` | Neither (executes `DSB SY` and `ISB`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
@@ -447,6 +471,7 @@ counter as well.
 | `kernel/arch/src/cpu.rs#cpacr` | `unsafe` | Neither (reads `CPACR_EL1`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs#halt` | `unsafe` | Neither (writes `DAIF`, waits with `WFE`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/boards/qemu-virt/src` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/boards/qemu-virt/src/irq.rs#GIC` | `unsafe` | Neither (names the GICv2 of QEMU virt through `Gic::new`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/boards/qemu-virt/src/uart.rs#read` | `mmio` | Neither (reads a PL011 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/boards/qemu-virt/src/uart.rs#write` | `mmio` | Neither (writes a PL011 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/boards/qemu-virt/src/main.rs#image::initialize` | `unsafe` | Neither (reads two words of the image) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
@@ -474,8 +499,9 @@ their expected values, and the
   `CNTV_CTL_EL0` and `CNTV_CVAL_EL0`, and `ISR_EL1`.
 - Arm Limited, *ARM Generic Interrupt Controller Architecture
   Specification, GIC architecture version 2.0*, IHI 0048B: the distributor
-  and CPU interface registers, the acknowledgement, the special interrupt
-  IDs and the end of interrupt.
+  and CPU interface registers, the interrupt groups with and without the
+  Security Extensions, the acknowledgement, the special interrupt IDs and
+  the end of interrupt.
 - Arm Limited, *Arm Cortex-A76 Core Technical Reference Manual*, revision
   r4p1, document 100798_0401_00_en, 2020,
   <https://documentation-service.arm.com/static/5f562083235b3560a01e03bc>:

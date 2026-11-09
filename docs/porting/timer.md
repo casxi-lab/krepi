@@ -47,14 +47,13 @@ None: the instructions are those of the legacy code.
 ## Hardware evidence to re-obtain
 
 - The timer interrupts of QEMU virt, armed, re-armed and stopped: the cases
-  `timer-irq` and `irq-preserves-registers` of `cargo xtask qemu-boot`, in
-  CI.
+  `timer-irq`, whose image checks that the second interrupt came at least a
+  period after the first, and `irq-preserves-registers` of
+  `cargo xtask qemu-boot`, in CI.
 - The timer of the Pi 5 with its board support on the bench (planned).
 
 ## Not carried over
 
 - The masked deadline of `set_syscall_probe_deadline`, which served a
   diagnostic probe.
-- The physical timer of the physical-entry profile, which comes with the
-  Pi 5 board support.
 - The legacy feature annotation `system.kernel.interrupts`.

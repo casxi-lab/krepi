@@ -515,7 +515,8 @@ not part of the check, and CI runs it after the check as stated above. It
 builds the images with one command, `cargo build --locked --release
 --target aarch64-unknown-none-softfloat -p krepi-qemu-virt --bin
 krepi-qemu-virt --example el1-brk --example injected-serror --example
-el1-fp-trap --example timer-irq --example irq-registers
+el1-fp-trap --example timer-irq --example irq-registers --example
+sp-el0-brk --example unexpected-irq
 --message-format=json-render-diagnostics` in `kernel/`, where
 the `.cargo/config.toml` of the repository root gives the target its flags,
 takes each image from Cargo's artifact message and records `rustc -vV`.
@@ -539,10 +540,11 @@ Cortex-A76 identity record, `CASXI_BOOT kernel=krepi board=qemu-virt el=1`
 and `CASXI_READY`, followed by the 16 bytes sent, a line feed and nothing
 else; and when the three image digests are equal and the three transcripts
 identical. The cases `el1-brk`, `injected-serror`, `el1-fp-trap`,
-`timer-irq` and `irq-preserves-registers` run their test image once each,
-`irq-preserves-registers` the image `irq-registers` and the others the image
-of their own name: `injected-serror` on the machine with EL2, the others on
-the runner's machine. Each passes when its run ended at its
+`timer-irq`, `irq-preserves-registers`, `sp-el0-brk` and `unexpected-irq`
+run their test image once each, `irq-preserves-registers` the image
+`irq-registers` and the others the image of their own name:
+`injected-serror` on the machine with EL2, the others on the runner's
+machine. Each passes when its run ended at its
 window with no errors and no input, on the machine of the case with one
 Cortex-A76, without an instruction count, booted the image of the build,
 and its transcript holds exactly, each line ending in CR LF, the start
@@ -550,11 +552,13 @@ record `CASXI_TEST image=<image>`, for each expected exception an empty line
 and the exception record of the contract, and then `CASXI_HALTED`, or one
 record `CASXI_CHECK name=<check> failures=0x<16 hexadecimal digits>` for
 each self-check of the image in order, each with no failure, and
-`CASXI_RESUMED`. Each exception record must have the vector, class and
-syndrome of the case and a return address at a symbol of the image's ELF
-file, or between two of them. The expected records are written into the
-suite from the contract and the exception classes of the Arm Architecture
-Reference Manual; each record and each self-check is a check of its own.
+`CASXI_RESUMED`, or, for `sp-el0-brk`, whose vectors halt after its
+dispatch, its self-check records alone. Each exception record must have
+the vector, class and syndrome of the case and a return address at a
+symbol of the image's ELF file, or between two of them. The expected
+records are written into the suite from the contract and the exception
+classes of the Arm Architecture Reference Manual; each record and each
+self-check is a check of its own.
 
 Each run writes a directory `<case>-<n>` with the files and the receipt of
 `cargo xtask qemu`; the receipt of a run of `cold-boot-echo` has one more

@@ -192,10 +192,11 @@ interrupt returns to the interrupted code.
 [boot](boot/contract.md) component.
 
 **Engineering notes.** The frame lies below the interrupted stack pointer
-and records it; the dispatch runs with every exception masked, so
-exceptions do not nest. The fatal path writes its record within the console
-bounds and does not allocate. Exceptions from EL0, with the save and restore
-of `SP_EL0`, belong to the user context of the runtime domain.
+and records it; the dispatch and the return run with every exception
+masked, so no SError, IRQ or FIQ nests, while a synchronous exception of
+the dispatch itself would. The fatal path writes its record within the
+console bounds and does not allocate. Exceptions from EL0, with the save and
+restore of `SP_EL0`, belong to the user context of the runtime domain.
 
 **Verification.** QEMU tests trigger each handled kind once, a breakpoint,
 a timer interrupt, an injected SError and an FP/SIMD access, check the

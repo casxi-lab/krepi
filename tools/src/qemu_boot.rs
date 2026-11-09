@@ -43,12 +43,13 @@
 //! The other cases boot a test image once each and hold its transcript
 //! against an exact sequence of records: the start record of the image, the
 //! exception records that the case expects, each with its vector, class,
-//! syndrome and return address, and then either `CASXI_HALTED` or the
-//! self-checks of the image, each with no failure, and `CASXI_RESUMED`;
-//! nothing else. The return address must be that of a symbol of the image,
-//! or lie between two of its symbols, which the suite reads from the ELF
-//! file. The expected records are written here from the contract and from
-//! the exception classes of the Arm Architecture Reference Manual, not
+//! syndrome and return address, and then either `CASXI_HALTED`, or the
+//! self-checks of the image, each with no failure, and `CASXI_RESUMED`, or,
+//! for an image whose vectors halt after its dispatch, those self-checks
+//! alone; nothing else. The return address must be that of a symbol of the
+//! image, or lie between two of its symbols, which the suite reads from the
+//! ELF file. The expected records are written here from the contract and
+//! from the exception classes of the Arm Architecture Reference Manual, not
 //! taken from an earlier run, and the suite judges no times.
 //!
 //! The suite exits with 0 for `PASS`, 1 for `FAIL`, 2 for `ERROR`, such as
@@ -146,7 +147,7 @@ fn cli() -> clap::Command {
         .bin_name(PROG)
         .no_binary_name(true)
         .about(
-            "Build the QEMU virt default image and run the QEMU boot suite on it, judging every run against fixed expected records.",
+            "Build the QEMU virt default image and test images and run the QEMU boot suite on them, judging every run against fixed expected records.",
         )
         .args_override_self(true)
         .arg(
@@ -418,6 +419,9 @@ pub enum End {
     Halted,
     /// The self-checks of the image in order, then `CASXI_RESUMED`.
     Resumed(&'static [&'static str]),
+    /// The self-checks of the image in order, which its dispatch writes
+    /// before it returns, and nothing after them: the vectors halted.
+    Silent(&'static [&'static str]),
 }
 
 /// How a case judges its runs.
@@ -448,7 +452,7 @@ pub struct Case {
 }
 
 /// The cases of the suite, in the order in which it runs them.
-pub const CASES: [Case; 6] = [
+pub const CASES: [Case; 8] = [
     Case {
         name: CASE,
         criterion: CRITERION,
@@ -518,7 +522,7 @@ pub const CASES: [Case; 6] = [
         machine: Machine::Virt,
         runs: 1,
         judgment: Judgment::Records(
-            &[TIMER_IRQ, TIMER_IRQ],
+            &[WAIT_IRQ, WAIT_IRQ],
             End::Resumed(&["timer-irq", "dispatch-masks-daif"]),
         ),
     },
@@ -538,10 +542,35 @@ pub const CASES: [Case; 6] = [
             End::Resumed(&["irq-preserves-registers"]),
         ),
     },
+    Case {
+        name: "sp-el0-brk",
+        criterion: "A BRK #0x5e at EL1 with SP_EL0 selected enters vector 0 and is reported with the class sync, the syndrome of EC 0x3c with the immediate and the address of the BRK; the frame records the stack pointer above it on SP_EL1, as the image's check holds, and when the dispatch returns the vectors halt with nothing after its records",
+        image: Image::Test("sp-el0-brk"),
+        machine: Machine::Virt,
+        runs: 1,
+        judgment: Judgment::Records(
+            &[Exception {
+                vector: 0,
+                class: "sync",
+                esr: Esr::Exact(0xf200_005e),
+                elr: Elr::At("krepi_test_sp0_site"),
+            }],
+            End::Silent(&["sp-el0-frame-records-sp-el1"]),
+        ),
+    },
+    Case {
+        name: "unexpected-irq",
+        criterion: "The physical timer interrupts through the GICv2 as interrupt 30, which the board does not expect, enters vector 5 once while the image waits with IRQs unmasked and is reported with the class irq and an address in the waiting code; the board's handler disables and ends it, and the image's check that one interrupt came, that it was interrupt 30 and that it is disabled holds",
+        image: Image::Test("unexpected-irq"),
+        machine: Machine::Virt,
+        runs: 1,
+        judgment: Judgment::Records(&[WAIT_IRQ], End::Resumed(&["unexpected-irq-disabled"])),
+    },
 ];
 
-/// The exception record of a timer interrupt of the case `timer-irq`.
-const TIMER_IRQ: Exception = Exception {
+/// The exception record of an IRQ that a test image takes while it waits in
+/// `krepi_test_wait`.
+const WAIT_IRQ: Exception = Exception {
     vector: 5,
     class: "irq",
     esr: Esr::Any,
@@ -761,8 +790,9 @@ pub struct Records<'t> {
 /// test image `image` that a case judges with `exceptions` and `end`: the
 /// start record `CASXI_TEST image=<image>`; for each expected exception an
 /// empty line and an exception record; then, for [`End::Halted`],
-/// `CASXI_HALTED`, or for [`End::Resumed`] one `CASXI_CHECK` record of each
-/// self-check in order and `CASXI_RESUMED`; and nothing else.
+/// `CASXI_HALTED`, for [`End::Resumed`] one `CASXI_CHECK` record of each
+/// self-check in order and `CASXI_RESUMED`, or for [`End::Silent`] those
+/// self-check records alone; and nothing else.
 pub fn check_records<'t>(
     transcript: &'t [u8],
     image: &str,
@@ -771,11 +801,12 @@ pub fn check_records<'t>(
 ) -> Result<Records<'t>, Failure> {
     let lines = record_lines(transcript)?;
     let start = format!("CASXI_TEST image={image}");
-    let checks: &[&str] = match end {
-        End::Halted => &[],
-        End::Resumed(checks) => checks,
+    let (checks, last_record): (&[&str], Option<&[u8]>) = match end {
+        End::Halted => (&[], Some(b"CASXI_HALTED")),
+        End::Resumed(checks) => (checks, Some(b"CASXI_RESUMED")),
+        End::Silent(checks) => (checks, None),
     };
-    let expected = 1 + 2 * exceptions.len() + checks.len() + 1;
+    let expected = 1 + 2 * exceptions.len() + checks.len() + usize::from(last_record.is_some());
     require(lines.len() == expected, || {
         format!(
             "the transcript has {} records, not {expected}: {}",
@@ -804,24 +835,23 @@ pub fn check_records<'t>(
         records.push(pair[1]);
     }
     let rest = &lines[1 + 2 * exceptions.len()..];
-    let (last, check_lines) = rest.split_last().expect("the count includes the end");
+    let check_lines = &rest[..checks.len()];
     for (line, name) in check_lines.iter().zip(checks) {
         let prefix = format!("CASXI_CHECK name={name} failures=0x");
         require(line.starts_with(prefix.as_bytes()), || {
             format!("the record {} is not the check {name}", line.escape_ascii())
         })?;
     }
-    let last_record: &[u8] = match end {
-        End::Halted => b"CASXI_HALTED",
-        End::Resumed(_) => b"CASXI_RESUMED",
-    };
-    require(*last == last_record, || {
-        format!(
-            "the last record is {}, not {}",
-            last.escape_ascii(),
-            last_record.escape_ascii()
-        )
-    })?;
+    if let Some(last_record) = last_record {
+        let last = rest[checks.len()];
+        require(last == last_record, || {
+            format!(
+                "the last record is {}, not {}",
+                last.escape_ascii(),
+                last_record.escape_ascii()
+            )
+        })?;
+    }
     Ok(Records {
         exceptions: records,
         checks: check_lines.to_vec(),
@@ -871,7 +901,7 @@ pub fn judge_records(
                 result,
             ));
         }
-        if let End::Resumed(names) = end {
+        if let End::Resumed(names) | End::Silent(names) = end {
             for (position, name) in names.iter().enumerate() {
                 let result = parsed.as_ref().map_err(|_| missing()).and_then(|records| {
                     let line = records.checks[position];

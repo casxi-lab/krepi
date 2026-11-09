@@ -329,6 +329,10 @@ fn the_build_command_names_the_images() {
             "timer-irq",
             "--example",
             "irq-registers",
+            "--example",
+            "sp-el0-brk",
+            "--example",
+            "unexpected-irq",
             "--message-format=json-render-diagnostics",
         ]
     );
@@ -529,6 +533,7 @@ fn symbols() -> Vec<(String, u64)> {
         ("krepi_test_wait", 0x4020_1160),
         ("krepi_test_wait_end", 0x4020_1188),
         ("krepi_test_irq_resume", 0x4020_1258),
+        ("krepi_test_sp0_site", 0x4020_1178),
     ]
     .map(|(name, address)| (name.to_string(), address))
     .to_vec()
@@ -637,6 +642,33 @@ fn registers_transcript(elr: u64) -> Vec<u8> {
     ])
 }
 
+/// The exception record of a good run of `sp-el0-brk`.
+const SP0_RECORD: &[u8] = b"CASXI_EXCEPTION vector=0 ESR=0x00000000f200005e ELR=0x0000000040201178 FAR=0x0000000000000000 SPSR=0x00000000600003c4 class=sync";
+
+/// The transcript of a good run of `sp-el0-brk`, whose vectors halted after
+/// its dispatch.
+fn sp0_transcript() -> Vec<u8> {
+    lines(&[
+        b"CASXI_TEST image=sp-el0-brk",
+        b"",
+        SP0_RECORD,
+        b"CASXI_CHECK name=sp-el0-frame-records-sp-el1 failures=0x0000000000000000",
+    ])
+}
+
+/// The transcript of a good run of `unexpected-irq` whose interrupt
+/// returned to `elr`.
+fn unexpected_transcript(elr: u64) -> Vec<u8> {
+    let record = irq_record(elr);
+    lines(&[
+        b"CASXI_TEST image=unexpected-irq",
+        b"",
+        record.as_bytes(),
+        b"CASXI_CHECK name=unexpected-irq-disabled failures=0x0000000000000000",
+        b"CASXI_RESUMED",
+    ])
+}
+
 /// The checks of one run of the case `name` with `transcript` on `machine`.
 fn judge_one(name: &str, transcript: Vec<u8>, machine: Machine) -> Vec<Check> {
     let run = Run {
@@ -700,6 +732,25 @@ mod records {
         let checks = judge_one(
             "irq-preserves-registers",
             registers_transcript(0x4020_1258),
+            Machine::Virt,
+        );
+        assert_eq!(failed(&checks), Vec::<&str>::new());
+        let checks = judge_one("sp-el0-brk", sp0_transcript(), Machine::Virt);
+        assert_eq!(failed(&checks), Vec::<&str>::new());
+        let names: Vec<&str> = checks.iter().map(|check| check.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "run 1 receipt",
+                "run 1 transcript",
+                "run 1 exception 1",
+                "run 1 sp-el0-frame-records-sp-el1",
+                "runs",
+            ]
+        );
+        let checks = judge_one(
+            "unexpected-irq",
+            unexpected_transcript(0x4020_1170),
             Machine::Virt,
         );
         assert_eq!(failed(&checks), Vec::<&str>::new());
@@ -901,6 +952,58 @@ mod records {
         }
     }
 
+    /// The case whose vectors halt after its dispatch fails with any record
+    /// after its self-check, such as `CASXI_RESUMED` when the vectors
+    /// returned, and without the self-check; a failed self-check or another
+    /// vector fails that check alone. The unexpected interrupt fails when it
+    /// came twice.
+    #[test]
+    fn a_case_that_halts_after_its_dispatch_fails_with_more_or_less() {
+        let good = sp0_transcript();
+        let all_failed = [
+            "run 1 transcript",
+            "run 1 exception 1",
+            "run 1 sp-el0-frame-records-sp-el1",
+        ];
+        for extra in [&b"CASXI_RESUMED\r\n"[..], b"CASXI_HALTED\r\n", b"\r\n"] {
+            let transcript = [good.as_slice(), extra].concat();
+            let checks = judge_one("sp-el0-brk", transcript, Machine::Virt);
+            assert_eq!(failed(&checks), all_failed, "{}", extra.escape_ascii());
+        }
+        let without_check = lines(&[b"CASXI_TEST image=sp-el0-brk", b"", SP0_RECORD]);
+        let checks = judge_one("sp-el0-brk", without_check, Machine::Virt);
+        assert_eq!(failed(&checks), all_failed);
+        let text = String::from_utf8(good).unwrap();
+        let failing = text.replace("failures=0x0000000000000000", "failures=0x0000000000000004");
+        let checks = judge_one("sp-el0-brk", failing.into_bytes(), Machine::Virt);
+        assert_eq!(failed(&checks), ["run 1 sp-el0-frame-records-sp-el1"]);
+        let other_vector = text.replace("vector=0", "vector=4");
+        let checks = judge_one("sp-el0-brk", other_vector.into_bytes(), Machine::Virt);
+        assert_eq!(failed(&checks), ["run 1 exception 1"]);
+        let record = irq_record(0x4020_1170);
+        let twice = lines(&[
+            b"CASXI_TEST image=unexpected-irq",
+            b"",
+            record.as_bytes(),
+            b"",
+            record.as_bytes(),
+            b"CASXI_CHECK name=unexpected-irq-disabled failures=0x0000000000000000",
+            b"CASXI_RESUMED",
+        ]);
+        let checks = judge_one("unexpected-irq", twice, Machine::Virt);
+        assert_eq!(
+            failed(&checks),
+            [
+                "run 1 transcript",
+                "run 1 exception 1",
+                "run 1 unexpected-irq-disabled"
+            ]
+        );
+        let outside = unexpected_transcript(0x4020_1188);
+        let checks = judge_one("unexpected-irq", outside, Machine::Virt);
+        assert_eq!(failed(&checks), ["run 1 exception 1"]);
+    }
+
     /// The receipt of a test image must name the machine of its case, so
     /// the SError case fails without EL2 and the breakpoint case with it;
     /// a run with input, an instruction count or another image fails too.
@@ -970,7 +1073,9 @@ fn the_cases_name_their_symbols_images_and_outcome() {
             "injected-serror",
             "el1-fp-trap",
             "timer-irq",
-            "irq-registers"
+            "irq-registers",
+            "sp-el0-brk",
+            "unexpected-irq"
         ]
     );
     let all = |outcomes: &[Outcome]| suite_outcome(outcomes);

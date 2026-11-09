@@ -12,8 +12,9 @@
 //! the vector number into the [`Frame`], clears its reserved word, masks
 //! every exception and calls `exception_dispatch(&mut Frame)`, which each
 //! image defines as an unmangled `extern "C"` function. When the dispatch
-//! returns from one of the four entries of the current exception level with
-//! `SP_EL1`, vectors 4 to 7, the path loads `ELR_EL1` and `SPSR_EL1` from the
+//! returns, the path masks every exception again, whatever the dispatch
+//! unmasked. For one of the four entries of the current exception level with
+//! `SP_EL1`, vectors 4 to 7, it then loads `ELR_EL1` and `SPSR_EL1` from the
 //! frame, clears `x0` to `x30`, loads them from the frame, releases the frame
 //! and returns with `ERET`. A dispatch that returns from any other entry ends
 //! in a halt with every exception masked. The path tells the entries apart

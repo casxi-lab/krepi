@@ -118,13 +118,14 @@ handle an exception of EL0.
   exception masked. The dispatch of the default image writes the exception
   record, with the vector, `ESR`, `ELR`, `FAR`, `SPSR` and the class `brk`,
   `fp`, `sync`, `irq`, `fiq` or `serror`, then `CASXI_HALTED`, and halts.
-  Only the four vectors of the current level with `SP_EL1` can return:
-  after their dispatch returns, `ELR_EL1`, `SPSR_EL1` and `x0` to `x30` are
-  loaded from the frame. FP/SIMD state is never saved, as FP/SIMD
-  instructions trap.
-- **Interrupts.** `irq::init` enables only the timer interrupt 27 of the
-  GICv2 and arms the virtual timer for 10 ms, leaving IRQs masked; the code
-  that waits for it unmasks them. `irq::handle`, in the dispatch of an IRQ,
+  Once a dispatch returns, every exception is masked again. Only the four
+  vectors of the current level with `SP_EL1` then return: `ELR_EL1`,
+  `SPSR_EL1` and `x0` to `x30` are loaded from the frame. The others halt.
+  FP/SIMD state is never saved, as FP/SIMD instructions trap.
+- **Interrupts.** `irq::init` enables the timer interrupt 27 of the GICv2,
+  the only PPI that it leaves enabled, and arms the virtual timer for 10 ms,
+  leaving IRQs masked; the code that waits for it unmasks them.
+  `irq::handle`, in the dispatch of an IRQ,
   acknowledges the interrupt, re-arms the timer for the next period,
   disables any other interrupt, and ends it, except a special ID from 1020
   on, which it leaves alone. The default image sets no interrupt up and
@@ -282,23 +283,28 @@ The syndrome of a breakpoint taken through vector 0, the current level with
   the echo on QEMU virt; it does not establish them on a Raspberry Pi 5, and
   a QEMU result is not a board result.
 - **QEMU, exceptions.** The cases `el1-brk`, `injected-serror`,
-  `el1-fp-trap`, `timer-irq` and `irq-preserves-registers` of the same suite
-  boot a test image each, in release, on the same machine or, for
-  `injected-serror`, on the machine with EL2, and hold the transcript
-  against the exact records of the case: the exception records with their
-  vector, class, syndrome and an `ELR` at a symbol of the image or between
-  two, then the halt or the self-checks of the frame, of the return and of
-  the registers, each with no failure. They establish the vectors, the
-  frame, the return of a synchronous exception and of an IRQ, the timer
-  interrupt through the GICv2, the registers across an IRQ, the virtual
-  SError and the FP/SIMD trap on QEMU virt, not on a Raspberry Pi 5; the
-  virtual SError needs EL2, which the default image does not run with.
+  `el1-fp-trap`, `timer-irq`, `irq-preserves-registers`, `sp-el0-brk` and
+  `unexpected-irq` of the same suite boot a test image each, in release, on
+  the same machine or, for `injected-serror`, on the machine with EL2, and
+  hold the transcript against the exact records of the case: the exception
+  records with their vector, class, syndrome and an `ELR` at a symbol of the
+  image or between two, then the halt, or the self-checks of the frame, of
+  the return, of the interrupts and of the registers, each with no failure,
+  and for `sp-el0-brk` nothing after its self-check. They establish the
+  vectors, the frame, the return of a synchronous exception and of an IRQ,
+  the halt of vector 0 after its dispatch, the timer interrupt through the
+  GICv2 with its re-arm, the disabling of an unexpected interrupt, the
+  registers across an IRQ, the virtual SError and the FP/SIMD trap on QEMU
+  virt, not on a Raspberry Pi 5; the virtual SError needs EL2, which the
+  default image does not run with.
 - **Proofs.** None: no theorem covers the feature, and the boot contract
   lists its code as [open obligations](../../domains/boot-platform/boot/contract.md#open-obligations).
 - **Unverified.** The paths that QEMU's PL011 never takes, a full transmit
   FIFO and a stalled device, are shown only by the host tests. The special
-  interrupt IDs and an unexpected interrupt in `irq::handle`, and the
-  vectors that halt, are taken by no test.
+  interrupt IDs in `irq::handle`, the return of vectors 6 and 7, the halt of
+  the vectors other than vector 0, and the masking of the return path after
+  a dispatch that unmasks, which no image's dispatch does, are taken by no
+  test.
 
 ## Limitations
 

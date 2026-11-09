@@ -33,7 +33,7 @@ states the rules of the vectors, the frame and the dispatch.
 - `ExceptionFrame` is `Frame`, and its field `regs` is `x`; the layout, 304
   bytes with the stack pointer at 248, `ELR_EL1` at 256 and the vector number
   at 288, is the legacy one. Constant assertions fix the offset of every
-  field, not only of three. The frame is `Clone`, `Copy`, `Debug`,
+  field, not only the size and two offsets. The frame is `Clone`, `Copy`, `Debug`,
   `PartialEq` and `Eq` and has a frame of zeros, `Frame::ZERO`.
 - New: the exception class `exception_class`, the two vector numbers and
   exception classes that the record needs, and `Class` with `Class::of` and
@@ -52,6 +52,12 @@ states the rules of the vectors, the frame and the dispatch.
   tells the entries apart by the vector number that it keeps in `x19`, which
   the dispatch preserves, so a dispatch that changes the frame's vector
   field cannot make a halting entry return.
+- New: once the dispatch returns, the path masks every exception again
+  before it writes `ELR_EL1` and `SPSR_EL1`, so that an exception that the
+  dispatch unmasked cannot be taken before the `ERET` and overwrite them.
+  The legacy path wrote them with whatever the dispatch left. No dispatch of
+  krepi unmasks an exception, so the change has no effect that an image
+  shows, and no test observes it.
 - The clear of `x0` to `x30` before their loads is kept, with a comment that
   states what it changes: a register that a load missed reads 0, not a value
   of the dispatch. The mask of every exception before the dispatch is kept,
@@ -71,17 +77,17 @@ Manual.
 
 | Change | Evidence |
 | --- | --- |
-| An exception of a lower level or of the current level with `SP_EL0` halts once its dispatch returns, where the legacy path returned to it | Host: `exception::tests::the_other_entries_give_sync_for_a_breakpoint` for the class; the return path itself has no test, as no image takes such an exception |
-| The saved stack pointer of those entries is the address above the frame, not `SP_EL0` | None: no image takes such an exception |
+| An exception of a lower level or of the current level with `SP_EL0` halts once its dispatch returns, where the legacy path returned to it | The case `sp-el0-brk` of `cargo xtask qemu-boot`, for vector 0, whose dispatch returns past the breakpoint and after which nothing follows; host: `exception::tests::the_other_entries_give_sync_for_a_breakpoint` for the class |
+| The saved stack pointer of those entries is the address above the frame, not `SP_EL0` | The self-check `sp-el0-frame-records-sp-el1` of the case `sp-el0-brk` |
 | The entries of the current level with `SP_EL1` return as before | The cases `el1-brk`, `timer-irq` and `irq-preserves-registers` of `cargo xtask qemu-boot` |
 
 ## Hardware evidence to re-obtain
 
 - The breakpoint, the FP/SIMD trap, the virtual SError on the machine with
   EL2, the timer IRQ and the registers across it on QEMU virt with one
-  Cortex-A76: the cases `el1-brk`, `el1-fp-trap`, `injected-serror`,
-  `timer-irq` and `irq-preserves-registers` of `cargo xtask qemu-boot`, in
-  CI.
+  Cortex-A76, and the halt of vector 0: the cases `el1-brk`, `el1-fp-trap`,
+  `injected-serror`, `timer-irq`, `irq-preserves-registers` and `sp-el0-brk`
+  of `cargo xtask qemu-boot`, in CI.
 - The same vectors on the Pi 5, after its EL2 to EL1 entry, on the HIL bench
   (planned).
 

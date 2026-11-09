@@ -9,8 +9,10 @@
 //! come or [`WAIT_MS`] have passed. The dispatch reads `DAIF`, writes the
 //! exception record, acknowledges and ends the interrupt with the board's
 //! `irq::handle` and returns; after the second timer interrupt it stops the
-//! timer, so that exactly two arrive. The image then checks the interrupts
-//! and the masking of the dispatch and writes `CASXI_RESUMED`. On the host
+//! timer, so that exactly two arrive. The image then checks the interrupts,
+//! among them that the second came at least one period after the first had
+//! entered the dispatch, which only the re-arm in `irq::handle` makes so,
+//! and the masking of the dispatch, and writes `CASXI_RESUMED`. On the host
 //! it is an empty program.
 
 #![cfg_attr(all(target_arch = "aarch64", target_os = "none"), no_std, no_main)]
@@ -28,7 +30,7 @@ mod image {
     use krepi_arch::{cpu, timer};
     use krepi_qemu_virt::console::window_ticks;
     use krepi_qemu_virt::irq::{self, Interrupt};
-    use krepi_qemu_virt::uart;
+    use krepi_qemu_virt::{TIMER_RATE, uart};
 
     /// The timer interrupts that the image waits for.
     const TICKS: u64 = 2;
@@ -44,6 +46,11 @@ mod image {
     static mut OTHER: u64 = 0;
     /// The entries of the dispatch at which `DAIF` was not [`ALL_MASKED`].
     static mut UNMASKED: u64 = 0;
+    /// The virtual count at the entry of the dispatch of the first timer
+    /// interrupt.
+    static mut FIRST: u64 = 0;
+    /// The virtual count at the entry of the dispatch of the second.
+    static mut SECOND: u64 = 0;
 
     unsafe extern "C" {
         /// Unmasks IRQs, waits until the word at `count` is at least
@@ -113,7 +120,14 @@ mod image {
         // leaves IRQs masked as it found them.
         unsafe { krepi_test_wait(&raw const TIMER, TICKS, deadline) };
         let ticks = load(&raw const TIMER);
-        common::check("timer-irq", &[ticks == TICKS, load(&raw const OTHER) == 0]);
+        // The period of `irq`: the counter frequency divided by the rate,
+        // rounded up, and at least 1.
+        let period = cpu::counter_frequency().div_ceil(TIMER_RATE).max(1);
+        let gap = load(&raw const SECOND).wrapping_sub(load(&raw const FIRST));
+        common::check(
+            "timer-irq",
+            &[ticks == TICKS, load(&raw const OTHER) == 0, gap >= period],
+        );
         common::check(
             "dispatch-masks-daif",
             &[ticks > 0, load(&raw const UNMASKED) == 0],
@@ -132,8 +146,11 @@ mod image {
 
     /// The exception dispatch of the image: an IRQ is reported, acknowledged
     /// and ended, and the dispatch returns; any other exception is fatal.
+    /// The virtual count at the entry of the first two timer interrupts is
+    /// kept.
     #[unsafe(no_mangle)]
     extern "C" fn exception_dispatch(frame: &mut Frame) {
+        let entered = cpu::virtual_counter();
         if daif() != ALL_MASKED {
             store(&raw mut UNMASKED, load(&raw const UNMASKED) + 1);
         }
@@ -144,8 +161,13 @@ mod image {
         if irq::handle() == Interrupt::Timer {
             let ticks = load(&raw const TIMER) + 1;
             store(&raw mut TIMER, ticks);
-            if ticks == TICKS {
-                timer::stop_virtual();
+            match ticks {
+                1 => store(&raw mut FIRST, entered),
+                TICKS => {
+                    store(&raw mut SECOND, entered);
+                    timer::stop_virtual();
+                }
+                _ => {}
             }
         } else {
             store(&raw mut OTHER, load(&raw const OTHER) + 1);

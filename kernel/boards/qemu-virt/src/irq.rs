@@ -16,10 +16,12 @@ use krepi_arch::gic::{self, Gic};
 use krepi_arch::{cpu, timer};
 
 /// The GICv2 of QEMU virt.
-const GIC: Gic = Gic {
-    distributor: GIC_DISTRIBUTOR,
-    cpu: GIC_CPU,
-};
+// SAFETY: `GIC_DISTRIBUTOR` and `GIC_CPU` are the distributor and the CPU
+// interface of the GICv2 of QEMU virt, which the MMU, while it is off,
+// reaches as Device memory; a later MMU setup keeps them mapped with Device
+// attributes. Only the boot CPU uses this module, `init` with IRQs masked and
+// `handle` in the dispatch of an IRQ with every exception masked.
+const GIC: Gic = unsafe { Gic::new(GIC_DISTRIBUTOR, GIC_CPU) };
 
 /// The interrupt that [`handle`] took.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,8 +42,9 @@ fn period() -> u64 {
 }
 
 /// Sets the interrupts up with IRQs left masked: stops the virtual timer,
-/// sets the GIC up with only the timer interrupt enabled, level-sensitive
-/// at [`TIMER_PRIORITY`], and arms the timer for one period from now.
+/// sets the GIC up with the timer interrupt the only enabled PPI,
+/// level-sensitive at [`TIMER_PRIORITY`], and arms the timer for one period
+/// from now. The SPIs stay as the reset of the machine left them, disabled.
 pub fn init() {
     timer::stop_virtual();
     GIC.init();

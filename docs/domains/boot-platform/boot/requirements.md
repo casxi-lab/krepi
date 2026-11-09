@@ -50,8 +50,8 @@ follow are in the [contract](contract.md).
   board crate for the same target: each links the cold entry, the
   exception vectors, the console and the exception record of the default
   image and adds its own `kernel_main`, dispatch and trigger sequence.
-- **Host.** The host tests of the console run on the development host and
-  in CI.
+- **Host.** The host tests of the console, of the exception record and of
+  the exception classes run on the development host and in CI.
 - The Raspberry Pi 5 is not a configuration of these requirements, and
   neither is more than one CPU.
 
@@ -75,7 +75,8 @@ after `CASXI_READY`.
 - **Examples.** [ex3](../../../features/platform/qemu-virt-boot.md#ex3-the-echo-adds-lf-after-cr-only)
   of the QEMU virt boot feature document.
 - **Entry points.** `_start`, `kernel_main`, `krepi_qemu_virt::uart::print`,
-  `krepi_qemu_virt::uart::write_echo` and `krepi_qemu_virt::verify_cpu`.
+  `krepi_qemu_virt::uart::write_echo` and `verify_cpu` in
+  `kernel/boards/qemu-virt/src/main.rs`.
 - **Contract.** [Cold entry](contract.md#cold-entry),
   [Initialization checks](contract.md#initialization-checks),
   [Records](contract.md#records) and [Echo](contract.md#echo).
@@ -170,11 +171,13 @@ hold their bytes and classes.
   of before. The case checks the record's vector, class, syndrome and the
   address of the symbol of the `BRK` in the image. The host tests of
   `kernel/boards/qemu-virt/src/fault/` and `kernel/arch/src/exception/`
-  hold the record and the classes. It shows the save and return of vectors
-  4 to 7 for a synchronous exception on QEMU virt: a register stored after
-  the entry changed it, such as `x0` after the vector number, would fail
-  `entry-saves-general-registers`. It does not show the behaviour of the
-  other vectors, which no image takes, or the vectors on a Raspberry Pi 5.
+  hold the record and the classes. It shows the save and return of vector
+  4 for a synchronous exception on QEMU virt: a register stored after the
+  entry changed it, such as `x0` after the vector number, would fail
+  `entry-saves-general-registers`. It does not show the return of vectors 6
+  and 7, which no image returns from, the vectors 1 to 3 and 8 to 15, which
+  no image takes, or the vectors on a Raspberry Pi 5; BOOT-R06 and BOOT-R08
+  show vectors 5 and 0.
 
 ### BOOT-R04
 
@@ -263,19 +266,24 @@ code, which a second interrupt reaches again. The criterion: the case
   of the contract carry its code and the rule `mask`.
 - **Evidence.** The case `timer-irq` of `cargo xtask qemu-boot`, in CI, with
   the two self-checks of its test image: `timer-irq`, that exactly two
-  timer interrupts came within the wait and no other interrupt, and
-  `dispatch-masks-daif`, the test of the rule `mask`, that `DAIF` had D, A,
-  I and F set at each entry of the dispatch. Taking an exception to EL1
-  sets the four bits, and the save path sets them again, so the check shows
-  that they are set during the dispatch but not which of the two set them.
-  The image waits with IRQs
-  unmasked in code of its own and stops the timer after the second
-  interrupt. The case checks two IRQ records with an `ELR` between the
-  symbols of the waiting code. The second interrupt shows that the end of
-  interrupt of the first took effect, as the GICv2 signals no interrupt that
-  is still active. It does not show the period of the timer, which the
-  suite does not time, a device interrupt, or the GIC-400 of a Raspberry Pi
-  5.
+  timer interrupts came within the wait and no other interrupt, and that
+  the second entered the dispatch at least one period, on the virtual
+  count, after the first; and `dispatch-masks-daif`, the test of the rule
+  `mask`, that `DAIF` had D, A, I and F set at each entry of the dispatch.
+  Taking an exception to EL1 sets the four bits, and the save path sets
+  them again, so the check shows that they are set during the dispatch but
+  not which of the two set them; it does not show that the return path sets
+  them again, which matters only for a dispatch that unmasks, and none
+  does. The image waits with IRQs unmasked in code of its own and stops the
+  timer after the second interrupt. The case checks two IRQ records with an
+  `ELR` between the symbols of the waiting code. The second interrupt shows
+  that the end of interrupt of the first took effect, as the GICv2 signals
+  no interrupt that is still active, and its distance from the first shows
+  the re-arm: without it the timer keeps its level up after the end of
+  interrupt, and the second interrupt comes at once. It does not show that
+  the period is 10 ms, as the check bounds the distance only from below, an
+  interrupt other than the timer interrupt, which BOOT-R09 covers, or the
+  GIC-400 of a Raspberry Pi 5.
 
 ### BOOT-R07
 
@@ -309,8 +317,79 @@ to the frame's. The criterion: the case `irq-preserves-registers` passes.
   time. A missed load would leave a register at 0, and a load from the
   wrong place another value, so both fail the check; the clear before the
   loads, which no load misses, has no effect that the check can see. It
-  does not show a second interrupt during the return, which the masking
-  during the dispatch excludes, or the behaviour on a Raspberry Pi 5.
+  does not show a second interrupt during the return, which the masking of
+  the return path excludes, or the behaviour on a Raspberry Pi 5.
+
+### BOOT-R08
+
+**An exception with `SP_EL0` is reported and halts.** A `BRK #imm` at EL1
+with `SP_EL0` selected enters vector 0. The entry saves the frame on
+`SP_EL1`, and the frame records the stack pointer above it on `SP_EL1`, not
+`SP_EL0`. The exception record names vector 0, the class `sync`, the
+syndrome of EC `0x3c` with the immediate and the address of the `BRK` as
+`ELR`. When the dispatch returns, even with the frame's `ELR` moved past the
+`BRK`, the vectors do not return to the interrupted code: they halt with
+every exception masked, and nothing follows the records of the dispatch.
+The criterion: the case `sp-el0-brk` passes.
+
+- **Examples.** [ex6](../../../features/platform/qemu-virt-boot.md#ex6-a-breakpoint-through-another-entry-is-sync)
+  of the QEMU virt boot feature document.
+- **Entry points.** `__exception_vectors`, `exception_dispatch`,
+  `krepi_qemu_virt::uart::report_exception` and
+  `krepi_arch::exception::Class::of`.
+- **Contract.** [Exception vectors](contract.md#exception-vectors),
+  [Frames](contract.md#frames), [Dispatch](contract.md#dispatch) and
+  [Records](contract.md#records).
+- **Specification.** None: no specification covers the component.
+- **Proof path.** None: the [open obligations](contract.md#open-obligations)
+  of the contract carry its code.
+- **Evidence.** The case `sp-el0-brk` of `cargo xtask qemu-boot`, in CI,
+  with the self-check of its test image, `sp-el0-frame-records-sp-el1`:
+  that the frame records the address just above it, the `SP_EL1` of before
+  the breakpoint and not the value that the image put into `SP_EL0`, and
+  that `SPSR` names EL1 with `SP_EL0`. The dispatch writes the record and
+  the self-check, moves the frame's `ELR` past the `BRK` and returns; had
+  the vectors returned, the image would write `CASXI_RESUMED`. The case
+  checks the record's vector, class, syndrome and the address of the symbol
+  of the `BRK`, and that nothing follows the self-check. It shows the halt
+  of vector 0 after its dispatch on QEMU virt. It does not show vectors 1 to
+  3 and 8 to 15, which share its path but which no image takes, or the
+  vectors on a Raspberry Pi 5.
+
+### BOOT-R09
+
+**An interrupt other than the timer interrupt is disabled and ended.**
+With the interrupts set up by `irq::init`, an interrupt that the board does
+not expect, here the physical timer of the CPU, interrupt 30, enabled by the
+code, is taken through vector 5 when the code unmasks IRQs and reported in
+an exception record with vector 5, the class `irq` and an `ELR` in the
+interrupted code. `irq::handle` acknowledges it, disables it in the GICv2
+and ends it, so that it does not come again although its source keeps its
+level up, and the dispatch returns. The criterion: the case
+`unexpected-irq` passes.
+
+- **Examples.** None of its own: the record is that of BOOT-R03.
+- **Entry points.** `__exception_vectors`, `exception_dispatch`,
+  `krepi_qemu_virt::irq::init` and `krepi_qemu_virt::irq::handle`, with the
+  GICv2 functions of `krepi-arch`.
+- **Contract.** [Interrupts](contract.md#interrupts),
+  [Exception vectors](contract.md#exception-vectors) and
+  [Records](contract.md#records).
+- **Specification.** None: no specification covers the component.
+- **Proof path.** None: the [open obligations](contract.md#open-obligations)
+  of the contract carry its code.
+- **Evidence.** The case `unexpected-irq` of `cargo xtask qemu-boot`, in CI,
+  with the self-check of its test image, `unexpected-irq-disabled`: that
+  the dispatch was entered once, that `irq::handle` returned the
+  interrupt 30 as unexpected and that `GICD_ISENABLER0` no longer enables
+  it. The image stops the virtual timer after `irq::init`, enables
+  interrupt 30 with `Gic::enable_ppi` and arms the physical timer to fire at
+  once, so that its level stays up until the image stops it after the wait.
+  The case checks one IRQ record with an `ELR` between the symbols of the
+  waiting code. It shows the path of an unexpected interrupt on QEMU virt.
+  It does not show a special interrupt ID, which QEMU gives only when no
+  interrupt is pending, a device interrupt, or the GIC-400 of a Raspberry Pi
+  5.
 
 ## Liveness, time and performance
 
@@ -318,9 +397,9 @@ to the frame's. The criterion: the case `irq-preserves-registers` passes.
   loop runs forever and answers every received byte.
 - A console write ends within its window on a running counter and within
   `attempts_per_byte` refusals of one byte on a stopped one.
-- A test image that takes the timer interrupt waits for it for at most
-  1,000 ms on the counter, a platform parameter of QEMU virt for these
-  images, and then reports what it saw.
+- A test image that waits for an interrupt waits for at most 1,000 ms on
+  the counter, a platform parameter of QEMU virt for these images, and then
+  reports what it saw.
 - The QEMU boot suite ends each run at its window of 20 s, a platform
   parameter of QEMU virt that leaves ample room for a boot that takes well
   under a second, and judges no time. A test image either halts or ends in
@@ -333,10 +412,11 @@ to the frame's. The criterion: the case `irq-preserves-registers` passes.
 - The MMU and the caches stay off, and the device tree is not read.
 - The vectors of the current level with `SP_EL0` and of a lower level halt
   after their dispatch returns; the kernel handles no such exception, and
-  no image takes one. Every exception of the default image halts, and only
-  test images return from an exception.
+  only the test image of BOOT-R08 takes one. Every exception of the default
+  image halts, and only test images return from an exception.
 - The default image sets no interrupt up and takes no IRQ; only test images
-  take the timer interrupt, and no device interrupt is handled.
+  take the timer interrupt and the interrupt of BOOT-R09, and no device
+  interrupt is handled.
 - The Raspberry Pi 5 entry, its firmware handoff and its UART are not
   covered.
 

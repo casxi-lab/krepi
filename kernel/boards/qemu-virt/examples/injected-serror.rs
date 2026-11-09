@@ -12,8 +12,14 @@
 //! (`CNTHCTL_EL2` 3), a virtual offset of 0, the syndrome 0 for the virtual
 //! SError (`VSESR_EL2`) and the affinity of the CPU in `VMPIDR_EL2`, which
 //! EL1 reads as `MPIDR_EL1`. It then returns to `_start` at EL1 with
-//! `SP_EL1` and every exception masked. The image runs only on the machine
-//! with EL2. On the host it is an empty program.
+//! `SP_EL1` and every exception masked. Entered at any other level, it
+//! branches to `_start` at once, so that on a machine without EL2 the image
+//! reports a failed check rather than trapping before the vectors exist.
+//! It leaves the other registers of EL2, among them `CPTR_EL2` and
+//! `MDCR_EL2`, and `SCTLR_EL1` at the values that QEMU's reset gives them,
+//! which the architecture leaves unknown and which trap nothing that the
+//! image does. The image runs only on the machine with EL2. On the host it
+//! is an empty program.
 
 #![cfg_attr(all(target_arch = "aarch64", target_os = "none"), no_std, no_main)]
 
@@ -43,6 +49,9 @@ mod image {
         .global krepi_test_entry
         .type krepi_test_entry, %function
     krepi_test_entry:
+        mrs x0, CurrentEL
+        cmp x0, #(2 << 2)
+        b.ne _start
         mov x0, #(1 << 31)
         orr x0, x0, #(1 << 8)
         orr x0, x0, #(1 << 5)

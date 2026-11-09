@@ -20,11 +20,11 @@ of the two module files of the legacy architecture area: `src/arch/mod.rs`,
 which declared `aarch64`, and `src/arch/aarch64/mod.rs`, which declared the
 AArch64 modules and compiled those that touch the CPU only for the
 bare-metal target. krepi has one architecture, so the crate is the AArch64
-module itself: its root declares `boot` and `cpu`, each compiled only for
-`target_arch = "aarch64"` with `target_os = "none"`, as the legacy root
-compiled `cpu`, and `exception`, compiled on the host too, as the legacy root
-compiled it. The manifest makes the crate a member of the kernel
-workspace. The legacy area `src/arch` is ported, as
+module itself: its root declares `boot`, `cpu`, `gic` and `timer`, each
+compiled only for `target_arch = "aarch64"` with `target_os = "none"`, as
+the legacy root compiled `cpu`, and `exception`, compiled on the host too,
+as the legacy root compiled it. The manifest makes the crate a member of the
+kernel workspace. The legacy area `src/arch` is ported, as
 [porting](../conventions/porting.md#classification-of-the-legacy-areas)
 classifies it.
 
@@ -41,6 +41,12 @@ classifies it.
   at the root of the prototype's kernel, is a module of this crate; its
   record is [boot](boot.md).
 - The root declares only the modules that are present.
+- The crate is the processor layer together with the ARM interrupt
+  controller and timer that the boards share: `gic`, the GICv2 driver, and
+  `timer`, the generic timer, which take the driver part of the QEMU virt
+  interrupt code of `src/board/qemu/irq.rs` and have the records
+  [gic](gic.md) and [timer](timer.md). The description of the manifest and
+  the crate documentation say so, in place of processor primitives alone.
 
 ## Tests carried over
 
@@ -58,7 +64,9 @@ None of its own; the records of the declared modules name theirs.
 
 - The declarations of `address`, `asid`, `context`, `gic_sgi`, `paging`,
   `gic`, `physical_timer`, `transaction` and `local`: their modules are not
-  part of this crate. The re-export of `ExceptionFrame` is left out: the
+  part of this crate. The legacy `gic` is the GIC-400 module of the Pi 5
+  path, not the GICv2 driver that this crate's `gic` holds. The re-export
+  of `ExceptionFrame` is left out: the
   module `exception` is public, and its frame is `Frame`. Page tables,
   user contexts, user addresses and ASIDs, the GIC-400 and the physical timer
   of the Pi 5 path, SGIs and the CPU-local and transaction adapters are

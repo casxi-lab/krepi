@@ -45,7 +45,10 @@ the timer interrupt do.
 - The addresses `GIC_DISTRIBUTOR`, `0x0800_0000`, and `GIC_CPU`,
   `0x0801_0000`, the interrupt `TIMER_INTID`, 27, `TIMER_PRIORITY` and
   `TIMER_RATE` are constants of the crate root, which the
-  [qemu-virt](qemu-virt.md) record describes.
+  [qemu-virt](qemu-virt.md) record describes. The module names the GICv2
+  with the `unsafe` function `Gic::new` of [gic](gic.md), in a constant
+  whose `SAFETY` comment states why the addresses are those of the GICv2 of
+  QEMU virt and why one CPU uses it with IRQs masked.
 - The line `//! Feature: krepi.platform.qemu-virt-boot` names the feature.
 
 ## Tests carried over
@@ -58,13 +61,14 @@ None: the legacy module had no host tests.
 | --- | --- |
 | `init` leaves IRQs masked, and the code that takes the timer interrupt unmasks them | The cases `timer-irq` and `irq-preserves-registers` of `cargo xtask qemu-boot` |
 | `handle` keeps no statistics and returns the kind of the interrupt | The case `timer-irq`, whose image counts the timer interrupts |
-| A device interrupt is unexpected: it is disabled and ended | None: no image enables a device interrupt |
+| Every interrupt but the timer interrupt is unexpected, the device interrupt 34 of the PL031 among them: it is disabled and ended | The case `unexpected-irq` of `cargo xtask qemu-boot`, whose image enables interrupt 30, the physical timer, and checks that it came once and is disabled |
 
 ## Hardware evidence to re-obtain
 
-- Two timer interrupts, each ended and re-armed, and one taken at a known
-  instruction on QEMU virt: the cases `timer-irq` and
-  `irq-preserves-registers`, in CI.
+- Two timer interrupts, each ended and re-armed, one taken at a known
+  instruction and one unexpected interrupt, disabled and ended, on QEMU
+  virt: the cases `timer-irq`, `irq-preserves-registers` and
+  `unexpected-irq`, in CI.
 
 ## Not carried over
 

@@ -28,21 +28,33 @@ classifies it.
 
 ## Changes
 
-- The base addresses are the fields of `Gic`, which the board fills, in
-  place of the constants `DIST` and `CPU` of the legacy board module, and
-  each register has a named offset.
+- The base addresses are the private fields of `Gic`, in place of the
+  constants `DIST` and `CPU` of the legacy board module, and each register
+  has a named offset. A board names its GICv2 with the `unsafe` function
+  `Gic::new`, whose `# Safety` section states what the `SAFETY` comments of
+  the register accesses rely on: the addresses are the register frames of a
+  GICv2 reached as Device memory, and one CPU uses the controller with IRQs
+  masked. With safe fields, safe code could have named any address.
 - `Gic::init` takes the steps of the legacy `init` that set the controller
   up without an interrupt: the distributor and the CPU interface off, the
-  SGIs and PPIs of the CPU disabled and in group 0, the priority mask
-  `0xff`, the binary point 0, and the distributor and the CPU interface on
-  again. The legacy `init` enabled the timer interrupt before it turned
-  them on; here `Gic::enable_ppi` enables it after, with IRQs masked at the
-  CPU all the while, so no interrupt is taken in between.
+  PPIs of the CPU, and its SGIs where the GIC lets them be disabled,
+  disabled and in group 0, the priority mask `0xff`, the binary point 0, and
+  the distributor and the CPU interface on again. The legacy `init` enabled
+  the timer interrupt before it turned them on; here `Gic::enable_ppi`
+  enables it after, with IRQs masked at the CPU all the while, so no
+  interrupt is taken in between. The documentation states, as the legacy
+  comments did, that writes to clear the enable of an SGI may be ignored,
+  that group 0 is signalled as IRQs only on a GIC without the Security
+  Extensions, as QEMU virt with `secure=off` has, and that the binary point
+  0 leaves the nesting of interrupts to the masking of the dispatch; it adds
+  that the SPIs and the active state stay as the reset left them.
 - `Gic::enable_ppi` takes the steps for the timer interrupt, clearing its
   pending state, setting its priority, making it level-sensitive and
   enabling it, for any PPI: the byte of the priority and the bits of the
   configuration follow from the interrupt ID, where the legacy code shifted
-  by fixed amounts that held for interrupt 27 only.
+  by fixed amounts that held for interrupt 27 only. It panics before any
+  access for an ID that is not a PPI, and `Gic::disable` for a special ID,
+  so that no ID reaches a register outside the distributor's frame.
 - `Gic::acknowledge`, `Gic::end` and `Gic::disable` are the accesses of the
   legacy `handle_local` to `GICC_IAR`, `GICC_EOIR` and `GICD_ICENABLER`;
   `interrupt_id` and `SPECIAL` name the interrupt ID field and the first
@@ -68,7 +80,8 @@ bare-metal target.
 ## Hardware evidence to re-obtain
 
 - The configuration, acknowledgement and end of the timer interrupt on the
-  GICv2 of QEMU virt: the cases `timer-irq` and `irq-preserves-registers` of
+  GICv2 of QEMU virt, and the disabling of another interrupt: the cases
+  `timer-irq`, `irq-preserves-registers` and `unexpected-irq` of
   `cargo xtask qemu-boot`, in CI.
 - The GIC-400 of the Pi 5, which implements GICv2, comes with the Pi 5
   board support and its bench runs (planned).
