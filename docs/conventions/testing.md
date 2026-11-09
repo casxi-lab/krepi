@@ -217,16 +217,58 @@ image (`ImageOS`, `ImageVersion`) and the GitHub Actions run
 (`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_EVENT_NAME`, `GITHUB_REF`,
 `GITHUB_SHA`). A value the environment does not provide is `null`.
 
-CI runs the check as the job `cargo xtask check` of
-`.github/workflows/check.yml` on a GitHub-hosted `ubuntu-24.04-arm` runner,
-for the head commit of every pull request to `main` and for every push to
-`main`. The job installs `clang-18` and `qemu-system-arm` from the Ubuntu
-archive and the toolchain of `rust-toolchain.toml` with rustup, with its
-bare-metal target, and uploads the receipt as the artifact
-`check-receipt-<commit>-<attempt>`. After the check, the same job runs
-`cargo xtask qemu-boot --output-dir artifacts/qemu-boot`, described below,
-and uploads that directory as the artifact `qemu-boot-<commit>-<attempt>`,
-also when the suite fails.
+CI runs in lines, each a workflow of `.github/workflows/` on GitHub-hosted
+`ubuntu-24.04-arm` runners:
+
+- The pull request line, `check.yml` on the head commit of every pull
+  request to `main`, and the main line, the same workflow on every push to
+  `main`. Its job `cargo xtask check` installs `clang-18` and
+  `qemu-system-arm` from the Ubuntu archive and the toolchain of
+  `rust-toolchain.toml` with rustup, with its bare-metal target, runs the
+  check and uploads the receipt as the artifact
+  `check-receipt-<commit>-<attempt>`. After the check, the same job runs
+  `cargo xtask qemu-boot --output-dir artifacts/qemu-boot`, described
+  below, and uploads that directory as the artifact
+  `qemu-boot-<commit>-<attempt>`, also when the suite fails. The job `image`
+  runs `cargo xtask image`, uploads the images as
+  `images-<commit>-<attempt>` and gives the SHA-256 of each as an output;
+  the job `suite` downloads them and runs `cargo xtask suite --images` with
+  those digests, with `--base` and the base commit of the pull request on a
+  pull request, so that a pull request runs the smoke cases and the suites
+  that it selects and `main` every suite, both without the slow cases, and
+  uploads its report as `suite-<commit>-<attempt>`. The job `check summary`
+  runs after the other three whatever their outcome and succeeds only if
+  each of them did. A push to a pull request cancels the run of its earlier
+  head; runs on `main` are not cancelled.
+- The full line, `full.yml`, runs only when the label `full-check` is added
+  to a pull request to `main`, on its head, and never on a push to it: its
+  first job fails unless the head contains the `main` of that moment, and
+  then `cargo xtask check --slow`, the images and `cargo xtask suite --slow`
+  run.
+- The nightly line, `nightly.yml`, every day at 10:43 UTC and on a manual
+  run, on `main` only: `cargo xtask check --slow`, the images and
+  `cargo xtask suite --slow`.
+- The weekly line, `weekly.yml`, on Sundays at 11:29 UTC and on a manual
+  run, on `main` only: the images and `cargo xtask suite`.
+
+Every job of these lines has a `timeout-minutes`, and its main command ends
+at a deadline that `timeout` sets two minutes earlier, so that the uploads
+still run. Along the longest chain of jobs that need each other the limits
+add up to 18 minutes on the pull request line and to 43 minutes on the full
+line, within the 20 and 60 minutes that those lines allow. Their artifacts
+are kept 90 days for a run on `main` and 30 days for the others. After each
+completed run of another workflow of the directory, the workflow
+`run record` (`run-record.yml`) writes its record with
+`cargo xtask run-record`, described below, adds the summary to the run's
+summary page and uploads the record as `run-record-<run>-<attempt>`, kept as
+long as the artifacts of the run that it records; it runs the code of the
+default branch with read permissions only, and a manual run of it on `main`
+records the run whose ID it takes. Unit tests of the check read the
+committed workflows and hold them to these limits, to the label of the full
+line as its only trigger, to `--slow` in the full and nightly lines only, to
+the one job named `cargo xtask check` and the summary of the pull request
+line, to the list of workflows that the record workflow follows, and to a
+retention for every upload of these files.
 
 `cargo xtask serial-capture --port <tty>` records what a board sends over a
 serial port, such as the UART of a Pi 5 behind a USB serial adapter, without
@@ -412,7 +454,7 @@ shell script that prints a line and exits.
 `cargo xtask run-record --input <run.json> --output <dir>` writes the
 record of one run of a workflow from the data of the GitHub API; it is not
 part of the check. The input is what the workflow `run record`, described
-below, writes with `jq`: `run`, with the `id`, `attempt`, `workflow`,
+above, writes with `jq`: `run`, with the `id`, `attempt`, `workflow`,
 `path`, `event`, `head_branch`, `head_sha` and `conclusion` of the run, and
 `jobs`, each with its `id`, `name`, `conclusion`, `labels`,
 `runner_group_name`, `runner_name`, `annotations` (`level`, `title` and
@@ -792,7 +834,7 @@ to an exact version in the manifest of the crate that uses it:
 | `xtask/Cargo.toml` | `tar` without default features | MIT OR Apache-2.0 | Unpacking the tar archive of the gate inputs that `git archive` writes for `cargo xtask formal run` |
 | `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `suites.toml`, `toolchains.toml`, `rust-toolchain.toml`, Charon's `rust-toolchain`, `verification/extraction.toml`, the compile-fail cases of the `subset` step, the `vectors` blocks of the contracts, and Charon's `charon/Cargo.toml` and the channel manifest of a nightly that `cargo xtask formal canary` reads |
 | `xtask/Cargo.toml` | `walkdir` | MIT OR Unlicense | The listing of the tool installation that `cargo xtask formal run` takes at the start and at the end of a phase, without following symbolic links |
-| `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step, and the YAML loader with which `cargo xtask run-record` reads the limits of the jobs of a workflow |
+| `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step, and the YAML loader with which `cargo xtask run-record` reads the limits of the jobs of a workflow and the unit tests of the check read the committed workflows of the CI lines |
 
 No test has a development dependency yet. Development dependencies are added
 only when a test category needs them, are pinned to an exact version and are

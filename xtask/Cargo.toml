@@ -126,7 +126,8 @@ toml = { version = "=1.2.0", default-features = false, features = ["parse", "ser
 # walk that does not follow symbolic links. The crate has no features.
 walkdir = "=2.5.0"
 # The workflows step uses the event parser, and `cargo xtask run-record`
-# the loader for the limits of the jobs of a workflow, on text that is
+# the loader for the limits of the jobs of a workflow, as the tests of the
+# check do for the committed workflows of the CI lines, on text that is
 # already UTF-8, so the input-decoding support of the default feature is
 # left out.
 yaml-rust2 = { version = "=0.13.0", default-features = false }

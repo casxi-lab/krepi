@@ -29,6 +29,8 @@
 //! `--slow` also runs the slow tests of every workspace: those marked
 //! `#[ignore = "slow"]`, whose names start with [`SLOW`].
 
+#[cfg(test)]
+mod ci;
 mod lanes;
 
 use std::ffi::OsString;

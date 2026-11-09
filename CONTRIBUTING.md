@@ -16,7 +16,11 @@ git diff --cached --check
 
 [Testing](docs/conventions/testing.md#entry-points) describes what the check
 runs. CI runs the same check, and then the QEMU boot suite, on every pull
-request to `main` and on every push to `main`. A change that updates a tool
+request to `main` and on every push to `main`, beside the QEMU suites of
+`suites.toml` on the images that it writes, and a summary job that requires
+all three; the slow tests run in the full line, which the label
+`full-check` starts on a reviewed head, and every night. A change that
+updates a tool
 version updates `toolchains.toml` in the same change. The proof tools are
 pinned separately, in `verification/toolchain.json`: a change to them runs
 `cargo xtask formal toolchain-check` and builds their image in CI, as
