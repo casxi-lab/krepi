@@ -72,9 +72,10 @@ examples ex4 to ex6 of the
 
 ## Hardware evidence to re-obtain
 
-- The records of a breakpoint, an FP/SIMD trap and a virtual SError on QEMU
-  virt with one Cortex-A76: the cases `el1-brk`, `el1-fp-trap` and
-  `injected-serror` of `cargo xtask qemu-boot`, in CI.
+- The records of a breakpoint, an FP/SIMD trap, a virtual SError and timer
+  IRQs on QEMU virt with one Cortex-A76: the cases `el1-brk`, `el1-fp-trap`,
+  `injected-serror`, `timer-irq` and `irq-preserves-registers` of
+  `cargo xtask qemu-boot`, in CI.
 - The records on the Pi 5, on the HIL bench (planned).
 
 ## Not carried over

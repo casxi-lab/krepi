@@ -51,7 +51,12 @@ with fault symbolization.
 ## Changes
 
 - `UART_BASE`, `0x0900_0000`, is a constant of the crate root, in place of
-  the `UART` span of type `fdt::Span`.
+  the `UART` span of type `fdt::Span`, and so are `GIC_DISTRIBUTOR`,
+  `0x0800_0000`, and `GIC_CPU`, `0x0801_0000`, the starts of the
+  `GIC_DISTRIBUTOR` and `GIC_CPU` spans, and `TIMER_INTID`, 27, of the
+  virtual profile, which the interrupt wiring [irq](irq.md) uses.
+  `TIMER_PRIORITY`, `0x80`, and `TIMER_RATE`, 100, name the priority and
+  the rate that the legacy `irq.rs` wrote as literals.
 - `CONSOLE_BOUNDS` gives the console bounds of QEMU virt, the legacy
   values, as platform parameters; the [console](console.md) record describes
   them.
@@ -151,8 +156,8 @@ None: the legacy files held no host tests.
   discovery; the re-exports of the MMU configuration of `cached` and
   `uncached`, which come with the MMU; `fdt::Span`, `fdt::CpuProfile`,
   `MINIMUM_RAM`, `DTB_ADDRESS` and `CPU_COMPATIBLE`, which come with the
-  device tree; and `LABEL`, `GIC_DISTRIBUTOR`, `GIC_CPU`, `TIMER_INTID`,
-  `CLOCK_NAME` and `TIMER_NAME`, which come with interrupt handling.
+  device tree; and `LABEL`, `CLOCK_NAME` and `TIMER_NAME`, the names of the
+  legacy diagnostic records.
 - From `src/entry.rs`: `Info` and `pi5_probe_main`.
 - From `src/main.rs`: the `global_asm!` symbols of the feature profiles; the
   records `CASXI_KERNEL_ENTRY` and `CASXI_BUILD`; boot memory, the MMU, the
@@ -160,10 +165,11 @@ None: the legacy files held no host tests.
   diagnostic dispatch of lines 217-368; the CPU-local record of the boot
   CPU, `cpu_local::initialize_boot`, which comes with the first code that
   needs CPU-local state; the setup of the interrupt controller and the
-  timer, `irq::init`, which comes with interrupt handling; from
+  timer, `irq::init`, which the default image does not call, as it takes no
+  interrupt, and which the test images of the timer interrupt call; from
   `exception_dispatch`, the user dispatch, the IRQ branch and the recovery
-  of MMU faults, which come with the user domains, interrupt handling and
-  the MMU; and the multicore start of `smp_kernel`.
+  of MMU faults, which come with the user domains, the first image that
+  takes interrupts and the MMU; and the multicore start of `smp_kernel`.
 - From `src/fault.rs`: `exception`, the exception record, which the
   [fault](fault.md) record covers; `build_id`, `stack_bounds` and
   `append_trace`, the build-id and the frame trace, which come with fault

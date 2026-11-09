@@ -155,6 +155,62 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
+      "item": "kernel/arch/src/gic.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/gic.rs#barrier",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/gic.rs#read",
+      "kind": "mmio",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/gic.rs#write",
+      "kind": "mmio",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/timer.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/timer.rs#arm_virtual",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/timer.rs#stop_virtual",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
       "item": "kernel/boards/qemu-virt/src",
       "kind": "code",
       "verified_state": "neither",

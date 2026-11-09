@@ -448,7 +448,7 @@ pub struct Case {
 }
 
 /// The cases of the suite, in the order in which it runs them.
-pub const CASES: [Case; 4] = [
+pub const CASES: [Case; 6] = [
     Case {
         name: CASE,
         criterion: CRITERION,
@@ -511,7 +511,42 @@ pub const CASES: [Case; 4] = [
             End::Halted,
         ),
     },
+    Case {
+        name: "timer-irq",
+        criterion: "The virtual timer interrupts through the GICv2 as interrupt 27, enters vector 5 twice while the image waits with IRQs unmasked, and is reported with the class irq and an address in the waiting code each time; the dispatch acknowledges and ends it and returns, and the image's checks of the interrupts and of the masking during the dispatch hold",
+        image: Image::Test("timer-irq"),
+        machine: Machine::Virt,
+        runs: 1,
+        judgment: Judgment::Records(
+            &[TIMER_IRQ, TIMER_IRQ],
+            End::Resumed(&["timer-irq", "dispatch-masks-daif"]),
+        ),
+    },
+    Case {
+        name: "irq-preserves-registers",
+        criterion: "The timer interrupt taken at a known instruction is reported with the class irq and that instruction's address; after the return, x0 to x30, the stack pointer and NZCV are those of before the interrupt, and ELR_EL1 and SPSR_EL1 equal the frame's, as the image checks",
+        image: Image::Test("irq-registers"),
+        machine: Machine::Virt,
+        runs: 1,
+        judgment: Judgment::Records(
+            &[Exception {
+                vector: 5,
+                class: "irq",
+                esr: Esr::Any,
+                elr: Elr::At("krepi_test_irq_resume"),
+            }],
+            End::Resumed(&["irq-preserves-registers"]),
+        ),
+    },
 ];
+
+/// The exception record of a timer interrupt of the case `timer-irq`.
+const TIMER_IRQ: Exception = Exception {
+    vector: 5,
+    class: "irq",
+    esr: Esr::Any,
+    elr: Elr::Within("krepi_test_wait", "krepi_test_wait_end"),
+};
 
 /// The common checks of the receipt of one run of an image with the digest
 /// `image_sha256` on `machine`: no errors; ended at its window by the

@@ -24,10 +24,11 @@ identity check and the echo of the challenge `casxi-sim-check` and CR, and
 its report of runs with their outcome, and judges the krepi default image
 against the records of the
 [boot contract](../domains/boot-platform/boot/contract.md#records). The
-legacy suite `kernel/interrupts` checked, among others, the record of a
-deliberate FP/SIMD trap and the halt and silence after it; this module takes
-its expected fields, the exception class `0x07` and the halt with nothing
-after it, for the case of the FP/SIMD trap. The suite builds the images
+legacy suite `kernel/interrupts` checked that timer IRQs returned to the
+interrupted code, that the registers survived an IRQ, and the record of a
+deliberate FP/SIMD trap with the halt and silence after it; this module
+takes its expected fields for the cases of the timer IRQ, of the registers
+across an IRQ and of the FP/SIMD trap. The suite builds the images
 itself and runs each boot through the library entry of the QEMU runner,
 `qemu_run::run_image_on`, which sends the challenge of the default image
 once the ready record has arrived, writes the receipt of `cargo xtask qemu`
@@ -74,7 +75,12 @@ command.
   EL1h return address, and then the frame trace and the halt; krepi requires
   the exception class `0x07`, which the Arm Architecture Reference Manual
   gives, the address of the trapping instruction, and the halt with nothing
-  after it.
+  after it. The legacy suite counted timer IRQs and their hits in a
+  labelled loop from a statistics record of the image, and took the
+  register check from a probe that a serial byte started; krepi requires
+  two IRQ records with return addresses in the waiting code and the
+  image's own checks, and an IRQ taken at one known instruction with every
+  register checked by the image after it.
 - The receipt of a test image's run must name the machine of its case: the
   machine with EL2 for the SError, the runner's machine for the others.
 - The three runs must use the same image and give identical transcripts; the

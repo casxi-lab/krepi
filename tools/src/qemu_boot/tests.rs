@@ -325,6 +325,10 @@ fn the_build_command_names_the_images() {
             "injected-serror",
             "--example",
             "el1-fp-trap",
+            "--example",
+            "timer-irq",
+            "--example",
+            "irq-registers",
             "--message-format=json-render-diagnostics",
         ]
     );
@@ -522,6 +526,9 @@ fn symbols() -> Vec<(String, u64)> {
         ("krepi_test_serror", 0x4020_11a0),
         ("krepi_test_serror_end", 0x4020_11b0),
         ("krepi_test_fp_site", 0x4020_1160),
+        ("krepi_test_wait", 0x4020_1160),
+        ("krepi_test_wait_end", 0x4020_1188),
+        ("krepi_test_irq_resume", 0x4020_1258),
     ]
     .map(|(name, address)| (name.to_string(), address))
     .to_vec()
@@ -594,6 +601,42 @@ fn fp_transcript() -> Vec<u8> {
     ])
 }
 
+/// The exception record of an IRQ with the return address `elr`.
+fn irq_record(elr: u64) -> String {
+    format!(
+        "CASXI_EXCEPTION vector=5 ESR=0x0000000000000000 ELR={elr:#018x} FAR=0x0000000000000000 SPSR=0x0000000000000345 class=irq"
+    )
+}
+
+/// The transcript of a run of `timer-irq` whose interrupts returned to
+/// `elrs`, with checks that report no failure.
+fn timer_transcript(elrs: &[u64]) -> Vec<u8> {
+    let records: Vec<String> = elrs.iter().map(|&elr| irq_record(elr)).collect();
+    let mut all: Vec<&[u8]> = vec![b"CASXI_TEST image=timer-irq"];
+    for record in &records {
+        all.extend([&b""[..], record.as_bytes()]);
+    }
+    all.extend([
+        &b"CASXI_CHECK name=timer-irq failures=0x0000000000000000"[..],
+        b"CASXI_CHECK name=dispatch-masks-daif failures=0x0000000000000000",
+        b"CASXI_RESUMED",
+    ]);
+    lines(&all)
+}
+
+/// The transcript of a good run of `irq-registers` whose interrupt returned
+/// to `elr`.
+fn registers_transcript(elr: u64) -> Vec<u8> {
+    let record = irq_record(elr);
+    lines(&[
+        b"CASXI_TEST image=irq-registers",
+        b"",
+        record.as_bytes(),
+        b"CASXI_CHECK name=irq-preserves-registers failures=0x0000000000000000",
+        b"CASXI_RESUMED",
+    ])
+}
+
 /// The checks of one run of the case `name` with `transcript` on `machine`.
 fn judge_one(name: &str, transcript: Vec<u8>, machine: Machine) -> Vec<Check> {
     let run = Run {
@@ -635,6 +678,62 @@ mod records {
         assert_eq!(failed(&checks), Vec::<&str>::new());
         let checks = judge_one("el1-fp-trap", fp_transcript(), Machine::Virt);
         assert_eq!(failed(&checks), Vec::<&str>::new());
+        let checks = judge_one(
+            "timer-irq",
+            timer_transcript(&[0x4020_1164, 0x4020_1170]),
+            Machine::Virt,
+        );
+        assert_eq!(failed(&checks), Vec::<&str>::new());
+        let names: Vec<&str> = checks.iter().map(|check| check.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "run 1 receipt",
+                "run 1 transcript",
+                "run 1 exception 1",
+                "run 1 exception 2",
+                "run 1 timer-irq",
+                "run 1 dispatch-masks-daif",
+                "runs",
+            ]
+        );
+        let checks = judge_one(
+            "irq-preserves-registers",
+            registers_transcript(0x4020_1258),
+            Machine::Virt,
+        );
+        assert_eq!(failed(&checks), Vec::<&str>::new());
+    }
+
+    /// The timer interrupts must return into the waiting code, two of them,
+    /// and the interrupt of the register check at the instruction after the
+    /// unmask; a missing interrupt, a third one or another address fails.
+    #[test]
+    fn the_interrupts_must_return_where_the_cases_expect() {
+        let one = |elrs: &[u64]| {
+            failed(&judge_one(
+                "timer-irq",
+                timer_transcript(elrs),
+                Machine::Virt,
+            ))
+            .len()
+        };
+        assert_eq!(one(&[0x4020_1160, 0x4020_1184]), 0);
+        assert_eq!(one(&[0x4020_1164, 0x4020_1188]), 1);
+        assert_eq!(one(&[0x4020_115c, 0x4020_1170]), 1);
+        assert!(one(&[0x4020_1164]) > 0);
+        assert!(one(&[0x4020_1164, 0x4020_1168, 0x4020_116c]) > 0);
+        let at = |elr: u64| {
+            failed(&judge_one(
+                "irq-preserves-registers",
+                registers_transcript(elr),
+                Machine::Virt,
+            ))
+            .len()
+        };
+        assert_eq!(at(0x4020_1258), 0);
+        assert_eq!(at(0x4020_125c), 1);
+        assert_eq!(at(0x4020_1254), 1);
     }
 
     /// A record of another exception class, syndrome, return address, class
@@ -864,7 +963,16 @@ fn the_cases_name_their_symbols_images_and_outcome() {
         symbols_of(exceptions),
         ["krepi_test_serror", "krepi_test_serror_end"]
     );
-    assert_eq!(test_images(), ["el1-brk", "injected-serror", "el1-fp-trap"]);
+    assert_eq!(
+        test_images(),
+        [
+            "el1-brk",
+            "injected-serror",
+            "el1-fp-trap",
+            "timer-irq",
+            "irq-registers"
+        ]
+    );
     let all = |outcomes: &[Outcome]| suite_outcome(outcomes);
     assert_eq!(all(&[Outcome::Pass, Outcome::Pass]), Outcome::Pass);
     assert_eq!(all(&[Outcome::Pass, Outcome::Fail]), Outcome::Fail);

@@ -515,7 +515,8 @@ not part of the check, and CI runs it after the check as stated above. It
 builds the images with one command, `cargo build --locked --release
 --target aarch64-unknown-none-softfloat -p krepi-qemu-virt --bin
 krepi-qemu-virt --example el1-brk --example injected-serror --example
-el1-fp-trap --message-format=json-render-diagnostics` in `kernel/`, where
+el1-fp-trap --example timer-irq --example irq-registers
+--message-format=json-render-diagnostics` in `kernel/`, where
 the `.cargo/config.toml` of the repository root gives the target its flags,
 takes each image from Cargo's artifact message and records `rustc -vV`.
 The test images are the examples of `kernel/boards/qemu-virt/examples`:
@@ -537,9 +538,11 @@ records of the
 Cortex-A76 identity record, `CASXI_BOOT kernel=krepi board=qemu-virt el=1`
 and `CASXI_READY`, followed by the 16 bytes sent, a line feed and nothing
 else; and when the three image digests are equal and the three transcripts
-identical. The cases `el1-brk`, `injected-serror` and `el1-fp-trap` run
-their test image once each: `injected-serror` on the machine with EL2, the
-others on the runner's machine. Each passes when its run ended at its
+identical. The cases `el1-brk`, `injected-serror`, `el1-fp-trap`,
+`timer-irq` and `irq-preserves-registers` run their test image once each,
+`irq-preserves-registers` the image `irq-registers` and the others the image
+of their own name: `injected-serror` on the machine with EL2, the others on
+the runner's machine. Each passes when its run ended at its
 window with no errors and no input, on the machine of the case with one
 Cortex-A76, without an instruction count, booted the image of the build,
 and its transcript holds exactly, each line ending in CR LF, the start

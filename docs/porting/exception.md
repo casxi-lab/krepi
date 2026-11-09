@@ -73,21 +73,24 @@ Manual.
 | --- | --- |
 | An exception of a lower level or of the current level with `SP_EL0` halts once its dispatch returns, where the legacy path returned to it | Host: `exception::tests::the_other_entries_give_sync_for_a_breakpoint` for the class; the return path itself has no test, as no image takes such an exception |
 | The saved stack pointer of those entries is the address above the frame, not `SP_EL0` | None: no image takes such an exception |
-| The entries of the current level with `SP_EL1` return as before | The case `el1-brk` of `cargo xtask qemu-boot` |
+| The entries of the current level with `SP_EL1` return as before | The cases `el1-brk`, `timer-irq` and `irq-preserves-registers` of `cargo xtask qemu-boot` |
 
 ## Hardware evidence to re-obtain
 
-- The breakpoint, the FP/SIMD trap and the virtual SError on the machine
-  with EL2 on QEMU virt with one Cortex-A76: the cases `el1-brk`,
-  `el1-fp-trap` and `injected-serror` of `cargo xtask qemu-boot`, in CI.
+- The breakpoint, the FP/SIMD trap, the virtual SError on the machine with
+  EL2, the timer IRQ and the registers across it on QEMU virt with one
+  Cortex-A76: the cases `el1-brk`, `el1-fp-trap`, `injected-serror`,
+  `timer-irq` and `irq-preserves-registers` of `cargo xtask qemu-boot`, in
+  CI.
 - The same vectors on the Pi 5, after its EL2 to EL1 entry, on the HIL bench
   (planned).
 
 ## Not carried over
 
 - `irq_register_probe` (legacy lines 126-212), the IRQ return probe of the
-  register-preservation diagnostic: the test images check the registers
-  around an exception with sequences of their own.
+  register-preservation diagnostic: the test image `irq-registers` checks
+  the registers across an IRQ with a sequence of its own, which takes the
+  interrupt at one known instruction.
 - `diagnostic_bad_fp` (lines 214-222), a fault probe: the default image
   holds none.
 - The save and restore of `SP_EL0` and the return to a lower level: they

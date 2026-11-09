@@ -3,9 +3,9 @@
 This page governs the code of the `boot` component of the
 [boot and platform](../README.md) domain: the cold entry of a kernel image,
 the exception vectors of EL1 with the frame that they save, the processor
-primitives that EL1 code reads, and the QEMU virt board support with its
-serial console, its exception record, its default image and its test
-images. The observable
+primitives that EL1 code reads, the GICv2 and the generic timer, and the
+QEMU virt board support with its serial console, its exception record, its
+interrupt wiring, its default image and its test images. The observable
 behaviour that these rules serve, with its evidence, is in the
 [requirements](requirements.md), the other document of the component.
 
@@ -57,6 +57,9 @@ behaviour that these rules serve, with its evidence, is in the
 | `krepi_qemu_virt::console::print`, `write`, `echo`, `report_panic`, `failure_marker`, `report_failure` and `window_ticks` | Functions, host-testable | The PL011 driver of a board | [Console output](#console-output), [Echo](#echo) |
 | `verify_cpu` in `kernel/boards/qemu-virt/src/main.rs` | Function | `kernel_main` | [Initialization checks](#initialization-checks) |
 | `krepi_arch::exception::Class::of`, `Class::name` and `exception_class` | Functions, host-testable | The exception record | [Records](#records) |
+| `krepi_qemu_virt::irq::init` and `handle` | Functions | The test images that take the timer interrupt: their `kernel_main` and their dispatch | [Interrupts](#interrupts) |
+| `krepi_arch::gic::Gic::init`, `enable_ppi`, `acknowledge`, `end` and `disable`, `krepi_arch::gic::barrier` and `interrupt_id` | Functions | The interrupt wiring of a board | [Interrupts](#interrupts) |
+| `krepi_arch::timer::stop_virtual` and `arm_virtual` | Functions | The interrupt wiring of a board and the test images | [Interrupts](#interrupts) |
 | `krepi_arch::cpu::exception_level`, `main_id`, `system_control`, `counter_frequency`, `virtual_counter` and `cpacr` | Functions | Kernel code at EL1 | [Processor registers](#processor-registers) |
 | `krepi_arch::cpu::halt` | Function | Fatal paths | [Processor registers](#processor-registers) |
 
@@ -64,8 +67,9 @@ behaviour that these rules serve, with its evidence, is in the
 
 No code of this component follows the
 [provable Rust subset](../../../conventions/provable-subset.md): the cold
-entry, the exception vectors, the processor primitives, the board support
-and the PL011 driver are none of the modules that the subset lists, and
+entry, the exception vectors, the processor primitives, the GICv2 and
+timer drivers, the board support and the PL011 driver are none of the
+modules that the subset lists, and
 its page-table logic leaves the barrier, cache and TLB instructions to
 adapters. The section therefore
 lists no source paths, and the `subset` step of `cargo xtask check` checks
@@ -171,6 +175,33 @@ The frame is the `repr(C)` structure `Frame` of `krepi_arch::exception`,
   code that it interrupts is then between two console accesses: the
   default image takes no asynchronous exception, and a test image unmasks
   one only in code that does not write.
+
+## Interrupts
+
+- `irq::init` runs with IRQs masked and leaves them masked. It stops the
+  virtual timer, sets the GICv2 at `GIC_DISTRIBUTOR` and `GIC_CPU` up with
+  `Gic::init`, enables the timer interrupt `TIMER_INTID`, 27, with
+  `Gic::enable_ppi` at `TIMER_PRIORITY`, arms the virtual timer for one
+  period after the virtual count of now and completes the writes with
+  `barrier`.
+- `Gic::init` disables the distributor and the CPU interface, disables the
+  SGIs and PPIs of the executing CPU and puts them in group 0, sets the
+  priority mask to `0xff` and the binary point to 0, and enables the
+  distributor and the CPU interface again, with an end of interrupt that
+  drops the priority and deactivates together. `Gic::enable_ppi` clears the
+  pending state of a PPI, sets its priority, makes it level-sensitive and
+  enables it.
+- `irq::handle` runs in the dispatch of an IRQ with every exception masked.
+  It acknowledges the interrupt with `GICC_IAR`. A special ID, 1020 to 1023,
+  returns without an end of interrupt. The timer interrupt re-arms the
+  timer one period after now, so that its level drops; any other interrupt
+  is disabled. Then `barrier`, the end of interrupt with the whole
+  acknowledged value in `GICC_EOIR`, and `barrier` again. Each acknowledged
+  interrupt is ended once.
+- The period is the counter frequency divided by `TIMER_RATE`, rounded up
+  and at least 1.
+- The default image calls neither function: it never unmasks IRQs, so no
+  IRQ reaches its dispatch.
 
 ## Initialization checks
 
@@ -296,6 +327,7 @@ the bounds allow, and `format` for a formatter that failed.
 | `attempts_per_byte` | Refusals of one byte before a record fails | 1,000,000 |
 | `failure_attempts` | Attempts of the failure marker in all | 1,000,000 |
 | `window_ms` | Longest time of one record on the counter | 250 ms |
+| `TIMER_RATE` | Timer interrupts per second, whose inverse is the period of the timer | 100 |
 
 At 115200 baud a record of 1,024 bytes takes about 89 ms on the wire, so the
 window leaves room for a whole record; QEMU does not model the baud rate.
@@ -325,6 +357,8 @@ The Raspberry Pi 5 values are given by its board support.
 - An exception entry and its return run a fixed sequence of instructions
   without a loop. The dispatch of the default image writes two records
   within the console bounds and halts.
+- `irq::init` and `irq::handle` make a fixed number of register accesses
+  without a loop.
 
 ## Determinism
 
@@ -333,7 +367,9 @@ state of the CPU and the bytes received, in a fixed order. Whether a console
 write fails by its window depends on the counter, which is time:
 [ND-01](../../../security.md#nd-01) of the register of
 [permitted nondeterminism](../../../security.md#permitted-nondeterminism).
-Which bytes arrive, and when, is the input of the echo.
+Which bytes arrive, and when, is the input of the echo. When a timer
+interrupt arrives, and so which instruction it interrupts, depends on the
+counter as well.
 
 ## State fields
 
@@ -345,6 +381,8 @@ Which bytes arrive, and when, is the input of the echo.
 | `DAIF`, `CPACR_EL1`, `SCTLR_EL1`, `TPIDR_EL1`, `VBAR_EL1` and the stack pointer of EL1 | Per-CPU | The executing CPU | The `ISB` after the cold entry's writes | `none` |
 | The frame of an exception, 304 bytes on `SP_EL1` | Per-CPU, of the CPU that took the exception | Its exception entry, then its dispatch, then its return | - | `none`: the return releases it |
 | `ELR_EL1`, `SPSR_EL1`, `ESR_EL1` and `FAR_EL1` | Per-CPU | The exception entry and the return path of the executing CPU | The `ERET` | `none` |
+| The distributor and CPU interface registers of the GICv2 | Shared | The boot CPU alone: `irq::init` with IRQs masked, then `irq::handle` in the dispatch of an IRQ | The volatile access to the register | `none`: its single owner never changes |
+| `CNTV_CTL_EL0` and `CNTV_CVAL_EL0` | Per-CPU | The executing CPU | The `ISB` after the writes | `none` |
 
 ## Testing obligations
 
@@ -372,6 +410,9 @@ Which bytes arrive, and when, is the input of the echo.
   of a symbol of the image, or lie between two. Each rule of the saved and
   restored state has one test, a self-check of a test image or a case of
   the suite, named in the [open obligations](#open-obligations).
+- The test images that take the timer interrupt wait for it for at most
+  1,000 ms on the counter, a platform parameter of QEMU virt for these
+  images, where the interrupt comes after one period of 10 ms.
 - No test bounds the time that a step takes, and the guest takes its
   windows and spin limits from the platform parameters.
 
@@ -384,12 +425,19 @@ Which bytes arrive, and when, is the input of the echo.
 | `kernel/arch/src/exception.S#frame` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `frame-records-interrupted-sp` | - |
 | `kernel/arch/src/exception.S#save-general` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `entry-saves-general-registers` | - |
 | `kernel/arch/src/exception.S#save-system` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `frame-records-system-registers` | - |
-| `kernel/arch/src/exception.S#mask` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | - | - |
+| `kernel/arch/src/exception.S#mask` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `dispatch-masks-daif` | - |
 | `kernel/arch/src/exception.S#restore-elr-spsr` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `return-restores-elr-and-pstate` | - |
-| `kernel/arch/src/exception.S#clear-and-load` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | - | - |
+| `kernel/arch/src/exception.S#clear-and-load` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `irq-preserves-registers` | - |
 | `kernel/arch/src/exception.S#release` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `return-restores-sp` | - |
 | `kernel/arch/src/exception.S#no-fp-state` | `register-state` | Neither | The proof of the register state that exception entry and return save, restore and clear | `0.2` | `el1-fp-trap` | - |
 | `kernel/arch/src/exception.rs` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/arch/src/gic.rs` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/arch/src/gic.rs#read` | `mmio` | Neither (reads a GICv2 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/arch/src/gic.rs#write` | `mmio` | Neither (writes a GICv2 register) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/arch/src/gic.rs#barrier` | `unsafe` | Neither (executes `DSB SY` and `ISB`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/arch/src/timer.rs` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/arch/src/timer.rs#stop_virtual` | `unsafe` | Neither (writes `CNTV_CTL_EL0`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
+| `kernel/arch/src/timer.rs#arm_virtual` | `unsafe` | Neither (writes `CNTV_CVAL_EL0` and `CNTV_CTL_EL0`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs#exception_level` | `unsafe` | Neither (reads `CurrentEL`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
 | `kernel/arch/src/cpu.rs#main_id` | `unsafe` | Neither (reads `MIDR_EL1`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` | - | - |
@@ -422,7 +470,12 @@ their expected values, and the
   `VBAR_EL1`; `ESR_EL1` with the exception classes `0x07`, `0x2f` and
   `0x3c`, `ELR_EL1`, `SPSR_EL1` and `FAR_EL1`; and, for the test image that
   enters at EL2, `HCR_EL2` with RW, AMO and VSE, `VSESR_EL2`,
-  `CNTHCTL_EL2`, `CNTVOFF_EL2` and `VMPIDR_EL2`.
+  `CNTHCTL_EL2`, `CNTVOFF_EL2` and `VMPIDR_EL2`; the generic timer,
+  `CNTV_CTL_EL0` and `CNTV_CVAL_EL0`, and `ISR_EL1`.
+- Arm Limited, *ARM Generic Interrupt Controller Architecture
+  Specification, GIC architecture version 2.0*, IHI 0048B: the distributor
+  and CPU interface registers, the acknowledgement, the special interrupt
+  IDs and the end of interrupt.
 - Arm Limited, *Arm Cortex-A76 Core Technical Reference Manual*, revision
   r4p1, document 100798_0401_00_en, 2020,
   <https://documentation-service.arm.com/static/5f562083235b3560a01e03bc>:
@@ -433,4 +486,4 @@ their expected values, and the
   the registers, flags and divisors.
 - The QEMU Project, *'virt' generic virtual platform*,
   <https://www.qemu.org/docs/master/system/arm/virt.html>: the machine, its
-  RAM and its PL011.
+  RAM, its PL011, its GICv2 and the virtual timer interrupt.

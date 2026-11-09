@@ -368,16 +368,19 @@ handler ignores, not an error.
 [QEMU virt and Pi 5 board support](#qemu-virt-and-pi-5-board-support); the
 [boot](boot/contract.md) component for the GICv2 of QEMU virt.
 
-**Engineering notes.** The distributor is configured once, at boot. The
-handler of an interrupt is bounded and does not allocate. The state of the
+**Engineering notes.** The distributor is configured once, with IRQs
+masked, before the first interrupt is taken. The handler of an interrupt is
+bounded and does not allocate. The GICv2 driver is shared by the boards that
+have one, and each board gives its addresses and interrupt IDs. The state of the
 controller is classified in the state fields of the contract of its
 board's support: for the GICv2 of QEMU virt, the
 [State fields](boot/contract.md#state-fields) of the boot contract; for the
 GIC-400 of the Pi 5, those of the Pi 5 board support.
 
-**Verification.** A QEMU test that takes a timer interrupt, acknowledges and
-ends it and returns to the interrupted code; on the Pi 5 the same through
-the GIC-400 on the bench.
+**Verification.** QEMU tests that take the timer interrupt, acknowledge
+and end it and return to the interrupted code, twice, and that take it at
+one known instruction and find every register unchanged after it; on the
+Pi 5 the same through the GIC-400 on the bench.
 
 ## PCIe and RP1 links
 

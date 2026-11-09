@@ -12,21 +12,25 @@ follow are in the [contract](contract.md).
 ## Sources
 
 - The cold entry, the exception vectors with their frame, the processor
-  primitives, the PL011 driver, the console with its bounded writes, the
+  primitives, the GICv2 and timer drivers with the interrupt wiring of QEMU
+  virt, the PL011 driver, the console with its bounded writes, the
   exception record and the QEMU virt board support are ported from the
   prototype tree, with their host tests; the porting records
   [boot](../../../porting/boot.md),
   [exception](../../../porting/exception.md), [cpu](../../../porting/cpu.md),
-  [uart](../../../porting/uart.md), [console](../../../porting/console.md),
-  [fault](../../../porting/fault.md), [arch](../../../porting/arch.md) and
+  [gic](../../../porting/gic.md), [timer](../../../porting/timer.md),
+  [irq](../../../porting/irq.md), [uart](../../../porting/uart.md),
+  [console](../../../porting/console.md), [fault](../../../porting/fault.md),
+  [arch](../../../porting/arch.md) and
   [qemu-virt](../../../porting/qemu-virt.md) name the taken paths and the
   changes.
 - The records, the checks and the bounds follow the Arm Architecture
   Reference Manual, the Cortex-A76 and PL011 manuals and the QEMU virt
   documentation that the [contract](contract.md#references) cites.
 - The echo challenge and the shape of the boot case come from the
-  prototype's QEMU boot suite, and the expected fields of the FP/SIMD trap
-  from its suite of interrupts; the
+  prototype's QEMU boot suite, and the expected fields of the timer IRQ, of
+  the registers across it and of the FP/SIMD trap from its suite of
+  interrupts; the
   [porting record of the suite](../../../porting/tools-qemu_boot.md) names
   them. The test images and their self-checks are new.
 
@@ -234,12 +238,89 @@ return. The criterion: the case `el1-fp-trap` passes.
   kernel enables FP/SIMD, which the review of `CPACR_EL1` writes holds, or
   the trap on a Raspberry Pi 5.
 
+### BOOT-R06
+
+**The timer interrupt is taken, ended and returned from.** With the
+interrupts set up by `irq::init`, the virtual timer of QEMU virt interrupts
+through the GICv2 as interrupt 27 once a period, 10 ms, has passed, and the
+IRQ vector of the current level with `SP_EL1`, vector 5, takes it when the
+code unmasks IRQs. The dispatch runs with D, A, I and F masked. Each
+interrupt is reported in an exception record with vector 5, the class
+`irq` and an `ELR` in the interrupted code; `irq::handle` acknowledges it,
+re-arms the timer and ends it, and the dispatch returns to the interrupted
+code, which a second interrupt reaches again. The criterion: the case
+`timer-irq` passes.
+
+- **Examples.** None of its own: the record is that of BOOT-R03.
+- **Entry points.** `__exception_vectors`, `exception_dispatch`,
+  `krepi_qemu_virt::irq::init` and `krepi_qemu_virt::irq::handle`, with the
+  GICv2 and timer functions of `krepi-arch`.
+- **Contract.** [Interrupts](contract.md#interrupts),
+  [Exception vectors](contract.md#exception-vectors),
+  [Dispatch](contract.md#dispatch) and [Records](contract.md#records).
+- **Specification.** None: no specification covers the component.
+- **Proof path.** None: the [open obligations](contract.md#open-obligations)
+  of the contract carry its code and the rule `mask`.
+- **Evidence.** The case `timer-irq` of `cargo xtask qemu-boot`, in CI, with
+  the two self-checks of its test image: `timer-irq`, that exactly two
+  timer interrupts came within the wait and no other interrupt, and
+  `dispatch-masks-daif`, the test of the rule `mask`, that `DAIF` had D, A,
+  I and F set at each entry of the dispatch. Taking an exception to EL1
+  sets the four bits, and the save path sets them again, so the check shows
+  that they are set during the dispatch but not which of the two set them.
+  The image waits with IRQs
+  unmasked in code of its own and stops the timer after the second
+  interrupt. The case checks two IRQ records with an `ELR` between the
+  symbols of the waiting code. The second interrupt shows that the end of
+  interrupt of the first took effect, as the GICv2 signals no interrupt that
+  is still active. It does not show the period of the timer, which the
+  suite does not time, a device interrupt, or the GIC-400 of a Raspberry Pi
+  5.
+
+### BOOT-R07
+
+**An IRQ leaves the interrupted registers unchanged.** When the timer
+interrupt is taken at an instruction L of the interrupted code, the frame
+holds L as `ELR` and the interrupted `PSTATE` as `SPSR`: NZCV as set, D, A
+and F masked, I unmasked, and EL1 with `SP_EL1`. After the dispatch
+returns, execution continues at L with `x0` to `x30`, the stack pointer and
+NZCV as they were before the interrupt, and `ELR_EL1` and `SPSR_EL1` equal
+to the frame's. The criterion: the case `irq-preserves-registers` passes.
+
+- **Examples.** None of its own.
+- **Entry points.** `__exception_vectors`, `exception_dispatch` and
+  `krepi_qemu_virt::irq::handle`.
+- **Contract.** [Exception vectors](contract.md#exception-vectors),
+  [Frames](contract.md#frames) and [Dispatch](contract.md#dispatch).
+- **Specification.** None: no specification covers the component.
+- **Proof path.** None: the [open obligations](contract.md#open-obligations)
+  of the contract carry its code and the rule `clear-and-load`.
+- **Evidence.** The case `irq-preserves-registers` of
+  `cargo xtask qemu-boot`, in CI, which is also the test of the rule
+  `clear-and-load`. Its test image waits with IRQs masked until `ISR_EL1`
+  shows the timer interrupt pending, puts a different known value into
+  each of `x0` to `x30`, sets NZCV and unmasks IRQs; the instruction after
+  the unmask, the symbol `krepi_test_irq_resume`, masks them again and
+  starts recording. Its self-check holds `ELR` and `SPSR` of the frame,
+  the registers read after the return, the stack pointer and NZCV, and the
+  case checks the IRQ record's `ELR` against the symbol. That QEMU takes a
+  pending IRQ right after the unmask is a property of QEMU, which the case
+  relies on; the architecture only requires that the IRQ be taken in finite
+  time. A missed load would leave a register at 0, and a load from the
+  wrong place another value, so both fail the check; the clear before the
+  loads, which no load misses, has no effect that the check can see. It
+  does not show a second interrupt during the return, which the masking
+  during the dispatch excludes, or the behaviour on a Raspberry Pi 5.
+
 ## Liveness, time and performance
 
 - A cold boot reaches `CASXI_READY` without waiting for input. The echo
   loop runs forever and answers every received byte.
 - A console write ends within its window on a running counter and within
   `attempts_per_byte` refusals of one byte on a stopped one.
+- A test image that takes the timer interrupt waits for it for at most
+  1,000 ms on the counter, a platform parameter of QEMU virt for these
+  images, and then reports what it saw.
 - The QEMU boot suite ends each run at its window of 20 s, a platform
   parameter of QEMU virt that leaves ample room for a boot that takes well
   under a second, and judges no time. A test image either halts or ends in
@@ -254,6 +335,8 @@ return. The criterion: the case `el1-fp-trap` passes.
   after their dispatch returns; the kernel handles no such exception, and
   no image takes one. Every exception of the default image halts, and only
   test images return from an exception.
+- The default image sets no interrupt up and takes no IRQ; only test images
+  take the timer interrupt, and no device interrupt is handled.
 - The Raspberry Pi 5 entry, its firmware handoff and its UART are not
   covered.
 

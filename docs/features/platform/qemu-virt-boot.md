@@ -8,6 +8,8 @@ modules:
   - kernel/arch/src/cpu.rs
   - kernel/arch/src/exception.rs
   - kernel/arch/src/exception.S
+  - kernel/arch/src/gic.rs
+  - kernel/arch/src/timer.rs
   - kernel/boards/qemu-virt/build.rs
   - kernel/boards/qemu-virt/src/lib.rs
   - kernel/boards/qemu-virt/src/main.rs
@@ -16,6 +18,7 @@ modules:
   - kernel/boards/qemu-virt/src/console/polled.rs
   - kernel/boards/qemu-virt/src/console/emitter.rs
   - kernel/boards/qemu-virt/src/fault.rs
+  - kernel/boards/qemu-virt/src/irq.rs
 tests:
   - kernel/arch/src/exception/tests.rs
   - kernel/boards/qemu-virt/src/console/tests.rs
@@ -38,7 +41,9 @@ the PL011 serial console and then echoes the bytes that it receives, with
 every console write bounded by the platform parameters of the machine. Its
 exception vectors take the exceptions of EL1, save their frame and report
 each in an exception record; the default image then halts, and test images
-of the QEMU boot suite return from the exceptions that they cause. The
+of the QEMU boot suite return from the exceptions that they cause, among
+them the timer interrupt, which the GICv2 delivers and the board's
+interrupt wiring acknowledges and ends. The
 feature belongs to the kernel at EL1. It does not boot a Raspberry Pi 5,
 start secondary CPUs, read the device tree, turn the MMU or the caches on or
 handle an exception of EL0.
@@ -74,6 +79,9 @@ handle an exception of EL0.
   exception record, the second with `CASXI_HALTED` and the halt, and the
   host-testable `krepi_qemu_virt::console` and `krepi_qemu_virt::fault`
   functions do so for any device and counter;
+  `krepi_qemu_virt::irq::init` sets the GICv2 and the virtual timer up and
+  `krepi_qemu_virt::irq::handle` acknowledges and ends an interrupt, with
+  the drivers `krepi_arch::gic` and `krepi_arch::timer`;
   `krepi_arch::cpu` reads the processor registers of EL1 and halts the CPU,
   and `krepi_arch::exception` gives the frame and the class of an
   exception.
@@ -114,6 +122,13 @@ handle an exception of EL0.
   after their dispatch returns, `ELR_EL1`, `SPSR_EL1` and `x0` to `x30` are
   loaded from the frame. FP/SIMD state is never saved, as FP/SIMD
   instructions trap.
+- **Interrupts.** `irq::init` enables only the timer interrupt 27 of the
+  GICv2 and arms the virtual timer for 10 ms, leaving IRQs masked; the code
+  that waits for it unmasks them. `irq::handle`, in the dispatch of an IRQ,
+  acknowledges the interrupt, re-arms the timer for the next period,
+  disables any other interrupt, and ends it, except a special ID from 1020
+  on, which it leaves alone. The default image sets no interrupt up and
+  never unmasks IRQs ([interrupts](../../domains/boot-platform/boot/contract.md#interrupts)).
 - **Undefined.** An exception before the cold entry has installed the
   vectors is not handled, and one that leaves `SP_EL1` without 304 bytes of
   room overwrites what lies below it.
@@ -182,6 +197,12 @@ The syndrome of a breakpoint taken through vector 0, the current level with
 - The exception record keeps the fields of the prototype's record, which the
   host tools parse, and adds the class of the exception at the end. It is
   written through the same bounded writes as every other record.
+- The GICv2 and the generic timer are drivers of `krepi-arch`, which the
+  boards share; QEMU virt gives the addresses, interrupt 27 of its virtual
+  timer, a priority and the rate of 100 interrupts per second. The order of
+  the interrupt handling is the prototype's: acknowledge, re-arm the level
+  of the timer or disable another source, then end the interrupt between
+  two barriers.
 - One CPU owns the PL011. A dispatch writes it only through the exception
   record, with every exception masked, between two accesses of the code
   that it interrupted. Secondary CPUs stay parked; their start needs entries
@@ -231,6 +252,10 @@ The syndrome of a breakpoint taken through vector 0, the current level with
   `report_fatal`, which write within the bounds and report a failure.
 - `kernel/boards/qemu-virt/src/fault.rs`: the exception record and the
   record of the fatal path.
+- `kernel/arch/src/gic.rs` and `kernel/arch/src/timer.rs`: the GICv2 driver
+  and the virtual timer; `kernel/boards/qemu-virt/src/irq.rs`: their wiring
+  on QEMU virt, `init` and `handle`, with the addresses, the interrupt ID,
+  the priority and the rate in `kernel/boards/qemu-virt/src/lib.rs`.
 - `kernel/boards/qemu-virt/src/console.rs` with `console/polled.rs` and
   `console/emitter.rs`: the bounded writes of a record and of bytes, the echo
   rule, the panic record and the failure markers.
@@ -256,20 +281,24 @@ The syndrome of a breakpoint taken through vector 0, the current level with
   the evidence. It establishes the cold boot, the checks, the records and
   the echo on QEMU virt; it does not establish them on a Raspberry Pi 5, and
   a QEMU result is not a board result.
-- **QEMU, exceptions.** The cases `el1-brk`, `injected-serror` and
-  `el1-fp-trap` of the same suite boot a test image each, in release, on the
-  same machine or, for `injected-serror`, on the machine with EL2, and hold
-  the transcript against the exact records of the case: the exception
-  record with its vector, class, syndrome and an `ELR` at a symbol of the
-  image, then the halt or the self-checks of the frame and of the return,
-  each with no failure. They establish the vectors, the frame, the return
-  of a synchronous exception, the virtual SError and the FP/SIMD trap on
-  QEMU virt, not on a Raspberry Pi 5; the virtual SError needs EL2, which
-  the default image does not run with.
+- **QEMU, exceptions.** The cases `el1-brk`, `injected-serror`,
+  `el1-fp-trap`, `timer-irq` and `irq-preserves-registers` of the same suite
+  boot a test image each, in release, on the same machine or, for
+  `injected-serror`, on the machine with EL2, and hold the transcript
+  against the exact records of the case: the exception records with their
+  vector, class, syndrome and an `ELR` at a symbol of the image or between
+  two, then the halt or the self-checks of the frame, of the return and of
+  the registers, each with no failure. They establish the vectors, the
+  frame, the return of a synchronous exception and of an IRQ, the timer
+  interrupt through the GICv2, the registers across an IRQ, the virtual
+  SError and the FP/SIMD trap on QEMU virt, not on a Raspberry Pi 5; the
+  virtual SError needs EL2, which the default image does not run with.
 - **Proofs.** None: no theorem covers the feature, and the boot contract
   lists its code as [open obligations](../../domains/boot-platform/boot/contract.md#open-obligations).
 - **Unverified.** The paths that QEMU's PL011 never takes, a full transmit
-  FIFO and a stalled device, are shown only by the host tests.
+  FIFO and a stalled device, are shown only by the host tests. The special
+  interrupt IDs and an unexpected interrupt in `irq::handle`, and the
+  vectors that halt, are taken by no test.
 
 ## Limitations
 
@@ -277,5 +306,7 @@ The syndrome of a breakpoint taken through vector 0, the current level with
 - Secondary CPUs park forever.
 - Every exception of the default image halts; no exception of EL0 or with
   `SP_EL0` is handled.
+- The default image takes no interrupt; only the timer interrupt is handled,
+  in the test images, and device interrupts are not.
 - The MMU and the caches stay off, and the device tree is not read.
 - The panic record has no backtrace and no build-id.
