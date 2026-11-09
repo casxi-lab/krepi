@@ -33,9 +33,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The largest entry of each kind that is saved, in bytes.
-  CARGO_CACHE_LIMIT: "4000000000"
-  TOOLS_CACHE_LIMIT: "1000000000"
+  # The largest entry of each kind that is saved, in bytes: about three
+  # times the cargo cache and 1.2 times the tools cache that the check job
+  # measured, 0.68 GB and 0.65 GB.
+  CARGO_CACHE_LIMIT: "2000000000"
+  TOOLS_CACHE_LIMIT: "800000000"
 
 # `bash` runs every step with `-eo pipefail`.
 defaults:

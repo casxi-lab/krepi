@@ -1058,8 +1058,8 @@ const TOOLS_PATHS: &str = "~/.cache/krepi-ci/apt/\n~/.rustup/toolchains/1.99.0-a
                            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu\n";
 /// The largest entry of each kind, in bytes.
 const CACHE_LIMITS: [(&str, u64); 2] = [
-    ("CARGO_CACHE_LIMIT", 4_000_000_000),
-    ("TOOLS_CACHE_LIMIT", 1_000_000_000),
+    ("CARGO_CACHE_LIMIT", 2_000_000_000),
+    ("TOOLS_CACHE_LIMIT", 800_000_000),
 ];
 
 /// The steps of `job` that use the action `action`.

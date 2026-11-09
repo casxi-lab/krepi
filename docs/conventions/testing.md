@@ -341,14 +341,15 @@ that GitHub removed after seven days without use. Its job `cache build`
 looks up each entry; for a missing one it installs Clang, QEMU and the Rust
 toolchain as the lines do, runs `cargo xtask check`, which builds what the
 lines build, measures the paths with `du` and saves the entry with
-`actions/cache/save` when it is at most 4 GB for the cargo cache and 1 GB
+`actions/cache/save` when it is at most 2 GB for the cargo cache and 0.8 GB
 for the tools cache, both decimal, and otherwise reports it over its limit
-and saves nothing. Its job `cache prune`, the only job with `actions: write`,
+and saves nothing. The limits leave room above the sizes that the check job
+measured, 0.68 GB and 0.65 GB. Its job `cache prune`, the only job with `actions: write`,
 runs no code of the repository and lives in a workflow that does not run on
 pull requests: once the current entry of a kind is on `main` within its
 limit, it deletes the older entries of that kind. The caches then hold at
-most 5 GB, and at most 10 GB between a save and the deletion, which is the
-limit that GitHub sets for a repository. A unit test holds the workflows to
+most 2.8 GB, and at most 5.6 GB between a save and the deletion, within the
+10 GB that GitHub keeps for a repository. A unit test holds the workflows to
 these keys, paths, triggers, permissions and limits.
 
 The workflow `release` (`release.yml`) drafts a release of the check
