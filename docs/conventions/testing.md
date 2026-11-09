@@ -485,7 +485,8 @@ the minutes, the limit of the line, 1,200 s for the pull request line and
 than 80% of it, which the summary states as a run that "exceeds 80% of its
 limit", the days for which the record is kept, 90 for a run on `main` that
 a pull request did not trigger and 30 for the others, and with `--own` the
-wall clock and minutes of the record workflow's run until `--now`. The
+record workflow's run until `--now`: its wall clock and minutes, and each of
+its jobs with its runner class, seconds and minutes. The
 summary, which the workflow adds to the run's summary page, gives the same
 in Markdown with the text of the run escaped. `cargo xtask run-record --id
 <text>` checks the run ID of a manual run of the record workflow, digits

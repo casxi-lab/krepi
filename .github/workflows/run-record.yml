@@ -10,8 +10,9 @@
 # such as branch and job names, only through files, environment variables
 # and jq, and turns workflow commands off while it prints. It does not
 # record its own runs; each record states the wall clock and minutes of
-# the run that wrote it. Actions are pinned to full commit SHAs; the comment
-# names the release.
+# the run that wrote it, with the runner class, seconds and minutes of each
+# of its jobs. Actions are pinned to full commit SHAs; the comment names the
+# release.
 name: run record
 
 on:

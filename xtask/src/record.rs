@@ -16,10 +16,11 @@
 //! `runner_group_name`, `runner_name`, its `annotations` (`level`, `title`
 //! and `message` of each) and its `started_at` and `completed_at`. Every time
 //! is a count of seconds since 1970, which `jq` computes with
-//! `fromdateiso8601`, or null; no other field may be present. `--workflow` names the text of the workflow
-//! file at the head of the run, from which the limit of each job is read:
-//! its `timeout-minutes`, or 360 without one; a job whose name the text does
-//! not give as written, or whose limit is an expression, has no known limit.
+//! `fromdateiso8601`, or null; no other field may be present. `--workflow`
+//! names the text of the workflow file at the head of the run, from which
+//! the limit of each job is read: its `timeout-minutes`, or 360 without one;
+//! a job whose name the text does not give as written, or whose limit is an
+//! expression, has no known limit.
 //! `--own` names the same object for the run of the record workflow itself,
 //! with `--now` the current time.
 //!
@@ -35,10 +36,11 @@
 //! the first start to the last end of the jobs that ran on a runner; the sum
 //! of the minutes; the limit of the line and whether the run or one of its
 //! jobs took more than 80% of it ([`over`]); the days that the record is kept
-//! ([`retention`]); and, with `--own`, the wall clock and minutes of the
-//! record workflow's run until `--now`. The summary is the same in Markdown,
-//! with the text of the run escaped, and states in neutral words a run that
-//! exceeds 80% of its limit.
+//! ([`retention`]); and, with `--own`, the record workflow's run until
+//! `--now`: its wall clock and minutes, and each of its jobs with its runner
+//! class, seconds and minutes, a job still running counting until `--now`.
+//! The summary is the same in Markdown, with the text of the run escaped,
+//! and states in neutral words a run that exceeds 80% of its limit.
 //!
 //! `--id TEXT` checks the run ID that a manual run of the record workflow
 //! takes as its input and prints it: digits only, without a leading zero,
@@ -288,15 +290,29 @@ pub fn record(
     let limit = limit(line);
     let over = limit.map(|limit| over(limit, clock, &durations));
     let own = own.map(|(own, now)| {
-        let used: u64 = (own.jobs.iter())
-            .filter_map(|job| seconds(job, Some(now)))
-            .map(minutes)
-            .sum();
+        let mut used = 0;
+        let mut jobs = Vec::new();
+        for job in &own.jobs {
+            let seconds = seconds(job, Some(now));
+            used += seconds.map_or(0, minutes);
+            jobs.push(json!({
+                "id": job.id,
+                "name": job.name,
+                "runner": runner(job),
+                "labels": job.labels,
+                "runner_group": job.runner_group_name,
+                "started_at": job.started_at,
+                "completed_at": job.completed_at,
+                "seconds": seconds,
+                "minutes": seconds.map_or(0, minutes),
+            }));
+        }
         json!({
             "id": own.run.id,
             "attempt": own.run.attempt,
             "wall_seconds": wall(&own.jobs, Some(now)),
             "minutes": used,
+            "jobs": jobs,
         })
     });
     json!({
@@ -380,10 +396,21 @@ pub fn summary(record: &Value) -> String {
     let own = &record["record_run"];
     if !own.is_null() {
         summary.push_str(&format!(
-            "\nThis record took {} s of wall clock and {} job minutes until its upload.\n",
+            "\nThis record took {} s of wall clock and {} job minutes until its upload.\n\n",
             text(&own["wall_seconds"]),
             own["minutes"]
         ));
+        summary.push_str("| Job of this record | Runner | Seconds | Minutes |\n");
+        summary.push_str("| --- | --- | ---: | ---: |\n");
+        for job in own["jobs"].as_array().into_iter().flatten() {
+            summary.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                text(&job["name"]),
+                text(&job["runner"]),
+                text(&job["seconds"]),
+                text(&job["minutes"]),
+            ));
+        }
     }
     summary
 }

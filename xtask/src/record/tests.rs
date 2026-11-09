@@ -321,14 +321,35 @@ fn the_run_of_the_record_counts_until_now() {
     running.completed_at = None;
     let own = run("run record", "workflow_run", "main", vec![running]);
     let record = record(&input(MAIN), None, Some((&own, 1000 + 61)));
+    // Each job of the record workflow's run has its runner class, seconds
+    // and minutes, as the jobs of the recorded run do.
     assert_eq!(
         record["record_run"],
-        json!({"id": 7, "attempt": 1, "wall_seconds": 61, "minutes": 2})
+        json!({
+            "id": 7,
+            "attempt": 1,
+            "wall_seconds": 61,
+            "minutes": 2,
+            "jobs": [{
+                "id": 1,
+                "name": "run record",
+                "runner": "standard hosted",
+                "labels": ["ubuntu-24.04-arm"],
+                "runner_group": "GitHub Actions",
+                "started_at": 1000,
+                "completed_at": null,
+                "seconds": 61,
+                "minutes": 2,
+            }],
+        })
     );
     let summary = summary(&record);
     assert!(
         summary.ends_with(
-            "\nThis record took 61 s of wall clock and 2 job minutes until its upload.\n"
+            "\nThis record took 61 s of wall clock and 2 job minutes until its upload.\n\n\
+             | Job of this record | Runner | Seconds | Minutes |\n\
+             | --- | --- | ---: | ---: |\n\
+             | run record | standard hosted | 61 | 2 |\n"
         ),
         "{summary}"
     );
@@ -431,6 +452,12 @@ fn the_command_writes_the_record_and_the_summary_into_a_new_directory() {
     );
     assert_eq!(written, expected);
     assert_eq!(written["record_run"]["wall_seconds"], 193);
+    let own_job = &written["record_run"]["jobs"][0];
+    assert_eq!(own_job["runner"], "standard hosted");
+    assert_eq!(
+        (&own_job["seconds"], &own_job["minutes"]),
+        (&json!(193), &json!(4))
+    );
     let markdown =
         fs::read_to_string(scratch.0.join("out").join(SUMMARY_FILE)).expect("the summary");
     assert_eq!(markdown, summary(&expected));
