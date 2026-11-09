@@ -2,7 +2,8 @@
 # repositories beside it, kosmo and kalyx. It runs on the second day of each
 # month at 06:19 UTC for the month before, and on a manual run of main for a
 # month that it takes as its input, the current month ending at the time of
-# the run. With the read permissions of the workflow token and the public
+# the run, or, with no input, for the month before. With the read
+# permissions of the workflow token and the public
 # interface of the container registry only, it reads the runs of each
 # repository in the month, among them the runs of the dynamic workflows such
 # as code scanning, the jobs of every attempt of each run, the artifacts
@@ -93,8 +94,8 @@ jobs:
             echo "partial=$partial"
           } >> "$GITHUB_OUTPUT"
 
-      # A request that fails names its repository and fails the step; the
-      # token does not reach a repository that it cannot read.
+      # A request that fails names its repository or package and fails the
+      # step; the token does not reach a repository that it cannot read.
       - name: Read the usage
         env:
           GH_TOKEN: ${{ github.token }}
@@ -163,11 +164,23 @@ jobs:
           types="$types,application/vnd.docker.distribution.manifest.list.v2+json"
           types="$types,application/vnd.docker.distribution.manifest.v2+json"
           : > "$data/packages.jsonl"
+          registry() { # <registry path>, for $package with the pull token $pull
+            if ! curl -fsS -H "Authorization: Bearer $pull" -H "Accept: $types" "https://ghcr.io/v2/$package/$1"; then
+              echo "cannot read the package $package from the registry: $1" >&2
+              return 1
+            fi
+          }
           for package in $PACKAGES; do
-            pull=$(curl -fsS "https://ghcr.io/token?scope=repository:$package:pull&service=ghcr.io" | jq -er .token)
-            registry() { curl -fsS -H "Authorization: Bearer $pull" -H "Accept: $types" "https://ghcr.io/v2/$package/$1"; }
+            url="https://ghcr.io/token?scope=repository:$package:pull&service=ghcr.io"
+            if ! pull=$(curl -fsS "$url" | jq -er .token); then
+              echo "cannot read the package $package from the registry: no pull token" >&2
+              exit 1
+            fi
             : > "$data/tags.jsonl"
-            for tag in $(registry "tags/list?n=1000" | jq -r '.tags // [] | .[]'); do
+            # The tags are read before the loop, so that a failed request
+            # fails the step.
+            tags=$(registry "tags/list?n=1000" | jq -r '.tags // [] | .[]')
+            for tag in $tags; do
               [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$ ]] || { echo "a tag of $package is not a tag" >&2; exit 1; }
               manifest=$(registry "manifests/$tag")
               digests=$(jq -r '.manifests // [] | .[].digest' <<< "$manifest")

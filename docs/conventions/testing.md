@@ -381,20 +381,22 @@ The workflow `usage` (`usage.yml`) writes the usage summary of the CI of a
 month for krepi and the public repositories kosmo and kalyx. It runs on the
 second day of each month at 06:19 UTC for the month before, and on a manual
 run of `main` for the month of its input, as `YYYY-MM`, the current month
-ending at the time of the run. Its one job has read permissions only and
-uses no other credential: with the workflow token it reads, for each
-repository, the runs created in the month, one query for each day, among
-them the runs of dynamic workflows such as code scanning, the jobs of every
-attempt of each run, the artifacts that have not expired and the cache
-usage, and with an anonymous pull token of the container registry the tags
-of the package `casxi-lab/krepi-formal` and the config and layers of their
-manifests. A request that fails names its repository and fails the run.
-Text from the API goes only through files and `jq`, and workflow commands
-are off while the data is read. `cargo xtask usage`, described below,
-writes the summary, which goes to the summary page of the run, and the data
-and the summary are uploaded as `usage-<month>-<run>-<attempt>`. A unit test
-holds the workflow to its schedule and its manual run, its condition on
-`main`, its read permissions and the commands that are off while it reads.
+ending at the time of the run, or, with no input, for the month before. Its
+one job has read permissions only and uses no other credential: with the
+workflow token it reads, for each repository, the runs created in the month,
+one query for each day, among them the runs of dynamic workflows such as
+code scanning, the jobs of every attempt of each run, the artifacts that
+have not expired and the cache usage, and with an anonymous pull token of
+the container registry the tags of the package `casxi-lab/krepi-formal` and
+the config and layers of their manifests. A request that fails names its
+repository or package and fails the run. Text from the API goes only through
+files and `jq`, and workflow commands are off while the data is read.
+`cargo xtask usage`, described below, writes the summary, which goes to the
+summary page of the run, and the data and the summary are uploaded as
+`usage-<month>-<run>-<attempt>`. A unit test holds the workflow to its
+schedule and its manual run, its condition on `main`, its read permissions
+and the commands that are off while it reads.
+
 `cargo xtask serial-capture --port <tty>` records what a board sends over a
 serial port, such as the UART of a Pi 5 behind a USB serial adapter, without
 evaluating its boot; it is a tool for the bench and is not part of the
