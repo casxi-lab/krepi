@@ -5,6 +5,7 @@ status: partial
 modules:
   - kernel/arch/src/boot.rs
   - kernel/arch/src/boot.S
+  - kernel/arch/src/cache.rs
   - kernel/arch/src/cache_range.rs
   - kernel/arch/src/cpu.rs
   - kernel/arch/src/exception.rs

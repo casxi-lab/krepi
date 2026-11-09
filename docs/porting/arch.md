@@ -20,12 +20,14 @@ of the two module files of the legacy architecture area: `src/arch/mod.rs`,
 which declared `aarch64`, and `src/arch/aarch64/mod.rs`, which declared the
 AArch64 modules and compiled those that touch the CPU only for the
 bare-metal target. krepi has one architecture, so the crate is the AArch64
-module itself: its root declares `boot`, `cpu`, `gic` and `timer`, each
-compiled only for `target_arch = "aarch64"` with `target_os = "none"`, as
-the legacy root compiled `cpu`, and `exception` and `cache_range`, compiled
-on the host too, as the legacy root compiled them. The record of
-`cache_range` is [cache_range](cache_range.md). The manifest makes the crate a member of the
-kernel workspace. The legacy area `src/arch` is ported, as
+module itself: its root declares `boot`, `cache`, `cpu`, `gic` and
+`timer`, each compiled only for `target_arch = "aarch64"` with
+`target_os = "none"`, as the legacy root compiled `cache` and `cpu`, and
+`exception` and `cache_range`, compiled on the host too, as the legacy root
+compiled them. The records of the two cache modules are
+[cache](cache.md) and [cache_range](cache_range.md). The manifest makes the
+crate a member of the kernel workspace. The legacy area `src/arch` is
+ported, as
 [porting](../conventions/porting.md#classification-of-the-legacy-areas)
 classifies it.
 
@@ -36,8 +38,8 @@ classifies it.
   dependencies, with `missing_docs` warned and undocumented `unsafe` blocks
   denied.
 - The crate is `no_std` outside its tests. On the host, where the
-  repository checks build it, it holds the exception frame and the classes
-  of exceptions, whose tests run there.
+  repository checks build it, it holds the exception frame, the classes of
+  exceptions and the cache-line walks, whose tests run there.
 - The cold entry `boot`, which the legacy kernel included from `src/boot.S`
   at the root of the prototype's kernel, is a module of this crate; its
   record is [boot](boot.md).
@@ -47,7 +49,8 @@ classifies it.
   `timer`, the generic timer, which take the driver part of the QEMU virt
   interrupt code of `src/board/qemu/irq.rs` and have the records
   [gic](gic.md) and [timer](timer.md). The description of the manifest and
-  the crate documentation say so, in place of processor primitives alone.
+  the crate documentation say so, in place of processor primitives alone,
+  and name the cache and TLB maintenance of the executing CPU.
 
 ## Tests carried over
 
@@ -72,6 +75,5 @@ None of its own; the records of the declared modules name theirs.
   user contexts, user addresses and ASIDs, the GIC-400 and the physical timer
   of the Pi 5 path, SGIs and the CPU-local and transaction adapters are
   ported or redesigned with the code that needs them.
-- The declaration of `cache`, which is added with that module.
 - The module documentation, which described the legacy modules; the crate
   documentation describes this crate.

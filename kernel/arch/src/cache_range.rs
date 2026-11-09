@@ -10,7 +10,10 @@
 //! lies in, from the line of the first byte to the line of the last, and
 //! refuses a range before it walks: an empty range, one longer than its
 //! limit, one that wraps past the end of the address space and a field
-//! above 15 give `None`. The module is compiled on the host too, where its
+//! above 15 give `None`. The walks of the cache maintenance by address take
+//! their line size from a value of `CTR_EL0`, the data walk from its field
+//! `DminLine` and the instruction walk from `IminLine`, each with the limit
+//! [`MAX_RANGE_BYTES`]. The module is compiled on the host too, where its
 //! tests run.
 
 use core::iter::StepBy;
@@ -32,6 +35,24 @@ pub fn lines(start: u64, bytes: u64, log2_words: u8, limit: u64) -> Option<StepB
     let end = start.checked_add(bytes)?;
     let line = 4_u64 << log2_words;
     Some(((start & !(line - 1))..end).step_by(line as usize))
+}
+
+/// The data cache lines of `[start, start + bytes)` for the cache type
+/// `ctr`, a value of `CTR_EL0`: the walk of [`lines`] at the smallest data
+/// cache line, `DminLine` in bits 16 to 19, with the limit
+/// [`MAX_RANGE_BYTES`]. It is the walk of the data cache maintenance by
+/// address.
+pub fn data_lines(ctr: u64, start: u64, bytes: u64) -> Option<StepBy<Range<u64>>> {
+    lines(start, bytes, ((ctr >> 16) & 15) as u8, MAX_RANGE_BYTES)
+}
+
+/// The instruction cache lines of `[start, start + bytes)` for the cache
+/// type `ctr`, a value of `CTR_EL0`: the walk of [`lines`] at the smallest
+/// instruction cache line, `IminLine` in bits 0 to 3, with the limit
+/// [`MAX_RANGE_BYTES`]. It is the walk of the instruction cache maintenance
+/// by address.
+pub fn instruction_lines(ctr: u64, start: u64, bytes: u64) -> Option<StepBy<Range<u64>>> {
+    lines(start, bytes, (ctr & 15) as u8, MAX_RANGE_BYTES)
 }
 
 /// The cache lines of a whole image that firmware hands over, `bytes` from

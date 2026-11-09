@@ -21,11 +21,13 @@ empty range, a range longer than a limit, a range that wraps and a field
 above 15; and `handoff_lines`, the walk of a whole, page-aligned image that
 firmware hands over, within the reserved window of its platform. The
 module is compiled on the host too, as in the legacy tree, where it was
-also declared without a condition. The cache maintenance by address is to
-walk its ranges with `lines` (planned). `handoff_lines` has no
-caller in the kernel yet: its user is the invalidation of the image that
-firmware hands over, once the MMU and the caches are turned on (planned).
-The legacy area `src/arch` is ported, as
+also declared without a condition. The cache maintenance by address of
+[cache](cache.md) walks its ranges with `data_lines` and
+`instruction_lines`, new walks of `lines` at the line size that a value of
+`CTR_EL0` gives. `handoff_lines` has no caller in the kernel yet: its
+user is the invalidation of the image that firmware hands over, once the
+MMU and the caches are turned on (planned). The legacy area `src/arch` is
+ported, as
 [porting](../conventions/porting.md#classification-of-the-legacy-areas)
 classifies it.
 
@@ -38,10 +40,16 @@ classifies it.
   the cache maintenance by address: the legacy functions of the code
   publication passed it as the literal 65536. It lives here, on the host,
   so that the host tests can use it.
+- The new functions `data_lines` and `instruction_lines` give the walk of
+  `lines` at the field `DminLine` or `IminLine` of a value of `CTR_EL0`,
+  with the limit `MAX_RANGE_BYTES`: each legacy maintenance function
+  extracted its field and passed its limit itself. They live here so that
+  the host tests hold the field and the limit of each walk.
 - The tests are in `cache_range/tests.rs`, in place of an inline test
   module, and two new tests are the examples ex7 and ex8 of the
   [QEMU virt boot](../features/platform/qemu-virt-boot.md) feature
-  document.
+  document. Three new tests hold `data_lines` and `instruction_lines` at a
+  value of `CTR_EL0` whose line fields differ.
 - The line `//! Feature: krepi.platform.qemu-virt-boot` names the feature in
   both files.
 
@@ -55,11 +63,15 @@ No expected value changed.
 
 ## Behaviour changes
 
-None: the walks are those of the legacy functions.
+None: the walks are those of the legacy functions, and `data_lines` and
+`instruction_lines` walk at the fields and the limit of the legacy cache
+functions.
 
 ## Hardware evidence to re-obtain
 
-None of its own: the walks are arithmetic, which the host tests show.
+None of its own: the walks are arithmetic, which the host tests show. The
+record of [cache](cache.md) names the evidence of the maintenance that
+uses them.
 
 ## Not carried over
 

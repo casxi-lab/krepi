@@ -1,6 +1,7 @@
 //! The tests of the cache-line walks: the tests taken from the prototype
-//! tree, with their expected values, and the examples of the feature
-//! document.
+//! tree, with their expected values, the examples of the feature document,
+//! and the fields of `CTR_EL0` and the limit that the walks of the cache
+//! maintenance take.
 //!
 //! Feature: krepi.platform.qemu-virt-boot
 
@@ -66,4 +67,49 @@ fn ex8_an_empty_or_oversized_range_is_refused() {
     assert_eq!(aligned.count(), 1024);
     let unaligned = lines(0x4020_1001, MAX_RANGE_BYTES, 4, MAX_RANGE_BYTES).unwrap();
     assert_eq!(unaligned.count(), 1025);
+}
+
+/// A value of `CTR_EL0` whose four line and granule fields differ, at the
+/// places that the Arm Architecture Reference Manual gives them: `IminLine`
+/// 3 in bits 0 to 3, lines of 32 bytes; `DminLine` 4 in bits 16 to 19, 64
+/// bytes; `ERG` 5 in bits 20 to 23; and `CWG` 6 in bits 24 to 27; with
+/// `L1Ip` 0b11 in bits 14 and 15 and bit 31, which reads as 1. The value of
+/// the Cortex-A76, `0x8444_c004`, has 4 in all four, so a walk that read
+/// another field would give the same lines there.
+const DISTINCT_FIELDS: u64 = (1 << 31) | (6 << 24) | (5 << 20) | (4 << 16) | (0b11 << 14) | 3;
+
+/// The data walk takes its line size from `DminLine` alone: the 200 bytes
+/// of ex7 touch the same four lines of 64 bytes.
+#[test]
+fn the_data_walk_takes_dminline() {
+    let walk = data_lines(DISTINCT_FIELDS, 0x4020_1005, 200).unwrap();
+    assert!(walk.eq([0x4020_1000, 0x4020_1040, 0x4020_1080, 0x4020_10c0]));
+}
+
+/// The instruction walk takes its line size from `IminLine` alone: the 200
+/// bytes of ex7 touch the seven lines of 32 bytes from `0x4020_1000` to
+/// `0x4020_10c0`.
+#[test]
+fn the_instruction_walk_takes_iminline() {
+    let walk = instruction_lines(DISTINCT_FIELDS, 0x4020_1005, 200).unwrap();
+    assert!(walk.eq((0..7).map(|line| 0x4020_1000 + 32 * line)));
+}
+
+/// Both walks of the maintenance refuse an empty range, a range one byte
+/// longer than [`MAX_RANGE_BYTES`] and a range that wraps, and walk a range
+/// of exactly that length: 1,024 lines of 64 bytes, and 2,048 of 32 bytes.
+#[test]
+fn the_walks_of_the_maintenance_take_the_limit_of_one_call() {
+    for (start, bytes) in [
+        (0x4020_1000, 0),
+        (0x4020_1000, MAX_RANGE_BYTES + 1),
+        (u64::MAX, 1),
+    ] {
+        assert!(data_lines(DISTINCT_FIELDS, start, bytes).is_none());
+        assert!(instruction_lines(DISTINCT_FIELDS, start, bytes).is_none());
+    }
+    let data = data_lines(DISTINCT_FIELDS, 0x4020_1000, MAX_RANGE_BYTES).unwrap();
+    assert_eq!(data.count(), 1024);
+    let instruction = instruction_lines(DISTINCT_FIELDS, 0x4020_1000, MAX_RANGE_BYTES).unwrap();
+    assert_eq!(instruction.count(), 2048);
 }
