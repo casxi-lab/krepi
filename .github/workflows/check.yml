@@ -69,12 +69,18 @@ jobs:
             xtask/target/
             tools/target/
 
+      # apt, which runs as root, leaves a lock and a partial directory that
+      # the runner user cannot read beside the packages; they are removed,
+      # so that the tools cache holds the packages alone, owned by the
+      # runner user.
       - name: Install Clang and QEMU
         run: |
           mkdir -p ~/.cache/krepi-ci/apt/partial
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/.cache/krepi-ci/apt" \
             -o APT::Keep-Downloaded-Packages=true clang-18 qemu-system-arm
+          sudo rm -rf ~/.cache/krepi-ci/apt/partial ~/.cache/krepi-ci/apt/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/.cache/krepi-ci/apt
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
@@ -87,10 +93,19 @@ jobs:
 
       # The size of each path of the two caches and of each cache, against
       # which the limits of the entries that the workflow cache saves are set.
+      # A size for which du failed, as the measure of that workflow would,
+      # is marked so, and du names the path in the log.
       - name: Report the size of the cache paths
         if: always()
         run: |
-          size() { du -sbc "$@" 2> /dev/null | tail -n 1 | cut -f 1 || true; }
+          size() {
+            local bytes
+            if bytes=$(du -sbc "$@" | tail -n 1 | cut -f 1); then
+              echo "$bytes"
+            else
+              echo "$bytes (du failed; see the log)"
+            fi
+          }
           cargo=(~/.cargo/registry/index/ ~/.cargo/registry/cache/ xtask/target/ tools/target/)
           tools=(~/.cache/krepi-ci/apt/ ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
             ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu)
@@ -104,7 +119,7 @@ jobs:
             done
             echo "| cargo cache | $(size "${cargo[@]}") |"
             echo "| tools cache | $(size "${tools[@]}") |"
-            echo "| .deb packages | $(find ~/.cache/krepi-ci/apt/ -name '*.deb' 2> /dev/null | wc -l) |"
+            echo "| .deb packages | $(find ~/.cache/krepi-ci/apt/ -name '*.deb' | wc -l) |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the receipt
@@ -214,12 +229,18 @@ jobs:
             xtask/target/
             tools/target/
 
+      # apt, which runs as root, leaves a lock and a partial directory that
+      # the runner user cannot read beside the packages; they are removed,
+      # so that the tools cache holds the packages alone, owned by the
+      # runner user.
       - name: Install QEMU
         run: |
           mkdir -p ~/.cache/krepi-ci/apt/partial
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/.cache/krepi-ci/apt" \
             -o APT::Keep-Downloaded-Packages=true qemu-system-arm
+          sudo rm -rf ~/.cache/krepi-ci/apt/partial ~/.cache/krepi-ci/apt/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/.cache/krepi-ci/apt
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install

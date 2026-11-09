@@ -1166,6 +1166,42 @@ fn scripts_of(job: &Yaml) -> Vec<&str> {
         .collect()
 }
 
+/// The option that makes apt keep its packages in the directory of the
+/// tools cache.
+const APT_ARCHIVES: &str = "-o Dir::Cache::Archives=\"$HOME/.cache/krepi-ci/apt\"";
+/// The commands that end a step that installs with apt. apt, which runs as
+/// root, leaves beside the packages a lock and a partial directory that the
+/// runner user cannot read, and `du` and the save of the workflow cache
+/// would fail on them.
+const APT_CLEANUP: [&str; 2] = [
+    "sudo rm -rf ~/.cache/krepi-ci/apt/partial ~/.cache/krepi-ci/apt/lock",
+    "sudo chown -R \"$(id -u):$(id -g)\" ~/.cache/krepi-ci/apt",
+];
+
+#[test]
+fn every_apt_install_leaves_the_packages_alone_in_the_tools_cache() {
+    let mut count = 0;
+    for (path, document) in workflows() {
+        for (key, job) in jobs(&document) {
+            for script in scripts_of(job) {
+                if !script.contains("apt-get install") {
+                    continue;
+                }
+                count += 1;
+                assert!(script.contains(APT_ARCHIVES), "{path}: {key}");
+                let lines = logical_lines(script);
+                let last: Vec<&str> = (lines.iter().rev().take(2).rev())
+                    .map(|line| line.trim())
+                    .collect();
+                assert_eq!(last, APT_CLEANUP, "{path}: {key}");
+            }
+        }
+    }
+    // The two jobs that install in each of the pull request, full and
+    // nightly lines, the suite of the weekly line and `cache build`.
+    assert_eq!(count, 8);
+}
+
 /// The workflow that drafts a release.
 const RELEASE: &str = ".github/workflows/release.yml";
 

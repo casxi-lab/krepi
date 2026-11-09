@@ -314,14 +314,19 @@ cache holds the `.deb` packages of `clang-18`, `qemu-system-arm` and their
 dependencies, which apt keeps in `~/.cache/krepi-ci/apt/`, and the Rust
 toolchain of `rust-toolchain.toml` below `~/.rustup/`, under the key
 `tools-<runner system>-<runner architecture>-<digest>` of
-`rust-toolchain.toml` and `toolchains.toml`. An entry is used only under its
-exact key. The line workflows set `cache-mode: read`, restore both caches
-with `actions/cache/restore` in each job that builds or installs, and save
-none. A restored cache is not trusted for its versions: apt installs a
-cached package only when its digest matches the index of the archive, and
-the `toolchain` step of the check still compares the versions with
-`toolchains.toml`. The job `cargo xtask check` of the pull request and main
-lines reports the size of each path of the two caches in its summary.
+`rust-toolchain.toml` and `toolchains.toml`. apt, which runs as root, also
+leaves a lock file and a directory `partial/` there that the runner user
+cannot read, so each step that installs with apt then removes both and gives
+the directory to the runner user: `du` and the save read the packages alone.
+An entry is used only under its exact key. The line workflows set
+`cache-mode: read`, restore both caches with `actions/cache/restore` in each
+job that builds or installs, and save none. A restored cache is not trusted
+for its versions: apt installs a cached package only when its digest matches
+the index of the archive, and the `toolchain` step of the check still
+compares the versions with `toolchains.toml`. The job `cargo xtask check` of
+the pull request and main lines reports the size of each path of the two
+caches in its summary and marks a size for which `du` failed, as the measure
+of the workflow `cache` would.
 
 The workflow `cache` runs on a push to `main` that changes it,
 `rust-toolchain.toml`, `toolchains.toml` or the `Cargo.lock` of one of the

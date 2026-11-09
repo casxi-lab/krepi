@@ -96,12 +96,18 @@ jobs:
             xtask/target/
             tools/target/
 
+      # apt, which runs as root, leaves a lock and a partial directory that
+      # the runner user cannot read beside the packages; they are removed,
+      # so that the tools cache holds the packages alone, owned by the
+      # runner user.
       - name: Install Clang and QEMU
         run: |
           mkdir -p ~/.cache/krepi-ci/apt/partial
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/.cache/krepi-ci/apt" \
             -o APT::Keep-Downloaded-Packages=true clang-18 qemu-system-arm
+          sudo rm -rf ~/.cache/krepi-ci/apt/partial ~/.cache/krepi-ci/apt/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/.cache/krepi-ci/apt
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
@@ -207,12 +213,18 @@ jobs:
             xtask/target/
             tools/target/
 
+      # apt, which runs as root, leaves a lock and a partial directory that
+      # the runner user cannot read beside the packages; they are removed,
+      # so that the tools cache holds the packages alone, owned by the
+      # runner user.
       - name: Install QEMU
         run: |
           mkdir -p ~/.cache/krepi-ci/apt/partial
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/.cache/krepi-ci/apt" \
             -o APT::Keep-Downloaded-Packages=true qemu-system-arm
+          sudo rm -rf ~/.cache/krepi-ci/apt/partial ~/.cache/krepi-ci/apt/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/.cache/krepi-ci/apt
 
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
