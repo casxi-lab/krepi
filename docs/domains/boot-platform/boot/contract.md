@@ -39,7 +39,8 @@ component.
 - **Test image.** An example of the QEMU virt board crate: an image that
   links the production code of the default image and adds its own
   `kernel_main`, dispatch and trigger sequence, for the QEMU boot suite. It
-  is test code, not a production image.
+  is test code, not a production image; the translation tables of the test
+  image that turns the MMU on are test code too.
 - **Cache-line walk.** The addresses that `krepi_arch::cache_range::lines`
   gives for a range of bytes: one for each cache line that a byte of the
   range lies in, from the line of the first byte to the line of the last.
@@ -546,6 +547,16 @@ counter as well.
   rule of the saved and restored state has one test, a self-check of a test
   image or a case of the suite, named in the
   [open obligations](#open-obligations).
+- The suite boots four test images of the cache and TLB maintenance, each
+  testing one function of `krepi_arch::cache` and the publication of code
+  with the clean before it, and holds each transcript against its start
+  record, one self-check with no failure and `CASXI_RESUMED`, with no
+  exception record. One of them turns the MMU on with translation tables of
+  its own to replace the entry of a page by break-before-make; the others
+  run with the MMU off. The caches stay off, and QEMU's TCG does not model
+  them, so the cases show that the instructions execute and, for the TLB,
+  that the page is translated through its new entry, not an effect on a
+  cache.
 - The test images that wait for an interrupt wait for at most 1,000 ms on
   the counter, a platform parameter of QEMU virt for these images, where
   the timer interrupt comes after one period of 10 ms.
@@ -623,7 +634,9 @@ records of the [console](../../../porting/console.md) and of
   coherency and the scope of the maintenance instructions, the publication
   of code with Non-cacheable memory and the concurrent modification of
   instructions, the TLB maintenance and the attributes of memory with the
-  MMU off.
+  MMU off; and, for the test image that turns the MMU on, the VMSAv8-64
+  descriptors of the 4 KiB granule, `MAIR_EL1`, `TCR_EL1`, `TTBR0_EL1`,
+  `SCTLR_EL1` and `TLBI VMALLE1`.
 - Arm Limited, *Learn the architecture - AArch64 memory management Guide*,
   version 1.4, document 101811_0104_01_en, 2024,
   <https://documentation-service.arm.com/static/670e4dc89fbc7343d3e4cee1>:

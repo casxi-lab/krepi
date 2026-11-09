@@ -212,8 +212,9 @@ address, invalidates TLB entries of a virtual address with the barriers
 around it, and invalidates instruction cache lines when it publishes code.
 Each primitive acts on a stated shareability domain and is called by the CPU
 for itself. The primitives cover every line of an address range whose ends
-are not aligned to a cache line. They do not invalidate TLB entries of other
-CPUs and wait for their acknowledgement, which the multicore domain does.
+are not aligned to a cache line. They do not maintain caches or TLBs on
+behalf of another CPU and wait for its acknowledgement, which the multicore
+domain does.
 
 **Design background.** The sequences follow the Arm Architecture Reference
 Manual: `DC CVAU` by line and `DSB ISH` before instruction fetch sees new
@@ -225,21 +226,28 @@ require. The cache line sizes come from `CTR_EL0`.
 **Consumers.** Page-table changes and code publication of the memory domain,
 the turning on of the MMU and the caches, and image loading.
 
-**Interface.** One primitive per maintenance operation, each taking an
-address range and reporting nothing: the instructions do not fail.
+**Interface.** One primitive per maintenance operation. The three range
+primitives each take an address range of at most 64 KiB and panic, before
+any instruction, on a range that is empty, longer than 64 KiB or wraps; the
+TLB primitive takes an address in the page. None reports a result: an
+address that cannot be translated makes a data cache primitive raise a Data
+Abort and may make the instruction cache primitive raise one, and the TLB
+invalidation never raises one.
 
 **Prerequisites.** [EL1 entry](#el1-entry); the
 [boot](boot/contract.md) component.
 
 **Engineering notes.** The range arithmetic is plain code that host tests
-cover for unaligned ends and empty ranges; the instructions are assembly in
-adapters. QEMU's TCG does not model data and instruction caches, so a QEMU
-test shows that a primitive executes over a range, not its effect on a
-cache.
+cover for unaligned ends, empty ranges and the line field of `CTR_EL0` that
+each walk takes; the instructions are assembly in adapters. QEMU's TCG does
+not model data and instruction caches, so a QEMU test shows that a primitive
+executes over a range, not its effect on a cache.
 
 **Verification.** Host tests of the line coverage of a range; QEMU tests
-that each primitive executes, that a remapped page is read through its new
-frame after the TLB invalidation and that published code runs; the effect
+that each range primitive executes over a range whose ends are not aligned
+to a line, that a page whose entry is replaced by break-before-make is read
+through its new frame after the TLB invalidation, in a test image with
+translation tables of its own, and that published code runs; the effect
 with the caches on is shown on the Pi 5.
 
 ## Device-tree parsing

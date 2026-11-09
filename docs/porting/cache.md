@@ -94,14 +94,15 @@ that gives its line size and its limit are held by the tests of
 
 | Change | Evidence |
 | --- | --- |
-| The data cache invalidation takes any range of at most 64 KiB, with unaligned ends, without the checks of an image handoff | A case of the QEMU boot suite that runs it over a range with unaligned ends (planned) |
-| A range that is empty, wraps or exceeds 64 KiB is refused before any maintenance in all three range functions, which panic; the legacy handoff invalidation was bounded by the platform window instead | The host tests of `cache_range::lines`, which each range function calls before any maintenance, `cache_range::tests::ex8_an_empty_or_oversized_range_is_refused` among them |
+| The data cache invalidation takes any range of at most 64 KiB, with unaligned ends, without the checks of an image handoff | The case `invalidate-to-poc` of `cargo xtask qemu-boot`, which runs it over a range with unaligned ends |
+| A range that is empty, wraps or exceeds 64 KiB is refused before any maintenance in all three range functions, which panic; the legacy handoff invalidation was bounded by the platform window instead | The host tests of `cache_range::lines`, `data_lines` and `instruction_lines`, the walks that each range function calls before any maintenance, `cache_range::tests::ex8_an_empty_or_oversized_range_is_refused` among them, which show that the walk refuses the range; no test takes the panic itself |
 
 ## Hardware evidence to re-obtain
 
-- The four functions at EL1 on QEMU virt with one Cortex-A76, which cases
-  of the QEMU boot suite are to obtain (planned). QEMU does not model the
-  data and instruction caches, so such cases show the execution and the TLB
+- The four functions at EL1 on QEMU virt with one Cortex-A76: the cases
+  `clean-code-to-pou`, `invalidate-to-poc`, `invalidate-tlb-page` and
+  `code-publication` of `cargo xtask qemu-boot`, in CI. QEMU does not model
+  the data and instruction caches, so they show the execution and the TLB
   invalidation, not the effect on a cache.
 - The clean, the invalidations and the publication of code with the MMU and
   the caches on, and the invalidation of the image that the Pi 5 firmware

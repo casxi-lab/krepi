@@ -21,9 +21,13 @@ follow are in the [contract](contract.md).
   [gic](../../../porting/gic.md), [timer](../../../porting/timer.md),
   [irq](../../../porting/irq.md), [uart](../../../porting/uart.md),
   [console](../../../porting/console.md), [fault](../../../porting/fault.md),
+  [cache](../../../porting/cache.md),
+  [cache_range](../../../porting/cache_range.md),
   [arch](../../../porting/arch.md) and
   [qemu-virt](../../../porting/qemu-virt.md) name the taken paths and the
-  changes.
+  changes. The cache and TLB maintenance takes the clean, the invalidations
+  and the line walks of the prototype tree; its TLB invalidation of a page
+  is new.
 - The records, the checks and the bounds follow the Arm Architecture
   Reference Manual, the Cortex-A76 and PL011 manuals and the QEMU virt
   documentation that the [contract](contract.md#references) cites.
@@ -49,9 +53,13 @@ follow are in the [contract](contract.md).
 - **Test images.** The release builds of the examples of the QEMU virt
   board crate for the same target: each links the cold entry, the
   exception vectors, the console and the exception record of the default
-  image and adds its own `kernel_main`, dispatch and trigger sequence.
-- **Host.** The host tests of the console, of the exception record and of
-  the exception classes run on the development host and in CI.
+  image and adds its own `kernel_main`, dispatch and trigger sequence. The
+  test image of BOOT-R13 turns the MMU on with translation tables of its
+  own and keeps the data and instruction caches off; every other image
+  runs with the MMU and the caches off, as QEMU leaves them.
+- **Host.** The host tests of the console, of the exception record, of
+  the exception classes and of the cache-line walks run on the development
+  host and in CI.
 - The Raspberry Pi 5 is not a configuration of these requirements, and
   neither is more than one CPU.
 
@@ -391,6 +399,233 @@ level up, and the dispatch returns. The criterion: the case
   interrupt is pending, a device interrupt, or the GIC-400 of a Raspberry Pi
   5.
 
+### BOOT-R10
+
+**Cache-line walks of a range.** The walk of `[start, start + bytes)` at
+lines of `4 << field` bytes gives the address of the line of `start`,
+rounded down to a multiple of the line size, and of every line after it that
+starts below `start + bytes`, and nothing else; it refuses a range that is
+empty, longer than its limit or that wraps past the end of the address
+space, and a field above 15, before it gives any address. The walk of an
+image that firmware hands over gives the same lines and also refuses an
+image that does not start at the start of its window, is not page aligned,
+ends beyond the window or has lines of more than 4 KiB. The walks of the
+cache maintenance take their line size from a value of `CTR_EL0`, the data
+walk from `DminLine`, bits 16 to 19, and the instruction walk from
+`IminLine`, bits 0 to 3, and walk at most 64 KiB. The criterion: the host
+tests of `kernel/arch/src/cache_range/` pass.
+
+- **Examples.**
+  [ex7](../../../features/platform/qemu-virt-boot.md#ex7-a-range-with-unaligned-ends-covers-each-line-it-touches)
+  and
+  [ex8](../../../features/platform/qemu-virt-boot.md#ex8-an-empty-or-oversized-range-is-refused)
+  of the QEMU virt boot feature document.
+- **Entry points.** `krepi_arch::cache_range::lines`, `data_lines`,
+  `instruction_lines`, `handoff_lines` and `MAX_RANGE_BYTES`.
+- **Contract.** [Cache-line walks](contract.md#cache-line-walks) and
+  [Work bounds](contract.md#work-bounds).
+- **Specification.** None: no specification covers the component.
+- **Proof path.** None: the [open obligations](contract.md#open-obligations)
+  of the contract carry its code.
+- **Evidence.** The host tests of `kernel/arch/src/cache_range/`, in the
+  `test` step of `cargo xtask check`: the three tests taken from the
+  prototype tree with their expected values, of partial lines and exact
+  boundaries, of empty, oversized, wrapping and wide-field requests and of
+  the walk of a whole image in the windows of the Raspberry Pi 5 and of QEMU
+  virt, the examples ex7 and ex8, and the walks of the maintenance at a
+  value of `CTR_EL0` whose four line and granule fields differ, which hold
+  the field and the limit of each walk. They show the arithmetic of the
+  walks. They show no maintenance instruction and nothing of a machine.
+
+### BOOT-R11
+
+**Clean to the point of unification.**
+`cache::clean_code_to_pou(start, bytes)` executes `DC CVAU` on each line of
+the walk of the range at the smallest data cache line size that
+`CTR_EL0.DminLine` reports, then `DSB ISH`, at EL1, and returns. For Inner
+or Outer Shareable memory, which includes every data access with the MMU
+off, the cleans reach the data caches of every CPU of the inner-shareable
+domain of the executing CPU, and `DSB ISH` waits for them there; the
+executing CPU calls it for code that it wrote itself. A range that is empty,
+wraps or is longer than 64 KiB panics before any maintenance. The criterion:
+the case `clean-code-to-pou` passes.
+
+- **Examples.** None of its own: the walk is that of BOOT-R10.
+- **Entry points.** `krepi_arch::cache::clean_code_to_pou`.
+- **Contract.**
+  [Cache and TLB maintenance](contract.md#cache-and-tlb-maintenance),
+  [Check and execute](contract.md#check-and-execute) and
+  [Work bounds](contract.md#work-bounds).
+- **Specification.** None: no specification covers the component.
+- **Proof path.** None: the [open obligations](contract.md#open-obligations)
+  of the contract carry its code.
+- **Evidence.** The case `clean-code-to-pou` of `cargo xtask qemu-boot`, in
+  CI, with the self-check of its test image, `clean-keeps-data`: that the
+  range starts and ends inside data cache lines of the size that `CTR_EL0`
+  reports, that it touches more than one line, and that the buffer of the
+  range reads back unchanged. The image cleans 200 bytes that cross the
+  boundary of 2 KiB in the middle of a page-aligned buffer, with the MMU and
+  the caches off. It shows that `clean_code_to_pou` executes at EL1 on QEMU
+  virt over a range with unaligned ends and returns without an exception: an
+  exception would add its record and halt. It does not show that any line
+  was cleaned. QEMU's TCG does not model data or instruction caches: by its
+  implementation it executes the data and instruction cache maintenance
+  instructions without an effect that a guest can observe. This is an
+  inference from QEMU's implementation, not a documented guarantee. It does
+  not show which lines the walk covers or the field of `CTR_EL0` that sizes
+  them, as the line sizes and granules of `CTR_EL0` are all 64 bytes on the
+  Cortex-A76 that QEMU models: the host tests of BOOT-R10 show those of
+  `data_lines`, which the function calls. It does not show the panic on a
+  refused range, which no test takes; the host tests of BOOT-R10 show that
+  the walk refuses the range. Nor does it show the broadcast to other CPUs,
+  or the effect with the caches on, which needs a run on the Raspberry Pi 5
+  (planned).
+
+### BOOT-R12
+
+**Invalidate to the point of coherency.**
+`cache::invalidate_to_poc(start, bytes)` executes `DSB SY`, `DC IVAC` on
+each line of the walk of the range at `CTR_EL0.DminLine`, `DSB SY`,
+`IC IALLU`, `DSB SY` and `ISB` at EL1, and returns. Each `DC IVAC` acts in
+the data caches, up to the point of coherency, of every CPU of the
+shareability domain of the address, the Outer Shareable domain for every
+data access with the MMU off; `IC IALLU` and `ISB` act on the executing CPU
+only, which calls it for itself. Its caller owns every block of 2 KiB that
+the range touches, and no cache holds data of them that must be kept. A
+range that is empty, wraps or is longer than 64 KiB panics before any
+maintenance. The criterion: the case `invalidate-to-poc` passes.
+
+- **Examples.** None of its own: the walk is that of BOOT-R10.
+- **Entry points.** `krepi_arch::cache::invalidate_to_poc`.
+- **Contract.**
+  [Cache and TLB maintenance](contract.md#cache-and-tlb-maintenance),
+  [Check and execute](contract.md#check-and-execute) and
+  [Work bounds](contract.md#work-bounds).
+- **Specification.** None: no specification covers the component.
+- **Proof path.** None: the [open obligations](contract.md#open-obligations)
+  of the contract carry its code.
+- **Evidence.** The case `invalidate-to-poc` of `cargo xtask qemu-boot`, in
+  CI, with the self-check of its test image, `invalidate-keeps-data`: that
+  `SCTLR_EL1` has the MMU and both caches off, that the range starts and
+  ends inside data cache lines and touches more than one line, and that the
+  data that the image wrote before the invalidation reads back unchanged.
+  The image invalidates only when the caches are off, the condition under
+  which no cache holds data that must be kept. It shows that
+  `invalidate_to_poc` executes at EL1 on QEMU virt over a range with
+  unaligned ends and returns without an exception, and that data written
+  with the caches off survives it. It does not show that a stale line is
+  discarded or that the instruction caches are invalidated. QEMU's TCG does
+  not model data or instruction caches: by its implementation it executes
+  the data and instruction cache maintenance instructions without an effect
+  that a guest can observe. This is an inference from QEMU's implementation,
+  not a documented guarantee. As for BOOT-R11, it does not show which lines
+  the walk covers or the field of `CTR_EL0` that sizes them, which the host
+  tests of BOOT-R10 show for `data_lines`. It does not show the panic on a
+  refused range, which no test takes; the host tests of BOOT-R10 show that
+  the walk refuses the range. It does not show the behaviour with the
+  caches on, which needs a run on the Raspberry Pi 5 (planned).
+
+### BOOT-R13
+
+**Invalidate the TLB entries of a page.**
+`cache::invalidate_tlb_page(address)` executes `DSB ISH`, `TLBI VAAE1IS`
+with bits 12 to 55 of the address, `DSB ISH` and `ISB` at EL1, and returns;
+it never raises an abort. The invalidation removes the cached entries of the
+EL1&0 translation regime for the address, with any ASID and from any level
+of the walk, on every CPU of the inner-shareable domain, and the second
+`DSB ISH` waits for it; the `ISB` synchronizes the executing CPU, which
+calls it for a translation that it changed. After a page's entry is replaced
+by break-before-make with the invalidation between the invalid and the new
+entry, the executing CPU translates the page through the new entry. The
+criterion: the case `invalidate-tlb-page` passes.
+
+- **Examples.** None of its own.
+- **Entry points.** `krepi_arch::cache::invalidate_tlb_page`.
+- **Contract.**
+  [Cache and TLB maintenance](contract.md#cache-and-tlb-maintenance) and
+  [Work bounds](contract.md#work-bounds).
+- **Specification.** None: no specification covers the component.
+- **Proof path.** None: the [open obligations](contract.md#open-obligations)
+  of the contract carry its code.
+- **Evidence.** The case `invalidate-tlb-page` of `cargo xtask qemu-boot`,
+  in CI. Its test image builds translation tables of its own, with the 4 KiB
+  granule from level 1: blocks that map the first GiB, with the devices, as
+  Device-nGnRnE memory and the second GiB, with the RAM, as Normal
+  Non-cacheable memory, each to itself, and one page at `0x40_0000_0000`,
+  256 GiB, on a first frame. It turns the MMU on with the caches off, reads
+  the page, writes an invalid entry in its place, calls
+  `invalidate_tlb_page`, writes the entry of a second frame with `DSB ISH`
+  and `ISB`, and reads the page again. Its self-check
+  `remap-reads-new-frame` holds that the MMU is on, that the first read
+  returned the word of the first frame and the second read that of the
+  second frame, and that both frames still hold their words. It shows that
+  after the invalidation the executing CPU translates the page through its
+  new entry on QEMU virt. QEMU keeps the translations that it has used in a
+  software TLB until a TLB invalidation, or an event of its own, removes
+  them, so without the invalidation the second read could still give the
+  first frame. QEMU also flushes its whole software TLB when an invalidated
+  address falls in the region of the blocks that it has used, so the page
+  lies far from the blocks; an invalidation of a wrong address that falls in
+  that region would still go unnoticed. These are inferences from QEMU's
+  implementation, not documented guarantees. It does not show the
+  invalidation on other CPUs, which one CPU cannot show, the need for the
+  barriers, which the in-order execution of TCG does not exercise, the
+  invalidation for every ASID, as the entry is global and the ASID is 0, the
+  invalidation of the entries of the walk above the last level, as only the
+  page entry changes, the TLB of a Cortex-A76 on a board, or translation
+  with the caches on.
+
+### BOOT-R14
+
+**Publish code.** Code that the executing CPU wrote is published by
+`cache::clean_code_to_pou` and then `cache::invalidate_code_to_pou` of the
+same range. `invalidate_code_to_pou(start, bytes)` executes `IC IVAU` on
+each line of the walk at the smallest instruction cache line size that
+`CTR_EL0.IminLine` reports, then `DSB ISH` and `ISB` at EL1, and returns;
+for Inner or Outer Shareable memory, which includes Non-cacheable memory and
+every instruction fetch with the MMU off, the invalidations reach the
+instruction caches of every CPU of the inner-shareable domain. The `ISB`
+synchronizes the executing CPU, which calls it for code that it published
+itself; another CPU executes its own context synchronization before it runs
+the code. After the publication the executing CPU runs the new instructions,
+also over instructions that it ran before. A range that is empty, wraps or
+is longer than 64 KiB panics before any maintenance. The criterion: the case
+`code-publication` passes.
+
+- **Examples.** None of its own: the walk is that of BOOT-R10.
+- **Entry points.** `krepi_arch::cache::clean_code_to_pou` and
+  `krepi_arch::cache::invalidate_code_to_pou`.
+- **Contract.**
+  [Cache and TLB maintenance](contract.md#cache-and-tlb-maintenance),
+  [Check and execute](contract.md#check-and-execute) and
+  [Work bounds](contract.md#work-bounds).
+- **Specification.** None: no specification covers the component.
+- **Proof path.** None: the [open obligations](contract.md#open-obligations)
+  of the contract carry its code.
+- **Evidence.** The case `code-publication` of `cargo xtask qemu-boot`, in
+  CI. Its test image writes `MOVZ W0, #0x2a` and `RET` in the last word of
+  an instruction cache line of the size that `CTR_EL0` reports and the first
+  word of the next, in a page-aligned buffer, publishes them with
+  `clean_code_to_pou` and `invalidate_code_to_pou` and calls them; it then
+  writes `MOVZ W0, #0x55` and `RET` at the same address, publishes them and
+  calls them again. Its self-check `published-code-runs` holds the placement
+  across the two lines and both results. It shows that the publication
+  sequence runs at EL1 on QEMU virt, with the MMU and the caches off, and
+  that the second call executes the rewritten instructions. It does not show
+  that the clean and the invalidation are needed. QEMU's TCG does not model
+  data or instruction caches: by its implementation it executes the data and
+  instruction cache maintenance instructions without an effect that a guest
+  can observe. This is an inference from QEMU's implementation, not a
+  documented guarantee. TCG also notices writes to code that it has
+  translated, so the new instructions would run without them. It does not
+  show which lines the walks cover or the fields of `CTR_EL0` that size
+  them, which the host tests of BOOT-R10 show for `data_lines` and
+  `instruction_lines`, or the panic on a refused range, which no test
+  takes; the host tests of BOOT-R10 show that the walks refuse the range.
+  It does not show the effect on a board, where instruction fetches can be
+  held in an instruction cache even with the caches off, which is why the
+  sequence is needed there.
+
 ## Liveness, time and performance
 
 - A cold boot reaches `CASXI_READY` without waiting for input. The echo
@@ -400,6 +635,8 @@ level up, and the dispatch returns. The criterion: the case
 - A test image that waits for an interrupt waits for at most 1,000 ms on
   the counter, a platform parameter of QEMU virt for these images, and then
   reports what it saw.
+- A call of the cache maintenance over a range walks at most 64 KiB of
+  lines and ends; the TLB invalidation runs a fixed sequence.
 - The QEMU boot suite ends each run at its window of 20 s, a platform
   parameter of QEMU virt that leaves ample room for a boot that takes well
   under a second, and judges no time. A test image either halts or ends in
@@ -409,7 +646,11 @@ level up, and the dispatch returns. The criterion: the case
 
 - One CPU of QEMU virt: secondary CPUs park in the cold entry and never run
   kernel code.
-- The MMU and the caches stay off, and the device tree is not read.
+- The MMU and the caches stay off, except that the test image of BOOT-R13
+  turns the MMU on with tables of its own; the caches stay off in every
+  image. The device tree is not read.
+- Cache and TLB maintenance on behalf of another CPU, with its
+  acknowledgement, is not provided.
 - The vectors of the current level with `SP_EL0` and of a lower level halt
   after their dispatch returns; the kernel handles no such exception, and
   only the test image of BOOT-R08 takes one. Every exception of the default

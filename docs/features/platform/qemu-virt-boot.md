@@ -1,7 +1,7 @@
 ---
 id: krepi.platform.qemu-virt-boot
 title: QEMU virt boot
-status: partial
+status: implemented
 modules:
   - kernel/arch/src/boot.rs
   - kernel/arch/src/boot.S
@@ -48,8 +48,8 @@ of the QEMU boot suite return from the exceptions that they cause, among
 them the timer interrupt, which the GICv2 delivers and the board's
 interrupt wiring acknowledges and ends. The
 feature belongs to the kernel at EL1. It does not boot a Raspberry Pi 5,
-start secondary CPUs, read the device tree, turn the MMU or the caches on or
-handle an exception of EL0.
+start secondary CPUs, read the device tree, turn the caches on, turn the MMU
+on outside one test image, or handle an exception of EL0.
 
 ## Interface
 
@@ -87,7 +87,11 @@ handle an exception of EL0.
   the drivers `krepi_arch::gic` and `krepi_arch::timer`;
   `krepi_arch::cpu` reads the processor registers of EL1 and halts the CPU,
   and `krepi_arch::exception` gives the frame and the class of an
-  exception.
+  exception; `krepi_arch::cache` cleans and invalidates cache lines by
+  address and invalidates the TLB entries of a page for the executing CPU,
+  as the
+  [boot contract](../../domains/boot-platform/boot/contract.md#cache-and-tlb-maintenance)
+  states, and `krepi_arch::cache_range` gives the lines of a range.
   The [entry points of the boot contract](../../domains/boot-platform/boot/contract.md#entry-points)
   list them.
 - **Suite.** `cargo xtask qemu-boot` builds the default image and the test
@@ -226,9 +230,20 @@ input of the walk.
   record, with every exception masked, between two accesses of the code
   that it interrupted. Secondary CPUs stay parked; their start needs entries
   of their own, which do not clear BSS again.
+- The cache and TLB maintenance works by address and is called by the CPU
+  for itself; each function states its shareability domain. The sequences
+  are those of the Arm Architecture Reference Manual and of the
+  [SMP design rules](../../conventions/smp.md#s6c-tlb-invalidation): a
+  clean to the point of unification and an instruction cache invalidation
+  to publish code, and `DSB ISH`, `TLBI VAAE1IS`, `DSB ISH` and `ISB` for a
+  changed translation. A range is walked at the smallest line size that
+  `CTR_EL0` reports and bounded by 64 KiB, so that a call ends within a
+  known number of lines. Only the invalidation of data lines, which can
+  discard data that was not cleaned, is an `unsafe` function.
 - Excluded: a console that waits without a bound, an interrupt-driven
-  console, commands on the serial input and image variants chosen at build
-  time.
+  console, commands on the serial input, image variants chosen at build
+  time, cache maintenance by set and way, and maintenance on behalf of
+  another CPU with its acknowledgement.
 
 ## References
 
@@ -278,18 +293,26 @@ input of the walk.
 - `kernel/boards/qemu-virt/src/console.rs` with `console/polled.rs` and
   `console/emitter.rs`: the bounded writes of a record and of bytes, the echo
   rule, the panic record and the failure markers.
+- `kernel/arch/src/cache.rs`: `clean_code_to_pou`, `invalidate_to_poc`,
+  `invalidate_tlb_page` and `invalidate_code_to_pou`, with the read of
+  `CTR_EL0`.
+- `kernel/arch/src/cache_range.rs`: the cache-line walks `lines`,
+  `data_lines`, `instruction_lines` and `handoff_lines` and the limit
+  `MAX_RANGE_BYTES`.
 
 ## Verification
 
 - **Host.** The tests of `kernel/boards/qemu-virt/src/console/`,
-  `kernel/boards/qemu-virt/src/fault/` and `kernel/arch/src/exception/` run
-  in the `test` step of `cargo xtask check`: the examples above, the
-  boundaries of a write and of the failure marker, the exception record of
-  each kind of entry, the classes of the vectors and syndromes, and the
-  tests taken from the prototype tree with their expected values. They
-  establish the logic of the bounds and of the records with a device and a
-  counter that the tests drive, not the PL011, a machine's counter or the
-  vectors.
+  `kernel/boards/qemu-virt/src/fault/`, `kernel/arch/src/exception/` and
+  `kernel/arch/src/cache_range/` run in the `test` step of
+  `cargo xtask check`: the examples above, the boundaries of a write and of
+  the failure marker, the exception record of each kind of entry, the
+  classes of the vectors and syndromes, the cache-line walks with the field
+  of `CTR_EL0` and the limit of each walk of the maintenance, and the tests
+  taken from the prototype tree with their expected values. They establish
+  the logic of the bounds, of the records and of the walks with a device and
+  a counter that the tests drive, not the PL011, a machine's counter, the
+  vectors or a maintenance instruction.
 - **QEMU.** The case `cold-boot-echo` of the QEMU boot suite,
   `cargo xtask qemu-boot`, runs in the `check` workflow on QEMU virt
   `virt-8.2` with one Cortex-A76, 128 MiB and the host clock, at the QEMU
@@ -315,6 +338,22 @@ input of the walk.
   registers across an IRQ, the virtual SError and the FP/SIMD trap on QEMU
   virt, not on a Raspberry Pi 5; the virtual SError needs EL2, which the
   default image does not run with.
+- **QEMU, cache and TLB maintenance.** The cases `clean-code-to-pou`,
+  `invalidate-to-poc`, `invalidate-tlb-page` and `code-publication` of the
+  same suite boot a test image each, in release, on the machine without
+  EL2, and hold the transcript against the start record, one self-check
+  with no failure and `CASXI_RESUMED`, with no exception record. The images
+  of the clean, of the invalidation and of the publication of code run with
+  the MMU and the caches off; that of the TLB invalidation turns the MMU on
+  with translation tables of its own and the caches off. They establish
+  that each range function executes at EL1 over a range with unaligned ends
+  without an exception, that data survives the clean and, with the caches
+  off, the invalidation, that a page whose entry is replaced by
+  break-before-make with the TLB invalidation is read through its new
+  frame, and that published code runs, also over code that ran before, on
+  QEMU virt, not on a Raspberry Pi 5. QEMU's TCG does not model the data
+  and instruction caches (an inference from its implementation), so they
+  do not establish the effect of a clean or an invalidation on a cache.
 - **Proofs.** None: no theorem covers the feature, and the boot contract
   lists its code as [open obligations](../../domains/boot-platform/boot/contract.md#open-obligations).
 - **Unverified.** The paths that QEMU's PL011 never takes, a full transmit
@@ -322,7 +361,11 @@ input of the walk.
   interrupt IDs in `irq::handle`, the return of vectors 6 and 7, the halt of
   the vectors other than vector 0, and the masking of the return path after
   a dispatch that unmasks, which no image's dispatch does, are taken by no
-  test.
+  test. The effect of the cache maintenance on a cache, which QEMU does not
+  model, the panic of a range function on a refused range, the need for the
+  barriers of the TLB invalidation, its invalidation for every ASID and of
+  the entries of the walk above the last level, and the broadcast of the
+  maintenance to other CPUs are shown by no test.
 
 ## Limitations
 
@@ -332,5 +375,8 @@ input of the walk.
   `SP_EL0` is handled.
 - The default image takes no interrupt; only the timer interrupt is handled,
   in the test images, and device interrupts are not.
-- The MMU and the caches stay off, and the device tree is not read.
+- The MMU and the caches stay off, except that one test image turns the
+  MMU on with tables of its own; the caches stay off in every image, and
+  the device tree is not read.
+- No cache or TLB maintenance on behalf of another CPU.
 - The panic record has no backtrace and no build-id.
