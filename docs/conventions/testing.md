@@ -22,9 +22,64 @@ Races are tested with multi-threaded TCG and then on the board.
 
 ## Entry points
 
-`cargo xtask check` runs the required host checks from the repository root in
-order. It stops at the first failure, exits with a non-zero status and names
-the failed step:
+`cargo xtask check` runs the required host checks from the repository root
+as the steps listed below, in lanes of two segments. The first segment is the
+lint lane, which runs `toolchain`, `manifests`, `fmt` and `clippy` one after
+another. Once it has passed, the second segment starts its three lanes at
+once, and each runs its steps one after another: the debug lane runs `test`,
+`docs`, `lean`, `subset` and `workflows`, the release lane runs
+`test-release`, and the formal lane has no step yet; it is the place of a
+formal step. `cargo xtask check --sequential` runs every step in one lane
+instead, in the order of the list, and stops at the first failure.
+
+The steps `fmt`, `clippy`, `test` and `test-release` run commands. Each of
+their commands runs in a process group of its own, with no input; the check
+kills the group when the command has ended or the check stops, before it
+collects the command, and then waits up to 60 s for the group to be empty,
+failing the step if processes of the group outlive that. A passing command
+therefore leaves no process of its group behind either. A command's output
+and error output go to the log of its step,
+`artifacts/check/<UTC time>Z-<process ID>/<NN>-<step>.log`, where `NN` is the
+number of the step in the list, such as `05-test.log`, after a line with the
+command; when the step ends, the check prints its log and a line with its
+status and seconds in one piece, so the output of two lanes never
+interleaves, and the output of such a step appears only when the step ends.
+The other steps are checks that `xtask` implements itself. They run inside
+the check process and print as they go, and the commands that they start,
+such as `git ls-files`, the version queries of `toolchain`, the Cargo
+resolutions of `manifests` and `subset` and the builds of the compile-fail
+cases, run in the process group of the check and write to no step log.
+
+Once a step fails, no further step or command starts, and the running
+commands of the command steps are killed with their groups. The step of a
+killed command, and a step whose next command no longer starts, is
+`cancelled`; a step that had not started is `not run`. A check that `xtask`
+implements itself is not stopped: one that runs when another step fails
+finishes and keeps its own result, and so do the commands that it started.
+
+The check ends with a summary table on its standard output: one row per step
+in the order of the list, with its segment, lane, status, start and seconds
+from the start of the check (`-` for a step that did not run), and a row for
+the lane without steps. It then names the failed step with the reason on its
+standard error and exits with 1, or prints `check passed` and exits with 0;
+a receipt that was asked for and cannot be written makes it exit with 1.
+From before its first step until it prints the summary, SIGINT and SIGTERM,
+and SIGHUP unless it is ignored, as under `nohup`, stop the check as a
+failure does: it kills the running commands of the command steps with their
+groups, prints the summary and `check interrupted by` with the name of the
+signal, writes the receipt and exits with 128 plus the number of the signal,
+such as 143 for SIGTERM and 130 for SIGINT, whatever the steps did. A signal
+that arrives later, while the check prints the summary or writes the
+receipt, is ignored. As the commands of the command steps run in groups of
+their own, a Ctrl-C in a terminal reaches them only through the check, but
+it reaches the commands that the checks of `xtask` start directly, so that
+such a check can fail.
+
+`cargo xtask check --slow` also runs the slow tests, described after the
+list. The options `--sequential`, `--slow` and `--receipt <path>` can be
+combined and given in any order.
+
+The steps are:
 
 1. `toolchain`: the installed rustc, Clang, lld and QEMU have the versions
    that `toolchains.toml` pins for the host (`darwin-arm64` or
@@ -65,12 +120,18 @@ the failed step:
      `--sysroot`, a compiler wrapper, an included configuration file or a
      build-script override; in a build script, a library search path it
      prints; and in a procedural macro, files it reads;
-3. `fmt`, `clippy` with warnings as errors, and `test`, each in the kernel
-   workspace, the user-space workspace, `xtask` and the host tooling crate
-   `tools`;
-4. `docs`: relative links and anchors in Markdown and the `cargo xtask`
+3. `fmt` in the kernel workspace, the user-space workspace, `xtask` and the
+   host tooling crate `tools`;
+4. `clippy` with warnings as errors in the same four workspaces, which ends
+   the lint lane;
+5. `test`, the first step of the debug lane: the tests of the same four
+   workspaces, and with `--slow` then their slow tests;
+6. `test-release`, the release lane: the tests of the kernel and user-space
+   workspaces, from which the kernel and user-space images are to be built,
+   in the release profile, which keeps `overflow-checks = true`;
+7. `docs`: relative links and anchors in Markdown and the `cargo xtask`
    commands that documents mention;
-5. `lean`: the source rules of the tracked `.lean` files below
+8. `lean`: the source rules of the tracked `.lean` files below
    `verification/`, each a UTF-8 regular file, with the items of
    `verification/tcb.json`, which must be readable: each file lies below
    `verification/Krepi/` or `verification/externals/` and is a module file;
@@ -80,7 +141,7 @@ the failed step:
    below `verification/externals/`; no string reads otherwise as an
    interpolated string; and no file of the statement side imports the root
    module `Krepi` or a module below `Krepi.Proofs`;
-6. `subset`: the [mechanical checks](provable-subset.md#mechanical-checks)
+9. `subset`: the [mechanical checks](provable-subset.md#mechanical-checks)
    of the provable Rust subset. The files that the `paths` blocks of the
    contracts list, apart from test code, hold no `static mut`, no
    interior-mutability type, no `cfg` attribute outside the allowlist and
@@ -94,35 +155,56 @@ the failed step:
    memory and, for the compile-fail cases and the step itself, on a
    workspace and a Git repository of their own that they build below the
    build directory of `xtask`;
-7. `workflows`: every `.yml` or `.yaml` file below `.github/workflows/` is
-   YAML without anchors, aliases, merge keys, repeated keys or characters
-   that YAML parsers read differently, and never mentions
-   `pull_request_target`, not even in a comment or through an escape; every
-   job sets its own `permissions`; and in a workflow that runs on
-   `pull_request`, no job requests write access and nothing outside `on`
-   references `secrets`. Besides these rules of `xtask/src/workflows.rs`,
-   which is written to be copied unchanged into another repository, the
-   step checks with `xtask/src/formal/toolchain.rs` that a workflow that
-   runs on `pull_request` names the proof-tool image of
-   `verification/image-pin.json` by its pinned digest, and that every such
-   workflow mentions the image's repository only in that form
-   ([image pin](../formal-verification.md#image-pin)).
+10. `workflows`: every `.yml` or `.yaml` file below `.github/workflows/` is
+    YAML without anchors, aliases, merge keys, repeated keys or characters
+    that YAML parsers read differently, and never mentions
+    `pull_request_target`, not even in a comment or through an escape; every
+    job sets its own `permissions`; and in a workflow that runs on
+    `pull_request`, no job requests write access and nothing outside `on`
+    references `secrets`. Besides these rules of `xtask/src/workflows.rs`,
+    which is written to be copied unchanged into another repository, the
+    step checks with `xtask/src/formal/toolchain.rs` that a workflow that
+    runs on `pull_request` names the proof-tool image of
+    `verification/image-pin.json` by its pinned digest, and that every such
+    workflow mentions the image's repository only in that form
+    ([image pin](../formal-verification.md#image-pin)).
 
 The checks that `xtask` implements itself read only files that Git tracks,
 so a fresh clone and a working copy with build output give the same result;
-the Cargo commands, including the resolutions in `manifests` and `subset`,
-read the working copy, and the builds of the compile-fail cases a copy of
-its tracked files. The check does not run the proof gate,
+Cargo, in the command steps and in the resolutions of `manifests` and
+`subset`, reads the working copy, and in the builds of the compile-fail
+cases a copy of its tracked files. The check does not run the proof gate,
 `cargo xtask formal run`, which needs the pinned tools; CI runs the gate in
 the job `formal run` of `.github/workflows/formal.yml`, described below.
 
+A slow test is a Cargo test marked `#[ignore = "slow"]` whose function name
+starts with `slow_`. `cargo xtask check --slow` runs the slow tests in the
+`test` step, after the other tests of the four workspaces, with
+`cargo test --workspace --locked -- --ignored slow_` in each. libtest then
+runs the ignored tests whose path contains `slow_`, so the name of no other
+ignored test, of no module and of no Rust file of the workspaces contains
+`slow_`; the unit test `check::tests::slow_tests_follow_the_naming_rule`
+checks this and the marking of the slow tests on every tracked Rust file of
+the workspaces. There is no slow test yet. A test that is ignored for
+another reason, such as the one that needs the pinned Lean, is no slow test,
+and `--slow` does not run it. The release tests are the same with and
+without `--slow`.
+
 `cargo xtask check --receipt <path>` also writes a JSON receipt of the run to
-`<path>`, whether the check passes or fails. It records the commit, whether
-the working tree was clean before and after the run, each step with its
-status and duration, the version output of the tools that the toolchain step
-found, the runner image (`ImageOS`, `ImageVersion`) and the GitHub Actions
-run (`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_EVENT_NAME`, `GITHUB_REF`,
-`GITHUB_SHA`); a value the environment does not provide is `null`.
+`<path>`, whether the check passes, fails or is interrupted. Its `format` is
+2. It records the mode, `parallel` or `sequential`, and whether the run
+included the slow tests; the commit and whether the working tree was clean
+before and after the run; the result, `passed`, `failed` or `interrupted`,
+which a stop signal sets whatever the steps did, with the number of that
+signal or `null`; each lane with its segment and the names of its steps, the
+formal lane with none; each step with its lane and status (`passed`,
+`failed`, `cancelled` or `not run`), the milliseconds from the start of the
+check to its start, `null` for a step that did not run, its duration, the
+reason of a failed or cancelled step, and the facts that it observed, such
+as the version output of the tools that the toolchain step found; the runner
+image (`ImageOS`, `ImageVersion`) and the GitHub Actions run
+(`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_EVENT_NAME`, `GITHUB_REF`,
+`GITHUB_SHA`). A value the environment does not provide is `null`.
 
 CI runs the check as the job `cargo xtask check` of
 `.github/workflows/check.yml` on a GitHub-hosted `ubuntu-24.04-arm` runner,
@@ -479,7 +561,26 @@ the gate that it starts to reach its command, which only a failing test
 reaches. In the tests of `cargo xtask formal vectors`, a Lake stand-in that
 hangs gets a budget of 1 s, which only decides that it is stopped, and any
 other a budget of 1,800 s or 3,600 s; the ignored replay with the pinned
-Lean has 300 s. No other test bounds how long a step takes.
+Lean has 300 s.
+
+In the tests of `cargo xtask check`, a step that the check is to cancel runs
+a shell that starts a sleep of 600 s, writes the number of its process group
+to a file and waits; the failing step of the test waits for these files
+before it fails, so the test drives the interleaving. The check must
+end within 10 s after the failing step, which only a check that waited for
+such a sleep exceeds, and a step of these tests that waits for a file or for
+the check to stop gives up after 60 s, which only a failing test reaches.
+The test of a stop signal runs the check in a child process, the test
+executable started again for that test alone with SIGHUP at its default
+action, and waits at most 120 s for both of its lanes to run, which only a
+failing test reaches. No other test bounds how long a step takes.
+
+The process group of the `test` step holds Cargo and the test executables,
+not the processes that tests start in process groups of their own. When the
+check kills the step, as it does when the release lane fails or a stop
+signal arrives, such processes outlive it: a sleep of the tests of the check
+for up to 600 s, and one of the tests of `cargo xtask formal run` or
+`cargo xtask formal vectors` for up to 86,400 s.
 
 ## Dependencies
 
@@ -494,13 +595,13 @@ to an exact version in the manifest of the crate that uses it:
 | `tools/Cargo.toml` | `object` without default features, with `write_core` and `elf` | MIT OR Apache-2.0 | The ELF writer that lays out and encodes the test image around its instruction words: the ELF header, the program and section headers, the symbol table and the string tables |
 | `tools/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | Report values, whose objects keep the order of their keys, and their JSON text |
 | `tools/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests in the report of the ELF fixture patching and in the receipts of the serial capture and of `cargo xtask qemu`, the suffix of their run directories, and the build-id of the test image |
-| `xtask/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask formal run`, `cargo xtask formal guard`, `cargo xtask formal toolchain-check`, `cargo xtask formal check`, `cargo xtask formal vectors` and `cargo xtask formal canary`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
-| `xtask/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The process groups of the commands of `cargo xtask formal run` and `cargo xtask formal vectors`: killing a command's group, finding whether any of its processes remain, seeing that a command has ended without collecting it, and the default disposition of `SIGCHLD` that this needs; finding whether SIGHUP is ignored when the run starts; and the effective user of the run, the bytes available on the file system of its run directory and the largest resident set of a process that it collected, which its receipt records |
+| `xtask/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask check`, `cargo xtask formal run`, `cargo xtask formal guard`, `cargo xtask formal toolchain-check`, `cargo xtask formal check`, `cargo xtask formal vectors` and `cargo xtask formal canary`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
+| `xtask/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The process groups of the commands of `cargo xtask check`, `cargo xtask formal run` and `cargo xtask formal vectors`: killing a command's group, finding whether any of its processes remain, seeing that a command has ended without collecting it, and the default disposition of `SIGCHLD` that this needs; finding whether SIGHUP is ignored when the run starts; and the effective user of the run, the bytes available on the file system of its run directory and the largest resident set of a process that it collected, which its receipt records |
 | `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json`, `cargo xtask formal check` reads `verification/targets.json` and `cargo xtask formal run` reads `verification/targets.json`, `verification/qualification/cases.json`, `verification/extraction.toml`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json` and the `translation.json` that Aeneas writes, the type into which the `subset` step of `cargo xtask check` reads its compile-fail cases, the type into which `cargo xtask formal vectors` reads the `vectors` block of a contract, the record of a step of `cargo xtask formal canary`, and the types of the receipt of `cargo xtask formal run`, which the canary also reads |
 | `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run` and of `verification/open.json`, reading the output of `cargo metadata` in the `manifests` and `subset` steps, in `cargo xtask formal run` and in `cargo xtask formal check`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/models.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/image-pin.json`, the `versions.json` of the proof-tool image, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the messages that `lean --json` prints, the event of a pull request that `cargo xtask formal guard` reads, and the tool manifest, the Lake locks, the statement registry, the records of its steps and the receipt that `cargo xtask formal canary` reads and writes |
-| `xtask/Cargo.toml` | `syn` without default features, with `full`, `parsing` and `visit` | MIT OR Apache-2.0 | Parsing the source files of the kernel workspace for the inventory of `cargo xtask formal check` and for the `subset` step of `cargo xtask check`, walking their items and reading their attributes, paths and tokens |
+| `xtask/Cargo.toml` | `syn` without default features, with `full`, `parsing` and `visit` | MIT OR Apache-2.0 | Parsing the source files of the kernel workspace for the inventory of `cargo xtask formal check` and for the `subset` step of `cargo xtask check`, walking their items and reading their attributes, paths and tokens, and in a unit test of the check the Rust files of every workspace for the names of the slow tests |
 | `xtask/Cargo.toml` | `proc-macro2` without default features, with `span-locations` | MIT OR Apache-2.0 | The token type under `syn`, whose span locations give the line of each problem that the `subset` step reports |
-| `xtask/Cargo.toml` | `signal-hook` without default features | MIT OR Apache-2.0 | The handler that lets SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop `cargo xtask formal run` and `cargo xtask formal vectors`, and the emulation of their default action with which the command then ends |
+| `xtask/Cargo.toml` | `signal-hook` without default features | MIT OR Apache-2.0 | The handler that lets SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop `cargo xtask check`, `cargo xtask formal run` and `cargo xtask formal vectors`; the emulation of their default action with which the two formal commands then end, whereas the check exits with 128 plus the signal number; and the names of the signals in the output of the check |
 | `xtask/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests of the Aeneas patch and the Lake lock that `cargo xtask formal toolchain-check` compares with `verification/toolchain.json`, and of the output files of the commands of `cargo xtask formal run` and `cargo xtask formal vectors`, the Lean files that Aeneas writes in the former and the `versions.json` of the proof-tool image, and of the Lean archives, the channel manifest and the Lake lock of Aeneas main, which `cargo xtask formal canary` writes into the derived tool manifest |
 | `xtask/Cargo.toml` | `tar` without default features | MIT OR Apache-2.0 | Unpacking the tar archive of the gate inputs that `git archive` writes for `cargo xtask formal run` |
 | `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `toolchains.toml`, `rust-toolchain.toml`, Charon's `rust-toolchain`, `verification/extraction.toml`, the compile-fail cases of the `subset` step, the `vectors` blocks of the contracts, and Charon's `charon/Cargo.toml` and the channel manifest of a nightly that `cargo xtask formal canary` reads |

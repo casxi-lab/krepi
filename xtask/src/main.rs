@@ -13,7 +13,6 @@ mod subset;
 mod toolchain;
 mod workflows;
 
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// A command of `cargo xtask`, possibly with subcommands of its own.
@@ -28,7 +27,7 @@ pub struct Command {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "check",
-        about: "Run the toolchain, manifest, format, Clippy, test, documentation, Lean source, provable-subset and workflow checks; with --receipt <path>, also write a JSON receipt of the run",
+        about: "Run the required host checks: the toolchain, manifest, format and Clippy checks, then at once the debug lane (the tests and the documentation, Lean source, provable-subset and workflow checks) and the release tests; the first failure or a stop signal cancels the other steps, and a summary gives the seconds of each step; --help lists the options",
         subcommands: &[],
     },
     Command {
@@ -68,8 +67,7 @@ fn main() -> ExitCode {
         .collect::<Vec<_>>()
         .as_slice()
     {
-        ["check"] => check::run(repo::root(), None),
-        ["check", "--receipt", path] => check::run(repo::root(), Some(PathBuf::from(path))),
+        ["check", rest @ ..] => check::command(repo::root(), rest),
         ["qemu", rest @ ..] => {
             let args: Vec<String> = rest.iter().map(|arg| arg.to_string()).collect();
             let code = krepi_tools::qemu_run::main(&repo::root(), &args);
