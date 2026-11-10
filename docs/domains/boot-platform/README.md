@@ -297,8 +297,11 @@ specification.
 
 **Description.** From the memory nodes, the reserved ranges, the image and
 the device tree itself, the kernel builds the list of usable RAM ranges and
-of the ranges that it must not hand out. Ranges are page aligned, sorted and
-disjoint. It does not allocate pages: the memory domain owns them.
+of the ranges that it must not hand out. The usable ranges are page
+aligned, sorted and disjoint; each range that must not be handed out is
+rounded outward to whole pages and kept in input order, and firmware
+reservations may overlap each other. It does not allocate pages: the memory
+domain owns them.
 
 **Design background.** On the Pi 5 the memory node of the device tree that
 Raspberry Pi ships is a placeholder of 640 MiB, which the firmware replaces;
@@ -310,8 +313,11 @@ has one bank at `0x4000_0000`.
 **Consumers.** The physical page ownership and the kernel direct map of the
 memory domain.
 
-**Interface.** The list of usable and reserved ranges, or an error for
-overlapping or misaligned input.
+**Interface.** The list of usable and reserved ranges, or an error that
+names the broken rule, such as overlapping RAM banks, boot storage that
+shares a page with other boot storage or with a firmware reservation, or
+RAM beyond the capacities; a misaligned reserved range is rounded outward,
+not refused.
 
 **Prerequisites.** [Device-tree parsing](#device-tree-parsing); the
 [fdt](fdt/contract.md#boot-memory-map) component.

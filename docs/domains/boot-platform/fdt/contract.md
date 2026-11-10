@@ -196,18 +196,22 @@ The node access reads only a tree that the parse accepted:
 - `Fdt::nodes` gives every node in the order of the structure block.
   `Fdt::reservations` gives the entries of the reservation map in their
   order, and `total_size` the `totalsize` of the tree.
-- `Fdt::find_node` takes an absolute path with exact unit addresses, `/` for
-  the root. A path that does not start with `/`, ends in `/` other than the
-  root, or holds `//` fails with `BadPath`; a path that matches two sibling
-  nodes fails with `AmbiguousMapping`; a path that matches nothing gives
-  none. Aliases and abbreviated names are not resolved.
-- `Node::property` gives the value of the named property of the node, or
-  none; `parent` gives the parent node, and none for the root.
-- `Node::string_property` gives a value that holds one NUL-terminated UTF-8
-  string, and fails with `BadString` for a value without a NUL or with a
-  string that is not UTF-8, and with `BadProperty` for a byte after the NUL.
-- `Node::enabled` is true when `status` is absent, `okay` or `ok`, and false
-  for any other string (section 2.3.4 of DTSpec v0.4).
+- `Fdt::find_node(path)` takes an absolute path with exact unit addresses,
+  `/` for the root. A path that does not start with `/`, ends in `/` other
+  than the root, or holds `//` fails with `BadPath`; a path that matches two
+  sibling nodes fails with `AmbiguousMapping`; a path that matches nothing
+  gives none. Aliases and abbreviated names are not resolved.
+- `Node::property(name)` gives the value of the named property of the node,
+  or none; `parent` gives the parent node, and none for the root.
+- `Node::string_property(name)` gives a value that holds one NUL-terminated
+  UTF-8 string, and fails with `BadString` for a value without a NUL or
+  with a string that is not UTF-8, and with `BadProperty` for a byte after
+  the NUL.
+- `Node::enabled` reads `status` as `string_property` does, with its
+  errors. It is true when `status` is absent or `okay`, the value of an
+  operational device in section 2.3.4 of DTSpec v0.4, or `ok`, which that
+  section does not list and which the prototype accepts, as Linux does; it
+  is false for any other string.
 - `Node::address_cells` and `size_cells` read the node's own
   `#address-cells` and `#size-cells`, each a value of 4 bytes or
   `BadProperty`, and are 2 and 1 when the property is absent (section 2.3.5
@@ -258,7 +262,7 @@ which are not part of the component, use it.
 | `Error::DuplicateProperty` | Two properties of one name in a node |
 | `Error::LimitExceeded` | A limit of [Format and bounds](#format-and-bounds) is exceeded: the size of the tree, also the Pi 5 limit, the depth, the tokens, the properties of a node, the entries of the reservation map, the RAM ranges or the reserved regions |
 | `Error::UnsupportedCells` | A `reg` or a translation with address cells other than 1 or 2, or size cells above 2; a number of more than 2 cells; a Pi 5 root whose cells are not 2 and 2; or `/cpus` whose address cells are not 1 or 2 |
-| `Error::BadProperty` | A property whose value breaks its binding: a cell count that is not 4 bytes; a `reg` or translation value that is empty where a value is required or not a whole number of entries; a flag with a value; a string property with a byte after its NUL; an enabled node with only one of a memory name and the `device_type` `memory`; a `/reserved-memory` without explicit cells equal to those of the root or without an empty `ranges`; `no-map` with `reusable`; a CPU, PSCI or timer binding of [CPU nodes](#cpu-nodes) that does not hold; or a Pi 5 `compatible` that lacks an entry or has an empty one |
+| `Error::BadProperty` | A property whose value breaks its binding: a cell count that is not 4 bytes; a `reg` or translation value that is empty where a value is required or not a whole number of entries; a flag with a value; a string property with a byte after its NUL; an enabled node with only one of a memory name and the `device_type` `memory`; a `/reserved-memory` without explicit cells equal to those of the root or without an empty `ranges`; `no-map` with `reusable`; a CPU, PSCI or timer binding of [CPU nodes](#cpu-nodes) that does not hold; or a Pi 5 `compatible` that does not end with a NUL, lacks an entry or has an empty one |
 | `Error::MissingProperty` | A required node or property is absent: the `reg` of a node asked for it; `reg` and `size` alike in an enabled child of `/reserved-memory`; `/cpus`, the `reg` of a CPU node or `/psci`; or the `compatible` of a Pi 5 root |
 | `Error::Overflow` | An offset, span, translated address, page rounding or sum leaves 64 bits; or a span of a one-cell address leaves the first 4 GiB |
 | `Error::EmptyRegion` | A reservation entry, RAM range, reserved region, translation window or translation request of size 0; an empty image; a selection of size 0 or with an empty bound; or an empty span asked of the Pi 5 boot memory |
@@ -321,11 +325,16 @@ The parse and the entries on a tree:
    `Overflow`.
 6. `Fdt::discover_cpus`: `/cpus` absent, `MissingProperty`; disabled or
    with size cells other than 0, `BadProperty`; its address cells,
-   `UnsupportedCells`; each CPU node in tree order: disabled or another
-   model, `BadProperty`; no `reg`, `MissingProperty`; its value,
+   `UnsupportedCells`; each child of `/cpus` in tree order: first its
+   `device_type`, `BadString` or `BadProperty`, and a child whose
+   `device_type` is not `cpu` is skipped; then, for a CPU node, disabled or
+   another model, `BadProperty`; no `reg`, `MissingProperty`; its value,
    `UnsupportedCells` or `BadProperty`; its ID, `BadProperty`; its
    `enable-method`, `BadProperty`; then the set of IDs, `BadProperty`;
-   `/psci` absent, `MissingProperty`; its binding, `BadProperty`.
+   `/psci` absent, `MissingProperty`; its binding, `BadProperty`. Each
+   string property of these steps, such as `status`, `compatible` and
+   `method`, fails as `Node::string_property` does, `BadString` or
+   `BadProperty`, at its step.
 7. Translation: `cells_u64`, the number of cells `UnsupportedCells`, then
    the length `BadProperty`. `Reg::new`, the cells `UnsupportedCells`, the
    length `BadProperty`, then each entry `Overflow`. `AddressMap::new`, the
@@ -456,8 +465,8 @@ inside no range, which the discovery accepts. No public document gives the
 ranges of the other models, and the Raspberry Pi device tree source has
 only the placeholder that the bootloader fills, so their shapes are
 inferred from the 8 GB measurement: RAM from address 0 up to the installed
-size, the same hole of 4 MiB below 1 GiB, and ranges that end at 1 GiB and
-at 4 GiB.
+size, with ranges divided at 1 GiB and at 4 GiB and the same hole of 4 MiB
+below 1 GiB.
 
 | RAM model | RAM ranges of the hand-over tree | RAM | Basis |
 | --- | --- | --- | --- |
@@ -611,20 +620,27 @@ is started, as sections 3.7 and 3.8 of DTSpec v0.4 describe the nodes:
 
 ## Check and execute
 
-The component changes no state outside the values that its entries
-return, so every entry consists of checks
+The component writes no state: every entry reads its inputs and fills
+only a local result value, which the caller cannot see before the entry
+returns. Its only write that is visible outside is the return, so every
+check of an entry completes before that write, and the write phase, the
+return of the value, cannot fail
 ([rule 1](../../../conventions/provable-subset.md#1-check-then-execute)):
 
 - `Fdt::parse` checks the header, the blocks, the reservation map and every
-  token before it returns a tree, and writes nothing.
+  token before it returns a tree.
 - The node access, the translation, the queries and `find_available` read
-  their inputs and return a value or an error, and write nothing.
+  their inputs and return a value or an error.
 - `discover_memory`, `discover_pi5_boot_memory`, `discover_cpus`,
-  `MemoryPlan::all_ram`, `new` and `from_pi5` fill a result value of their
-  own, of fixed capacity, while they check. Their only failures while
-  filling are capacity failures, `LimitExceeded` and `Capacity`; on any
-  failure the value is dropped and the caller receives only the error, so
-  the state of the caller is that from before the call.
+  `MemoryPlan::all_ram`, `new` and `from_pi5` fill their local result value
+  while they check, and may fail with any error of their order in
+  [Rejection and error priority](#rejection-and-error-priority) after
+  they have put a part of it there, such as `BadProperty`, `NoMemory` or
+  `MissingProperty` after the RAM ranges of `discover_memory`, or
+  `Overflow`, `OutsideRam` or `Overlap` after the RAM banks of `all_ram`.
+  On any failure the local value is dropped and the caller receives only
+  the error ([no partial result](#rejection-and-error-priority)), so the
+  state of the caller is that from before the call.
 
 ## Work bounds
 
@@ -641,23 +657,40 @@ $N \le T$ nodes. They bound the number of steps, not the time.
 - `Fdt::nodes` reads at most $T$ tokens; `Node::property` at most the $T$
   tokens after its node; `Node::parent` at most $T$ tokens;
   `Fdt::find_node` at most $D$ path components, each over at most $N$ nodes.
+  `Node::string_property` and `enabled` make one lookup of `property` and
+  read the value once; `address_cells` and `size_cells` make one lookup;
+  `Node::reg`, `ranges` and `dma_ranges` take `parent`, at most two lookups
+  on each of the node and its parent, and the construction below.
+  `Fdt::reservations` reads at most $R$ entries.
 - `Reg::new` and `AddressMap::new` read each entry of their value once; a
   translation compares the request with each window once;
-  `Node::translate_reg` translates through at most $D$ buses.
+  `Node::translate_reg` translates through at most $D$ buses, each with its
+  `parent` and `ranges`.
 - `Fdt::discover_memory` reads at most $R$ map entries and $N$ nodes, with
   the property and parent lookups above for each, and compares each RAM
   range with at most $M$ others.
-- `Fdt::discover_cpus` reads the children of `/cpus`, each at most once;
-  `validate_qemu_timers` reads at most 5 records.
+- `Fdt::discover_pi5_boot_memory` makes the root lookup of `find_node`, its
+  cell and `compatible` lookups, reads the `compatible` value once, makes a
+  fixed number of comparisons of the tree and the image, calls
+  `discover_memory` once, compares the tree and the image each with at most
+  $M$ RAM ranges and sums at most $M$ ranges. `Pi5BootMemory::is_available`
+  makes at most $M + Q + 2$ comparisons: the span with each RAM range, the
+  tree, the image and each reserved region. `find_available` tries, in each
+  RAM range, at most $Q + 3$ candidates, each compared with the image, the
+  tree and $Q$ regions.
+- `Fdt::discover_cpus` reads the children of `/cpus`, each at most once,
+  with at most five lookups of each; `validate_qemu_timers` reads at most
+  5 records; `logical_id` and `affinity` make a fixed number of steps.
 - `MemoryPlan::all_ram` reads at most 32 banks, each compared with the
   earlier ones, and sorts them once; it reads at most 4 boot storage spans,
   each compared with the earlier ones, and at most 128 firmware
-  reservations, each compared with the boot storage. The queries compare a
-  range with at most 32 banks and 132 reservations. `available_ranges`
-  yields at most one range for each managed bank and each reservation, 164
-  in all, and finds each in at most 133 passes over the 132 reservations.
-  `find_available` tries, in each RAM range, at most $Q + 3$ candidates,
-  each compared with the image, the tree and $Q$ regions.
+  reservations, each compared with the boot storage. `MemoryPlan::new` makes
+  a fixed number of checks of its window, calls `all_ram` once and
+  compares the window with at most 32 banks; `from_pi5` builds at most 4
+  spans of boot storage and calls `new` once. The queries compare a range
+  with at most 32 banks and 132 reservations. `available_ranges` yields at
+  most one range for each managed bank and each reservation, 164 in all,
+  and finds each in at most 133 passes over the 132 reservations.
 - The component has no long operation: every entry runs to its end on the
   boot CPU, before the secondary CPUs start, and stores no progress.
 
@@ -703,9 +736,11 @@ cites no entry of the register of
   limit and one 1 above it, where no vector holds that case: a tree of
   exactly 2 MiB is accepted; a Pi 5 hand-over tree of exactly 128 KiB is
   accepted and one of 128 KiB and 1 byte fails with `LimitExceeded`; a tree
-  with a node at depth 31 is accepted; trees of exactly 65,536 tokens and of
-  65,537 tokens; reservation maps of 128 entries and of 129 entries, which
-  fails with `LimitExceeded`; and a tree with 32 RAM ranges is accepted.
+  with a node at depth 31 is accepted; a tree of exactly 65,536 tokens, the
+  end token included, is accepted and one of 65,537 tokens fails with
+  `LimitExceeded`; a reservation map of 128 entries is accepted and one of
+  129 entries fails with `LimitExceeded`; and a tree with 32 RAM ranges is
+  accepted.
 - For each of the 1, 2, 4 and 16 GB RAM models, one host test parses a Pi 5
   hand-over tree with the inferred RAM ranges of the model, as
   [Memory discovery](#memory-discovery) lists them, and with `atf@0`, and
@@ -758,12 +793,13 @@ assert. The vectors are not yet in a file of the repository, so the
 section holds no `vectors` block.
 
 A vector of this page is one test function. The vector file is to hold one
-line for each case of it, with the id `<vector>.<n>`, `n` counting its cases
-from 1, so that a vector of this page corresponds to the lines of the file
-whose ids start with its id. Six vectors are ignored tests whose input is a
-device-tree file outside the prototype tree: they freeze the name of the
-test and its expected output, and their inputs stay outside this
-repository.
+line for each case of it through an entry of this page, with the id
+`<vector>.<n>`, `n` counting those cases from 1, so that a vector of this
+page corresponds to the lines of the file whose ids start with its id; a
+case that its row marks not applicable has no line. Six vectors are
+ignored tests whose input is a device-tree file outside the prototype tree:
+they freeze the name of the test and its expected output, and their inputs
+stay outside this repository.
 
 ### Notation
 
@@ -777,13 +813,20 @@ require:
 - A span is `<start>+<size>`; a list of spans is the spans joined by `,`,
   and `-` when empty. A reserved region is its span, `/` and its flags:
   `no-map`, `reusable` or `none`.
-- An input is `entry=<entry>` followed by the arguments of the entry in the
-  order of its signature in [Entry points](#entry-points), each
-  `<name>=<value>`, such as `entry=discover_pi5_boot_memory dtb=<bytes>
-  dtb_address=0x200000 image=0x80000+0x20000`, and ends with `ask=` and the
-  fields and queries that the case asks, joined by `,`.
-- An output is `result=err error=<error>` for a case whose test asserts the
-  error, `result=err` for one whose test asserts only a rejection, and
+- An input is `entry=<entry>`; then `dtb=<bytes>`, the bytes of the tree,
+  for the parse and for every entry on a tree, and `node=<path>` for an
+  entry on a node; then the other arguments of the entry, each
+  `<name>=<value>`, in the order in which the rule sections of this page
+  write its parameters, such as `discover_pi5_boot_memory(dtb_address,
+  image)` in [Memory discovery](#memory-discovery):
+  `entry=discover_pi5_boot_memory dtb=<bytes> dtb_address=0x200000
+  image=0x80000+0x20000`. It ends with `ask=` and the fields and queries
+  that the case asks, joined by `,`.
+- An output is `result=err error=<type>::<variant>` for a case whose test
+  asserts the error, with the type `Error` or `PlanError` of
+  [Rejection and error priority](#rejection-and-error-priority), such as
+  `error=Error::Overlap` or `error=PlanError::Overlap`; `result=err` for
+  one whose test asserts only a rejection; and
   `result=ok` followed by the asked fields and queries, each
   `<field>=<value>` or `<query>(<arguments>)=<value>`, in the order of
   `ask`. The fields of a value are those of its entry: `ram`, `reserved`,
@@ -796,6 +839,12 @@ require:
   file holds one case for each generated input, with the output
   `result=err`, `result=returned`, or the output of the independent model
   of the test for that input.
+- The tables below name an error without its type where the row leaves no
+  doubt: an error of the rows of `src/platform/tests.rs` is a `PlanError`,
+  and an error of every other row of this component is an `Error`; a row
+  whose cases reach both types names the type, as `fdt-pi5-platform-2`
+  does. The rows of the device bindings, which are not part of this
+  component, name the owner of each error that is not an `Error`.
 
 ### Behaviour changes
 
@@ -823,7 +872,7 @@ root with `#address-cells` and `#size-cells` of 2 and one node
 | `fdt-parser-4` | `rejects_bad_tokens_names_padding_and_property_order` | A property after a child node, `BadTree`; `#address-cells` twice in the root, `DuplicateProperty`; a first token `0xff`, `BadToken`; a nonzero byte in the padding of the root name, `BadPadding`; a property name offset `0xffffffff`, `BadString`; a strings block without a NUL, `BadString` | `Fdt::parse` |
 | `fdt-parser-5` | `rejects_unbalanced_tree_trailing_tokens_and_excess_depth` | A root without its end node, `BadTree`; one end node too many, `BadTree`; an end token followed by another end token, `BadTree`; a root with 32 nested children, 33 nodes on a path, `LimitExceeded` | `Fdt::parse` |
 | `fdt-parser-6` | `header_and_structure_single_byte_corruptions_do_not_panic` | Property: for each byte of the minimal tree, the tree with that byte inverted (XOR `0xff`) is parsed and, when accepted, its memory is discovered and `reg`, `ranges` and `dma_ranges` of every node are read; every call returns, `result=returned`. That no input panics holds of the specification by construction, so the replay checks only that the entries return | `Fdt::parse`, `Fdt::discover_memory`, `Node::reg`, `ranges` and `dma_ranges` |
-| `fdt-parser-7` | `qemu_property_padding_residue_is_not_payload_or_a_token` | A tree minimized from the QEMU 11.1.2 tree of the machine `virt`: the root `model` `linux,dummy-virt`, 17 bytes, with the padding bytes `00 00 02`, and `memory@40000000` whose `device_type` padding holds `0x73`, with `reg` `0x40000000+0x8000000`. Accepted; the root `model` reads `linux,dummy-virt`; RAM `0x40000000+0x8000000`. Of the padding bound, which the parse computes internally: a value that ends at byte 5 of a block of 5 bytes, `Truncated`; of a block of 8 bytes, the next token at byte 8 | `Fdt::parse`, `Node::string_property`, `Fdt::discover_memory`; the two cases of the padding bound through the internal function of the parse that computes it |
+| `fdt-parser-7` | `qemu_property_padding_residue_is_not_payload_or_a_token` | A tree minimized from the QEMU 11.1.2 tree of the machine `virt`: the root `model` `linux,dummy-virt`, 17 bytes, with the padding bytes `00 00 02`, and `memory@40000000` whose `device_type` padding holds `0x73`, with `reg` `0x40000000+0x8000000`. Accepted; the root `model` reads `linux,dummy-virt`; RAM `0x40000000+0x8000000`. Of the padding bound, which the parse computes internally: a value that ends at byte 5 of a block of 5 bytes, `Truncated`; of a block of 8 bytes, the next token at byte 8 | `Fdt::parse`, `Fdt::find_node`, `Node::string_property`, `Fdt::discover_memory`. The two cases of the padding bound: not applicable, they call a function internal to the parse, which no entry reaches with them, since a structure block is a multiple of 4 bytes long; only the host tests of the module hold them, and the vector file has no line for them |
 | `fdt-parser-8` | `accepts_unaligned_host_bytes_and_compatible_future_version` | The minimal tree with version 18 and last compatible version 17, at an odd host address: accepted, and the memory discovery succeeds | `Fdt::parse`, `Fdt::discover_memory` |
 | `fdt-parser-9` | `vendor_property_names_and_symbol_tables_remain_bounded` | A node `__symbols__` with 334 and with 512 properties, accepted; with 513, `LimitExceeded`. A root property named `snps,parkmode-disable-fsls-quirk`, 32 bytes, and one of 64 bytes of `x`, accepted; one of 65 bytes, `BadString` | `Fdt::parse` |
 

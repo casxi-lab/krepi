@@ -18,8 +18,9 @@ covers the component, so the metadata lists none.
   contract list, with their host tests as the frozen
   [vectors](contract.md#legacy-test-vectors).
 - The write plans, the kernel's lower mappings from a layout, the one-step
-  allocation without a callback and the counts of the five Raspberry Pi 5
-  models are new; the [behaviour changes](contract.md#legacy-test-vectors)
+  allocation without a callback, the exclusion records of the page
+  ownership table and the counts of the five Raspberry Pi 5 models are
+  new; the [behaviour changes](contract.md#legacy-test-vectors)
   of the contract list where they differ from the prototype.
 - The descriptor formats, the memory attributes, the barriers and the TLB
   maintenance follow the Arm Architecture Reference Manual; the exclusion
@@ -214,12 +215,13 @@ valid ends with `DSB ISH` and `ISB`; the plan of an unmap stores the invalid
 entry and then invalidates the address with the broadcast TLB invalidation
 and its barriers; a plan for the kernel tables writes only invalid entries.
 No plan step fails. The criterion: the plans of `map_page`, `map_block`,
-`unmap_page`, `kernel_map` and `direct_map` equal the order of the contract,
-written from it.
+`unmap_page`, `clone_kernel_from`, `kernel_map` and `direct_map` equal the
+order of the contract, written from it.
 
 - **Examples.** None: no feature document covers the component.
-- **Entry points.** `map_page`, `map_block`, `unmap_page`, `kernel_map`,
-  `direct_map` and `krepi_arch::mmu::apply` (planned).
+- **Entry points.** `map_page`, `map_block`, `unmap_page`,
+  `clone_kernel_from`, `kernel_map`, `direct_map` and
+  `krepi_arch::mmu::apply` (planned).
 - **Contract.** [Write plans and publication](contract.md#write-plans-and-publication).
 - **Specification.** None: the component has no specification.
 - **Proof path.** None: the component has no proof path; the stores, the
@@ -307,10 +309,11 @@ vectors hold.
 of RAM: the pool of the direct map holds 80 tables, which leaves 61 free on
 the inferred shape of the 16 GB model; the lower kernel set holds 16; the
 page ownership table manages at most 16 GiB in at most 32 banks with at most
-160 extents. A request beyond a capacity fails before any write with
-`OutOfTables` or `MetadataExhausted`. The criterion: a direct map that
-needs exactly 80 tables succeeds and one that needs 81 is refused; a page
-ownership table at exactly 160 extents works and one more extent is
+160 extents and 132 exclusions. A request beyond a capacity fails before any
+write with `OutOfTables` or `MetadataExhausted`. The criterion: a direct map
+that needs exactly 80 tables succeeds and one that needs 81 is refused; a
+page ownership table at exactly 160 extents works and one more extent is
+refused; an initialization with 132 exclusions succeeds and one with 133 is
 refused.
 
 - **Examples.** None: no feature document covers the component.
@@ -323,6 +326,33 @@ refused.
 - **Evidence.** The host tests of the capacities of the
   [contract](contract.md#testing-obligations), and the frozen vectors
   `dm-03`, `own-05` and `own-08`.
+
+### PGT-R12
+
+**Copying the kernel tables.** `clone_kernel_from` gives a set that no CPU
+uses a private copy of the lower kernel set: the same pages, kinds and
+output addresses, global ones included, in tables of its own pool at the
+indices of the source, so that a later write to one of the two sets leaves
+the other unchanged. It refuses, before any write, pools that overlap, a
+misaligned base, a width outside 32 to 48, a source with a block, with a
+leaf of a kind other than `ReadExecute`, `ReadOnly`, `ReadWrite` and
+`Device` or above the width, and a source whose table descriptors do not
+reach its tables in use exactly once. The criterion: the frozen vectors
+hold, and the plan of the copy equals the order of the contract.
+
+- **Examples.** None: no feature document covers the component.
+- **Entry points.** `Tables::clone_kernel_from`, `map_page`, `unmap_page`,
+  `lookup_page` and `used` (planned).
+- **Contract.** [Copying the kernel tables](contract.md#copying-the-kernel-tables),
+  [Abstract mapping](contract.md#abstract-mapping) and
+  [Write plans and publication](contract.md#write-plans-and-publication).
+- **Specification.** None: the component has no specification.
+- **Proof path.** None: the component has no proof path.
+- **Evidence.** The frozen vectors `pt-07`, `pt-08`, `pt-10`, `pt-12` and
+  `pt-18` as host tests, and the host test of the plans of the
+  [contract](contract.md#testing-obligations). They show the copy on sets
+  that the tests build; they do not show a process running on the copy,
+  which the tables of address spaces show.
 
 ## Liveness, time and performance
 
@@ -338,10 +368,11 @@ refused.
 - One CPU. The acknowledgement of TLB invalidation by other CPUs, and the
   local form of `TLBI` that the record of an address space allows, are not
   covered.
-- The tables of the address spaces of processes, their ASIDs, the switch of
-  `TTBR0_EL1` and the copy of the kernel's lower tables into them are not
-  covered; neither are VM objects, the execute right or the authority to
-  map device registers into a process.
+- The address spaces of processes, their ASIDs and the switch of
+  `TTBR0_EL1` are not covered, apart from the copy of the kernel's lower
+  tables into the lower tables of a process (PGT-R12); neither are VM
+  objects, the execute right or the authority to map device registers into
+  a process.
 - The direct map is never changed after boot: no page is sealed, split or
   merged.
 - The kernel has no byte heap.

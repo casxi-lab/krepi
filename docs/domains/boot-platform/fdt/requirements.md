@@ -59,15 +59,16 @@ tests follow are in the [contract](contract.md).
 **Bounded parse of an untrusted tree.** `Fdt::parse` accepts a device tree
 only when its header, its blocks, its reservation map and every token of
 its structure block keep the format of chapter 5 of DTSpec v0.4 and the
-limits of the contract: at most 2 MiB, or 128 KiB for a Pi 5 hand-over
-tree; 32 nodes on a path; 65,536 tokens; 512 properties in a node; property
-names of up to 64 bytes; 128 entries of the reservation map; 32 RAM ranges;
-and 128 reserved regions. It accepts the trees of the supported boards,
-among them a node with 334 properties and property names of 32 bytes, as
-the Pi 5 tree has, and the bytes that QEMU leaves in the padding after a
-property value. The criterion: for each limit, an input at the limit is
-accepted and one 1 above it fails with the error of the contract, and every
-vector of the parse gives its expected output.
+limits of the parse in the contract: at most 2 MiB; 32 nodes on a path;
+65,536 tokens; 512 properties in a node; property names of up to 64 bytes;
+and 128 entries of the reservation map. It accepts the trees of the
+supported boards, among them a node with 334 properties and property names
+of 32 bytes, as the Pi 5 tree has, and the bytes that QEMU leaves in the
+padding after a property value. The criterion: for each of these limits,
+an input at the limit is accepted and one 1 above it fails with the error
+of the contract, and every vector of the parse gives its expected output.
+The limits of the RAM ranges, of the reserved regions and of the Pi 5
+hand-over tree are those of FDT-R03 and FDT-R05.
 
 - **Examples.** None: no feature document describes the component.
 - **Entry points.** `fdt::Fdt::parse` (planned).
@@ -120,10 +121,12 @@ number of dynamic reservations. It skips disabled memory nodes before it
 checks their binding, accepts reserved regions outside every RAM range, and
 fails on overlapping RAM, on `no-map` with `reusable`, on a
 `/reserved-memory` whose cells differ from the root's or whose `ranges` is
-not empty, and on a tree without RAM. The criterion: the vectors of the
-discovery give their expected outputs, and a tree with the RAM ranges and
-both reserved regions of the 8 GB hand-over tree is accepted, with the
-region of 62 bytes in the hole between two ranges kept.
+not empty, on a tree without RAM, and on more than 32 RAM ranges or more
+than 128 reserved regions. The criterion: the vectors of the discovery give
+their expected outputs; 32 RAM ranges and 128 reserved regions are
+accepted, and 33 and 129 fail with `LimitExceeded`; and a tree with the RAM
+ranges and both reserved regions of the 8 GB hand-over tree is accepted,
+with the region of 62 bytes in the hole between two ranges kept.
 
 - **Examples.** None: no feature document describes the component.
 - **Entry points.** `Fdt::discover_memory` and the `MemoryMap` that it
@@ -132,8 +135,10 @@ region of 62 bytes in the hole between two ranges kept.
 - **Specification.** None: no specification covers the component.
 - **Proof path.** None: no target is registered for the component.
 - **Evidence.** The host tests that replay `fdt-discovery-1` to
-  `fdt-discovery-6` and `fdt-parser-7`, and the test of the 8 GB hand-over
-  shape of the [testing obligations](contract.md#testing-obligations). They
+  `fdt-discovery-6`, `fdt-parser-7`, `fdt-pi5-boundaries-5` and
+  `fdt-pi5-selection-3`, and the tests of 32 RAM ranges and of the 8 GB
+  hand-over shape of the
+  [testing obligations](contract.md#testing-obligations). They
   show the discovery on trees that the tests build. They do not show that a
   hand-over tree describes the installed RAM, which only a board run shows.
 
@@ -175,7 +180,8 @@ range; it gives the memory map, the spans of the tree and of the image and
 the sum of the RAM ranges. `is_available` and `find_available` never give a
 span that touches the image, the tree or a reserved region, or that bridges
 two RAM ranges or a hole. The criterion: the vectors of the Pi 5 boot memory
-give their expected outputs.
+give their expected outputs, and a hand-over tree of exactly 128 KiB is
+accepted and one of 1 byte more fails with `LimitExceeded`.
 
 - **Examples.** None: no feature document describes the component.
 - **Entry points.** `Fdt::discover_pi5_boot_memory`,
@@ -187,10 +193,11 @@ give their expected outputs.
 - **Evidence.** The host tests that replay `fdt-pi5-1` to `fdt-pi5-4`,
   `fdt-pi5-boundaries-1` to `fdt-pi5-boundaries-5`, `fdt-pi5-selection-1`
   to `fdt-pi5-selection-3` and `fdt-pi5-firmware-2`, the last on merged
-  trees outside the repository. They show the checks on these trees. They
-  do not show the address at which the firmware leaves the tree or the
-  layout in which it loads the image, which the board support of the Pi 5
-  states and a board run shows.
+  trees outside the repository, and the tests of the 128 KiB limit of the
+  [testing obligations](contract.md#testing-obligations). They show the
+  checks on these trees. They do not show the address at which the
+  firmware leaves the tree or the layout in which it loads the image, which
+  the board support of the Pi 5 states and a board run shows.
 
 ### FDT-R06
 
@@ -325,8 +332,11 @@ the boot memory map.
 - Every entry ends within the loop bounds of the
   [contract](contract.md#work-bounds) and waits for nothing: the component
   has no long operation and takes no lock.
-- The trees of the supported boards hold fewer than 3,000 tokens, far
-  below the limits; no test bounds the time of an entry.
+- The structure block of the tree that the Pi 5 firmware ships holds 2,973
+  tokens, and that of QEMU virt 343, far below the limit of 65,536; the
+  number of tokens of the Pi 5 hand-over tree, which is 1,826 bytes longer
+  than the shipped file in the prototype's measurement, was not counted.
+  No test bounds the time of an entry.
 
 ## Scope
 

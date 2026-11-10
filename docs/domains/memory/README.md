@@ -113,9 +113,10 @@ through which a page is zeroed; the
 [page-tables contract](page-tables/contract.md#page-ownership).
 
 **Engineering notes.** The table manages at most 16 GiB in at most 32
-banks with 160 extents; at boot the 8 GB Pi 5 uses 4. A request that would
-need more extents is passed over or refused before any write. The table is
-shared state; its class and protection are in the
+banks with 160 extents; at boot the 8 GB Pi 5 uses 4. The excluded pages
+take no extent: the owners of at most 132 exclusions are kept apart. A
+request that would need more extents is passed over or refused before any
+write. The table is shared state; its class and protection are in the
 [State fields](page-tables/contract.md#state-fields) of the page-tables
 contract.
 
@@ -132,7 +133,8 @@ release it, allocate it to another owner and read zeroes back.
 
 **Description.** A table set holds the tables of one region in a pool of
 fixed capacity. Its writes map a page with one of nine kinds, map a 2 MiB
-block, unmap a page and reset the set; each write is refused before any
+block, unmap a page, reset the set and fill a new set with a private copy
+of the kernel's lower tables; each write is refused before any
 change when an address is misaligned or outside the region or the width,
 when the place holds a mapping or when the pool has too few tables, and
 otherwise returns a write plan that the architecture crate executes. The
@@ -162,14 +164,16 @@ direct map; the VM objects and the address spaces of processes, which use
 the table sets for their lower tables; every kernel path that reaches a
 frame it owns.
 
-**Interface.** `page_tables::Tables` with `new`, `reset`, `map_page`,
-`map_block`, `unmap_page`, `lookup_page`, `lookup_block` and `used`,
+**Interface.** `page_tables::Tables` with `new`, `reset`,
+`clone_kernel_from`, `map_page`, `map_block`, `unmap_page`, `lookup_page`,
+`lookup_block` and `used`,
 `page_tables::kernel_map` and `page_tables::direct_map`, the kinds of
 `page_tables::Kind` and `page_tables::direct_address`; in the architecture
 crate, `krepi_arch::mmu::apply` and `enable`
 ([entry points](page-tables/contract.md#entry-points)). Errors name a
 misaligned address, an address outside the region or the width, a bad pool,
-too few tables, a place that holds a mapping and an address without a leaf.
+too few tables, a place that holds a mapping, an address without a leaf
+and a descriptor of the kernel's tables that a copy does not take.
 
 **Prerequisites.** [Physical memory ranges](../boot-platform/README.md#physical-memory-ranges)
 and [Cache and TLB maintenance](../boot-platform/README.md#cache-and-tlb-maintenance)
@@ -179,7 +183,8 @@ of the boot and platform domain; the
 **Engineering notes.** Contiguous 8 GiB of blocks need 9 tables; the direct
 map of the 8 GB Pi 5 needs 11 tables, 4,092 blocks and 581 pages, and the
 16 GB model 19 of the 80 that its pool holds. A table returns to its pool
-only on reset. The kernel tables are shared state, classified in the
+only on reset or on a copy into its set. The kernel tables are shared
+state, classified in the
 [State fields](page-tables/contract.md#state-fields) of the page-tables
 contract.
 
@@ -395,8 +400,10 @@ Pi 5.
 ## Exclusions
 
 - The parsing of the device tree and the boot memory map belong to the
-  [boot and platform](../boot-platform/README.md) domain, and so does the
-  cache and TLB maintenance of the executing CPU.
+  [boot and platform](../boot-platform/README.md) domain, and so do the
+  cache and TLB maintenance primitives of the executing CPU; the MMU
+  adapter of this domain executes only the barriers of its write plans and
+  the invalidation of the local TLB with which it turns the MMU on.
 - The acknowledgement of TLB invalidation and reclamation across CPUs and
   the start of secondary CPUs belong to the multicore domain.
 - The authority to map device registers into a process, the delivery of
