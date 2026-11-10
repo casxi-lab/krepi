@@ -334,11 +334,13 @@ uses a private copy of the lower kernel set: the same pages, kinds and
 output addresses, global ones included, in tables of its own pool at the
 indices of the source, so that a later write to one of the two sets leaves
 the other unchanged. It refuses, before any write, pools that overlap, a
-misaligned base, a width outside 32 to 48, a source with a block, with a
-leaf of a kind other than `ReadExecute`, `ReadOnly`, `ReadWrite` and
-`Device` or above the width, and a source whose table descriptors do not
-reach its tables in use exactly once. The criterion: the frozen vectors
-hold, and the plan of the copy equals the order of the contract.
+misaligned base, a width outside 32 to 48, a pool that ends above the
+width, a source with a block, with a table descriptor that holds an
+attribute bit, with a leaf of a kind other than `ReadExecute`, `ReadOnly`,
+`ReadWrite` and `Device` or above the width, and a source whose table
+descriptors do not reach its tables in use exactly once. The criterion:
+the frozen vectors hold, and the plan of the copy equals the order of the
+contract.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `Tables::clone_kernel_from`, `map_page`, `unmap_page`,

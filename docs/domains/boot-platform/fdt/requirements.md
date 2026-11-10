@@ -106,7 +106,8 @@ that step.
 - **Proof path.** None: no target is registered for the component.
 - **Evidence.** The host tests that replay the property vectors
   `fdt-parser-1` and `fdt-parser-6`, the vectors whose expected output is
-  an error, and the tests of the error orders of the
+  an error, and the tests of the errors that no vector reaches and of the
+  error orders of the
   [testing obligations](contract.md#testing-obligations). They show the
   errors on these inputs. The prefixes and single changes of one small tree
   are examples, not every input.
@@ -334,8 +335,9 @@ the boot memory map.
   has no long operation and takes no lock.
 - The structure block of the tree that the Pi 5 firmware ships holds 2,973
   tokens, and that of QEMU virt 343, far below the limit of 65,536; the
-  number of tokens of the Pi 5 hand-over tree, which is 1,826 bytes longer
-  than the shipped file in the prototype's measurement, was not counted.
+  number of tokens of the Pi 5 hand-over tree, which is 1,818 or 1,826
+  bytes longer than the shipped file in the prototype's measurements, was
+  not counted.
   No test bounds the time of an entry.
 
 ## Scope

@@ -301,8 +301,16 @@ The parse and the entries on a tree:
    its end, `Overflow`; its size, `EmptyRegion`; overlap with an earlier
    entry, `Overlap`.
 3. The tokens, in the order of the structure block. For each token, first
-   its encoding, `Truncated`, `Overflow`, `BadToken`, `BadString` or
-   `BadPadding`, then its place in the tree: `BadTree`, the depth
+   its encoding: its tag past the end of the block, `Truncated`, then a tag
+   other than 1, 2, 3, 4 and 9, `BadToken`. For a begin node, then its
+   name without a NUL in the block or not UTF-8, `BadString`; the padding
+   after the name past the end of the block, `Truncated`, then a nonzero
+   byte in it, `BadPadding`; then a character of the name outside its set,
+   `BadString`. For a property, then its length and name offset past the
+   end of the block, `Truncated`; the end of its value beyond 64 bits,
+   `Overflow`, then past the end of the block, `Truncated`; its name,
+   `BadString`; then the padding after the value past the end of the block,
+   `Truncated`. Then its place in the tree: `BadTree`, the depth
    `LimitExceeded`, the properties of its node `LimitExceeded`, then
    `DuplicateProperty`. More than `MAX_TOKENS` tokens without the end
    token, `LimitExceeded`.
@@ -316,13 +324,17 @@ The parse and the entries on a tree:
    `BadProperty`, neither `reg` nor `size` `MissingProperty`, the `reg`,
    and each of its spans `EmptyRegion` or `LimitExceeded`.
 5. `Fdt::discover_pi5_boot_memory`: `totalsize` above `PI5_MAX_BLOB_SIZE`,
-   `LimitExceeded`; the address of the tree, `BadAlignment`; the cells of
-   the root, `BadProperty` or `UnsupportedCells`; the root `compatible`,
-   `MissingProperty`, `BadString` or `BadProperty`; the span of the tree,
-   `Overflow`; the image, `EmptyRegion` then `Overflow`; the image on the
-   tree, `Overlap`; `discover_memory`; the tree, then the image, outside
-   every single RAM range, `Unmapped`; the sum of the RAM ranges,
-   `Overflow`.
+   `LimitExceeded`; the address of the tree, `BadAlignment`; the address
+   cells of the root, a value that is not 4 bytes `BadProperty`, then a
+   number other than 2 `UnsupportedCells`, and then its size cells in the
+   same way; the root `compatible`: absent, `MissingProperty`; a value that
+   does not end with a NUL, `BadProperty`; then each entry in order, not
+   UTF-8 `BadString`, then empty `BadProperty`; then without
+   `raspberrypi,5-model-b` or without `brcm,bcm2712`, `BadProperty`; the
+   span of the tree, `Overflow`; the image, `EmptyRegion` then `Overflow`;
+   the image on the tree, `Overlap`; `discover_memory`; the tree, then the
+   image, outside every single RAM range, `Unmapped`; the sum of the RAM
+   ranges, `Overflow`.
 6. `Fdt::discover_cpus`: `/cpus` absent, `MissingProperty`; disabled or
    with size cells other than 0, `BadProperty`; its address cells,
    `UnsupportedCells`; each child of `/cpus` in tree order: first its
@@ -417,8 +429,12 @@ describe them:
   configuration has to disable the node.
 - **Reserved regions and RAM.** A reserved region need not lie in a RAM
   range: one in a hole between banks, or outside RAM, is accepted and kept
-  like any other. Reserved regions may overlap each other and RAM ranges;
-  every one stays excluded ([Boot memory map](#boot-memory-map)).
+  like any other. An entry of the reservation map may overlap a span of
+  `/reserved-memory`, and the spans of `/reserved-memory` may overlap each
+  other; only the entries of the reservation map are disjoint from each
+  other ([Format and bounds](#format-and-bounds)). Reserved regions may also
+  overlap RAM ranges; every one stays excluded
+  ([Boot memory map](#boot-memory-map)).
 - **No-map.** The `no-map` flag of a reserved region, which section 3.5.2 of
   DTSpec v0.4 defines as a region that the operating system must not map as
   part of its standard mapping of system memory, is kept with the region.
@@ -631,6 +647,12 @@ return of the value, cannot fail
   token before it returns a tree.
 - The node access, the translation, the queries and `find_available` read
   their inputs and return a value or an error.
+- The iterators, `Fdt::nodes`, `Fdt::reservations`, the entries of a `Reg`
+  and `MemoryPlan::available_ranges`, read only what was checked before
+  they were made: the parse checked the tokens and the reservation map,
+  `Reg::new` the entries of the `Reg`, and the entry that built the boot
+  memory map its banks and reservations. Each call of `next` advances only
+  the iterator's own cursor and does not fail.
 - `discover_memory`, `discover_pi5_boot_memory`, `discover_cpus`,
   `MemoryPlan::all_ram`, `new` and `from_pi5` fill their local result value
   while they check, and may fail with any error of their order in
@@ -659,16 +681,21 @@ $N \le T$ nodes. They bound the number of steps, not the time.
   `Fdt::find_node` at most $D$ path components, each over at most $N$ nodes.
   `Node::string_property` and `enabled` make one lookup of `property` and
   read the value once; `address_cells` and `size_cells` make one lookup;
-  `Node::reg`, `ranges` and `dma_ranges` take `parent`, at most two lookups
-  on each of the node and its parent, and the construction below.
-  `Fdt::reservations` reads at most $R$ entries.
+  `Node::reg` takes `parent`, one lookup on the node and two on its parent,
+  and the construction below; `ranges` and `dma_ranges` take `parent`,
+  three lookups on the node and one on its parent, and the construction
+  below. `Fdt::reservations` reads at most $R$ entries.
 - `Reg::new` and `AddressMap::new` read each entry of their value once; a
   translation compares the request with each window once;
   `Node::translate_reg` translates through at most $D$ buses, each with its
   `parent` and `ranges`.
-- `Fdt::discover_memory` reads at most $R$ map entries and $N$ nodes, with
-  the property and parent lookups above for each, and compares each RAM
-  range with at most $M$ others.
+- `Fdt::discover_memory` reads at most $R$ map entries, calls `find_node`
+  twice, for the root and for `/reserved-memory`, and walks the nodes at
+  most twice, at most $N$ nodes each time: once for the children of the
+  root and once for the children of `/reserved-memory`, with a fixed number
+  of the property and parent lookups above for each child and for
+  `/reserved-memory` itself. It compares each RAM range with at most $M$
+  others.
 - `Fdt::discover_pi5_boot_memory` makes the root lookup of `find_node`, its
   cell and `compatible` lookups, reads the `compatible` value once, makes a
   fixed number of comparisons of the tree and the image, calls
@@ -689,8 +716,21 @@ $N \le T$ nodes. They bound the number of steps, not the time.
   compares the window with at most 32 banks; `from_pi5` builds at most 4
   spans of boot storage and calls `new` once. The queries compare a range
   with at most 32 banks and 132 reservations. `available_ranges` yields at
-  most one range for each managed bank and each reservation, 164 in all,
-  and finds each in at most 133 passes over the 132 reservations.
+  most one range for each managed bank and each reservation, 164 in all.
+  Its cursor only moves forward within a bank, so in each bank at most 132
+  of its passes over the 132 reservations move the cursor past a
+  reservation; each range that it yields takes one more pass, which moves
+  nothing, and one that finds the end of the range. A range found without
+  leaving its bank takes at most 134 passes, and the whole iteration at
+  most $32 \cdot 132 + 2 \cdot 164$.
+- The other entries make a fixed number of steps: `Fdt::total_size`,
+  `Node::name`, `Span::new`, `end` and `contains`, `cells_u64`,
+  `AddressMap::kind`, `CpuProfile::affinity_shift` and `conduit`,
+  `CpuTopology::count` and `profile`, and the accessors of `MemoryMap`,
+  `Pi5BootMemory` and `MemoryPlan`, such as `MemoryMap::ram`,
+  `Pi5BootMemory::dtb` and `MemoryPlan::managed_banks`.
+  `MemoryPlan::described_bytes` and `managed_bytes` each sum at most 32
+  banks.
 - The component has no long operation: every entry runs to its end on the
   boot CPU, before the secondary CPUs start, and stores no progress.
 
@@ -757,6 +797,12 @@ cites no entry of the register of
   `alloc-ranges`, are accepted with one dynamic reservation and no reserved
   region for it; a child with both `reg` and `size` is a static region.
 - Boot storage of 4 spans is accepted, and 5 fail with `Capacity`.
+- Each error of the table of
+  [Rejection and error priority](#rejection-and-error-priority) that no
+  applicable case of the vectors of this component gives has a test of its
+  own: `Fdt::parse` of fewer than 40 bytes fails with `Truncated`;
+  `discover_cpus` on a tree without `/cpus` fails with `MissingProperty`;
+  and `find_node` with a path that holds `//` fails with `BadPath`.
 - For each step of the two error orders of
   [Rejection and error priority](#rejection-and-error-priority), an input
   that breaks that step and a later one gives the error of that step.
@@ -872,7 +918,7 @@ root with `#address-cells` and `#size-cells` of 2 and one node
 | `fdt-parser-4` | `rejects_bad_tokens_names_padding_and_property_order` | A property after a child node, `BadTree`; `#address-cells` twice in the root, `DuplicateProperty`; a first token `0xff`, `BadToken`; a nonzero byte in the padding of the root name, `BadPadding`; a property name offset `0xffffffff`, `BadString`; a strings block without a NUL, `BadString` | `Fdt::parse` |
 | `fdt-parser-5` | `rejects_unbalanced_tree_trailing_tokens_and_excess_depth` | A root without its end node, `BadTree`; one end node too many, `BadTree`; an end token followed by another end token, `BadTree`; a root with 32 nested children, 33 nodes on a path, `LimitExceeded` | `Fdt::parse` |
 | `fdt-parser-6` | `header_and_structure_single_byte_corruptions_do_not_panic` | Property: for each byte of the minimal tree, the tree with that byte inverted (XOR `0xff`) is parsed and, when accepted, its memory is discovered and `reg`, `ranges` and `dma_ranges` of every node are read; every call returns, `result=returned`. That no input panics holds of the specification by construction, so the replay checks only that the entries return | `Fdt::parse`, `Fdt::discover_memory`, `Node::reg`, `ranges` and `dma_ranges` |
-| `fdt-parser-7` | `qemu_property_padding_residue_is_not_payload_or_a_token` | A tree minimized from the QEMU 11.1.2 tree of the machine `virt`: the root `model` `linux,dummy-virt`, 17 bytes, with the padding bytes `00 00 02`, and `memory@40000000` whose `device_type` padding holds `0x73`, with `reg` `0x40000000+0x8000000`. Accepted; the root `model` reads `linux,dummy-virt`; RAM `0x40000000+0x8000000`. Of the padding bound, which the parse computes internally: a value that ends at byte 5 of a block of 5 bytes, `Truncated`; of a block of 8 bytes, the next token at byte 8 | `Fdt::parse`, `Fdt::find_node`, `Node::string_property`, `Fdt::discover_memory`. The two cases of the padding bound: not applicable, they call a function internal to the parse, which no entry reaches with them, since a structure block is a multiple of 4 bytes long; only the host tests of the module hold them, and the vector file has no line for them |
+| `fdt-parser-7` | `qemu_property_padding_residue_is_not_payload_or_a_token` | A tree minimized from the QEMU 11.1.2 tree of the machine `virt`: the root `model` `linux,dummy-virt`, 17 bytes, with the padding bytes `00 00 02`, and `memory@40000000` whose `device_type` padding holds `0x73`, with `reg` `0x40000000+0x8000000`. Accepted; the root `model` reads `linux,dummy-virt`; RAM `0x40000000+0x8000000`. Of the padding bound, which the parse computes internally: a value that ends at byte 5 of a block of 5 bytes, `Truncated`; of a block of 8 bytes, the next token at byte 8 | `Fdt::parse`, `Fdt::find_node`, `Node::string_property`, `Fdt::discover_memory`. The two cases of the padding bound: not applicable, they call a function internal to the parse, which no entry reaches with them: a block of 5 bytes is not a multiple of 4, one of 8 bytes is shorter than the 12 bytes of the smallest structure block, and the value of a property starts at least at byte 12 of its block, so it never ends at byte 5; only the host tests of the module hold them, and the vector file has no line for them |
 | `fdt-parser-8` | `accepts_unaligned_host_bytes_and_compatible_future_version` | The minimal tree with version 18 and last compatible version 17, at an odd host address: accepted, and the memory discovery succeeds | `Fdt::parse`, `Fdt::discover_memory` |
 | `fdt-parser-9` | `vendor_property_names_and_symbol_tables_remain_bounded` | A node `__symbols__` with 334 and with 512 properties, accepted; with 513, `LimitExceeded`. A root property named `snps,parkmode-disable-fsls-quirk`, 32 bytes, and one of 64 bytes of `x`, accepted; one of 65 bytes, `BadString` | `Fdt::parse` |
 

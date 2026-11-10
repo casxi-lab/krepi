@@ -100,11 +100,13 @@ the tables of the address spaces of processes.
 **Interface.** `page_tables::Ownership` with `new`, `choose` and `assign`,
 `reserve`, `publish`, `cancel` and `release`, `owner`, `validate` and
 `stats`, and `page_tables::Reservation::initialized`
-([entry points](page-tables/contract.md#entry-points)). Errors name the
-broken rule: an invalid range, alignment or size, an overflow, the arena 0,
-the capacity of the metadata, no free range, an exhausted generation, a
-failed zeroing, and a receipt of another arena, of another owner or of no
-held range. No result is a state; every failure is an error.
+([entry points](page-tables/contract.md#entry-points)); `stats` counts as
+managed bytes only the free and held pages, not the pages that firmware
+reservations and boot storage exclude. Errors name the broken rule: an
+invalid range, alignment or size, an overflow, the arena 0, the capacity of
+the metadata, no free range, an exhausted generation, a failed zeroing, and
+a receipt of another arena, of another owner or of no held range. No result
+is a state; every failure is an error.
 
 **Prerequisites.** [Physical memory ranges](../boot-platform/README.md#physical-memory-ranges)
 of the boot and platform domain, which give the managed banks and the
@@ -312,7 +314,8 @@ validation of copies and QEMU runs with concurrent writers.
 **Description.** No frame is mapped writable and executable at the same
 time, counting every alias. No kind of descriptor is both; the direct map
 maps only pages of RAM that are free or held, read-write and
-execute-never; the image's text has one mapping, read-only and executable;
+execute-never; the image's text has one kind, read-only and executable, in
+every table set that maps it, the kernel's lower tables and their copies;
 and executable pages come only from the image and the boot bundle until VM
 objects carry the execute right. Code that the kernel writes at run time is
 published by cleaning its data cache lines to the point of unification,

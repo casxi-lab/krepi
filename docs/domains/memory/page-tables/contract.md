@@ -56,6 +56,11 @@ the component.
   reservations that it excludes, and its usable ranges. This component
   reads it and never changes it.
 - **Managed page.** A 4 KiB page that lies wholly in a managed bank.
+- **Managed bytes.** The bytes of the managed pages that are free or held,
+  as `Ownership::stats` counts them: the pages that a firmware reservation,
+  the image or another boot storage excludes are managed pages but not
+  managed bytes. `MemoryPlan::managed_bytes` of the boot memory map counts
+  every page of the managed banks instead.
 - **Usable range.** A range of whole pages of a managed bank that no boot
   storage and no firmware reservation touches, as
   `MemoryPlan::available_ranges` gives it, in address order.
@@ -94,7 +99,7 @@ The entries of the core are in the module `page_tables` of `krepi-kernel`
 | Entry point | Kind | Called by | Rules |
 | --- | --- | --- | --- |
 | `page_tables::Kind`, `page_tables::descriptor`, `page_tables::direct_address`, `PhysRange::new`, `end`, `contains` and `overlaps`, and `Tables::lookup_page`, `lookup_block` and `used` (planned) | Value types and functions that write nothing, host-testable | The entries of this page; `krepi_arch::mmu`, for `direct_address`; the modules `vm` and `creation` of the core (planned) | [Descriptors and attributes](#descriptors-and-attributes), [Kernel direct map](#kernel-direct-map) |
-| `Tables::new`, `Tables::reset` and `Tables::clone_kernel_from` (planned) | Write entries, host-testable; `clone_kernel_from` returns a write plan | `new`: the boot wiring, for the kernel tables; `new`, `reset` and `clone_kernel_from`: the modules `creation` and `lifecycle` of the core (planned), for the lower tables of a process, which `clone_kernel_from` fills from the lower kernel set | [Abstract mapping](#abstract-mapping), [Copying the kernel tables](#copying-the-kernel-tables), [Table pool](#table-pool) |
+| `Tables::new`, `Tables::reset` and `Tables::clone_kernel_from` (planned) | Write entries, host-testable; `reset` and `clone_kernel_from` return write plans | `new`: the boot wiring, for the kernel tables; `new`, `reset` and `clone_kernel_from`: the modules `creation` and `lifecycle` of the core (planned), for the lower tables of a process, which `clone_kernel_from` fills from the lower kernel set | [Abstract mapping](#abstract-mapping), [Copying the kernel tables](#copying-the-kernel-tables), [Table pool](#table-pool) |
 | `Tables::map_page` (planned) | Write entry, host-testable; returns a write plan | `kernel_map`; the modules `vm` and `creation` of the core (planned) | [Abstract mapping](#abstract-mapping), [Write plans and publication](#write-plans-and-publication) |
 | `Tables::map_block` (planned) | Write entry, host-testable; returns a write plan | `direct_map` | [Abstract mapping](#abstract-mapping), [Kernel direct map](#kernel-direct-map) |
 | `Tables::unmap_page` (planned) | Write entry, host-testable; returns a write plan | The module `vm` of the core (planned), for a set that is not one of the kernel tables | [Abstract mapping](#abstract-mapping), [Write plans and publication](#write-plans-and-publication) |
@@ -292,7 +297,7 @@ returns no plan: $M' = M$, $G' = G$, $P' = P$.
 
 | Entry | Requires | After mapping |
 | --- | --- | --- |
-| `Tables::new` | - | $M = \emptyset$, $G = P = \emptyset$, so 1 table in use |
+| `Tables::new` | The storage of the pool is zero in all its $N$ tables ([Table pool](#table-pool)); the entry does not check it | $M = \emptyset$, $G = P = \emptyset$, so 1 table in use |
 | `reset` | No CPU holds the root in a `TTBR` and no TLB holds a translation of the set ([reclamation](../../../conventions/smp.md#s3-reclamation-after-acknowledgement)); the entry does not check it | $M' = \emptyset$, $G' = P' = \emptyset$ |
 | `map_page(v, p, k)` | $v \notin \mathrm{dom}\,M$, so neither a page nor a block covers $v$ | $M' = M[v \mapsto (p, k, \mathrm{page})]$, $G' = G \cup \{\mathrm{gib}(v)\}$, $P' = P \cup \{\mathrm{blk}(v)\}$ |
 | `map_block(v, p)` | $v = \mathrm{blk}(v)$, no page of $[v, v + 2^{21})$ in $\mathrm{dom}\,M$ and $v \notin P$ | $M' = M \cup \{v + i \mapsto (p + i, \mathrm{ReadWrite}, \mathrm{block}) : i = 0, 4096, \ldots, 2^{21} - 4096\}$, $G' = G \cup \{\mathrm{gib}(v)\}$, $P' = P$ |
@@ -397,9 +402,12 @@ them in order, each completing before the next:
 - **Copy.** The plan of `clone_kernel_from` is a `Zero` of every table in
   use of the target, then a `Store` of every valid entry of every table in
   use of the source into the target's table of the same index, its table
-  descriptors pointing into the target's pool, and `Sync` last. No CPU
-  walks the target before the caller installs its root, after the `Sync`,
-  so the whole set is complete before it is published
+  descriptors pointing into the target's pool, and `Sync` last. After the
+  `Zero` steps every table of the target is zero, since its tables not in
+  use are zero already ([Table pool](#table-pool)), so an entry that is
+  invalid in the source is invalid in the target too. No CPU walks the
+  target before the caller installs its root, after the `Sync`, so the
+  whole set is complete before it is published
   ([S6b](../../../conventions/smp.md#s6b-new-translation-tables)).
 - **Before the MMU is on.** The plans of `kernel_map` and `direct_map` run on
   the boot CPU with the MMU off, into sets that no `TTBR` holds; their order
@@ -498,10 +506,12 @@ managed banks and the exclusions of the boot memory map with their owners.
   boot storage; the boot memory map gives no such page.
 - The table keeps every exclusion, with its owner, in an exclusion record
   of its own; the excluded pages take no extent.
-- The checks run in the order alignment, arena, the number of banks,
-  overlap, then the number of exclusions against the capacity of the
-  exclusion records and the extents that the exclusions need against the
-  capacity of the extents (`MetadataExhausted`).
+- The checks run in the order alignment, arena, the number of banks (none
+  is `InvalidRange`, more than the capacity of the extents is
+  `MetadataExhausted`), overlap, then the number of exclusions against the
+  capacity of the exclusion records and the extents that the banks, split
+  by the exclusions, need against the capacity of the extents
+  (`MetadataExhausted`).
 
 **Placement.** `choose(owner, pages, alignment, placement)` gives, without
 writing, the range that an allocation takes:
@@ -560,7 +570,8 @@ owner of a page: the owner of the extent that holds it, or, for a page of a
 managed bank in no extent, the first owner in the order firmware, image,
 boot storage among the exclusion records that touch it.
 
-**Statistics.** `stats` gives the managed, free and allocated bytes, where
+**Statistics.** `stats` gives the managed bytes, those of the free and
+held pages, without the excluded ones; the free and allocated bytes, where
 reserved pages count as allocated; the number of allocations, reservations
 included; the number of free extents and the largest; and the extents in
 use with the capacity.
@@ -596,13 +607,22 @@ records never change after it.
 ## Table pool
 
 - A pool holds $N \geq 1$ tables, at a `base` that is a multiple of 4 KiB,
-  ending at or below $2^{\mathrm{bits}}$. Every entry on a set takes `base`
-  and `bits` as arguments, as the prototype does, and checks them first
-  ([errors](#errors-of-table-sets)).
+  ending at or below $2^{\mathrm{bits}}$. Every entry on a set other than
+  `new`, `reset` and `used` takes `base` and `bits` as arguments, as the
+  prototype does, and checks them first ([errors](#errors-of-table-sets));
+  `new` and `reset` check nothing ([Check and execute](#check-and-execute)).
 - A new table is the one of the lowest free index, zeroed by its plan, and
   a table returns to the pool only through `reset` and through
   `clone_kernel_from`, which empties its target first: `unmap_page` leaves
   an empty table in place.
+- **Zero storage.** Every table of a pool that is not in use is zero.
+  `new` takes storage that is zero in all its $N$ tables, as the prototype's
+  sets start: the BSS of the image for the kernel tables, and held pages,
+  which are zero before they are published
+  ([zeroing before publication](#page-ownership)), for a process. A table
+  leaves use only through `reset` and `clone_kernel_from`, whose plans zero
+  every table in use, so the tables not in use stay zero and those plans
+  need no `Zero` of them.
 - **Count.** A mapping needs the root, one level 2 table for each 1 GiB slot
   that it touches and one level 3 table for each 2 MiB slot that it maps
   in part, with pages. For the direct map, a level 3 table belongs to each
@@ -651,8 +671,9 @@ or the image covers in part, at most 4.
 - `kernel_map` and `direct_map` check every range and the tables that the
   whole plan needs before the first write: a map that does not fit fails
   with `OutOfTables` and leaves the set as it was, with no step executed.
-- `Tables::new` and `reset` check nothing and do not fail; `reset` relies
-  on its caller for the unreachability of the set.
+- `Tables::new` and `reset` check nothing and do not fail; `new` relies on
+  its caller for storage that is zero, and `reset` for the unreachability
+  of the set.
 - `choose`, `owner`, `validate`, `stats`, `lookup_page`, `lookup_block`,
   `used`, `descriptor` and `direct_address` write nothing.
 - `Ownership::new`, `assign`, `reserve`, `publish`, `cancel` and `release`
