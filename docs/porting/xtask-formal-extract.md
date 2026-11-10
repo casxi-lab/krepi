@@ -38,7 +38,9 @@ New in krepi are the types that `translation.json` is read into
 (`Translation`, `Function`, `Type`, `Source`, `Loop`), the request with its
 unit, `read_output`, which reads what Aeneas wrote before Aeneas is
 classified, the reading of the extraction configuration
-`verification/extraction.toml` (`Configuration`, `configuration`), and
+`verification/extraction.toml` (`Configuration`, `configuration`, which
+refuses features or `cfg` settings in either section, since the gate
+passes none to Cargo), and
 `package_problems` with `MANIFEST`, the check that the manifest of the
 qualification crate makes it a workspace of its own and holds only the
 tables and keys that do not change what Cargo compiles and that Charon
@@ -70,10 +72,10 @@ does not read. The commands run through the gate of
   Cargo compiles the package: none for the qualification crate, which is
   compiled for the host, and the extraction triple for a kernel target,
   which Charon passes to Cargo as `--target` after `--lib --locked`. It has
-  no `exclude`, and no `cargo_target`: the Cargo target directory is `target/` of the work
-  directory, removed when the two commands have ended, and a work directory
-  that already holds it is refused as one that holds `extract.llbc` or
-  `aeneas/` is.
+  no `exclude`, and no `cargo_target`: the Cargo target directory is
+  `target/` of the work directory, removed when the two commands have
+  ended, and a work directory that already holds it is refused as one that
+  holds `extract.llbc` or `aeneas/` is.
 - The generated namespace is that of the layout, `KrepiGen`, in place of
   the CAS project's.
 - `translation.json` is read with `serde` into `Translation`, with only the

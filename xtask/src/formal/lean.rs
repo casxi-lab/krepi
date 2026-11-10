@@ -1388,6 +1388,47 @@ mod tests {
     }
 
     #[test]
+    fn a_theorem_of_a_target_must_be_reported_in_a_proof_module_with_admitted_axioms() {
+        let modules = ["Krepi.Proofs.T".to_string()];
+        let reported = |module: &str, axioms: &[&str]| {
+            let axioms = Vec::from_iter(axioms.iter().map(|axiom| axiom.to_string()));
+            (module.to_string(), axioms)
+        };
+        let audit = Audit {
+            theorems: BTreeMap::from([
+                ("T.a".to_string(), reported("Krepi.Proofs.T", &["propext"])),
+                (
+                    "T.b".to_string(),
+                    reported("Krepi.Proofs.T", &["Krepi.T.ax"]),
+                ),
+                ("T.c".to_string(), reported("Krepi.Proofs.Other", &[])),
+            ]),
+            errors: BTreeMap::from([(9, vec!["error: in the audit file".to_string()])]),
+            ..Audit::default()
+        };
+        let names = ["T.a", "T.b", "T.c", "T.d"].map(String::from);
+        let theorems = Vec::from_iter(&names);
+        let problems = target_problems(&audit, &theorems, &modules, &Sources::default());
+        assert_eq!(
+            problems,
+            [
+                "error: in the audit file",
+                "T.b depends on Krepi.T.ax",
+                "the audit did not report T.c in a proof module",
+                "the audit did not report T.d in a proof module",
+            ]
+        );
+        // An axiom of the registry, such as a trusted axiom of the target,
+        // is admitted.
+        let sources = Sources {
+            registry: BTreeSet::from(["Krepi.T.ax".to_string()]),
+            ..Sources::default()
+        };
+        let problems = target_problems(&audit, &theorems[1..2], &modules, &sources);
+        assert_eq!(problems, ["error: in the audit file"]);
+    }
+
+    #[test]
     fn the_root_module_imports_every_module_below_both_namespaces() {
         let modules: BTreeSet<String> = [
             "KrepiGen.Qual.SingleLoop.Types",

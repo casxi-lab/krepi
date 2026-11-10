@@ -124,9 +124,10 @@ gate inputs, the home and temporary directories of the tools; in
 `cases/`, the extraction and the Lake stage of each qualification case; in
 `targets/<name>/`, the extraction of each target that the run extracts
 in `extract/` and its stage in `stage/`, with the root module and the
-audit file of a selected formal target; in `base/`, the stage of the base round with the root
-module `Krepi.lean` that the run writes, its audit file `Audit.lean` and
-its heartbeat copies in `.heartbeats/`, and `mktree`, the input of
+audit file of a selected formal target; in `base/`, the stage of the base
+round with the root module `Krepi.lean` that the run writes, its audit
+file `Audit.lean` and its heartbeat copies in `.heartbeats/`, and
+`mktree`, the input of
 `git mktree` for the statement hash of the round; and `mktree`, the same
 input for the guard phase. The
 root module is written only there, never in the checkout. Generated
@@ -1191,20 +1192,24 @@ theorems.
 ### Source rules
 
 The `lean` step of `cargo xtask check` reads each tracked `.lean` file
-below `verification/`, which must be a UTF-8 regular file, and
-`verification/tcb.json`, and the base round each such file of the
-snapshot, with the same rules. They read Lean's tokens: comments, string
-literals, raw string literals and character literals are skipped, but the
-`{}` parts of a string are read as code, as an interpolated string reads
-them, and a string that ends elsewhere when it is read as an interpolated
-string than when it is read as a plain one breaks a rule:
+below `verification/`, which must be a UTF-8 regular file, with the
+`tcb.json` of its Lake project: `verification/tcb.json`, or for a file of
+the Lake project of the [calibration target](#calibration-target), that
+project's own. The base round reads each such file of the snapshot in the
+Lake project of its layout, with the same rules. They read Lean's tokens:
+comments, string literals, raw string literals and character literals are
+skipped, but the `{}` parts of a string are read as code, as an
+interpolated string reads them, and a string that ends elsewhere when it
+is read as an interpolated string than when it is read as a plain one
+breaks a rule:
 
-- the file lies below `verification/Krepi/` or `verification/externals/`
+- the file lies below `Krepi/` of its Lake project, `verification/Krepi/`
+  or that of the calibration target, or below `verification/externals/`,
   and is a module file: its header starts with `module`;
 - `native_decide`, `bv_decide`, and the name `native`, which `decide`
   takes as an option, such as in `decide +native` or
   `decide (native := true)`, appear only in a file that a
-  `native-decision` item of `verification/tcb.json` names;
+  `native-decision` item of the `tcb.json` of its project names;
 - `axiom` appears only below `verification/externals/`;
 - a file of the statement side imports neither the root module `Krepi` nor
   a module below `Krepi.Proofs`

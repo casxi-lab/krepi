@@ -190,7 +190,7 @@ fn cli() -> clap::Command {
                     .help("Run only this target; may be repeated")
                     .action(ArgAction::Append)
                     .value_parser(NonEmptyStringValueParser::new()),
-                (Arg::new("calibration").long("calibration")).action(ArgAction::SetTrue),
+                clap::arg!(--calibration "Run in the layout of the calibration target"),
             ]),
         )
         .subcommand(guard::cli(about("guard")))
@@ -270,6 +270,15 @@ mod tests {
             let (_, matches) = matches.subcommand().expect("a subcommand");
             assert_eq!(matches.get_flag("calibration"), calibration);
         }
+        let mut run = cli()
+            .find_subcommand("run")
+            .cloned()
+            .expect("the run command");
+        let help = run.render_help().to_string();
+        assert!(
+            help.contains("Run in the layout of the calibration target"),
+            "{help}"
+        );
         assert_eq!(
             run_targets(&["run", "--target", "b", "--target", "a", "--target", "b"]),
             BTreeSet::from(["a".to_string(), "b".to_string()])

@@ -1556,6 +1556,88 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_target_is_rejected_for_each_problem_of_its_unit() {
+        // Each case gives the target `t` its `registry` entries, makes Lake
+        // run a `script` for a key and names the reason of `target/t`.
+        let theorem = "Krepi.Proofs.T.f_spec";
+        let types = "error: KrepiGen/T/Funs.lean:3:8: type mismatch";
+        let proofs = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
+        let other = "Krepi.Proofs.T.g_spec";
+        let trusted = serde_json::json!([{"name": "Krepi.Extra.ax", "reason": "Reviewed."}]);
+        let cases = [
+            (
+                serde_json::json!({}),
+                Some((
+                    "KrepiGen.T.Funs",
+                    fixture::failing("KrepiGen.T.Funs", &[types], 1),
+                )),
+                format!(
+                    "its generated definitions do not type-check: {types} | error: build failed"
+                ),
+            ),
+            (
+                serde_json::json!({}),
+                Some(("+Krepi", fixture::failing("Krepi.Proofs.T", &[proofs], 1))),
+                format!("the proofs do not build: {proofs} | error: build failed"),
+            ),
+            (
+                serde_json::json!({}),
+                Some(("audit", "exit 1\n".to_string())),
+                "the audit did not pass".to_string(),
+            ),
+            (
+                serde_json::json!({"obligations": [{"id": "f", "theorems": [other]}]}),
+                None,
+                format!("the audit did not report {other} in a proof module"),
+            ),
+            (
+                serde_json::json!({"obligations": [{"id": "f", "theorems": []}]}),
+                None,
+                "its obligations name no theorem".to_string(),
+            ),
+            (
+                serde_json::json!({"unconstrained": ["core::x"]}),
+                None,
+                "t: registered external item core::x is not reached".to_string(),
+            ),
+            (
+                serde_json::json!({}),
+                None,
+                format!("{theorem} depends on Krepi.Extra.ax"),
+            ),
+        ];
+        for (index, (entries, script, reason)) in cases.into_iter().enumerate() {
+            let mut registry: serde_json::Value =
+                serde_json::from_str(&two_targets(1_800, 1)).expect("JSON");
+            let target = registry[0].as_object_mut().expect("the target t");
+            target.extend(entries.as_object().expect("entries").clone());
+            let fixture = with_targets(&format!("rejected-{index}"), &registry.to_string());
+            if let Some((key, script)) = script {
+                fixture::lake_script(&fixture, key, &script);
+            }
+            // The audit reports an axiom that no source admits.
+            if index == 6 {
+                fixture.write(
+                    &format!("artifacts/lake/axioms/{theorem}"),
+                    "Krepi.Extra.ax",
+                );
+            }
+            let done = gate(&fixture, &[], target_run(&fixture, &[]));
+            assert_eq!(done.receipt.status, Status::Rejected, "{:?}", done.receipt);
+            let rejected = (Status::Rejected, Some(reason.as_str()));
+            assert_eq!(fixture::status(&done, "target/t"), rejected, "case {index}");
+            assert_eq!(done.receipt.proof_targets["t"].problems, [reason]);
+            // The axiom is the only problem until the target trusts it.
+            if index == 6 {
+                registry[0]["trusted_axioms"] = trusted.clone();
+                register(&fixture, &registry.to_string());
+                let done = gate(&fixture, &[], target_run(&fixture, &[]));
+                assert_eq!(fixture::status(&done, "target/t"), (Status::Verified, None));
+            }
+        }
+    }
+
+    #[test]
     fn a_target_that_outruns_its_budget_is_budget_and_its_receipt_is_written() {
         // The build of the proofs hangs after the extraction, whose seconds
         // the budget of the target has already spent.
@@ -1629,13 +1711,14 @@ pub(crate) mod tests {
             "{:?}",
             named.failures()
         );
-        let whole = gate(&fixture, &[], verified());
+        let whole = gate(&fixture, &[], target_run(&fixture, &[]));
         assert_eq!(
             whole.receipt.status,
             Status::Verified,
             "{:?}",
             whole.failures()
         );
+        assert!(whole.receipt.phases["extraction"].ran && whole.receipt.phases["targets"].ran);
         assert!(whole.receipt.targets.is_empty() && whole.receipt.proof_targets.is_empty());
         // `formal check` in the production layout reads its own registry
         // alone: a calibration registry that it would refuse changes nothing.

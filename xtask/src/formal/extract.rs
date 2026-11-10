@@ -1402,6 +1402,17 @@ mod tests {
             refused("\"aarch64-unknown-none\"", "\"x86_64-unknown-none\""),
             "[kernel] has the triple x86_64-unknown-none, not aarch64-unknown-none"
         );
+        // Nor does the gate pass them to the extraction of a kernel target.
+        let kernel = "\"aarch64-unknown-none\"\nfeatures = []\ncfg = []";
+        for list in [
+            "features = [\"x\"]\ncfg = []",
+            "features = []\ncfg = [\"x\"]",
+        ] {
+            assert_eq!(
+                refused(kernel, &format!("\"aarch64-unknown-none\"\n{list}")),
+                "[kernel] has features or cfg settings, which the gate does not pass"
+            );
+        }
         let unknown = refused("[kernel]\n", "[kernel]\ntarget = \"x\"\n");
         assert!(
             unknown.starts_with("not an extraction configuration: "),
