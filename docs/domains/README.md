@@ -22,7 +22,7 @@ each page that exists.
 | --- | --- | --- |
 | [Boot and platform](boot-platform/README.md) | `boot-platform` | Firmware handoff, EL1 entry, exception vectors, cache and TLB maintenance, device-tree parsing, physical memory ranges, QEMU virt and Pi 5 board support, interrupt controllers, PCIe and RP1 links, CPU errata, fault symbolization |
 | [Memory and address spaces](memory/README.md) | `memory` | Physical page ownership, page tables and the kernel direct map, ASIDs, VM objects and their kinds, user-buffer access, W^X and code publication, reclamation barriers |
-| Kernel objects and capabilities | `objects-capabilities` | The object table, boot-time capacities, generations, metadata quotas, write-set transactions, process and thread lifetimes, per-process capability tables, delegation and revocation |
+| [Kernel objects and capabilities](objects-capabilities/README.md) | `objects-capabilities` | The object table, boot-time capacities, generations, metadata quotas, write-set transactions, process and thread lifetimes, per-process capability tables, delegation and revocation |
 | IPC and waits | `ipc-waits` | Call, receive and reply, one-shot replies, capability transfer, shared buffers, notifications, timeouts, wait sets and futex-style waits |
 | Scheduling and budgets | `scheduling` | Priority classes, budgets and replenishment, preemption, synchronous budget lending, reserved control capacity, admission |
 | Multicore | `multicore` | Secondary CPU startup, per-CPU state, migration, cross-CPU IPC, waits and budgets, acknowledged TLB invalidation and reclamation, parallel jobs |

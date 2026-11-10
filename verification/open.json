@@ -299,6 +299,14 @@
       "contract": "docs/domains/memory/page-tables/contract.md"
     },
     {
+      "item": "kernel/arch/src/percpu.rs#enter_masked",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the SMP primitives and of the concurrency backend",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/objects/contract.md"
+    },
+    {
       "item": "kernel/arch/src/timer.rs",
       "kind": "code",
       "verified_state": "neither",
