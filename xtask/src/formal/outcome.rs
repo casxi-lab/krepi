@@ -390,7 +390,7 @@ pub(crate) mod conventions {
         vec![
             Row {
                 name: "timeout",
-                script: Some("exec sleep 86400"),
+                script: Some("exec sleep 30"),
                 limit: limit(SHORT, LimitBy::Cap),
                 ends: |ended| *ended == Ended::TimedOut,
                 sites: TOOLS,
@@ -399,7 +399,7 @@ pub(crate) mod conventions {
             },
             Row {
                 name: "timeout-at-budget",
-                script: Some("exec sleep 86400"),
+                script: Some("exec sleep 30"),
                 limit: limit(SHORT, LimitBy::Phase),
                 ends: |ended| *ended == Ended::TimedOut,
                 sites: TOOLS,

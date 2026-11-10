@@ -612,7 +612,7 @@ others are planned.
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
 | `cargo xtask formal run [--target NAME]...` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets. Its phases are, on a pull request, the [guard](#guard), which records its rules; the [qualification](#qualification) and the [base round](#base-round), which every run has; and, planned, every target (or the named ones) with its mutants |
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs and sources ([guard](#guard)) |
-| `cargo xtask formal check [--write]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`. It runs no tool and proves nothing |
+| `cargo xtask formal check [--write]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`. It runs no tool and proves nothing |
 | `cargo xtask formal receipt [--require-fresh]` (planned) | Says whether a receipt is current for the checkout: the same gate inputs and image, one conclusion for each unit, complete and `VERIFIED`; `--require-fresh` also requires a run of the whole gate from a clean checkout without planned statements |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its job fetched and built: `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from the outcomes of the steps of the job ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
@@ -635,7 +635,9 @@ inputs in `paths.rs`, the commands in `process.rs`, their classes and the
 statuses in `outcome.rs`, the receipt in `receipt.rs`, the extraction in
 `extract.rs`, the Lake stages, the source rules and the allowlist in
 `lean.rs`, the qualification in `qualify.rs`, the base round in `base.rs`,
-the statement side and the guard in `guard.rs`, and the run in `run.rs`.
+the statement side and the guard in `guard.rs`, the registry and its rules
+in `registry.rs`, the check of a target's registration against its
+extraction in `classify.rs`, and the run in `run.rs`.
 
 ### Gate inputs and snapshot
 
@@ -681,9 +683,18 @@ in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
    `cargo metadata --format-version 1 --locked --offline --all-features --manifest-path kernel/Cargo.toml`
    and rejects the run unless the workspace root is `kernel/` and every
    package is a member of it, with its manifest and the sources of its
-   targets inside `kernel/` once symbolic links are resolved, as the
-   `manifests` step requires of the checkout. A failure of Cargo itself is
-   a tool failure.
+   targets inside `kernel/` once symbolic links are resolved, and the root
+   manifest `kernel/Cargo.toml` has the shape of the
+   [source layout](architecture.md#source-layout), as the `manifests` step
+   requires of the checkout. A failure of Cargo itself is a tool failure.
+   The run is also rejected when it is to extract kernel targets and
+   `kernel/Cargo.toml` has no `[package]` named `krepi-kernel`, the root
+   package that kernel targets are extracted from. The phase that extracts
+   the targets is planned; the targets of a run are every formal target of
+   the registry for a whole run, and those that `--target` names, planned
+   ones included, for a run with `--target`. A whole run whose registry has
+   no formal target has none: it only qualifies the tools and runs the base
+   round, and the workspace may then have no root package.
 
 A tool failure in one of these steps ends them: the later steps do not run.
 A rule that rejects the run in step 4 does not. Every later step reads the
@@ -1623,14 +1634,19 @@ or commit instead of cancelling it.
 
 ## Proof targets
 
-Each entry of `targets.json` under `targets` describes one extraction and its
-obligations. The fields are those of the CAS project:
+`targets.json` has schema 2. Each entry under `targets` describes one
+extraction and its obligations. The fields are those of the CAS project,
+with the state and the budget of a target added and a cut point written as
+an object; a field that the table does not list is refused:
 
 | Field | Meaning |
 | --- | --- |
 | `name`, `module`, `feature` | Target name, generated Lean namespace, feature ID (`krepi.<area>.<feature>`) |
+| `state` | `formal`, the default, for a target that the gate verifies, or `planned` for one that it only extracts and type-checks; a run of the whole gate selects the formal targets, and a planned one runs when `--target` names it |
+| `budget` | The seconds that the unit of the target may take, 1,800 when the field is left out |
 | `description` | What the target proves, in one paragraph |
-| `start_from`, `opaque`, `exclude` | Charon roots and cut points; `cargo xtask formal check` refuses `exclude`, which the gate does not support |
+| `start_from`, `exclude` | Charon roots and cut points by exclusion; `cargo xtask formal check` refuses `exclude`, which the gate does not support |
+| `opaque` | The cut points: items translated without their bodies, each an object with the Charon `pattern`, the `source` where the items are and the `reason`. A cut item is modelled as a deterministic function of its arguments, so the reason states that no statement depends on two calls with the same arguments agreeing, as a function that reads hardware or global state would not |
 | `proves` | Inventory keys (`file#Owner::name`) of local functions whose every path the obligations cover |
 | `unclosed` | Inventory keys of local functions the extraction reaches, translated or cut, that are not proved |
 | `derived` | Reached methods that a `#[derive(..)]` attribute defines; they have no source text and stay unverified |
@@ -1638,12 +1654,55 @@ obligations. The fields are those of the CAS project:
 | `models` | Optional directory of reviewed external declarations installed in place of the generated templates |
 | `trusted_axioms` | Further axioms the theorems may use, each with a reviewed reason |
 | `premises` | Hypotheses that restate, over this target's generated types, a registered theorem of another target about a function this target cuts; `cargo xtask formal check` refuses non-empty `premises`, which the gate does not check yet |
-| `proof_modules`, `obligations` | Lean modules, and the statements with the theorems that establish them |
-| `mutants` | Source edits, each of which must make a named theorem fail |
+| `proof_modules`, `obligations` | Lean modules, and the statements, each with its `id`, `statement` and the `theorems` that establish it |
+| `mutants` | Source edits, each with its `name`, the `file`, the text `find`, which occurs once in the file, its `replace` and the theorems `fails`, one of which the edit must make fail |
+
+`cargo xtask formal check` applies the rules of the registry without running
+a tool, and each broken rule is a problem:
+
+- no two targets have the same name or module, and no theorem is registered
+  twice, by the obligations of one target or of two, or by a target and a
+  specification;
+- a formal target has at least one obligation and at least one mutant, and
+  every obligation has at least one theorem; a planned target needs neither
+  an obligation nor a mutant;
+- every mutant names at least one theorem in `fails`, each a theorem of an
+  obligation of its own target, and no target registers more than 30
+  mutants;
+- no key is in two of `proves`, `unclosed` and `derived`;
+- every cut point and every axiom of `verification/axioms.json` has a
+  `source` and a `reason` that are not blank;
+- every key of `proves` and `unclosed` is a production function of the
+  [inventory](#legacy-inventory-and-admission), and every entry of
+  `derived` is a key `file#Type::method` of a method that a
+  `#[derive(..)]` of a production type in the file defines, not a
+  production function.
 
 A run extracts the target from the current production source and checks the
-registry against the translation: every reached local function is in `proves`
-or `unclosed`, every external item in `unconstrained`, and no entry is stale.
+registry against the translation (planned): every reached local function is
+in `proves`, `unclosed` or `derived`, every cut local item in `unclosed`,
+where a cut derived method may be in `derived` instead, and the reached
+external items are exactly those of `unconstrained`; every entry of these
+lists is still reached, and a `derived` entry is reached as a method of a
+derived implementation of a standard trait, under one Rust name. A Rust name
+maps to the inventory key of its function: the path below the module of its
+source file, `krepi_kernel::m::inner::f` in the file of `m` for `inner::f`,
+gives the inline modules; the self type of an implementation,
+`{impl Trait for krepi_kernel::m::Type}`, the owner; and the loops of a
+function, whose Rust name is that of the function, map to its key, as the
+default method of a trait and its loops map to `Trait::method`. A reached
+function that maps to no function of the inventory is not registered, so the
+run fails: the body of a closure, which has a function of its own (rule R4 of
+the [provable subset](conventions/provable-subset.md)), a loop that the tools
+place in a file outside the package, such as that of a macro, a function in
+the body of another, and a method whose key is both that of a function of
+the inventory and that of a derived method, as the `eq` of a type that
+derives `PartialEq` and also implements `PartialEq<u32>` by hand, which the
+key cannot tell apart. A key that the inventory numbers, as `#2` and `#3`
+for the second and third method of trait implementations with one key in a
+file, is ambiguous too: a Rust name does not say which number is its own,
+so every reached method of that key fails as not registered, even where
+only one of them is reached.
 It builds the generated definitions and the proof modules with warnings as
 errors, so `sorry` fails, and audits every registered theorem with
 `#print axioms`. The axioms that its theorems may use are those of the
@@ -2138,6 +2197,8 @@ there is any:
   latest stage is the release after the one in work, and it rises by one
   release when work on the next release begins;
 - a committed `open.json` that differs from what the contracts give;
+- a broken rule of the registry ([proof targets](#proof-targets)), such as
+  a key of a target that is no production function of the inventory;
 - what the gate does not support yet: non-empty `premises` of a target, an
   `exclude` cut point and a model in `verification/models.json`.
 

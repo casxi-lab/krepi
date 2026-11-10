@@ -105,10 +105,14 @@ None: the inventory reads text on the host.
   `tests::digests_ignore_layout_but_not_content` (lines 617 to 623): the
   inventory parses with `syn`, and `verification/legacy.json` records no
   digest.
-- `key_for_rust_name`, `key_for_translated` and `is_derived_name`
-  (lines 491 to 567), with the tests `tests::derived_names_are_recognised`
-  (lines 692 to 709), `tests::aeneas_names_map_to_keys` (lines 813 to 829)
-  and the half of `tests::default_methods_map_to_the_scanned_key` that maps
-  translated names (lines 716 to 780): they map the names of the
-  translation to keys, which the check of the registry against the
-  extraction results (planned) needs.
+- `key_for_rust_name`, `key_for_translated`, `is_default_method` and
+  `is_derived_name` (lines 491 to 567), with the tests
+  `tests::derived_names_are_recognised` (lines 692 to 709),
+  `tests::aeneas_names_map_to_keys` (lines 813 to 829) and the half of
+  `tests::default_methods_map_to_the_scanned_key` that maps translated names
+  (lines 716 to 780): they map the names of the translation to keys for the
+  check of a target's registration against its extraction, and are taken
+  into `xtask/src/formal/classify.rs`
+  ([porting record](xtask-formal-classify.md)). For that mapping the
+  inventory records the module of each production file below the root of
+  its crate, which is new code.

@@ -726,7 +726,7 @@ esac"#;
             "{error}"
         );
         // A command that hangs is stopped at the end of the budget.
-        lake(&fixture, "[ $1 = build ] && exec sleep 100");
+        lake(&fixture, "[ $1 = build ] && exec sleep 30");
         let error = compared(Instant::now() + Duration::from_secs(1)).expect_err("a hang");
         assert!(
             error.starts_with("build ran longer than its limit of "),

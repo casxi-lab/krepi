@@ -1,6 +1,6 @@
 //! A Git repository that holds the gate inputs in a minimal form, for the
 //! tests of `cargo xtask formal run`: a kernel workspace with one crate and
-//! its `Cargo.lock`, a target registry with the target `demo`, the committed
+//! its `Cargo.lock`, a target registry without targets, the committed
 //! tool manifest with the installation at `artifacts/formal/tools`, which
 //! holds only scripts that start the Cargo and `rustc` of the build, the
 //! fake tools that a test installs and the version manifest of the pinned
@@ -70,7 +70,7 @@ impl Fixture {
         fixture.lock();
         fixture.write(
             "verification/targets.json",
-            "{\"schema\": 1, \"specifications\": [], \"targets\": [{\"name\": \"demo\"}]}\n",
+            "{\"schema\": 2, \"specifications\": [], \"targets\": []}\n",
         );
         let local = MANIFEST.replace(
             "\"prefix\": \"/opt/krepi-formal\"",

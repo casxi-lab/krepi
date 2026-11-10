@@ -366,11 +366,11 @@ pub(super) mod tests {
         }
     }
 
-    /// A step `name` that starts a sleep of 600 s as a grandchild, writes the
+    /// A step `name` that starts a sleep of 240 s as a grandchild, writes the
     /// number of its process group to `<name>.pgid` in the working
     /// directory and waits; only a kill ends it before the sleep.
     pub(in crate::check) fn sleeper(name: &'static str, lane: Lane) -> Step {
-        let script = format!("sleep 600 & echo $$ > {name}.new && mv {name}.new {name}.pgid; wait");
+        let script = format!("sleep 240 & echo $$ > {name}.new && mv {name}.new {name}.pgid; wait");
         shell(name, lane, script)
     }
 
@@ -432,7 +432,7 @@ pub(super) mod tests {
             assert_eq!(probe(group(scratch, name)), Some(libc::ESRCH), "{name}");
         }
         let after = run.elapsed - (failed.offset.expect("the step ran") + failed.duration);
-        // Only a check that waited for a sleeper of 600 s takes longer.
+        // Only a check that waited for a sleeper of 240 s takes longer.
         assert!(after < Duration::from_secs(10), "{after:?}");
         // The log of the failed step holds its command line.
         let log = fs::read_to_string(scratch.0.join("logs").join(format!(

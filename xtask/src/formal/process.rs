@@ -468,7 +468,7 @@ pub(crate) mod tests {
     #[test]
     fn no_process_of_the_group_survives_a_timeout() {
         let scratch = Scratch::new("group-timeout");
-        let ran = shell(&scratch, "sleep 86400 & sleep 86400", SHORT);
+        let ran = shell(&scratch, "sleep 30 & sleep 30", SHORT);
         assert_eq!(ran.ended, Ended::TimedOut);
         assert!(!ran.survivors);
         let group = ran.group.expect("the command started");
@@ -478,7 +478,7 @@ pub(crate) mod tests {
     #[test]
     fn the_group_is_killed_when_its_leader_exits() {
         let scratch = Scratch::new("group-exit");
-        let ran = shell(&scratch, "sleep 86400 & exit 0", LONG);
+        let ran = shell(&scratch, "sleep 30 & exit 0", LONG);
         assert_eq!(ran.ended, Ended::Exited(0));
         assert!(!ran.survivors);
         let group = ran.group.expect("the command started");

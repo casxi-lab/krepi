@@ -8,6 +8,7 @@
 
 pub mod base;
 pub mod canary;
+pub mod classify;
 pub mod extract;
 #[cfg(test)]
 mod fixture;
@@ -39,6 +40,9 @@ pub struct Layout {
     /// The kernel workspace, the input of extraction, relative to the
     /// repository root.
     pub kernel: &'static str,
+    /// The root package of the kernel workspace, from which the kernel
+    /// targets are extracted.
+    pub package: &'static str,
     /// The qualification crate, an input of extraction, relative to the
     /// repository root.
     pub qualification: &'static str,
@@ -89,6 +93,7 @@ impl Layout {
     /// The layout of the production kernel.
     pub const PRODUCTION: Layout = Layout {
         kernel: crate::manifests::KERNEL,
+        package: crate::manifests::KERNEL_PACKAGE,
         qualification: "verification/qualification",
         cases: "verification/qualification/cases.json",
         extraction: "verification/extraction.toml",
@@ -129,7 +134,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "check",
-        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, and that the registries hold nothing that the gate does not support; --write first writes the file",
+        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, that the target registry and verification/axioms.json keep their rules, with every key of a target in the inventory, and that the registries hold nothing that the gate does not support; --write first writes the file",
         subcommands: &[],
     },
     Command {

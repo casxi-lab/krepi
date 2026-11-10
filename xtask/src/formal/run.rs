@@ -3,7 +3,7 @@
 //! `docs/formal-verification.md` describes. Every command runs through
 //! [`Gate::command`], which limits, classifies, records and prints it.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env::consts::{ARCH, OS};
 use std::fs;
 use std::io::{self, Write};
@@ -546,31 +546,55 @@ fn export_and_check(
             return Err(format!("image: {}", problems.join("; ")));
         }
     }
-    let names = fs::read_to_string(source.join(registry))
+    let states = fs::read_to_string(source.join(registry))
         .map_err(|error| error.to_string())
-        .and_then(|text| registry::target_names(&text))
+        .and_then(|text| registry::states(&text))
         .map_err(|error| format!("cannot read {registry}: {error}"))?;
     let targets = &gate.receipt.targets;
     let unknown: Vec<&str> = (targets.iter())
-        .filter(|target| !names.contains(*target))
+        .filter(|target| !states.contains_key(*target))
         .map(String::as_str)
         .collect();
     if !unknown.is_empty() {
         let unknown = unknown.join(", ");
         return Err(format!("{registry} registers no target named {unknown}"));
     }
+    let extracts = !selected(&states, targets).is_empty();
     for problem in paths::rejected(&files, &gate.layout) {
         gate.fail(Status::Rejected, problem);
     }
-    check_kernel(gate, &source, &files)
+    check_kernel(gate, &source, &files, extracts)
+}
+
+/// The targets that a run of `named` targets selects: those, or every
+/// formal target of the registry when it names none, for a planned target
+/// runs only when it is named.
+fn selected<'a>(
+    states: &'a BTreeMap<String, registry::State>,
+    named: &'a [String],
+) -> Vec<&'a str> {
+    let formal = |(name, state): (&'a String, &registry::State)| {
+        (*state == registry::State::Formal).then_some(name.as_str())
+    };
+    match named {
+        [] => states.iter().filter_map(formal).collect(),
+        named => named.iter().map(String::as_str).collect(),
+    }
 }
 
 /// Checks the exported kernel workspace: that Cargo reads no Cargo
 /// configuration but the snapshot's, which is a file, in the export and in
 /// the checkout root when it has the same bytes there; that its path
-/// dependencies stay inside it; and, with Cargo resolving it offline, that
-/// its packages are its members inside it.
-fn check_kernel(gate: &mut Gate, source: &Path, files: &Files) -> Result<(), String> {
+/// dependencies stay inside it; with Cargo resolving it offline, that its
+/// packages are its members inside it and its root manifest has its shape;
+/// and, when the run `extracts` kernel targets, that the workspace has the
+/// root package that they are extracted from.
+fn check_kernel(
+    gate: &mut Gate,
+    source: &Path,
+    files: &Files,
+    extracts: bool,
+) -> Result<(), String> {
     let resolved = |path: &Path| {
         fs::canonicalize(path)
             .map_err(|error| format!("cannot resolve {}: {error}", path.display()))
@@ -621,6 +645,19 @@ fn check_kernel(gate: &mut Gate, source: &Path, files: &Files) -> Result<(), Str
     let kernel = source.join(gate.layout.kernel);
     for problem in manifests::check_kernel_metadata(&metadata, &kernel) {
         gate.fail(Status::Rejected, problem);
+    }
+    let path = format!("{}/Cargo.toml", gate.layout.kernel);
+    let root = fs::read_to_string(source.join(&path))
+        .map_err(|error| format!("cannot read {path}: {error}"))?;
+    let package = manifests::root_package(&root).map_err(|error| format!("{path}: {error}"))?;
+    if extracts && package.as_deref() != Some(gate.layout.package) {
+        gate.fail(
+            Status::Rejected,
+            format!(
+                "the run extracts kernel targets, and {path} has no [package] named {}, the root package that they are extracted from",
+                gate.layout.package
+            ),
+        );
     }
     Ok(())
 }
@@ -924,7 +961,7 @@ pub(crate) mod tests {
     fn a_hanging_command_is_stopped_at_its_phase_budget_and_the_receipt_is_written() {
         let fixture = Fixture::new("hang");
         let phases = vec![phase("base", Duration::from_secs(1), &["base"], |run| {
-            shell(run, "base", "exec sleep 86400");
+            shell(run, "base", "exec sleep 30");
             run.conclude("base", (Status::Verified, None));
             Ok(())
         })];
@@ -1044,9 +1081,116 @@ pub(crate) mod tests {
         );
     }
 
+    /// The failure of a run that extracts kernel targets from a kernel
+    /// workspace without its root package.
+    const NO_ROOT_PACKAGE: &str = "the run extracts kernel targets, and kernel/Cargo.toml has no [package] named krepi-kernel, the root package that they are extracted from";
+
+    /// Gives the kernel workspace of `fixture` the root package `name`, whose
+    /// manifest ends with `extra`, and commits it.
+    fn root_package(fixture: &Fixture, name: &str, extra: &str) {
+        fixture.write(
+            "kernel/Cargo.toml",
+            &format!(
+                "[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n\
+                 [workspace]\nresolver = \"3\"\nmembers = [\"abi\"]\n\n\
+                 [lints.rust]\nunsafe_code = \"forbid\"\n{extra}"
+            ),
+        );
+        fixture.write("kernel/src/lib.rs", "#![no_std]\n");
+        fixture.lock();
+        fixture.commit_all();
+    }
+
+    /// Registers the targets `targets`, a JSON list, in `fixture` and
+    /// commits them.
+    fn register(fixture: &Fixture, targets: &str) {
+        fixture.write(
+            "verification/targets.json",
+            &format!("{{\"schema\": 2, \"specifications\": [], \"targets\": {targets}}}\n"),
+        );
+        fixture.commit_all();
+    }
+
+    /// A phase that concludes its unit `base` as verified.
+    fn verified() -> Vec<Phase<'static>> {
+        vec![phase("base", LONG, &["base"], |run| {
+            run.conclude("base", (Status::Verified, None));
+            Ok(())
+        })]
+    }
+
+    #[test]
+    fn a_run_that_extracts_kernel_targets_needs_the_root_package() {
+        // A whole run selects every formal target, and the kernel workspace
+        // of the fixture is virtual.
+        let fixture = Fixture::new("no-root");
+        register(&fixture, r#"[{"name": "demo"}]"#);
+        let done = gate(&fixture, &[], verified());
+        assert_eq!(done.code, ExitCode::FAILURE);
+        assert_eq!(done.written().status, Status::Rejected);
+        assert!(!done.receipt.complete);
+        assert_eq!(done.failures(), [NO_ROOT_PACKAGE]);
+        assert!(!done.receipt.phases["base"].ran);
+        assert_eq!(done.receipt.units["base"].status, Status::NotRun);
+        // A root package of another name is no root package either.
+        root_package(&fixture, "kernel", "");
+        let done = gate(&fixture, &[], Vec::new());
+        assert_eq!(done.receipt.status, Status::Rejected);
+        assert_eq!(
+            done.failures(),
+            [
+                "kernel/Cargo.toml: the root package is named `kernel`, not `krepi-kernel`",
+                NO_ROOT_PACKAGE
+            ]
+        );
+    }
+
+    #[test]
+    fn a_run_that_extracts_no_kernel_target_needs_no_root_package() {
+        // The registry is empty: the run only has the phases of the tools
+        // and of krepi's own Lean.
+        let fixture = Fixture::new("no-kernel-target");
+        let done = gate(&fixture, &[], verified());
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(done.written().status, Status::Verified);
+        assert!(done.receipt.complete);
+        assert_eq!(done.receipt.units["base"].status, Status::Verified);
+    }
+
+    #[test]
+    fn a_whole_run_does_not_select_a_planned_target() {
+        let fixture = Fixture::new("planned");
+        register(&fixture, r#"[{"name": "demo", "state": "planned"}]"#);
+        let done = gate(&fixture, &[], Vec::new());
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        assert_eq!(done.receipt.targets, Vec::<String>::new());
+        // A run that names it extracts it.
+        let done = gate(&fixture, &["demo"], Vec::new());
+        assert_eq!(done.receipt.status, Status::Rejected);
+        assert_eq!(done.failures(), [NO_ROOT_PACKAGE]);
+    }
+
+    #[test]
+    fn a_root_manifest_out_of_shape_rejects_the_run_as_it_fails_the_manifests_step() {
+        let fixture = Fixture::new("shape");
+        root_package(&fixture, "krepi-kernel", "\n[profile.dev]\nopt-level = 1\n");
+        let problem = "kernel/Cargo.toml: the root manifest may not have profile.dev";
+        let done = gate(&fixture, &[], Vec::new());
+        assert_eq!(done.written().status, Status::Rejected);
+        assert_eq!(done.failures(), [problem]);
+        assert_eq!(manifests::check_kernel_workspace(fixture.root()), [problem]);
+    }
+
     #[test]
     fn a_run_of_named_targets_is_scoped_and_not_complete() {
         let fixture = Fixture::new("scoped");
+        register(&fixture, r#"[{"name": "demo"}]"#);
+        root_package(&fixture, "krepi-kernel", "");
         let done = gate(&fixture, &["demo"], Vec::new());
         assert_eq!(done.code, ExitCode::SUCCESS);
         let receipt = done.written();
@@ -1259,7 +1403,7 @@ pub(crate) mod tests {
             let root = PathBuf::from(root);
             let group = root.join("artifacts/group");
             let script = format!(
-                "sleep 86400 & echo $$ > {0}.new && mv {0}.new {0}; wait",
+                "sleep 240 & echo $$ > {0}.new && mv {0}.new {0}; wait",
                 group.display()
             );
             let phases = vec![phase("base", LONG, &["u1"], |run| {

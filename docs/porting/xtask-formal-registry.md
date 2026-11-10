@@ -23,11 +23,19 @@ License as part of krepi, as the
 [porting conventions](../conventions/porting.md#licensing-of-ported-code)
 state for the tooling taken from the CAS project.
 
-The rest of `xtask/src/formal/registry.rs` is new code: the names of the
-targets that `verification/targets.json` registers, the inventory keys that
-they prove or leave unclosed, and the refusal of what the gate does not
-support yet, which `cargo xtask formal check` reports: premises, `exclude`
-cut points and the models of `verification/models.json`.
+The rest of `xtask/src/formal/registry.rs` is new code: the targets and
+specifications of `verification/targets.json` in its schema 2, with the
+state and budget of a target and its cut points as objects; the static rules
+of the registry and of `verification/axioms.json`; and the refusal of what
+the gate does not support yet. `cargo xtask formal check` reports both:
+the rules ([proof targets](../formal-verification.md#proof-targets)), and
+premises, `exclude` cut points and the models of
+`verification/models.json`. The rules cover those that the CAS project
+applied while it read its registry, such as unique names and modules, a
+theorem registered once, an obligation and a mutant for every target and
+disjoint lists, and add the planned state, the sources and reasons of cut
+points and library axioms, and the bound on the mutants of a target; they
+report every problem rather than stopping at the first.
 
 ## Changes
 
@@ -69,5 +77,5 @@ None: the function reads text on the host.
   (lines 16 to 342), with the test
   `tests::specifications_must_exist_below_the_namespace_with_their_theorems`
   (lines 404 to 423): they read the registry of the CAS project, whose
-  schema is not krepi's. The phases that read the specifications and the
-  targets of krepi's registry read them for its own schema.
+  schema is not krepi's. krepi's registry is read into types of its own
+  schema, written anew.
