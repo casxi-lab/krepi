@@ -29,7 +29,10 @@ acknowledges TLB invalidation across them; the devices and DMA domain gives
 EL0 drivers authority over devices and delivers their interrupts; the
 security and lifecycle domain decides which images a board may boot. The
 [boot](boot/requirements.md) component holds the cold entry, the processor
-primitives and the QEMU virt board support with its console.
+primitives and the QEMU virt board support with its console. The
+[fdt](fdt/requirements.md) component holds the bounded parsing of the
+device tree, the discovery of memory and CPUs from it and the boot memory
+map that the memory domain takes.
 
 ## Conventions
 
@@ -59,8 +62,8 @@ primitives and the QEMU virt board support with its console.
 | [EL1 entry](#el1-entry) | From the ELF entry point to Rust at EL1 on the boot CPU, with the entry state checked | [QEMU virt boot](../../features/platform/qemu-virt-boot.md) | [boot](boot/requirements.md) |
 | [Exception vectors](#exception-vectors) | The vector table of EL1, the exception frame, its save and restore, and the report of an exception | [QEMU virt boot](../../features/platform/qemu-virt-boot.md) | [boot](boot/requirements.md) |
 | [Cache and TLB maintenance](#cache-and-tlb-maintenance) | Cleaning and invalidating caches by address, TLB invalidation with its barriers and the publication of code, by the executing CPU | [QEMU virt boot](../../features/platform/qemu-virt-boot.md) | [boot](boot/requirements.md) |
-| [Device-tree parsing](#device-tree-parsing) | Bounded parsing of the flattened device tree that the firmware hands over | - | The device-tree parser |
-| [Physical memory ranges](#physical-memory-ranges) | The banks of RAM and the reserved ranges, from the device tree and the image | - | The boot memory map |
+| [Device-tree parsing](#device-tree-parsing) | Bounded parsing of the flattened device tree that the firmware hands over | - | [fdt](fdt/requirements.md) |
+| [Physical memory ranges](#physical-memory-ranges) | The banks of RAM and the reserved ranges, from the device tree and the image | - | [fdt](fdt/requirements.md) |
 | [QEMU virt and Pi 5 board support](#qemu-virt-and-pi-5-board-support) | The constants and bring-up of each board, its serial console and its image | [QEMU virt boot](../../features/platform/qemu-virt-boot.md) | [boot](boot/requirements.md) |
 | [Interrupt controllers](#interrupt-controllers) | The GICv2 of QEMU virt and the GIC-400 of the Pi 5: configuration, acknowledgement and end of interrupt | [QEMU virt boot](../../features/platform/qemu-virt-boot.md) | [boot](boot/requirements.md) |
 | [PCIe and RP1 links](#pcie-and-rp1-links) | The bring-up of the PCIe link to RP1 and the baseline that EL0 drivers receive | - | The PCIe and RP1 bring-up |
@@ -256,10 +259,13 @@ with the caches on is shown on the Pi 5.
 
 **Description.** The kernel parses the flattened device tree that the
 firmware hands over, within fixed bounds on its size, depth, property count
-and string lengths. It finds the memory nodes, the reserved ranges, the CPU
-nodes with their enable method and the devices that boot code needs, and it
-rejects a tree that breaks the format or a bound. It does not apply
-overlays or change the tree.
+and string lengths. It gives bounded access to the nodes and properties of
+the tree, the memory nodes, the reserved ranges, the CPU nodes with their
+enable method and the translation of addresses, and it rejects a tree that
+breaks the format or a bound. The bindings of the Pi 5 devices, such as
+its interrupt controller, its device windows, PCIe and RP1, are not part of
+the fdt component: the components that use them read them through its
+node access. It does not apply overlays or change the tree.
 
 **Design background.** The format is that of the Devicetree Specification.
 The device tree that the Pi 5 firmware ships (firmware commit `0162538`,
@@ -276,7 +282,8 @@ multicore domain and device discovery in the devices and DMA domain.
 **Interface.** A parse of the tree at the handed address, which yields its
 nodes and properties or an error that names the broken rule.
 
-**Prerequisites.** [Firmware handoff](#firmware-handoff).
+**Prerequisites.** [Firmware handoff](#firmware-handoff); the
+[fdt](fdt/contract.md) component.
 
 **Engineering notes.** Every loop over the tree has a bound, and every
 offset is checked before it is read. The tree is read with the MMU off or
@@ -290,8 +297,11 @@ specification.
 
 **Description.** From the memory nodes, the reserved ranges, the image and
 the device tree itself, the kernel builds the list of usable RAM ranges and
-of the ranges that it must not hand out. Ranges are page aligned, sorted and
-disjoint. It does not allocate pages: the memory domain owns them.
+of the ranges that it must not hand out. The usable ranges are page
+aligned, sorted and disjoint; each range that must not be handed out is
+rounded outward to whole pages and kept in input order, and firmware
+reservations may overlap each other. It does not allocate pages: the memory
+domain owns them.
 
 **Design background.** On the Pi 5 the memory node of the device tree that
 Raspberry Pi ships is a placeholder of 640 MiB, which the firmware replaces;
@@ -303,10 +313,14 @@ has one bank at `0x4000_0000`.
 **Consumers.** The physical page ownership and the kernel direct map of the
 memory domain.
 
-**Interface.** The list of usable and reserved ranges, or an error for
-overlapping or misaligned input.
+**Interface.** The list of usable and reserved ranges, or an error that
+names the broken rule, such as overlapping RAM banks, boot storage that
+shares a page with other boot storage or with a firmware reservation, or
+RAM beyond the capacities; a misaligned reserved range is rounded outward,
+not refused.
 
-**Prerequisites.** [Device-tree parsing](#device-tree-parsing).
+**Prerequisites.** [Device-tree parsing](#device-tree-parsing); the
+[fdt](fdt/contract.md#boot-memory-map) component.
 
 **Engineering notes.** The image, its stack, the device tree and every
 reserved range stay out of the usable ranges. The list has a fixed capacity
