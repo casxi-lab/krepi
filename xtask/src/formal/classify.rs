@@ -130,8 +130,8 @@ fn classify_items(
     let mut problems = Vec::new();
     let name = &target.name;
     // A derived entry stands for one derived method: a key that several Rust
-    // names reach, such as a derived method and a hand-written one of a type
-    // of the same name in an inline module, is not accepted.
+    // names reach, such as the derived `eq` of a type and a hand-written one
+    // of its implementation of `PartialEq` for another type, is not accepted.
     for key in &target.derived {
         let reached: BTreeSet<&String> = transparent
             .get(key)
@@ -366,11 +366,11 @@ pub fn derived_problems(target: &Target, inventory: &Inventory) -> Vec<String> {
 mod tests {
     //! The translations of `fixtures/classify/` are what the pinned Charon
     //! and Aeneas wrote, with the arguments of the extraction of a
-    //! qualification case, on `darwin-arm64` for three modules of the
-    //! crate whose sources are in `fixtures/classify/src/`: `registration`,
+    //! qualification case, on `darwin-arm64` for four modules of the crate
+    //! whose sources are in `fixtures/classify/src/`: `registration`,
     //! extracted with `--opaque crate::registration::hardware::read`,
-    //! `closure` and `scan`. The tests place the crate at `kernel/`, as the
-    //! root package of the kernel workspace.
+    //! `names`, `closure` and `scan`. The tests place the crate at
+    //! `kernel/`, as the root package of the kernel workspace.
 
     use std::path::PathBuf;
 
@@ -385,7 +385,7 @@ mod tests {
     const PACKAGE: &str = "kernel";
 
     /// The sources of the crate, below [`PACKAGE`].
-    const SOURCES: [(&str, &str); 4] = [
+    const SOURCES: [(&str, &str); 5] = [
         (
             "kernel/src/lib.rs",
             include_str!("fixtures/classify/src/lib.rs"),
@@ -393,6 +393,10 @@ mod tests {
         (
             "kernel/src/registration.rs",
             include_str!("fixtures/classify/src/registration.rs"),
+        ),
+        (
+            "kernel/src/names.rs",
+            include_str!("fixtures/classify/src/names.rs"),
         ),
         (
             "kernel/src/closure.rs",
@@ -405,11 +409,15 @@ mod tests {
     ];
 
     const REGISTRATION: &str = include_str!("fixtures/classify/registration/translation.json");
+    const NAMES: &str = include_str!("fixtures/classify/names/translation.json");
     const CLOSURE: &str = include_str!("fixtures/classify/closure/translation.json");
     const SCAN: &str = include_str!("fixtures/classify/scan/translation.json");
 
     /// The file of the registration module.
     const FILE: &str = "kernel/src/registration.rs";
+
+    /// The file of the names module.
+    const NAMES_FILE: &str = "kernel/src/names.rs";
 
     /// The inventory of the crate.
     fn crate_inventory() -> Inventory {
@@ -485,10 +493,10 @@ mod tests {
 
     #[test]
     fn default_and_derived_methods_are_classified() {
-        let extraction = extraction("Registration", REGISTRATION);
+        let registered = extraction("Registration", REGISTRATION);
         let (problems, found) = classify(
             &target(registration()),
-            &extraction,
+            &registered,
             PACKAGE,
             &crate_inventory(),
         );
@@ -512,6 +520,54 @@ mod tests {
         let mut external: Vec<String> = serde_json::from_value(unconstrained).expect("names");
         external.sort();
         assert_eq!(found.external, external);
+
+        // The derived `eq` of `Wrapper` and the hand-written `eq` of its
+        // `PartialEq<u32>` have the same key, which a derived entry refuses.
+        let names = |names: &[&str]| -> Vec<String> {
+            (names.iter())
+                .map(|name| format!("{NAMES_FILE}#{name}"))
+                .collect()
+        };
+        let proved = names(&[
+            "Count::default",
+            "Count::twice",
+            "Wrapper::count",
+            "Wrapper::get",
+            "default",
+            "equal",
+        ]);
+        let eq = format!("{NAMES_FILE}#Wrapper::eq");
+        let inventory = crate_inventory();
+        let check = |fields: Value, translation: &str| {
+            let extraction = extraction("Names", translation);
+            classify(&target(fields), &extraction, PACKAGE, &inventory)
+        };
+        let derived = json!({"proves": proved, "derived": [eq]});
+        let expected = format!(
+            "reg: derived entry {eq} is reached under several Rust names: \
+             registration_fixture::names::{{impl core::cmp::PartialEq<registration_fixture::names::Wrapper<T>> for registration_fixture::names::Wrapper<T>}}::eq, \
+             registration_fixture::names::{{impl core::cmp::PartialEq<u32> for registration_fixture::names::Wrapper<u32>}}::eq"
+        );
+        let (problems, found) = check(derived.clone(), NAMES);
+        assert_eq!(problems, std::slice::from_ref(&expected));
+        let mut keys = [proved.clone(), vec![eq.clone()]].concat();
+        keys.sort();
+        assert_eq!(found.transparent, keys);
+        // The same with the hand-written `eq` cut: the change of the captured
+        // translation makes its entry opaque, in the file of declarations.
+        let mut translation: Value = serde_json::from_str(NAMES).expect("a translation");
+        let hand_written = "registration_fixture::names::{impl core::cmp::PartialEq<u32> for registration_fixture::names::Wrapper<u32>}::eq";
+        let functions = translation["functions"]
+            .as_array_mut()
+            .expect("the functions");
+        let entry = (functions.iter_mut())
+            .find(|entry| entry["rust_name"] == hand_written)
+            .expect("the hand-written eq");
+        entry["is_opaque"] = json!(true);
+        entry["lean_file"] = json!("KrepiGen/Reg/Names/FunsExternal_Template.lean");
+        let (problems, found) = check(derived, &translation.to_string());
+        assert_eq!(problems, [expected]);
+        assert_eq!(found.opaque, [eq]);
     }
 
     #[test]
@@ -768,6 +824,28 @@ mod tests {
                 "{rust_name}"
             );
         }
+        // The methods of a generic type: an inherent one, one of a local
+        // trait and one of an implementation for an instance of the type.
+        for (rust_name, expected) in [
+            (
+                "registration_fixture::names::{registration_fixture::names::Wrapper<T>}::get",
+                "Wrapper::get",
+            ),
+            (
+                "registration_fixture::names::{impl registration_fixture::names::Count for registration_fixture::names::Wrapper<T>}::count",
+                "Wrapper::count",
+            ),
+            (
+                "registration_fixture::names::{impl core::cmp::PartialEq<u32> for registration_fixture::names::Wrapper<u32>}::eq",
+                "Wrapper::eq",
+            ),
+        ] {
+            assert_eq!(
+                key_for_rust_name(NAMES_FILE, rust_name, "registration_fixture", "names"),
+                Some(format!("{NAMES_FILE}#{expected}")),
+                "{rust_name}"
+            );
+        }
         // At the root of the crate, the module is empty; a name below
         // another module has no key in the file.
         assert_eq!(
@@ -781,49 +859,104 @@ mod tests {
         assert_eq!(key("other_crate::registration::same", "registration"), None);
         // The keys are those of the inventory.
         let inventory = crate_inventory();
-        let functions = &extraction("Registration", REGISTRATION)
-            .translation
-            .functions;
-        for entry in functions.iter().filter(|entry| entry.is_local) {
-            let found = key_for_translated(
-                FILE,
-                &entry.rust_name,
-                &entry.lean_name,
-                "registration_fixture",
-                "registration",
-            )
-            .expect("a key");
-            let known = inventory.functions.contains(&found) || inventory.derived.contains(&found);
-            assert!(known, "{found}");
+        for (file, module, namespace, text) in [
+            (FILE, "registration", "Registration", REGISTRATION),
+            (NAMES_FILE, "names", "Names", NAMES),
+        ] {
+            let functions = &extraction(namespace, text).translation.functions;
+            for entry in functions.iter().filter(|entry| entry.is_local) {
+                let found = key_for_translated(
+                    file,
+                    &entry.rust_name,
+                    &entry.lean_name,
+                    "registration_fixture",
+                    module,
+                )
+                .expect("a key");
+                let known =
+                    inventory.functions.contains(&found) || inventory.derived.contains(&found);
+                assert!(known, "{found}");
+            }
         }
     }
 
     #[test]
     fn default_methods_map_to_the_scanned_key() {
-        let scanned = format!("{FILE}#Table::total");
-        assert!(crate_inventory().functions.contains(&scanned));
-        // The default method and its loop, as the pinned Aeneas names them.
-        for lean in [
-            "KrepiGen.Reg.Registration.registration.Table.total.default",
-            "KrepiGen.Reg.Registration.registration.Table.total.default_loop",
-            "KrepiGen.Reg.Registration.registration.Table.total.default_loop.body",
-            "KrepiGen.Reg.Registration.registration.Table.total.default_loop1.body",
-        ] {
-            assert!(is_default_method("total", lean), "{lean}");
-            assert_eq!(
-                key_for_translated(
-                    FILE,
-                    "registration_fixture::registration::Table::total",
-                    lean,
-                    "registration_fixture",
-                    "registration",
-                ),
-                Some(scanned.clone()),
-                "{lean}"
-            );
+        let inventory = crate_inventory();
+        // Default methods, one with a loop and one with two, a default
+        // method named `default` and a free function of that name with its
+        // loop: the Lean names that the pinned Aeneas gives them map to the
+        // key of the inventory.
+        let cases: [(&str, &str, &str, &[&str]); 4] = [
+            (
+                REGISTRATION,
+                "registration",
+                "Table::total",
+                &[
+                    "Table.total.default_loop.body",
+                    "Table.total.default_loop",
+                    "Table.total.default",
+                ],
+            ),
+            (
+                NAMES,
+                "names",
+                "Count::twice",
+                &[
+                    "Count.twice.default_loop0.body",
+                    "Count.twice.default_loop0",
+                    "Count.twice.default_loop1.body",
+                    "Count.twice.default_loop1",
+                    "Count.twice.default",
+                ],
+            ),
+            (NAMES, "names", "Count::default", &["Count.default.default"]),
+            (
+                NAMES,
+                "names",
+                "default",
+                &["default_loop.body", "default_loop", "default"],
+            ),
+        ];
+        for (text, module, name, leans) in cases {
+            let file = format!("kernel/src/{module}.rs");
+            let rust_name = format!("registration_fixture::{module}::{name}");
+            let namespace = match module {
+                "registration" => "Registration",
+                _ => "Names",
+            };
+            let prefix = format!("KrepiGen.Reg.{namespace}.{module}.");
+            let functions = &extraction(namespace, text).translation.functions;
+            let captured: Vec<&str> = (functions.iter())
+                .filter(|entry| entry.rust_name == rust_name)
+                .map(|entry| {
+                    entry
+                        .lean_name
+                        .strip_prefix(&prefix)
+                        .expect("the namespace")
+                })
+                .collect();
+            assert_eq!(captured, leans, "{rust_name}");
+            let key = format!("{file}#{name}");
+            assert!(inventory.functions.contains(&key), "{key}");
+            let method = name.rsplit("::").next().expect("a name");
+            for lean in leans {
+                let lean = format!("{prefix}{lean}");
+                // Only the definitions of a default method and its loops
+                // read as one.
+                assert_eq!(
+                    is_default_method(method, &lean),
+                    name.contains("::"),
+                    "{lean}"
+                );
+                assert_eq!(
+                    key_for_translated(&file, &rust_name, &lean, "registration_fixture", module),
+                    Some(key.clone()),
+                    "{lean}"
+                );
+            }
         }
-        // Implementations, free functions and loop bodies keep their keys;
-        // a loop index must be a number.
+        // Implementations, free functions and loop bodies keep their keys.
         for (rust_name, lean, expected) in [
             (
                 "registration_fixture::registration::{impl registration_fixture::registration::Table for registration_fixture::registration::Slots}::value",
@@ -851,9 +984,12 @@ mod tests {
                 Some(format!("{file}#{expected}"))
             );
         }
+        // A loop index must be a number: the captured `default_loop1` with
+        // a letter for its index, which the tools do not write, is no loop
+        // of the default method.
         assert!(!is_default_method(
-            "total",
-            "KrepiGen.Reg.Registration.registration.Table.total.default_loopx"
+            "twice",
+            "KrepiGen.Reg.Names.names.Count.twice.default_loopx"
         ));
     }
 

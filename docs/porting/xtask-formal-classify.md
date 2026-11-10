@@ -48,7 +48,12 @@ a target and calls the check is planned.
   function of an inline module to the key of a function of that name in the
   file. The mapping takes the crate and the module of the file from the
   inventory, which records the module of each production file, and returns
-  nothing for a name that is not below the module.
+  nothing for a name that is not below the module. A derived method and a
+  hand-written one of a type of the same name in an inline module, which
+  the CAS project mapped to one key, so have two; a `derived` entry that
+  several Rust names reach is still refused, such as the key of the
+  derived `eq` of a type that also implements `PartialEq` for another type
+  by hand.
 - The default method of a trait keeps its trait as its owner, as in the CAS
   project, with the inline modules before the trait; with the module of the
   file, the key is the same as that of `key_for_rust_name`.
@@ -78,17 +83,18 @@ a target and calls the check is planned.
 ## Tests carried over
 
 The inputs are the translations that the pinned Charon and Aeneas wrote for
-a crate of three modules, kept with its sources in
+four modules of a crate, kept with its sources in
 `xtask/src/formal/fixtures/classify/`, and not the names of the CAS tests,
 which an earlier Aeneas spelled; the expected keys are those of krepi's
-inventory.
+inventory. Where a test changes a captured translation, the test writes
+the change.
 
 | CAS project test | krepi test | Expected values |
 | --- | --- | --- |
-| `run.rs` `tests::default_and_derived_methods_are_classified`, line 2794 | `tests::default_and_derived_methods_are_classified` | A default method with its loop and two derived methods of the captured translation, which a registration that names them passes |
-| `inventory.rs` `tests::derived_names_are_recognised`, lines 691 to 709 | `tests::derived_names_are_recognised` | The derived methods of the captured translation, and the same forms that are not derived methods |
-| `inventory.rs` `tests::aeneas_names_map_to_keys`, lines 812 to 829 | `tests::aeneas_names_map_to_keys` | The keys of an inherent method, a trait method, a free function and a function of an inline module; every local function of the captured translation maps to a key of the inventory |
-| `inventory.rs` `tests::default_methods_map_to_the_scanned_key`, the translated names of lines 716 to 780 | `tests::default_methods_map_to_the_scanned_key` | The default method and its loops as the pinned Aeneas names them map to the key of the inventory; a loop index must be a number |
+| `run.rs` `tests::default_and_derived_methods_are_classified`, line 2794 | `tests::default_and_derived_methods_are_classified` | A default method with its loop and two derived methods of the captured translation, which a registration that names them passes; a derived `eq` and a hand-written `eq` of the same key, which a `derived` entry refuses, with the hand-written one translated and cut |
+| `inventory.rs` `tests::derived_names_are_recognised`, lines 692 to 709 | `tests::derived_names_are_recognised` | The derived methods of the captured translation, and the same forms that are not derived methods |
+| `inventory.rs` `tests::aeneas_names_map_to_keys`, lines 813 to 829 | `tests::aeneas_names_map_to_keys` | The keys of an inherent method, a trait method, a free function, a function of an inline module and the methods of a generic type; every local function of the captured translations maps to a key of the inventory |
+| `inventory.rs` `tests::default_methods_map_to_the_scanned_key`, the translated names of lines 716 to 780 | `tests::default_methods_map_to_the_scanned_key` | Default methods with one loop and with two, a default method named `default` and a free function named `default` with its loop, as the pinned Aeneas names them, map to the keys of the inventory; a loop index must be a number |
 | `legacy.rs` `tests::derived_entries_need_a_derive_and_no_source`, line 759 | `tests::derived_entries_need_a_derive_and_no_source` | A production function, a malformed key and a key without a derive are refused |
 
 The other tests of the module are new: one for each rule of the check, on
