@@ -36,10 +36,10 @@ the restricted use mode and keys.
 - A person may rewrite the storage medium while the device is off, and the
   build and supply chain may be compromised.
 
-**Trusted.** The kernel, the root, drivers that program DMA, the firmware,
-the hardware, the pinned toolchain and CI, and the components that the
-[integrity policy](#integrity-policy) trusts. The proof checker is the
-logical trusted base of proof-checking results.
+**Trusted.** The kernel, the root, drivers that program DMA, the firmware
+mailbox service, the firmware, the hardware, the pinned toolchain and CI,
+and the components that the [integrity policy](#integrity-policy) trusts.
+The proof checker is the logical trusted base of proof-checking results.
 
 **Trust boundaries.**
 
@@ -56,8 +56,11 @@ logical trusted base of proof-checking results.
   assumption; a driver that does not program DMA holds only the registers
   and interrupts that its manifest grants
   ([devices](architecture.md#devices-and-dma)).
-- Firmware and kernel: the firmware is trusted, but the kernel parses the
-  device tree as untrusted input, with bounds.
+- Firmware and kernel: the firmware is trusted, including the coherence
+  convention that the kernel relies on at entry
+  ([boot](architecture.md#boot-and-the-resident-root)) and the services
+  behind its mailbox ([devices](architecture.md#devices-and-dma)), but the
+  kernel parses the device tree as untrusted input, with bounds.
 - Storage: only bytes that the integrity policy verifies or authenticates are
   trusted.
 - Build and device: artifacts are taken by their SHA-256 digest.
@@ -337,21 +340,18 @@ acceptance; CRC fields in formats taken from the prototype tree keep that
 meaning. The only trust anchors are the public keys and digests in the image,
 and verification on the device uses no private key.
 
-- **Loading.** For a boot bundle that is loaded as a separate file, the
-  build records the digest of each of its images, or of the whole bundle, in
-  a trusted part of the kernel image, and the root computes the digest
-  before it loads an image and refuses the image on a mismatch; the expected
-  value comes from the kernel image, never from the caller of a load. When
-  the bundle is part of the kernel image and the root reads the images from
-  there, the kernel image itself binds them, and the root compares no digest
-  at run time. Once the read-only system image exists, its root digest is
-  published with the kernel image, and its contents are verified against it
-  when read, by a component that can be held to an executable specification,
-  such as one in the block layer, so that the file service stays outside the
-  trusted base; the volume is updated together with the kernel image, with
-  one volume slot for each A/B slot. Loading only verifies: the root parses
-  no signature and uses no key, and authentication covers the whole image
-  when an update is installed.
+- **Loading.** The boot bundle is part of the kernel image, and the root
+  reads its images from there, so the kernel image itself binds them and
+  the root compares no digest at run time. Once the read-only system image
+  exists, the root digest of its manifest is published with the kernel
+  image, and the read-only image service of the block layer verifies every
+  block that it reads against the hash tree of its file, with an expected
+  value that comes from the kernel image, never from the caller of a load,
+  so that the file service stays outside the trusted base
+  ([storage](architecture.md#storage)); the volume is updated together with
+  the kernel image, with one volume slot for each A/B slot. Loading only
+  verifies: the root parses no signature and uses no key, and
+  authentication covers the whole image when an update is installed.
 - **Exec.** A page is mapped executable only from a memory object with the
   execute right; the kernel checks that right and W^X and parses no file or
   ELF. Objects from a verified read-only source, that is the boot bundle,
@@ -412,9 +412,14 @@ and verification on the device uses no private key.
   service that passes worker images from the boot bundle to the loader, if
   one does. They are trusted for these two properties only and count as
   untrusted services otherwise. Each is held at least to an executable
-  specification of its own, and the storage architecture, an
-  [open design question](architecture.md#open-design-questions), is to name
-  the storage components among them.
+  specification of its own. Among them, the read-only image service of the
+  [storage rules](architecture.md#storage) is the component that verifies
+  the read-only system image, and also the storage component that keeps
+  installed packages immutable, since it checks their contents whenever it
+  reads them; the block driver is the storage path that alone writes the
+  A/B slots and approval records, since it grants those writes only to the
+  updater; and no file service passes worker images from the boot bundle
+  to the loader.
 
 Packages, updates, keys and the restricted use mode come after the first
 release. Until then there is no update path, and A/B logic taken from the
