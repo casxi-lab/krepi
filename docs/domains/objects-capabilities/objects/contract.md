@@ -57,8 +57,8 @@ observable behaviour that these rules serve, with its evidence, is in the
   ([capacities](../../../architecture.md#kernel-objects-and-capabilities)).
   Its object part is this component's
   ([Capacity record](#capacity-record)); its VM and loading part belongs to
-  the VM of the core, the module `vm` (planned); the directory, with the
-  framing of the record in it, belongs to the address-space component of the
+  the VM and loading components; the directory, with the framing of the
+  record in it, belongs to the address-space component of the
   [memory and address spaces](../../memory/README.md) domain.
 - **Capacities.** `objects::Capacities` (planned): the object part of a
   capacity record once it has passed its checks.
@@ -72,10 +72,12 @@ observable behaviour that these rules serve, with its evidence, is in the
   shared and per-process state; with one CPU, the executing CPU holds every
   token.
 - **Boot wiring.** The code of a board crate that runs on the boot CPU before
-  any entry from EL0: it validates the capacity record, carves the storage
-  of [Storage carved at boot](#storage-carved-at-boot) from the
-  [page ownership table](../../memory/page-tables/contract.md#page-ownership)
-  and builds the object table.
+  any entry from EL0: it validates the capacity record, has the kernel root
+  carve the storage of [Storage carved at boot](#storage-carved-at-boot)
+  from the
+  [page ownership table](../../memory/page-tables/contract.md#page-ownership),
+  zeroes that storage, forms its slices and builds the object table on
+  them.
 
 ## Entry points
 
@@ -87,12 +89,12 @@ which compose these entries.
 
 | Entry point | Kind | Called by | ABI operation | Rules |
 | --- | --- | --- | --- | --- |
-| `objects::validate_capacities`, `Capacities::allocations` and `Capacities::root_limits` (planned) | Read entries, host-testable | `validate_capacities` and `allocations`: the boot wiring, once, before it carves the storage; `root_limits`: the boot of the root by the kernel root (planned) | None | [Capacity record](#capacity-record), [Storage carved at boot](#storage-carved-at-boot), [Metadata quotas](#metadata-quotas) |
-| `ObjectTable::new` (planned) | Write entry, host-testable | The boot wiring, once, on the storage that it carved | None | [Object kinds and pools](#object-kinds-and-pools), [Storage carved at boot](#storage-carved-at-boot) |
+| `objects::validate_capacities`, `Capacities::allocations` and `Capacities::root_limits` (planned) | Read entries, host-testable | `validate_capacities` and `allocations`: the boot wiring, once, before the storage is carved; `root_limits`: the boot of the root by the kernel root (planned) | None | [Capacity record](#capacity-record), [Storage carved at boot](#storage-carved-at-boot), [Metadata quotas](#metadata-quotas) |
+| `ObjectTable::new` (planned) | Write entry, host-testable | The boot wiring, once, on the slices of the carved storage that it forms | None | [Object kinds and pools](#object-kinds-and-pools), [Storage carved at boot](#storage-carved-at-boot) |
 | `ObjectTable::resolve` (planned) | Read entry, host-testable | Every module of the core that follows a reference: `capabilities`, `waits`, `ipc`, `vm`, `lifecycle`, `creation` and `dispatch` (planned) | None | [Identities and generations](#identities-and-generations) |
 | `ObjectTable::choose` (planned) | Read entry, host-testable | The module `creation` and the boot of the root by the kernel root (planned), in their checks | None | [Identities and generations](#identities-and-generations), [Determinism](#determinism) |
-| `ObjectTable::occupy` and `ObjectTable::release` (planned) | Write entries on the copies of a write set, host-testable | `occupy`: the module `creation` and the boot of the root; `release`: the module `lifecycle`, for a process and its thread when they are reaped, and the module `capabilities`, for an endpoint or a notification whose last capability of its current generation is deleted (planned) | None | [Identities and generations](#identities-and-generations), [Write-set transactions](#write-set-transactions) |
-| `QuotaRecord::check`, `charge`, `credit`, `split` and `merge` (planned) | A read entry and write entries on the copies of a write set, host-testable | `check`, `charge` and `split`: the module `creation`; `credit` and `merge`: the module `lifecycle`; `charge` and `credit` of capability slots: the module `capabilities`; of committed VM pages and private pages of loaded images: the modules `vm` and `creation` (planned) | None | [Metadata quotas](#metadata-quotas) |
+| `ObjectTable::occupy` and `ObjectTable::release` (planned) | Write entries on the copies of a write set, host-testable | `occupy`: the module `creation` and the boot of the root; `release`: the module `lifecycle`, for a process and its thread when they are reaped, and for the endpoints and notifications of an owner that is destroyed, in the steps of its destruction; and the module `capabilities`, for an endpoint or a notification whose last capability of its current generation is deleted (planned) | None | [Identities and generations](#identities-and-generations), [Metadata quotas](#metadata-quotas), [Write-set transactions](#write-set-transactions) |
+| `QuotaRecord::check`, `charge`, `credit`, `split`, `merge` and `start_root` (planned) | A read entry and write entries on the copies of a write set, host-testable | `check`, `charge` and `split`: the module `creation`; `credit` and `merge`: the module `lifecycle`; `charge` and `credit` of capability slots: the module `capabilities`; of committed VM pages and of private pages of loaded images: the VM and loading components; `start_root`: the boot of the root by the kernel root (planned) | None | [Metadata quotas](#metadata-quotas) |
 | `WriteSet::stage`, `commit` and `discard` (planned) | Write entries on the write-set buffer of the executing CPU, host-testable | Every entry of the core that changes more than one item (planned) | None | [Write-set transactions](#write-set-transactions) |
 | `ObjectTable::counts` and `QuotaRecord::usage` (planned) | Read entries, host-testable | The modules `creation` and `lifecycle` (planned), and the tests | None | [Identities and generations](#identities-and-generations), [Metadata quotas](#metadata-quotas) |
 
@@ -122,12 +124,15 @@ architecture crate (planned); finding the record of the executing CPU,
 masking interrupts and lending the buffer by `&mut` is an adapter of the
 architecture crate, outside the proof target, which
 [Open obligations](#open-obligations) lists. The boot wiring, code of the
-board crates, takes the storage of
-[Storage carved at boot](#storage-carved-at-boot) from the page ownership
-table, zeroes it through the direct map and hands it, as the storage of
-the pools, the capability tables, the VM region tables and the write-set
-buffers, to `ObjectTable::new` and to the components of those tables. The
-contract is written before its code, so this section lists no source
+board crates, zeroes the storage of
+[Storage carved at boot](#storage-carved-at-boot) that the kernel root
+takes from the page ownership table, forms the slices of that storage
+through the direct map and hands them, as the storage of the pools, the
+capability tables, the VM region tables and the write-set buffers, to
+`ObjectTable::new` and to the components of those tables; forming the
+slices from physical pages is `unsafe` code of the board crate, outside the
+proof target, which [Open obligations](#open-obligations) lists as well.
+The contract is written before its code, so this section lists no source
 paths; the change that adds the module writes its `paths` block here.
 
 ## Object kinds and pools
@@ -164,6 +169,8 @@ that counts it, and a creator:
 - **Pool numbers.** `ObjectTable::new` takes the number of its first pool.
   The six pools take that number and the five after it, in the order
   process, thread, endpoint, notification, device directory, device grant.
+  It refuses a first pool number of 0, or one whose five successors do not
+  fit 64 bits (`InvalidConfiguration`).
   The boot wiring passes 1; a host test passes other numbers to build
   tables whose pools differ. The table is built once in a boot, so its pool
   numbers are never reused within the boot.
@@ -187,10 +194,10 @@ keep their form.
 
 ### Storage carved at boot
 
-No object memory is allocated after boot. The boot wiring carves the
-storage of the object table from the page ownership table once, before the
-first entry from EL0, in eight allocations, and no entry takes or returns
-pages afterwards; a full pool or table never takes memory, as the
+No object memory is allocated after boot. The storage of the object table
+is carved from the page ownership table once, at boot, before the first
+entry from EL0, in eight allocations, and no entry takes or returns pages
+afterwards; a full pool or table never takes memory, as the
 [provable subset](../../../conventions/provable-subset.md#2-no-allocation-at-run-time)
 requires.
 
@@ -212,13 +219,18 @@ requires.
 - The eight owner identities are nonzero 64-bit constants of the module,
   distinct from each other and from the owner identity of every other
   holder of the page ownership table.
-- The boot wiring takes the allocations in the order of the table: each with
+- The kernel root (planned), which holds the page ownership table and is
+  above both this module and `page_tables` in the
+  [module order](../../../architecture.md#module-order-in-the-core), takes
+  the allocations at boot in the order of the table, each in one step of
+  [zeroing before publication](../../memory/page-tables/contract.md#page-ownership):
   `Ownership::choose` at an alignment of one page and a low placement
-  without a window, the zeroing of its range through the direct map, and
-  `Ownership::assign`
-  ([zeroing before publication](../../memory/page-tables/contract.md#page-ownership)).
-  When the page ownership table finds no range for one of them, the boot
-  stops with `InsufficientMemory`.
+  without a window; then the boot wiring zeroes the chosen range through
+  the direct map with `krepi_arch::mmu::zero_frames`; then
+  `Ownership::assign` with the owner identity of the allocation. When the
+  page ownership table finds no range for one of them, the boot stops with
+  `InsufficientMemory`. The module `objects` gives the allocations as
+  values and calls neither the kernel root nor `page_tables`.
 - **Extents.** An allocation adds at most two extents to the page ownership
   table, the held range and the rest of the free extent that it splits; a
   low placement at an alignment of one page starts at the start of a free
@@ -284,13 +296,19 @@ requires.
 - **Release.** `release(reference, kind)` changes the copy of the slot of a
   live reference as **Generations** states and moves one slot from
   allocated to free or to retired. It checks the reference as `resolve`
-  does. The fields of the released object, its owner included, are cleared.
+  does, and then, for a process slot, that the quota record of the process
+  counts no usage, ordinary or control, of an item other than the
+  page-table pages (`InvalidState`): the objects, capability entries and
+  pages of a process are released before its process slot. The fields of
+  the released object, its owner and its quota record included, are
+  cleared.
 
 ## Capacity record
 
 The object part of the capacity record is its first 48 bytes: twelve
 unsigned 32-bit fields, little-endian, without padding, in this order. The
-VM and loading part follows it, from byte 48, and is the VM component's.
+VM and loading part follows it, from byte 48, and belongs to the VM and
+loading components.
 
 | Offset | Field | Content |
 | ---: | --- | --- |
@@ -368,8 +386,8 @@ record.
 | Endpoints | The allocated endpoint slots | The owner of the slot | Split from the creator's limit |
 | Notifications | The allocated notification slots | The owner of the slot | Split from the creator's limit |
 | Capability slots | The filled entries of the capability table of a process | The process of the table | `capability_slots`, the size of its table |
-| Committed VM pages | The pages committed in the VM regions of a process, as the VM component counts them | The process of the address space | Split from the creator's limit |
-| Private pages of loaded images | The private pages of the images loaded into a process, as the VM component counts them | The process of the address space | Split from the creator's limit |
+| Committed VM pages | The pages committed in the VM regions of a process, as the VM and loading components count them | The process of the address space | Split from the creator's limit |
+| Private pages of loaded images | The private pages of the images loaded into a process, as the VM and loading components count them | The process of the address space | Split from the creator's limit |
 | Page-table pages | The tables of the table pool of the address space of a process, which the address-space component fixes per process | The process itself | The tables of one table pool |
 
 - **Starting state.** `occupy` of a process slot sets every limit and usage
@@ -377,8 +395,12 @@ record.
   `capability_slots`, and the page-table pages, whose limit and ordinary
   usage are the tables of one table pool from the occupation of the slot to
   its release. Neither of these two items is split from the creator or
-  returned to it: the process's own fixed structures give them, so their
-  check never fails while a slot of the table is free.
+  returned to it: the process's own fixed structures give them. The check
+  of capability slots fails only when the table of the process has no free
+  entry, a result of the process itself. The page-table pages are written
+  only by `occupy` and `release` of the process slot; no entry checks,
+  charges or credits them, and which tables of its pool a process uses is
+  a rule of the address-space component.
 - **Order.** A creation checks the caller's own quota before the shared
   capacity, and checks the quota and the free slot before its first write;
   it charges the quota and occupies the slot in one write set
@@ -407,25 +429,34 @@ record.
   before its own return to its owner. No ownership and no quota is
   transferred to another owner.
 - **Releases.** Endpoints and notifications are released when the last
-  capability of their current generation is deleted, processes and threads
-  when they are reaped; each release credits its owner in the same write
-  set.
+  capability of their current generation is deleted, or, when their owner
+  is destroyed, in the bounded steps of that destruction, before the owner
+  becomes dead; processes and threads are released when they are reaped.
+  Each release credits its owner in the same write set.
 - **The root.** The root's process and thread are a control allocation of
-  the kernel domain, charged to the control usage of its child-process item;
-  the kernel domain has no limit and creates nothing after boot.
-  `root_limits` gives the root's starting limits: for child processes, the
-  smaller of the ordinary capacities of the process and the thread pool,
-  the ordinary capacity of a pool being its capacity less its control
-  reserve; for endpoints and notifications, the ordinary capacity of their
-  pool; for committed VM pages and private pages of loaded images, the
-  values of the VM and loading part of the capacity record, which its
-  caller passes; for capability slots and page-table pages, those of every
-  process. The limits of the
+  the kernel domain, charged to the control usage of its child-process item.
+  The record of the kernel domain, which `ObjectTable::new` writes, has
+  every limit and usage 0 but this control usage, and the kernel domain
+  creates nothing after boot. `root_limits` gives the root's starting
+  limits of the five split items: for child processes, the smaller of the
+  ordinary capacities of the process and the thread pool, the ordinary
+  capacity of a pool being its capacity less its control reserve; for
+  endpoints and notifications, the ordinary capacity of their pool; for
+  committed VM pages and private pages of loaded images, the values of the
+  VM and loading part of the capacity record, which its caller passes.
+  `start_root(record, limits)` writes them into the root's record, in the
+  write set that occupies the root's process slot, after `occupy` has set
+  the starting state; it refuses with `InvalidState` unless the limits and
+  usages of the five items of the record are 0. The root's capability
+  slots and page-table pages are those of every process. The limits of the
   objects are split from the pools; the limits of pages are not, so the
   page limits of all processes together may exceed the free pages.
-- **Consequence.** Limits move only between a parent and its child, so for
-  each of the five split items the limits of the live calling domains add
-  up to the root's starting limit. For child processes, endpoints and
+- **Consequence.** `start_root` writes the root's starting limits once, and
+  afterwards limits move only between a parent and its child. So from the
+  write-back that occupies the root's process slot on, for each of the five
+  split items the limits of the live calling domains, the kernel domain
+  with its limits of 0 among them, add up to the root's starting limit. For
+  child processes, endpoints and
   notifications they therefore never exceed the ordinary capacity of the
   pools that the item counts, and an ordinary creation that passes its
   quota check fails for shared capacity only when control allocations have
@@ -445,12 +476,14 @@ processes are destroyed:
    to what is allocated for the item: the allocated process slots, the
    allocated endpoint slots, the allocated notification slots, the filled
    capability entries of all tables, the committed and the loaded private
-   pages as the VM component counts them, and the tables of the table pools
-   of all allocated process slots.
+   pages as the VM and loading components count them, and the tables of the
+   table pools of all allocated process slots.
 
-An owner never changes, and every allocation and release charges or
-credits its owner in the write set that occupies or releases what the item
-counts, so both statements hold without exception. The kernel domain
+An owner never changes, every allocation and release charges or credits
+its owner in the write set that occupies or releases what the item counts,
+and a process slot, whose release clears its record, is released only once
+that record counts no usage but its page-table pages, which leave with the
+slot. So both statements hold without exception. The kernel domain
 counts the root's process with its thread; the root's own table pool counts
 for the root.
 
@@ -510,7 +543,7 @@ The write set of each write entry of this page:
 | `ObjectTable::new` | Every slot and the counts of every pool, and the record of the kernel domain; it writes them in place, at boot, before any token exists |
 | `occupy` | The slot and the counts of its pool |
 | `release` | The slot and the counts of its pool |
-| `charge`, `credit` | One quota record |
+| `charge`, `credit`, `start_root` | One quota record |
 | `split`, `merge` | The two quota records |
 | `stage`, `commit`, `discard` | The write-set buffer of the executing CPU, which is per-CPU and in no write set |
 
@@ -519,12 +552,12 @@ The write set of each write entry of this page:
 | Error | Rule broken | Entries | Place in the order of errors |
 | --- | --- | --- | --- |
 | `InvalidConfiguration` | A record shorter than its object part; a capacity, a capability-slot count or a VM region count of 0, or beyond its width; fewer threads than processes; a control reserve larger than its pool; for `ObjectTable::new`, storage of another size than the capacities give, a first pool number of 0, or one whose five successors do not fit 64 bits | `validate_capacities`, `ObjectTable::new` | Checks 2 to 4 of the capacity record, at boot |
-| `InsufficientMemory` | The eight allocations and the table pools of the address spaces do not fit the free pages, or the page ownership table finds no range for one of the allocations | `validate_capacities`; the boot wiring, when it carves | Check 5 of the capacity record, at boot |
+| `InsufficientMemory` | The eight allocations and the table pools of the address spaces do not fit the free pages, or the page ownership table finds no range for one of the allocations | `validate_capacities`; the kernel root, when it carves at boot | Check 5 of the capacity record, at boot |
 | `WrongPool` | A reference or a pool number that is not that of the pool of the kind that the entry needs | `resolve`, `choose`, `occupy`, `release` | Handle resolution: the type |
 | `StaleReference` | A reference whose slot number is not below the capacity of its pool, or whose slot is free, retired or of another generation | `resolve`, `release` | Handle resolution: the liveness of the object |
 | `QuotaExceeded` | An ordinary charge or check beyond the limit, or a share beyond the limit less the ordinary usage | `check`, `charge`, `split` | The caller's quota |
 | `PoolExhausted` | No free slot in the range of the allocation class | `choose` | Shared capacity |
-| `InvalidState` | An occupation of a slot that is not free or beyond the capacity; a credit beyond the usage; a merge while a usage of the child in a split item is not 0 | `occupy`, `credit`, `merge` | Object state |
+| `InvalidState` | An occupation of a slot that is not free or beyond the capacity; a release of a process slot whose quota record counts a usage other than its page-table pages; a credit beyond the usage; a merge while a usage of the child in a split item is not 0; a `start_root` on a record whose five split items are not 0 | `occupy`, `release`, `credit`, `merge`, `start_root` | Object state |
 | `WriteSetFull` | A new key staged into a buffer of $W$ items | `stage` | A capacity failure of the write phase |
 | `InjectedFault` | A fault-injection point of a test build | `commit` | The write phase, in test builds only |
 
@@ -584,12 +617,13 @@ The prototype's object pool had sixteen errors. Here:
   checks.
 - `resolve`, `choose`, `counts`, `QuotaRecord::check` and `usage` write
   nothing.
-- `occupy`, `release`, `charge`, `credit`, `split` and `merge` change only
-  the copies in the write set of their caller. Each checks on the copies
-  what its effect needs, as [Errors](#errors) lists, before it changes them,
-  and changes nothing when a check fails. The composing entry has made the
-  same checks before its first write, with `resolve`, `choose`, `check` and
-  `usage`, so its write phase meets none of them.
+- `occupy`, `release`, `charge`, `credit`, `split`, `merge` and
+  `start_root` change only the copies in the write set of their caller.
+  Each checks on the copies what its effect needs, as [Errors](#errors)
+  lists, before it changes them, and changes nothing when a check fails.
+  The composing entry has made the same checks before its first write, with
+  `resolve`, `choose`, `check` and `usage`, so its write phase meets none of
+  them.
 - `stage` checks the room in the buffer before it copies; `commit` writes
   every copy back and cannot fail, except at a fault-injection point of a
   test build, where it discards instead; `discard` cannot fail.
@@ -611,7 +645,8 @@ The prototype's object pool had sixteen errors. Here:
   range for an ordinary allocation, and the reserved tail and the ordinary
   range for a control one, so at most the capacity of the pool.
 - `QuotaRecord::check`, `charge`, `credit`, `split` and `usage` touch one
-  item of one or two records; `merge` five items of two records.
+  item of one or two records; `merge` five items of two records, and
+  `start_root` five items of one record.
 - `stage` compares its key with at most $W - 1$ staged keys and copies one
   item; `commit` writes at most $W$ items; `discard` makes a fixed number of
   steps.
@@ -679,14 +714,19 @@ The page ownership table that holds the storage is a field of the
   refused; a reserve equal to its pool is accepted and one more refused; a
   record of 47 bytes is refused; allocations that fit the free pages
   exactly are accepted and one page more fails with `InsufficientMemory`.
-  For each pair of consecutive checks of the order, a record that breaks
-  both gives the error of the earlier.
+  For each pair of consecutive checks of the order whose errors differ, a
+  record that breaks both gives the error of the earlier: checks 4 and 5
+  through `validate_capacities`, and checks 1 and 2 and checks 5 and 6
+  through the boot wiring, where the errors of the address-space component
+  differ from those of checks 2 and 5. Checks 2 to 4 share
+  `InvalidConfiguration`, so their order is not observable and has no such
+  test.
 - The default record of each board passes the checks and provides at least
   64 processes and 256 threads.
 - `Capacities::allocations` gives eight allocations with distinct owner
   identities and the pages that this page computes, for the default records
   and for a record at the limits; on the page ownership table of the 8 GB
-  Pi 5, the boot wiring's carving of each adds at most one extent.
+  Pi 5, the kernel root's carving of each adds at most one extent.
 - Generations: a slot occupied and released $n$ times has generation
   $n + 1$; a slot that a test sets to $2^{64} - 1$ is occupied once and its
   release retires it; the reference of a retired slot fails with
@@ -696,8 +736,11 @@ The page ownership table that holds the storage is a field of the
   of a parent with children, and checks after every write-back, against an
   independent model of owners, limits and usages, both statements of
   [Conservation](#metadata-quotas) and the sum of the split limits.
-- The root's starting limits for a record with reserves of 0 and with
-  reserves at their pools, and an ordinary creation within the quota that
+- The root's starting limits, as `start_root` writes them, for a record
+  with reserves of 0, with reserves at their pools and with a thread pool
+  whose ordinary capacity is below that of the process pool; a release of
+  a process slot whose record still counts a capability entry is
+  `InvalidState`; and an ordinary creation within the quota that
   meets `PoolExhausted` only after control allocations have taken the
   ordinary range.
 - Write sets: for each fault-injection point of the implementation, an
@@ -725,13 +768,17 @@ entries are to be covered by its targets. An entry that a later contract
 adds to the object table beyond the entries of this page is an open
 obligation of the contract that adds it, carried by the proof of object
 lifetimes, waits and sequential composition, by release 0.2. The
-obligation of the code around this page is the adapter that lends the
+obligations of the code around this page are the adapter that lends the
 write-set buffer of the executing CPU
-([rule 8](../../../conventions/provable-subset.md#8-no-interior-mutability)).
+([rule 8](../../../conventions/provable-subset.md#8-no-interior-mutability))
+and the board's forming of the slices of the storage carved at boot
+([Extractability](#extractability)). Each board forms those slices in its
+board crate; the row of the Pi 5 board is added with its board crate.
 
 | Obligation | Kind | Verified state | Carrier | Stage |
 | --- | --- | --- | --- | --- |
 | `kernel/arch/src/percpu.rs#enter_masked` (planned) | `unsafe` | Neither (finds the per-CPU record of the executing CPU, masks its interrupts and lends its write-set buffer by `&mut` for no longer than the token of the CPU lives; it reads and writes none of the buffer's contents) | The proof of the SMP primitives and of the concurrency backend | `0.2` |
+| `kernel/boards/qemu-virt/src/main.rs#object_storage` (planned) | `unsafe` | Neither (forms, through the direct map, the slices of the eight allocations of [Storage carved at boot](#storage-carved-at-boot) on the pages that the page ownership table holds for their owner identities, after their zeroing, each of the size that `Capacities::allocations` gives; it reads and writes none of their contents) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
 
 ## Legacy test vectors
 
@@ -752,15 +799,22 @@ the section holds no `vectors` block.
   termination, quiescence and the gates of reclamation, and are vectors of
   the lifecycle component of this domain, not of this page.
 - The 23 vectors of `src/objects/tests/activations.rs` and
-  `src/smp/tests.rs` are the tests whose input the prototype's activation
-  entries must reject without a panic and without a change, and in which
-  that input decides the rejection: a missing or out-of-range owner of a
-  thread, a wrong owner key, a pool of no process slot, and a CPU number
-  outside the activation array. The other tests of these files fix the
-  order of the activation checks and its successes; they are not frozen
-  here. The activation itself is not an entry of this component, so these
-  vectors hold for the resolution of references and the checks of the
-  capacity record.
+  `src/smp/tests.rs` are the tests in which the prototype's activation
+  entries must reject, without a panic and without a change, one of three
+  inputs, and that input decides the rejection: an invalid owner identity
+  of the thread, that is a missing owner, a slot number beyond the pool, a
+  key of another pool or slot, or a generation that does not match; a pool
+  of no process slot; and a CPU number outside the activation array.
+  `activation-legacy-10`, `activation-parallel-10`, `smp-2` and `smp-3`
+  also put that rejection before a later check of the activation. The
+  other tests of these files are not frozen here: those of a dying or a
+  dead owner, whose state is the lifecycle component's; those of the
+  activation serial alone, and of the claims, stops and receipts of the
+  activation, which are the scheduler's; those in which another check of
+  the activation decides the rejection; and those of its successes. The
+  activation itself is not an entry of this component, so these vectors
+  hold for the resolution of references and the checks of the capacity
+  record.
 - Four vectors test rules of other components and are frozen here with the
   component that receives them: `objects-7` the capabilities component,
   `objects-9` and `objects-12` the waits component, and `objects-13` the
@@ -821,14 +875,14 @@ steps the row assigns to their components.
 
 | Vector | Line | Test | Expected output | Entry |
 | --- | ---: | --- | --- | --- |
-| `objects-1` | 15 | `reusable_self_test_covers_the_same_contracts_without_host_facilities` | Composite. One table `processes=3 threads=4 reserved_processes=1 reserved_threads=1`. A creation of a pair that meets a fault-injection point is `err=InjectedFault` and leaves the counts as before; two ordinary pairs take process slots 0 and 1; a third is `err=PoolExhausted`, the reserved process slot 2 left free; the prototype's limit of threads of a process does not exist, since a process has one thread, and `check` of an item at its limit stands for it, `err=QuotaExceeded`; a control pair takes process slot 2 and thread slot 3, and 3 processes are allocated; after the release of the slots of the two ordinary pairs and of a third one, the references of the first are `err=StaleReference`; at the end 1 process and 1 thread are allocated, the control pair, and the audit counts of released process and thread slots are 3 and 3. The prototype's other steps belong to other components: the attenuation of rights to the capabilities component; the single winner of a wait, its result and its stale ticket to the waits component; termination, activation, quiescence, the reference gates of reaping and the exit status to the lifecycle component. The prototype's count of at least 18 checks counts the steps of the test itself and does not apply | `stage`, `commit`, `discard`, `choose`, `occupy`, `release`, `QuotaRecord::check`, `resolve`, `counts` |
-| `objects-2` | 28 | `configuration_rejects_missing_capacity_or_invalid_reserve` | Records `processes=0 threads=1`, `processes=1 threads=0`, `processes=1 threads=1 reserved_processes=2` and `processes=1 threads=1 reserved_threads=2`: each `err=InvalidConfiguration`. The prototype's pool number 0 does not apply: pool numbers are not fields of the record | `validate_capacities` |
+| `objects-1` | 15 | `reusable_self_test_covers_the_same_contracts_without_host_facilities` | Composite. One table `processes=3 threads=4 reserved_processes=1 reserved_threads=1`. A creation of a pair that meets a fault-injection point is `err=InjectedFault` and leaves the counts as before; two ordinary pairs take process slots 0 and 1; a third is `err=PoolExhausted`, the reserved process slot 2 left free; the prototype's limit of threads of a process does not exist, since a process has one thread, and `check` of an item at its limit stands for it, `err=QuotaExceeded`; a control pair takes process slot 2 and thread slot 3, and 3 processes are allocated; after the release of the slots of the two ordinary pairs, a new ordinary pair takes process slot 0 and thread slot 0 with the references `1:0:2` and `2:0:2`, the references `1:0:1` and `2:0:1` of the first pair are then `err=StaleReference`, and the slots of the new pair are released; at the end 1 process and 1 thread are allocated, the control pair, and the audit counts of released process and thread slots are 3 and 3. The prototype's other steps belong to other components: the attenuation of rights to the capabilities component; the single winner of a wait, its result and its stale ticket to the waits component; termination, activation, quiescence, the reference gates of reaping and the exit status to the lifecycle component. The prototype's count of at least 18 checks counts the steps of the test itself and does not apply | `stage`, `commit`, `discard`, `choose`, `occupy`, `release`, `QuotaRecord::check`, `resolve`, `counts` |
+| `objects-2` | 28 | `configuration_rejects_missing_capacity_or_invalid_reserve` | In the order of the test: the records `processes=0 threads=1` and `processes=1 threads=0`; `ObjectTable::new` of a table `processes=1 threads=1` with the first pool number 0; and the records `processes=1 threads=1 reserved_processes=2` and `processes=1 threads=1 reserved_threads=2`: each `err=InvalidConfiguration` | `validate_capacities`, `ObjectTable::new` |
 | `objects-3` | 52 | `failed_preparation_never_publishes_or_charges_objects` | Table `processes=2 threads=2`: 8 creations of a pair, each meeting a fault-injection point, are each `err=InjectedFault`, and after each the counts are `free=2 allocated=0 retired=0` for both pools and every slot is free; then a pair commits with the references `1:0:1` and `2:0:1`, and the audit count of occupied process slots is 1 | `stage`, `commit`, `discard`, `choose`, `occupy`, `counts` |
 | `objects-4` | 72 | `thread_exhaustion_leaves_free_process_slot_unpublished` | Table `processes=2 threads=2 reserved_threads=1`, whose ordinary range of threads has one slot, with one ordinary pair: the checks of a second ordinary pair give `err=PoolExhausted` for the thread pool, before any write and any fault-injection point; the counts are unchanged and process slot 1 stays free. The prototype's table of 2 processes and 1 thread fails check 3 of the capacity record | `choose`, `counts` |
 | `objects-5` | 86 | `control_reserve_requires_pool_bound_internal_authority` | Table `processes=2 threads=2 reserved_processes=1 reserved_threads=1` with one ordinary pair: an ordinary thread slot and an ordinary pair are each `err=PoolExhausted`; a control pair takes process slot 1 and thread slot 1, and 2 processes and 2 threads are allocated. The prototype's control token of another pool, `PermissionDenied`, does not apply | `choose`, `occupy`, `counts` |
-| `objects-6` | 110 | `bootstrap_is_explicit_and_all_reserved_pool_excludes_ordinary_allocations` | Table `processes=1 threads=1 reserved_processes=1 reserved_threads=1`: the root's pair, a control allocation of the kernel domain, gets `1:0:1` and `2:0:1`, references into the process and thread pools of the table; an ordinary pair is `err=PoolExhausted`; the root's process slot resolves. That the root is alive is the lifecycle component's state | `ObjectTable::new`, `choose`, `occupy`, `resolve` |
+| `objects-6` | 110 | `bootstrap_is_explicit_and_all_reserved_pool_excludes_ordinary_allocations` | Table `processes=1 threads=1 reserved_processes=1 reserved_threads=1` with the first pool number 13: the root's pair, a control allocation of the kernel domain, gets `13:0:1` and `14:0:1`, references into the process and thread pools of the table; an ordinary pair is `err=PoolExhausted`; the root's process slot resolves. That the root is alive is the lifecycle component's state | `ObjectTable::new`, `choose`, `occupy`, `resolve` |
 | `objects-7` | 122 | `attenuated_receipts_cannot_regain_control_or_change_state` | A process and its thread, each named with only the right to observe: both can be queried; widening either to all rights is `PermissionDenied`; creating a thread, terminating the process, beginning a wait, terminating the thread and retaining a resource through them are each `PermissionDenied`; 1 process is allocated and stays alive | The capabilities component, which holds the rights: no entry of this page, since references carry no rights |
-| `objects-8` | 159 | `a_receipt_from_another_pool_cannot_name_a_matching_slot` | Two tables whose pools have no number in common, each `processes=1 threads=1` with one pair: the process and thread references of the first, resolved in the second, are each `err=WrongPool`. A wait ticket of the first, completed in the second, is `WrongPool` and leaves no pending wait there: a case of the waits component | `resolve`; the waits component, for the ticket |
+| `objects-8` | 159 | `a_receipt_from_another_pool_cannot_name_a_matching_slot` | Two tables, each `processes=1 threads=1` with one pair, the first with the first pool number 1 and the second with 7, so that their pools have no number in common: the process reference `1:0:1` and the thread reference `2:0:1` of the first, resolved in the second, are each `err=WrongPool`. A wait ticket of the first, completed in the second, is `WrongPool` and leaves no pending wait there: a case of the waits component | `resolve`; the waits component, for the ticket |
 | `objects-9` | 257 | `all_wait_completion_orders_have_exactly_one_winner` | For each of the four outcomes signalled, timed out, cancelled and peer closed as the winner: during the wait, another begin and a take of the result are `WaitInProgress`; the previous ticket is `StaleWait`; the winner completes and each loser is `AlreadyCompleted`; the take gives the winner, and another take `StaleWait`; 4 completions | The waits component; no entry of this page |
 | `objects-10` | 345 | `repeated_command_cycles_retain_the_root_and_never_reuse_generation` | Property. Table `processes=8 threads=16 reserved_processes=1 reserved_threads=2` with the root's pair, a control allocation, in process slot 7 and thread slot 14. Rounds $n$ from 1 to 128: an ordinary pair is occupied and its slots are then released; it gets `1:0:<n>` and `2:0:<n>`, a generation larger than in every earlier round; the process reference of round $n - 1$ is `err=StaleReference`, and in round 1 there is none; after each round the counts equal those before the first and the root's slots are unchanged. At the end the audit counts of occupied and released process slots are 129 and 128. Lines `objects-10.1` to `objects-10.128`, one for each round: `process=<reference> thread=<reference> stale=<output>`, the output `-` in round 1; line `objects-10.129`: `occupied=129 released=128` | `choose`, `occupy`, `release`, `resolve`, `counts` |
 | `objects-11` | 373 | `generation_exhaustion_never_wraps_or_commits_half_a_pair` | Table `processes=2 threads=3` whose slots all start at generation $2^{64} - 1$, which a test sets: a pair gets `1:0:18446744073709551615` and `2:0:18446744073709551615`; its release retires both slots, leaving the process pool `free=1 allocated=0 retired=1` and the thread pool `free=2 allocated=0 retired=1`, and its references are `err=StaleReference`; a second pair takes process slot 1 and thread slot 1, and its release retires them; a third pair is `err=PoolExhausted` for the process pool before any write, and the thread pool stays `free=1 allocated=0 retired=2`. The prototype's three refusals with its pool-wide counter do not apply | `choose`, `occupy`, `release`, `resolve`, `counts` |

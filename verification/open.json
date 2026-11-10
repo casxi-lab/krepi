@@ -379,6 +379,14 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
+      "item": "kernel/boards/qemu-virt/src/main.rs#object_storage",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/objects/contract.md"
+    },
+    {
       "item": "kernel/boards/qemu-virt/src/uart.rs#read",
       "kind": "mmio",
       "verified_state": "neither",

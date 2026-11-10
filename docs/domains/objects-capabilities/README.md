@@ -178,9 +178,10 @@ record is shared state, read-only after boot, classified in the
 **Verification.** Invariants: the capacities that the boot uses passed
 every check; the eight allocations have distinct owner identities.
 Required counterexamples: each check at its limit and one beyond, a record
-that breaks two checks, a record whose storage does not fit. Environments:
-host tests of the checks and of the default record of each board; QEMU
-boots with the default record and with a record that does not fit.
+that breaks two checks with different errors, a record whose storage does
+not fit. Environments: host tests of the checks and of the default record
+of each board; QEMU boots with the default record and with a record that
+does not fit.
 
 ## Generations
 
@@ -235,10 +236,12 @@ loaded images and page-table pages. A creation checks the caller's quota
 before the shared capacity and before its first write. The limits of a
 child are split from what its parent has left and return to the parent
 when the child is reaped; the capability slots and page-table pages of a
-process are given by its own fixed structures. The root starts with limits
-of objects equal to the ordinary capacities of the pools. For every item,
-the usages of different calling domains never overlap and add up to what is
-allocated.
+process are given by its own fixed structures. The root starts with a
+limit of child processes equal to the smaller of the ordinary capacities of
+the process and the thread pool, and with limits of endpoints and
+notifications equal to the ordinary capacities of their pools. For every
+item, the usages of different calling domains never overlap and add up to
+what is allocated.
 
 **Design background.** Charging metadata to the creator, with the limits
 carved down a tree of processes, bounds what any process can take without

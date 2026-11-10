@@ -152,7 +152,8 @@ check, and the kernel does not fall back to the defaults. Without a record,
 the boot uses the default record of the board, which provides at least 64
 processes and 256 threads and passes the same checks. The criterion: each
 check accepts its limit and refuses one beyond it, a record that breaks two
-checks gives the error of the earlier, and the frozen vectors hold.
+consecutive checks with different errors gives the error of the earlier,
+and the frozen vectors hold.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `objects::validate_capacities` and
@@ -170,9 +171,11 @@ checks gives the error of the earlier, and the frozen vectors hold.
 ### OBJ-R06
 
 **Storage carved at boot.** The boot carves the storage of the object table
-from the page ownership table in eight allocations, each with its own owner
-identity: the five pools, the capability tables, the VM region tables and
-the write-set buffers. No entry takes or returns memory after boot. Each
+from the
+[page ownership table](../../memory/page-tables/contract.md#page-ownership)
+in eight allocations, each with its own owner identity: the five pools, the
+capability tables, the VM region tables and the write-set buffers. No
+entry takes or returns memory after boot. Each
 allocation adds at most one extent to the page ownership table. The
 criterion: for the default records and for a record at the limits, the
 boot takes exactly eight allocations with distinct owner identities and the
@@ -181,8 +184,7 @@ the extents in use grow by at most eight.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `Capacities::allocations` and `ObjectTable::new`
-  (planned), with `Ownership::choose` and `assign` of the
-  [page-tables](../../memory/page-tables/contract.md#entry-points) component.
+  (planned).
 - **Contract.** [Storage carved at boot](contract.md#storage-carved-at-boot).
 - **Specification.** None: the component has no specification.
 - **Proof path.** None: the component has no proof path.
@@ -203,14 +205,17 @@ an ordinary charge beyond the limit fails with `QuotaExceeded` and changes
 nothing. The limits of a child are split from what its creator has left
 and return to the creator when the child is reaped; the capability slots
 and page-table pages of a process are given by its own fixed structures.
-The root starts with limits of child processes, endpoints and notifications
-equal to the ordinary capacities of their pools. The criterion: the quota
-steps of the frozen vectors hold, and the host tests of splits, returns and
-the root's limits hold against an independent model.
+The root starts with a limit of child processes equal to the smaller of the
+ordinary capacities of the process and the thread pool, and with limits of
+endpoints and notifications equal to the ordinary capacities of their
+pools. The criterion: the quota steps of the frozen vectors hold, and the
+host tests of splits, returns and the root's limits hold against an
+independent model.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `QuotaRecord::check`, `charge`, `credit`, `split`,
-  `merge` and `usage`, and `Capacities::root_limits` (planned).
+  `merge`, `start_root` and `usage`, and `Capacities::root_limits`
+  (planned).
 - **Contract.** [Metadata quotas](contract.md#metadata-quotas).
 - **Specification.** None: the component has no specification.
 - **Proof path.** None: the component has no proof path.
@@ -318,4 +323,5 @@ vectors hold without the prototype's counts of failures.
   [Liveness, time and performance](#liveness-time-and-performance) relies
   on.
 - [Open obligations](contract.md#open-obligations) lists the adapter that
-  lends the write-set buffer, which no requirement observes.
+  lends the write-set buffer and the board's forming of the slices of the
+  carved storage, which no requirement observes.
