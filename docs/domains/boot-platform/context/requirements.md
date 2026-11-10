@@ -19,11 +19,13 @@ the metadata lists none.
   manager, which the [references](contract.md#references) of the contract
   list, with their host tests as the frozen
   [vectors](contract.md#legacy-test-vectors).
-- FP/SIMD access for every thread at EL0, the save and restore at every
-  entry from EL0 and return to it with the switch of `CPACR_EL1.FPEN`, and
-  the errors that name the broken rule of a refused context are new; the
+- FP/SIMD access for every thread at EL0 and the save and restore at every
+  entry from EL0 and return to it, with the switch of `CPACR_EL1.FPEN`, are
+  new. The errors of a refused context are the five of the prototype's
+  validation of a context, in place of the one error, `InvalidContext`,
+  that its execution manager reported for each. The
   [behaviour changes](contract.md#legacy-test-vectors) of the contract list
-  where they differ from the prototype.
+  where the rules differ from the prototype.
 - The registers, their fields and their encodings follow the Arm
   Architecture Reference Manual and the Cortex-A76 manual; the default
   FPCR and the division of the floating-point environment between the
@@ -81,13 +83,14 @@ layout hold.
 `Context::new` gives: its general registers, its TLS registers and its
 vector registers are 0; its return address is its entry and its stack
 pointer the top of its initial stack; its SPSR is `0x340`, EL0 with
-`SP_EL0` in AArch64, with IRQs unmasked and FIQs, SErrors and debug
-exceptions masked; its FPCR is `0x0000_0000`, which rounds to nearest with
-ties to even and selects no flush to zero, no default NaN, the IEEE
-half-precision format and no trap; its FPSR is 0. No field comes from
-another thread, also when the new thread takes the slot of a destroyed
-one. The criterion: the frozen vectors hold, and on QEMU virt a new process
-finds these values in its registers at its first instruction.
+`SP_EL0` in AArch64, with IRQs unmasked, FIQs and SErrors masked, and D
+set, which masks no debug exception at EL0; its FPCR is `0x0000_0000`,
+which rounds to nearest with ties to even and selects no flush to zero, no
+default NaN, the IEEE half-precision format and no trap; its FPSR is 0. No
+field comes from another thread, also when the new thread takes the slot
+of a destroyed one. The criterion: the frozen vectors hold, and on QEMU
+virt a new process finds these values in its registers at its first
+instruction.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `Context::new`, `context::USER_PSTATE`, `DEFAULT_FPCR`
@@ -130,7 +133,8 @@ each range and each single bit of the SPSR outside NZCV.
 
 **No return with a refused context.** The kernel restores no context that
 `validate` refuses: a return to EL0 whose saved context has an illegal
-return address, stack pointer or SPSR executes no `ERET` with it, and the
+return address, stack pointer or SPSR, among them an SPSR in which the
+thread left `PSTATE.SSBS` set at EL0, executes no `ERET` with it, and the
 thread does not run at EL0 again. The criterion: on QEMU virt, three cases
 each give the saved context of a thread an illegal PC, SP or PSTATE before
 its return, and no instruction of the thread executes afterwards.
@@ -175,11 +179,12 @@ the return to it, a thread finds the registers that it left: `x0` to
 `x30`, `SP_EL0`, NZCV, `TPIDR_EL0`, `TPIDRRO_EL0`, all 128 bits of each of
 `q0` to `q31`, FPCR and FPSR, bit for bit, whatever other threads ran in
 between, apart from the results that a call writes. Every entry saves the
-FP/SIMD and TLS registers and every return restores them, eagerly, and EL0
-cannot write `TPIDRRO_EL0`. The criterion: on QEMU virt, two processes that
-interleave by a system call that yields and by timer interrupts compare,
-in each of a fixed number of rounds, every one of these registers with
-values that they compute from the round alone, and every comparison holds.
+FP/SIMD registers and `TPIDR_EL0`, and every return restores them with
+`TPIDRRO_EL0`, eagerly; EL0 cannot write `TPIDRRO_EL0`. The criterion: on
+QEMU virt, two processes that interleave by a system call that yields and
+by timer interrupts compare, in each of a fixed number of rounds, every one
+of these registers with values that they compute from the round alone, and
+every comparison holds.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `__fpsimd_save` and `__fpsimd_restore` in

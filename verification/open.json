@@ -220,7 +220,7 @@
     },
     {
       "item": "kernel/arch/src/fpsimd.S#__fpsimd_restore",
-      "kind": "unsafe",
+      "kind": "assembly",
       "verified_state": "reads",
       "carrier": "The proof of contexts, user copies and the private VM",
       "stage": "0.2",
@@ -228,7 +228,7 @@
     },
     {
       "item": "kernel/arch/src/fpsimd.S#__fpsimd_save",
-      "kind": "unsafe",
+      "kind": "assembly",
       "verified_state": "writes",
       "carrier": "The proof of contexts, user copies and the private VM",
       "stage": "0.2",
