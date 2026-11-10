@@ -134,7 +134,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "check",
-        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, and that the registries hold nothing that the gate does not support; --write first writes the file",
+        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, that the target registry and verification/axioms.json keep their rules, with every key of a target in the inventory, and that the registries hold nothing that the gate does not support; --write first writes the file",
         subcommands: &[],
     },
     Command {

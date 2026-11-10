@@ -687,12 +687,13 @@ in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
    manifest `kernel/Cargo.toml` has the shape of the
    [source layout](architecture.md#source-layout), as the `manifests` step
    requires of the checkout. A failure of Cargo itself is a tool failure.
-   The run is also rejected when it extracts kernel targets and
+   The run is also rejected when it is to extract kernel targets and
    `kernel/Cargo.toml` has no `[package]` named `krepi-kernel`, the root
-   package that kernel targets are extracted from: a whole run extracts
-   every formal target of the registry, a run with `--target` the targets
-   that it names, planned ones included. A run whose registry has no formal
-   target, or that names none, only qualifies the tools and runs the base
+   package that kernel targets are extracted from. The phase that extracts
+   the targets is planned; the targets of a run are every formal target of
+   the registry for a whole run, and those that `--target` names, planned
+   ones included, for a run with `--target`. A whole run whose registry has
+   no formal target has none: it only qualifies the tools and runs the base
    round, and the workspace may then have no root package.
 
 A tool failure in one of these steps ends them: the later steps do not run.
@@ -1679,13 +1680,14 @@ a tool, and each broken rule is a problem:
 
 A run extracts the target from the current production source and checks the
 registry against the translation (planned): every reached local function is
-in `proves`, `unclosed` or `derived`, every cut local item in `unclosed`, and
-the reached external items are exactly those of `unconstrained`; every entry
-of these lists is still reached, and a `derived` entry is reached as a method
-of a derived implementation of a standard trait, under one Rust name. A Rust
-name maps to the inventory key of its function: the path below the module
-of its source file, `krepi_kernel::m::inner::f` in the file of `m` for
-`inner::f`, gives the inline modules; the self type of an implementation,
+in `proves`, `unclosed` or `derived`, every cut local item in `unclosed` or
+`derived`, and the reached external items are exactly those of
+`unconstrained`; every entry of these lists is still reached, and a
+`derived` entry is reached as a method of a derived implementation of a
+standard trait, under one Rust name. A Rust name maps to the inventory key
+of its function: the path below the module of its source file,
+`krepi_kernel::m::inner::f` in the file of `m` for `inner::f`, gives the
+inline modules; the self type of an implementation,
 `{impl Trait for krepi_kernel::m::Type}`, the owner; and the loops of a
 function, whose Rust name is that of the function, map to its key, as the
 default method of a trait and its loops map to `Trait::method`. A reached

@@ -88,9 +88,9 @@ serde = { version = "=1.0.229", default-features = false, features = ["alloc", "
 # visitor and read their attributes, paths and tokens; the `manifests` step
 # and `cargo xtask formal run` read the crate attributes of the library of
 # the root package of the kernel workspace; a test of the check does so for
-# the Rust files of every workspace, for the names of the slow tests. Printing, the `Clone` implementations and the procedural-macro
-# support of the default features are not used, so the default features are
-# left out.
+# the Rust files of every workspace, for the names of the slow tests.
+# Printing, the `Clone` implementations and the procedural-macro support of
+# the default features are not used, so the default features are left out.
 syn = { version = "=3.0.9", default-features = false, features = ["full", "parsing", "visit"] }
 # The token type under `syn`, already in the lock file through it: the
 # `subset` step reports the line of each problem that it finds, which the
