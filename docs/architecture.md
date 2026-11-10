@@ -14,7 +14,8 @@ crate nor a job.
 
 ```text
 EL0   root (supervisor and process manager)
-      file service, block driver, stream service, UART service
+      file service, read-only image service, file system services
+      block driver, stream service, UART service
       job service, display and input services, device drivers
       worker processes: CAS, plotting, Python, proof compile/run/check
       POSIX environments: a process service and its POSIX processes
@@ -29,8 +30,10 @@ HW    CPUs, MMU, GIC, timers, platform protection
 | --- | --- | --- |
 | Kernel (EL1) | Kernel objects, page tables, scheduling, GIC and timers, hardware protection operations | A kernel fault is a system fault: minimal diagnostics, then halt or controlled restart |
 | Root | Initial resources, creation, termination and granting of authority, the service manifest and recovery policy | A root failure is a system failure; the root does not claim to restart itself |
-| File service | Authorized namespaces, files and directories, the read-only boot bundle; the endpoint of the block service | Open file sessions fail; data held only in memory may be lost and writes are not replayed |
-| Block driver | Granted MMIO, IRQ and DMA buffers | The device is stopped and in-flight operations drained before memory is reclaimed |
+| File service | The authorized namespace of each environment with its mounts, path resolution, files and directories, the read-only boot bundle and tmpfs with quotas; its sessions with the storage back ends, and at first the session of the block service that holds its persistent namespace | Open file sessions fail; data held only in memory, tmpfs included, may be lost and writes are not replayed; the back ends keep their committed state |
+| Read-only image service | The read-only system image: its manifest and the files that it lists, each block checked against the hash tree of its file whenever it is read, and the execute right of the files that the manifest marks executable; the contents of installed packages, checked in the same way against the roots recorded when they were installed | Only the sessions of its mounts fail; it holds no state beyond its caches |
+| File system service | One writable volume, its commits and its quotas | Only the sessions of its mounts fail; writes that were not committed are lost, and recovery returns the last commit |
+| Block driver | Granted MMIO, IRQ and DMA buffers; ranges of blocks, each granted to one client, so that only the updater writes the A/B slots and the approval records | The device is stopped and in-flight operations drained before memory is reclaimed |
 | Workers | Private heap and stack, an input snapshot, limited file, stream and result rights | Each non-cooperative job runs in a process that can be killed as a whole |
 | Process service | The process IDs, parent relations, exit statuses, process groups and sessions of one POSIX environment, and the creation right and quota from which it creates every process of that environment | Every process of the environment is destroyed with it; other environments continue |
 | Linux process | An unmodified Linux program and the compatibility runtime that loading places in its address space, with the authority of that process only | Only that process is affected, also when the program damages its runtime |
@@ -52,10 +55,10 @@ dispositions or other POSIX state and implements no Linux system call
    information and its initial capabilities. This path performs only bounded
    mapping and entry checks.
 3. The root reads the service manifest from the read-only boot bundle,
-   validates restricted static ELF images and asks the kernel to create
-   domains, pages, mappings and threads. Starting the file service from the
-   read-only bundle avoids a loader that needs a file service that does not
-   exist yet.
+   which is part of the kernel image, validates restricted static ELF
+   images and asks the kernel to create domains, pages, mappings and
+   threads. Starting the file service from the read-only bundle avoids a
+   loader that needs a file service that does not exist yet.
 4. Services receive their endpoints and complete a version handshake and a
    readiness protocol. A service that does not become ready fails with a
    timeout and a diagnostic, so services never wait for each other in a
@@ -69,23 +72,80 @@ A cold boot reaches the resident root without reading the serial port. The
 first service topology is the root with a file, a block, a stream and a UART
 service.
 
+The boot bundle holds the boot-bundle directory with its capacity record
+and the images of the root, the services and the workers. It is a
+read-only segment of the kernel image, page aligned and holding nothing
+else, and neither board delivers it in another way: on QEMU virt it is a
+read-only segment of the ELF image that QEMU's loader loads, and on the
+Pi 5 the firmware loads it with the image. The kernel finds the bundle from
+the symbols of its link and gives its place and size to the root in the
+boot information; the root reads the images from there, so the kernel image
+binds them and the root compares no digest at run time. The bundle shares
+no page with kernel data, and the kernel maps it for itself read-only and
+never executable. Each board has one image file, and the digest of the
+image covers the bundle and its workers. The build checks the size of the
+bundle and the number of its entries against limits of the boot
+configuration, and the image with its bundle has to fit the load layout of
+the board.
+
 Boot facts that the prototype established and that the design accounts for:
 
-- The Pi 5 firmware enters at EL2 with the MMU and caches off, loads the
-  image at `0x80000` and the device tree at `0x200000`. UART10 must keep the
-  divisor that the firmware set.
+- The Pi 5 firmware enters at EL2 with the MMU off. The boot protocol that
+  it follows allows the instruction cache to be on, so the entry checks both
+  caches; the prototype found them off. UART10 must keep the divisor that
+  the firmware set.
 - The BCM2712 uses a GIC-400, not a GICv3. Group 1 routing of INTID 30 can
   only be configured by the firmware.
-- The firmware device tree has 334 symbol properties, 32-character vendor
-  names and a dynamic `linux,cma` reserved range. The upstream memory node is
-  a 640 MiB placeholder; the 8 GiB of the board come in three banks with a
-  4 MiB hole, and using all of it needs block mappings and a kernel direct
-  map.
+- The device tree that the Pi 5 firmware ships has 334 properties in its
+  symbol node and property names of up to 32 characters. Its reservation for
+  the Linux contiguous memory allocator is dynamic, a size and an allowed
+  range rather than an address; the kernel checks and records it but does
+  not treat it as a reserved range. The memory node of the device tree that
+  Raspberry Pi ships is a placeholder of 640 MiB that the firmware replaces.
+  On the 8 GB model the firmware describes three banks with a hole of 4 MiB
+  below 1 GiB, as the prototype measured; the banks of the 1, 2, 4 and 16 GB
+  models are inferred from that measurement. Using all of the RAM needs
+  block mappings and a kernel direct map
+  ([physical memory ranges](domains/boot-platform/README.md#physical-memory-ranges)).
 - PSCI uses SMC on the Pi 5 and HVC on QEMU virt. The Pi 5 CPU affinities are
   `0`, `0x100`, `0x200` and `0x300`.
-- With caches on, the prototype's entry code invalidated only its own image
-  range and relied on a firmware coherence convention that is not proved.
-  That convention is a trusted item.
+
+The firmware coherence convention is a trusted item. Before it enters the
+kernel, the firmware writes the image, the device tree and any other file
+that it loads for the kernel to the point of coherency and leaves no line
+of these ranges dirty in a cache. Afterwards nothing writes memory except
+the CPUs, the DMA of trusted drivers ([devices and DMA](#devices-and-dma)),
+the firmware when it answers a mailbox request in the buffer of that
+request, and the firmware in its reserved memory. A scan-out that the
+firmware leaves running reads only memory that the device tree reserves or
+leaves out of its memory nodes, until the display driver stops it or takes
+it over; other memory that it may read stays quarantined. Before it turns
+the caches on, the entry code invalidates by address the data cache lines
+from the start of the image to the end of the boot bundle, which is the
+whole image, and then the instruction cache of its CPU; it relies on no
+other cache state that the firmware leaves. The kernel cannot check the
+convention at run time: tests with the caches on check it on the board for
+each firmware version, and again after every firmware update.
+
+On the Pi 5 the configuration of the firmware loads the image at `0x80000`
+and the device tree at `0x1000_0000`, with 2 MiB of room for the device
+tree, and loads no initial RAM disk; the kernel takes the address of the
+device tree from `x0` and does not assume it. The image with its boot
+bundle may take up to 255.5 MiB, from `0x80000` up to the device tree, on
+every RAM size of the board. The build refuses an image that would reach
+the device tree, and the part of that range that the image leaves free
+stays usable RAM. The reserved memory of the firmware lies below the image
+and, on the 8 GB model, in the hole below 1 GiB, and the dynamic
+reservation does not constrain this layout. On every model the image, its
+boot bundle and the device tree lie in the first bank, outside the kernel
+direct map. The layout is not yet confirmed on the board: cold boots with
+an image of the largest size are to confirm it.
+
+The rules on the boot bundle and the load layout leave the fields of the
+boot information and of the boot-bundle directory to the contracts of the
+components below [subject domains](domains/README.md), and they do not
+state the values of the limits that the boot configuration sets on the
+bundle.
 
 ## Kernel objects and capabilities
 
@@ -433,8 +493,7 @@ The execute right is a right of a VM object and comes with the full VM
 object model: at first no VM object carries it, and executable pages come
 only from the boot bundle. Mapping a VM object executable requires that
 right. Which processes may add the right, and how it is withdrawn, belong to
-the integrity policy for `exec`, an
-[open design question](#open-design-questions).
+the [integrity policy](security.md#integrity-policy) for `exec`.
 
 ## Processes, POSIX and Linux compatibility
 
@@ -822,21 +881,150 @@ QEMU with one, two and four vCPUs checks function. A fixed instruction count
 reproduces function only; races are tested with multi-threaded TCG and then on
 the Pi 5. Four boot messages from four CPUs do not show that SMP works.
 
+## Storage
+
+Storage is served in EL0. Clients reach it through the file service, which
+holds the namespaces and resolves paths; the one exception is the loader
+under **Verification** below. Each storage back end runs in a domain of its
+own: the read-only image service for the system image, and a file system
+service for each writable volume. The file service reaches the back ends
+through sessions of its own, apart from that loader no client holds a
+capability to a back end, and the back ends reach the medium through the
+block driver.
+
+- **Read-only system image.** The system image is a read-only volume. Its
+  manifest lists each file with its path, size and kind, whether it is
+  executable, and the root of a SHA-256 hash tree over the 4 KiB blocks of
+  the file; the manifest is stored in 4 KiB blocks with a hash tree of its
+  own, whose root is the root digest of the volume. Each volume slot is a
+  partition of the GPT that holds a header, the manifest with its tree, and
+  the contents and trees of the files; the header decides nothing about
+  acceptance. The build writes the root digest into a trusted part of the
+  kernel image, so a kernel image and its volume are released and updated
+  as a pair: each A/B slot of the kernel image has a volume slot of its
+  own, approved and selected with it, and every read of a volume that does
+  not match its kernel image fails. The system never writes the active
+  volume: until the updater writes volumes on the device, a host writes the
+  volume to the medium, and the updater then writes only the inactive
+  volume slot.
+- **Verification.** The read-only image service, in the block layer above
+  the block driver, checks the manifest against the root digest from the
+  kernel image, looks files up by path and checks every block that it reads
+  against the hash tree of its file, also when a page is read again after
+  it was evicted; a block that does not verify is never returned. It
+  provides each file as a read-only memory object that carries its path,
+  and it gives the execute right to the files that the manifest marks
+  executable, so integrity and the execute right are both kept per file. A
+  loader takes an object in one of two ways: it asks the read-only image
+  service for the object by path, the one case in which a client other than
+  the file service holds a session with a back end, or it receives the
+  object through the file service and checks the path that the object
+  carries. The contract of the loader (planned) fixes which of the two it
+  uses. The file service builds the directory tree from the manifest and
+  passes the objects on: it could misreport a directory listing, but it
+  cannot change the contents or the path of an object. Large images are
+  loaded page by page from verified blocks, and the kernel maintains the
+  instruction cache before a page becomes executable, so their size is
+  bound only by the limits of VM and loading in the capacity record, not by
+  entry cache maintenance.
+- **Installed packages.** Installed packages are stored in the same format.
+  The signature of a package manifest is verified when the package is
+  installed, and the roots of the hash trees of its files are recorded then.
+  The read-only image service checks every read of an installed package
+  against those roots and never returns a changed block, so what any client
+  receives equals what was checked at installation. The file system service
+  that stores the packages marks them immutable but is not trusted for it:
+  if it changes or removes them, reads fail.
+- **Namespaces and mounts.** Each environment has one namespace, which the
+  file service records. The process manager obtains for an environment a
+  directory handle to the root of its namespace, a session capability of
+  the file service whose badge names the environment, and the processes of
+  the environment receive only directory handles derived from it. A path is
+  resolved from a directory handle and never leads out of the directory
+  that the handle names, through an absolute path, `..` or a symbolic link.
+  A mount binds a volume or a directory of a back end at a path of one
+  namespace, and only a holder of the authority to mount in that namespace
+  makes it; Linux mounts and mount namespaces map onto these mounts
+  ([processes](#processes-posix-and-linux-compatibility)). A rename or a
+  replacement across volumes is refused.
+- **Files and quotas.** Directory hierarchy, hard and symbolic links and
+  POSIX permission metadata are kept by the format of a back end and passed
+  on by the file service. The file service orders the requests of its
+  clients and enforces their quotas of bytes, files, handles and requests
+  in flight, and a back end accounts each request to the principal that the
+  file service names.
+- **Writable file system.** A file system service keeps one writable volume
+  in a copy-on-write format of krepi's own: directories and files are
+  copy-on-write trees, and each of two superblock slots carries a
+  generation that only increases and a commit identity. A write changes
+  only the working view. A commit writes the new blocks, completes a write
+  barrier, writes the other superblock slot with a higher generation and a
+  new commit identity, and completes a second barrier; only then is it
+  reported durable. `fsync` and a rename within a volume are each one
+  commit and become visible atomically, and the completion of a write, its
+  atomic visibility and its durability are reported apart. Recovery reads
+  both superblocks and takes the newest valid one, so it reads a fixed
+  number of blocks; the map of free space is saved with each commit, not
+  rebuilt. The result of a commit whose reply was lost can be queried by
+  its commit identity, and without enough evidence its outcome is reported
+  as unknown, never assumed to be success. Quotas of bytes and files are
+  kept in the metadata. A writable volume cannot be read or written
+  directly on a PC.
+- **SD cards.** A card is written only while its write cache is absent or
+  off; a card whose write cache is on is not used for writing, and the
+  cache flush of `CMD49` is not used. A write barrier is the completion of
+  the transfer, with `DAT0` ready and `CMD13` reporting the transfer state
+  and `READY_FOR_DATA`, and every commit takes two barriers. Large reads and
+  writes go through DMA buffers ([devices and DMA](#devices-and-dma)).
+- **FAT.** FAT32 remains only on the path of the prototype, for exchange
+  with a host and for the boot partition. The Pi 5 firmware reads its
+  configuration, the device tree and the kernel from a FAT boot partition,
+  so the boot partition and the A/B slots that the firmware selects by
+  partition stay FAT, and the updater writes them whole, not through a file
+  system service.
+- **Failure.** When the file service fails, all its sessions fail and the
+  back ends keep their committed state. When a back end fails, only the
+  sessions of its mounts fail, and a fault of a writable volume does not
+  affect the read-only image. Once the back ends run in domains of their
+  own, the file system services are the only storage services that write
+  blocks: neither the file service nor the read-only image service writes
+  the medium.
+- **Integrity roles.** Of the storage components that code and update
+  integrity rely on ([integrity policy](security.md#integrity-policy)), the
+  read-only image service is the component that verifies the read-only
+  system image, and also the storage component that keeps installed
+  packages immutable, since it checks their contents whenever it reads
+  them. The block driver is the storage path that alone writes the A/B
+  slots and the approval records: they lie in partitions of their own,
+  outside every writable volume, and the block driver grants writes to them
+  only to the updater; it grants every range of blocks to one client only.
+  No file service passes worker images from the boot bundle to the loader,
+  because the root reads them from the kernel image; a file service that
+  passed images to a loader would be trusted for that as well. The file
+  service and the file system services are not trusted for integrity.
+- **At first.** At first the file service is the only storage service. It
+  serves the boot bundle as read-only files and keeps its persistent
+  namespace as a whole through a session of the block service, committing
+  it as a snapshot to one of two slots in the format of the prototype,
+  whose CRC detects accidental damage only; until the back ends run in
+  domains of their own, it holds the session of the block service that
+  writes.
+- **Not covered here.** These rules do not state the entries, path
+  encoding and limits of the manifest, the fields and limits of the
+  writable format, its points of power loss, the capacities of volumes,
+  the limit of large images, the identification of SD cards and the SD host
+  driver, signed packages and updates with their keys, or recovery media.
+  The EL0 services and storage, devices and DMA, and security and lifecycle
+  domains ([subject domains](domains/README.md#domains)) and the
+  [integrity policy](security.md#integrity-policy) state them.
+
 ## Devices and DMA
 
-Drivers in EL0 receive only the register ranges and interrupts that their
-manifest grants. They cannot map arbitrary physical memory or configure the
-GIC. The kernel identifies an interrupt, masks or completes it at the
-controller as the protocol requires and notifies the driver; the driver
-clears the device cause and re-enables the line through its binding.
-
-Device authority covers MMIO, IRQs, DMA address ranges, clocks and resets, and
-buffers in flight. Unmapping memory from the CPU does not stop DMA. When a
-process dies, its device is stopped, drained or reset before memory is
-reclaimed; when that cannot be confirmed, the memory stays quarantined and the
-device disabled. Without a verified IOMMU constraint, a driver that programs
-DMA is part of the trusted base; running it in EL0 gives only partial
-isolation against CPU faults.
+A driver in EL0 that does not program DMA receives only the register
+ranges and interrupts that its manifest grants, as device grants that the
+root issues from the device directory; a driver that programs DMA also
+holds the DMA authority of its devices and their DMA buffers. Drivers
+cannot map other physical memory or configure the GIC.
 
 On the Pi 5, PCIe and RP1 bring-up uses the independent reset controller
 (the reset inside the root complex reads back `0xdeaddead`), RESCAL, the PHY
@@ -844,6 +1032,153 @@ and Gen2 x4 link training, and hands EL0 a baseline with all BARs zero and
 bridge windows closed. RP1 interrupts are demultiplexed by masking `INT_STAT`
 with the `ENABLE` bit of each vector. The shared INTA line also carries an
 Ethernet interrupt source that krepi does not own.
+
+- **MMIO.** Every window of the device directory is aligned to 4 KiB pages.
+  The kernel maps the window of a grant into the address space of the
+  driver as whole pages of Device-nGnRnE memory that are not global,
+  readable and writable at EL0 and never executable; EL0 never names a
+  physical address, a size or memory attributes, and a futex operation on
+  these pages fails with a fixed error. The driver then accesses its
+  registers without the kernel. A page that holds registers of more than
+  one device is granted whole to one domain, and the directory entry states
+  that this domain holds the authority of each of those devices; the grant
+  does not isolate them from each other. Registers that drivers of
+  different domains need, such as the clocks, resets and pin multiplexing
+  of RP1, are changed on request by the domain that holds their page.
+- **First grants.** At first the device directory holds the PL011 on QEMU
+  virt and UART10 on the Pi 5, each mapped to its driver in this way, and
+  the VirtIO-mmio slots in use on QEMU virt. Those slots are the exception:
+  eight of them share a page, and their registers set the addresses of the
+  queues that the device reads, so at first the kernel does not map them
+  into EL0, and the driver reaches their registers and its DMA only through
+  the kernel, which checks each access. Once DMA buffers exist, the VirtIO
+  block driver uses them as every driver that programs DMA does, and its
+  slot is mapped to it; a page that would hold slots of drivers in
+  different domains stays behind the kernel.
+- **Interrupts.** An interrupt binding is part of a device grant and names
+  one bit of a notification. A binding delivers nothing before its first
+  arm. When the interrupt is taken, the kernel identifies it, records the
+  sequence number of the event and the time it was taken, and sets the
+  bit; the driver waits on the notification, handles the device and
+  acknowledges the event with the epoch and sequence number of its binding.
+  Epochs and sequence numbers never wrap. At most one event of a binding is
+  pending at a time and the line stays masked until it is acknowledged, so
+  a device stuck at an active level is delivered once, and edges that
+  arrive while an event is pending are merged into it. The kernel masks a
+  level-triggered source at the distributor before it ends the interrupt,
+  so the CPU interface can take other interrupts; the driver clears the
+  cause at the device before it acknowledges, and the kernel clears the
+  pending state at the distributor before it unmasks the line. The
+  interrupt path allocates nothing and changes only the routing record and
+  one notification word. Sources that share a line, such as those of RP1
+  on its shared line, each have a binding of their own, masked at their own
+  enable bit, and the kernel demultiplexes them.
+- **Revocation.** Revoking a grant, or the death of its holder, masks and
+  drains its interrupts: a pending event is discarded and the epoch
+  changes, so an acknowledgement with the old epoch and a repeated arm are
+  refused, and a new holder starts with an arm after it has cleared the
+  cause at the device. The kernel then removes the mappings, waits until
+  the TLB invalidation has completed, and only then releases the
+  references. DMA buffers are drained as below.
+- **DMA buffers.** Device authority covers MMIO, interrupts, DMA buffers,
+  clocks and resets, and buffers in flight. A driver that holds DMA
+  authority gives its device memory only through DMA buffers, kernel
+  objects of a kind of their own with a pool and a quota item, whose pages
+  come from the quota of the driver and can be physically contiguous and
+  aligned as the device needs. The pages stay resident and are never
+  evicted or moved, and a buffer can be mapped into other processes as a
+  shared VM object is. Before a buffer is given to a device it is sealed:
+  while the device holds it, no mapping is added, its memory attributes do
+  not change and it cannot be released, and unsealing first drains the
+  device. A bus address is a type of its own, which the kernel computes
+  from the physical address with the `dma-ranges` of the device tree. Only
+  the driver that holds the DMA authority receives it, as part of that
+  authority; no process receives the CPU physical address, and the other
+  holders of mappings of the buffer receive no bus address. Where the path
+  of a device is treated as not coherent, as the paths of the SD host and
+  PCIe on the Pi 5 are, the driver asks the kernel to clean or invalidate
+  ranges of its buffers, or creates them as Normal Non-cacheable memory;
+  the VirtIO devices of QEMU virt are coherent.
+- **Draining.** Unmapping memory from the CPU does not stop DMA. When a
+  grant is revoked or its driver dies, its DMA buffers become pending:
+  their CPU mappings are removed and their pages are not reclaimed. A
+  trusted party that keeps control of the device, the restarted driver or a
+  recovery component of the root, stops the device and reads back that it
+  has stopped, and only once the drain is confirmed are the pages
+  reclaimed. A timeout is not a confirmation: pages whose drain cannot be
+  confirmed stay quarantined and are not allocated again before the next
+  boot, and the device stays disabled.
+- **Trusted base.** No device path has an IOMMU or an equivalent constraint
+  that is verified; the IOMMUs of the BCM2712 and the inbound windows of
+  PCIe are not used for isolation. Every EL0 driver that programs DMA is
+  therefore part of the trusted base as a whole process, with its code, its
+  data and its grants, and is trusted only to let its devices reach the DMA
+  buffers that it holds; otherwise it counts as an untrusted driver. On the
+  Pi 5 these are the display driver, the drivers of the USB host
+  controller, the SD host and Ethernet, and the component that sets the
+  inbound windows of PCIe and enables bus mastering; on QEMU virt they are
+  the VirtIO block driver once it uses DMA buffers and, if QEMU virt shows
+  its display through a VirtIO device, the driver of that device. Drivers
+  that do not program DMA, such as those of the UARTs and GPIO, are not
+  part of it. Each of these drivers is held to an executable specification
+  of its own; for one that runs before that specification is complete, the
+  release declaration says how far it is checked. Running a driver in EL0
+  gives only partial isolation against CPU faults. At first the only DMA is
+  that of the VirtIO block device on QEMU virt, through a fixed region that
+  the kernel holds and never maps into EL0: the kernel checks each
+  descriptor before it publishes it to the device, and the driver names no
+  address.
+- **Firmware mailbox.** Only the firmware mailbox service holds the grant of
+  the mailbox of the Pi 5 and its interrupt, and it alone owns the buffer
+  of the requests, a DMA buffer of its own whose cache it maintains before
+  and after each request. Clients, such as the power and thermal services
+  for frequencies and temperatures and the display driver for its clocks,
+  send it requests through an endpoint. The service manifest of the root
+  lists the tags of each client, and the service checks each tag with its
+  arguments, such as the clocks and the ranges of frequency that a client
+  may set. It refuses to every client the tags that return or take bus
+  addresses of memory, those that call code at a bus address and those
+  that allocate a frame buffer; the tags that change the persistent state
+  of the firmware, such as its OTP memory and its boot and reboot flags,
+  are listed only for the root itself. The mailbox passes only the
+  bus address of the request buffer, and the firmware reads the request
+  there and writes the response back, so whoever writes the mailbox
+  registers can make the firmware write any memory that it names. The
+  service is therefore part of the trusted base under the rule for drivers
+  that program DMA, trusted only to let the firmware reach no buffer but
+  those of the requests that it forwards. At first there is no mailbox
+  service.
+- **Display.** The display device service runs in the process of the
+  display driver. It allocates every buffer that a display scans out as a
+  DMA buffer, with the contiguity and memory attributes that the controller
+  needs, and grants mappings of it to its holders: the kosmo display server
+  and, as a second holder, a minimal recovery client of krepi that shows
+  only prerendered images and status codes. A holder never supplies the
+  pages that a device scans out. A holder that dies loses only its
+  mappings; the buffers stay with the service, the scan-out goes on and the
+  last frame stays on the display. The display driver holds the DMA
+  authority of these buffers and stops the scan-out of a buffer, or moves
+  it to another one, before the buffer is reclaimed. On the Pi 5 the
+  registers of the HVS, the pixel valves and HDMI are mapped to the display
+  driver, and a page that HDMI shares with another block is granted whole
+  to it; the driver programs the scan-out addresses, and the register
+  writes of each frame do not go through the kernel. Its completion and
+  vertical blanking interrupts each have a binding, it sets the HDMI and
+  HVS clocks of a mode through the mailbox service, and it never takes a
+  scan-out buffer from the firmware. The holders only write pixels, program
+  no DMA and are not part of the trusted base.
+- **Not covered here.** These rules do not state the operations and errors
+  of device grants, interrupt bindings and DMA buffers, how the time at
+  which an interrupt was taken reaches the driver, the list of mailbox
+  tags, how display and input device services pass events to their holders
+  and the rest of their interfaces, the forms of the display and input
+  drivers, the inbound windows, bus mastering and first interrupt
+  configuration of PCIe, the management of the shared registers of RP1,
+  the programming of an IOMMU, or the policy of power, frequency and
+  temperature. The devices and DMA and the boot and platform domains
+  ([subject domains](domains/README.md#domains)) state them, and the
+  [trusted boundary](formal-verification.md#trusted-boundary) lists what a
+  release declaration trusts.
 
 ## Floating-point state
 
@@ -897,8 +1232,6 @@ each layer is organized and what remains trusted.
 These questions are being decided and the rules they produce will be stated on
 this page when they are made:
 
-- the storage architecture (read-only system image, VFS, writable file system
-  back end) and the trust model for devices without an IOMMU;
 - the GUI, display and input stack with its rendering path, and the
   connections the device offers (Ethernet, Wi-Fi and Bluetooth, USB device
   mode);
