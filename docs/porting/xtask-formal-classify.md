@@ -52,8 +52,10 @@ check is planned.
   nothing for a name that is not below the module. A derived method and a
   hand-written one of a type of the same name in an inline module, which
   the CAS project mapped to one key, so have two; a `derived` entry that
-  several Rust names reach is still refused, such as the key of the
-  derived `eq` of a type that also implements `PartialEq<u32>` by hand.
+  several Rust names reach is still refused, a rule that now fires only
+  when the inventory does not see the hand-written method, since the key
+  of the derived `eq` of a type that also implements `PartialEq<u32>` by
+  hand is refused earlier, as the next item says.
 - A reached function whose key the inventory holds both as a function and
   as a derived method, such as that `eq`, maps to no key and is not
   registered, so the target fails under any list. The CAS project accepted
