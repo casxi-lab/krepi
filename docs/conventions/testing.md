@@ -1040,15 +1040,19 @@ takes.
 
 In the tests of `cargo xtask formal run`, a fake tool that hangs gets a
 limit of 1 s, which only decides that it is stopped, and any other fake
-tool a limit of 3,600 s. The test of a stop signal waits at most 120 s for
-the gate that it starts to reach its command, which only a failing test
-reaches. In the tests of `cargo xtask formal vectors`, a Lake stand-in that
-hangs gets a budget of 1 s, which only decides that it is stopped, and any
-other a budget of 1,800 s or 3,600 s; the ignored replay with the pinned
-Lean has 300 s.
+tool a limit of 3,600 s. A fake tool that hangs sleeps for 30 s, and so does
+a process that a test leaves behind in the group of a command that ends.
+The test of a stop signal waits at most 120 s for the gate that it starts
+to reach its command, which only a failing test reaches; that command
+sleeps for 240 s. In the tests of `cargo xtask formal vectors`, a Lake
+stand-in that hangs gets a budget of 1 s, which only decides that it is
+stopped, and sleeps for 30 s, and any other a budget of 1,800 s or
+3,600 s; the ignored replay with the pinned Lean has 300 s. Each sleep is a
+small multiple of the bound of its test, so that it outlasts every wait
+that a passing test makes.
 
 In the tests of `cargo xtask check`, a step that the check is to cancel runs
-a shell that starts a sleep of 600 s, writes the number of its process group
+a shell that starts a sleep of 240 s, writes the number of its process group
 to a file and waits; the failing step of the test waits for these files
 before it fails, so the test drives the interleaving. The check must
 end within 10 s after the failing step, which only a check that waited for
@@ -1062,9 +1066,9 @@ failing test reaches. No other test bounds how long a step takes.
 The process group of the `test` step holds Cargo and the test executables,
 not the processes that tests start in process groups of their own. When the
 check kills the step, as it does when the release lane fails or a stop
-signal arrives, such processes outlive it: a sleep of the tests of the check
-for up to 600 s, and one of the tests of `cargo xtask formal run` or
-`cargo xtask formal vectors` for up to 86,400 s.
+signal arrives, such processes outlive it: a sleep of the tests of the
+check, `cargo xtask formal run` or `cargo xtask formal vectors` for up to
+240 s.
 
 ## Dependencies
 

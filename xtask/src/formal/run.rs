@@ -924,7 +924,7 @@ pub(crate) mod tests {
     fn a_hanging_command_is_stopped_at_its_phase_budget_and_the_receipt_is_written() {
         let fixture = Fixture::new("hang");
         let phases = vec![phase("base", Duration::from_secs(1), &["base"], |run| {
-            shell(run, "base", "exec sleep 86400");
+            shell(run, "base", "exec sleep 30");
             run.conclude("base", (Status::Verified, None));
             Ok(())
         })];
@@ -1259,7 +1259,7 @@ pub(crate) mod tests {
             let root = PathBuf::from(root);
             let group = root.join("artifacts/group");
             let script = format!(
-                "sleep 86400 & echo $$ > {0}.new && mv {0}.new {0}; wait",
+                "sleep 240 & echo $$ > {0}.new && mv {0}.new {0}; wait",
                 group.display()
             );
             let phases = vec![phase("base", LONG, &["u1"], |run| {
