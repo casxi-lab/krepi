@@ -933,8 +933,28 @@ affected features until they are obtained again.
 - Integration tests are grouped by documentation area: one module per feature
   document, whose path mirrors the feature ID with hyphens written as
   underscores (`krepi.kernel.endpoint-ipc` maps to a module
-  `endpoint_ipc` in the `kernel` area). The crate layout is fixed with the
-  first tests.
+  `endpoint_ipc` in the `kernel` area). In the user-space workspace, the
+  crate layout is fixed with the first tests; the kernel workspace follows
+  the next point.
+- In the kernel workspace, the integration tests of the provable core in
+  `kernel/tests/` (planned) see only its `pub` items
+  ([provable core](../architecture.md#the-provable-core)). Differential
+  random tests drive a host build of the core and the Lean specification
+  of a component with the same random sequences of operations and compare
+  the results. Tests across the modules of the core, and the host
+  interface of differential random tests, are in `#[cfg(test)]` modules
+  inside `kernel/src/`, such as `#[cfg(test)] mod drt;` (planned) in
+  `lib.rs`, which see its `pub(crate)` items and are test code in the
+  inventory
+  ([legacy inventory and admission](../formal-verification.md#legacy-inventory-and-admission)).
+  No test crate with a library is built. The top-level modules of the
+  kernel crates have names that differ from each other: the core has
+  `context` (planned), so the save and restore module of the architecture
+  crate is `switch` (planned). The core has no dependencies, development
+  dependencies included, so differential random tests read and write their
+  JSON in `xtask`; the test modules of the core offer one interface per
+  operation and exchange data with `xtask` across processes only in a line
+  format that `std` reads and writes.
 - Frozen data lives in a data directory per area; each file starts with a
   comment that names its source (hand calculation, manual, construction or
   the legacy tree with commit and path).

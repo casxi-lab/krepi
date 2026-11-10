@@ -10,9 +10,12 @@ qualification of code shapes and the proof gate. The
 
 ## Scope
 
-The convention binds the code of the following modules. Their source paths
-are not fixed yet, so each is named by its role; the `contract.md` of its
-component names its source paths.
+The convention binds the code of the following modules. They are modules
+of the provable core, the root package of the kernel workspace, so their
+sources are below `kernel/src/` (planned); the
+[module order](../architecture.md#module-order-in-the-core) of the core
+names the module of each role. Each is named here by its role, and the
+`paths` block of its component's `contract.md` fixes its source paths.
 
 | Module | Role |
 | --- | --- |
@@ -41,6 +44,9 @@ component names its source paths.
   which the [mechanical checks](#mechanical-checks) read
   ([component documents](documentation.md#component-documents)). The
   change that adds or moves a module of the list writes its paths there.
+  Every `.rs` file below `kernel/src/` that production code reaches is
+  listed in the `paths` block of some contract, and the `manifests` step of
+  `cargo xtask check` is to fail on one that is not (planned).
 
 ## Constructs and alternatives
 
@@ -888,7 +894,7 @@ sequential refinement:
 ```markdown
 | Obligation | Kind | Verified state | Carrier | Stage |
 | --- | --- | --- | --- | --- |
-| `kernel/mmu/src/table.rs#store_descriptor` | `unsafe` volatile write | Writes the translation tables that the page-table logic describes | Lifted when the architecture layer proves translation-table stores | 0.2 |
+| `kernel/arch/src/mmu.rs#store_descriptor` | `unsafe` volatile write | Writes the translation tables that the page-table logic describes | Lifted when the architecture layer proves translation-table stores | 0.2 |
 ```
 
 ## Constructs the tools do not support
