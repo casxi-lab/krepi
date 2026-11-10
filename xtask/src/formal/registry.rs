@@ -114,9 +114,9 @@ pub struct Opaque {
 /// An axiom beyond the allowlist that the theorems of a target may use.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "the target phase of the gate reads it")]
 pub struct TrustedAxiom {
     pub name: String,
+    #[expect(dead_code, reason = "review reads the reason, the gate the name")]
     pub reason: String,
 }
 

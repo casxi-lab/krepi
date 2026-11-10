@@ -1103,8 +1103,9 @@ it allows:
 `sorryAx` is in no row. The case audits of the qualification use the same
 table with the qualification kind. A theorem of a proof module of a target
 may also use the declarations that the templates of the target keep, its
-unconstrained and cut items, as the audit of the
-[target](#proof-targets) admits them. Lean 4.35.0 gives each native
+unconstrained and cut items, and the `trusted_axioms` of the target, in
+the audit of the base round as in that of the
+[target](#proof-targets). Lean 4.35.0 gives each native
 decision an axiom of its own, `<declaration>._native.<tactic>.ax_<i>_<j>`,
 where the tactic is `native_decide`, `decide` or `bv_decide`, with
 `_private.<module>.0.` before it in a module file. A name with a component
