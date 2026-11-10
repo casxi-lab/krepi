@@ -131,6 +131,134 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
+      "item": "kernel/arch/src/el0.S",
+      "kind": "assembly",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.S#__el0_entry",
+      "kind": "assembly",
+      "verified_state": "writes",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.S#__el0_return",
+      "kind": "assembly",
+      "verified_state": "reads",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.S#entry-mask",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.S#entry-save-general",
+      "kind": "register-state",
+      "verified_state": "writes",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.S#entry-save-system",
+      "kind": "register-state",
+      "verified_state": "writes",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.S#entry-stack",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.S#return-load",
+      "kind": "register-state",
+      "verified_state": "reads",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.S#return-no-kernel-value",
+      "kind": "register-state",
+      "verified_state": "reads",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.S#return-stack",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.S#return-ttbr0",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.S#return-validate",
+      "kind": "register-state",
+      "verified_state": "reads",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.rs#invalidate_asid",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.rs#load_kernel_tables",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/el0.rs#write_controls",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
       "item": "kernel/arch/src/exception.S",
       "kind": "assembly",
       "verified_state": "neither",
@@ -489,6 +617,14 @@
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
       "stage": "0.2",
       "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/src/address_space.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/address-space/contract.md"
     }
   ]
 }
