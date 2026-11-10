@@ -379,7 +379,7 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
-      "item": "kernel/boards/qemu-virt/src/main.rs#object_storage",
+      "item": "kernel/boards/qemu-virt/src/main.rs#image::object_storage",
       "kind": "unsafe",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",

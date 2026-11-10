@@ -232,14 +232,16 @@ domains never overlap, and the usages of all calling domains add up to
 what is allocated for the item, after every operation and also while
 processes are destroyed; for each split item, the limits of the live
 domains add up to the root's starting limit. The criterion: a property test
+that starts from the building of the object table and the boot of the root,
 over sequences of creations, charges, splits, releases, returns and the
-destruction of a parent with children holds the two statements and the sum
-after every write-back, against an independent model of owners, limits and
-usages.
+destruction of a parent with children, holds the two statements and the
+sum after every write-back, against an independent model of owners, limits
+and usages.
 
 - **Examples.** None: no feature document covers the component.
-- **Entry points.** `QuotaRecord::charge`, `credit`, `split`, `merge` and
-  `usage`, and `ObjectTable::occupy` and `release` (planned).
+- **Entry points.** `QuotaRecord::charge`, `credit`, `split`, `merge`,
+  `start_root` and `usage`, and `ObjectTable::occupy` and `release`
+  (planned).
 - **Contract.** [Metadata quotas](contract.md#metadata-quotas).
 - **Specification.** None: the component has no specification.
 - **Proof path.** None: the component has no proof path.
