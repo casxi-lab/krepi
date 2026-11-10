@@ -58,14 +58,16 @@ document covers the component, so the metadata lists none.
 
 **Handles.** A handle is a 64-bit value of a slot number of the caller's
 own table in its low 16 bits and the generation of that slot in its high 48
-bits. Every slot starts at generation 1 and gains one each time its
-capability is deleted, and a slot deleted at $2^{48} - 1$ retires until the
-next boot, so the value 0 never names a capability and a handle that has
-gone stale never names one again. A handle names a slot of its holder's
-table only, and the kernel returns a handle only for a capability that it
-puts into the slot that the caller named. The criterion: the frozen vectors
-hold, among them a slot reused at a new generation and a slot retired at
-the largest generation.
+bits. For each process that occupies a process slot, every slot of its
+table starts at generation 1 and gains one each time its capability is
+deleted, and a slot deleted at $2^{48} - 1$ retires while that process
+occupies the slot, so the value 0 never names a capability, a handle that
+has gone stale never names one again, and no handle depends on an earlier
+process of the same slot. A handle names a slot of its holder's table only,
+and the kernel returns a handle only for a capability that it puts into the
+slot that the caller named. The criterion: the frozen vectors hold, among
+them a slot reused at a new generation, a slot retired at the largest
+generation and a process slot that a new process occupies.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `Tables::new`, `Tables::lookup`, `Tables::install` and
@@ -73,8 +75,9 @@ the largest generation.
 - **Contract.** [Handles](contract.md#handles).
 - **Specification.** None: the component has no specification.
 - **Proof path.** None: the component has no proof path.
-- **Evidence.** The frozen vectors `caps-admission-2`, `caps-admission-7`
-  and `caps-lifetime-5` as host tests, and the host tests of handles of the
+- **Evidence.** The frozen vectors `caps-admission-2`, `caps-admission-7`,
+  `caps-lifetime-5` and `caps-endpoint-lifetime-5` as host tests, and the
+  host tests of handles of the
   [contract](contract.md#testing-obligations). They show the rule on the
   host with generations set by the tests; reaching $2^{48} - 1$ by deletions
   is not run.
@@ -281,8 +284,9 @@ count. An endpoint or a notification is released, and its owner credited,
 when its last capability is deleted, and not before; no count holds back
 the reclamation of an object. Each filled slot of a table is charged to the
 process of the table, and the charge never fails. The criterion: a property
-test finds every count equal to the filled entries that name its object,
-and the frozen vectors hold with the release at the last capability.
+test finds every count equal to the filled entries other than replies that
+name its object, and the frozen vectors hold with the release at the last
+capability.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `Tables::count`, with the write entries of the

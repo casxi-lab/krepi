@@ -23,13 +23,14 @@ other document of the component.
   entries of the capacity record of the
   [objects contract](../objects/contract.md#capacity-record), numbered from
   0, in the storage that the boot carves for every slot of the process pool
-  ([storage](../objects/contract.md#storage-carved-at-boot)). The table and
-  the generations of its slots belong to the process slot and outlive the
-  processes that occupy it.
+  ([storage](../objects/contract.md#storage-carved-at-boot)). The table
+  belongs to the process slot, and the generations of its slots count
+  afresh for each process that occupies the process slot
+  ([Handles](#handles)).
 - **Entry.** A slot of a capability table with the fields of
   [Derivation links](#derivation-links). Its state is empty, usable,
-  reserved or retired; a **filled** entry is usable or reserved, and holds
-  a capability.
+  reserved for a copy, reserved for a move or retired; a **filled** entry
+  is usable or reserved, and holds a capability.
 - **Capability.** The authority of a filled entry: the kind and reference
   of its object, its rights and, for an endpoint, its badge.
 - **Kind.** One of the seven kinds of object that EL0 holds through
@@ -39,11 +40,14 @@ other document of the component.
 - **Handle.** `capabilities::Handle` (planned): the 64-bit value that names
   a slot of the caller's own table with the generation of that slot
   ([Handles](#handles)).
-- **Entry reference.** `capabilities::EntryRef` (planned): a process slot, a
-  table slot and the generation of that table slot, 96 bits in all; the
-  reference with generation 0, which no slot has, is **none**. Entry
-  references name entries inside the kernel, also entries of the tables of
-  other processes, and are never handles.
+- **Entry reference.** `capabilities::EntryRef` (planned): a process slot
+  with the generation of the process that occupies it, a table slot and
+  the generation of that table slot, 160 bits in all; the reference with
+  table generation 0, which no slot has, is **none**. An entry reference is
+  **live** while the entry of its table slot is filled with both of its
+  generations, as [Handles](#handles) states. Entry references name entries
+  inside the kernel, also entries of the tables of other processes, and
+  are never handles.
 - **Caller.** The process of the calling thread, whose table every handle of
   an operation names.
 - **Derivation tree.** The relation that the derivation links of the filled
@@ -51,8 +55,8 @@ other document of the component.
   is its **child**, and that one its parent; **ancestors** and
   **descendants** follow. A filled entry without a filled ancestor is a
   **root entry**.
-- **Nearest live ancestor.** The first entry reference of the path of an
-  entry that names a filled entry at its generation
+- **Nearest live ancestor.** The entry that the first live entry reference
+  of the path of an entry names
   ([Derivation links](#derivation-links)).
 - **Subtree of a revocation.** The descendants of the entry that a pending
   revocation started from, its **target**, which itself is not part of it.
@@ -131,22 +135,37 @@ change that adds the module writes its `paths` block here.
   handle of the entry of slot $s$ at generation $g$ is $g \cdot 2^{16} + s$.
   A table has at most $2^{16}$ = 65,536 slots, the limit that the objects
   component checks for `capability_slots`.
-- **Generations.** `Tables::new` makes every entry of every table empty at
-  generation 1. Filling an empty entry keeps its generation, so the handle
-  of a new capability carries the generation of its slot. Deleting a filled
+- **Generations.** The generations of a table count for the process that
+  occupies its process slot. Each entry records in its `epoch` the
+  generation of the process for which its own generation counts, and an
+  entry whose `epoch` is not the generation of the process that occupies
+  the process slot is empty at generation 1 for that process, whatever it
+  held for an earlier one. `Tables::new` makes every entry of every table
+  empty at generation 1 with the epoch 0, which no process has. Filling an
+  empty entry keeps its generation and sets its `epoch`, so the handle of a
+  new capability carries the generation of its slot. Deleting a filled
   entry at generation $g < 2^{48} - 1$ empties it at $g + 1$; deleting it at
-  $2^{48} - 1$ retires the slot, which stays retired until the next boot. A
-  generation never wraps, never decreases and never repeats for a slot, and
-  the generations of a table survive the release of its process slot, so a
-  handle, and an entry reference, that has gone stale never names a
-  capability again within the boot.
+  $2^{48} - 1$ retires the slot, which stays retired while the same process
+  occupies the process slot. For one process, a generation never wraps,
+  never decreases and never repeats for a slot, so a handle that has gone
+  stale never names a capability again. An entry reference carries the
+  generation of the process as well, and a process generation is never
+  reused for a process slot, so an entry reference that has gone stale
+  never names a capability again within the boot.
+- **Earlier processes.** A process slot is released only when the
+  capability slots of its process count no usage
+  ([release](../objects/contract.md#identities-and-generations)), as the
+  [teardown](#teardown-of-a-table) of its table leaves them, so no filled
+  entry has an epoch other than the generation of the process that
+  occupies its process slot.
 - **Value 0.** No slot has generation 0, so the handle 0, and every handle
   whose high 48 bits are 0, names no capability.
 - **Own table.** A handle names a slot of the caller's own table only; the
   same value in another process names a slot of that process's table. The
   kernel returns a handle only for a capability that it puts into the
   caller's table, at the slot that the caller named, so the value depends
-  only on the caller's table
+  only on the caller's table since the caller's process occupied its
+  process slot, and on no earlier process of that slot
   ([internal choices](../../../security.md#internal-choices)).
 - **Rights.** A handle carries no rights: the rights live in the entry.
 
@@ -249,26 +268,29 @@ of any field:
 ## Derivation links
 
 Each entry of a table holds these fields, in this order; an entry
-reference is 96 bits, a 32-bit process slot, a 16-bit table slot and a
-48-bit generation, and none is the reference with generation 0:
+reference is 160 bits, a 32-bit process slot, the 64-bit generation of its
+process, a 16-bit table slot and a 48-bit generation, and none is the
+reference with table generation 0:
 
 | Field | Width | Content |
 | --- | ---: | --- |
-| `state` | 8 bits | Empty, usable, reserved or retired |
+| `state` | 8 bits | Empty, usable, reserved for a copy, reserved for a move or retired |
 | `generation` | 48 bits | The generation of the slot, from 1 |
+| `epoch` | 64 bits | The generation of the process for which `generation` counts, or 0 |
 | `kind` | 8 bits | The kind of the object |
 | `rights` | 8 bits | The rights mask of [Rights](#rights) |
 | `revocation` | 8 bits | The revocation mark: clear, or removing while a revocation of the descendants of the entry is pending |
 | `object` | 160 bits | The reference of the object, a 64-bit pool number, a 32-bit slot number and a 64-bit generation; for a reply, the reference of the calling thread |
 | `badge` | 64 bits | The badge of an endpoint capability, 0 for none; for a reply, the generation of the reply record of the calling thread; 0 for the other kinds |
-| `moving` | 96 bits | The reservation of a pending move of this entry, or none |
-| `path` | `MAX_DEPTH` × 96 bits | The entry references of the ancestors of the entry when it was filled, nearest first, the unused ones none |
-| `previous`, `next` | 2 × 96 bits | The neighbours of the entry in its sibling chain, or none |
-| `first_child`, `last_child` | 2 × 96 bits | The ends of the chain of its children, or none |
+| `moving` | 160 bits | The reservation of a pending move of this entry, or none |
+| `path` | `MAX_DEPTH` × 160 bits | The entry references of the ancestors of the entry when it was filled, nearest first, the unused ones none |
+| `previous`, `next` | 2 × 160 bits | The neighbours of the entry in its sibling chain, or none |
+| `first_child`, `last_child` | 2 × 160 bits | The ends of the chain of its children, or none |
 
 The fields are those of `capabilities::Entry` (planned); an empty or
-retired entry keeps only its `state` and `generation`, the others none or
-0. `MAX_DEPTH` is 16 ([Derivation and badges](#derivation-and-badges)).
+retired entry keeps only its `state`, `generation` and `epoch`, the others
+none or 0. `MAX_DEPTH` is 16
+([Derivation and badges](#derivation-and-badges)).
 
 - **Path.** A capability that `install` puts into a table has an empty path.
   One made from a source by derivation, copy or transfer has as its path
@@ -315,7 +337,9 @@ retired entry keeps only its `state` and `generation`, the others none or
   endpoint capability without a badge as the source and SEND among the
   requested rights (`InvalidBadge`); `derive` with the badge 0 keeps the
   badge of the source. Derivation, copy and transfer keep a badge, and no
-  operation changes it, so a badge is set once. `install` puts no badge.
+  operation changes it, so a badge is set once. `install` puts no badge,
+  and the `badge` field of a reply holds the generation of its reply
+  record instead.
 - **Depth.** The path of a new capability holds at most `MAX_DEPTH` =
   16 references, `capabilities::MAX_DEPTH` (planned); a derivation, copy or
   transfer whose new path would be longer is refused (`DepthExceeded`).
@@ -324,14 +348,16 @@ retired entry keeps only its `state` and `generation`, the others none or
   ancestors in a lookup and the walk down a subtree in a revocation. A
   closed ancestor does not count, since its reference has gone stale.
 - **Installation.** `install(root, buffer, process, slot, kind, reference,
-  rights)` puts the capability to a live reference of the kind, with the
-  rights that its caller gives, a well-formed mask of bits that the kind
-  defines, into a slot of the table of the process: a root entry, without
-  badge. For a reply, the reference is that of the calling thread, and the
-  IPC component gives the generation of its reply record with it. Its
-  callers name the slot as their own rules state: the creation operation
-  and the receive of a call take the slot from their caller, and the boot
-  of the root fixes the slots of the root's first capabilities.
+  rights, record)` puts the capability to a live reference of the kind,
+  with the rights that its caller gives, a well-formed mask of bits that
+  the kind defines, into a slot of the table of the process: a root entry,
+  without badge. For a reply, the reference is that of the calling thread,
+  and `record` is the generation of its reply record, which the IPC
+  component gives and the entry keeps in its `badge` field; for every other
+  kind, `record` is 0 (`InvalidBadge`). Its callers name the slot as their
+  own rules state: the creation operation and the receive of a call take
+  the slot from their caller, and the boot of the root fixes the slots of
+  the root's first capabilities.
 - **Order of checks.** `derive` checks its rights mask (`InvalidRights`)
   and the range of its target slot (`InvalidSlot`); then its source, as
   [Lookup](#lookup) states, with GRANT and the requested rights; then
@@ -340,23 +366,24 @@ retired entry keeps only its `state` and `generation`, the others none or
   the same order, without a badge, and `copy` without a mask. `install`
   checks its rights mask, which holds only bits of the kind
   (`InvalidRights`), the range of its slot (`InvalidSlot`), its reference
-  with `resolve` (`WrongPool`, `StaleReference`), and then `SlotOccupied`
-  and `GenerationExhausted`.
+  with `resolve` (`WrongPool`, `StaleReference`), and then `InvalidBadge`,
+  `SlotOccupied` and `GenerationExhausted`.
 
 Each of these entries charges one capability slot to the process of the
 table, with `QuotaRecord::charge` of the
-[objects component](../objects/contract.md#metadata-quotas), and adds one
-to the count of the object ([Capability counts](#capability-counts)), in
-the write set that fills the entry. The charge never fails, since the
-limit of capability slots is the size of the table and the slot is empty.
+[objects component](../objects/contract.md#metadata-quotas), and, for
+every kind but a reply, adds one to the count of its object
+([Capability counts](#capability-counts)), in the write set that fills
+the entry. The charge never fails, since the limit of capability slots is
+the size of the table and the slot is empty.
 
 ## Close
 
 - **Effect.** `close(root, buffer, caller, handle)` deletes one capability
   of the caller's table. It needs no right. The entry is emptied at its next
   generation, or retired, as [Handles](#handles) states; the process of the
-  table is credited one capability slot; and when the reference of the
-  entry is live, the count of its object loses one.
+  table is credited one capability slot; and when the entry is not a reply
+  and its reference is live, the count of its object loses one.
 - **Descendants stay.** The children of the closed entry take its place in
   its sibling chain, in their order. Their paths are not rewritten: the
   reference of the closed entry in them has gone stale, so their nearest
@@ -475,26 +502,33 @@ restores a moved source.
   of the receiver's table, which the receiver named when it waited to
   receive, a reserved entry: a child of the source with the requested
   rights and the badge of the source, charged to the receiver and counted
-  for its object. The mode is copy or move; a move also records the
-  reservation in the `moving` field of the source, which hides the source
-  from every lookup (`TransferPending`). No lookup reaches a reserved entry
+  for its object. The mode is copy or move, and the `state` of the reserved
+  entry records it; a move also records the reservation in the `moving`
+  field of the source, which hides the source from every lookup
+  (`TransferPending`). No lookup reaches a reserved entry
   (`NoCapability`), so the receiver does not see the capability before the
   commit, and the slot is not free for another capability
   (`SlotOccupied`).
 - **Commit.** `commit(root, buffer, reservation)` makes the reserved entry
   usable and gives the receiver's handle of it. For a move it then deletes
   the source as `close` does, so the received capability takes the place of
-  the source among its siblings. It refuses a reservation that is no longer
-  reserved at its generation, or a move whose source no longer holds it in
-  its `moving` field (`TransferGone`), and a reservation in the subtree of
-  a pending revocation (`RevocationPending`).
+  the source among its siblings. The `state` of the reservation tells a
+  move from a copy, and the source of a move is the entry that the first
+  reference of its path names. A commit refuses a reservation that is no
+  longer reserved at its generation, or a reservation for a move whose
+  source is no longer live with the reservation in its `moving` field
+  (`TransferGone`), and a reservation in the subtree of a pending
+  revocation (`RevocationPending`). A reservation for a copy whose source
+  has been closed commits all the same, below the nearest live ancestor
+  that it then has.
 - **Abort.** `abort(root, buffer, reservation)` deletes a reservation that
   is still reserved at its generation, crediting the receiver and taking it
-  from the count of its object, and for a move clears the `moving` field of
-  its source, which is usable again with its original rights. It returns
-  `aborted`, or `gone` without a change when the reservation no longer
-  exists; it never fails, never restores a source that has been deleted and
-  never touches a slot that another capability has taken since.
+  from the count of its object, and, for a move whose source is live,
+  clears the `moving` field of the source, which is usable again with its
+  original rights. It returns `aborted`, or `gone` without a change when
+  the reservation no longer exists; it never fails, never restores a source
+  that has been deleted and never touches a slot that another capability
+  has taken since.
 - **Revocation.** A reservation is a descendant of its source, so it is in
   the subtree of every revocation of the source or of an ancestor: from the
   pending transition its commit is refused, and a step removes it as a
@@ -502,8 +536,11 @@ restores a moved source.
   fails (`TransferGone`).
 - **Teardown.** The teardown of the receiver's table removes a reservation
   as an abort does. The teardown of the sender's table deletes the source of
-  a move, so the reservation stays, as a root entry, until its abort, and
-  its commit fails (`TransferGone`).
+  a move as `close` does, so the reservation stays until its abort below
+  the nearest live ancestor of the source, or as a root entry when the
+  source had none, and a revocation of that ancestor still removes it; its
+  commit fails (`TransferGone`), since the source of its move is no longer
+  live.
 
 The reservation is named by its entry reference, which the IPC component
 keeps with its message; it is never a handle of EL0.
@@ -543,16 +580,17 @@ other steps of the destruction of a process.
   device-directory and device-grant pools holds, beside the fields of its
   object, the count of capabilities of the object at its current
   generation: the number of filled entries, usable or reserved, whose
-  reference names the slot at that generation. A reply capability counts
-  for no object. A free slot has the count 0, and the release of a slot
+  reference names the slot at that generation, replies left out. A reply
+  capability counts for no object, though its `object` field names the
+  calling thread. A free slot has the count 0, and the release of a slot
   clears its count with its other fields, so a capability of an earlier
   generation is never counted.
-- **Changes.** Filling an entry by `install`, `derive`, `copy` or `reserve`
-  adds one to the count of its object; deleting a filled entry whose
-  reference is live, by `close`, a step of revocation or of teardown,
-  `abort`, or the commit of a move, takes one away. A deletion of an entry
-  whose reference has gone stale changes no count. `commit` of a reservation
-  changes none either.
+- **Changes.** Filling an entry other than a reply by `install`, `derive`,
+  `copy` or `reserve` adds one to the count of its object; deleting a filled
+  entry other than a reply whose reference is live, by `close`, a step of
+  revocation or of teardown, `abort`, or the commit of a move, takes one
+  away. A deletion of an entry whose reference has gone stale, or of a
+  reply, changes no count. `commit` of a reservation changes none either.
 - **Bound.** A count is at most the number of entries of all tables, at
   most $2^{32} \cdot 2^{16}$, so it fits its 64 bits, and the only entries
   that change it are those of this page.
@@ -582,11 +620,11 @@ other steps of the destruction of a process.
 | `WrongType` | An entry of another kind than the operation needs | `lookup` | Handle resolution: the type |
 | `WrongPool` of the objects component | A reference of another pool than its kind's | `install`, `count` | Handle resolution: the type |
 | `StaleReference` of the objects component | A reference that is not live | `lookup`, `derive`, `copy`, `reserve`, `install`, `count` | Handle resolution: the liveness of the object |
-| `TransferGone` | A reservation that is no longer reserved at its generation, or a move whose source no longer holds it | `commit` | Handle resolution: the liveness of the reservation |
+| `TransferGone` | A reservation that is no longer reserved at its generation, or a reservation for a move whose source is no longer live with it in its `moving` field | `commit` | Handle resolution: the liveness of the reservation |
 | `PermissionDenied` | A right that the operation needs and the entry lacks: GRANT, REVOKE, a requested right, or a right of the operation | `lookup`, `derive`, `copy`, `revoke`, `reserve` | Rights |
 | `RevocationPending` | An entry, or a live ancestor, whose revocation mark is set, other than for a `revoke` that continues the revocation of the entry | `lookup`, `derive`, `copy`, `close`, `revoke`, `reserve`, `commit` | Object state |
 | `TransferPending` | The source of a pending move | `lookup`, `derive`, `copy`, `close`, `revoke`, `reserve` | Object state |
-| `InvalidBadge` | A badge set on a source that is not an endpoint capability without a badge, or without SEND among the requested rights | `derive` | Object state |
+| `InvalidBadge` | A badge set on a source that is not an endpoint capability without a badge, or without SEND among the requested rights; for `install`, a nonzero record for another kind than a reply | `derive`, `install` | Object state |
 | `SlotOccupied` | A target or receive slot that holds a capability | `derive`, `copy`, `install`, `reserve` | Object state |
 | `GenerationExhausted` | A target or receive slot that has retired | `derive`, `copy`, `install`, `reserve` | Object state |
 | `DepthExceeded` | A new path longer than `MAX_DEPTH` | `derive`, `copy`, `reserve` | Shared capacity |
@@ -694,8 +732,8 @@ part of the waits and IPC components, with the bounds of their contracts.
 - `Tables::new` writes each entry of each table once: the process capacity
   times `capability_slots` entries, at boot.
 - `lookup` reads the entry, at most `MAX_DEPTH` = 16 entries named by its
-  path, each for its generation and revocation mark, and one slot of the
-  object table: at most 17 entries and one slot.
+  path, each for its epoch, generation and revocation mark, and one slot of
+  the object table: at most 17 entries and one slot.
 - `derive`, `copy` and `reserve` make the lookup of their source, form the
   new path from the same at most 16 references, read the target slot and
   write the 5 items of their write set.
@@ -739,9 +777,15 @@ part of the waits and IPC components, with the bounds of their contracts.
   slots of the root's first capabilities are fixed by the boot of the root.
 - **Handles.** A handle is the slot number and the generation of that slot
   in the caller's own table, which follows from the history of that slot
-  alone.
-- **Ancestors.** The nearest live ancestor of an entry is the first live
-  reference of its path.
+  since the caller's process occupied its process slot, and from nothing
+  else.
+- **Badges.** The badge of an endpoint capability is the value that the
+  party that mints the send capability gives to `derive`; the kernel stores
+  it, and derivation, copy and transfer keep it, as the rule for
+  identifiers of the
+  [internal choices](../../../security.md#internal-choices) states.
+- **Ancestors.** The nearest live ancestor of an entry is the entry that
+  the first live reference of its path names.
 - **Order of removal.** A revocation removes its subtree in post-order,
   children before parents and siblings in the order of their chain, at most
   `REVOKE_BATCH` in a step; a close puts the children of the closed entry
@@ -763,8 +807,8 @@ The component leaves no other choice open.
 
 | Field | Class | Lock or owner | Linearization point | Publication |
 | --- | --- | --- | --- | --- |
-| The `state`, `generation`, `kind`, `rights`, `object`, `badge` and `moving` of each entry of the table of a process | Per-process | The token of the process of the table; an operation that changes the entry through a capability of another process, a transfer, a step of revocation or of teardown, or a close that splices it, holds that token too; with one CPU, the executing CPU | The release of the tokens after the write-back of the write set that changes the entry | Under the token, by the release of the lock that provides it once CPUs share it |
-| The derivation links of each entry: `path`, `previous`, `next`, `first_child` and `last_child` | Per-process | The token of the process of the table; a lookup that reads the generations and marks of ancestors in other tables holds their tokens, at most 17 in all, and a close, a transfer and a step of revocation or of teardown that write entries of other tables hold the tokens of those tables | The release of the tokens after the write-back | Under the token |
+| The `state`, `generation`, `epoch`, `kind`, `rights`, `object`, `badge` and `moving` of each entry of the table of a process | Per-process | The token of the process of the table; an operation that changes the entry through a capability of another process, a transfer, a step of revocation or of teardown, or a close that splices it, holds that token too; with one CPU, the executing CPU | The release of the tokens after the write-back of the write set that changes the entry | Under the token, by the release of the lock that provides it once CPUs share it |
+| The derivation links of each entry: `path`, `previous`, `next`, `first_child` and `last_child` | Per-process | The token of the process of the table; a lookup that reads the epochs, generations and marks of ancestors in other tables holds their tokens, at most 17 in all, and a close, a transfer and a step of revocation or of teardown that write entries of other tables hold the tokens of those tables | The release of the tokens after the write-back | Under the token |
 | The revocation mark of each entry, which with the subtree is the progress of its revocation | Per-process, with its entry | The token of the process of the table, which the pending transition and every step of the revocation hold | The release of the token after the write-back of the pending transition, and after that of the step that clears it | Under the token |
 | The count of capabilities of each object, in its object slot | Shared | The token of the pool of the object | The release of the token after the write-back | Under the token |
 
@@ -791,7 +835,10 @@ change are fields of the
   errors differ, a handle that breaks both gives the error of the earlier;
   the handle 0, every handle whose generation is 0, every slot number from
   `capability_slots` to 65,535 and a slot that a test sets to generation
-  $2^{48} - 1$, whose deletion retires it.
+  $2^{48} - 1$, whose deletion retires it; and a process that occupies a
+  process slot after another, whose table it finds empty at generation 1 in
+  every slot, retired ones included, while every entry reference to an
+  entry of the earlier process stays stale.
 - Rights: for each kind and each of the 32 masks, a derivation from a
   capability with every right of its kind gives exactly the requested
   rights or the error of [Rights](#rights); a capability with GRANT alone,
@@ -808,8 +855,8 @@ change are fields of the
   the live references of its path, that every sibling chain holds the
   children of its nearest live ancestor in post-order of creation with the
   closed entries left out, that no filled entry has a right that an
-  ancestor lacks, and that every count equals the filled entries that name
-  its object.
+  ancestor lacks, and that every count equals the filled entries other
+  than replies that name its object.
 - Revocation: a chain of eight capabilities below a target is removed in
   at least two steps of at most four removals, in post-order; between the
   pending transition and completion, every operation on the subtree and on
@@ -822,7 +869,10 @@ change are fields of the
 - Transfer: copy and move, each committed and aborted; the commit and abort
   after the pending transition and after the removal of the reservation;
   the teardown of the sender's and of the receiver's table while a move is
-  pending.
+  pending; a copy whose source is closed before the commit, which commits,
+  and a move whose source, a child of another capability, is deleted before
+  the commit, which is `TransferGone` and leaves the reservation in the
+  subtree of that capability until its abort.
 - Teardown: a table with descendants in other tables, whose rights and
   ancestors stay; a table that holds the target of a pending revocation;
   after the last step every slot is empty or retired and the capability
@@ -951,8 +1001,9 @@ without the rest of the destruction of X.
   a capability of a released object goes stale. The prototype's references
   that held back reclamation, the reference of an endpoint to its service
   thread and the tests that damaged a count do not apply.
-- A table belongs to its process slot: the prototype's spaces, with their
-  registration, owners, limits, generations, receipts and control
+- A table belongs to its process slot, and its generations start again
+  for each process that occupies the slot: the prototype's spaces, with
+  their registration, owners, limits, generations, receipts and control
   reserves, and its global node capacity, do not apply.
 - References carry no rights, and the rights of a lookup are those of its
   operation: the prototype's native handles with restricted rights and its
@@ -961,10 +1012,14 @@ without the rest of the destruction of X.
   of the caller and of the object, and the closure of an endpoint, are not
   checks of this page: the prototype's refusals for a dead caller, a dead
   target, a closed endpoint and an endpoint whose owner is dead do not
-  apply, and a derivation needs only a live reference.
+  apply to its entries. Whether an operation that composes them refuses
+  such a state is for the contracts of the lifecycle and IPC components to
+  state.
 - A badge is set by the derivation that mints it, not by an installation:
-  the rows put that derivation in place of the prototype's seeding of an
-  endpoint with a badge, and their counts include it.
+  where a test asserts the badge of an endpoint that it seeds, or is about
+  distinct badges, its row puts that derivation in place of the seeding,
+  and the counts of the row include it; where the badge plays no part, the
+  row installs the endpoint without one.
 - The caller names the slot of a new capability: a slot beyond the table is
   `InvalidSlot` and a filled one `SlotOccupied`, where the prototype's
   quotas gave `QuotaExceeded`.
@@ -985,7 +1040,7 @@ without the rest of the destruction of X.
 | `caps-admission-4` | 103 | `derivation_can_only_reduce_granted_rights` | A[0] holds T with all rights; a derivation from `0@1` into A[1] with OBSERVE gives `1@1`. From `1@1`, which lacks GRANT and REVOKE, a derivation into A[2] with OBSERVE and one with all rights are each `err=PermissionDenied`, its revocation is `err=PermissionDenied`, and a lookup for a thread with CONTROL is `err=PermissionDenied`. The refusals leave the tables unchanged, and `count(T)=2` | `install`, `derive`, `revoke`, `lookup`, `count` |
 | `caps-admission-5` | 133 | `full_local_quota_and_global_nodes_fail_without_retaining` | Table with `capability_slots=1`. A[0] holds T with all rights; a derivation from `0@1` into A[0] is `err=SlotOccupied` and into A[1] `err=InvalidSlot`, where the prototype's limit of one live capability gave `QuotaExceeded`. A send of `0@1` from A to B[0] with OBSERVE gives B `0@1`; an installation into B[0] is then `err=SlotOccupied`. The prototype's global capacities of two nodes (`NodeCapacity`) and two spaces (`SpaceCapacity`) do not apply. The refusals leave the tables unchanged, and `count(T)=2` | `install`, `derive`, `reserve`, `commit`, `count` |
 | `caps-admission-6` | 161 | `closed_ancestry_keeps_global_node_quota_charged` | Table with `capability_slots=2`. A[0] holds T with all rights and sends it to B[0] with OBSERVE. The close of A's `0@1` deletes it, where the prototype kept a tombstone: B[0] becomes a root entry, A's usage of capability slots is 0 and `count(T)=1`; an installation of T with all rights into A[0] then gives `0@2`, where the tombstone gave `NodeCapacity`. After the close of B's `0@1`, `count(T)=1`, the new capability of A, where the prototype's count reached 0 since its installation had failed | `install`, `reserve`, `commit`, `close`, `count` |
-| `caps-admission-7` | 183 | `token_and_space_generations_never_wrap` | A test sets the generation of A[0] to $2^{48} - 1$: an installation of T with all rights there gives `0@281474976710655`, the handle value 18446744073709486080; its close retires the slot; a further installation into A[0] is `err=GenerationExhausted` and leaves the table unchanged, and one into A[1] gives `1@1`. The prototype's global token counter (`TokenExhausted`) and its space generations (`GenerationExhausted` of a space) do not apply: each slot has its own generation, and a table keeps the generations of its process slot | `install`, `close` |
+| `caps-admission-7` | 183 | `token_and_space_generations_never_wrap` | A test sets the generation of A[0] to $2^{48} - 1$: an installation of T with all rights there gives `0@281474976710655`, the handle value 18446744073709486080; its close retires the slot; a further installation into A[0] is `err=GenerationExhausted` and leaves the table unchanged, and one into A[1] gives `1@1`. The prototype's global token counter (`TokenExhausted`) and its space generations (`GenerationExhausted` of a space) do not apply: each slot has its own generation, and a table is that of its process slot, whose own generations are those of the objects component | `install`, `close` |
 | `caps-admission-8` | 210 | `dead_target_and_attenuated_native_seed_fail_atomically` | The prototype's installation from a native thread handle restricted to OBSERVE (`PermissionDenied`) does not apply: `install` takes a reference, which carries no rights. Its refusal after the termination of T (`InvalidState`) does not apply: the lifecycle state of T is not a check of this page. With the slot of T released, an installation of the reference of T into A[0] is `err=StaleReference` and leaves the table unchanged | `install` |
 
 ### Endpoint admission vectors
@@ -995,7 +1050,7 @@ fixture and the endpoint E.
 
 | Vector | Line | Test | Expected output | Entry |
 | --- | ---: | --- | --- | --- |
-| `caps-endpoint-admission-1` | 4 | `endpoint_and_thread_capabilities_reject_cross_kind_resolution` | A[0] holds E with SEND, `0@1`, and A[1] T with all rights, `1@1`. A's lookup of `0@1` for a thread is `err=WrongType`, and of `1@1` for an endpoint `err=WrongType`; A's lookup of `0@1` for an endpoint with SEND gives E with no badge, where the prototype's seeding gave the badge 71, which here only a derivation sets; with RECEIVE, `err=PermissionDenied`; B's lookup of `0@1` with SEND is `err=NoCapability`. `count(E)=1` and `count(T)=1`. The teardown of A's table deletes both, after which `count(T)=0` and E, whose last capability is deleted, is released, its slot free at generation 2. The prototype's resolution for GRANT (`InvalidRights`) and its native receipts of E and of its owner do not apply | `install`, `lookup`, `count`, `teardown_step` |
+| `caps-endpoint-admission-1` | 4 | `endpoint_and_thread_capabilities_reject_cross_kind_resolution` | A[0] holds E with all rights, `0@1`; a derivation from `0@1` into A[1] with SEND and the badge 71 gives `1@1`, the prototype's seeded capability; and A[2] holds T with all rights, `2@1`. A's lookup of `1@1` for a thread is `err=WrongType`, and of `2@1` for an endpoint `err=WrongType`; A's lookup of `1@1` for an endpoint with SEND gives E with the badge 71; with RECEIVE, `err=PermissionDenied`; B's lookup of `1@1` with SEND is `err=NoCapability`. `count(E)=2`, the prototype's 1 and the capability that sets the badge, and `count(T)=1`. The teardown of A's table deletes the three in one step, after which `count(T)=0` and E, whose last capability is deleted, is released, its slot free at generation 2. The prototype's resolution for GRANT (`InvalidRights`) and its native receipts of E and of its owner do not apply | `install`, `derive`, `lookup`, `count`, `teardown_step` |
 | `caps-endpoint-admission-2` | 55 | `derivation_preserves_badge_kind_and_attenuation` | A[0] holds E with all rights; a derivation from `0@1` into A[1] with all rights and the badge 18446744073709551615 gives `1@1`, the prototype's seeded capability. A send of `1@1` from A to B[0] with SEND gives B `0@1`, and a derivation from `1@1` into A[2] with RECEIVE gives `2@1`. B's lookup of `0@1` for an endpoint with SEND and A's of `2@1` with RECEIVE each give E with the badge 18446744073709551615; A's lookup of `2@1` with SEND is `err=PermissionDenied`. B's derivation from `0@1` into B[1] with SEND and A's from `2@1` into A[3] with all rights are each `err=PermissionDenied` and leave the tables unchanged. `count(E)=4`: the prototype's 3 and the capability that sets the badge | `install`, `derive`, `reserve`, `commit`, `lookup`, `count` |
 | `caps-endpoint-admission-3` | 94 | `seed_rejects_attenuated_foreign_and_stale_endpoints_atomically` | The prototype's installations from native endpoint handles restricted to OBSERVE or CONTROL (`PermissionDenied`) do not apply: a reference carries no rights. An installation into A[0] of the reference of an endpoint of another table, whose pools have other numbers, is `err=WrongPool`; with the slot of E released, an installation of the reference of E is `err=StaleReference`. The table is unchanged | `install` |
 | `caps-endpoint-admission-4` | 126 | `closed_endpoint_cannot_gain_new_authority_but_keeps_cleanup_identity` | A[0] holds E with all rights. The closure of E is a state of the IPC component, which no check of this page reads, so the prototype's refusals of a derivation and an installation after it (`InvalidState`) do not apply. A's lookup of `0@1` for an endpoint with RECEIVE gives E with no badge. The prototype's refused reaping of E (`ReferencesOutstanding`) does not apply: the close of `0@1` deletes the last capability of E and so releases it; a new endpoint then takes its slot at generation 2, and A's lookup of `0@1` is `err=NoCapability` | `install`, `lookup`, `close` |
@@ -1012,7 +1067,7 @@ fixture and the endpoint E.
 | `caps-endpoint-lifetime-2` | 35 | `dead_service_rejects_new_authority_and_pins_backing_until_cleanup` | A[0] holds E with all rights, and a derivation from `0@1` into A[1] with all rights and the badge 12 gives `1@1`, the prototype's root. C, the owner of E, is terminated: its states, and the release of E in the steps of its destruction, are rules of the lifecycle component, which no check of this page reads, so the prototype's refusals of an installation and a derivation (`InvalidState`) do not apply. Before that release, A's lookup of `1@1` for an endpoint with SEND gives E with the badge 12. The prototype's references of the capabilities to E and of E to its service thread, which held back the reaping of the thread (`ReferencesOutstanding`), do not apply; the close of `1@1` succeeds | `install`, `derive`, `lookup`, `close` |
 | `caps-endpoint-lifetime-3` | 68 | `mixed_target_cleanup_preflights_every_reference_before_releasing` | A[0] holds the thread of B and A[1] holds E, each with all rights. The teardown of A's table deletes both in one step, after which the count of the thread of B is 0 and `count(E)=0`, and E is released. The prototype's damaged count of E, which made its teardown fail without a change (`CounterUnderflow`), does not apply: only the entries of this page change a count | `install`, `teardown_step`, `count` |
 | `caps-endpoint-lifetime-4` | 91 | `cleanup_aggregates_one_endpoint_across_distinct_badges` | A[0] holds E with all rights; derivations from `0@1` into A[1] and A[2] with all rights and the badges 1 and 2 give `1@1` and `2@1`, and `count(E)=3`. The teardown of A's table deletes the three in one step, after which `count(E)=0` and E is released. The prototype's damaged count (`CounterUnderflow`) does not apply, as in `caps-endpoint-lifetime-3` | `install`, `derive`, `teardown_step`, `count` |
-| `caps-endpoint-lifetime-5` | 112 | `dead_namespace_cleanup_and_reuse_preserve_outward_endpoint_caps` | A[0] holds E with all rights, a derivation from `0@1` into A[1] with all rights and the badge 20 gives `1@1`, and A sends `1@1` to B[0] with SEND. A is terminated: its thread runs no more, so the prototype's lookup by a dead caller (`InvalidState`) does not apply. The teardown of A's table deletes A[0] and A[1]: B[0] becomes a root entry and `count(E)=1`. A new process in the process slot of A has the table of that slot, whose slots 0 and 1 are empty at generation 2: its lookup of `1@1` is `err=NoCapability`. B's lookup of `0@1` for an endpoint with SEND gives E with the badge 20. The teardown of B's table leaves `count(E)=0` and releases E. The prototype's second teardown of the same space (`StaleSpace`) does not apply: a table is torn down once, in the destruction of its process | `install`, `derive`, `reserve`, `commit`, `teardown_step`, `lookup`, `count` |
+| `caps-endpoint-lifetime-5` | 112 | `dead_namespace_cleanup_and_reuse_preserve_outward_endpoint_caps` | A[0] holds E with all rights, a derivation from `0@1` into A[1] with all rights and the badge 20 gives `1@1`, and A sends `1@1` to B[0] with SEND. A is terminated: its thread runs no more, so the prototype's lookup by a dead caller (`InvalidState`) does not apply. The teardown of A's table deletes A[0] and A[1]: B[0] becomes a root entry and `count(E)=1`. A new process in the process slot of A has the table of that slot, which it finds empty at generation 1 in every slot, whatever A did there: its lookup of `1@1` is `err=NoCapability`. B's lookup of `0@1` for an endpoint with SEND gives E with the badge 20. The teardown of B's table leaves `count(E)=0` and releases E. The prototype's second teardown of the same space (`StaleSpace`) does not apply: a table is torn down once, in the destruction of its process | `install`, `derive`, `reserve`, `commit`, `teardown_step`, `lookup`, `count` |
 
 ### Lifetime vectors
 
