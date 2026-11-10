@@ -75,8 +75,8 @@ observable behaviour that these rules serve, with its evidence, is in the
   any entry from EL0: it validates the capacity record, carves the storage
   of [Storage carved at boot](#storage-carved-at-boot) from the
   [page ownership table](../../memory/page-tables/contract.md#page-ownership)
-  that it builds for the kernel root and zeroes it, forms the slices of that
-  storage and builds the object table on them.
+  that it builds for the kernel root, zeroes that storage, forms its slices
+  and builds the object table on them.
 
 ## Entry points
 
@@ -471,13 +471,15 @@ record.
   creation that passes its quota check fails for shared capacity
   (`PoolExhausted`) only when control allocations have taken slots of the
   ordinary range, which they do once the reserved tail of their pool has
-  no free slot, or slots have retired. When the control reserve of the
-  process or the thread pool is 0, the root's pair is such a control
-  allocation: it takes the lowest slot of the ordinary range of that pool,
-  so the limits of child processes can add up to one more than the
-  ordinary slots that are left, and the last ordinary creation of a
-  process within them can meet `PoolExhausted`. The pages run out as
-  shared capacity, with the error of the component that counts them.
+  no free slot, or slots have retired. When the control reserve of a pool
+  is 0, the root's process or thread in that pool is such a control
+  allocation and takes the lowest slot of its ordinary range. When that
+  pool is the process pool and the ordinary capacity of the thread pool is
+  not less than the capacity of the process pool, the limits of child
+  processes add up to one more than the ordinary process slots that are
+  left, and the last ordinary creation of a process within them can meet
+  `PoolExhausted`. The pages run out as shared capacity, with the error of
+  the component that counts them.
 - **Shared records.** The quota records are shared state: a release may
   credit an owner that its caller holds no right to, such as the owner of an
   object that the destruction of a process releases.
@@ -498,19 +500,18 @@ kernel, also while processes are destroyed:
 
 The entries of the kernel are `ObjectTable::new`, the boot of the root and
 the operations that compose the entries of this page. `ObjectTable::new`
-leaves every slot free and every usage 0. An owner never changes; each of
-these entries charges or credits the owner of what an item counts in the
-write set that occupies or releases it, the boot of the root the kernel
-domain for the root's process with its thread; and a process slot, whose
-release clears its record, is released only once that record counts no
-usage but its page-table pages, which leave with the slot. So both
-statements hold in every state that these entries reach, without
-exception. The root's own table pool counts for the root. `occupy` and
-`release` charge and credit nothing themselves: a host test that calls
-them without `charge` and `credit`, as the
-[Legacy test vectors](#legacy-test-vectors) do, builds tables that the
-entries of the kernel do not reach, and Conservation is not checked on
-them.
+leaves every slot of the five carved pools free and every usage 0. An owner
+never changes; each of these entries charges or credits the owner of what an
+item counts in the write set that occupies or releases it, the boot of the
+root the kernel domain for the root's process with its thread; and a process
+slot, whose release clears its record, is released only once that record
+counts no usage but its page-table pages, which leave with the slot. So both
+statements hold in every state that these entries reach, without exception.
+The root's own table pool counts for the root. `occupy` and `release` charge
+and credit nothing themselves: a host test that calls them without `charge`
+and `credit`, as the [Legacy test vectors](#legacy-test-vectors) do, builds
+tables that the entries of the kernel do not reach, and Conservation is not
+checked on them.
 
 ## Write-set transactions
 
