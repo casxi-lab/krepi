@@ -588,11 +588,11 @@ fn export_and_check(
     }
     let chosen = selected(&states, targets);
     let extracts = !chosen.is_empty();
-    // The gate's budget grows by the budget of each target that it extracts.
-    let all = Duration::from_secs(states.values().map(|(_, budget)| budget).sum());
+    // The gate's budget grows by the budget of each target that it selects.
+    let budget = |name: &str| Duration::from_secs(states[name].1);
+    let all: Duration = chosen.iter().map(|name| budget(name)).sum();
     (gate.deadline, gate.receipt.budgets.gate_seconds) =
         (gate.deadline + all, (GATE_BUDGET + all).as_secs());
-    let budget = |name: &str| Duration::from_secs(states[name].1);
     gate.budgets = BTreeMap::from_iter(chosen.iter().map(|name| (target_unit(name), budget(name))));
     for problem in paths::rejected(&files, &gate.layout) {
         gate.fail(Status::Rejected, problem);
@@ -718,19 +718,20 @@ pub fn target_project(gate: &Gate, name: &str) -> PathBuf {
 }
 
 /// The phases of the targets of the registry of the checkout `root`:
-/// `extraction`, before the base round, which extracts every target, whose
-/// proofs the base round builds, and concludes the selected planned ones;
-/// and `targets`, after it, which concludes the selected formal ones. The
-/// first stops when the export's registry is not the one read here.
+/// `extraction`, before the base round, which extracts the selected targets
+/// and the formal ones, whose proofs the base round builds, and concludes
+/// the selected planned ones; and `targets`, after it, which concludes the
+/// selected formal ones. The first stops on another registry in the export.
 fn target_phases<'a>(root: &Path, layout: &Layout, named: &BTreeSet<String>) -> [Phase<'a>; 2] {
     let path = layout.registry;
     let read = fs::read_to_string(root.join(path)).map_err(|error| error.to_string());
     let read = read.and_then(|text| Ok((registry::parse(&text)?.targets, text)));
     let read = read.map_err(|error| format!("cannot read {path}: {error}"));
-    let all = Vec::from_iter(read.iter().flat_map(|(targets, _)| targets.clone()));
+    let mut all = Vec::from_iter(read.iter().flat_map(|(targets, _)| targets.clone()));
     let states = BTreeMap::from_iter(all.iter().map(|t| (t.name.clone(), (t.state, t.budget))));
     let named = Vec::from_iter(named.iter().cloned());
     let chosen = BTreeSet::from_iter(selected(&states, &named).into_iter().map(String::from));
+    all.retain(|t| t.state == State::Formal || chosen.contains(&t.name));
     let pick = |t: &&Target, state| t.state == state && chosen.contains(&t.name);
     let formal = Vec::from_iter(all.iter().filter(|t| pick(t, State::Formal)).cloned());
     let planned = Vec::from_iter(all.iter().filter(|t| pick(t, State::Planned)).cloned());
@@ -742,11 +743,11 @@ fn target_phases<'a>(root: &Path, layout: &Layout, named: &BTreeSet<String>) -> 
     ];
     let bodies: [Body<'a>; 2] = [
         Box::new(move |gate| {
-            let (targets, text) = read?;
+            let (_, text) = read?;
             if base::read(&gate.source().join(path))? != text {
                 return Err(format!("{path} differs from the one read at the start"));
             }
-            (targets.iter()).try_for_each(|t| extract_target(gate, t, chosen.contains(&t.name)))
+            (all.iter()).try_for_each(|t| extract_target(gate, t, chosen.contains(&t.name)))
         }),
         Box::new(move |gate| (formal.iter()).try_for_each(|t| finish_target(gate, t))),
     ];
@@ -1339,7 +1340,7 @@ pub(crate) mod tests {
 
     /// Gives the kernel workspace of `fixture` the root package `name`, whose
     /// manifest ends with `extra`, and commits it.
-    fn root_package(fixture: &Fixture, name: &str, extra: &str) {
+    pub(crate) fn root_package(fixture: &Fixture, name: &str, extra: &str) {
         fixture.write(
             "kernel/Cargo.toml",
             &format!(
@@ -1411,18 +1412,29 @@ pub(crate) mod tests {
 
     #[test]
     fn a_whole_run_does_not_select_a_planned_target() {
+        // The kernel workspace is virtual and the fixture has no proof tools:
+        // a whole run extracts nothing and has the budget of the gate alone.
         let fixture = Fixture::new("planned");
-        register(&fixture, r#"[{"name": "demo", "state": "planned"}]"#);
-        let done = gate(&fixture, &[], Vec::new());
+        let planned = serde_json::json!([
+            {"name": "demo", "state": "planned", "module": "Demo", "start_from": ["crate::f"]}
+        ]);
+        register(&fixture, &planned.to_string());
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
         assert_eq!(
             done.receipt.status,
             Status::Verified,
             "{:?}",
             done.failures()
         );
+        assert!(done.receipt.complete);
         assert_eq!(done.receipt.targets, Vec::<String>::new());
+        assert!(done.receipt.proof_targets.is_empty());
+        assert!(!done.sites().contains(&Site::Charon));
+        assert_eq!(done.receipt.budgets.gate_seconds, 7_200);
+        let extraction = &done.receipt.phases["extraction"];
+        assert_eq!((extraction.ran, extraction.budget_seconds), (true, 0));
         // A run that names it extracts it.
-        let done = gate(&fixture, &["demo"], Vec::new());
+        let done = gate(&fixture, &["demo"], target_run(&fixture, &["demo"]));
         assert_eq!(done.receipt.status, Status::Rejected);
         assert_eq!(done.failures(), [NO_ROOT_PACKAGE]);
     }
@@ -1486,6 +1498,16 @@ pub(crate) mod tests {
         vec![extraction, base, finish]
     }
 
+    /// The phases of a run of `named` targets of the fixture at `root` in the
+    /// production layout, as [`command`] puts them together, but the guard.
+    pub(crate) fn every_phase<'a>(root: &Path, named: &[&str]) -> Vec<Phase<'a>> {
+        let named = BTreeSet::from_iter(named.iter().map(|name| name.to_string()));
+        let layout = &Layout::PRODUCTION;
+        let [extraction, finish] = target_phases(root, layout, &named);
+        let (qualification, base) = (qualify::phase(root, layout), base::phase(root, layout));
+        vec![qualification, extraction, base, finish]
+    }
+
     #[test]
     fn a_formal_target_is_verified_in_its_stage_and_a_planned_one_is_scoped() {
         let fixture = with_targets("targets", &two_targets(1_800, 1));
@@ -1498,29 +1520,39 @@ pub(crate) mod tests {
             sites,
             [&expected[..], &[Site::TargetBuild, Site::AxiomAudit]].concat()
         );
-        // The target is extracted for the extraction triple; the planned one
-        // only for the base round.
+        // The target is extracted for the extraction triple, and the planned
+        // one not at all.
         let charon = &fixture::commands(&done, "target/t")[0];
         assert!(
             charon
                 .argv
                 .ends_with(&["--target", "aarch64-unknown-none"].map(String::from))
         );
+        let formal = &done.receipt.proof_targets["t"];
+        assert_eq!(Vec::from_iter(done.receipt.proof_targets.keys()), ["t"]);
+        assert_eq!(formal.unit.as_deref(), Some("target/t"));
+        assert!(formal.typed && formal.problems.is_empty());
+        assert_eq!(done.receipt.budgets.gate_seconds, 7_200 + 1_800);
+        assert_eq!(done.receipt.phases["extraction"].budget_seconds, 1_800);
+        // A run of the planned target concludes it as scoped, and extracts
+        // the formal one for the base round alone, as commands of `base`.
+        let done = gate(&fixture, &["p"], target_run(&fixture, &["p"]));
+        assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.receipt);
+        assert_eq!(fixture::status(&done, "target/p"), (Status::Scoped, None));
+        assert!(!done.receipt.units.contains_key("target/t"));
         let (formal, planned) = (
             &done.receipt.proof_targets["t"],
             &done.receipt.proof_targets["p"],
         );
         assert_eq!(
             (formal.unit.as_deref(), planned.unit.as_deref()),
-            (Some("target/t"), None)
+            (None, Some("target/p"))
         );
-        assert!(formal.typed && planned.typed && formal.problems.is_empty());
-        assert_eq!(done.receipt.budgets.gate_seconds, 7_200 + 2 * 1_800);
-        // A run of the planned target concludes it as scoped.
-        let done = gate(&fixture, &["p"], target_run(&fixture, &["p"]));
-        assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.receipt);
-        assert_eq!(fixture::status(&done, "target/p"), (Status::Scoped, None));
-        assert!(!done.receipt.units.contains_key("target/t"));
+        assert!(formal.typed && planned.typed);
+        let base = Vec::from_iter(fixture::commands(&done, "base").iter().map(|c| c.site));
+        assert_eq!(base, [Site::Charon, Site::Aeneas, Site::TargetBuild]);
+        assert_eq!(done.receipt.budgets.gate_seconds, 7_200 + 1_800);
+        assert_eq!(done.receipt.phases["extraction"].budget_seconds, 2 * 1_800);
     }
 
     #[test]

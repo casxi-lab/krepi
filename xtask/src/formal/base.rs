@@ -543,6 +543,13 @@ mod tests {
     /// Commits what changed, with the statement hash of the commit in
     /// `statements.json`, and runs both phases.
     fn run(fixture: &mut Fixture) -> Done {
+        hashed(fixture);
+        gate(fixture, &[], phases(fixture))
+    }
+
+    /// Commits what changed, with the statement hash of the commit in
+    /// `statements.json`.
+    fn hashed(fixture: &mut Fixture) {
         if !Fixture::git(fixture, &["status", "--porcelain"]).is_empty() {
             fixture.commit_all();
         }
@@ -556,7 +563,6 @@ mod tests {
             fixture.write(LAYOUT.statements, &format!("{text}\n"));
             fixture.commit_all();
         }
-        gate(fixture, &[], phases(fixture))
     }
 
     /// The qualification and the base round of `fixture`.
@@ -1717,5 +1723,56 @@ mod tests {
         );
         assert_eq!(done.failures(), [stopped]);
         assert_eq!(status(&done, PHASE).0, Status::NotRun);
+    }
+
+    /// Writes the target registry `targets`, a JSON list, and an empty
+    /// registry of models.
+    fn targets(fixture: &Fixture, targets: &Value) {
+        let file = json!({"schema": 2, "specifications": [], "targets": targets});
+        fixture.write(LAYOUT.registry, &format!("{file}\n"));
+        fixture.write(LAYOUT.models, "{\"schema\": 1, \"models\": []}\n");
+    }
+
+    #[test]
+    fn a_whole_run_builds_no_planned_target_and_a_run_that_names_it_does() {
+        // The generated definitions of the planned target do not type-check,
+        // and its kernel workspace is still virtual.
+        let mut fixture = base("planned-target");
+        let planned =
+            json!({"name": "p", "state": "planned", "module": "P", "start_from": ["crate::f"]});
+        targets(&fixture, &json!([planned]));
+        let error = "error: KrepiGen/P/Funs.lean:3:8: type mismatch";
+        let script = fixture::failing("KrepiGen.P.Funs", &[error], 1);
+        lake_script(&fixture, "KrepiGen.P.Funs", &script);
+        hashed(&mut fixture);
+        let done = gate(&fixture, &[], run::tests::every_phase(fixture.root(), &[]));
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        assert!(done.receipt.complete && done.receipt.proof_targets.is_empty());
+        assert_eq!(status(&done, PHASE), (Status::Verified, None));
+        assert!(
+            (done.receipt.commands.iter())
+                .all(|c| c.site != Site::Charon || c.unit != Some(PHASE.to_string()))
+        );
+        // A run that names it, from a root package, builds nothing of `base`.
+        run::tests::root_package(&fixture, "krepi-kernel", "");
+        hashed(&mut fixture);
+        let done = gate(
+            &fixture,
+            &["p"],
+            run::tests::every_phase(fixture.root(), &["p"]),
+        );
+        let lacks = "the target p has no generated definitions that type-check";
+        assert_eq!(status(&done, PHASE), (Status::Rejected, Some(lacks)));
+        let reason =
+            format!("its generated definitions do not type-check: {error} | error: build failed");
+        assert_eq!(
+            status(&done, "target/p"),
+            (Status::Rejected, Some(reason.as_str()))
+        );
     }
 }

@@ -122,9 +122,9 @@ its start, its process number and a count: `receipt.json`, `logs/` with
 the two output files of each command, and `work/` with the export of the
 gate inputs, the home and temporary directories of the tools; in
 `cases/`, the extraction and the Lake stage of each qualification case; in
-`targets/<name>/`, the extraction of each target in `extract/` and its
-stage in `stage/`, with the root module and the audit file of a selected
-formal target; in `base/`, the stage of the base round with the root
+`targets/<name>/`, the extraction of each target that the run extracts
+in `extract/` and its stage in `stage/`, with the root module and the
+audit file of a selected formal target; in `base/`, the stage of the base round with the root
 module `Krepi.lean` that the run writes, its audit file `Audit.lean` and
 its heartbeat copies in `.heartbeats/`, and `mktree`, the input of
 `git mktree` for the statement hash of the round; and `mktree`, the same
@@ -619,7 +619,7 @@ others are planned.
 | Command | Purpose |
 | --- | --- |
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
-| `cargo xtask formal run [--target NAME]... [--calibration]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets, and `--calibration` runs in the layout of the [calibration target](#calibration-target). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of every target, the [base round](#base-round) and the selected [targets](#proof-targets), which every run has; the mutants of a target are planned |
+| `cargo xtask formal run [--target NAME]... [--calibration]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets, and `--calibration` runs in the layout of the [calibration target](#calibration-target). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets), which every run has; the mutants of a target are planned |
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs and sources ([guard](#guard)) |
 | `cargo xtask formal check [--write]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`. It runs no tool and proves nothing |
 | `cargo xtask formal receipt [--require-fresh]` (planned) | Says whether a receipt is current for the checkout: the same gate inputs and image, one conclusion for each unit, complete and `VERIFIED`; `--require-fresh` also requires a run of the whole gate from a clean checkout without planned statements |
@@ -703,10 +703,12 @@ in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
    package that kernel targets are extracted from. The targets that a run
    selects are every formal target of the registry for a whole run, and
    those that `--target` names, planned ones included, for a run with
-   `--target`. A whole run whose registry has no formal target selects
-   none, and the workspace may then have no root package. When the run
-   selects targets, it takes the inventory of the exported workspace for
-   their registration checks
+   `--target`; a run extracts these and, for the base round, the formal
+   targets that it does not select, so a whole run extracts no planned
+   target. A whole run whose registry has no formal target selects and
+   extracts none, and the workspace may then have no root package. When
+   the run selects targets, it takes the inventory of the exported
+   workspace for their registration checks
    ([legacy inventory and admission](#legacy-inventory-and-admission)).
 
 A tool failure in one of these steps ends them: the later steps do not run.
@@ -756,7 +758,7 @@ command wrote is kept. Its limit is the smallest of:
   the comparator, Git and `cargo metadata` have none;
 - the rest of the budget of its phase;
 - the rest of the budget of the gate, 7,200 s from the start of the run
-  and the budget of each target of the registry, which the run extracts;
+  and the budget of each target that the run selects;
 - for a command of the unit of a target, the rest of the budget of the
   target: the budget less the seconds of the earlier commands of the unit,
   whichever phase ran them.
@@ -1427,13 +1429,13 @@ keys; times are seconds, rounded to milliseconds.
 | `started`, `seconds` | The Unix time in seconds at which the run started, and how long it took |
 | `commit`, `tree` | The snapshot commit and its root tree, or `null` |
 | `inputs` | `before` and `after`, the object of each gate input (`mode`, `type`, `oid`, or `null` when the commit does not have it) at the start and at the end, or `null` when they were not taken; `clean_after`, whether the gate inputs were clean at the end, or `null` |
-| `budgets` | `gate_seconds`, 7200 and the budget of each target of the registry, and `receipt_margin_seconds`, 300 |
+| `budgets` | `gate_seconds`, 7200 and the budget of each target that the run selects, and `receipt_margin_seconds`, 300 |
 | `resources` | What the run used of the host, below |
 | `phases` | For each phase, `budget_seconds`, `seconds` and `ran` |
 | `units` | For each unit, its `phase`, its `status` and the `reason` for it, or `null` |
 | `qualification` | What the qualification found, below, or `null` when it did not start |
 | `base` | What the base round found, below, or `null` when the round stopped before it recorded it |
-| `proof_targets` | What the run found for each target that it extracted, below, by its name |
+| `proof_targets` | What the run found for each target that the phase `extraction` took, below, by its name: those that it selects and the formal ones, also one that it did not extract since it registers more than 30 mutants or its module is not a Lean module path |
 | `guard` | What the guard found on a pull request, below, or `null` without a pull request event or when its phase did not finish |
 | `commands` | Every command, in the order in which they ran |
 | `failures` | Every failure that is not the conclusion of a unit, with its `status` and `message` |
@@ -1619,7 +1621,9 @@ instead of a pull.
 The job may take 195 minutes: 15 for the steps before the vectors step (2
 to check out, 8 to record the runner and pull, 3 to build xtask, 1 for the
 probe and 1 for the guard), the 55 of the vectors step, and the gate's own
-7,200 s with the 300 s of its receipt.
+7,200 s with the 300 s of its receipt. That is the budget of a whole run
+while the registry has no formal target; each formal target adds its
+budget to the gate's, which these limits do not take into account yet.
 The gate's step has a limit of 126 minutes, a backstop one minute after the
 gate's own end. When the steps before the gate and the gate use all their
 time, the steps after it have almost none, and the limit of the job may cut
@@ -1733,11 +1737,17 @@ a tool, and each broken rule is a problem:
   production function.
 
 The targets of the registry run in two phases of the gate. The phase
-`extraction`, before the base round, extracts every target of the
-registry, since the base round builds every proof and so needs the
-generated definitions of each target; the targets that the run selects
-have a unit of their own, `target/<name>`, and the others are extracted as
-commands of `base`. For each target, in `work/targets/<name>/`, it
+`extraction`, before the base round, extracts the targets that the run
+selects and every formal target, since the base round builds every proof
+and so needs the generated definitions of each formal target; the
+selected targets have a unit of their own, `target/<name>`, and the
+formal ones that the run does not select are extracted as commands of
+`base`. A planned target that the run does not select is not extracted:
+a whole run extracts no planned target and records none, so a
+hand-written module that imports the generated definitions of a planned
+target fails the base build of such a run. The phase has the budgets of
+the targets that it extracts, and the gate's budget grows by those of the
+selected targets alone. For each target, in `work/targets/<name>/`, it
 
 1. extracts the target from the root package of the exported workspace,
    for the extraction triple, with its `start_from` roots and the patterns
@@ -1854,7 +1864,8 @@ calibration target: the gate inputs and the qualification of the tools,
 whose cases build in the Lake project of `verification/`, are those of
 every run, and the extraction, the base round and the targets take the
 workspace, the Lake project and the registries of the calibration. With
-`--target calibration-planned` it runs the planned target alone. Neither
+`--target calibration-planned` it concludes the planned target alone and
+extracts `calibration` for the base round only. Neither
 target is in `verification/targets.json` or among the declared targets: a
 run in the production layout cannot name them and records none, and
 `cargo xtask formal check` reads the registry of production alone. Its
