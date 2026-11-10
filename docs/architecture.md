@@ -138,8 +138,14 @@ stays usable RAM. The reserved memory of the firmware lies below the image
 and, on the 8 GB model, in the hole below 1 GiB, and the dynamic
 reservation does not constrain this layout. On every model the image, its
 boot bundle and the device tree lie in the first bank, outside the kernel
-direct map. Cold boots on the board with an image of the largest size
-confirm the layout.
+direct map. The layout is not yet confirmed on the board: cold boots with
+an image of the largest size are to confirm it.
+
+The rules on the boot bundle and the load layout leave the fields of the
+boot information and of the boot-bundle directory to the contracts of the
+components below [subject domains](domains/README.md), and they do not
+state the values of the limits that the boot configuration sets on the
+bundle.
 
 ## Kernel objects and capabilities
 
@@ -896,8 +902,9 @@ back end, and the back ends reach the medium through the block driver.
   as a pair: each A/B slot of the kernel image has a volume slot of its
   own, approved and selected with it, and every read of a volume that does
   not match its kernel image fails. The system never writes the active
-  volume: at first a host writes the volume to the medium, and later the
-  updater writes the inactive volume slot.
+  volume: until the updater writes volumes on the device, a host writes the
+  volume to the medium, and the updater then writes only the inactive
+  volume slot.
 - **Verification.** The read-only image service, in the block layer above
   the block driver, checks the manifest against the root digest from the
   kernel image, looks files up by path and checks every block that it reads
@@ -972,9 +979,10 @@ back end, and the back ends reach the medium through the block driver.
 - **Failure.** When the file service fails, all its sessions fail and the
   back ends keep their committed state. When a back end fails, only the
   sessions of its mounts fail, and a fault of a writable volume does not
-  affect the read-only image. Of the storage services, only the file system
-  services write blocks; neither the file service nor the read-only image
-  service writes the medium.
+  affect the read-only image. Once the back ends run in domains of their
+  own, the file system services are the only storage services that write
+  blocks: neither the file service nor the read-only image service writes
+  the medium.
 - **Integrity roles.** Of the storage components that code and update
   integrity rely on ([integrity policy](security.md#integrity-policy)), the
   read-only image service is the component that verifies the read-only
@@ -992,10 +1000,9 @@ back end, and the back ends reach the medium through the block driver.
   serves the boot bundle as read-only files and keeps its persistent
   namespace as a whole through a session of the block service, committing
   it as a snapshot to one of two slots in the format of the prototype,
-  whose CRC detects accidental damage only; while it does, it holds the
-  session of the block service that writes. Once the read-only image
-  service and the file system services run in their domains, only the file
-  system services write blocks.
+  whose CRC detects accidental damage only; until the back ends run in
+  domains of their own, it holds the session of the block service that
+  writes.
 - **Not covered here.** These rules do not state the entries, path
   encoding and limits of the manifest, the fields and limits of the
   writable format, its points of power loss, the capacities of volumes,
@@ -1007,9 +1014,11 @@ back end, and the back ends reach the medium through the block driver.
 
 ## Devices and DMA
 
-Drivers in EL0 receive only the register ranges and interrupts that their
-manifest grants, as device grants that the root issues from the device
-directory. They cannot map other physical memory or configure the GIC.
+A driver in EL0 that does not program DMA receives only the register
+ranges and interrupts that its manifest grants, as device grants that the
+root issues from the device directory; a driver that programs DMA also
+holds the DMA authority of its devices and their DMA buffers. Drivers
+cannot map other physical memory or configure the GIC.
 
 On the Pi 5, PCIe and RP1 bring-up uses the independent reset controller
 (the reset inside the root complex reads back `0xdeaddead`), RESCAL, the PHY
@@ -1019,7 +1028,7 @@ with the `ENABLE` bit of each vector. The shared INTA line also carries an
 Ethernet interrupt source that krepi does not own.
 
 - **MMIO.** Every window of the device directory is aligned to 4 KiB pages.
-  The kernel maps the windows of a grant into the address space of the
+  The kernel maps the window of a grant into the address space of the
   driver as whole pages of Device-nGnRnE memory that are not global,
   readable and writable at EL0 and never executable; EL0 never names a
   physical address, a size or memory attributes, and a futex operation on
@@ -1032,14 +1041,14 @@ Ethernet interrupt source that krepi does not own.
   of RP1, are changed on request by the domain that holds their page.
 - **First grants.** At first the device directory holds the PL011 on QEMU
   virt and UART10 on the Pi 5, each mapped to its driver in this way, and
-  the VirtIO MMIO transports in use on QEMU virt. Those transports are the
-  exception: eight of them share a page, and their registers set the
-  addresses of the queues that the device reads, so the kernel never maps
-  them into EL0, and the driver reaches their registers and its DMA only
-  through the kernel, which checks each access. Once DMA buffers exist, the
-  VirtIO block driver uses them as every driver that programs DMA does,
-  and its transport is mapped to it; a page that would hold transports of
-  drivers in different domains stays behind the kernel.
+  the VirtIO-mmio slots in use on QEMU virt. Those slots are the exception:
+  eight of them share a page, and their registers set the addresses of the
+  queues that the device reads, so at first the kernel does not map them
+  into EL0, and the driver reaches their registers and its DMA only through
+  the kernel, which checks each access. Once DMA buffers exist, the VirtIO
+  block driver uses them as every driver that programs DMA does, and its
+  slot is mapped to it; a page that would hold slots of drivers in
+  different domains stays behind the kernel.
 - **Interrupts.** An interrupt binding is part of a device grant and names
   one bit of a notification. A binding delivers nothing before its first
   arm. When the interrupt is taken, the kernel identifies it, records the
@@ -1080,10 +1089,10 @@ Ethernet interrupt source that krepi does not own.
   the driver that holds the DMA authority receives it, as part of that
   authority; no process receives the CPU physical address, and the other
   holders of mappings of the buffer receive no bus address. Where the path
-  of a device is not coherent, as for the SD host and PCIe on the Pi 5, the
-  driver asks the kernel to clean or invalidate ranges of its buffers, or
-  creates them as Normal Non-cacheable memory; the VirtIO devices of QEMU
-  virt are coherent.
+  of a device is treated as not coherent, as the paths of the SD host and
+  PCIe on the Pi 5 are, the driver asks the kernel to clean or invalidate
+  ranges of its buffers, or creates them as Normal Non-cacheable memory;
+  the VirtIO devices of QEMU virt are coherent.
 - **Draining.** Unmapping memory from the CPU does not stop DMA. When a
   grant is revoked or its driver dies, its DMA buffers become pending:
   their CPU mappings are removed and their pages are not reclaimed. A
@@ -1102,16 +1111,17 @@ Ethernet interrupt source that krepi does not own.
   Pi 5 these are the display driver, the drivers of the USB host
   controller, the SD host and Ethernet, and the component that sets the
   inbound windows of PCIe and enables bus mastering; on QEMU virt they are
-  the VirtIO block driver once it uses DMA buffers and the driver of a
-  VirtIO display, if the development display uses one. Drivers that do not
-  program DMA, such as those of the UARTs and GPIO, are not part of it.
-  Each of these drivers is held to an executable specification of its own;
-  for one that runs before that specification is complete, the release
-  declaration states the level that it has. Running a driver in EL0 gives
-  only partial isolation against CPU faults. At first the only DMA is that of the VirtIO
-  block device on QEMU virt, through a fixed region that the kernel holds
-  and never maps into EL0: the kernel checks each descriptor before it
-  publishes it to the device, and the driver names no address.
+  the VirtIO block driver once it uses DMA buffers and, if QEMU virt shows
+  its display through a VirtIO device, the driver of that device. Drivers
+  that do not program DMA, such as those of the UARTs and GPIO, are not
+  part of it. Each of these drivers is held to an executable specification
+  of its own; for one that runs before that specification is complete, the
+  release declaration says how far it is checked. Running a driver in EL0
+  gives only partial isolation against CPU faults. At first the only DMA is
+  that of the VirtIO block device on QEMU virt, through a fixed region that
+  the kernel holds and never maps into EL0: the kernel checks each
+  descriptor before it publishes it to the device, and the driver names no
+  address.
 - **Firmware mailbox.** Only the firmware mailbox service holds the grant of
   the mailbox of the Pi 5 and its interrupt, and it alone owns the buffer
   of the requests, a DMA buffer of its own whose cache it maintains before

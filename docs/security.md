@@ -343,11 +343,11 @@ and verification on the device uses no private key.
 - **Loading.** The boot bundle is part of the kernel image, and the root
   reads its images from there, so the kernel image itself binds them and
   the root compares no digest at run time. Once the read-only system image
-  exists, the root digest of its manifest is published with the kernel
-  image, and the read-only image service of the block layer verifies every
-  block that it reads against the hash tree of its file, with an expected
-  value that comes from the kernel image, never from the caller of a load,
-  so that the file service stays outside the trusted base
+  exists, its root digest is published with the kernel image, and the
+  read-only image service of the block layer verifies every block that it
+  reads against the hash tree of its file, with an expected value that
+  comes from the kernel image, never from the caller of a load, so that the
+  file service stays outside the trusted base
   ([storage](architecture.md#storage)); the volume is updated together with
   the kernel image, with one volume slot for each A/B slot. Loading only
   verifies: the root parses no signature and uses no key, and
@@ -412,14 +412,8 @@ and verification on the device uses no private key.
   service that passes worker images from the boot bundle to the loader, if
   one does. They are trusted for these two properties only and count as
   untrusted services otherwise. Each is held at least to an executable
-  specification of its own. Among them, the read-only image service of the
-  [storage rules](architecture.md#storage) is the component that verifies
-  the read-only system image, and also the storage component that keeps
-  installed packages immutable, since it checks their contents whenever it
-  reads them; the block driver is the storage path that alone writes the
-  A/B slots and approval records, since it grants those writes only to the
-  updater; and no file service passes worker images from the boot bundle
-  to the loader.
+  specification of its own, and the [storage rules](architecture.md#storage)
+  name the storage components among them.
 
 Packages, updates, keys and the restricted use mode come after the first
 release. Until then there is no update path, and A/B logic taken from the
