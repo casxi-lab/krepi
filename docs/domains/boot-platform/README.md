@@ -32,7 +32,11 @@ security and lifecycle domain decides which images a board may boot. The
 primitives and the QEMU virt board support with its console. The
 [fdt](fdt/requirements.md) component holds the bounded parsing of the
 device tree, the discovery of memory and CPUs from it and the boot memory
-map that the memory domain takes.
+map that the memory domain takes. The [context](context/requirements.md)
+component holds the saved user context of a thread: its layout, its
+initial value, its validation before every return to EL0, the results that
+a call writes into it, and the save and restore of the FP/SIMD and TLS
+registers of EL0 at every entry from EL0 and return to it.
 
 ## Conventions
 
@@ -60,7 +64,7 @@ map that the memory domain takes.
 | --- | --- | --- | --- |
 | [Firmware handoff](#firmware-handoff) | What the firmware leaves for the kernel: the image, the device tree, the exception level and the resident firmware services | - | The entry of each board |
 | [EL1 entry](#el1-entry) | From the ELF entry point to Rust at EL1 on the boot CPU, with the entry state checked | [QEMU virt boot](../../features/platform/qemu-virt-boot.md) | [boot](boot/requirements.md) |
-| [Exception vectors](#exception-vectors) | The vector table of EL1, the exception frame, its save and restore, and the report of an exception | [QEMU virt boot](../../features/platform/qemu-virt-boot.md) | [boot](boot/requirements.md) |
+| [Exception vectors](#exception-vectors) | The vector table of EL1, the exception frame, its save and restore, and the report of an exception | [QEMU virt boot](../../features/platform/qemu-virt-boot.md) | [boot](boot/requirements.md), [context](context/requirements.md) |
 | [Cache and TLB maintenance](#cache-and-tlb-maintenance) | Cleaning and invalidating caches by address, TLB invalidation with its barriers and the publication of code, by the executing CPU | [QEMU virt boot](../../features/platform/qemu-virt-boot.md) | [boot](boot/requirements.md) |
 | [Device-tree parsing](#device-tree-parsing) | Bounded parsing of the flattened device tree that the firmware hands over | - | [fdt](fdt/requirements.md) |
 | [Physical memory ranges](#physical-memory-ranges) | The banks of RAM and the reserved ranges, from the device tree and the image | - | [fdt](fdt/requirements.md) |
@@ -185,8 +189,11 @@ and return is a separate obligation with a test that observes it, because
 the rules are assembly that no extraction reaches.
 
 **Consumers.** Interrupt delivery, the timer and preemption of the
-scheduling domain, system calls and user faults of the runtime domain, and
-fault symbolization, which reads the records.
+scheduling domain; system calls, whose dispatch belongs to the runtime
+domain; the entry from EL0 and the return to it, with the classes of
+exceptions and user faults, which belong to the address-space component of
+the [memory](../memory/README.md) domain; and fault symbolization, which
+reads the records.
 
 **Interface.** The table, the frame layout, the dispatch function of the
 image and the exception record. A fatal exception is reported and halts; an
@@ -200,8 +207,11 @@ interrupt returns to the interrupted code.
 and records it; the dispatch and the return run with every exception
 masked, so no SError, IRQ or FIQ nests, while a synchronous exception of
 the dispatch itself would. The fatal path writes its record within the
-console bounds and does not allocate. Exceptions from EL0, with the save and
-restore of `SP_EL0`, belong to the user context of the runtime domain.
+console bounds and does not allocate. An exception from EL0 enters and
+returns as the address-space component of the
+[memory](../memory/README.md) domain states, and the user context that it
+saves and restores, `SP_EL0` among it, is state of the
+[context](context/contract.md#state-fields) component.
 
 **Verification.** QEMU tests trigger each handled kind once, a breakpoint,
 a timer interrupt, an injected SError and an FP/SIMD access, check the
@@ -534,8 +544,10 @@ records with matching and mismatching build-ids.
   belong to the devices and DMA domain.
 - Signed boot and the choice of the image a board may boot belong to the
   security and lifecycle domain.
-- The FP/SIMD state of user threads belongs to the runtime ABI and SDK
-  domain.
+- The floating-point environment of user threads and the libraries that
+  use it belong to the runtime ABI and SDK domain; the kernel's save and
+  restore of their FP/SIMD state belongs to the
+  [context](context/requirements.md) component of this domain.
 
 ## References
 
