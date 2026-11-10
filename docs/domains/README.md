@@ -21,7 +21,7 @@ each page that exists.
 | Domain | Directory | Scope |
 | --- | --- | --- |
 | [Boot and platform](boot-platform/README.md) | `boot-platform` | Firmware handoff, EL1 entry, exception vectors, cache and TLB maintenance, device-tree parsing, physical memory ranges, QEMU virt and Pi 5 board support, interrupt controllers, PCIe and RP1 links, CPU errata, fault symbolization |
-| Memory and address spaces | `memory` | Physical page ownership, page tables and the kernel direct map, ASIDs, VM objects and their kinds, user-buffer access, W^X and code publication, reclamation barriers |
+| [Memory and address spaces](memory/README.md) | `memory` | Physical page ownership, page tables and the kernel direct map, ASIDs, VM objects and their kinds, user-buffer access, W^X and code publication, reclamation barriers |
 | Kernel objects and capabilities | `objects-capabilities` | The object table, boot-time capacities, generations, metadata quotas, write-set transactions, process and thread lifetimes, per-process capability tables, delegation and revocation |
 | IPC and waits | `ipc-waits` | Call, receive and reply, one-shot replies, capability transfer, shared buffers, notifications, timeouts, wait sets and futex-style waits |
 | Scheduling and budgets | `scheduling` | Priority classes, budgets and replenishment, preemption, synchronous budget lending, reserved control capacity, admission |
@@ -31,7 +31,7 @@ each page that exists.
 | Runtime ABI and SDK | `runtime-sdk` | System-call dispatch and the operation inventory, application entry and CRT, sysroots, Rust `std`, C and C++ libraries, threads, TLS and the floating-point environment, the Go runtime, SDK packages |
 | Security and lifecycle | `security-lifecycle` | The threat model of the [security model](../security.md), integrity of loading, `exec`, packages and updates, keys, signed boot and updates, restricted use mode, release profiles and trusted-base declarations |
 | Compatibility personalities | `compatibility` | Native POSIX and GNU interfaces, the shell and terminal, dynamic loading and `dlopen`, Linux system-call and binary compatibility |
-| Application platform services | `application-services` | Document and job services for applications, GUI, display and input stacks, networking and TLS, CPython, Lean and Lake, desktop frameworks, host companion and data exchange |
+| Application platform services | `application-services` | Document and job services for applications, networking and TLS, CPython, Lean and Lake, host companion and data exchange |
 | Cross-cutting components | `cross-cutting` | Components that several domains build on, with their requirements, contracts, specifications and proof paths |
 
 ## Shared conventions
@@ -64,7 +64,7 @@ its features and adds only rules of its own.
 The following lie outside every domain of this repository:
 
 - the algorithms of the computer algebra system, which belong to kalyx;
-- reusable UI components and the graphical shell, which belong to kosmo;
+- the desktop environment and GUI framework, which belong to kosmo;
 - the electrical and mechanical design of the device;
 - the internal logic of language runtimes and proof checkers, beyond their
   integration with the system.

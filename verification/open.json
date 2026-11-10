@@ -251,6 +251,54 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
+      "item": "kernel/arch/src/mmu.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/mmu.rs#enable",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/mmu.rs#store_descriptor",
+      "kind": "unsafe",
+      "verified_state": "writes",
+      "carrier": "The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/mmu.rs#synchronize",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/mmu.rs#zero_frames",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/mmu.rs#zero_table",
+      "kind": "unsafe",
+      "verified_state": "writes",
+      "carrier": "The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
       "item": "kernel/arch/src/timer.rs",
       "kind": "code",
       "verified_state": "neither",
@@ -289,6 +337,14 @@
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
       "stage": "0.2",
       "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/boards/qemu-virt/src/main.rs#image::device_tree",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/fdt/contract.md"
     },
     {
       "item": "kernel/boards/qemu-virt/src/main.rs#image::exception_dispatch",
