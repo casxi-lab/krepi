@@ -1,0 +1,420 @@
+{
+  "aeneas_version": "4acbb6d+patch-d4bc7d21",
+  "charon_version": "0.1.312",
+  "crate": "registration_fixture",
+  "functions": [
+    {
+      "def_id": 36,
+      "lean_name": "core.option.Option.Insts.CoreOpsTry_traitTry.branch",
+      "lean_file": "KrepiGen/Reg/Registration/FunsExternal_Template.lean",
+      "rust_name": "core::option::{impl core::ops::try_trait::Try for core::option::Option<T>}::branch",
+      "is_local": false,
+      "source": {
+        "file": "/rustc/library/core/src/option.rs",
+        "begin_line": 2875,
+        "end_line": 2875
+      },
+      "is_opaque": true,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    },
+    {
+      "def_id": 37,
+      "lean_name": "core.option.Option.Insts.CoreOpsTry_traitFromResidualOptionNever.from_residual",
+      "lean_file": "KrepiGen/Reg/Registration/FunsExternal_Template.lean",
+      "rust_name": "core::option::{impl core::ops::try_trait::FromResidual<core::option::Option<!>> for core::option::Option<T>}::from_residual",
+      "is_local": false,
+      "source": {
+        "file": "/rustc/library/core/src/option.rs",
+        "begin_line": 2889,
+        "end_line": 2889
+      },
+      "is_opaque": true,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    },
+    {
+      "def_id": 32,
+      "lean_name": "core.sync.atomic.AtomicU32Align4U32.load",
+      "lean_file": "KrepiGen/Reg/Registration/FunsExternal_Template.lean",
+      "rust_name": "core::sync::atomic::{core::sync::atomic::Atomic<u32, core::sync::atomic::private::Align4<u32>>}::load",
+      "is_local": false,
+      "source": {
+        "file": "/rustc/library/core/src/sync/atomic.rs",
+        "begin_line": 4116,
+        "end_line": 4133
+      },
+      "is_opaque": true,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    },
+    {
+      "def_id": 31,
+      "lean_name": "registration.hardware.read",
+      "lean_file": "KrepiGen/Reg/Registration/FunsExternal_Template.lean",
+      "rust_name": "registration_fixture::registration::hardware::read",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 72,
+        "end_line": 74
+      },
+      "is_opaque": true,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    },
+    {
+      "def_id": 24,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Slot.Insts.CoreCloneClone.clone",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::{impl core::clone::Clone for registration_fixture::registration::Slot}::clone",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 7,
+        "end_line": 7
+      },
+      "is_opaque": false,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    },
+    {
+      "def_id": 25,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Slot.Insts.CoreCmpPartialEqSlot.eq",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::{impl core::cmp::PartialEq<registration_fixture::registration::Slot> for registration_fixture::registration::Slot}::eq",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 7,
+        "end_line": 7
+      },
+      "is_opaque": false,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    },
+    {
+      "def_id": 27,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Table.total.default_loop.body",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::Table::total",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 19,
+        "end_line": 24
+      },
+      "is_opaque": false,
+      "can_fail": true,
+      "can_diverge": true,
+      "is_rec": false,
+      "reducible": false,
+      "loop": { "id": 0, "pos": [ 0 ], "is_body": true },
+      "parent_lean_name": "KrepiGen.Reg.Registration.registration.Table.total.default"
+    },
+    {
+      "def_id": 27,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Table.total.default_loop",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::Table::total",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 19,
+        "end_line": 24
+      },
+      "is_opaque": false,
+      "can_fail": true,
+      "can_diverge": true,
+      "is_rec": false,
+      "reducible": false,
+      "loop": { "id": 0, "pos": [ 0 ], "is_body": false },
+      "parent_lean_name": "KrepiGen.Reg.Registration.registration.Table.total.default"
+    },
+    {
+      "def_id": 27,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Table.total.default",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::Table::total",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 16,
+        "end_line": 26
+      },
+      "is_opaque": false,
+      "can_fail": true,
+      "can_diverge": true,
+      "is_rec": false,
+      "reducible": true
+    },
+    {
+      "def_id": 28,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Slots.bump",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::{registration_fixture::registration::Slots}::bump",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 34,
+        "end_line": 42
+      },
+      "is_opaque": false,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    },
+    {
+      "def_id": 29,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Slots.Insts.Registration_fixtureRegistrationTable.value",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::{impl registration_fixture::registration::Table for registration_fixture::registration::Slots}::value",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 46,
+        "end_line": 52
+      },
+      "is_opaque": false,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    },
+    {
+      "def_id": 19,
+      "lean_name": "KrepiGen.Reg.Registration.registration.same",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::same",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 55,
+        "end_line": 57
+      },
+      "is_opaque": false,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    },
+    {
+      "def_id": 20,
+      "lean_name": "KrepiGen.Reg.Registration.registration.copied",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::copied",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 59,
+        "end_line": 61
+      },
+      "is_opaque": false,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    },
+    {
+      "def_id": 21,
+      "lean_name": "KrepiGen.Reg.Registration.registration.probe",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::probe",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 63,
+        "end_line": 65
+      },
+      "is_opaque": false,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    },
+    {
+      "def_id": 22,
+      "lean_name": "KrepiGen.Reg.Registration.registration.load",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::load",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 67,
+        "end_line": 69
+      },
+      "is_opaque": false,
+      "can_fail": true,
+      "can_diverge": false,
+      "is_rec": false,
+      "reducible": false
+    }
+  ],
+  "types": [
+    {
+      "def_id": 14,
+      "lean_name": "core.sync.atomic.private.Align4",
+      "lean_file": "KrepiGen/Reg/Registration/TypesExternal_Template.lean",
+      "rust_name": "core::sync::atomic::private::Align4",
+      "is_local": false,
+      "source": {
+        "file": "/rustc/library/core/src/sync/atomic.rs",
+        "begin_line": 267,
+        "end_line": 267
+      }
+    },
+    {
+      "def_id": 11,
+      "lean_name": "core.sync.atomic.Atomic",
+      "lean_file": "KrepiGen/Reg/Registration/TypesExternal_Template.lean",
+      "rust_name": "core::sync::atomic::Atomic",
+      "is_local": false,
+      "source": {
+        "file": "/rustc/library/core/src/sync/atomic.rs",
+        "begin_line": 384,
+        "end_line": 384
+      }
+    },
+    {
+      "def_id": 12,
+      "lean_name": "KrepiGen.Reg.Registration.core.sync.atomic.Ordering",
+      "lean_file": "KrepiGen/Reg/Registration/Types.lean",
+      "rust_name": "core::sync::atomic::Ordering",
+      "is_local": false,
+      "source": {
+        "file": "/rustc/library/core/src/sync/atomic.rs",
+        "begin_line": 465,
+        "end_line": 465
+      }
+    },
+    {
+      "def_id": 5,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Slot",
+      "lean_file": "KrepiGen/Reg/Registration/Types.lean",
+      "rust_name": "registration_fixture::registration::Slot",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 8,
+        "end_line": 11
+      }
+    },
+    {
+      "def_id": 6,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Slots",
+      "lean_file": "KrepiGen/Reg/Registration/Types.lean",
+      "rust_name": "registration_fixture::registration::Slots",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 29,
+        "end_line": 31
+      }
+    }
+  ],
+  "globals": [],
+  "trait_decls": [
+    {
+      "def_id": 4,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Table",
+      "lean_file": "KrepiGen/Reg/Registration/Types.lean",
+      "rust_name": "registration_fixture::registration::Table",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 13,
+        "end_line": 27
+      }
+    }
+  ],
+  "trait_impls": [
+    {
+      "def_id": 7,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Slot.Insts.CoreCloneClone",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::{impl core::clone::Clone for registration_fixture::registration::Slot}",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 7,
+        "end_line": 7
+      },
+      "impl_trait_def_id": 0,
+      "impl_trait_rust_name": "core::clone::Clone",
+      "impl_trait_is_builtin": true
+    },
+    {
+      "def_id": 8,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Slot.Insts.CoreMarkerCopy",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::{impl core::marker::Copy for registration_fixture::registration::Slot}",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 7,
+        "end_line": 7
+      },
+      "impl_trait_def_id": 7,
+      "impl_trait_rust_name": "core::marker::Copy",
+      "impl_trait_is_builtin": true
+    },
+    {
+      "def_id": 9,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Slot.Insts.CoreMarkerStructuralPartialEq",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::{impl core::marker::StructuralPartialEq for registration_fixture::registration::Slot}",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 7,
+        "end_line": 7
+      },
+      "impl_trait_def_id": 8,
+      "impl_trait_rust_name": "core::marker::StructuralPartialEq",
+      "impl_trait_is_builtin": true
+    },
+    {
+      "def_id": 10,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Slot.Insts.CoreCmpPartialEqSlot",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::{impl core::cmp::PartialEq<registration_fixture::registration::Slot> for registration_fixture::registration::Slot}",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 7,
+        "end_line": 7
+      },
+      "impl_trait_def_id": 9,
+      "impl_trait_rust_name": "core::cmp::PartialEq",
+      "impl_trait_is_builtin": true
+    },
+    {
+      "def_id": 11,
+      "lean_name": "KrepiGen.Reg.Registration.registration.Slots.Insts.Registration_fixtureRegistrationTable",
+      "lean_file": "KrepiGen/Reg/Registration/Funs.lean",
+      "rust_name": "registration_fixture::registration::{impl registration_fixture::registration::Table for registration_fixture::registration::Slots}",
+      "is_local": true,
+      "source": {
+        "file": "src/registration.rs",
+        "begin_line": 45,
+        "end_line": 53
+      },
+      "impl_trait_def_id": 4,
+      "impl_trait_rust_name": "registration_fixture::registration::Table",
+      "impl_trait_is_builtin": false
+    }
+  ]
+}

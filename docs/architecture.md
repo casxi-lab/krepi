@@ -1348,12 +1348,15 @@ core is `kernel/` itself, the ABI crate `kernel/abi`, the architecture
 crate `kernel/arch` and a board crate a directory directly below
 `kernel/boards/`. A package in any other directory fails the check.
 
-`kernel/Cargo.toml` keeps one shape, which a check of the `manifests` step
-and the proof gate is to enforce (planned). It holds only these tables and
-keys: `package` with `name`, `version`, `edition`, `license`, `publish`,
-`description` and `rust-version`; `workspace` with `resolver`, `members`
-and `package`; `lints` with `rust`; `profile` with `release`; and `lib` with
-`path`, or no `lib`. It must not have:
+`kernel/Cargo.toml` keeps one shape, which the `manifests` step of
+`cargo xtask check` and the proof gate check in the manifest, in the
+crate attributes of the root package's library and in the targets that
+`cargo metadata` reports for that package
+([testing](conventions/testing.md#entry-points)). It holds only these
+tables and keys: `package` with `name`, `version`, `edition`, `license`,
+`publish`, `description` and `rust-version`; `workspace` with `resolver`,
+`members` and `package`; `lints` with `rust`; `profile` with `release`;
+and `lib` with `path`, or no `lib`. It must not have:
 
 1. a dependency table of any kind, including those by target and
    `[workspace.dependencies]`;
@@ -1376,8 +1379,10 @@ well: `kernel/build.rs` under 12, `src/main.rs` and `src/bin/` under 6,
 `lints.rust.unsafe_code = "forbid"`, and an unconditional `#![no_std]`
 among the crate attributes of the library, which
 `#![cfg_attr(..., no_std)]` does not satisfy. A `kernel/Cargo.toml` without
-`[package]` passes the check, and with `[package]` the package is named
-`krepi-kernel`.
+`[package]`, a virtual workspace, passes the check, and with `[package]`
+the package is named `krepi-kernel`. Kernel targets are extracted from that
+package, so the proof gate refuses a run that extracts one while the
+workspace has none ([gate run](formal-verification.md#gate-run)).
 
 | Crate | Modules |
 | --- | --- |

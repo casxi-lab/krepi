@@ -1,6 +1,7 @@
 //! The manifests step: crate licenses, release profiles, the dependency
 //! direction between the two workspaces and, as Cargo resolves it, the
-//! kernel workspace's freedom from external crates.
+//! kernel workspace's freedom from external crates and the shape of its
+//! root manifest.
 
 use std::fs;
 use std::path::Path;
@@ -14,6 +15,9 @@ use crate::repo::{self, Entry, Tree};
 
 /// The kernel workspace. Its crates may only reach paths inside it.
 pub const KERNEL: &str = "kernel";
+/// The root package of the kernel workspace, which its root manifest
+/// declares once the workspace has one.
+pub const KERNEL_PACKAGE: &str = "krepi-kernel";
 /// The user-space workspace.
 pub const USER: &str = "user";
 /// The ABI crate: the only kernel-workspace crate that user space may use.
@@ -343,7 +347,7 @@ pub fn kernel_metadata(root: &Path) -> Result<Json, String> {
 
 /// Resolves the kernel workspace below `root` with [`kernel_metadata`] and
 /// checks what Cargo reports.
-fn check_kernel_workspace(root: &Path) -> Vec<String> {
+pub fn check_kernel_workspace(root: &Path) -> Vec<String> {
     match kernel_metadata(root) {
         Ok(metadata) => check_kernel_metadata(&metadata, &root.join(KERNEL)),
         Err(problem) => vec![problem],
@@ -352,8 +356,8 @@ fn check_kernel_workspace(root: &Path) -> Vec<String> {
 
 /// Problems in what `cargo metadata` reports for the kernel workspace in
 /// `kernel`: its root must be `kernel`, and every package must be a member
-/// of it, with its manifest and the sources of its targets inside `kernel`.
-/// Paths are
+/// of it, with its manifest and the sources of its targets inside `kernel`;
+/// and the problems of [`root_shape`] in its root manifest. Paths are
 /// compared with symbolic links resolved; a path that cannot be resolved is a
 /// problem.
 pub fn check_kernel_metadata(metadata: &Json, kernel: &Path) -> Vec<String> {
@@ -401,7 +405,151 @@ pub fn check_kernel_metadata(metadata: &Json, kernel: &Path) -> Vec<String> {
             }
         }
     }
+    problems.extend(root_problems(packages, &kernel));
     problems
+}
+
+/// The tables of the root manifest of the kernel workspace, each with the
+/// keys that it may hold.
+const ROOT_TABLES: [(&str, &str); 5] = [
+    (
+        "package",
+        "name version edition license publish description rust-version",
+    ),
+    ("workspace", "resolver members package"),
+    ("lints", "rust"),
+    ("profile", "release"),
+    ("lib", "path"),
+];
+
+/// The kinds of the targets of the root package.
+const ROOT_KINDS: [&str; 2] = ["lib", "test"];
+
+/// The name of the package that the manifest `text` declares, if it has
+/// `[package]`; an empty name when it has none.
+pub fn root_package(text: &str) -> Result<Option<String>, String> {
+    let table: Table = (text.parse()).map_err(|error| format!("not valid TOML: {error}"))?;
+    let name = |package: &Value| {
+        package
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    Ok(table.get("package").map(name))
+}
+
+/// The problems of the shape of the root manifest of the kernel workspace,
+/// `manifest`, whose package has targets of the `kinds` that `cargo
+/// metadata` reports, as `(kind, source)`, and the library `lib`, as its
+/// path and text. A manifest without `[package]`, of a virtual workspace,
+/// passes. With it, the package is [`KERNEL_PACKAGE`], the manifest holds
+/// only the tables and keys of [`ROOT_TABLES`] and forbids unsafe code, the
+/// package has only targets of [`ROOT_KINDS`], even among those that Cargo
+/// finds by itself, and its library has an unconditional `#![no_std]`.
+pub fn root_shape(
+    manifest: &str,
+    kinds: &[(String, String)],
+    lib: Option<(&str, &str)>,
+) -> Vec<String> {
+    let path = format!("{KERNEL}/Cargo.toml");
+    let table: Table = match manifest.parse() {
+        Ok(table) => table,
+        Err(error) => return vec![format!("{path}: not valid TOML: {error}")],
+    };
+    let Some(package) = table.get("package") else {
+        return Vec::new();
+    };
+    let mut problems = Vec::new();
+    let name = package.get("name").and_then(Value::as_str).unwrap_or("");
+    if name != KERNEL_PACKAGE {
+        problems.push(format!(
+            "{path}: the root package is named `{name}`, not `{KERNEL_PACKAGE}`"
+        ));
+    }
+    for (key, value) in &table {
+        let Some((_, keys)) = ROOT_TABLES.iter().find(|(table, _)| table == key) else {
+            problems.push(format!("{path}: the root manifest may not have [{key}]"));
+            continue;
+        };
+        let Some(value) = value.as_table() else {
+            problems.push(format!("{path}: `{key}` is not a table"));
+            continue;
+        };
+        let allowed = |inner: &&String| keys.split(' ').any(|allowed| allowed == inner.as_str());
+        for inner in value.keys().filter(|inner| !allowed(inner)) {
+            problems.push(format!(
+                "{path}: the root manifest may not have {key}.{inner}"
+            ));
+        }
+    }
+    let unsafe_code = (table.get("lints"))
+        .and_then(|lints| lints.get("rust"))
+        .and_then(|rust| rust.get("unsafe_code"))
+        .and_then(Value::as_str);
+    if unsafe_code != Some("forbid") {
+        problems.push(format!(
+            "{path}: the root manifest must set lints.rust.unsafe_code = \"forbid\""
+        ));
+    }
+    for (kind, source) in kinds
+        .iter()
+        .filter(|(kind, _)| !ROOT_KINDS.contains(&kind.as_str()))
+    {
+        let what = match kind.as_str() {
+            "custom-build" => "a build script".to_string(),
+            kind => format!("a target of the kind {kind}"),
+        };
+        problems.push(format!(
+            "{path}: the root package may not have {what}, {source}"
+        ));
+    }
+    let unconditional = |attr: &syn::Attribute| {
+        matches!(attr.style, syn::AttrStyle::Inner(_))
+            && matches!(&attr.meta, syn::Meta::Path(path) if path.is_ident("no_std"))
+    };
+    let no_std = |text| syn::parse_file(text).map(|file| file.attrs.iter().any(unconditional));
+    match lib.map(|(lib, text)| (lib, no_std(text))) {
+        None => problems.push(format!("{path}: the root package has no library")),
+        Some((_, Ok(true))) => {}
+        Some((lib, Ok(false))) => problems.push(format!(
+            "{lib}: the library of the root package must have an unconditional #![no_std]"
+        )),
+        Some((lib, Err(error))) => problems.push(format!("{lib}: does not parse: {error}")),
+    }
+    problems
+}
+
+/// The problems of [`root_shape`] for the root manifest in `kernel`, a
+/// resolved path, and the package of `packages` whose manifest it is.
+fn root_problems(packages: &[Json], kernel: &Path) -> Vec<String> {
+    let manifest = kernel.join("Cargo.toml");
+    let text = |path: &Path| {
+        fs::read_to_string(path).map_err(|error| format!("cannot read {}: {error}", path.display()))
+    };
+    let resolved = |value: &Json| value.as_str().and_then(|path| fs::canonicalize(path).ok());
+    let below = |path: &Path| match path.strip_prefix(kernel) {
+        Ok(below) => format!("{KERNEL}/{}", below.display()),
+        Err(_) => path.display().to_string(),
+    };
+    let root = (packages.iter())
+        .find(|package| resolved(&package["manifest_path"]) == Some(manifest.clone()));
+    let targets = root
+        .into_iter()
+        .flat_map(|root| root["targets"].as_array().into_iter().flatten());
+    let (mut kinds, mut lib) = (Vec::new(), None);
+    for target in targets {
+        let source = resolved(&target["src_path"]).unwrap_or_default();
+        for kind in (target["kind"].as_array().into_iter().flatten()).filter_map(Json::as_str) {
+            lib = lib.or_else(|| (kind == "lib").then(|| source.clone()));
+            kinds.push((kind.to_string(), below(&source)));
+        }
+    }
+    match (text(&manifest), lib.map(|lib| (below(&lib), text(&lib)))) {
+        (Err(error), _) | (_, Some((_, Err(error)))) => vec![error],
+        (Ok(manifest), Some((lib, Ok(text)))) => root_shape(&manifest, &kinds, Some((&lib, &text))),
+        (Ok(manifest), None) => root_shape(&manifest, &kinds, None),
+    }
 }
 
 /// Whether the tracked `path`, without regard to ASCII case as a
@@ -823,6 +971,239 @@ mod tests {
         assert_eq!(problems.len(), 1, "{problems:?}");
     }
 
+    /// A root manifest of the kernel workspace in its shape.
+    const ROOT: &str = "[package]\nname = \"krepi-kernel\"\nversion = \"0.1.0\"\nedition = \"2024\"\nlicense.workspace = true\npublish = false\ndescription = \"The core.\"\nrust-version = \"1.99\"\n\n[workspace]\nresolver = \"3\"\nmembers = [\"abi\"]\n\n[workspace.package]\nlicense = \"MIT\"\n\n[lib]\npath = \"src/lib.rs\"\n\n[lints.rust]\nunsafe_code = \"forbid\"\n\n[profile.release]\noverflow-checks = true\n";
+
+    /// The library of the root package.
+    const ROOT_LIB: &str = "//! The core.\n#![no_std]\n#![forbid(unsafe_code)]\n\npub fn f() {}\n";
+
+    /// The problems of the shape of the root manifest `manifest`, whose
+    /// package has the library [`ROOT_LIB`] and the further targets
+    /// `kinds`.
+    fn shape(manifest: &str, kinds: &[(&str, &str)]) -> Vec<String> {
+        shape_with(manifest, kinds, ROOT_LIB)
+    }
+
+    fn shape_with(manifest: &str, kinds: &[(&str, &str)], lib: &str) -> Vec<String> {
+        let kinds: Vec<(String, String)> =
+            [("lib", "kernel/src/lib.rs"), ("test", "kernel/tests/t.rs")]
+                .iter()
+                .chain(kinds)
+                .map(|(kind, source)| (kind.to_string(), source.to_string()))
+                .collect();
+        root_shape(manifest, &kinds, Some(("kernel/src/lib.rs", lib)))
+    }
+
+    /// The problems of [`ROOT`] followed by `extra`.
+    fn shape_after(extra: &str) -> Vec<String> {
+        shape(&format!("{ROOT}\n{extra}"), &[])
+    }
+
+    #[test]
+    fn a_root_manifest_in_its_shape_passes() {
+        assert_eq!(shape(ROOT, &[]), Vec::<String>::new());
+        // A virtual workspace has no root package, whatever it holds.
+        let virtual_workspace = include_str!("../../kernel/Cargo.toml");
+        assert_eq!(root_package(virtual_workspace), Ok(None));
+        assert_eq!(
+            root_shape(virtual_workspace, &[], None),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            root_shape("[workspace]\n\n[features]\nx = []\n", &[], None),
+            Vec::<String>::new()
+        );
+        assert_eq!(root_package(ROOT), Ok(Some(KERNEL_PACKAGE.to_string())));
+    }
+
+    #[test]
+    fn a_root_package_of_another_name_fails() {
+        let renamed = ROOT.replace("name = \"krepi-kernel\"", "name = \"kernel\"");
+        assert_eq!(
+            shape(&renamed, &[]),
+            ["kernel/Cargo.toml: the root package is named `kernel`, not `krepi-kernel`"]
+        );
+        assert_eq!(root_package(&renamed), Ok(Some("kernel".to_string())));
+    }
+
+    #[test]
+    fn a_root_manifest_with_a_dependency_table_fails() {
+        assert_eq!(
+            shape_after("[workspace.dependencies]\nkrepi-abi = { path = \"abi\" }\n"),
+            ["kernel/Cargo.toml: the root manifest may not have workspace.dependencies"]
+        );
+        for table in ["dependencies", "dev-dependencies", "build-dependencies"] {
+            assert_eq!(
+                shape_after(&format!("[{table}]\nkrepi-abi = {{ path = \"abi\" }}\n")),
+                [format!(
+                    "kernel/Cargo.toml: the root manifest may not have [{table}]"
+                )],
+                "{table}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_root_manifest_with_target_tables_fails() {
+        assert_eq!(
+            shape_after("[target.'cfg(unix)'.dependencies]\nkrepi-abi = { path = \"abi\" }\n"),
+            ["kernel/Cargo.toml: the root manifest may not have [target]"]
+        );
+    }
+
+    #[test]
+    fn a_root_manifest_with_features_fails() {
+        assert_eq!(
+            shape_after("[features]\ndefault = []\n"),
+            ["kernel/Cargo.toml: the root manifest may not have [features]"]
+        );
+    }
+
+    #[test]
+    fn a_root_manifest_with_patches_fails() {
+        assert_eq!(
+            shape_after("[patch.crates-io]\nkrepi-abi = { path = \"abi\" }\n"),
+            ["kernel/Cargo.toml: the root manifest may not have [patch]"]
+        );
+    }
+
+    #[test]
+    fn a_root_manifest_with_replacements_fails() {
+        assert_eq!(
+            shape_after("[replace]\n\"krepi-abi:0.1.0\" = { path = \"abi\" }\n"),
+            ["kernel/Cargo.toml: the root manifest may not have [replace]"]
+        );
+    }
+
+    #[test]
+    fn a_root_package_with_a_binary_fails() {
+        // Cargo finds `src/main.rs` by itself, and `cargo metadata` reports it.
+        assert_eq!(
+            shape(ROOT, &[("bin", "kernel/src/main.rs")]),
+            [
+                "kernel/Cargo.toml: the root package may not have a target of the kind bin, kernel/src/main.rs"
+            ]
+        );
+        assert_eq!(
+            shape_after("[[bin]]\nname = \"tool\"\npath = \"src/tool.rs\"\n"),
+            ["kernel/Cargo.toml: the root manifest may not have [bin]"]
+        );
+    }
+
+    #[test]
+    fn a_root_package_with_an_example_fails() {
+        assert_eq!(
+            shape(ROOT, &[("example", "kernel/examples/e.rs")]),
+            [
+                "kernel/Cargo.toml: the root package may not have a target of the kind example, kernel/examples/e.rs"
+            ]
+        );
+        assert_eq!(
+            shape_after("[[example]]\nname = \"e\"\n"),
+            ["kernel/Cargo.toml: the root manifest may not have [example]"]
+        );
+    }
+
+    #[test]
+    fn a_root_package_with_a_benchmark_fails() {
+        assert_eq!(
+            shape(ROOT, &[("bench", "kernel/benches/b.rs")]),
+            [
+                "kernel/Cargo.toml: the root package may not have a target of the kind bench, kernel/benches/b.rs"
+            ]
+        );
+        assert_eq!(
+            shape_after("[[bench]]\nname = \"b\"\n"),
+            ["kernel/Cargo.toml: the root manifest may not have [bench]"]
+        );
+    }
+
+    #[test]
+    fn a_root_manifest_with_package_metadata_fails() {
+        // Charon reads `[package.metadata.charon]`.
+        assert_eq!(
+            shape_after("[package.metadata.charon]\nextract_opaque_bodies = true\n"),
+            ["kernel/Cargo.toml: the root manifest may not have package.metadata"]
+        );
+    }
+
+    #[test]
+    fn a_root_manifest_with_default_members_fails() {
+        let manifest = ROOT.replace(
+            "members = [\"abi\"]\n",
+            "members = [\"abi\"]\ndefault-members = [\".\"]\n",
+        );
+        assert_eq!(
+            shape(&manifest, &[]),
+            ["kernel/Cargo.toml: the root manifest may not have workspace.default-members"]
+        );
+    }
+
+    #[test]
+    fn a_root_manifest_with_a_dev_profile_fails() {
+        assert_eq!(
+            shape_after("[profile.dev]\noverflow-checks = false\n"),
+            ["kernel/Cargo.toml: the root manifest may not have profile.dev"]
+        );
+    }
+
+    #[test]
+    fn a_root_package_with_a_build_script_fails() {
+        assert_eq!(
+            shape(ROOT, &[("custom-build", "kernel/build.rs")]),
+            ["kernel/Cargo.toml: the root package may not have a build script, kernel/build.rs"]
+        );
+    }
+
+    #[test]
+    fn a_root_manifest_that_does_not_forbid_unsafe_code_fails() {
+        let manifest = ROOT.replace("unsafe_code = \"forbid\"", "unsafe_code = \"deny\"");
+        let problem =
+            "kernel/Cargo.toml: the root manifest must set lints.rust.unsafe_code = \"forbid\"";
+        assert_eq!(shape(&manifest, &[]), [problem]);
+        let manifest = ROOT.replace("[lints.rust]\nunsafe_code = \"forbid\"\n", "");
+        assert_eq!(shape(&manifest, &[]), [problem]);
+    }
+
+    #[test]
+    fn a_root_library_without_an_unconditional_no_std_fails() {
+        let lib = ROOT_LIB.replace("#![no_std]", "#![cfg_attr(not(test), no_std)]");
+        assert_eq!(
+            shape_with(ROOT, &[], &lib),
+            [
+                "kernel/src/lib.rs: the library of the root package must have an unconditional #![no_std]"
+            ]
+        );
+        let kinds = [("test".to_string(), "kernel/tests/t.rs".to_string())];
+        assert_eq!(
+            root_shape(ROOT, &kinds, None),
+            ["kernel/Cargo.toml: the root package has no library"]
+        );
+    }
+
+    #[test]
+    fn cargo_reports_the_targets_of_the_root_package_that_it_finds_by_itself() {
+        let scratch = repository("root-package");
+        scratch.write(
+            "kernel/Cargo.toml",
+            "[package]\nname = \"krepi-kernel\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n\
+             [workspace]\nresolver = \"3\"\nmembers = [\"a\", \"b\"]\n\n\
+             [lints.rust]\nunsafe_code = \"forbid\"\n",
+        );
+        scratch.write("kernel/src/lib.rs", "#![no_std]\n");
+        scratch.lock();
+        assert_eq!(check_kernel_workspace(&scratch.0), Vec::<String>::new());
+        scratch.write("kernel/src/main.rs", "fn main() {}\n");
+        scratch.write("kernel/build.rs", "fn main() {}\n");
+        assert_eq!(
+            check_kernel_workspace(&scratch.0),
+            [
+                "kernel/Cargo.toml: the root package may not have a target of the kind bin, kernel/src/main.rs",
+                "kernel/Cargo.toml: the root package may not have a build script, kernel/build.rs"
+            ]
+        );
+    }
+
     const MEMBER: &str =
         "[package]\nname = \"a\"\nedition = \"2024\"\n\n[dependencies]\nb = { path = \"../b\" }\n";
 
@@ -949,8 +1330,17 @@ mod tests {
         );
         scratch.lock();
         let problems = check_kernel_workspace(&scratch.0);
-        assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(problems[0].contains("the root"), "{problems:?}");
+        // The root manifest is a package's, out of its shape.
+        assert_eq!(
+            problems[1..],
+            [
+                "kernel/Cargo.toml: the root package is named `k`, not `krepi-kernel`",
+                "kernel/Cargo.toml: the root manifest may not have package.workspace",
+                "kernel/Cargo.toml: the root manifest must set lints.rust.unsafe_code = \"forbid\"",
+                "kernel/src/lib.rs: the library of the root package must have an unconditional #![no_std]"
+            ]
+        );
     }
 
     #[test]
