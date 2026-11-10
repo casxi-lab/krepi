@@ -266,14 +266,19 @@ pub fn rules(registry: &Registry) -> Vec<String> {
     problems
 }
 
-/// `verification/axioms.json` as far as its rule reads it.
+/// `verification/axioms.json`, with the fields that the gate requires, as
+/// `lean::load_axioms` reads it, and refuses a field that it does not know;
+/// the source and the reason are optional here, so that the rule reports
+/// each axiom that lacks one.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Axioms {
     schema: u32,
     axioms: Vec<LibraryAxiom>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct LibraryAxiom {
     name: String,
     source: Option<String>,
@@ -713,6 +718,14 @@ mod tests {
         assert_eq!(
             axiom(json!({"source": "Aeneas.Std.Core"})),
             Ok(vec!["axiom Aeneas.Std.ax has no reason".to_string()])
+        );
+        // A field that the gate does not know, which it refuses.
+        let unknown = axiom(json!({"source": "Aeneas.Std.Core", "reason": "r", "note": "n"}));
+        assert!(
+            unknown
+                .as_ref()
+                .is_err_and(|error| error.contains("unknown field `note`")),
+            "{unknown:?}"
         );
         let committed = include_str!("../../../verification/axioms.json");
         assert_eq!(axiom_rules(committed), Ok(Vec::new()));
