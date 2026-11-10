@@ -1680,14 +1680,14 @@ a tool, and each broken rule is a problem:
 
 A run extracts the target from the current production source and checks the
 registry against the translation (planned): every reached local function is
-in `proves`, `unclosed` or `derived`, every cut local item in `unclosed` or
-`derived`, and the reached external items are exactly those of
-`unconstrained`; every entry of these lists is still reached, and a
-`derived` entry is reached as a method of a derived implementation of a
-standard trait, under one Rust name. A Rust name maps to the inventory key
-of its function: the path below the module of its source file,
-`krepi_kernel::m::inner::f` in the file of `m` for `inner::f`, gives the
-inline modules; the self type of an implementation,
+in `proves`, `unclosed` or `derived`, every cut local item in `unclosed`,
+where a cut derived method may be in `derived` instead, and the reached
+external items are exactly those of `unconstrained`; every entry of these
+lists is still reached, and a `derived` entry is reached as a method of a
+derived implementation of a standard trait, under one Rust name. A Rust name
+maps to the inventory key of its function: the path below the module of its
+source file, `krepi_kernel::m::inner::f` in the file of `m` for `inner::f`,
+gives the inline modules; the self type of an implementation,
 `{impl Trait for krepi_kernel::m::Type}`, the owner; and the loops of a
 function, whose Rust name is that of the function, map to its key, as the
 default method of a trait and its loops map to `Trait::method`. A reached
@@ -1695,12 +1695,14 @@ function that maps to no function of the inventory is not registered, so the
 run fails: the body of a closure, which has a function of its own (rule R4 of
 the [provable subset](conventions/provable-subset.md)), a loop that the tools
 place in a file outside the package, such as that of a macro, a function in
-the body of another, a method whose key is both that of a function of the
-inventory and that of a derived method, as the `eq` of a type that derives
-`PartialEq` and also implements `PartialEq<u32>` by hand, which the key
-cannot tell apart, and a method of a trait implementation whose key the
-inventory numbers, as `#2`, which its Rust name cannot tell apart from the
-others of its key.
+the body of another, and a method whose key is both that of a function of
+the inventory and that of a derived method, as the `eq` of a type that
+derives `PartialEq` and also implements `PartialEq<u32>` by hand, which the
+key cannot tell apart. A key that the inventory numbers, as `#2` and `#3`
+for the second and third method of trait implementations with one key in a
+file, is ambiguous too: a Rust name does not say which number is its own,
+so every reached method of that key fails as not registered, even where
+only one of them is reached.
 It builds the generated definitions and the proof modules with warnings as
 errors, so `sorry` fails, and audits every registered theorem with
 `#print axioms`. The axioms that its theorems may use are those of the
