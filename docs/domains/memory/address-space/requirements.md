@@ -135,7 +135,8 @@ touches, and a boot whose kernel layout reaches that window stops with
 `KernelLayout` before the lower kernel set is written. The boot
 information, the root's segments, its stack with a guard below it and its
 bundle lie at the fixed ranges of the contract. A saved context whose
-return address or stack pointer lies outside the window is not restored.
+return address lies outside the window, or whose stack pointer lies
+outside the window and is not its upper end, is not restored.
 The criterion: the host test of `check_kernel_ranges` holds, and on QEMU
 virt the root finds its boot information and its bundle at their
 addresses.
@@ -219,11 +220,13 @@ as the contract states.
 
 **User faults.** Every synchronous exception of a thread at EL0 other than
 a system call has exactly one of the nine cause classes of the contract,
-which a later release passes to a fault handler. In release 0.1 the fault
-ends the process of the thread as faulted, with a fault record that holds
-the cause class, the exception class bits of `ESR_EL1` and, where it is
-defined, the user virtual address of `FAR_EL1`; the thread never runs
-again, and no other process ends. A kernel sentinel that EL0 writes stays
+which a later release passes to a fault handler, and a saved context that
+`validate` refuses at a return is a user fault of the cause `Other`. In
+release 0.1 the fault ends the process of the thread as faulted, with a
+fault record that holds the cause class, for an exception the exception
+class bits of `ESR_EL1`, and, for the causes of the contract that carry
+it, the user virtual address of `FAR_EL1`; the thread never runs again,
+and no other process ends. A kernel sentinel that EL0 writes stays
 unchanged. The criterion: on QEMU virt, the case of each of the nine causes
 gives that cause and its fault record, and the process does not run again.
 
@@ -292,15 +295,16 @@ error of the earlier.
 
 **EL0 controls.** EL0 reads `CNTVCT_EL0` and `CNTFRQ_EL0` without a trap,
 and an access at EL0 to the physical counter, to the physical or virtual
-timer, to the performance monitors or to the debug communications channel
-traps with the exception class `0x18`; EL0 cannot mask an interrupt, its
+timer, to the performance monitors other than a read of `PMUSERENR_EL0`,
+or to the debug communications channel traps with the exception class
+`0x18`; EL0 cannot mask an interrupt, its
 stack pointer is checked for alignment, its data accesses are
 little-endian, it reads `CTR_EL0`, executes `DC ZVA`, cache maintenance by
 address and `WFE` without a trap, and a `WFI` that would wait traps. Every
 CPU has these controls before it first enters EL0. The criterion: on QEMU
 virt, the reads of `CNTVCT_EL0` and `CNTFRQ_EL0` succeed at EL0, and the
-three traps of the contract and the cases of `SpAlignment` and of a read
-of `PMCCNTR_EL0` hold.
+three traps of the contract, the case of the class `SpAlignment` and the
+case of the cause `TrappedAccess`, a read of `PMCCNTR_EL0`, hold.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `krepi_arch::el0::write_controls` (planned).
@@ -309,8 +313,9 @@ of `PMCCNTR_EL0` hold.
 - **Proof path.** None: the component has no proof path; the write is an
   [open obligation](contract.md#open-obligations).
 - **Evidence.** The QEMU tests of the timer reads and of the three traps,
-  and the QEMU cases of the classes `SpAlignment` and `TrappedAccess`, of
-  the [contract](contract.md#testing-obligations). They show the controls
+  and the QEMU cases of the class `SpAlignment` and of the cause
+  `TrappedAccess`, of the
+  [contract](contract.md#testing-obligations). They show the controls
   on QEMU virt; on the Pi 5, whose drop from EL2 leaves other bits, a board
   run shows them.
 
@@ -320,8 +325,9 @@ of `PMCCNTR_EL0` hold.
 and one emergency stack, and no thread owns a kernel stack; no kernel frame
 survives a return to EL0. A blocked call writes back two or six result
 registers when it completes, and a call that stops at a preemption point
-writes no result and is dispatched again from its saved registers before
-its thread returns to EL0. The criterion: on QEMU virt, the test of
+writes no result, the kernel handles the pending interrupt before any
+return to EL0, and the thread executes its `SVC` again when it next runs.
+The criterion: on QEMU virt, the test of
 `entry-stack` holds, and the tests of the blocking calls, which their
 components name, find the results in the result registers.
 

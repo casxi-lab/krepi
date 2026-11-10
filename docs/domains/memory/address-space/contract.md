@@ -84,9 +84,9 @@ observable behaviour that these rules serve, with its evidence, is in the
 - **Current thread.** The thread that a CPU runs, whose context an entry
   from EL0 on that CPU saves; the record of the CPU names it (planned).
 - **Composer of the return.** The module `dispatch` of the core (planned),
-  which chooses the thread that is to run, has its saved context validated
-  and gives the return plan; for the first return of the root, the boot
-  wiring.
+  which handles the pending interrupts, chooses the thread that is to run,
+  has its saved context validated and gives the return plan; for the first
+  return of the root, the boot wiring.
 - **Return plan.** The address of the saved context of the thread that is
   to run, which has passed `validate`, with the value of `TTBR0_EL1` for its
   address space and the top of the kernel stack of the CPU.
@@ -311,8 +311,9 @@ block here.
   the code range `[EL0_START, EL0_END)` and the stack range
   `[EL0_START, EL0_END]`, which passes the rules of
   [Bounds::new](../../boot-platform/context/contract.md#validation). So
-  `validate` refuses a return address or a stack pointer outside the EL0
-  window, whichever stack the thread runs on, such as the stack of an
+  `validate` refuses a return address outside the EL0 window, and a stack
+  pointer outside it other than `EL0_END`, the top of an empty stack that
+  ends there, whichever stack the thread runs on, such as the stack of an
   upcall handler.
 - **The range of a user buffer.**
   `check_range(address, length, lower, upper, limit)` checks the
@@ -443,21 +444,31 @@ with D, A, I and F set in `PSTATE`, and takes vector 8 or 9 of the
 
 **The return.** The composer of the return:
 
-1. chooses the thread that is to run, by the rules of scheduling (planned),
-   after the entry has released every lock and every borrowed object;
-2. when that thread has a call to execute again
-   ([Kernel stacks and blocking](#kernel-stacks-and-blocking)), dispatches
-   it from its saved registers and starts again at step 1;
-3. runs `Context::validate` on the saved context of the thread with the
+1. after the entry has released every lock and every borrowed object,
+   handles every interrupt that is pending, as for the class `Irq`, and
+   then chooses the thread that is to run, by the rules of scheduling
+   (planned);
+2. runs `Context::validate` on the saved context of the thread with the
    bounds of the EL0 window; when it fails, the thread does not return to
-   EL0, its process ends as faulted by the rules of the component that
-   terminates processes (planned), and the composer starts again at step 1;
-4. calls `Space::join` with the executing CPU, when the CPU record of the
+   EL0, its process ends by a user fault
+   ([a refused context](#user-faults)), and the composer starts again at
+   step 1;
+3. calls `Space::join` with the executing CPU, when the CPU record of the
    address space of the thread's process lacks it, and records the thread
    as the current thread of the CPU (planned);
-5. gives the return plan: the address of the saved context, `Space::ttbr0`
+4. gives the return plan: the address of the saved context, `Space::ttbr0`
    of the root of the address space, and the top of the kernel stack of the
    CPU.
+
+The composer handles the pending interrupts itself, with every exception
+masked, and does not leave them to be taken at EL0 after the `ERET`: when
+the first instruction there takes a synchronous exception, as an `SVC`
+does, the architecture leaves open whether a pending IRQ is taken first,
+and the [internal choices](../../../security.md#internal-choices) put the
+synchronous exception first. A call that stopped at a preemption point is
+executed again only by its thread at EL0
+([Kernel stacks and blocking](#kernel-stacks-and-blocking)), so its checks
+run with the thread's own address space loaded.
 
 `el0_dispatch`, or the boot wiring for the first return of the root, then
 calls `__el0_return` with the plan, and `__el0_return`, with every
@@ -527,15 +538,16 @@ are exactly these ten:
 ## User faults
 
 A user fault is a synchronous exception of a thread at EL0 other than a
-system call: every class of [Exception classes](#exception-classes) but
-`Svc` and `Irq`. `classify` gives its cause class, and the cause classes
-partition the user faults: every user fault has exactly one. The cause
-class is the class that a later release passes to the fault handler of a
-thread with the exception class bits of `ESR_EL1` and the user virtual
-address of `FAR_EL1`
-([fault handler](../../../architecture.md#futexes-and-upcalls)). The fault
-status code, `DFSC` of a Data Abort or `IFSC` of an Instruction Abort, is
-bits 0 to 5 of the `ISS`.
+system call, every class of [Exception classes](#exception-classes) but
+`Svc` and `Irq`, or a saved context that `validate` refuses at a return to
+EL0. `classify` gives the cause class of an exception, and the composer of
+the return that of a refused context; the cause classes partition the user
+faults: every user fault has exactly one. The cause class is the class
+that a later release passes to the fault handler of a thread with the
+exception class bits of `ESR_EL1` and the user virtual address of
+`FAR_EL1` ([fault handler](../../../architecture.md#futexes-and-upcalls)).
+The fault status code, `DFSC` of a Data Abort or `IFSC` of an Instruction
+Abort, is bits 0 to 5 of the `ISS`.
 
 | Cause | Value | Condition | Case of the QEMU tests |
 | --- | ---: | --- | --- |
@@ -547,7 +559,7 @@ bits 0 to 5 of the `ISS`.
 | `Undefined` | 6 | `EC` `0x00` | `UDF` |
 | `TrappedAccess` | 7 | `EC` `0x18`, or `EC` `0x01` with `TI` `0b00` | A read of `PMCCNTR_EL0` |
 | `Breakpoint` | 8 | `EC` `0x3c` | `BRK #0x76` |
-| `Other` | 9 | Any other `EC`, and `EC` `0x20` or `0x24` with any other fault status code: an address size fault, an access flag fault, a synchronous External abort or a TLB conflict | An FP/SIMD instruction after a test image has cleared `CPACR_EL1.FPEN` for the thread, `EC` `0x07`, which only a test image can cause |
+| `Other` | 9 | Any other `EC`, and `EC` `0x20` or `0x24` with any other fault status code: an address size fault, an access flag fault, a synchronous External abort or a TLB conflict; and a saved context that `validate` refuses at a return | An FP/SIMD instruction after a test image has cleared `CPACR_EL1.FPEN` for the thread, `EC` `0x07`, which only a test image can cause |
 
 - **Handling.** Release 0.1 has no fault handler of a thread, so every user
   fault ends the process of the thread as faulted, with a fault record, by
@@ -556,15 +568,17 @@ bits 0 to 5 of the `ISS`.
   the bits of `EC` of `ESR_EL1` and, for `DataTranslation`,
   `DataPermission`, `InstructionTranslation`, `InstructionPermission` and
   for `Alignment` from `EC` `0x24` or `0x22`, the user virtual address of
-  `FAR_EL1`; for the other causes `FAR_EL1` holds no defined value, and the
-  record holds none. A user fault never ends another process.
+  `FAR_EL1`. For the other causes the record holds no address, even where
+  `FAR_EL1` holds one, as for an access flag fault of `Other`. A user fault
+  never ends another process.
 - **The kernel sentinel.** The case of `DataPermission` writes, from EL0, a
   page that the lower kernel set maps writable at EL1, so the refused store
   shows the boundary between EL1 and EL0, not a read-only page.
-- A context that `validate` refuses at a return ends its process as faulted
-  as well, with the error of `validate` in place of a cause class
-  ([Entry and return](#entry-and-return)); it is not a user fault, since EL0
-  took no exception.
+- **A refused context.** A saved context that `validate` refuses at a
+  return ([Entry and return](#entry-and-return)) is a user fault of the
+  cause `Other`: the process of its thread ends as for every user fault,
+  and its fault record holds `Other` with no bits of `EC` and no address,
+  since EL0 took no exception for it.
 
 ## First process and boot information
 
@@ -586,8 +600,10 @@ allocator and the kernel root. Each step is taken by the module named:
    the memory of each RW segment, and `ROOT_STACK_PAGES`, 16, for the
    stack. It adds at most one extent to the page ownership table. When no
    range is found, the boot stops with the error of the page ownership
-   table. The root's private pages count in the root's private pages of
-   loaded images, by the component that charges that item (planned).
+   table. This page fixes the number of these pages; whether a quota item
+   of the root counts them, and which, is a rule of the
+   [objects](../../objects-capabilities/objects/contract.md#metadata-quotas)
+   component (planned).
 3. The module `creation` (planned) creates the root's process and thread
    as the boot of the root of the
    [objects](../../objects-capabilities/objects/contract.md#metadata-quotas)
@@ -665,8 +681,9 @@ has one profile.
 ## Boot-bundle directory
 
 The bundle starts with the directory: a header of 64 bytes and, from byte
-64, its entries of 48 bytes each, little-endian, every field aligned to its
-width. The boot wiring reads the bundle through the kernel's read-only
+64, its entries of 48 bytes each, little-endian, every field of 4 or 8
+bytes aligned to its width and the reserved field of 24 bytes to 8. The
+boot wiring reads the bundle through the kernel's read-only
 mapping of the image, from `__boot_bundle_start` to `__boot_bundle_end`
 (planned), and `Directory::parse` checks it once, as untrusted input,
 before any storage is carved; it writes nothing, and the boot stops at the
@@ -724,14 +741,14 @@ returns the error of the first check that fails:
    entry rounded up to a page, so that the entries follow each other in the
    bundle and share no page (`EntryRange`); its `access` and `address` are
    0 and `memory_bytes` equals `file_bytes` unless it is a root's segment
-   (`EntryForm`); for a root's segment, `access` is 1, 2 or 3, `address` is
-   a multiple of 4096, `memory_bytes` equals `file_bytes` for RX and RO and
+   (`EntryForm`); for a root's segment, fewer than `MAX_ROOT_SEGMENTS`, 8,
+   root's segments precede it, `access` is 1, 2 or 3, `address` is a
+   multiple of 4096, `memory_bytes` equals `file_bytes` for RX and RO and
    is at least it for RW, and the range of `address` and `memory_bytes`,
    rounded up to a page, lies in `[ROOT_IMAGE_START, ROOT_IMAGE_END)` and
    shares no page with the range of an earlier root's segment (`Segment`);
-6. the directory holds at least one and at most `MAX_ROOT_SEGMENTS`, 8,
-   root's segments, and `root_entry` is a multiple of 4 that lies in an RX
-   segment (`RootEntry`);
+6. the directory holds at least one root's segment, and `root_entry` is a
+   multiple of 4 that lies in an RX segment (`RootEntry`);
 7. it holds at most one capacity record (`CapacityRecords`).
 
 - A directory without a capacity record makes the boot wiring use the
@@ -766,7 +783,7 @@ channel.
 | Register | Value | Fields | Effect at EL0 |
 | --- | --- | --- | --- |
 | `CNTKCTL_EL1` | `0x2` | `EL0VCTEN`, bit 1, is 1; `EL0PCTEN`, bit 0, `EVNTEN`, bit 2, `EL0VTEN`, bit 8, and `EL0PTEN`, bit 9, are 0, and so are `EVNTI` and `EVNTDIR`; the higher bits are RES0 on the Cortex-A76 | A read of `CNTVCT_EL0` and of `CNTFRQ_EL0` does not trap, since `CNTFRQ_EL0` traps only when both `EL0VCTEN` and `EL0PCTEN` are 0; `CNTPCT_EL0`, the registers of the physical timer and those of the virtual timer trap with `EC` `0x18`; no event stream |
-| `PMUSERENR_EL0` | `0x0` | `EN`, `SW`, `CR` and `ER` are 0; the other fields are RES0 on the Cortex-A76 | Every access to a register of the performance monitors traps with `EC` `0x18`; the Cortex-A76 of both boards, and of QEMU, implements them |
+| `PMUSERENR_EL0` | `0x0` | `EN`, `SW`, `CR` and `ER` are 0; the other fields are RES0 on the Cortex-A76 | Every access to a register of the performance monitors traps with `EC` `0x18`, except an access to `PMUSERENR_EL0` itself: EL0 reads it, as 0, without a trap, and a write of it at EL0 is undefined, `EC` `0x00`; the Cortex-A76 of both boards, and of QEMU, implements them |
 | `MDSCR_EL1` | `0x1000` | `TDCC`, bit 12, is 1; `SS`, bit 0, `KDE`, bit 13, and `MDE`, bit 15, are 0 | Every access to `MDCCSR_EL0`, `DBGDTR_EL0`, `DBGDTRRX_EL0` and `DBGDTRTX_EL0` traps with `EC` `0x18`; no hardware breakpoint, watchpoint or software step |
 
 The virtual timer traps as well: it is not an output of EL0, and the kernel
@@ -835,16 +852,22 @@ this section states how this component represents them.
   ([results of a call](../../boot-platform/context/contract.md#results-of-a-call)).
   The record itself belongs to the waits component (planned). The thread
   blocks and the entry returns to another thread or waits.
-- **Execution again.** A long operation that stops at a preemption point
-  stores its progress in its object and writes no result: the saved context
-  of its thread stays as the entry saved it, and the saved `ELR_EL1` keeps
-  the address after the `SVC`. The thread is marked to execute its call
-  again (planned), and the composer of the return, when it chooses the
-  thread, dispatches the call from the saved registers before any return
-  to EL0 ([Entry and return](#entry-and-return)); the call repeats its
-  checks and continues from the stored progress. Whether a blocking call
-  completes by its completer's write or by execution again is a rule of the
-  contract of that call.
+- **Execution again.** A long operation that stops at a preemption point,
+  where an interrupt is pending, stores its progress in its object and
+  writes no result. The dispatch then moves the saved `elr` of its thread
+  back by 4, from the address after the `SVC` to the `SVC` itself, while
+  the executing CPU owns the saved context
+  ([state fields](../../boot-platform/context/contract.md#state-fields));
+  every other field stays as the entry saved it. The composer of the return
+  handles the pending interrupt before it chooses a thread
+  ([Entry and return](#entry-and-return)). When the thread next runs, it
+  executes the `SVC` again at EL0, and the call repeats its checks and
+  continues from the stored progress. The moved `elr` passes `validate`:
+  the `SVC` lay in a page of the EL0 window from which the thread executed
+  it. Whether a blocking call completes by its completer's write or by
+  execution again is a rule of the contract of that call; one that
+  completes by execution again moves `elr` back in the same way before its
+  thread blocks.
 
 ## Check and execute
 
@@ -893,8 +916,8 @@ this section states how this component represents them.
 | `EntryKind` | An unknown kind | `Directory::parse` | Check 5 |
 | `EntryRange` | An entry that is not page aligned, is empty, ends beyond the bundle, starts in the directory or before the end of the previous entry | `Directory::parse` | Check 5 |
 | `EntryForm` | An access, an address or a memory size where its kind has none | `Directory::parse` | Check 5 |
-| `Segment` | A root's segment with another access, an unaligned address, a memory size that its access does not allow, or a range outside the root image range or sharing a page with another | `Directory::parse` | Check 5 |
-| `RootEntry` | No root's segment or more than 8, or a root entry that is not a multiple of 4 or lies in no RX segment | `Directory::parse` | Check 6 |
+| `Segment` | A ninth root's segment, or a root's segment with another access, an unaligned address, a memory size that its access does not allow, or a range outside the root image range or sharing a page with another | `Directory::parse` | Check 5 |
+| `RootEntry` | No root's segment, or a root entry that is not a multiple of 4 or lies in no RX segment | `Directory::parse` | Check 6 |
 | `CapacityRecords` | More than one capacity record | `Directory::parse` | Check 7 |
 | `RootTables` | A bundle whose mapping in the root needs more tables than its pool leaves after the copy of the lower kernel set | `Directory::root_plan` | At boot, before the root is mapped |
 
@@ -903,7 +926,9 @@ checks, in the order of the
 [security model](../../../security.md#internal-choices); the others stop the
 boot or the operation that composes the entry. A context that `validate`
 refuses at a return is no error of this page: the composer ends the
-thread's process as faulted with the error of `validate`.
+thread's process by a user fault of the cause `Other`
+([a refused context](#user-faults)), and no call returns the error of
+`validate`.
 
 The errors of the prototype's ASID allocator, `Exhausted`,
 `GenerationExhausted` and `InvalidToken`, and of its range check, `TooLong`
@@ -932,9 +957,10 @@ thread runs at EL0; the others belong to other components, as
 - `Directory::parse` reads the header once and each entry once, in the
   order of the directory: at most `entry_count` entries, which check 3
   bounds by the size of the bundle, and each of which takes at least one
-  page of it. Since the entries follow each other, the check that they share no
-  page compares each entry with the one before it; each root's segment is
-  compared with the earlier ones, at most 8 by 8.
+  page of it. Since the entries follow each other, the check that they
+  share no page compares each entry with the one before it; each root's
+  segment is compared with the earlier ones, at most 7, since check 5
+  refuses a ninth, so at most 28 comparisons in all.
 - `Directory::root_plan` reads the at most 8 root's segments; the boot of
   the root maps at most the pages of the root block and of the bundle, one
   `map_page` each, and runs to its end at boot.
@@ -1023,11 +1049,17 @@ TLB entries that an invalidation removes in those of the
   page ownership table of the 8 GB Pi 5 and checks that it adds at most one
   extent, and that `TablePool::segment` gives disjoint segments.
 - On QEMU virt, a test image takes each of the ten classes of
-  [Exception classes](#exception-classes) once from EL0, with the case of
-  each cause of [User faults](#user-faults), and `svc #0`, a read of
-  `CNTP_CTL_EL0` and an IRQ of the timer that interrupts a loop at EL0 for
-  the classes without a cause; for each it checks the class, and for each
-  user fault the fault record and that the process does not run again.
+  [Exception classes](#exception-classes) once from EL0: `Svc` by
+  `svc #0`; `DataAbort` by a read of the guard of a stack;
+  `InstructionAbort` by an execution of a data page; `PcAlignment` by a
+  branch to an address that is not a multiple of 4; `SpAlignment` by a
+  load with `SP` as its base while `SP` is not a multiple of 16;
+  `TrappedAccess` by a read of `CNTP_CTL_EL0`; `Breakpoint` by `BRK`;
+  `Unknown` by `UDF`; `Other` by the FP/SIMD case of its cause; and `Irq`
+  by an IRQ of the timer that interrupts a loop at EL0. It also takes the
+  case of each cause of [User faults](#user-faults). For each it checks
+  the class, and for each user fault the cause, the fault record and that
+  the process does not run again.
 - On QEMU virt, a test image reads `CNTVCT_EL0` and `CNTFRQ_EL0` at EL0
   without a trap, and an access at EL0 to the physical timer, to a register
   of the performance monitors and to `DBGDTR_EL0` each traps with `EC`
