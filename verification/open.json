@@ -211,6 +211,94 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
+      "item": "kernel/arch/src/fpsimd.S",
+      "kind": "assembly",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/context/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/fpsimd.S#__fpsimd_restore",
+      "kind": "unsafe",
+      "verified_state": "reads",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/context/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/fpsimd.S#__fpsimd_save",
+      "kind": "unsafe",
+      "verified_state": "writes",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/context/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/fpsimd.S#el1-fp-trap",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/context/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/fpsimd.S#fpen-window",
+      "kind": "register-state",
+      "verified_state": "neither",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/context/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/fpsimd.S#new-context-clear",
+      "kind": "register-state",
+      "verified_state": "reads",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/context/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/fpsimd.S#restore-fp",
+      "kind": "register-state",
+      "verified_state": "reads",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/context/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/fpsimd.S#restore-tls",
+      "kind": "register-state",
+      "verified_state": "reads",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/context/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/fpsimd.S#save-fp",
+      "kind": "register-state",
+      "verified_state": "writes",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/context/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/fpsimd.S#save-tls",
+      "kind": "register-state",
+      "verified_state": "writes",
+      "carrier": "The proof of the register state that exception entry and return save, restore and clear",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/context/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/fpsimd.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/boot-platform/context/contract.md"
+    },
+    {
       "item": "kernel/arch/src/gic.rs",
       "kind": "code",
       "verified_state": "neither",
