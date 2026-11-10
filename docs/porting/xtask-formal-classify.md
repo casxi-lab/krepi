@@ -36,8 +36,8 @@ The rest of `xtask/src/formal/classify.rs` is new code: `key_of`, which
 finds the module of the reported source file in the inventory, maps the
 name with it and refuses a name that maps to no function of the inventory
 or to a key that is also that of a derived method, and the record of what
-the check found. The phase of the gate that extracts a target and calls the
-check is planned.
+the check found. The phase of the gate that extracts a target, in
+`xtask/src/formal/run.rs`, calls the check for each selected formal target.
 
 ## Changes
 

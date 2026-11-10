@@ -66,8 +66,11 @@ does not read. The commands run through the gate of
   without a root, a work directory that has been used, a path that is not
   UTF-8, a work directory that cannot be created and a Cargo target
   directory that cannot be removed.
-- The request names the unit of the commands. It has no `exclude`, and no
-  `cargo_target`: the Cargo target directory is `target/` of the work
+- The request names the unit of the commands, and the triple for which
+  Cargo compiles the package: none for the qualification crate, which is
+  compiled for the host, and the extraction triple for a kernel target,
+  which Charon passes to Cargo as `--target` after `--lib --locked`. It has
+  no `exclude`, and no `cargo_target`: the Cargo target directory is `target/` of the work
   directory, removed when the two commands have ended, and a work directory
   that already holds it is refused as one that holds `extract.llbc` or
   `aeneas/` is.

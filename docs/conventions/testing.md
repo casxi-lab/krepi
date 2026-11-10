@@ -828,8 +828,9 @@ sources.
 `cargo xtask formal run` runs the proof gate on a snapshot of the gate
 inputs and writes a receipt of the run below `artifacts/formal/runs/`
 ([gate run](../formal-verification.md#gate-run)): the qualification of the
-tools and the base round of krepi's own Lean, with the guard on a pull
-request. It is not part of the check: CI runs it in the pinned proof-tool
+tools, the extraction of the targets, the base round of krepi's own Lean
+and the targets that it selects, with the guard on a pull request; with
+`--calibration`, the same phases on the calibration target. It is not part of the check: CI runs it in the pinned proof-tool
 image as the job `formal run` of `.github/workflows/formal.yml`, on a
 GitHub-hosted `ubuntu-24.04-arm` runner, on every push to `main` and on
 every pull request to `main`, also when its labels or description change.
