@@ -17,11 +17,16 @@ cfg = []
 linux-aarch64 = "aarch64-unknown-linux-gnu"
 darwin-arm64 = "aarch64-apple-darwin"
 
-# The kernel workspace, extracted for the extraction triple with the
-# features and `cfg` settings of its release profile, which has none. No
-# target is registered, so nothing is extracted from it yet. The triple is
-# a pin of the gate, whose standard library the image of the proof tools
-# installs. It is not the target of the kernel images,
+# The kernel workspace, extracted for the extraction triple: each kernel
+# target is extracted from its root package, and the gate passes the triple
+# to Cargo with `--target`. The gate passes no features and no `cfg`
+# settings, so both lists stay empty. Charon builds the package in the dev
+# profile: `debug_assert!` is checked only in what the gate extracts, and
+# `cfg!(debug_assertions)` differs between the extraction and the release
+# build of the images, which review alone keeps out of the code that is
+# proved. No kernel target is registered yet. The triple is a pin of the
+# gate, whose standard library the image of the proof tools installs. It
+# is not the target of the kernel images,
 # aarch64-unknown-none-softfloat, whose soft-float ABI keeps compiled
 # kernel code off the FP/SIMD registers at EL1, where FP/SIMD instructions
 # trap. The two triples have the same architecture, OS and data layout and

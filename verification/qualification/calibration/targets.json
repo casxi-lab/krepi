@@ -1,0 +1,416 @@
+{
+  "schema": 2,
+  "specifications": [],
+  "targets": [
+    {
+      "name": "calibration",
+      "module": "Calibration",
+      "budget": 3000,
+      "description": "The calibration target of the proof gate: twelve functions of a crate in the shape of the kernel workspace, with a table of slots of fixed capacity and generations, a handle in bit fields, checked arithmetic, writes after a check and a bounded loop, each with a theorem about every input and mutants that fail them.",
+      "start_from": [
+        "crate::handle::encode",
+        "crate::handle::index",
+        "crate::handle::generation",
+        "crate::handle::next",
+        "crate::arith::charge",
+        "crate::arith::split",
+        "crate::arith::fits",
+        "crate::table::Table::new",
+        "crate::table::Table::alloc",
+        "crate::table::Table::retire",
+        "crate::table::Table::is_current",
+        "crate::table::Table::retired"
+      ],
+      "proves": [
+        "verification/qualification/calibration/src/handle.rs#encode",
+        "verification/qualification/calibration/src/handle.rs#index",
+        "verification/qualification/calibration/src/handle.rs#generation",
+        "verification/qualification/calibration/src/handle.rs#next",
+        "verification/qualification/calibration/src/arith.rs#charge",
+        "verification/qualification/calibration/src/arith.rs#split",
+        "verification/qualification/calibration/src/arith.rs#fits",
+        "verification/qualification/calibration/src/table.rs#Table::new",
+        "verification/qualification/calibration/src/table.rs#Table::alloc",
+        "verification/qualification/calibration/src/table.rs#Table::retire",
+        "verification/qualification/calibration/src/table.rs#Table::is_current",
+        "verification/qualification/calibration/src/table.rs#Table::retired"
+      ],
+      "proof_modules": [
+        "Krepi.Proofs.Calibration"
+      ],
+      "obligations": [
+        {
+          "id": "encode",
+          "statement": "encode packs an index of at most 255 and a generation of at most 2^24 - 1 into a handle, the generation above the eight bits of the index, and refuses anything else",
+          "theorems": [
+            "Krepi.Proofs.Calibration.encode_spec"
+          ]
+        },
+        {
+          "id": "index",
+          "statement": "index returns the eight low bits of a handle",
+          "theorems": [
+            "Krepi.Proofs.Calibration.index_spec"
+          ]
+        },
+        {
+          "id": "generation",
+          "statement": "generation returns the bits of a handle above its index",
+          "theorems": [
+            "Krepi.Proofs.Calibration.generation_spec"
+          ]
+        },
+        {
+          "id": "next",
+          "statement": "next returns the handle of the same slot at the next generation, and nothing when the generation is the largest",
+          "theorems": [
+            "Krepi.Proofs.Calibration.next_spec"
+          ]
+        },
+        {
+          "id": "charge",
+          "statement": "charge returns what is left of the budget after the cost, and nothing when the cost exceeds the budget",
+          "theorems": [
+            "Krepi.Proofs.Calibration.charge_spec"
+          ]
+        },
+        {
+          "id": "split",
+          "statement": "split returns the quotient rounded down, and nothing when there are no parts",
+          "theorems": [
+            "Krepi.Proofs.Calibration.split_spec"
+          ]
+        },
+        {
+          "id": "fits",
+          "statement": "fits holds exactly when the end of the range, without overflow, is at most the limit",
+          "theorems": [
+            "Krepi.Proofs.Calibration.fits_spec"
+          ]
+        },
+        {
+          "id": "new",
+          "statement": "new makes a table for one to four slots with none in use, and refuses any other capacity",
+          "theorems": [
+            "Krepi.Proofs.Calibration.new_spec"
+          ]
+        },
+        {
+          "id": "alloc",
+          "statement": "alloc returns the first slot that is not in use while one of the capacity is left, and changes nothing else",
+          "theorems": [
+            "Krepi.Proofs.Calibration.alloc_spec"
+          ]
+        },
+        {
+          "id": "retire",
+          "statement": "retire moves a slot of the capacity to its next generation unless that overflows, changes no other slot, and changes nothing when it does not",
+          "theorems": [
+            "Krepi.Proofs.Calibration.retire_spec"
+          ]
+        },
+        {
+          "id": "is_current",
+          "statement": "is_current holds exactly when a handle names a slot of the capacity at its current generation",
+          "theorems": [
+            "Krepi.Proofs.Calibration.is_current_spec"
+          ]
+        },
+        {
+          "id": "retired",
+          "statement": "retired counts at most the capacity, and every slot of the capacity when none has the generation 0",
+          "theorems": [
+            "Krepi.Proofs.Calibration.retired_spec"
+          ]
+        }
+      ],
+      "mutants": [
+        {
+          "name": "encode-index-bound",
+          "file": "src/handle.rs",
+          "find": "index > INDEX_MASK",
+          "replace": "index >= INDEX_MASK",
+          "fails": [
+            "Krepi.Proofs.Calibration.encode_spec"
+          ]
+        },
+        {
+          "name": "encode-generation-bound",
+          "file": "src/handle.rs",
+          "find": "generation > GENERATION_MAX",
+          "replace": "generation >= GENERATION_MAX",
+          "fails": [
+            "Krepi.Proofs.Calibration.encode_spec"
+          ]
+        },
+        {
+          "name": "encode-either-bound",
+          "file": "src/handle.rs",
+          "find": "INDEX_MASK || generation",
+          "replace": "INDEX_MASK && generation",
+          "fails": [
+            "Krepi.Proofs.Calibration.encode_spec"
+          ]
+        },
+        {
+          "name": "encode-join",
+          "file": "src/handle.rs",
+          "find": "<< INDEX_BITS) | index",
+          "replace": "<< INDEX_BITS) & index",
+          "fails": [
+            "Krepi.Proofs.Calibration.encode_spec"
+          ]
+        },
+        {
+          "name": "encode-shift",
+          "file": "src/handle.rs",
+          "find": "(generation << INDEX_BITS)",
+          "replace": "(generation >> INDEX_BITS)",
+          "fails": [
+            "Krepi.Proofs.Calibration.encode_spec"
+          ]
+        },
+        {
+          "name": "index-mask",
+          "file": "src/handle.rs",
+          "find": "handle & INDEX_MASK",
+          "replace": "handle | INDEX_MASK",
+          "fails": [
+            "Krepi.Proofs.Calibration.index_spec"
+          ]
+        },
+        {
+          "name": "generation-shift",
+          "file": "src/handle.rs",
+          "find": "handle >> INDEX_BITS",
+          "replace": "handle << INDEX_BITS",
+          "fails": [
+            "Krepi.Proofs.Calibration.generation_spec"
+          ]
+        },
+        {
+          "name": "next-decrement",
+          "file": "src/handle.rs",
+          "find": "checked_add(1)",
+          "replace": "checked_sub(1)",
+          "fails": [
+            "Krepi.Proofs.Calibration.next_spec"
+          ]
+        },
+        {
+          "name": "next-same-generation",
+          "file": "src/handle.rs",
+          "find": "checked_add(1)",
+          "replace": "checked_add(0)",
+          "fails": [
+            "Krepi.Proofs.Calibration.next_spec"
+          ]
+        },
+        {
+          "name": "charge-adds",
+          "file": "src/arith.rs",
+          "find": "left.checked_sub(cost)",
+          "replace": "left.checked_add(cost)",
+          "fails": [
+            "Krepi.Proofs.Calibration.charge_spec"
+          ]
+        },
+        {
+          "name": "split-no-parts",
+          "file": "src/arith.rs",
+          "find": "parts == 0",
+          "replace": "parts != 0",
+          "fails": [
+            "Krepi.Proofs.Calibration.split_spec"
+          ]
+        },
+        {
+          "name": "split-product",
+          "file": "src/arith.rs",
+          "find": "total / parts",
+          "replace": "total * parts",
+          "fails": [
+            "Krepi.Proofs.Calibration.split_spec"
+          ]
+        },
+        {
+          "name": "fits-start",
+          "file": "src/arith.rs",
+          "find": "base.checked_add(length)",
+          "replace": "base.checked_sub(length)",
+          "fails": [
+            "Krepi.Proofs.Calibration.fits_spec"
+          ]
+        },
+        {
+          "name": "fits-strict",
+          "file": "src/arith.rs",
+          "find": "end <= limit",
+          "replace": "end < limit",
+          "fails": [
+            "Krepi.Proofs.Calibration.fits_spec"
+          ]
+        },
+        {
+          "name": "fits-overflow",
+          "file": "src/arith.rs",
+          "find": "None => false",
+          "replace": "None => true",
+          "fails": [
+            "Krepi.Proofs.Calibration.fits_spec"
+          ]
+        },
+        {
+          "name": "new-empty",
+          "file": "src/table.rs",
+          "find": "capacity == 0",
+          "replace": "capacity != 0",
+          "fails": [
+            "Krepi.Proofs.Calibration.new_spec"
+          ]
+        },
+        {
+          "name": "new-full",
+          "file": "src/table.rs",
+          "find": "capacity > SLOTS",
+          "replace": "capacity >= SLOTS",
+          "fails": [
+            "Krepi.Proofs.Calibration.new_spec"
+          ]
+        },
+        {
+          "name": "new-either",
+          "file": "src/table.rs",
+          "find": "capacity == 0 ||",
+          "replace": "capacity == 0 &&",
+          "fails": [
+            "Krepi.Proofs.Calibration.new_spec"
+          ]
+        },
+        {
+          "name": "new-in-use",
+          "file": "src/table.rs",
+          "find": "used: 0,",
+          "replace": "used: 1,",
+          "fails": [
+            "Krepi.Proofs.Calibration.new_spec"
+          ]
+        },
+        {
+          "name": "alloc-bound",
+          "file": "src/table.rs",
+          "find": "self.used < self.capacity",
+          "replace": "self.used <= self.capacity",
+          "fails": [
+            "Krepi.Proofs.Calibration.alloc_spec"
+          ]
+        },
+        {
+          "name": "alloc-no-step",
+          "file": "src/table.rs",
+          "find": "self.used += 1",
+          "replace": "self.used += 0",
+          "fails": [
+            "Krepi.Proofs.Calibration.alloc_spec"
+          ]
+        },
+        {
+          "name": "alloc-index",
+          "file": "src/table.rs",
+          "find": "return Some(index);",
+          "replace": "return Some(index + 1);",
+          "fails": [
+            "Krepi.Proofs.Calibration.alloc_spec"
+          ]
+        },
+        {
+          "name": "retire-bound",
+          "file": "src/table.rs",
+          "find": "index >= self.capacity",
+          "replace": "index > self.capacity",
+          "fails": [
+            "Krepi.Proofs.Calibration.retire_spec"
+          ]
+        },
+        {
+          "name": "retire-decrement",
+          "file": "src/table.rs",
+          "find": "checked_add(1)",
+          "replace": "checked_sub(1)",
+          "fails": [
+            "Krepi.Proofs.Calibration.retire_spec"
+          ]
+        },
+        {
+          "name": "retire-result",
+          "file": "src/table.rs",
+          "find": "later;\n                true",
+          "replace": "later;\n                false",
+          "fails": [
+            "Krepi.Proofs.Calibration.retire_spec"
+          ]
+        },
+        {
+          "name": "current-generation",
+          "file": "src/table.rs",
+          "find": "== handle::generation(handle)",
+          "replace": "!= handle::generation(handle)",
+          "fails": [
+            "Krepi.Proofs.Calibration.is_current_spec"
+          ]
+        },
+        {
+          "name": "current-either",
+          "file": "src/table.rs",
+          "find": "self.capacity && self.generations",
+          "replace": "self.capacity || self.generations",
+          "fails": [
+            "Krepi.Proofs.Calibration.is_current_spec"
+          ]
+        },
+        {
+          "name": "current-bound",
+          "file": "src/table.rs",
+          "find": "index < self.capacity &&",
+          "replace": "index <= self.capacity &&",
+          "fails": [
+            "Krepi.Proofs.Calibration.is_current_spec"
+          ]
+        },
+        {
+          "name": "retired-bound",
+          "file": "src/table.rs",
+          "find": "slot < self.capacity",
+          "replace": "slot <= self.capacity",
+          "fails": [
+            "Krepi.Proofs.Calibration.retired_spec"
+          ]
+        },
+        {
+          "name": "retired-zero",
+          "file": "src/table.rs",
+          "find": "!= 0 {",
+          "replace": "== 0 {",
+          "fails": [
+            "Krepi.Proofs.Calibration.retired_spec"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "calibration-planned",
+      "state": "planned",
+      "module": "CalibrationPlanned",
+      "description": "A planned target of the calibration crate: a function that reaches a function of the standard library that the proof tools do not model, which stays a generated declaration.",
+      "start_from": [
+        "crate::arith::weight"
+      ],
+      "unclosed": [
+        "verification/qualification/calibration/src/arith.rs#weight"
+      ],
+      "unconstrained": [
+        "core::num::{u32}::count_ones"
+      ]
+    }
+  ]
+}

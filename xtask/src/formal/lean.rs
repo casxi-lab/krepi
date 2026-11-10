@@ -33,18 +33,44 @@ pub const PROJECT_FILES: [&str; 3] = ["lakefile.toml", "lean-toolchain", "lake-m
 pub const AUDIT: &str = "Audit.lean";
 
 /// Creates the stage `stage`, which must not exist, from the Lake project
-/// `project` of the export, whose directory name it keeps, with the links to
-/// `backend`, the Aeneas Lean library of the installation, and its packages.
-pub fn create_stage(project: &Path, stage: &Path, backend: &Path) -> Result<(), String> {
+/// `project` of the export, whose directory name it keeps, with the Lean
+/// toolchain and the Lake lock of the project `pins` of the export, the root
+/// package of the lock renamed to that of `project` when it is another, and
+/// with the links to `backend`, the Aeneas Lean library of the installation,
+/// and its packages. Returns the directory of the project in the stage.
+pub fn create_stage(
+    project: &Path,
+    pins: &Path,
+    stage: &Path,
+    backend: &Path,
+) -> Result<PathBuf, String> {
     let at = |path: &Path, error: std::io::Error| format!("{}: {error}", path.display());
     (fs::create_dir(stage))
         .map_err(|error| format!("cannot create the stage {}", at(stage, error)))?;
     let name = (project.file_name()).ok_or(format!("{} names no directory", project.display()))?;
     let staged = stage.join(name);
     fs::create_dir(&staged).map_err(|error| at(&staged, error))?;
-    for file in PROJECT_FILES {
-        let (from, to) = (project.join(file), staged.join(file));
+    for (index, file) in PROJECT_FILES.into_iter().enumerate() {
+        let (from, to) = (
+            [project, pins][usize::from(index > 0)].join(file),
+            staged.join(file),
+        );
         fs::copy(&from, &to).map_err(|error| format!("cannot copy {}", at(&from, error)))?;
+    }
+    if project != pins {
+        let read = |file: &str| fs::read_to_string(staged.join(file)).map_err(|e| at(&staged, e));
+        let lakefile: toml::Table =
+            (read(PROJECT_FILES[0])?.parse()).map_err(|e| format!("{e}"))?;
+        let mut lock: serde_json::Value = (serde_json::from_str(&read(PROJECT_FILES[2])?))
+            .map_err(|error| format!("the Lake lock: {error}"))?;
+        lock["name"] = lakefile
+            .get("name")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("")
+            .into();
+        let path = staged.join(PROJECT_FILES[2]);
+        let text = serde_json::to_string_pretty(&lock).map_err(|error| error.to_string())?;
+        fs::write(&path, text + "\n").map_err(|error| at(&path, error))?;
     }
     let (links, packages) = (stage.join(LINKS), backend.join(".lake/packages"));
     fs::create_dir_all(&links).map_err(|error| at(&links, error))?;
@@ -52,7 +78,7 @@ pub fn create_stage(project: &Path, stage: &Path, backend: &Path) -> Result<(), 
         let link = links.join(name);
         std::os::unix::fs::symlink(target, &link).map_err(|error| at(&link, error))?;
     }
-    Ok(())
+    Ok(staged)
 }
 
 /// Copies `file`, relative to `from`, to the same path below `to`, with its
@@ -568,6 +594,33 @@ pub fn audit_output(output: &str) -> Audit {
     audit
 }
 
+/// Why the `theorems` of a target do not pass its audit `audit`: each must
+/// be reported in one of its proof `modules` and use only axioms that the
+/// allowlist admits for a target with `sources`, and the audit file has no
+/// error.
+pub fn target_problems(
+    audit: &Audit,
+    theorems: &[&String],
+    modules: &[String],
+    sources: &Sources,
+) -> Vec<String> {
+    let mut problems = Vec::from_iter(audit.errors.values().flatten().cloned());
+    for theorem in theorems {
+        match (audit.theorems.get(*theorem)).filter(|(module, _)| modules.contains(module)) {
+            None => problems.push(format!(
+                "the audit did not report {theorem} in a proof module"
+            )),
+            Some((_, axioms)) => {
+                let rejected = axioms
+                    .iter()
+                    .filter(|axiom| !allows(Kind::Target, axiom, sources));
+                problems.extend(rejected.map(|axiom| format!("{theorem} depends on {axiom}")));
+            }
+        }
+    }
+    problems
+}
+
 /// Why the output of `leanchecker`, `ran`, is not what it writes: an exit other
 /// than 0 must report a module and a kernel problem not about a resource.
 pub fn leanchecker_read(ran: &Ran) -> Result<(), String> {
@@ -684,7 +737,7 @@ mod tests {
     use super::*;
     use crate::check::lean_problems;
     use crate::formal::process::{Ended, Limit, LimitBy};
-    use crate::repo::{Entry, Tree};
+    use crate::repo::{self, Entry, Tree};
     use crate::scratch::Scratch;
 
     fn modules(names: &[&str]) -> Vec<String> {
@@ -853,8 +906,8 @@ mod tests {
         scratch.write("export/verification/Krepi/Proof.lean", "");
         let backend = scratch.0.join("tools/backend");
         let stage = scratch.0.join("stage");
-        create_stage(&project, &stage, &backend).expect("a new stage");
-        let staged = stage.join("verification");
+        let staged = create_stage(&project, &project, &stage, &backend).expect("a new stage");
+        assert_eq!(staged, stage.join("verification"));
         for file in PROJECT_FILES {
             assert_eq!(
                 fs::read_to_string(staged.join(file)).expect("a project file"),
@@ -867,10 +920,59 @@ mod tests {
         assert_eq!(link("aeneas"), backend);
         assert_eq!(link("packages"), backend.join(".lake/packages"));
         // A stage is new.
-        let error = create_stage(&project, &stage, &backend).expect_err("a used stage");
+        let error = create_stage(&project, &project, &stage, &backend).expect_err("a used stage");
         assert!(error.starts_with("cannot create the stage "), "{error}");
         copy_into(&project, &staged, "Krepi/Proof.lean").expect("copy a module");
         assert!(staged.join("Krepi/Proof.lean").is_file());
+    }
+
+    #[test]
+    fn a_stage_of_the_calibration_takes_the_toolchain_and_the_lock_of_production() {
+        // The calibration project has its own Lake configuration and takes
+        // the Lean toolchain and the Lake lock of the production project, the
+        // lock with the name of the calibration project.
+        let scratch = Scratch::new("calibration-stage");
+        let layout = Layout::CALIBRATION;
+        let export = scratch.0.join("export");
+        let lakefile =
+            include_str!("../../../verification/qualification/calibration/lakefile.toml");
+        scratch.write(
+            &format!("export/{}/lakefile.toml", layout.project),
+            lakefile,
+        );
+        for file in &PROJECT_FILES[1..] {
+            assert!(
+                !repo::root().join(layout.project).join(file).exists(),
+                "{file}"
+            );
+            let text = fs::read_to_string(repo::root().join(layout.root_project).join(file));
+            let path = format!("export/{}/{file}", layout.root_project);
+            scratch.write(&path, &text.expect("a project file of production"));
+        }
+        let (project, pins) = (
+            export.join(layout.project),
+            export.join(layout.root_project),
+        );
+        let backend = scratch.0.join("tools/backend");
+        let stage = scratch.0.join("stage");
+        let staged = create_stage(&project, &pins, &stage, &backend).expect("a new stage");
+        assert_eq!(staged, stage.join("calibration"));
+        let read = |path: &Path| fs::read_to_string(path).expect("a project file");
+        assert_eq!(read(&staged.join(PROJECT_FILES[0])), lakefile);
+        assert_eq!(
+            read(&staged.join("lean-toolchain")),
+            read(&pins.join("lean-toolchain"))
+        );
+        let lock = |path: &Path| -> serde_json::Value {
+            serde_json::from_str(&read(&path.join("lake-manifest.json"))).expect("a lock")
+        };
+        let (mut production, calibration) = (lock(&pins), lock(&staged));
+        assert_eq!(production["name"], "krepiVerification");
+        assert_eq!(calibration["name"], "krepiCalibration");
+        production["name"] = "krepiCalibration".into();
+        assert_eq!(calibration, production);
+        let link = |name: &str| fs::read_link(stage.join(LINKS).join(name)).expect("a link");
+        assert_eq!(link("aeneas"), backend);
     }
 
     #[test]

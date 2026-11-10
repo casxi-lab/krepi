@@ -489,9 +489,15 @@ pub fn cache_problems(tree: &Tree) -> Vec<String> {
 }
 
 /// The `lean` step on the tracked files: the source rules of the
-/// hand-written Lean.
+/// hand-written Lean of the production and the calibration projects.
 fn check_lean(root: &Path) -> Result<(), String> {
-    let problems = lean_problems(&Tree::load(root)?, &Layout::PRODUCTION);
+    let tree = Tree::load(root)?;
+    let layouts = [Layout::PRODUCTION, Layout::CALIBRATION];
+    let problems = Vec::from_iter(
+        layouts
+            .iter()
+            .flat_map(|layout| lean_problems(&tree, layout)),
+    );
     if problems.is_empty() {
         Ok(())
     } else {
@@ -510,7 +516,8 @@ pub fn lean_problems(tree: &Tree, layout: &Layout) -> Vec<String> {
         Err(error) => (Vec::new(), vec![format!("{}: {error}", layout.tcb)]),
     };
     let project = format!("{}/", layout.project);
-    let file = |path: &&str| path.starts_with(&project) && path.ends_with(".lean");
+    let own = |path: &str| !crate::formal::guard::in_calibration(path, layout);
+    let file = |path: &&str| path.starts_with(&project) && path.ends_with(".lean") && own(path);
     for (path, _) in tree.entries().filter(|(path, _)| file(path)) {
         match tree.text(path) {
             Some(text) => problems.extend(lean::source_problems(path, text, &items, layout)),

@@ -14,14 +14,18 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::Layout;
+use super::inventory::{self, Inventory};
+use super::lean;
 use super::outcome::{self, Class, Conclusion, Site, Status, Verdict, word};
 use super::paths::{self, Files, Git, Snapshot};
 use super::process::{self, Ended, Limit, LimitBy, Ran, Spec};
 use super::receipt::{self, Budgets, Failure, Mode, Receipt, Trigger};
+use super::registry::{self, State, Target};
 use super::toolchain::environment::{self, Installation, RunDirs, Tool};
 use super::toolchain::{self, Manifest};
-use super::{base, guard, lean, qualify, registry};
+use super::{base, classify, externals, extract, guard, qualify};
 use crate::manifests;
+use crate::repo::{self, Entry, Tree};
 
 /// The two phases of 3,600 s that the gate runs, from the start of a run.
 pub const GATE_BUDGET: Duration = Duration::from_secs(7_200);
@@ -149,6 +153,13 @@ pub struct Gate {
     /// The modules whose errors and warnings make a failed base build a
     /// proof failure, which the base round sets.
     pub(super) own: Vec<String>,
+    /// The budget of the unit of each target that the run selects.
+    budgets: BTreeMap<String, Duration>,
+    /// The inventory of the export, when the run selects targets.
+    inventory: Option<(Inventory, BTreeSet<String>)>,
+    /// The hand-written module files of the Lake project, which the base
+    /// round finds and the stages of the targets hold too.
+    pub(super) handwritten: Vec<String>,
     progress: Box<dyn Write>,
     /// The site, limit and program that a test gives the commands there.
     #[cfg(test)]
@@ -182,7 +193,15 @@ impl Gate {
         let now = Instant::now();
         let left = |end: Instant| end.saturating_duration_since(now);
         let phase_end = self.phase.as_ref().map_or(self.deadline, |(_, end)| *end);
-        let limit = limit(request.site.cap(), left(phase_end), left(self.deadline));
+        let mut limit = limit(request.site.cap(), left(phase_end), left(self.deadline));
+        // The commands of a target's unit share its budget.
+        let mine = |command: &&receipt::Command| unit.is_some() && command.unit.as_deref() == unit;
+        let spent = (self.receipt.commands.iter().filter(mine)).map(|command| command.seconds);
+        let spent = Duration::from_secs_f64(spent.sum());
+        let rest = (unit.and_then(|unit| self.budgets.get(unit))).map(|b| b.saturating_sub(spent));
+        if let Some(rest) = rest.filter(|rest| *rest < limit.duration) {
+            (limit.duration, limit.by) = (rest, LimitBy::Target);
+        }
         #[cfg(test)]
         let limit = overridden.as_ref().map_or(limit, |(_, set, _)| *set);
         let name = word(&request.site);
@@ -438,6 +457,9 @@ pub(crate) fn execute(
         conclusions: Vec::new(),
         receipt: blank(context, targets, &run.id, &directory),
         own: Vec::new(),
+        budgets: BTreeMap::new(),
+        inventory: None,
+        handwritten: Vec::new(),
         progress,
         #[cfg(test)]
         overrides: None,
@@ -472,6 +494,11 @@ pub(crate) fn execute(
         }
     }
     let mut receipt = gate.receipt;
+    // The seconds of the commands of the unit of each selected target.
+    for target in receipt.proof_targets.values_mut() {
+        let own = (receipt.commands.iter()).filter(|c| c.unit.is_some() && c.unit == target.unit);
+        target.seconds = receipt::seconds(Duration::from_secs_f64(own.map(|c| c.seconds).sum()));
+    }
     receipt.resources.largest_process_max_rss = process::largest_child_rss();
     receipt.resources.cgroup_memory_peak = process::cgroup_memory_peak();
     let scoped = !targets.is_empty();
@@ -559,7 +586,14 @@ fn export_and_check(
         let unknown = unknown.join(", ");
         return Err(format!("{registry} registers no target named {unknown}"));
     }
-    let extracts = !selected(&states, targets).is_empty();
+    let chosen = selected(&states, targets);
+    let extracts = !chosen.is_empty();
+    // The gate's budget grows by the budget of each target that it extracts.
+    let all = Duration::from_secs(states.values().map(|(_, budget)| budget).sum());
+    (gate.deadline, gate.receipt.budgets.gate_seconds) =
+        (gate.deadline + all, (GATE_BUDGET + all).as_secs());
+    let budget = |name: &str| Duration::from_secs(states[name].1);
+    gate.budgets = BTreeMap::from_iter(chosen.iter().map(|name| (target_unit(name), budget(name))));
     for problem in paths::rejected(&files, &gate.layout) {
         gate.fail(Status::Rejected, problem);
     }
@@ -569,12 +603,9 @@ fn export_and_check(
 /// The targets that a run of `named` targets selects: those, or every
 /// formal target of the registry when it names none, for a planned target
 /// runs only when it is named.
-fn selected<'a>(
-    states: &'a BTreeMap<String, registry::State>,
-    named: &'a [String],
-) -> Vec<&'a str> {
-    let formal = |(name, state): (&'a String, &registry::State)| {
-        (*state == registry::State::Formal).then_some(name.as_str())
+fn selected<'a>(states: &'a BTreeMap<String, (State, u64)>, named: &'a [String]) -> Vec<&'a str> {
+    let formal = |(name, (state, _)): (&'a String, &(State, u64))| {
+        (*state == State::Formal).then_some(name.as_str())
     };
     match named {
         [] => states.iter().filter_map(formal).collect(),
@@ -633,7 +664,7 @@ fn check_kernel(
             site: Site::CargoMetadata,
             tool: Tool::CargoMetadata,
             program: "cargo",
-            args: &manifests::kernel_metadata_args(),
+            args: &manifests::kernel_metadata_args(gate.layout.kernel),
             cwd: source,
             stdin: None,
         })
@@ -642,9 +673,21 @@ fn check_kernel(
                 .map_err(|error| format!("its output is not JSON: {error}"))
         })
         .map_err(|error| format!("cannot resolve the kernel workspace: {error}"))?;
-    let kernel = source.join(gate.layout.kernel);
-    for problem in manifests::check_kernel_metadata(&metadata, &kernel) {
+    let (dir, kernel) = (gate.layout.kernel, source.join(gate.layout.kernel));
+    for problem in manifests::check_kernel_metadata(&metadata, &kernel, [dir, gate.layout.package])
+    {
         gate.fail(Status::Rejected, problem);
+    }
+    // The inventory of the export, which the registration checks read.
+    if extracts {
+        let mut tree = Tree::default();
+        let rust = |path: &&String| path.ends_with(".rs") && repo::is_within(path, dir);
+        for path in files.keys().filter(rust) {
+            let text = fs::read(source.join(path)).map_err(|error| format!("{path}: {error}"))?;
+            tree.insert(path, Entry::File(text));
+        }
+        let roots = inventory::roots(&metadata, dir)?;
+        gate.inventory = Some(inventory::inventory(&tree, &roots, dir));
     }
     let path = format!("{}/Cargo.toml", gate.layout.kernel);
     let root = fs::read_to_string(source.join(&path))
@@ -659,6 +702,213 @@ fn check_kernel(
             ),
         );
     }
+    Ok(())
+}
+
+/// The unit of the target `name`.
+pub fn target_unit(name: &str) -> String {
+    format!("target/{name}")
+}
+
+/// The directory of the Lake project in the stage of the target `name`.
+pub fn target_project(gate: &Gate, name: &str) -> PathBuf {
+    let project = (Path::new(gate.layout.project).file_name()).unwrap_or_default();
+    let stage = gate.work().join("targets").join(name).join("stage");
+    stage.join(project)
+}
+
+/// The phases of the targets of the registry of the checkout `root`:
+/// `extraction`, before the base round, which extracts every target, whose
+/// proofs the base round builds, and concludes the selected planned ones;
+/// and `targets`, after it, which concludes the selected formal ones. The
+/// first stops when the export's registry is not the one read here.
+fn target_phases<'a>(root: &Path, layout: &Layout, named: &BTreeSet<String>) -> [Phase<'a>; 2] {
+    let path = layout.registry;
+    let read = fs::read_to_string(root.join(path)).map_err(|error| error.to_string());
+    let read = read.and_then(|text| Ok((registry::parse(&text)?.targets, text)));
+    let read = read.map_err(|error| format!("cannot read {path}: {error}"));
+    let all = Vec::from_iter(read.iter().flat_map(|(targets, _)| targets.clone()));
+    let states = BTreeMap::from_iter(all.iter().map(|t| (t.name.clone(), (t.state, t.budget))));
+    let named = Vec::from_iter(named.iter().cloned());
+    let chosen = BTreeSet::from_iter(selected(&states, &named).into_iter().map(String::from));
+    let pick = |t: &&Target, state| t.state == state && chosen.contains(&t.name);
+    let formal = Vec::from_iter(all.iter().filter(|t| pick(t, State::Formal)).cloned());
+    let planned = Vec::from_iter(all.iter().filter(|t| pick(t, State::Planned)).cloned());
+    let units = |targets: &[Target]| Vec::from_iter(targets.iter().map(|t| target_unit(&t.name)));
+    let budget = |targets: &[Target]| Duration::from_secs(targets.iter().map(|t| t.budget).sum());
+    let phases = [
+        ("extraction", budget(&all), units(&planned)),
+        ("targets", budget(&formal), units(&formal)),
+    ];
+    let bodies: [Body<'a>; 2] = [
+        Box::new(move |gate| {
+            let (targets, text) = read?;
+            if base::read(&gate.source().join(path))? != text {
+                return Err(format!("{path} differs from the one read at the start"));
+            }
+            (targets.iter()).try_for_each(|t| extract_target(gate, t, chosen.contains(&t.name)))
+        }),
+        Box::new(move |gate| (formal.iter()).try_for_each(|t| finish_target(gate, t))),
+    ];
+    let mut phases = (phases.into_iter().zip(bodies)).map(|((name, budget, units), body)| {
+        let name = name.to_string();
+        Phase {
+            name,
+            budget,
+            units,
+            body,
+        }
+    });
+    [(); 2].map(|()| phases.next().expect("two phases"))
+}
+
+/// Extracts `target`, installs what the tools generated in its stage and
+/// type-checks the generated definitions with warnings as errors, as
+/// commands of its unit when the run selects it, `chosen`, and of `base`
+/// otherwise; checks the registration of a selected formal target,
+/// concludes a selected planned one and records it. A target with more
+/// mutants than a target may register is not run and is `BUDGET`.
+fn extract_target(gate: &mut Gate, target: &Target, chosen: bool) -> Result<(), String> {
+    let (layout, name) = (gate.layout, &target.name);
+    let unit = if chosen {
+        target_unit(name)
+    } else {
+        base::PHASE.to_string()
+    };
+    let mut record = receipt::Target {
+        unit: chosen.then(|| unit.clone()),
+        state: target.state,
+        budget_seconds: target.budget,
+        proof_modules: target.proof_modules.clone(),
+        ..receipt::Target::default()
+    };
+    let many = target.mutants.len() > registry::MUTANTS;
+    let module = (target.module.as_deref()).filter(|module| qualify::is_module(module) && !many);
+    let work = gate.work().join("targets").join(name);
+    if let Some(module) = module {
+        let (package, extracted) = (gate.source().join(layout.kernel), work.join("extract"));
+        let opaque = Vec::from_iter(target.opaque.iter().map(|opaque| opaque.pattern.clone()));
+        let request = extract::Request {
+            unit: &unit,
+            module,
+            package: &package,
+            start_from: &target.start_from,
+            opaque: &opaque,
+            work: &extracted,
+            triple: Some(layout.triple),
+        };
+        let extraction = extract::extract(gate, &request)?;
+        record.observed = qualify::observed(std::slice::from_ref(&extraction));
+        record.generated.clone_from(&extraction.files);
+        let args = lean::build_args(&[format!("{}.{module}.Funs", layout.generated)], true);
+        let project = target_project(gate, name);
+        let check = qualify::lake(Site::TargetBuild, &args, &project);
+        let installed = match extraction.complete {
+            true => externals::stage(gate, target, &extraction, &work.join("stage"))?,
+            false => Err("the extraction is not complete".to_string()),
+        };
+        match installed {
+            Ok(kept) => {
+                let (ran, verdict, _) = gate.run(&unit, &check, |_| Ok(()));
+                (record.declarations, record.typed) = (kept, verdict.class == Class::Passed);
+                let failed = ran.filter(|_| verdict.class == Class::ProofFailure);
+                let errors = failed.map(|ran| lean::errors(&ran.output).join(" | "));
+                let errors =
+                    errors.map(|e| format!("its generated definitions do not type-check: {e}"));
+                record.problems.extend(errors);
+            }
+            Err(why) => {
+                gate.skip(&unit, &check, &why);
+                record.problems.push(why);
+            }
+        }
+        if chosen && target.state == State::Formal {
+            let none = (Inventory::default(), BTreeSet::new());
+            let (inventory, unread) = gate.inventory.as_ref().unwrap_or(&none);
+            let found = classify::classify(target, &extraction, layout.kernel, inventory).0;
+            (record.problems).extend(unread.iter().cloned().chain(found));
+        }
+    } else if many {
+        let (count, most) = (target.mutants.len(), registry::MUTANTS);
+        let problem = format!("it registers {count} mutants, more than the {most} it may");
+        record.problems.push(problem);
+    } else {
+        (record.problems).push("its module is not a Lean module path".to_string());
+    }
+    if chosen && (many || target.state == State::Planned) {
+        let (status, reason) = qualify::conclusion(&record.problems);
+        let scoped = [status, Status::Scoped][usize::from(status == Status::Verified)];
+        gate.conclude(&unit, ([scoped, Status::Budget][usize::from(many)], reason));
+    }
+    gate.receipt.proof_targets.insert(name.clone(), record);
+    Ok(())
+}
+
+/// Builds the proof modules of the selected formal target `target` in its
+/// stage, with the hand-written Lean of the export and warnings as errors,
+/// audits the theorems of its obligations with the allowlist of a target,
+/// its trusted axioms and the declarations that its templates keep, and
+/// concludes its unit, unless its extraction concluded it.
+fn finish_target(gate: &mut Gate, target: &Target) -> Result<(), String> {
+    let (layout, source, unit) = (gate.layout, gate.source(), target_unit(&target.name));
+    if (gate.conclusions.iter()).any(|(concluded, _)| *concluded == unit) {
+        return Ok(());
+    }
+    let mut record = gate.receipt.proof_targets[&target.name].clone();
+    let (project, modules) = (target_project(gate, &target.name), &target.proof_modules);
+    let build_args = lean::build_args(&[format!("+{}", layout.namespace)], true);
+    let audit_args = lean::check_args(lean::AUDIT);
+    let build = qualify::lake(Site::TargetBuild, &build_args, &project);
+    let audit = qualify::lake(Site::AxiomAudit, &audit_args, &project);
+    let theorems = Vec::from_iter(target.obligations.iter().flat_map(|o| o.theorems.iter()));
+    let mut problems = record.problems.clone();
+    if theorems.is_empty() {
+        problems.push("its obligations name no theorem".to_string());
+    }
+    let write = |file: &str, text: String| {
+        fs::write(project.join(file), text).map_err(|error| format!("{file}: {error}"))
+    };
+    let (mut audited, mut built) = (None, false);
+    if record.typed {
+        for file in gate.handwritten.clone() {
+            lean::copy_into(&source.join(layout.project), &project, &file)?;
+        }
+        let root = lean::root_source(&BTreeSet::from_iter(modules.iter().cloned()));
+        write(&lean::module_file(layout.namespace), root)?;
+        let (ran, verdict, _) = gate.run(&unit, &build, |_| Ok(()));
+        built = verdict.class == Class::Passed;
+        let errors = (ran.filter(|_| !built)).map(|ran| lean::errors(&ran.output).join(" | "));
+        problems.extend(errors.map(|errors| format!("the proofs do not build: {errors}")));
+    } else {
+        gate.skip(&unit, &build, "its generated definitions do not type-check");
+    }
+    if built {
+        let text = lean::audit_source(layout.namespace, &[], modules);
+        write(lean::AUDIT, text)?;
+        let (ran, verdict, _) = gate.run(&unit, &audit, |_| Ok(()));
+        let passed = ran.filter(|_| verdict.class == Class::Passed);
+        audited = passed.map(|ran| lean::audit_output(&ran.output));
+    } else {
+        gate.skip(&unit, &audit, "the proofs did not build");
+    }
+    if let Some(audit) = &audited {
+        let input = |path: &str| base::read(&source.join(path));
+        let mut sources = lean::Sources {
+            registry: lean::load_axioms(&input(layout.axioms)?)?,
+            tcb: lean::load_tcb(&input(layout.tcb)?)?,
+            declared: BTreeSet::from_iter(record.declarations.iter().cloned()),
+            native: audit.native.clone(),
+            ..lean::Sources::default()
+        };
+        let trusted = target.trusted_axioms.iter().map(|axiom| &axiom.name);
+        (sources.registry).extend(record.declarations.iter().chain(trusted).cloned());
+        problems.extend(lean::target_problems(audit, &theorems, modules, &sources));
+    } else if built {
+        problems.push("the audit did not pass".to_string());
+    }
+    gate.conclude(&unit, qualify::conclusion(&problems));
+    record.problems = problems;
+    (gate.receipt.proof_targets).insert(target.name.clone(), record);
     Ok(())
 }
 
@@ -768,7 +1018,9 @@ pub fn command(root: &Path, layout: &Layout, targets: BTreeSet<String>) -> ExitC
     let receipt = match &run {
         Ok(run) => {
             let mut phases = Vec::from_iter(guard::phase(&var));
-            phases.extend([qualify::phase(root, layout), base::phase(root, layout)]);
+            let [extraction, finish] = target_phases(root, layout, &targets);
+            phases.extend([qualify::phase(root, layout), extraction]);
+            phases.extend([base::phase(root, layout), finish]);
             execute(&context, run, &targets, phases, Box::new(io::stdout()))
         }
         Err(error) => {
@@ -1184,6 +1436,186 @@ pub(crate) mod tests {
         assert_eq!(done.written().status, Status::Rejected);
         assert_eq!(done.failures(), [problem]);
         assert_eq!(manifests::check_kernel_workspace(fixture.root()), [problem]);
+    }
+
+    /// A fixture with the Lake project and the stand-ins of the
+    /// qualification, a kernel workspace with its root package, the empty
+    /// registries of the base round and of models, the proof module of the
+    /// target `t`, and the target registry `targets`, committed.
+    fn with_targets(label: &str, targets: &str) -> Fixture {
+        let fixture = fixture::qualification(label, &serde_json::json!([]));
+        for (file, list) in [("models", "models"), ("axioms", "axioms"), ("tcb", "items")] {
+            let text = format!("{{\"schema\": 1, \"{list}\": []}}\n");
+            fixture.write(&format!("verification/{file}.json"), &text);
+        }
+        let proof = "module\n\npublic theorem f_spec : True := trivial\n";
+        fixture.write("verification/Krepi/Proofs/T.lean", proof);
+        root_package(&fixture, "krepi-kernel", "");
+        register(&fixture, targets);
+        fixture
+    }
+
+    /// The registry of the formal target `t`, with `budget` and `mutants`,
+    /// and of the planned target `p`.
+    fn two_targets(budget: u64, mutants: usize) -> String {
+        let theorem = "Krepi.Proofs.T.f_spec";
+        let mutant = |index| {
+            let name = format!("m{index}");
+            serde_json::json!({"name": name, "file": "src/lib.rs", "find": "no_std", "replace": "no_std", "fails": [theorem]})
+        };
+        let mutants = Vec::from_iter((0..mutants).map(mutant));
+        serde_json::json!([
+            {"name": "t", "module": "T", "budget": budget, "start_from": ["crate::f"],
+             "proof_modules": ["Krepi.Proofs.T"], "obligations": [{"id": "f", "theorems": [theorem]}],
+             "mutants": mutants},
+            {"name": "p", "state": "planned", "module": "P", "start_from": ["crate::f"]}
+        ])
+        .to_string()
+    }
+
+    /// The phases of the targets of `fixture` for `named`, around a base
+    /// round that finds the proof module of `t` and is verified.
+    fn target_run<'a>(fixture: &Fixture, named: &[&str]) -> Vec<Phase<'a>> {
+        let named = BTreeSet::from_iter(named.iter().map(|name| name.to_string()));
+        let [extraction, finish] = target_phases(fixture.root(), &Layout::PRODUCTION, &named);
+        let base = phase("base", LONG, &["base"], |run| {
+            run.handwritten = vec!["Krepi/Proofs/T.lean".to_string()];
+            run.conclude("base", (Status::Verified, None));
+            Ok(())
+        });
+        vec![extraction, base, finish]
+    }
+
+    #[test]
+    fn a_formal_target_is_verified_in_its_stage_and_a_planned_one_is_scoped() {
+        let fixture = with_targets("targets", &two_targets(1_800, 1));
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(done.receipt.status, Status::Verified, "{:?}", done.receipt);
+        assert_eq!(fixture::status(&done, "target/t"), (Status::Verified, None));
+        let sites = Vec::from_iter(fixture::commands(&done, "target/t").iter().map(|c| c.site));
+        let expected = [Site::Charon, Site::Aeneas, Site::TargetBuild];
+        assert_eq!(
+            sites,
+            [&expected[..], &[Site::TargetBuild, Site::AxiomAudit]].concat()
+        );
+        // The target is extracted for the extraction triple; the planned one
+        // only for the base round.
+        let charon = &fixture::commands(&done, "target/t")[0];
+        assert!(
+            charon
+                .argv
+                .ends_with(&["--target", "aarch64-unknown-none"].map(String::from))
+        );
+        let (formal, planned) = (
+            &done.receipt.proof_targets["t"],
+            &done.receipt.proof_targets["p"],
+        );
+        assert_eq!(
+            (formal.unit.as_deref(), planned.unit.as_deref()),
+            (Some("target/t"), None)
+        );
+        assert!(formal.typed && planned.typed && formal.problems.is_empty());
+        assert_eq!(done.receipt.budgets.gate_seconds, 7_200 + 2 * 1_800);
+        // A run of the planned target concludes it as scoped.
+        let done = gate(&fixture, &["p"], target_run(&fixture, &["p"]));
+        assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.receipt);
+        assert_eq!(fixture::status(&done, "target/p"), (Status::Scoped, None));
+        assert!(!done.receipt.units.contains_key("target/t"));
+    }
+
+    #[test]
+    fn a_target_that_outruns_its_budget_is_budget_and_its_receipt_is_written() {
+        // The build of the proofs hangs after the extraction, whose seconds
+        // the budget of the target has already spent.
+        let fixture = with_targets("target-budget", &two_targets(3, 1));
+        fixture::lake_script(&fixture, "+Krepi", "exec sleep 30\n");
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(done.code, ExitCode::FAILURE);
+        let receipt = done.written();
+        assert_eq!(receipt, done.receipt);
+        assert_eq!(receipt.status, Status::Budget);
+        assert_eq!(receipt.units["target/t"].status, Status::Budget);
+        let own = fixture::commands(&done, "target/t");
+        let hung = own
+            .iter()
+            .position(|c| c.site == Site::TargetBuild && c.argv.ends_with(&["+Krepi".to_string()]));
+        let (before, hung) = (
+            &own[..hung.expect("the build of the proofs")],
+            own[hung.unwrap_or(0)],
+        );
+        let spent: f64 = before.iter().map(|command| command.seconds).sum();
+        assert_eq!(
+            (hung.limit, hung.class),
+            (LimitBy::Target, Class::Budget),
+            "{hung:?}"
+        );
+        assert!(hung.timed_out && spent > 0.0 && (hung.limit_seconds + spent - 3.0).abs() < 0.01);
+        let target = &receipt.proof_targets["t"];
+        assert_eq!(target.budget_seconds, 3);
+        assert!(
+            target.seconds >= hung.limit_seconds + spent - 0.01,
+            "{target:?}"
+        );
+    }
+
+    #[test]
+    fn a_target_with_more_mutants_than_it_may_register_is_budget_without_running() {
+        let fixture = with_targets("target-mutants", &two_targets(1_800, registry::MUTANTS + 1));
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(done.receipt.status, Status::Budget, "{:?}", done.failures());
+        let reason = "it registers 31 mutants, more than the 30 it may";
+        assert_eq!(
+            fixture::status(&done, "target/t"),
+            (Status::Budget, Some(reason))
+        );
+        assert!(fixture::commands(&done, "target/t").is_empty());
+        assert!(!done.receipt.proof_targets["t"].typed);
+    }
+
+    #[test]
+    fn the_calibration_targets_are_outside_the_target_set_of_production() {
+        let read = |layout: &Layout| fs::read_to_string(repo::root().join(layout.registry));
+        let names =
+            |layout| registry::states(&read(layout).expect("a registry")).expect("a registry");
+        let (production, calibration) = (names(&Layout::PRODUCTION), names(&Layout::CALIBRATION));
+        assert!(!calibration.is_empty());
+        assert!(
+            calibration
+                .keys()
+                .all(|name| !production.contains_key(name))
+        );
+        // A run in the production layout selects none of them, cannot name
+        // them and records none.
+        let fixture = Fixture::new("calibration-set");
+        let text = read(&Layout::CALIBRATION).expect("the calibration registry");
+        fixture.write(Layout::CALIBRATION.registry, &text);
+        fixture.commit_all();
+        let named = gate(&fixture, &["calibration"], Vec::new());
+        let unknown = "verification/targets.json registers no target named calibration";
+        assert!(
+            named.has_failure(Status::ToolFailure, unknown),
+            "{:?}",
+            named.failures()
+        );
+        let whole = gate(&fixture, &[], verified());
+        assert_eq!(
+            whole.receipt.status,
+            Status::Verified,
+            "{:?}",
+            whole.failures()
+        );
+        assert!(whole.receipt.targets.is_empty() && whole.receipt.proof_targets.is_empty());
+        // `formal check` in the production layout reads its own registry
+        // alone: a calibration registry that it would refuse changes nothing.
+        let mut tree = Tree::load(&repo::root()).expect("the repository");
+        let roots = manifests::kernel_metadata(&repo::root()).expect("the kernel workspace");
+        let roots = inventory::roots(&roots, manifests::KERNEL).expect("the roots");
+        let before = inventory::check(&tree, &roots, &Layout::PRODUCTION);
+        tree.insert(
+            Layout::CALIBRATION.registry,
+            Entry::File(b"not a registry".to_vec()),
+        );
+        assert_eq!(inventory::check(&tree, &roots, &Layout::PRODUCTION), before);
     }
 
     #[test]

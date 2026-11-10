@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "hash": "63638dc34e194193c770d15ba393bf2e4faa47ed",
+  "statements": [
+    {
+      "name": "Krepi.Calibration.Encode",
+      "theorem": "Krepi.Proofs.Calibration.encode_spec",
+      "module": "Krepi.Proofs.Calibration",
+      "state": "proved"
+    },
+    {
+      "name": "Krepi.Calibration.Index",
+      "theorem": "Krepi.Proofs.Calibration.index_spec",
+      "module": "Krepi.Proofs.Calibration",
+      "state": "proved"
+    },
+    {
+      "name": "Krepi.Calibration.Generation",
+      "theorem": "Krepi.Proofs.Calibration.generation_spec",
+      "module": "Krepi.Proofs.Calibration",
+      "state": "proved"
+    },
+    {
+      "name": "Krepi.Calibration.Next",
+      "theorem": "Krepi.Proofs.Calibration.next_spec",
+      "module": "Krepi.Proofs.Calibration",
+      "state": "proved"
+    },
+    {
+      "name": "Krepi.Calibration.Charge",
+      "theorem": "Krepi.Proofs.Calibration.charge_spec",
+      "module": "Krepi.Proofs.Calibration",
+      "state": "proved"
+    },
+    {
+      "name": "Krepi.Calibration.Split",
+      "theorem": "Krepi.Proofs.Calibration.split_spec",
+      "module": "Krepi.Proofs.Calibration",
+      "state": "proved"
+    },
+    {
+      "name": "Krepi.Calibration.Fits",
+      "theorem": "Krepi.Proofs.Calibration.fits_spec",
+      "module": "Krepi.Proofs.Calibration",
+      "state": "proved"
+    },
+    {
+      "name": "Krepi.Calibration.New",
+      "theorem": "Krepi.Proofs.Calibration.new_spec",
+      "module": "Krepi.Proofs.Calibration",
+      "state": "proved"
+    },
+    {
+      "name": "Krepi.Calibration.Alloc",
+      "theorem": "Krepi.Proofs.Calibration.alloc_spec",
+      "module": "Krepi.Proofs.Calibration",
+      "state": "proved"
+    },
+    {
+      "name": "Krepi.Calibration.Retire",
+      "theorem": "Krepi.Proofs.Calibration.retire_spec",
+      "module": "Krepi.Proofs.Calibration",
+      "state": "proved"
+    },
+    {
+      "name": "Krepi.Calibration.IsCurrent",
+      "theorem": "Krepi.Proofs.Calibration.is_current_spec",
+      "module": "Krepi.Proofs.Calibration",
+      "state": "proved"
+    },
+    {
+      "name": "Krepi.Calibration.Retired",
+      "theorem": "Krepi.Proofs.Calibration.retired_spec",
+      "module": "Krepi.Proofs.Calibration",
+      "state": "proved"
+    }
+  ]
+}
