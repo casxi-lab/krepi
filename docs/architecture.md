@@ -917,7 +917,7 @@ Cargo workspaces of their own, each in its own directory:
 
 | Path | Contents |
 | --- | --- |
-| `kernel/` | The kernel workspace: the EL1 kernel, board support, the ABI crate and the operation inventory; the input of proof extraction. It holds the ABI crate `kernel/abi` (`krepi-abi`), which defines no interface yet, the architecture crate `kernel/arch` (`krepi-arch`) and the QEMU virt board crate `kernel/boards/qemu-virt` (`krepi-qemu-virt`), described below. |
+| `kernel/` | The kernel workspace: the EL1 kernel, board support, the ABI crate and the operation inventory; the input of proof extraction. Its root package is the provable core `krepi-kernel` (planned), with its sources in `kernel/src/`. It holds the ABI crate `kernel/abi` (`krepi-abi`), which defines no interface yet, the architecture crate `kernel/arch` (`krepi-arch`) and one crate per board below `kernel/boards/`: the QEMU virt board crate `kernel/boards/qemu-virt` (`krepi-qemu-virt`) and the Raspberry Pi 5 board crate `kernel/boards/pi5` (planned). The [kernel workspace crates](#kernel-workspace-crates) are described below. |
 | `tools/` | The host tooling crate `krepi-tools`, a Cargo workspace of its own: a bounded ELF64 reader, the JSON values of tool reports, the serial port transport, the serial capture behind `cargo xtask serial-capture`, the serial link over the standard streams of a guest's process with the process helpers it uses, the QEMU virt command with the serial capture of a guest on QEMU or behind a board's serial port, the QEMU runner behind `cargo xtask qemu` and the test image that its tests boot, the QEMU boot suite behind `cargo xtask qemu-boot`, the line matchers and record parsers of a guest's serial output, and the time values of these tools per platform |
 | `user/` | The user-space workspace: the resident root, services, drivers, the SDK and workers, which are members outside `default-members`. It holds the SDK crate `user/sdk` (`krepi-sdk`). |
 | `verification/` | The Lean proof project and its registries, and the definition of the proof tools: their manifest, the reviewed patches and the recipe of the image that holds them, kept beside the proof project that the tools check ([formal verification](formal-verification.md#tools)) |
@@ -933,8 +933,9 @@ User-space crates reach the kernel workspace only through the ABI crate.
 Every crate is licensed MIT, and both workspaces build releases with
 `overflow-checks = true`. `cargo xtask check` checks these rules as
 [testing](conventions/testing.md#entry-points) describes, which also names
-what the check does not cover. The crates and modules inside each workspace
-are described here as they land.
+what the check does not cover. The crates of the kernel workspace and the
+modules of its core follow the rules below; the crates and modules of the
+user-space workspace are described here as they land.
 
 The kernel workspace builds for the host, where the repository checks
 format, lint and test it, and for the bare-metal target
@@ -953,7 +954,168 @@ of the image with `-p`, such as `-p krepi-qemu-virt`, and a test image with
 `.cargo/config.toml` of the repository root gives the target its flags: a
 GNU build-id note of SHA-1, the static relocation model and frame pointers.
 
+The image build follows a rule for every Cargo command that selects
+packages, such as `build`, `check`, `test`, `clippy`, `run` and `doc`, when
+it acts on the kernel workspace, in `kernel/` or with
+`--manifest-path kernel/Cargo.toml`: it names its packages with `-p` or
+takes `--workspace`, because once the core is the root package of
+`kernel/`, a command with neither acts on the core alone. `cargo fmt`, which
+has no `--workspace`, takes `--all`. The one exception is the extraction of
+the proof gate, which names no package and so extracts the root package
+([extraction](formal-verification.md#extraction)). A unit test of
+`cargo xtask check` is to check its command steps against this rule
+(planned), and a test of the QEMU boot suite checks the command with which
+`cargo xtask qemu-boot` builds the default image; review checks the
+commands in CI, in documents and in the other `cargo xtask` commands.
+
+### Kernel workspace crates
+
+The kernel workspace has four kinds of crate:
+
+- The provable core `krepi-kernel` (planned) is the root package of the
+  workspace: `kernel/Cargo.toml` holds both its `[package]` and the
+  `[workspace]`, its library `krepi_kernel` is in `kernel/src/` and its
+  integration tests are in `kernel/tests/`. It has one module per component,
+  and every module that the
+  [provable Rust subset](conventions/provable-subset.md#scope) lists is one
+  of them. It depends on no crate, forbids `unsafe` code, is `no_std`
+  without a condition and has no `cfg` other than `#[cfg(test)]` on a
+  module, so it holds no code for the bare-metal target alone; its test
+  modules write `extern crate std;`.
+- The architecture crate `kernel/arch` (`krepi-arch`) holds the assembly,
+  the system registers, the cache and TLB primitives, the ARM interrupt
+  controller and timer that the boards share, and the adapters around the
+  core, such as enabling the MMU and storing into live translation tables,
+  the per-CPU records with the masking of interrupts, and the entry of a
+  system call that hands the kernel root to the dispatch of the core.
+- Each board has one crate, `kernel/boards/<board>` named
+  `krepi-<board>`, with the wiring, the platform values and the one image of
+  that board.
+- The ABI crate `kernel/abi` (`krepi-abi`) holds only the data of the EL0
+  ABI.
+
+These are the only dependencies allowed between them, of every kind,
+normal, build and development, and for every target:
+
+| Crate | Depends only on |
+| --- | --- |
+| `krepi-kernel` (planned) | No crate |
+| `krepi-abi` | No crate |
+| `krepi-arch` | `krepi-kernel` |
+| A board crate | `krepi-arch` and `krepi-kernel` |
+
+So no board crate depends on another board crate or on `krepi-abi`, and no
+crate depends on a board crate. The core does not depend on `krepi-abi`
+either: the dispatch table of the core and `krepi-abi` each hold the
+operation numbers and error codes, and a check of `xtask` is to keep both
+equal to the inventory (planned). The `manifests` step of
+`cargo xtask check` and the proof gate are to check these edges (planned)
+in what `cargo metadata` reports, by the directory of each package: the
+core is `kernel/` itself, the ABI crate `kernel/abi`, the architecture
+crate `kernel/arch` and a board crate a directory directly below
+`kernel/boards/`. A package in any other directory fails the check.
+
+`kernel/Cargo.toml` keeps one shape, which a check of the `manifests` step
+and the proof gate is to enforce (planned). It holds only these tables and
+keys: `package` with `name`, `version`, `edition`, `license`, `publish`,
+`description` and `rust-version`; `workspace` with `resolver`, `members`
+and `package`; `lints` with `rust`; `profile` with `release`; and `lib` with
+`path`, or no `lib`. It must not have:
+
+1. a dependency table of any kind, including those by target and
+   `[workspace.dependencies]`;
+2. `target`;
+3. `features`;
+4. `patch`;
+5. `replace`;
+6. `bin`;
+7. `example`;
+8. `bench`;
+9. `package.metadata`;
+10. `workspace.default-members`;
+11. `profile.dev`;
+12. `kernel/build.rs`.
+
+The root package has only library and test targets, read from
+`cargo metadata`, so the targets that Cargo discovers by itself count as
+well: `kernel/build.rs` under 12, `src/main.rs` and `src/bin/` under 6,
+`examples/` under 7 and `benches/` under 8. Two items are required:
+`lints.rust.unsafe_code = "forbid"`, and an unconditional `#![no_std]`
+among the crate attributes of the library, which
+`#![cfg_attr(..., no_std)]` does not satisfy. A `kernel/Cargo.toml` without
+`[package]` passes the check, and with `[package]` the package is named
+`krepi-kernel`.
+
 | Crate | Modules |
 | --- | --- |
+| `kernel/` (`krepi-kernel`) (planned) | The provable core, the root package of the kernel workspace: its library in `kernel/src/`, with one module per component in the [module order](#module-order-in-the-core) below and the kernel root in `lib.rs`, and its integration tests in `kernel/tests/`. |
 | `kernel/arch` (`krepi-arch`) | The AArch64 processor layer with the ARM interrupt controller and timer that the boards share: `boot`, the cold entry `_start` of an image in `boot.S`; `cache`, the cache and TLB maintenance of the executing CPU by address; `cache_range`, the cache-line walks of a range; `cpu`, the processor registers that EL1 code reads and the halt of a CPU; `exception`, the exception vectors of EL1 in `exception.S`, the frame that they save and the class of an exception; `gic`, the GICv2 driver; and `timer`, the generic timer. The boards give the addresses, interrupt IDs and timers that they use. `boot`, `cache`, `cpu`, `gic`, `timer` and the vectors are compiled only for the bare-metal target; the frame, the classes and the cache-line walks are plain code. |
 | `kernel/boards/qemu-virt` (`krepi-qemu-virt`) | The QEMU virt board support, its default image and its test images. The library holds `console`, the host-testable bounded writes of the serial console with `console::polled` and `console::emitter`, `fault`, the host-testable exception record, the PL011 driver `uart`, `irq`, the wiring of the GICv2 and the virtual timer, and the addresses and platform parameters of the board. The binary `krepi-qemu-virt`, from `src/main.rs`, is the default image, with the Rust entry `kernel_main`, the CPU check and the exception dispatch; the examples in `examples/` are the test images of the QEMU boot suite; `build.rs` hands the linker `link.ld`, the layout of the images, for the bare-metal target. |
+
+### The provable core
+
+Items of the core are `pub(crate)` by default. Only the entries and value
+types that the architecture crate and the board crates call are `pub`, and
+together they are the rows of the entry tables of the component contracts
+that those crates call; review checks that the two agree. The constructor
+of a handle stays in the module that defines the handle
+([rule 6](conventions/provable-subset.md#6-compile-time-guards)). The core
+defines no callback for a hardware action: an entry that changes
+translation tables or other hardware state returns a write plan, which the
+architecture crate carries out.
+
+### Module order in the core
+
+The modules of the roles that the
+[provable Rust subset](conventions/provable-subset.md#scope) lists, one
+module each, and the kernel root are ordered in layers. A module refers
+only to modules of lower layers, never to a module of a higher layer or to
+another module of its own layer. The module names are planned and differ
+from the names of the modules of the other kernel crates
+([porting records](conventions/porting.md#porting-records)). From the lowest
+layer:
+
+| Layer | Item (planned) | Role |
+| --- | --- | --- |
+| 1 | `fdt` | fdt |
+| 1 | `objects` | Objects |
+| 1 | `context` | Context `validate` |
+| 1 | `loader` | Loader `validate` |
+| 2 | `page_tables` | Page-table logic |
+| 3 | `KernelRoot` in `lib.rs` | The kernel root |
+| 4 | `capabilities` | Capabilities |
+| 4 | `ledger` | Scheduling ledger |
+| 5 | `vm` | VM |
+| 5 | `waits` | Waits and notifications |
+| 6 | `ipc` | IPC |
+| 7 | `lifecycle` | Lifecycle state machine |
+| 8 | `creation` | Creation |
+| 9 | `dispatch` | ABI dispatch |
+
+The kernel root holds the state that the entries of the core share. The
+modules below it never refer to it and work on the values and the parts of
+the state that their callers pass them; `fdt` and `page_tables` also run at
+boot, before the root exists, and `page_tables` takes the boot memory map
+from `fdt` as values. Every handler entry of a module above the root
+receives the one `&mut KernelRoot`
+([rule 3](conventions/provable-subset.md#3-flat-relations-and-one-kernel-root)).
+The root is the one item that refers upwards: its fields hold the state of
+the modules above it as well as of those below it. Review checks the order;
+no mechanical check reads it.
+
+### Splitting the core
+
+A module leaves the core for a crate of its own only when three conditions
+hold together:
+
+1. no registered target reaches it, apart from targets that extract the
+   module itself;
+2. it exchanges only values with the rest of the core and touches neither
+   the kernel root nor the inside of a handle;
+3. a measurement gives a reason, or a consumer outside the core has to use
+   the module on its own.
+
+The measurement is the wall clock of one Charon run on `krepi-kernel`,
+each value the median of three runs; a value above about 6 s, a
+provisional threshold, is such a reason. A split is decided before the
+first target that reaches the module is registered.
