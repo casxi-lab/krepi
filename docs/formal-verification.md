@@ -1695,7 +1695,10 @@ function that maps to no function of the inventory is not registered, so the
 run fails: the body of a closure, which has a function of its own (rule R4 of
 the [provable subset](conventions/provable-subset.md)), a loop that the tools
 place in a file outside the package, such as that of a macro, a function in
-the body of another, and a method of a trait implementation whose key the
+the body of another, a method whose key is both that of a function of the
+inventory and that of a derived method, as the `eq` of a type that derives
+`PartialEq` and also implements `PartialEq<u32>` by hand, which the key
+cannot tell apart, and a method of a trait implementation whose key the
 inventory numbers, as `#2`, which its Rust name cannot tell apart from the
 others of its key.
 It builds the generated definitions and the proof modules with warnings as

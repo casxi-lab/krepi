@@ -5,8 +5,9 @@
 //! function in the inventory of `cargo xtask formal check`; a generated
 //! function that maps to no key, such as the body of a closure or a loop
 //! that the tools place in the file of a macro, is not registered, and
-//! neither is one whose name cannot tell it from another function of its
-//! file. The checks and the mapping are those of the CAS project.
+//! neither is one whose key cannot tell it from another function or a
+//! derived method of its file. The checks and the mapping are those of the
+//! CAS project.
 #![cfg_attr(
     not(test),
     expect(dead_code, reason = "the target phase of the gate is the first caller")
@@ -72,7 +73,9 @@ pub fn classify(
 
 /// The inventory key of the local function `rust_name`, `lean_name` in
 /// Lean, that the tools report in `file`, relative to the package in
-/// `package`, or why it has none.
+/// `package`, or why it has none. A key that the inventory holds both as a
+/// function and as a derived method is the key of neither: under `proves`,
+/// the hand-written function would stand for the derived method too.
 fn key_of(
     package: &str,
     file: &str,
@@ -99,6 +102,11 @@ fn key_of(
         [key] if inventory.functions.contains(&format!("{key}#2")) => Err(format!(
             "it maps to {key}, the key of more than one method of trait implementations in {path}, which its name does not tell apart"
         )),
+        [key] if inventory.functions.contains(key) && inventory.derived.contains(key) => {
+            Err(format!(
+                "it maps to {key}, the key of both a function and a derived method in {path}, which the key does not tell apart"
+            ))
+        }
         [key] => Ok(key.clone()),
         _ if keys.is_empty() => Err(format!("its name is not below the module of {path}")),
         _ => Err(format!(
@@ -130,8 +138,10 @@ fn classify_items(
     let mut problems = Vec::new();
     let name = &target.name;
     // A derived entry stands for one derived method: a key that several Rust
-    // names reach, such as the derived `eq` of a type and a hand-written one
-    // of its implementation of `PartialEq` for another type, is not accepted.
+    // names reach is not accepted. `key_of` already refuses the key of the
+    // derived `eq` of a type that also implements `PartialEq<u32>` by hand,
+    // which is the key of a function of the inventory too; this refuses any
+    // other key that several names reach.
     for key in &target.derived {
         let reached: BTreeSet<&String> = transparent
             .get(key)
@@ -456,6 +466,22 @@ mod tests {
         names.iter().map(|name| format!("{FILE}#{name}")).collect()
     }
 
+    /// The functions of the names module that its extraction translates,
+    /// but for `eq`, whose key is also that of a derived method.
+    fn names_proved() -> Vec<String> {
+        let names = [
+            "Count::default",
+            "Count::twice",
+            "Wrapper::count",
+            "Wrapper::get",
+            "default",
+            "equal",
+        ];
+        (names.iter())
+            .map(|name| format!("{NAMES_FILE}#{name}"))
+            .collect()
+    }
+
     /// What the registration target registers, as its extraction requires.
     fn registration() -> Value {
         json!({
@@ -522,22 +548,13 @@ mod tests {
         assert_eq!(found.external, external);
 
         // The derived `eq` of `Wrapper` and the hand-written `eq` of its
-        // `PartialEq<u32>` have the same key, which a derived entry refuses.
-        let names = |names: &[&str]| -> Vec<String> {
-            (names.iter())
-                .map(|name| format!("{NAMES_FILE}#{name}"))
-                .collect()
-        };
-        let proved = names(&[
-            "Count::default",
-            "Count::twice",
-            "Wrapper::count",
-            "Wrapper::get",
-            "default",
-            "equal",
-        ]);
+        // `PartialEq<u32>` have the same key. With the hand-written `eq` left
+        // out of the inventory, the key is that of the derived method alone,
+        // to which both names map, and a derived entry refuses it.
+        let proved = names_proved();
         let eq = format!("{NAMES_FILE}#Wrapper::eq");
-        let inventory = crate_inventory();
+        let mut inventory = crate_inventory();
+        assert!(inventory.functions.remove(&eq), "{eq}");
         let check = |fields: Value, translation: &str| {
             let extraction = extraction("Names", translation);
             classify(&target(fields), &extraction, PACKAGE, &inventory)
@@ -554,7 +571,9 @@ mod tests {
         keys.sort();
         assert_eq!(found.transparent, keys);
         // The same with the hand-written `eq` cut: the change of the captured
-        // translation makes its entry opaque, in the file of declarations.
+        // translation makes its entry opaque, with the Lean name without the
+        // namespace and the file of declarations that the pinned Aeneas
+        // writes for a cut local item.
         let mut translation: Value = serde_json::from_str(NAMES).expect("a translation");
         let hand_written = "registration_fixture::names::{impl core::cmp::PartialEq<u32> for registration_fixture::names::Wrapper<u32>}::eq";
         let functions = translation["functions"]
@@ -564,10 +583,46 @@ mod tests {
             .find(|entry| entry["rust_name"] == hand_written)
             .expect("the hand-written eq");
         entry["is_opaque"] = json!(true);
+        entry["lean_name"] = json!("names.WrapperU32.Insts.CoreCmpPartialEqU32.eq");
         entry["lean_file"] = json!("KrepiGen/Reg/Names/FunsExternal_Template.lean");
         let (problems, found) = check(derived, &translation.to_string());
         assert_eq!(problems, [expected]);
         assert_eq!(found.opaque, [eq]);
+    }
+
+    #[test]
+    fn a_key_of_a_function_and_a_derived_method_is_not_registered() {
+        // The derived `eq` of `Wrapper` and the hand-written `eq` of its
+        // `PartialEq<u32>` have one key, which the inventory holds as a
+        // function and as a derived method: under `proves`, the
+        // hand-written `eq` would stand for the derived one.
+        let eq = format!("{NAMES_FILE}#Wrapper::eq");
+        let inventory = crate_inventory();
+        assert!(inventory.functions.contains(&eq) && inventory.derived.contains(&eq));
+        let proved = [names_proved(), vec![eq.clone()]].concat();
+        let extraction = extraction("Names", NAMES);
+        let fields = json!({"proves": proved});
+        let (problems, found) = classify(&target(fields), &extraction, PACKAGE, &inventory);
+        let refused = |rust_name: &str, lean_name: &str| {
+            format!(
+                "reg: reached local function {rust_name} ({lean_name}) is not registered: it maps to {eq}, the key of both a function and a derived method in {NAMES_FILE}, which the key does not tell apart"
+            )
+        };
+        assert_eq!(
+            problems,
+            [
+                refused(
+                    "registration_fixture::names::{impl core::cmp::PartialEq<registration_fixture::names::Wrapper<T>> for registration_fixture::names::Wrapper<T>}::eq",
+                    "KrepiGen.Reg.Names.names.Wrapper.Insts.CoreCmpPartialEqWrapper.eq"
+                ),
+                refused(
+                    "registration_fixture::names::{impl core::cmp::PartialEq<u32> for registration_fixture::names::Wrapper<u32>}::eq",
+                    "KrepiGen.Reg.Names.names.WrapperU32.Insts.CoreCmpPartialEqU32.eq"
+                ),
+                format!("reg: proved function {eq} is not translated by this extraction"),
+            ]
+        );
+        assert_eq!(found.transparent, names_proved());
     }
 
     #[test]

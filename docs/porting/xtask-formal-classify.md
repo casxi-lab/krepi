@@ -34,9 +34,10 @@ state for the tooling taken from the CAS project.
 
 The rest of `xtask/src/formal/classify.rs` is new code: `key_of`, which
 finds the module of the reported source file in the inventory, maps the
-name with it and refuses a name that maps to no function of the inventory,
-and the record of what the check found. The phase of the gate that extracts
-a target and calls the check is planned.
+name with it and refuses a name that maps to no function of the inventory
+or to a key that is also that of a derived method, and the record of what
+the check found. The phase of the gate that extracts a target and calls the
+check is planned.
 
 ## Changes
 
@@ -52,8 +53,13 @@ a target and calls the check is planned.
   hand-written one of a type of the same name in an inline module, which
   the CAS project mapped to one key, so have two; a `derived` entry that
   several Rust names reach is still refused, such as the key of the
-  derived `eq` of a type that also implements `PartialEq` for another type
-  by hand.
+  derived `eq` of a type that also implements `PartialEq<u32>` by hand.
+- A reached function whose key the inventory holds both as a function and
+  as a derived method, such as that `eq`, maps to no key and is not
+  registered, so the target fails under any list. The CAS project accepted
+  the key under `proves`, where the hand-written method passed for the
+  derived one, which no proof covers; it refused it only as a `derived`
+  entry, which several Rust names reach.
 - The default method of a trait keeps its trait as its owner, as in the CAS
   project, with the inline modules before the trait; with the module of the
   file, the key is the same as that of `key_for_rust_name`.
@@ -91,7 +97,7 @@ the change.
 
 | CAS project test | krepi test | Expected values |
 | --- | --- | --- |
-| `run.rs` `tests::default_and_derived_methods_are_classified`, line 2794 | `tests::default_and_derived_methods_are_classified` | A default method with its loop and two derived methods of the captured translation, which a registration that names them passes; a derived `eq` and a hand-written `eq` of the same key, which a `derived` entry refuses, with the hand-written one translated and cut |
+| `run.rs` `tests::default_and_derived_methods_are_classified`, line 2794 | `tests::default_and_derived_methods_are_classified` | A default method with its loop and two derived methods of the captured translation, which a registration that names them passes; a derived `eq` and a hand-written `eq` of the same key, which a `derived` entry refuses, with the hand-written one translated and cut and left out of the inventory, so that the key is that of the derived method alone |
 | `inventory.rs` `tests::derived_names_are_recognised`, lines 692 to 709 | `tests::derived_names_are_recognised` | The derived methods of the captured translation, and the same forms that are not derived methods |
 | `inventory.rs` `tests::aeneas_names_map_to_keys`, lines 813 to 829 | `tests::aeneas_names_map_to_keys` | The keys of an inherent method, a trait method, a free function, a function of an inline module and the methods of a generic type; every local function of the captured translations maps to a key of the inventory |
 | `inventory.rs` `tests::default_methods_map_to_the_scanned_key`, the translated names of lines 716 to 780 | `tests::default_methods_map_to_the_scanned_key` | Default methods with one loop and with two, a default method named `default` and a free function named `default` with its loop, as the pinned Aeneas names them, map to the keys of the inventory; a loop index must be a number |
@@ -110,6 +116,9 @@ test, and the names that map to no key.
   `tests::the_body_of_a_closure_maps_to_no_key_and_is_not_registered`,
   `tests::a_loop_in_the_file_of_a_macro_maps_to_no_key_and_is_not_registered`
   and `tests::names_that_do_not_tell_functions_apart_are_not_registered`.
+- A function whose key is also that of a derived method is not registered,
+  and a target that proves the key fails. Test:
+  `tests::a_key_of_a_function_and_a_derived_method_is_not_registered`.
 
 ## Hardware evidence to re-obtain
 
