@@ -883,12 +883,14 @@ the Pi 5. Four boot messages from four CPUs do not show that SMP works.
 
 ## Storage
 
-Storage is served in EL0. Clients reach it only through the file service,
-which holds the namespaces and resolves paths. Each storage back end runs in
-a domain of its own: the read-only image service for the system image, and
-a file system service for each writable volume. The file service reaches
-the back ends through sessions of its own, clients hold no capability to a
-back end, and the back ends reach the medium through the block driver.
+Storage is served in EL0. Clients reach it through the file service, which
+holds the namespaces and resolves paths; the one exception is the loader
+under **Verification** below. Each storage back end runs in a domain of its
+own: the read-only image service for the system image, and a file system
+service for each writable volume. The file service reaches the back ends
+through sessions of its own, apart from that loader no client holds a
+capability to a back end, and the back ends reach the medium through the
+block driver.
 
 - **Read-only system image.** The system image is a read-only volume. Its
   manifest lists each file with its path, size and kind, whether it is
@@ -913,8 +915,12 @@ back end, and the back ends reach the medium through the block driver.
   provides each file as a read-only memory object that carries its path,
   and it gives the execute right to the files that the manifest marks
   executable, so integrity and the execute right are both kept per file. A
-  loader asks it for an object by path or checks the path that the object
-  carries. The file service builds the directory tree from the manifest and
+  loader takes an object in one of two ways: it asks the read-only image
+  service for the object by path, the one case in which a client other than
+  the file service holds a session with a back end, or it receives the
+  object through the file service and checks the path that the object
+  carries. The contract of the loader (planned) fixes which of the two it
+  uses. The file service builds the directory tree from the manifest and
   passes the objects on: it could misreport a directory listing, but it
   cannot change the contents or the path of an object. Large images are
   loaded page by page from verified blocks, and the kernel maintains the
