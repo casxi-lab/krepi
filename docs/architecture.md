@@ -1006,9 +1006,9 @@ normal, build and development, and for every target:
 
 So no board crate depends on another board crate or on `krepi-abi`, and no
 crate depends on a board crate. The core does not depend on `krepi-abi`
-either: the dispatch table of the core and `krepi-abi` each hold the
-operation numbers and error codes, and a check of `xtask` is to keep both
-equal to the inventory (planned). The `manifests` step of
+either: the dispatch table of the core and `krepi-abi` are each to hold
+the operation numbers and error codes, and a check of `xtask` is to keep
+both equal to the operation inventory (planned). The `manifests` step of
 `cargo xtask check` and the proof gate are to check these edges (planned)
 in what `cargo metadata` reports, by the directory of each package: the
 core is `kernel/` itself, the ABI crate `kernel/abi`, the architecture
@@ -1054,11 +1054,12 @@ among the crate attributes of the library, which
 
 ### The provable core
 
-Items of the core are `pub(crate)` by default. Only the entries and value
-types that the architecture crate and the board crates call are `pub`, and
-together they are the rows of the entry tables of the component contracts
-that those crates call; review checks that the two agree. The constructor
-of a handle stays in the module that defines the handle
+Items of the core are `pub(crate)` by default. Only the entries that the
+architecture crate and the board crates call are `pub`, with the value
+types that those entries take and return. The `pub` entries are the rows
+of the entry tables of the component contracts that those crates call, and
+review checks that the two agree. The constructor of a handle stays in
+the module that defines the handle
 ([rule 6](conventions/provable-subset.md#6-compile-time-guards)). The core
 defines no callback for a hardware action: an entry that changes
 translation tables or other hardware state returns a write plan, which the
@@ -1070,8 +1071,12 @@ The modules of the roles that the
 [provable Rust subset](conventions/provable-subset.md#scope) lists, one
 module each, and the kernel root are ordered in layers. A module refers
 only to modules of lower layers, never to a module of a higher layer or to
-another module of its own layer. The module names are planned and differ
-from the names of the modules of the other kernel crates
+another module of its own layer. An operation whose effect spans several
+modules, such as revocation, the release of a region or the destruction of
+a process, is composed by a module above all of them or by its entry in
+`dispatch`; each of those modules provides only the checks and the writes
+of its own part. The module names are planned and differ from the names
+of the modules of the other kernel crates
 ([porting records](conventions/porting.md#porting-records)). From the lowest
 layer:
 
@@ -1118,4 +1123,4 @@ hold together:
 The measurement is the wall clock of one Charon run on `krepi-kernel`,
 each value the median of three runs; a value above about 6 s, a
 provisional threshold, is such a reason. A split is decided before the
-first target that reaches the module is registered.
+next target that reaches the module is registered.

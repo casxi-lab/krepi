@@ -78,13 +78,13 @@ its crate root `kernel/src/lib.rs` (planned) is `docs/porting/kernel.md`,
 which also covers `kernel/Cargo.toml` and `kernel/Cargo.lock`. The modules
 of the crates of the kernel workspace, the core included, have names that
 differ from each other, and none is named `kernel`, so that no two kernel
-records share a name. Code that both boards use is in the architecture
-crate. When two boards each have a module of the same role that they do not
-share, such as the wiring, the exception dispatch, the fault record or the
-console, the board crate added later gives its module a name that no other
-kernel crate uses. The kernel workspace has no separate driver layer: the
-drivers of EL1 are in the architecture crate and the board crates, and
-`kernel/boards/` holds no crate that boards share.
+records share a name. Code outside the core that both boards share is in
+the architecture crate. When two boards each have a module of the same role
+that they do not share, such as the wiring, the exception dispatch, the
+fault record or the console, the board crate added later gives its module
+a name that no other kernel crate uses. The kernel workspace has no
+separate driver layer: the drivers of EL1 are in the architecture crate and
+the board crates, and `kernel/boards/` holds no crate that boards share.
 
 A record starts with a metadata block:
 
