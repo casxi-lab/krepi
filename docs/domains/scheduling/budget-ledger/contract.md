@@ -24,20 +24,21 @@ behaviour that these rules serve, with its evidence, is in the
 - **Tick.** One count of the virtual counter `CNTVCT_EL0`, which EL0 also
   reads ([EL0 controls](../../memory/address-space/contract.md#el0-controls)).
   Every time and every amount of this page is in ticks.
-- **Time.** The value of the virtual counter that the adapter reads once
-  on entry to a transition and passes to the entries of this page as their
-  argument `now` ([ND-01](../../../security.md#nd-01)). The **premises of
-  time** are that the time does not decrease within a boot and stays below
-  $2^{63}$; no entry checks them.
+- **Time.** The value of the virtual counter that the architecture crate
+  reads once on entry to a transition and passes to the entries of this
+  page as their argument `now` ([ND-01](../../../security.md#nd-01)). The
+  **premises of time** are that the time does not decrease within a boot
+  and stays below $2^{63}$; no entry checks them.
 - **Ledger.** `ledger::Ledger` (planned): the ledger of one CPU, with the
   epoch $E$, the period $P$, the cap $C_k$ of each class $k$, the kernel
-  margin $M$, the class ledger of each class and the unallocated holdings
-  ([Classes](#classes)).
+  margin $M$, the class ledger of each class, and the unallocated holdings
+  with the root flag ([Classes](#classes)).
 - **Class.** One of the three priority classes, control, interactive and
-  background, from the highest to the lowest, as the scheduler's
-  [priority classes](../scheduler/contract.md#priority-classes) define
-  them. The record stores a class as `ledger::Class` (planned), since this
-  module is below the scheduler's.
+  background, from the highest to the lowest. `ledger::Class` (planned)
+  defines the classes and this order, which [Lending](#lending) compares,
+  and the scheduler's
+  [priority classes](../scheduler/contract.md#priority-classes) select by
+  it; the module of this page is below the scheduler's.
 - **Period index.** $\pi(t) = \lfloor (t - E) / P \rfloor$ for a time
   $t \ge E$. The **boundaries** are the times $E + nP$ for $n \ge 1$, and
   the **current period** at $t$ runs from $E + \pi(t) P$ to its **end**,
@@ -86,9 +87,9 @@ component.
 | Entry point | Kind | Called by | ABI operation | Rules |
 | --- | --- | --- | --- | --- |
 | `Ledger::new` (planned), with the value types `ledger::Parameters` and `ledger::Error` | Function that writes nothing but the ledger it returns, host-testable | The boot wiring of each board crate, once for each CPU that it starts, with the platform parameters of the board and the value of `CNTFRQ_EL0`, before any entry from EL0 | None | [Classes](#classes), [Replenishment](#replenishment) |
-| `ledger::admit` (planned) | Write entry on the copies of a write set, host-testable | The module `creation` (planned), in the write set that occupies the thread slot of a new process, after the [admission](../scheduler/contract.md#admission) checks of the scheduler; the boot of the root by the kernel root (planned), once, for the root's thread | None | [Admission and release](#admission-and-release), [Budget records](#budget-records) |
+| `ledger::admit` (planned) | Write entry on the copies of a write set, host-testable | The module `creation` (planned), in the write set that occupies the thread slot of a new process, with the [admission](../scheduler/contract.md#admission) of the scheduler, whose checks it makes with those of this entry in the order of errors; the boot of the root by the kernel root (planned), once, for the root's thread | None | [Admission and release](#admission-and-release), [Budget records](#budget-records) |
 | `ledger::release` (planned) | Write entry on the copies of a write set, host-testable | The module `lifecycle` (planned), in the write set that reaps a process and releases its thread slot | None | [Admission and release](#admission-and-release) |
-| `ledger::charge` (planned) | Write entry on the copies of a write set, host-testable | The [scheduler](../scheduler/contract.md#entry-points), when the dispatch of the current thread stops, by its preemption, yield, block or removal, and when `requeue` moves the current thread to another context, with the start of the dispatch and the owner of its context | None | [Charging and debt](#charging-and-debt), [CPU time](#cpu-time) |
+| `ledger::charge` (planned) | Write entry on the copies of a write set, host-testable | The [scheduler](../scheduler/contract.md#entry-points), when the dispatch of the current thread stops, by its preemption, yield, block or removal, and when `requeue` charges the current dispatch up to a change of its context or of the record of the owner of its context, with the start of the dispatch or its last charge and the owner of its context | None | [Charging and debt](#charging-and-debt), [CPU time](#cpu-time) |
 | `ledger::replenish` (planned) | Write entry on the copies of a write set, host-testable | The write entries of this page, for each record and class ledger that they change, before they change it; and the tests. The scheduler needs no call of its own, since `available` gives the credit as brought up to date | None | [Replenishment](#replenishment) |
 | `ledger::lend` (planned) | Write entry on the copies of a write set, host-testable | The module `ipc` (planned), when a call is delivered to its receiver | None | [Lending](#lending) |
 | `ledger::withdraw` (planned) | Write entry on the copies of a write set, host-testable | The module `ipc` (planned), when a call ends for any reason, for its receiver and each thread downstream of it, at most `MAX_LOAN_DEPTH` in one transition | None | [Lending](#lending) |
@@ -99,11 +100,12 @@ component.
 
 The module `ledger` of the core (planned), below `kernel/src/` (planned),
 follows the [provable Rust subset](../../../conventions/provable-subset.md):
-the ledgers and their class ledgers, the budget records, the charge, the
-replenishment, the admission and release, the loans and the CPU time. Its
-items are `pub(crate)` except `Ledger::new`, the row of the entry table
-that the boot wiring calls, with the value types that it takes and returns,
-`ledger::Parameters`, `ledger::Ledger` and `ledger::Error`
+the classes and their order, the ledgers and their class ledgers, the
+budget records, the charge, the replenishment, the admission and release,
+the loans and the CPU time. Its items are `pub(crate)` except
+`Ledger::new`, the row of the entry table that the boot wiring calls, with
+the value types that it takes and returns, `ledger::Parameters`,
+`ledger::Ledger` and `ledger::Error`
 ([provable core](../../../architecture.md#the-provable-core)). The module is
 in layer 4 of the
 [module order](../../../architecture.md#module-order-in-the-core): it
@@ -164,7 +166,8 @@ these fields:
 - **Released threads.** No `source` names a thread whose slot has been
   released: the IPC component withdraws every loan downstream of a thread
   when it settles the calls of that thread, before the reap of the
-  thread's process ([Lending](#lending)). No dispatch outlives the record
+  thread's process, a premise of the composition that `release` does not
+  check ([Lending](#lending)). No dispatch outlives the record
   of the owner of its context either: a withdrawal during a dispatch is
   followed by the scheduler's `requeue`, which charges the dispatch up to
   that time.
@@ -203,10 +206,18 @@ whose context is of that class.
      (`InvalidConfiguration`);
   4. the caps and the margin, summed without overflow, do not exceed the
      period (`InvalidConfiguration`).
+- **A cap of 0.** The checks accept a cap of 0, whose class then admits
+  no thread, as the vectors of a class without capacity have it. The
+  root's thread runs on its holding of control
+  ([Admission and release](#admission-and-release)), so the values of a
+  board, which the scheduler's table of platform parameters gives, have a
+  `CONTROL_CAP` of at least 1 tick; this is a rule for those values, which
+  `Ledger::new` does not check.
 - **Starting state.** A ledger that passes the checks has the epoch $E$
-  equal to `now`, every class ledger with `spent` 0 and `stamp` 0, and an
-  unallocated holding of each class equal to its cap. The values are read
-  only after boot.
+  equal to `now`, every class ledger with `spent` 0 and `stamp` 0, an
+  unallocated holding of each class equal to its cap, and the root flag
+  clear. The epoch, the period, the caps and the margin are read-only
+  after boot.
 - **Margin.** The part of the period above the caps is the margin of the
   kernel and of interrupt handling; no class and no record holds it. Since
   the caps and the margin do not exceed the period, the dispatch credit
@@ -219,12 +230,16 @@ whose context is of that class.
 ## Charging and debt
 
 `charge(thread, owner, since, now)` charges the interval from `since`, the
-time at which the scheduler started the dispatch of `thread` or last
-charged it, to `now`, the time at which that dispatch stops or moves to
-another context. `owner` is the owner $O$ of the context that the dispatch
-has, which `available` gave when the dispatch started and which the
+time at which the scheduler started the dispatch of `thread` or last charged
+it, to `now`, the time at which that dispatch stops or the scheduler's
+`requeue` charges it. `owner` is the owner $O$ of the context that the
+dispatch has, which `available` gave when the dispatch started and which the
 scheduler keeps with the dispatch. `since` is not later than `now`, a
-premise of the scheduler.
+premise of the scheduler, and the stamps of the record of $O$ and of the
+class ledger of its class are at most $\pi(\mathit{since})$: no entry has
+brought them up to date at a later time while the dispatch ran, which the
+composers of admission and release ensure
+([Admission and release](#admission-and-release)).
 
 - **Context.** The interval is charged to the record of $O$: `thread`
   itself when it had no source at the start of the dispatch, and the owner
@@ -273,9 +288,9 @@ premise of the scheduler.
   credit, the smaller of the remaining credit of the record of $O$ and of
   the class ledger of its class, both as brought up to date at `now`; the
   end of the current period at `now`; and the effective class of `thread`.
-  A thread whose context has a budget of 0, or
-  whose context or class has debt, has the dispatch credit 0, and the
-  scheduler starts no dispatch on it.
+  A thread whose context has a budget of 0, or whose context or class has
+  debt, has the dispatch credit 0, and the scheduler starts no dispatch on
+  it.
 - **Other CPUs.** A charge to an owner whose record belongs to the ledger
   of another CPU adds the interval to the `pending` of that record, which
   the next write entry of this page on the owner's own CPU adds to its
@@ -307,15 +322,22 @@ admission or a release changes applies only from the time of that change.
   division of 64-bit values for $\pi(t)$, one multiplication and one
   subtraction, whatever the number of boundaries since the stamp. No entry
   loops over periods.
-- **Second termination.** A record with debt $d$ and budget $b > 0$ has
-  the dispatch credit 0, so no dispatch on its context starts and no charge
+- **Second termination.** While no admission or release of its thread
+  changes its budget, a record with debt $d$ and budget $b > 0$ has the
+  dispatch credit 0, so no dispatch on its context starts and no charge
   reaches it; at each boundary its debt falls by $b$ or to 0, a measure
   that decreases strictly while it is positive, and it is 0 within
-  $\lceil d / b \rceil$ boundaries. A class ledger with debt $d$ and cap
-  $c > 0$ is 0 within $\lceil d / c \rceil$ boundaries by the same
-  argument. A dispatch that runs at a boundary is charged by the closed
-  form of [Charging and debt](#charging-and-debt), which applies the same
-  rule to each boundary it crosses.
+  $\lceil d / b \rceil$ boundaries. The measure is the debt for a fixed
+  budget: its thread, which may run on a borrowed context while its own
+  record has debt, lowers $b$ and keeps `spent` when it admits a thread of
+  its own class, so it can raise the debt, and a budget of 0 keeps a debt
+  until a release returns a holding
+  ([Admission and release](#admission-and-release)). A class
+  ledger with debt $d$ and cap $c > 0$ is 0 within $\lceil d / c \rceil$
+  boundaries by the same argument, since no entry changes a cap. A
+  dispatch that runs at a boundary is charged by the closed form of
+  [Charging and debt](#charging-and-debt), which applies the same rule to
+  each boundary it crosses.
 - **Budget 0.** A record with budget 0 is never replenished and has the
   dispatch credit 0; a record has budget 0 when it has given its whole
   holding of its own class to the threads that it admitted.
@@ -332,18 +354,20 @@ admission or a release changes applies only from the time of that change.
 
 - **The root.** `admit(kernel, root, now)`, which the boot of the root
   makes once, gives the root's thread the class control, the ceiling
-  control and every unallocated holding of the ledger as its holdings, and
-  sets the unallocated holdings to 0. It refuses with `AdmissionRejected`
-  when an unallocated holding is not its cap, since the root has been
-  admitted already.
+  control and every unallocated holding of the ledger as its holdings,
+  sets the unallocated holdings to 0 and sets the root flag. It refuses
+  with `AdmissionRejected` when the root flag is set, since the root has
+  been admitted already; the flag decides this also when every cap is 0.
 - **A thread.** `admit(creator, child, class, budget, ceiling, now)` admits
   the thread of a new process for the thread `creator` of the process that
   creates it. It makes these checks in this order and returns the first
   error: `budget` is not 0 (`InvalidConfiguration`); `creator` and `child`
   resolve as the objects component states; `budget` does not exceed the
-  holding of `creator` of `class` (`AdmissionRejected`). The scheduler has
-  checked before that `class` and `ceiling` are not above the class of
-  `creator` ([admission](../scheduler/contract.md#admission)). It then
+  holding of `creator` of `class` (`AdmissionRejected`). That `class` and
+  `ceiling` are not above the class of `creator` is a check of the
+  scheduler's [admission](../scheduler/contract.md#admission); the composer
+  makes the checks of both entries in the order of errors that the
+  scheduler's [errors](../scheduler/contract.md#errors) give. It then
   brings the record of `creator` up to date at `now`, lowers its holding of
   `class` by `budget`, and writes the record of `child`: the `class`, the
   `ceiling`, a holding of `budget` of `class` and of 0 of the other
@@ -359,10 +383,21 @@ admission or a release changes applies only from the time of that change.
   of the owner's process. It checks that both resolve and that `child` has
   no source (`OutstandingLoan`), brings the record of `owner` up to date at
   `now`, adds each holding of `child` to the holding of `owner` of the same
-  class and clears the record of `child`. The `spent` of `child`, its debt
-  among it, leaves with the record; the class ledger keeps every charge
+  class and clears the record of `child`. The `spent` of `child`, including
+  its debt, leaves with the record; the class ledger keeps every charge
   that it has counted, so the spending of the class in its period and its
   debt are not erased by a release or a new admission.
+- **The current dispatch.** `admit` and `release` bring the record of the
+  creator or of the owner up to date at `now`. When that record is the
+  owner of the context of the current dispatch of the CPU, as it is when
+  the caller runs on its own context, the composer first calls `requeue`
+  of the scheduler for the current thread, which charges the dispatch up
+  to `now` and continues it from `now`
+  ([run queues](../scheduler/contract.md#run-queues)). So the premise of
+  [Charging and debt](#charging-and-debt) holds, the interval before the
+  change is charged with the budget from before it, and the reschedule
+  flag that `requeue` sets makes the return choose again, with a deadline
+  for the new budget.
 - **Order.** A process is reaped after its children, so the holdings that
   a release returns are those that its admission gave: what its children
   took has returned to it before.
@@ -394,10 +429,23 @@ ceiling of `borrower`.
   its caller, which blocks until the call ends and withdraws the loans
   before it makes the caller ready. So the threads that use a context form
   one chain from its owner, each blocked in a call but the last, and only
-  the last runs; the checks above refuse a second lender of one borrower
-  and a loan back to the lender or to the owner, which a call to oneself
-  and a cycle of calls would need and which the IPC component refuses
-  before delivery.
+  the last runs. The checks above refuse two loans that would break the
+  chain, for different reasons:
+  - a loan back to the lender or to the owner of its context, which a call
+    to oneself or a cycle of calls would need, and which the IPC component
+    refuses before delivery;
+  - a second loan to a borrower that has a source, which a delivery to a
+    receiver that still serves an earlier call would need; the IPC
+    component states what such a delivery does.
+- **Premises of the composition.** `lend` and `release` rely on two rules
+  of the IPC component, which they do not check and which no case of
+  `OutstandingLoan` covers:
+  - the lender has lent its context to no other thread, since a caller
+    blocks in its call until the call ends and its loans are withdrawn, so
+    the lender of `lend` is the last thread of the chain of its context;
+  - the loans downstream of a thread are withdrawn before the reap of its
+    process, so no `source` names a released thread
+    ([Budget records](#budget-records)).
 - **No duplication.** A loan moves no credit and writes no `spent`; every
   charge goes to the owner of the context, so a loan neither adds credit
   nor charges any record twice, and the sum of the credits of the records
@@ -447,7 +495,7 @@ ceiling of `borrower`.
 | `WrongPool` of the objects component | A reference of another pool than the thread pool | Every entry that takes a thread | Handle resolution: the type |
 | `StaleReference` of the objects component | A thread reference that is not live | Every entry that takes a thread | Handle resolution: the liveness of the object |
 | `OutstandingLoan` | For `lend`, a borrower that has a source, or that is the lender or the owner of the lender's context; for `release`, a record that has a source | `lend`, `release` | Object state |
-| `AdmissionRejected` | A budget beyond the creator's holding of the class; the admission of the root when an unallocated holding is not its cap | `admit` | The caller's quota |
+| `AdmissionRejected` | A budget beyond the creator's holding of the class; the admission of the root when the root flag is set | `admit` | The caller's quota |
 | `LoanDepth` | A loan whose depth would exceed `MAX_LOAN_DEPTH` | `lend` | Shared capacity |
 
 - **Order.** Each entry checks in the order that its rule section states
@@ -472,13 +520,14 @@ ceiling of `borrower`.
   the errors that reach EL0 through a composing operation belong to the ABI
   inventory.
 
-The prototype's scheduler had 23 errors. The ten below are those whose
-rules are on this page; four of them, `InvalidConfiguration`,
-`ClockWentBackwards`, `Object(_)` and `PermissionDenied`, are also in the
-errors of the [scheduler contract](../scheduler/contract.md#errors), which
-gives the place of the other thirteen and of the activation part of `Busy`
-of the objects component, among them `AdmissionRejected`, which `admit`
-reports here for the holdings. Here:
+The prototype's scheduler had 23 errors. This page maps the ten below,
+whose rules are here; four of them, `InvalidConfiguration`,
+`ClockWentBackwards`, `Object(_)` and `PermissionDenied`, the
+[scheduler contract](../scheduler/contract.md#errors) maps as well. That
+contract maps the other thirteen and the activation part of the
+prototype's `Busy` of its object pool. One of the thirteen,
+`AdmissionRejected`, is also an error of `admit` here, for a budget beyond
+the holding and for a second admission of the root. Here:
 
 | Prototype error | Here |
 | --- | --- |
@@ -488,7 +537,7 @@ reports here for the holdings. Here:
 | `Object(_)` | Not kept as a wrapper: the errors of the objects component that this page meets, `WrongPool` and `StaleReference`, are returned as they are |
 | `PermissionDenied` | Moved to the capabilities component: the rights of the operations that create and reap a process, CREATE and CONTROL, are checked by their lookups; a loan needs no right of its own, since it is a part of a call, and every record has a ceiling |
 | `OutstandingBudget` | Not applicable: a record is released at the reap of its thread at once, its holdings return to the owner, and the spending of its class stays in the class ledger |
-| `OutstandingLoan` | Kept, for a borrower that has a source or would close a cycle, and for the release of a record that has a source |
+| `OutstandingLoan` | Kept, for a borrower that has a source or would close a cycle, and for the release of a record that has a source; that the lender is the last thread of the chain of its context is a premise of the composition of the IPC component, which `lend` does not check ([Lending](#lending)) |
 | `StaleLoan` | Not applicable: a loan has no identity; the call that made it identifies it, and the withdrawal of a record without a source is `none` |
 | `LoanCycle` | Not applicable: the IPC component refuses a call to oneself and a call that closes a cycle before delivery, so no loan closes a cycle; `lend` refuses such a borrower with `OutstandingLoan` |
 | `LoanDepth` | Kept, for a ninth level of depth |
@@ -502,15 +551,19 @@ reports here for the holdings. Here:
 - `admit`, `release`, `charge`, `replenish`, `lend` and `withdraw` make all
   their checks, the resolution of their threads, of the `owner` of
   `charge` and of the owner of a source among them, before their first
-  write, and then change only the
-  copies in the write set of their caller. The composing entry has made
-  the same checks before its first write, so its write phase meets none of
-  them.
-- The class ledgers and the unallocated holdings are per-CPU state that
-  the write entries stage in the write set with the thread slots, each
-  class ledger keyed by its CPU and its class and the unallocated holdings
-  by their CPU, so that the write-back of the composing operation changes
-  them together with the records.
+  write, and then change only the copies in the write set of their caller.
+  The composing entry has made the same checks before its first write, so
+  its write phase meets none of them.
+- The class ledgers and the unallocated holdings with the root flag are
+  per-CPU state that the write entries stage in the write set with the
+  thread slots, each class ledger keyed by its CPU and its class and the
+  unallocated holdings by their CPU, so that the write-back of the
+  composing operation changes them together with the records. These kinds
+  of keys are this component's, as the
+  [write-set transactions](../../objects-capabilities/objects/contract.md#write-set-transactions)
+  of the objects component leave the items of the composing components to
+  their contracts, like the queue links of other components; with more
+  than one CPU, an entry stages only the items of the executing CPU.
 - The write phase of every entry of this page allows only `WriteSetFull`
   of `stage`, which the write sets below never reach, and the
   fault-injection points of test builds (`InjectedFault`), each of which
@@ -519,24 +572,35 @@ reports here for the holdings. Here:
 
 The write set of each write entry of this page, by its items: the thread
 slot of a thread, which holds its record, a class ledger and the
-unallocated holdings:
+unallocated holdings with the root flag:
 
 | Entry | Write set | Items |
 | --- | --- | ---: |
 | `Ledger::new` | The ledger that it returns, before any token exists | - |
-| `admit` | The thread slots of the creator and of the child; for the root, the thread slot of the root and the unallocated holdings | 2 |
+| `admit` | The thread slots of the creator and of the child; for the root, the thread slot of the root and the unallocated holdings with the root flag | 2 |
 | `release` | The thread slots of the owner and of the child | 2 |
 | `charge` | The thread slot of the owner of the context; the class ledger of its class; the thread slot of the thread that ran, when it is not that owner | 3 |
 | `replenish` | The thread slot; the class ledger of its class | 2 |
 | `lend` | The thread slot of the borrower | 1 |
 | `withdraw` | The thread slot of the borrower, when it has a source | 1 |
 
-The withdrawal of a chain when a call ends writes at most `MAX_LOAN_DEPTH`
-= 8 items of this page, and `requeue` of the scheduler, for the last thread
-of the chain, adds the items that its
-[check and execute](../scheduler/contract.md#check-and-execute) gives to
-the same write set; the IPC component counts them with the settlement of
-the call.
+The withdrawal of a chain when a call ends writes at most 11 items:
+
+- at most `MAX_LOAN_DEPTH` = 8 items of this page, the thread slots of the
+  threads that `withdraw` returns to their own records;
+- at most 3 more for `requeue` of the scheduler, for the last thread of the
+  chain, the only one of them that can be ready or running, by its
+  [check and execute](../scheduler/contract.md#check-and-execute). A write
+  set holds each key once, and the slot of that thread is among the 8, so
+  `requeue` adds, for a ready thread, the slots of the thread before it in
+  its old queue and of the last thread of its new queue and the scheduler
+  record; for the current thread, the scheduler record and the two items
+  of `charge` other than that slot, the thread slot of the owner of the
+  context, which is upstream of the threads withdrawn, and the class
+  ledger of its class. The other threads of the chain are blocked in their
+  calls and in no run queue.
+
+The IPC component counts these items with the settlement of the call.
 
 ## Work bounds
 
@@ -544,10 +608,10 @@ the call.
   writes the ledger once, at boot.
 - `admit` and `release` resolve two thread references, bring one record up
   to date and write two items; for the root, `admit` resolves one
-  reference, compares three holdings with their caps and writes two items.
+  reference, reads the root flag and writes two items.
 - `charge` resolves its thread and its `owner`, brings one record and one
-  class ledger up to date at `since` and charges each with
-  the closed form, and writes at most three items.
+  class ledger up to date at `since` and charges each with the closed form,
+  and writes at most three items.
 - `replenish` resolves its thread, brings one record and one class ledger
   up to date, and writes at most two items; `available` makes the same
   steps and writes nothing.
@@ -570,8 +634,7 @@ the call.
 
 - **Time.** Every entry takes its times as arguments: `now`, and `since`
   for `charge`, which the scheduler recorded when it started or last
-  charged the dispatch.
-  The time of each transition is the entry
+  charged the dispatch. The time of each transition is the entry
   [ND-01](../../../security.md#nd-01) of the register of
   [permitted nondeterminism](../../../security.md#permitted-nondeterminism);
   for each value of it, the rules of this page fix the result.
@@ -606,7 +669,7 @@ The component leaves no other choice open.
 | Field | Class | Lock or owner | Linearization point | Publication |
 | --- | --- | --- | --- | --- |
 | The epoch, the period, the caps and the margin of the ledger of each CPU | Per-CPU, read-only after boot | Its CPU, which `Ledger::new` builds the ledger for before any entry from EL0 | The return of `Ledger::new` | `none`: its single owner never changes |
-| The `spent` and `stamp` of each class ledger, and the unallocated holdings, of the ledger of each CPU | Per-CPU | Its CPU, with its interrupts masked, which the adapter lends the ledger to by `&mut` for one entry | The write-back of the write set that changes them | `none`: its single owner never changes |
+| The `spent` and `stamp` of each class ledger, and the unallocated holdings with the root flag, of the ledger of each CPU | Per-CPU | Its CPU, with its interrupts masked, which the adapter lends the ledger to by `&mut` for one entry | The write-back of the write set that changes them | `none`: its single owner never changes |
 | The `class`, `ceiling`, `holdings`, `spent`, `stamp` and `cpu` of the budget record of each thread, in its thread slot | Per-CPU, with the ledger of the CPU that the record belongs to | That CPU, with its interrupts masked; a charge from another CPU goes to `pending` instead | The write-back of the write set that changes them | `none` while the record belongs to one CPU; the move of a record to the ledger of another CPU is a handover that the cross-CPU budgets of the multicore domain define |
 | The `source` and `effective` of the budget record of each thread | Shared | The token of the thread slot of the borrower, which `lend`, `withdraw`, `charge`, `available` and `release` hold; with one CPU, the executing CPU | The release of the token after the write-back of the `lend` or `withdraw` that changes them | Under the token, by the release of the lock that provides it once CPUs share it |
 | The `pending` of the budget record of each thread | Shared | The token of the thread slot of the owner, which a charge from another CPU and the write entries of this page on the owner's CPU hold; with one CPU it stays 0 | The release of the token after the write-back of the charge that adds to it, or of the entry that adds it to `spent` and clears it | Under the token |
@@ -657,6 +720,14 @@ lock order is stated here.
   processes of every class, among them creators that give their whole own
   budget away, and checks after every write-back that the holdings of each
   class and its unallocated holding add up to its cap.
+- The root: a second admission of the root is `AdmissionRejected`, also
+  with every cap 0.
+- The current dispatch: an admission and a release by a thread that runs
+  on its own context, within a dispatch that has crossed a boundary by a
+  late stop, composed after `requeue` as
+  [Admission and release](#admission-and-release) states, after which the
+  `spent` of the record equals that of the tick model with the budget from
+  before the change up to it and the new budget after it.
 - Loans: chains of every depth from 1 to 8 and a ninth loan refused; the
   withdrawal of the receiver of a call in the middle of a chain, which
   leaves the upstream loans; the effective class for each of the 27
@@ -729,10 +800,9 @@ so the section holds no `vectors` block.
   `tests/failures.rs` and `tests/waits.rs`.
 - The id of a vector is the path of its file below `src/`, without every
   path component `tests` and the suffix `.rs`, with `/` and `_` written as
-  `-`,
-  followed by the position of its test among all the tests of that file,
-  counted from 1. The positions that this page skips are the vectors of the
-  scheduler contract.
+  `-`, followed by the position of its test among all the tests of that
+  file, counted from 1. The positions that this page skips are the vectors
+  of the scheduler contract.
 
 A vector of this page is one test function. The vector file is to hold one
 line for each case of it through an entry of this page, with the id
@@ -743,25 +813,25 @@ Entry column names no entry of this page has none.
 **Notation.** Times, amounts and counts are decimal ticks and counts. A
 ledger is written `period=<P> caps=<c>/<i>/<b> margin=<M> epoch=<E>`, with
 the caps of control, interactive and background, as `Ledger::new` gives it
-for parameters in microseconds at a frequency of 1,000,000 Hz. A process
-and its thread
-have one name. "X admits T in class k with b" is
+for parameters in microseconds at a frequency of 1,000,000 Hz. A process and
+its thread have one name. "X admits T in class k with b" is
 `admit(X, T, k, b, k, now)`, with the ceiling the class itself unless the
-row gives another; R is the root's thread, admitted at the epoch, which
-holds every cap and which no vector makes ready, and its holdings fall by
-what it admits. "T runs from s to t" is a dispatch of T that the scheduler
-starts at s and stops at t, which `charge(T, O, s, t)` accounts, with O the
-owner of the context that `available` gives for T at s; a deadline,
-where the row gives one, is that of the scheduler's selection, from
-`available`. "Nothing is selectable at t" is the scheduler's selection at t
-finding no ready thread whose dispatch credit is above 0. A record is
-written by its remaining credit and its debt, `remaining` and `debt`, as
-brought up to date at the time of the row, and `cpu` for its CPU time; a
-class by those of its class ledger. "A loan A to B" is `lend(A, B)`, which
-the IPC component makes when it delivers the call of A to B; "a
-withdrawal of B" is `withdraw(B)`. Blocking, waking and sleeping are the
-waits component's and the scheduler's, and change no record. The output
-of a call is `ok`, followed by its fields, or `err=<error>`.
+row gives another; R is the root's thread, admitted at the epoch by the
+admission of the root of this page alone, which holds every cap and which no
+vector makes ready, and its holdings fall by what it admits. "T runs from s
+to t" is a dispatch of T that the scheduler starts at s and stops at t,
+which `charge(T, O, s, t)` accounts, with O the owner of the context that
+`available` gives for T at s; a deadline, where the row gives one, is that
+of the scheduler's selection, from `available`. "Nothing is selectable at t"
+is the scheduler's selection at t finding no ready thread whose dispatch
+credit is above 0. A record is written by its remaining credit and its debt,
+`remaining` and `debt`, as brought up to date at the time of the row, and
+`cpu` for its CPU time; a class by those of its class ledger. "A loan A to
+B" is `lend(A, B)`, which the IPC component makes when it delivers the call
+of A to B; "a withdrawal of B" is `withdraw(B)`. Blocking, waking and
+sleeping are the waits component's and the scheduler's, and change no
+record. The output of a call is `ok`, followed by its fields, or
+`err=<error>`.
 
 **Fixtures.**
 
@@ -809,9 +879,8 @@ inputs; their rows state the property and the generation rule.
 - No loan closes a cycle, since the IPC component refuses a call to oneself
   and a cycle of calls: the prototype's `LoanCycle` does not apply.
 - Every record has the ceiling that its creator gives at its admission:
-  the prototype's services without a ceiling,
-  which could not borrow (`PermissionDenied`), and its later change of a
-  ceiling do not apply.
+  the prototype's services without a ceiling, which could not borrow
+  (`PermissionDenied`), and its later change of a ceiling do not apply.
 - A dispatch is charged to the context that it had at its start, and a
   change of a loan during a dispatch is followed by `requeue` of the
   scheduler, which charges the dispatch up to that time: the prototype's
@@ -978,9 +1047,9 @@ the scheduler contract.
   capabilities: a principled, light-weight operating-system mechanism for
   managing time", EuroSys 2018,
   <https://trustworthy.systems/publications/full_text/Lyons_MAH_18.pdf>:
-  the scheduling contexts, passive servers,
-  replenishment lists and timeout handlers that this model leaves out, and
-  the donation of a client's budget to a server that its loans resemble.
+  the scheduling contexts, passive servers, replenishment lists and timeout
+  handlers that this model leaves out, and the donation of a client's
+  budget to a server that its loans resemble.
 - The rules of this page take, as clauses of their own, the rules of the
   prototype tree at `prototype@ec8305c618a8f4e84e0707fa56beac5673f4675e`:
   - `docs/features/kernel/synchronous-budgets.md`, lines 77 to 137:

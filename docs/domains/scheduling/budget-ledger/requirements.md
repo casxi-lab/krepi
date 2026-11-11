@@ -72,7 +72,7 @@ exceeds the period with `InvalidConfiguration`, and a value whose ticks do
 not fit 64 bits with `Overflow`. Every class and every record of the CPU
 counts its periods from one epoch with one period. The criterion: the
 checks hold at their limits, and replenishment of a ledger whose epoch is
-37 happens at 137 for a thread of each class.
+37 happens at 137 for a control and a background thread.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `Ledger::new` (planned).
@@ -115,10 +115,9 @@ at its start and to the class ledger of that owner's class, and the part
 beyond the remaining credit becomes debt in full. An interval that crosses
 period boundaries is charged as if each tick were charged in turn and each
 boundary replenished the credit, in a fixed number of steps for any
-length. The criterion: the
-charges equal those of an independent tick model, among them an overrun of
-7 ticks in one period, a stop across two boundaries and a stop after
-$10^{12}$ periods.
+length. The criterion: the charges equal those of an independent tick
+model, among them an overrun of 7 ticks in one period, a stop across two
+boundaries and a stop after $10^{12}$ periods.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `ledger::charge` (planned).
@@ -143,9 +142,10 @@ class the smaller of its credit plus its cap and its cap: a debt is repaid
 first, and unused credit never accumulates. A record that a gap of any
 number of periods separates from its last update is brought up to date in
 a fixed number of steps. A record with debt $d$ and budget $b > 0$ that is
-not charged regains credit within $\lceil d/b \rceil$ boundaries, its debt
-falling at each of them; a record with budget 0 is never replenished. Waits
-and sleeps neither add nor remove credit. The criterion: the vectors of
+not charged, and whose budget no admission or release changes, regains
+credit within $\lceil d/b \rceil$ boundaries, its debt falling at each of
+them; a record with budget 0 is never replenished. Waits and sleeps neither
+add nor remove credit. The criterion: the vectors of
 replenishment hold, among them a gap of $10^{10}$ periods and a debt of 25
 that a wait across one boundary leaves at 5.
 
@@ -164,17 +164,17 @@ that a wait across one boundary leaves at 5.
 ### LEDG-R05
 
 **Admission and release.** The root starts with a holding of each class
-equal to its cap. An admission carves the budget of a new thread from its
-creator's holding of the thread's class, so that a creator's own budget
-falls when it admits a thread of its own class, and refuses a budget of 0
-with `InvalidConfiguration` and a budget beyond the holding with
-`AdmissionRejected`. The reap of a thread returns its holdings to its owner
-at once, and the spending of its class stays in the class ledger. For each
-class, the holdings of all records and the part that the root has not
-taken add up to its cap. The criterion: the vectors hold, among them a
-chain of six processes each of which gives its whole holding to the next,
-and a thread admitted after the reap of one that overran its budget, which
-the class ledger throttles.
+equal to its cap and is admitted once. An admission carves the budget of a
+new thread from its creator's holding of the thread's class, so that a
+creator's own budget falls when it admits a thread of its own class, and
+refuses a budget of 0 with `InvalidConfiguration` and a budget beyond the
+holding with `AdmissionRejected`. The reap of a thread returns its holdings
+to its owner at once, and the spending of its class stays in the class
+ledger. For each class, the holdings of all records and the part that the
+root has not taken add up to its cap. The criterion: the vectors hold, among
+them a chain of six processes each of which gives its whole holding to the
+next, and a thread admitted after the reap of one that overran its budget,
+which the class ledger throttles.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `ledger::admit` and `ledger::release` (planned).
@@ -189,8 +189,8 @@ the class ledger throttles.
   `scheduler-budget-scopes-lifecycle-3`,
   `scheduler-budget-scopes-lifecycle-7`, `scheduler-budget-lifecycle-3` and
   `scheduler-budget-lifecycle-4` as host tests, and the property test of
-  the conservation of holdings of the
-  [contract](contract.md#testing-obligations).
+  the conservation of holdings and the host tests of the root and of the
+  current dispatch of the [contract](contract.md#testing-obligations).
 
 ### LEDG-R06
 
@@ -261,8 +261,8 @@ count, and the same calls with the same times give the same results.
 - **Evidence.** Every frozen vector as a host test, with the times of the
   test, and the host tests of the
   [contract](contract.md#testing-obligations), each run twice with the same
-  inputs. The reading of the counter on entry is the adapter's and is shown
-  by the tests of the scheduler.
+  inputs. The reading of the counter on entry is the architecture crate's
+  and is shown by its QEMU tests.
 
 ### LEDG-R09
 
@@ -293,9 +293,9 @@ unchanged, and the frozen vectors of refused loans hold.
   withdrawals, which the IPC component makes in one transition.
 - A record with debt $d$ and budget $b > 0$ regains credit within
   $\lceil d/b \rceil$ period boundaries once no dispatch on its context
-  runs, and a class with debt $d$ and cap $c > 0$ within
-  $\lceil d/c \rceil$; no requirement bounds when a thread with credit is
-  selected, which is the scheduler's.
+  runs, while no admission or release changes its budget, and a class with
+  debt $d$ and cap $c > 0$ within $\lceil d/c \rceil$; no requirement
+  bounds when a thread with credit is selected, which is the scheduler's.
 - No requirement bounds the time that an entry takes.
 
 ## Scope
@@ -321,11 +321,8 @@ unchanged, and the frozen vectors of refused loans hold.
 ## Contract sections without a requirement
 
 - [Terms](contract.md#terms): definitions only.
-- [Budget records](contract.md#budget-records) states the fields that
-  [LEDG-R03](#ledg-r03) to [LEDG-R07](#ledg-r07) rely on.
-- [Determinism](contract.md#determinism) and
-  [State fields](contract.md#state-fields) bind the code without an
-  observable behaviour of their own.
+- [State fields](contract.md#state-fields) binds the code without an
+  observable behaviour of its own.
 - [Work bounds](contract.md#work-bounds) states the bounds that
   [Liveness, time and performance](#liveness-time-and-performance) relies
   on.
