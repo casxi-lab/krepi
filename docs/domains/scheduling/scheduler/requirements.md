@@ -26,9 +26,9 @@ feature document covers the component, so the metadata lists none.
 - One scheduler for both, the placement at the head of a thread preempted
   with time slice left, the external deadline that the waits component
   gives, the reschedule flag at the return to EL0, admission as a part of
-  the creation of a thread without scopes, the time slice in microseconds
-  converted at boot, and the time of a transition as an input with its
-  premises are new, from the kernel's
+  the creation of a thread without scopes, with its holdings carved class
+  by class, the time slice in microseconds converted at boot, and the time
+  of a transition as an input with its premises are new, from the kernel's
   [scheduling and budgets](../../../architecture.md#scheduling-and-budgets)
   and its
   [execution model](../../../architecture.md#system-calls-and-the-abi); the
@@ -238,14 +238,17 @@ every period.
 ### SCHED-R08
 
 **Admission.** A new thread is admitted once, when it is created, with the
-class, the budget and the service ceiling that its creator gives: a class or
-a ceiling above the creator's class is refused with `AdmissionRejected`,
-the budget comes from the creator's holding of the class, and a refused
-admission changes nothing. The admitted thread is ready at the tail of the
-queue of its class. The criterion: the frozen vectors of admission hold,
-among them admissions within and beyond a holding of 20, a class whose cap
-is 0, nested admissions that take their budgets from their creators, and a
-second admission of a thread.
+class, the amounts and the service ceiling that its creator gives: a class
+or a ceiling above the creator's class is refused with
+`AdmissionRejected`; the budget, the amount of its class, and the amounts
+of the classes below it come from the creator's holdings of the same
+classes, so the process of a thread can admit threads of its own class and
+of the classes below it in turn; and a refused admission changes nothing.
+The admitted thread is ready at the tail of the queue of its class. The
+criterion: the frozen vectors of admission hold, among them admissions
+within and beyond a holding of 20, a class whose cap is 0, nested
+admissions that take their budgets from their creators, and a second
+admission of a thread.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `scheduler::admit`, with `ledger::admit` of the
@@ -259,7 +262,8 @@ second admission of a thread.
   `scheduler-budget-scopes-admission-4` and
   `scheduler-budget-scopes-admission-6` as host tests. The creation call
   from EL0, which composes admission, is shown by the tests of the creation
-  component.
+  component, and the carving of each class by the host tests of the
+  budget-ledger component.
 
 ### SCHED-R09
 

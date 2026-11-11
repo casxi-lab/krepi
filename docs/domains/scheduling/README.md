@@ -85,7 +85,7 @@ slice.
 | [Preemption](#preemption) | Time slices, the deadline of a dispatch, preemption by the timer and at the return of an entry, and the time of a transition | - | [scheduler](scheduler/requirements.md) |
 | [Synchronous budget lending](#synchronous-budget-lending) | The loan of a caller's context to the service of its call, nested loans, the effective class within a ceiling and the withdrawal of loans | - | [budget-ledger](budget-ledger/requirements.md); the IPC component of the IPC and waits domain, for when a loan is made and withdrawn |
 | [Reserved control capacity](#reserved-control-capacity) | The caps of the classes and the kernel margin within the period, and the share that the control class keeps under load | - | [scheduler](scheduler/requirements.md) |
-| [Admission](#admission) | The class, budget and ceiling of a new thread, their checks, and the holdings carved from its creator and returned at its reap | - | [scheduler](scheduler/requirements.md); [budget-ledger](budget-ledger/requirements.md), for the holdings |
+| [Admission](#admission) | The class, budget and ceiling of a new thread, their checks, and the holdings of each class carved from its creator and returned at its reap | - | [scheduler](scheduler/requirements.md); [budget-ledger](budget-ledger/requirements.md), for the holdings |
 
 ## Priority classes
 
@@ -394,10 +394,10 @@ service; host tests of the IPC component that compose the loans with calls.
 the budgets that admission guarantees never exceed the CPU, and the margin
 is left to the kernel and to the handling of interrupts. The caps are
 disjoint, and the control cap is set aside before any other admission,
-since the admission of an interactive or background thread takes only from
-its own class. A control thread with credit is chosen before every thread
-of a lower class and preempts one at the return of the entry or at the
-timer interrupt that makes it ready, so under full load from the other
+since the admission of an interactive or background thread takes nothing
+of the control class. A control thread with credit is chosen before every
+thread of a lower class and preempts one at the return of the entry or at
+the timer interrupt that makes it ready, so under full load from the other
 classes it runs within each period up to its budget and the control cap.
 The background class keeps at least its cap in a period that the higher
 classes start without debt, less the overrun of dispatches that stop late.
@@ -444,34 +444,46 @@ thread under full load runs on its credit in every period.
 ## Admission
 
 **Description.** A new thread is admitted once, in the creation of its
-process, with the class, the budget and the ceiling that its creator gives.
-Neither the class nor the ceiling may be above the class of the creator,
-and the budget, of at least 1 tick, is carved from the creator's holding of
-that class, so a creator that admits a thread of its own class lowers its
-own budget. The reap of the thread returns its holdings to its owner, while
-the spending of its class stays with the class. The root starts with a
-holding of each class equal to its cap, so through any tree of processes
-the budgets of each class add up to at most its cap. A refused admission
-changes nothing, and an admitted thread joins the tail of the run queue of
-its class. A budget is carved from the creator alone, and a charge changes
-only the record that pays and its class, never an ancestor.
+process, with the class, the amounts and the ceiling that its creator
+gives. Neither the class nor the ceiling may be above the class of the
+creator. The creation gives one amount for the class of the thread and one
+for each class below it, each carved from the creator's holding of that
+class: the amount of its class, of at least 1 tick, is its budget, and
+those of the lower classes let its process admit threads of those classes
+in turn, so a process of the control class can create an interactive
+service that creates background workers. A creator that admits a thread
+of its own class lowers its own budget, and one that admits a thread of a
+lower class keeps it. The reap of the thread returns all its holdings to
+its owner, while the spending of its class stays with the class. The root
+starts with a holding of each class equal to its cap, so through any tree
+of processes the budgets of each class add up to at most its cap. A
+refused admission changes nothing, and an admitted thread joins the tail
+of the run queue of its class. Holdings are carved from the creator alone,
+and a charge changes only the record that pays and its class, never an
+ancestor.
 
 **Design background.** Carving the budget of a child from its parent's, as
 the [metadata quotas](../objects-capabilities/README.md#metadata-quotas)
-carve their limits, bounds what a subtree of processes can take by what its
-root was given, without a global allocator; charging the record that pays
-alone, and not each ancestor, keeps a charge a fixed number of steps.
+carve their limits, bounds what a subtree of processes can take by what
+its root was given, without a global allocator. Carving each class
+separately from a holding of the same class keeps the caps disjoint along
+the tree and lets a process pass the lower classes on to the processes
+that it creates. Charging the record that pays alone, and not each
+ancestor, keeps a charge a fixed number of steps.
 
 **Consumers.** The root and the process manager, which give services and
-workers their class, budget and ceiling; the process service of each POSIX
-environment, which gives its processes budgets from its own; the creation
-and the lifecycle of processes, which compose admission and release.
+workers their class, budget and ceiling, and the holdings of the lower
+classes from which those admit threads in turn; the process service of
+each POSIX environment, which gives its processes budgets from its own;
+the creation and the lifecycle of processes, which compose admission and
+release.
 
-**Interface.** The class, the budget and the ceiling are arguments of the
-creation of a process, whose form belongs to the operation inventory. A
-class or a ceiling above the creator's class and a budget beyond the
-creator's holding are refused with one error of the caller's quota, and a
-budget of 0 is an error of the form of the arguments
+**Interface.** The class, one amount for each class and the ceiling are
+arguments of the creation of a process, whose form belongs to the
+operation inventory. A class or a ceiling above the creator's class and an
+amount beyond the creator's holding of its class are refused with one
+error of the caller's quota, and a budget of 0 or an amount for a class
+above the thread's is an error of the form of the arguments
 ([admission](scheduler/contract.md#admission)).
 
 **Prerequisites.** [Priority classes](#priority-classes),
@@ -484,23 +496,26 @@ the
 of the kernel objects and capabilities domain.
 
 **Engineering notes.** An admission writes the thread slots of the
-creator, of the new thread and of the last thread of its run queue, and the
-scheduler record of the CPU, within the write set of the creation. A
-process is reaped after its children, so holdings return up the tree in
-order. The holdings are fields of the budget records,
-per-CPU state classified in the
-[State fields](budget-ledger/contract.md#state-fields) of the budget-ledger
-contract, and the scheduling state of a thread is classified in the
-[State fields](scheduler/contract.md#state-fields) of the scheduler
-contract.
+creator, of the new thread and of the last thread of its run queue, and
+the scheduler record of the CPU, within the write set of the creation; the
+holdings of every class that move are fields of the two budget records, so
+the classes add no item. A process is reaped after its children, so
+holdings return up the tree in order. The budget records are per-CPU state
+classified in the [State fields](budget-ledger/contract.md#state-fields)
+of the budget-ledger contract, and the scheduling state of a thread is
+classified in the [State fields](scheduler/contract.md#state-fields) of
+the scheduler contract.
 
 **Verification.** Invariants: for each class, the holdings of all live
 records and the part of the cap that the root has not taken add up to the
-cap. Required counterexamples: a class above the creator's, a ceiling above
-it, a budget of 0, a budget one tick beyond the holding, a class whose cap
-is 0, a second admission of one thread, a chain of processes each of which
-gives its whole holding to the next. Environments: host tests with the
-frozen vectors of the prototype's admission and a property test of the
+cap; no record holds anything of a class above its own. Required
+counterexamples: a class above the creator's, a ceiling above it, a budget
+of 0, an amount for a class above the thread's, an amount one tick beyond
+the creator's holding of its class, a class whose cap is 0, a second
+admission of one thread, a chain of processes each of which gives its
+whole holding to the next, a thread that admits a thread of a lower class
+from the holding that its creator gave it. Environments: host tests with
+the frozen vectors of the prototype's admission and a property test of the
 conservation of holdings over trees of processes; QEMU runs that create
 processes with budgets from EL0.
 
@@ -533,9 +548,9 @@ processes with budgets from EL0.
   [boot and platform](../boot-platform/README.md) domain, and the EL0
   policy of the timers to the
   [memory and address spaces](../memory/README.md) domain.
-- The operation numbers and the encoding of `yield` and of the class,
-  budget and ceiling of a creation belong to the operation inventory of the
-  runtime ABI and SDK domain.
+- The operation numbers and the encoding of `yield` and of the class, the
+  amount of each class and the ceiling of a creation belong to the
+  operation inventory of the runtime ABI and SDK domain.
 - The POSIX interfaces of scheduling built on the classes belong to the
   compatibility personalities.
 

@@ -5,19 +5,20 @@ This page governs the code of the `budget-ledger` component of the
 its period, its class caps and the ledger of each class; the budget record
 of each thread with its holdings, its credit and its CPU time; the charge
 of a stopped dispatch, with the debt of an overrun; the replenishment at
-period boundaries; the admission that carves the budget of a new thread
-from its creator and the release that returns it at the reap; and the loan
-of a caller's context to the service of its call and its withdrawal. The
-priority classes, the run queues, the selection of the thread that runs,
-its time slice, preemption and the admission checks of the class and the
-ceiling belong to the [scheduler](../scheduler/contract.md) component, the
-module `scheduler` of the core (planned), which reads the dispatch credit
-that this page gives; when a loan is made and withdrawn belongs to the
-module `ipc` (planned); the creation and the reap of the thread of a
-process belong to the modules `creation` and `lifecycle` (planned), which
-compose the admission and the release of this page. The observable
-behaviour that these rules serve, with its evidence, is in the
-[requirements](requirements.md), the other document of the component.
+period boundaries; the admission that carves the holdings of a new thread
+from those of its creator, class by class, and the release that returns
+them at the reap; and the loan of a caller's context to the service of its
+call and its withdrawal. The priority classes, the run queues, the
+selection of the thread that runs, its time slice, preemption and the
+admission checks of the class and the ceiling belong to the
+[scheduler](../scheduler/contract.md) component, the module `scheduler` of
+the core (planned), which reads the dispatch credit that this page gives;
+when a loan is made and withdrawn belongs to the module `ipc` (planned);
+the creation and the reap of the thread of a process belong to the modules
+`creation` and `lifecycle` (planned), which compose the admission and the
+release of this page. The observable behaviour that these rules serve,
+with its evidence, is in the [requirements](requirements.md), the other
+document of the component.
 
 ## Terms
 
@@ -35,8 +36,9 @@ behaviour that these rules serve, with its evidence, is in the
   with the root flag ([Classes](#classes)).
 - **Class.** One of the three priority classes, control, interactive and
   background, from the highest to the lowest. `ledger::Class` (planned)
-  defines the classes and this order, which [Lending](#lending) compares,
-  and the scheduler's
+  defines the classes and this order, which [Lending](#lending) and
+  [Admission and release](#admission-and-release) compare, and the
+  scheduler's
   [priority classes](../scheduler/contract.md#priority-classes) select by
   it; the module of this page is below the scheduler's.
 - **Period index.** $\pi(t) = \lfloor (t - E) / P \rfloor$ for a time
@@ -45,10 +47,11 @@ behaviour that these rules serve, with its evidence, is in the
   $E + (\pi(t) + 1) P$.
 - **Budget record.** `ledger::Record` (planned): the fields of
   [Budget records](#budget-records) in the slot of a thread.
-- **Holding.** The amount per period that a record holds of one class.
-  The **budget** $b$ of a record is its holding of its own class; its
-  holdings of the other classes are what it can give to the threads that
-  it admits.
+- **Holding.** The amount per period that a record holds of one class. The
+  **budget** $b$ of a record is its holding of its own class. A record
+  holds nothing of a class above its own, and its holdings of the classes
+  below its own are what it can give, besides its budget, to the threads
+  that it admits ([Admission and release](#admission-and-release)).
 - **Spent.** The amount $s$ that a record or a class ledger has used, net
   of the replenishments it has received, as of its **stamp**, the period
   index at which it was last brought up to date. The **remaining credit**
@@ -80,9 +83,9 @@ behaviour that these rules serve, with its evidence, is in the
 
 The entries of the core are in the module `ledger` of `krepi-kernel`
 (planned). No entry of this page is an operation of the ABI inventory: the
-class, budget and ceiling of a thread are arguments of the creation of its
-process, and its CPU time is a result of the query of the lifecycle
-component.
+class, the amount of each class and the ceiling of a thread are arguments
+of the creation of its process, and its CPU time is a result of the query
+of the lifecycle component.
 
 | Entry point | Kind | Called by | ABI operation | Rules |
 | --- | --- | --- | --- | --- |
@@ -144,7 +147,7 @@ these fields:
 | --- | --- | --- |
 | `class` | The class of the thread | `admit` |
 | `ceiling` | The class of its ceiling | `admit` |
-| `holdings` | One amount for each class; the one of `class` is the budget $b$ | `admit`, `release` |
+| `holdings` | One amount for each class, 0 for each class above `class`; the one of `class` is the budget $b$ | `admit`, `release` |
 | `spent` and `stamp` | The spent $s$ and the period index at which it is up to date | `admit`, `charge`, `replenish`, `release` |
 | `cpu` | The CPU time | `admit`, `charge` |
 | `source` | None, or the owner of the borrowed context and the depth | `admit`, `lend`, `withdraw` |
@@ -160,6 +163,11 @@ these fields:
   of a record are at most the time less $E$, so below $2^{63}$, since the
   intervals of the dispatches of one CPU do not overlap and every charge
   adds one of them.
+- **Holdings by class.** A record holds nothing of a class above its own:
+  the root's class is control, the highest; an admission gives a thread
+  holdings of its own class and of the classes below it only; and a
+  release adds them to the record of the creator, whose class is not below
+  the thread's ([Admission and release](#admission-and-release)).
 - **References.** A record names other threads only by thread references
   of the objects component: the owner in its `source`. No record holds a
   copy of the credit of another.
@@ -180,10 +188,11 @@ that a context of a record of its class pays for, whichever thread runs
 on it, and its remaining credit bounds the dispatch credit of every thread
 whose context is of that class.
 
-- **No borrowing between classes.** A class never uses the cap of
-  another. The cap of a class that its threads leave unused in a period is
-  lost at the next boundary, as unused credit always is
-  ([Replenishment](#replenishment)).
+- **No borrowing between classes.** A class never uses the cap of another,
+  and an admission carves each holding from a holding of the same class
+  ([Admission and release](#admission-and-release)). The cap of a class
+  that its threads leave unused in a period is lost at the next boundary,
+  as unused credit always is ([Replenishment](#replenishment)).
 - **One period.** Every class ledger and every record of the ledger counts
   its periods from the epoch $E$ with the period $P$, so all of them
   replenish at the same boundaries.
@@ -330,12 +339,15 @@ admission or a release changes applies only from the time of that change.
   $\lceil d / b \rceil$ boundaries. The measure is the debt for a fixed
   budget: its thread, which may run on a borrowed context while its own
   record has debt, lowers $b$ and keeps `spent` when it admits a thread of
-  its own class, so it can raise the debt, and a budget of 0 keeps a debt
-  until a release returns a holding
-  ([Admission and release](#admission-and-release)). A class
-  ledger with debt $d$ and cap $c > 0$ is 0 within $\lceil d / c \rceil$
-  boundaries by the same argument, since no entry changes a cap. A
-  dispatch that runs at a boundary is charged by the closed form of
+  its own class, the only admission that changes its budget, so it can
+  raise the debt; its admission of a thread of a lower class takes only
+  holdings of the classes below its own and leaves $b$ and the debt as
+  they were; and a budget of 0 keeps a debt until a release returns a
+  holding of its class
+  ([Admission and release](#admission-and-release)). A class ledger with
+  debt $d$ and cap $c > 0$ is 0 within $\lceil d / c \rceil$ boundaries by
+  the same argument, since no entry changes a cap. A dispatch that runs at
+  a boundary is charged by the closed form of
   [Charging and debt](#charging-and-debt), which applies the same rule to
   each boundary it crosses.
 - **Budget 0.** A record with budget 0 is never replenished and has the
@@ -358,35 +370,48 @@ admission or a release changes applies only from the time of that change.
   sets the unallocated holdings to 0 and sets the root flag. It refuses
   with `AdmissionRejected` when the root flag is set, since the root has
   been admitted already; the flag decides this also when every cap is 0.
-- **A thread.** `admit(creator, child, class, budget, ceiling, now)` admits
-  the thread of a new process for the thread `creator` of the process that
-  creates it. It makes these checks in this order and returns the first
-  error: `budget` is not 0 (`InvalidConfiguration`); `creator` and `child`
-  resolve as the objects component states; `budget` does not exceed the
-  holding of `creator` of `class` (`AdmissionRejected`). That `class` and
-  `ceiling` are not above the class of `creator` is a check of the
-  scheduler's [admission](../scheduler/contract.md#admission); the composer
-  makes the checks of both entries in the order of errors that the
-  scheduler's [errors](../scheduler/contract.md#errors) give. It then
-  brings the record of `creator` up to date at `now`, lowers its holding of
-  `class` by `budget`, and writes the record of `child`: the `class`, the
-  `ceiling`, a holding of `budget` of `class` and of 0 of the other
-  classes, `spent` 0 at the stamp $\pi(\mathit{now})$, `cpu` 0, no source,
-  the effective class `class` and `pending` 0.
-- **The creator's budget.** An admission of a thread of the creator's own
-  class lowers the creator's budget; its `spent` is kept, so the admission
-  can leave the creator with less remaining credit or with debt in the
-  current period. The admission of a thread of another class leaves the
-  creator's budget as it was.
+- **A thread.** `admit(creator, child, class, amounts, ceiling, now)`
+  admits the thread of a new process for the thread `creator` of the
+  process that creates it. `amounts` gives one amount for each class: the
+  amount of `class` is the budget of `child`, and the amount of each class
+  below `class`, which may be 0, is the holding of that class that `child`
+  receives, from which its process can admit threads of that class. It
+  makes these checks in this order and returns the first error:
+  1. the amount of `class` is not 0, and the amount of each class above
+     `class` is 0 (`InvalidConfiguration`);
+  2. `creator` and `child` resolve as the objects component states;
+  3. the amount of each class does not exceed the holding of `creator` of
+     that class (`AdmissionRejected`).
+
+  That `class` and `ceiling` are not above the class of `creator` is a
+  check of the scheduler's
+  [admission](../scheduler/contract.md#admission); the composer makes the
+  checks of both entries in the order of errors that the scheduler's
+  [errors](../scheduler/contract.md#errors) give. It then brings the
+  record of `creator` up to date at `now`, lowers its holding of each
+  class by the amount of that class, and writes the record of `child`: the
+  `class`, the `ceiling`, the holdings that `amounts` gives, `spent` 0 at
+  the stamp $\pi(\mathit{now})$, `cpu` 0, no source, the effective class
+  `class` and `pending` 0.
+- **The creator's budget.** The budget of `creator` falls by the budget of
+  `child` when `class` is the class of `creator`, and stays as it was when
+  `class` is lower, since the amounts of the classes below its own come
+  from holdings that are not its budget. Its `spent` is kept, so an
+  admission of a thread of its own class can leave it with less remaining
+  credit or with debt in the current period. With the class of `child` and
+  each class below it carved separately, the process of `child` can admit
+  threads of its own class from its budget and threads of each lower class
+  from its holding of that class.
 - **Release.** `release(owner, child, now)` releases the record of the
-  thread `child` of a process that its owner reaps, with `owner` the thread
-  of the owner's process. It checks that both resolve and that `child` has
-  no source (`OutstandingLoan`), brings the record of `owner` up to date at
-  `now`, adds each holding of `child` to the holding of `owner` of the same
-  class and clears the record of `child`. The `spent` of `child`, including
-  its debt, leaves with the record; the class ledger keeps every charge
-  that it has counted, so the spending of the class in its period and its
-  debt are not erased by a release or a new admission.
+  thread `child` of a process that its owner reaps, with `owner` the
+  thread of the owner's process, which created it. It checks that both
+  resolve and that `child` has no source (`OutstandingLoan`), brings the
+  record of `owner` up to date at `now`, adds every holding of `child`, of
+  each class, to the holding of `owner` of the same class and clears the
+  record of `child`. The `spent` of `child`, including its debt, leaves
+  with the record; the class ledger keeps every charge that it has
+  counted, so the spending of the class in its period and its debt are not
+  erased by a release or a new admission.
 - **The current dispatch.** `admit` and `release` bring the record of the
   creator or of the owner up to date at `now`. When that record is the
   owner of the context of the current dispatch of the CPU, as it is when
@@ -402,11 +427,13 @@ admission or a release changes applies only from the time of that change.
   a release returns are those that its admission gave: what its children
   took has returned to it before.
 - **Conservation.** From the return of `Ledger::new` on, for each class
-  $k$, the holdings of class $k$ of the records of all live threads and the
-  unallocated holding of $k$ add up to $C_k$: `Ledger::new` sets the
-  unallocated holding to $C_k$, and each admission and each release moves
-  an amount between two of these terms. So the budgets of all threads of a
-  class never add up to more than its cap.
+  $k$, the holdings of class $k$ of the records of all live threads and
+  the unallocated holding of $k$ add up to $C_k$: `Ledger::new` sets the
+  unallocated holding to $C_k$, and each admission and each release moves,
+  for each class separately, one amount between two of these terms, from
+  the unallocated holdings to the root, from a creator to its child or
+  from a child back to its owner. So the budgets of all threads of a class
+  never add up to more than its cap.
 
 ## Lending
 
@@ -490,12 +517,12 @@ ceiling of `borrower`.
 
 | Error | Rule broken | Entries | Place in the order of errors |
 | --- | --- | --- | --- |
-| `InvalidConfiguration` | A counter frequency of 0, a period of 0 ticks or of $2^{62}$ ticks or more, or caps and a margin whose sum exceeds the period; a budget of 0 | `Ledger::new`; `admit` | At boot; for `admit`, the form of the register arguments |
+| `InvalidConfiguration` | A counter frequency of 0, a period of 0 ticks or of $2^{62}$ ticks or more, or caps and a margin whose sum exceeds the period; a budget of 0, or an amount above 0 for a class above the class of the thread | `Ledger::new`; `admit` | At boot; for `admit`, the form of the register arguments |
 | `Overflow` | A platform parameter whose ticks do not fit 64 bits | `Ledger::new` | At boot |
 | `WrongPool` of the objects component | A reference of another pool than the thread pool | Every entry that takes a thread | Handle resolution: the type |
 | `StaleReference` of the objects component | A thread reference that is not live | Every entry that takes a thread | Handle resolution: the liveness of the object |
 | `OutstandingLoan` | For `lend`, a borrower that has a source, or that is the lender or the owner of the lender's context; for `release`, a record that has a source | `lend`, `release` | Object state |
-| `AdmissionRejected` | A budget beyond the creator's holding of the class; the admission of the root when the root flag is set | `admit` | The caller's quota |
+| `AdmissionRejected` | An amount beyond the creator's holding of its class; the admission of the root when the root flag is set | `admit` | The caller's quota |
 | `LoanDepth` | A loan whose depth would exceed `MAX_LOAN_DEPTH` | `lend` | Shared capacity |
 
 - **Order.** Each entry checks in the order that its rule section states
@@ -526,12 +553,13 @@ whose rules are here; four of them, `InvalidConfiguration`,
 [scheduler contract](../scheduler/contract.md#errors) maps as well. That
 contract maps the other thirteen and the activation part of the
 prototype's `Busy` of its object pool. One of the thirteen,
-`AdmissionRejected`, is also an error of `admit` here, for a budget beyond
-the holding and for a second admission of the root. Here:
+`AdmissionRejected`, is also an error of `admit` here, for an amount
+beyond the creator's holding of its class and for a second admission of
+the root. Here:
 
 | Prototype error | Here |
 | --- | --- |
-| `InvalidConfiguration` | Kept, for the platform parameters of `Ledger::new` and a budget of 0; the form of the prototype's loan identities does not apply, since a loan has no identity |
+| `InvalidConfiguration` | Kept, for the platform parameters of `Ledger::new` and, for `admit`, a budget of 0 and an amount for a class above the thread's; the form of the prototype's loan identities does not apply, since a loan has no identity |
 | `ClockWentBackwards` | Not applicable: the time is an argument that does not decrease within a boot, a premise of time that no entry checks |
 | `Overflow` | Kept, for the conversion of a platform parameter at boot; the overflow of a charge, of a period boundary, of an admission sum and of a count does not apply, since the bounds of [Budget records](#budget-records) and the premises of time exclude it and the counts of the prototype are not kept |
 | `Object(_)` | Not kept as a wrapper: the errors of the objects component that this page meets, `WrongPool` and `StaleReference`, are returned as they are |
@@ -577,7 +605,7 @@ unallocated holdings with the root flag:
 | Entry | Write set | Items |
 | --- | --- | ---: |
 | `Ledger::new` | The ledger that it returns, before any token exists | - |
-| `admit` | The thread slots of the creator and of the child; for the root, the thread slot of the root and the unallocated holdings with the root flag | 2 |
+| `admit` | The thread slots of the creator and of the child, whose records hold the holdings of every class that it moves; for the root, the thread slot of the root and the unallocated holdings with the root flag | 2 |
 | `release` | The thread slots of the owner and of the child | 2 |
 | `charge` | The thread slot of the owner of the context; the class ledger of its class; the thread slot of the thread that ran, when it is not that owner | 3 |
 | `replenish` | The thread slot; the class ledger of its class | 2 |
@@ -607,8 +635,9 @@ The IPC component counts these items with the settlement of the call.
 - `Ledger::new` makes five conversions, one sum and four checks, and
   writes the ledger once, at boot.
 - `admit` and `release` resolve two thread references, bring one record up
-  to date and write two items; for the root, `admit` resolves one
-  reference, reads the root flag and writes two items.
+  to date, compare or add one amount for each of the three classes and
+  write two items; for the root, `admit` resolves one reference, reads the
+  root flag and writes two items.
 - `charge` resolves its thread and its `owner`, brings one record and one
   class ledger up to date at `since` and charges each with the closed form,
   and writes at most three items.
@@ -651,8 +680,9 @@ The IPC component counts these items with the settlement of the call.
 - **Effective class.** The effective class of a borrower is the rule of
   [Lending](#lending), from its own class, its ceiling and its lender's
   effective class.
-- **Admission.** The class, budget and ceiling of a thread are its
-  creator's arguments; the holdings that move are fixed by them.
+- **Admission.** The class, the amount of each class and the ceiling of a
+  thread are its creator's arguments; the holdings that move are fixed by
+  them.
 - **Requests.** The dispatches of one CPU stop one at a time, and requests
   that change the same records take effect in the order in which they
   enter the kernel, as the
@@ -716,10 +746,22 @@ lock order is stated here.
   that is not charged has, at each boundary, a smaller debt or 0, and 0
   after $\lceil d / b \rceil$ boundaries, for $d$ from 1 to $5b$; a record
   with budget 0 is never replenished.
+- Carving by class: for a creator of each class and a thread of its class
+  and of each class below it, an admission whose amount of each class
+  equals the creator's holding of that class is ok and one with one tick
+  more of one class is `AdmissionRejected`; an amount above 0 for a class
+  above the class of the thread is `InvalidConfiguration`, also when it
+  exceeds the creator's holding; the creator's budget falls by the budget
+  of the thread when the thread is of its own class and stays as it was
+  otherwise; a thread that has received a holding of a lower class admits
+  a thread of that class from it; and the release returns every holding of
+  each class to the creator.
 - Conservation: a property test admits and releases threads in a tree of
   processes of every class, among them creators that give their whole own
-  budget away, and checks after every write-back that the holdings of each
-  class and its unallocated holding add up to its cap.
+  budget away and creators that give holdings of lower classes to threads
+  that admit from them in turn, and checks after every write-back that the
+  holdings of each class and its unallocated holding add up to its cap and
+  that no record holds anything of a class above its own.
 - The root: a second admission of the root is `AdmissionRejected`, also
   with every cap 0.
 - The current dispatch: an admission and a release by a thread that runs
@@ -815,8 +857,9 @@ ledger is written `period=<P> caps=<c>/<i>/<b> margin=<M> epoch=<E>`, with
 the caps of control, interactive and background, as `Ledger::new` gives it
 for parameters in microseconds at a frequency of 1,000,000 Hz. A process and
 its thread have one name. "X admits T in class k with b" is
-`admit(X, T, k, b, k, now)`, with the ceiling the class itself unless the
-row gives another; R is the root's thread, admitted at the epoch by the
+`admit(X, T, k, amounts, k, now)` with the amount b of class k and 0 of
+every other class, and with the ceiling the class itself unless the row
+gives another; R is the root's thread, admitted at the epoch by the
 admission of the root of this page alone, which holds every cap and which no
 vector makes ready, and its holdings fall by what it admits. "T runs from s
 to t" is a dispatch of T that the scheduler starts at s and stops at t,
@@ -852,13 +895,16 @@ inputs; their rows state the property and the generation rule.
 
 **Behaviour changes.** These rules differ from the prototype:
 
-- An admission carves a thread's budget from its creator's holding, and
-  the reap returns it; a charge changes the record of the context and its
-  class only. The prototype's CPU scopes, with their roots, delegation,
-  scoped admission, receipts, generations, the charge of every ancestor
-  and the refusal to release a scope with spending (`OutstandingBudget`,
-  `DuplicateOwner`, `StaleScope`), do not apply; where a vector asserts the
-  spending of a scope, its row gives that of the record or of the class.
+- An admission carves a thread's budget, and its holdings of the classes
+  below its own, from its creator's holdings of the same classes, and the
+  reap returns them; a charge changes the record of the context and its
+  class only. A creator may admit a thread of a class below its own, where
+  the prototype's child scopes took the class of their parent. The
+  prototype's CPU scopes, with their roots, delegation, scoped admission,
+  receipts, generations, the charge of every ancestor and the refusal to
+  release a scope with spending (`OutstandingBudget`, `DuplicateOwner`,
+  `StaleScope`), do not apply; where a vector asserts the spending of a
+  scope, its row gives that of the record or of the class.
 - A process has one thread, so the prototype's replacement threads within
   one process or scope do not apply; a thread admitted after a reap is the
   thread of a new process, with a record of its own.

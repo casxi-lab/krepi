@@ -382,10 +382,11 @@ and these entries and events change it:
   and the kernel margin add up to at most the period, a check of
   `Ledger::new` of the budget-ledger component at boot
   ([Platform parameters and time](#platform-parameters-and-time)). The
-  caps are disjoint: the holdings that admission carves are holdings of one
-  class, so an admission of an interactive or a background thread never
-  takes from the control cap, and the control cap is set aside before any
-  admission of the other classes
+  caps are disjoint: admission carves each holding from a holding of the
+  same class and gives a thread nothing of a class above its own, so an
+  admission of an interactive or a background thread never takes from the
+  control cap, and the control cap is set aside before any admission of
+  the other classes
   ([admission and release](../budget-ledger/contract.md#admission-and-release)).
 - **Kernel margin.** `KERNEL_MARGIN` of each period is admitted to no class:
   it is the time of the kernel and of interrupts, so the budgets that
@@ -405,12 +406,14 @@ and these entries and events change it:
 
 ## Admission
 
-- **Inputs.** The creator of a new thread gives its class, its budget and
-  its service ceiling, the highest class that a loan can lend it, through
-  the arguments of the creation call. The creation component composes
-  `admit` of this page with `ledger::admit` of the budget-ledger component
-  in the write set that creates the thread; the ABI form of the arguments
-  belongs to the ABI inventory.
+- **Inputs.** The creator of a new thread gives, through the arguments of
+  the creation call, its class; one amount for each class, of which the
+  amount of its class is its budget and those of the classes below it are
+  the holdings from which its process can admit threads of those classes;
+  and its service ceiling, the highest class that a loan can lend it. The
+  creation component composes `admit` of this page with `ledger::admit` of
+  the budget-ledger component in the write set that creates the thread;
+  the ABI form of the arguments belongs to the ABI inventory.
 - **Checks.** `admit(creator, thread, class, ceiling, now)` checks, in this
   order and before the first write of the composition:
   1. the references of the creator and of the new thread
@@ -424,12 +427,13 @@ and these entries and events change it:
   A ceiling at or below the class of the thread lends it no higher class,
   since its effective class is the higher of its own class and the class
   that a loan gives it within the ceiling
-  ([lending](../budget-ledger/contract.md#lending)).
-  The budget of 0 and a budget beyond the creator's holding of the class
-  are refused by `ledger::admit`
+  ([lending](../budget-ledger/contract.md#lending)). The amounts are
+  checked by `ledger::admit`
   ([admission and release](../budget-ledger/contract.md#admission-and-release)),
-  with its errors; the composer makes the checks of both entries before its
-  first write, in the order of errors of [Errors](#errors).
+  with its errors: a budget of 0, an amount above 0 for a class above the
+  class of the thread, and an amount beyond the creator's holding of its
+  class. The composer makes the checks of both entries before its first
+  write, in the order of errors of [Errors](#errors).
 - **Effect.** `admit` makes the thread ready at the tail of the queue of its
   class with a whole slice, and sets the reschedule flag as
   [Preemption](#preemption) states. The creation component decides when, in
@@ -512,13 +516,14 @@ The values are read-only after boot.
 | `InvalidState` | A thread or a dispatch in a state other than the one that the entry needs: `admit` of a thread that is not new; `enqueue` of one that is not blocked; `requeue` of one that is neither ready nor running; `remove` of one that is new or removed; `choose` while a dispatch runs; `preempt`, `yield_now` and `block` without a dispatch; `preempt` before the deadline of the dispatch without the reschedule flag | `admit`, `enqueue`, `requeue`, `remove`, `choose`, `preempt`, `yield_now`, `block` | Object state |
 | `AdmissionRejected` | A class, or a service ceiling, above the class of the creator | `admit` | The caller's quota |
 
-- **Order.** Each entry checks in the order of its rule section and returns
-  the first error. A composing operation applies the order of errors of the
-  [security model](../../../security.md#internal-choices): the form of its
-  arguments, among them the budget of 0 that `ledger::admit` refuses, comes
-  first; then handle resolution, then object state, then the caller's
-  quota, where the class and the ceiling of this page come before the
-  holding that `ledger::admit` checks.
+- **Order.** Each entry checks in the order of its rule section and
+  returns the first error. A composing operation applies the order of
+  errors of the [security model](../../../security.md#internal-choices):
+  the form of its arguments, among them the budget of 0 and the amounts
+  above the class of the thread that `ledger::admit` refuses, comes first;
+  then handle resolution, then object state, then the caller's quota,
+  where the class and the ceiling of this page come before the holdings
+  that `ledger::admit` checks.
 - **No change on failure.** No error changes state: an entry of this page
   that returns an error leaves every field of the kernel state as it was,
   the copies in the write set included, and writes no counter; a composing
@@ -542,8 +547,8 @@ pool, which the objects contract moved to the scheduler. Here:
 
 | Prototype error | Here |
 | --- | --- |
-| `InvalidConfiguration` | Kept, for the check of the time slice; the prototype's capacity of 0 does not apply, since the run queues take the threads of the thread pool and have no capacity of their own. The checks of the period, the caps, the margin and a budget of 0 are the budget-ledger component's, with its own row |
-| `AdmissionRejected` | Kept, for a class or a ceiling above the creator's class; a budget beyond the creator's holding is the budget-ledger component's |
+| `InvalidConfiguration` | Kept, for the check of the time slice; the prototype's capacity of 0 does not apply, since the run queues take the threads of the thread pool and have no capacity of their own. The checks of the period, the caps, the margin and the amounts of an admission are the budget-ledger component's, with its own row |
+| `AdmissionRejected` | Kept, for a class or a ceiling above the creator's class; an amount beyond the creator's holding of its class is the budget-ledger component's |
 | `Duplicate` | Not applicable: a thread is admitted once, in the write set that creates it, and a second `admit` of it, which no composer makes, is `InvalidState` |
 | `Capacity` | Not applicable: a run queue holds threads of the thread pool and has no capacity of its own |
 | `UnknownThread` | Not applicable: the entries take thread references, and a reference that is not live is `StaleReference` of the objects component |
@@ -860,9 +865,10 @@ line.
 **Notation.** Times, budgets, slices, credits and deadlines are in ticks,
 decimal. Threads are named by the letters of their tests, classes by their
 names. The cases call `admit(t, class, budget)`, which the creator of the
-row makes, R unless the row names another, with `ledger::admit` and the
-ceiling equal to the class; `enqueue(t, now)`, `requeue(t, now)`
-and `remove(t, now)`; `choose(now)`, or `choose(now, e)` with the external
+row makes, R unless the row names another, with `ledger::admit`, the
+amount `budget` of `class` and 0 of every other class, and the ceiling
+equal to the class; `enqueue(t, now)`, `requeue(t, now)` and
+`remove(t, now)`; `choose(now)`, or `choose(now, e)` with the external
 deadline $e$; and `preempt(now)`, `yield_now(now)` and `block(now)` of the
 current dispatch. The output of `choose` is `ok <thread> deadline=<d>`, or
 `ok idle wake=<w>`, or `ok idle` without a wake time; the output of another
@@ -937,10 +943,13 @@ a thread is `ledger::cpu_time` of the budget-ledger component.
 - The scheduler has no capacity and no registry, and takes references, not
   handles: the prototype's duplicate admission, capacity, unknown thread,
   restricted handles and threads of other pools do not apply as written.
-- Admission is part of the creation of a thread and takes its budget from
-  the holding of its creator; there are no scopes, so the vectors of scopes
-  keep only their cases of admission, and a budget beyond a holding is
-  refused without the prototype's sums and their `Overflow`.
+- Admission is part of the creation of a thread and takes its budget, and
+  its holdings of the classes below its own, from the holdings of its
+  creator, whose class may be above its own, where the prototype's child
+  scopes took the class of their parent; there are no scopes, so the
+  vectors of scopes keep only their cases of admission, and a budget
+  beyond a holding is refused without the prototype's sums and their
+  `Overflow`.
 - The platform parameters are given in microseconds and converted at boot;
   the prototype's quantum is the time slice of this page, its epoch the
   start of the periods of the budget-ledger component, the time of the

@@ -19,11 +19,11 @@ the component, so the metadata lists none.
   rules of the prototype's budget scheduler and of its synchronous budgets,
   which the [references](contract.md#references) of the contract list, with
   their host tests as the frozen [vectors](contract.md#legacy-test-vectors).
-- The holdings that an admission carves from its creator and that the reap
-  returns, with charges to the record of a thread and to its class alone,
-  the time of a transition as an argument with its premises, the platform
-  parameters with the kernel margin converted at boot, and the records in
-  the thread slots are new, from the kernel's
+- The holdings that an admission carves from its creator, class by class,
+  and that the reap returns, with charges to the record of a thread and to
+  its class alone, the time of a transition as an argument with its
+  premises, the platform parameters with the kernel margin converted at
+  boot, and the records in the thread slots are new, from the kernel's
   [scheduling and budgets](../../../architecture.md#scheduling-and-budgets)
   and the budget lending of its
   [IPC](../../../architecture.md#ipc-notifications-and-waits); the
@@ -164,17 +164,21 @@ that a wait across one boundary leaves at 5.
 ### LEDG-R05
 
 **Admission and release.** The root starts with a holding of each class
-equal to its cap and is admitted once. An admission carves the budget of a
-new thread from its creator's holding of the thread's class, so that a
-creator's own budget falls when it admits a thread of its own class, and
-refuses a budget of 0 with `InvalidConfiguration` and a budget beyond the
-holding with `AdmissionRejected`. The reap of a thread returns its holdings
-to its owner at once, and the spending of its class stays in the class
-ledger. For each class, the holdings of all records and the part that the
-root has not taken add up to its cap. The criterion: the vectors hold, among
-them a chain of six processes each of which gives its whole holding to the
-next, and a thread admitted after the reap of one that overran its budget,
-which the class ledger throttles.
+equal to its cap and is admitted once. An admission gives a new thread one
+amount for its class and one for each class below it, each carved from its
+creator's holding of the same class: the amount of its class is its
+budget, and the others let its process admit threads of those classes in
+turn. A creator's own budget falls only when it admits a thread of its own
+class. A budget of 0 and an amount for a class above the thread's are
+refused with `InvalidConfiguration`, and an amount beyond the creator's
+holding with `AdmissionRejected`. The reap of a thread returns all its
+holdings to its owner at once, and the spending of its class stays in the
+class ledger. For each class, the holdings of all records and the part
+that the root has not taken add up to its cap. The criterion: the vectors
+hold, among them a chain of six processes each of which gives its whole
+holding to the next, and a thread admitted after the reap of one that
+overran its budget, which the class ledger throttles, and the host test of
+the carving by class holds.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `ledger::admit` and `ledger::release` (planned).
@@ -189,8 +193,9 @@ which the class ledger throttles.
   `scheduler-budget-scopes-lifecycle-3`,
   `scheduler-budget-scopes-lifecycle-7`, `scheduler-budget-lifecycle-3` and
   `scheduler-budget-lifecycle-4` as host tests, and the property test of
-  the conservation of holdings and the host tests of the root and of the
-  current dispatch of the [contract](contract.md#testing-obligations).
+  the conservation of holdings and the host tests of the root, of the
+  carving by class and of the current dispatch of the
+  [contract](contract.md#testing-obligations).
 
 ### LEDG-R06
 
