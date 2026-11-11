@@ -1451,7 +1451,7 @@ keys; times are seconds, rounded to milliseconds.
 | `started`, `seconds` | The Unix time in seconds at which the run started, and how long it took |
 | `commit`, `tree` | The snapshot commit and its root tree, or `null` |
 | `inputs` | `before` and `after`, the object of each gate input (`mode`, `type`, `oid`, or `null` when the commit does not have it) at the start and at the end, or `null` when they were not taken; `clean_after`, whether the gate inputs were clean at the end, or `null` |
-| `budgets` | `gate_seconds`, 7200 and the budget of each target that the run selects, and `receipt_margin_seconds`, 300 |
+| `budgets` | `gate_seconds`, 7200 and the budget of each target that the run selects, or 14,400 for a run of `cargo xtask formal mutants`, whatever the budgets of its targets ([source mutants and survivors](#source-mutants-and-survivors)), and `receipt_margin_seconds`, 300 |
 | `resources` | What the run used of the host, below |
 | `phases` | For each phase, `budget_seconds`, `seconds` and `ran` |
 | `units` | For each unit, its `phase`, its `status` and the `reason` for it, or `null` |
@@ -1672,9 +1672,10 @@ receipt, 195 with no formal target, and the job `formal planned` 15
 minutes before its gate, the step of the gate and 3 minutes after it. The
 records of the runs of the workflow name no limit for these two jobs,
 whose limits are expressions. A job of a hosted runner ends after 360
-minutes; when the budgets need a longer job, or a target name is not of
-lowercase letters, digits and hyphens,
-the job `formal limits` fails, and the jobs after it do not run.
+minutes, so the formal targets may register 9,900 s of budgets in all,
+five targets of the default budget but not six; when the budgets need a
+longer job, or a target name is not of lowercase letters, digits and
+hyphens, the job `formal limits` fails, and the jobs after it do not run.
 
 The job `formal planned`, beside `formal run`, runs the gate on the planned
 targets of the head's registry, which a whole run does not select: with the
@@ -1687,8 +1688,9 @@ reaches the gate and it writes its receipt; the step has two minutes more
 than that deadline. Its steps
 are those of `formal run`, without the guard and the vectors, and with a
 shorter probe; without a planned target it checks out the head, says that
-there are none and passes. It summarizes the receipt and uploads it with
-the logs as `formal-planned-<commit>-<attempt>`. Until a planned target is
+there are none and passes. It summarizes the receipt, with workflow
+commands turned off, and uploads it with the logs as
+`formal-planned-<commit>-<attempt>`. Until a planned target is
 registered in `verification/targets.json`, it runs nothing.
 
 The measurement jobs `leanchecker fresh`, `leanchecker prefix` and
@@ -1791,6 +1793,11 @@ a tool, and each broken rule is a problem:
   `#[derive(..)]` of a production type in the file defines, not a
   production function.
 
+A target name is made of lowercase letters, digits and hyphens and starts
+with a letter or a digit. `cargo xtask formal check` does not check it: the
+job `formal limits` of the workflow `formal` ([CI job](#ci-job)) fails on
+another name before the names reach a gate.
+
 The targets of the registry run in two phases of the gate. The phase
 `extraction`, before the base round, extracts the targets that the run
 selects and every formal target, since the base round builds every proof
@@ -1849,8 +1856,10 @@ The commands of the unit of a target and of the units of its registered
 mutants share its `budget`, 1,800 s unless the registry gives another: each
 runs for at most the budget less the seconds of the earlier commands of
 these units, in either phase, and the base round between them does not
-count. A command that meets that limit is
-`BUDGET`, and so is the target. The calibration target registers a
+count. A command that meets that limit concludes its own unit `BUDGET`:
+the unit of the target while the target is extracted, built and checked,
+or that of a mutant, which leaves the target as it was concluded; the run
+is `BUDGET` either way. The calibration target registers a
 budget of 3,000 s ([calibration target](#calibration-target)); a target
 of the kernel keeps the default.
 
@@ -2035,7 +2044,11 @@ staged, built and judged as a registered mutant. A mutant that
 build is rejected is killed, and one whose build is accepted survives. An
 inconclusive mutant, and one with a command that fails as a tool or meets
 the budget, conclude the unit otherwise than `VERIFIED`, and the command
-then writes no list and exits with 1.
+then writes no list and exits with 1. So does a run that is not `SCOPED`
+for another reason, such as a unit of the qualification or of the base
+round that is not `VERIFIED`. A theorem of the obligations that is not a
+top-level theorem of the proof modules, against which no error could
+count, concludes the unit `REJECTED` before any mutant is generated.
 
 The run writes the list of survivors of the target,
 `verification/mutants/<target>.json`, or that of the calibration below
@@ -2055,9 +2068,12 @@ Its fields:
 A reviewer gives every survivor a class, `missing-lemma` for a property
 that the proofs lack, `no-theorem` for a function that no theorem covers,
 or `equivalent` for a mutant with the meaning of the source, and a reason
-that is not blank. `cargo xtask formal check` fails on a survivor without
-a class or a reason, and on a list that does not parse or is not that of a
-registered target at its path; it names the functions of the survivors of
+that is not blank. A survivor in a function of `unclosed`, which no
+theorem is about, is written with the class `no-theorem` and keeps it.
+`cargo xtask formal check` fails on a survivor without a class or a
+reason, on one in a function of `unclosed` of another class, and on a
+list that does not parse or is not that of a registered target at its
+path; it names the functions of the survivors of
 class `no-theorem` in its report
 ([legacy inventory and admission](#legacy-inventory-and-admission)). A
 refinement task names the operators that it uses; an operator is added to
@@ -2146,12 +2162,19 @@ example the 7,200 s and the 1,800 s of its planned target, and that of the
 mutants the 14,400 s of `formal mutants`; with the 300 s of the receipt,
 175, 155 and 245 minutes. Each step has two minutes more, the jobs of the
 two runs 23 minutes more than their steps and the job of the mutants 20,
-267 minutes in all. A newer event of the same pull request cancels a job
-that has not ended. Each job summarizes its receipt, with the budget and
-the seconds of each target and the SHA-256 of the receipt, and uploads the
-receipt, the summary, the output of the check and the logs compressed into
-`logs.tar.gz`, as `formal-calibration-<job>-<commit>-<attempt>`; the job of
-the mutants uploads the list of survivors as well.
+267 minutes in all. The limits of the jobs `calibration run` and
+`planned example` are an expression of their matrix, so the records of
+the runs of the workflow name no limit for them, as for the jobs
+`formal run` and `formal planned`. A newer event of the same pull request
+cancels a job that has not ended. Each job summarizes its receipt, with
+the budget and the seconds of each target and the SHA-256 of the receipt,
+with workflow commands turned off, since the receipt holds text of Lean
+and Lake, and uploads the receipt, the summary, and the record of the
+runner, the output of the check and the logs of the gate compressed into
+`logs.tar.gz`, as `formal-calibration-<job>-<commit>-<attempt>`. The job
+of the mutants uploads the list of survivors as well, from
+`artifacts/formal/mutants/` and only when its run passed: a run that fails
+writes no list, and the checkout may hold the list of an earlier run.
 
 ## Specifications
 

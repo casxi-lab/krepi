@@ -905,7 +905,7 @@ on trees of files in memory and on fixture contracts.
 `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration]`
 generates the source mutants of a formal target with its operators and runs
 each through a run of the gate on the target, with a budget of 14,400 s,
-and writes the list of the survivors
+and, when the run is `SCOPED`, writes the list of the survivors
 ([source mutants and survivors](../formal-verification.md#source-mutants-and-survivors)).
 It is not part of the check: the job `calibration mutants` of the workflow
 `formal calibration` runs it on the calibration target. Its unit tests run
