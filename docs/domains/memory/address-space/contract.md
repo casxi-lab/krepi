@@ -792,11 +792,15 @@ channel.
 The virtual timer traps as well: it is not an output of EL0, and the kernel
 uses it for preemption
 ([interrupts](../../boot-platform/boot/contract.md#interrupts)), which a
-write of `CNTV_CTL_EL0` at EL0 would stop. The rules need, where EL2
-exists, `HCR_EL2.{E2H, TGE}` other than `{1, 1}` and `MDCR_EL2.TPM` 0,
-without which a read of `PMUSERENR_EL0` at EL0 traps to EL2: QEMU virt in
-its configuration has no EL2, and a board that enters at EL2 drops to EL1
-with `HCR_EL2.TGE` 0 and `MDCR_EL2.TPM` 0.
+write of `CNTV_CTL_EL0` at EL0 would stop. A write at EL0 of a register
+that is only read, such as `CNTPCT_EL0`, `PMCEID0_EL0` or `MDCCSR_EL0`, is
+undefined, with `EC` `0x00`, rather than a trap of the table. The rules
+need, where EL2 exists, `HCR_EL2.{E2H, TGE}` other than `{1, 1}` and
+`MDCR_EL2.TPM` 0, and, where EL3 exists, `MDCR_EL3.TPM` 0, without which a
+read of `PMUSERENR_EL0` at EL0 traps to EL2 or EL3: QEMU virt in its
+configuration has neither, a board that enters at EL2 drops to EL1 with
+`HCR_EL2.TGE` 0 and `MDCR_EL2.TPM` 0, and the firmware leaves
+`MDCR_EL3.TPM` 0.
 
 `write_controls` writes the eight bits of `SCTLR_EL1` that govern EL0 by a
 read-modify-write that changes no other bit: it clears the bits of the mask
@@ -1292,7 +1296,8 @@ limit `0x2000`.
   of asynchronous exceptions taken from EL0 by `PSTATE`; `SCTLR_EL1` with
   `UMA`, `SA0`, `E0E`, `UCT`, `DZE`, `UCI`, `nTWI` and `nTWE`;
   `CNTKCTL_EL1`, `PMUSERENR_EL0` and `MDSCR_EL1` with their traps of EL0;
-  and the effect of `HCR_EL2.{E2H, TGE}` and of `MDCR_EL2.TPM` on them.
+  and the effect of `HCR_EL2.{E2H, TGE}`, of `MDCR_EL2.TPM` and of
+  `MDCR_EL3.TPM` on them.
 - Arm Limited, *Arm Cortex-A76 Core Technical Reference Manual*, revision
   r4p1, document 100798_0401_00_en, 2020,
   <https://documentation-service.arm.com/static/5f562083235b3560a01e03bc>:

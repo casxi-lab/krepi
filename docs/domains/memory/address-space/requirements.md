@@ -301,7 +301,8 @@ and an access at EL0 to the physical counter, to the physical or virtual
 timer, to the performance monitors or to the debug communications channel
 traps with the exception class `0x18`, except an access to `PMUSERENR_EL0`
 itself, of which a read does not trap and a write is undefined, with the
-exception class `0x00`; EL0 cannot mask an interrupt, its stack pointer is
+exception class `0x00`, and a write of a register that is only read, which
+is undefined as well; EL0 cannot mask an interrupt, its stack pointer is
 checked for alignment, its data accesses are little-endian, it reads
 `CTR_EL0`, executes `DC ZVA`, cache maintenance by address and `WFE`
 without a trap, and a `WFI` that would wait traps. Every CPU has these
