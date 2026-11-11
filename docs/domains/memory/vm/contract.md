@@ -52,7 +52,9 @@ the other document of the component.
   its neighbours in address order, the count of its pages that hold a
   frame and its phase, live or pending with the progress of its release. A
   commit raises the count by its pages, and the return of each frame of the
-  region to the pool lowers it by one.
+  region to the pool in a decommit or a release lowers it by one; the
+  revocation at the destruction of a process frees the rows with the whole
+  table instead.
 - **Page pool.** `vm::Pool` (planned): the frames that the boot carves in
   one range of RAM, with their free stack and their metadata
   ([Configuration and the page pool](#configuration-and-the-page-pool)).
@@ -73,7 +75,8 @@ the other document of the component.
   operation whose progress is stored and which has no result yet; or the
   result of the operation.
 - **Cursor.** The field of the VM head that holds the operation in
-  progress, the next page, its end and the frame of the plan in flight; it
+  progress with its row, the next page, its end and the frame of the plan
+  in flight; it
   is empty between transitions. A plan is in flight from the entry that
   gives it to its `acknowledge`.
 - **Pending and completed.** A region is pending from the transaction that
@@ -334,9 +337,10 @@ page ownership table:
 - `Pool::free()` gives the number of free frames. `Pool::take(process)`
   takes the top frame as a loaded frame of the process, links it at the
   head of the committed chain of the process and gives its physical
-  address. The creation of a process calls it after its write-back, for
-  each private page of the image that it loads, having checked `free` and
-  charged the pages before its first write (planned); `take` of an empty
+  address. The creation of a process calls it after its write-back and
+  before its first plan, for each private page of the image that it loads,
+  having checked `free` and charged the pages before its first write
+  (planned), so that no plan in flight needs a free frame; `take` of an empty
   pool is `OutOfPages` and changes nothing, a call that no composer makes.
   A commit takes its frames as committed frames ([Commit](#commit)).
 - Every frame has exactly one holder at any time: the pool or one process,
@@ -495,7 +499,9 @@ committed page of it, in two phases, and gives no result value.
   frame and, at the `acknowledge` of that plan, the return of the frame
   with the credit of one committed VM page and the count of the row
   lowered by one. The write set of a step is 2 items, the row with its
-  phase and progress and the VM head with the cursor. A step ends:
+  phase and progress and the VM head with the cursor; a step that completes
+  the region without a committed page among its pages also holds the
+  neighbours of the row in address order, at most 4 items. A step ends:
   - with the completion of the region, when its progress has reached its
     end or its count is 0: the row leaves the region table and the result
     of the call is `ok`;
@@ -1159,7 +1165,7 @@ the events of a region become the plans of each of its pages.
 | Vector | Line | Test | Expected output | Entry |
 | --- | ---: | --- | --- | --- |
 | `vm-failures-1` | 3 | `partial_mapping_failure_retires_the_prefix_and_releases_exact_charge` | A map of 2 pages whose backend maps a prefix and fails is `err=Backend`; the events are `zero`, `map`, `unmap`, `invalidate` and `scrub`; no mapping remains, and the charged pages, the free bytes and the regions are those from before | No case: a commit makes all its checks before its first write and none of its plans fails, so there is no partial map to retire |
-| `vm-failures-2` | 20 | `failed_map_retirement_is_retained_even_without_a_published_receipt` | A map of 2 pages whose backend fails to map and then to invalidate is `err=Retirement`: 2 pages and 1 retiring region remain, with 6 charged pages and 2 mapping obligations; a further map is `err=Busy`; nothing has been scrubbed; a retry with a working backend leaves no region | `release` of a region of 2 committed pages whose first unmap plan a host test holds without `acknowledge`: the region is pending, no zero plan has been given, the frames are off the pool and the usage of committed VM pages stays 2; `commit` in the region, `err=Pending`; after the `acknowledge` of every plan and the calls that continue the release, the region is gone, `ok`, and the frames are in the pool. A failed retirement has no case: a held plan is one not yet acknowledged, and no plan fails |
+| `vm-failures-2` | 20 | `failed_map_retirement_is_retained_even_without_a_published_receipt` | A map of 2 pages whose backend fails to map and then to invalidate is `err=Retirement`: 2 pages and 1 retiring region remain, with 6 charged pages and 2 mapping obligations; a further map is `err=Busy`; nothing has been scrubbed; a retry with a working backend leaves no region | `release` of a region of 2 committed pages whose first unmap plan a host test holds without `acknowledge`: the region is pending, no zero plan has been given, the frames are off the pool and the usage of committed VM pages stays 2; the prototype's further map lies after the region: here a `reserve` there while the plan is held is `err=InvalidState`, and a `commit` in the region `err=Pending`; after the `acknowledge` of every plan and the calls that continue the release, the region is gone, `ok`, and the frames are in the pool. A failed retirement has no case: a held plan is one not yet acknowledged, and no plan fails |
 | `vm-failures-3` | 45 | `failed_unmap_or_invalidation_keeps_pages_and_prevents_process_reaping` | For a failing invalidation and then a failing unmap: the unmap of a region of 2 pages filled with `0xde` is `err=Retirement`, nothing is scrubbed, the pages keep `0xde` and 2 pages stay mapped, and the destruction of the domain is `err=ReferencesOutstanding`; with a working backend the unmap and the close succeed | `release` of a region of 2 pages filled with `0xde`, with its first unmap plan executed and held before its `acknowledge`, and then with it held before its execution: in both, no zero plan has been given, the frames keep `0xde` and stay off the pool, and the usage of committed VM pages stays 2; after the `acknowledge` of every plan the release completes, `ok`. That the process does not reach Dead before its frames return is a gate of the lifecycle component (planned) |
 | `vm-failures-4` | 70 | `owner_fault_closes_authority_but_keeps_retirement_and_peer_independent` | Domain a maps 2 pages and domain b 1 page, filled with `0xf3`; a's execution ends by a fault and its space is closed; with a failing invalidation, the close of a's grant is `err=Retirement`, the grant is no longer open, 3 pages are mapped and the destruction of a is `err=ReferencesOutstanding`; with a working backend, the close and the destruction succeed, and b's page keeps `0xf3` | After the fault of process a, whose destruction is the lifecycle component's (planned), `revoke_step` of a after the invalidation of its ASID and the reset of its tables, with its first zero plan held: a's 2 frames stay off the pool and its usage of committed VM pages stays 2; after the `acknowledge` of every plan, the revocation completes, a holds no frame, and b's frame keeps `0xf3`. The grant and its close have no case |
 | `vm-failures-5` | 102 | `active_cpu_blocks_mapping_and_closure_without_callback_or_state_change` | While domain a runs on the execution manager, a map and the close of the grant of domain b are each `err=Execution(Busy)`; b's grant stays open, the backend has no event and the registry is unchanged | No case: an operation acts only on the address space of the calling thread, the one thread of its process, and an entry runs to completion, so no operation meets another address space or one that runs |
