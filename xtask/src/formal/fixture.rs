@@ -226,8 +226,9 @@ fn aeneas(root: &str) -> String {
 /// The Lake stand-in, whose `@ROOT@` is the root of the fixture. It
 /// records each call and keys it: in the stage of the base round by what it
 /// runs, `build`, `planned` (a build without `--wfail`), `audit`,
-/// `heartbeats` or `leanchecker-<prefix>`; elsewhere by the target that it
-/// builds, or `Audit`. It runs the script `<key>.sh` of `artifacts/lake` that
+/// `heartbeats` or `leanchecker-<prefix>`; in the stage of a proof target
+/// the audit is `audit` too; elsewhere by the target that it builds, or
+/// `Audit`. It runs the script `<key>.sh` of `artifacts/lake` that
 /// a test gives, then answers. A build completes. The case audit reports
 /// `propext` and `Quot.sound` for each theorem that `Audit.lean` names. The
 /// base audit prints, for each own module of `Audit.lean`, its marker and,
@@ -248,6 +249,7 @@ case "$PWD $1 $2 $3" in
   */base/stage/*" env lean --json") key=heartbeats ;;
   */base/stage/*" env lean "*) key=audit ;;
   */base/stage/*" env leanchecker "*) key=leanchecker-$3 ;;
+  */targets/*" env lean "*) key=audit ;;
   *" build "*) for argument; do key=$argument; done ;;
   *) key=Audit ;;
 esac

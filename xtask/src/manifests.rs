@@ -301,9 +301,9 @@ fn source_paths(line: &str) -> Vec<&str> {
 /// The arguments of Cargo that resolve the kernel workspace offline, from its
 /// `Cargo.lock` and with every feature of its members, run from the
 /// repository root; the proof gate runs the same command in its export of
-/// the repository.
-pub fn kernel_metadata_args() -> Vec<String> {
-    let manifest = format!("{KERNEL}/Cargo.toml");
+/// the repository, for the workspace `kernel` of its layout.
+pub fn kernel_metadata_args(kernel: &str) -> Vec<String> {
+    let manifest = format!("{kernel}/Cargo.toml");
     [
         "metadata",
         "--format-version",
@@ -323,7 +323,7 @@ pub fn kernel_metadata_args() -> Vec<String> {
 /// package that is not cached, or a stale `Cargo.lock`, fails the
 /// resolution.
 pub fn kernel_metadata(root: &Path) -> Result<Json, String> {
-    let args = kernel_metadata_args();
+    let args = kernel_metadata_args(KERNEL);
     let program = check::cargo();
     let shown = format!("{} {}", program.to_string_lossy(), args.join(" "));
     println!("$ {shown}");
@@ -348,19 +348,20 @@ pub fn kernel_metadata(root: &Path) -> Result<Json, String> {
 /// Resolves the kernel workspace below `root` with [`kernel_metadata`] and
 /// checks what Cargo reports.
 pub fn check_kernel_workspace(root: &Path) -> Vec<String> {
+    let workspace = [KERNEL, KERNEL_PACKAGE];
     match kernel_metadata(root) {
-        Ok(metadata) => check_kernel_metadata(&metadata, &root.join(KERNEL)),
+        Ok(metadata) => check_kernel_metadata(&metadata, &root.join(KERNEL), workspace),
         Err(problem) => vec![problem],
     }
 }
 
 /// Problems in what `cargo metadata` reports for the kernel workspace in
-/// `kernel`: its root must be `kernel`, and every package must be a member
-/// of it, with its manifest and the sources of its targets inside `kernel`;
-/// and the problems of [`root_shape`] in its root manifest. Paths are
-/// compared with symbolic links resolved; a path that cannot be resolved is a
-/// problem.
-pub fn check_kernel_metadata(metadata: &Json, kernel: &Path) -> Vec<String> {
+/// `kernel`, `workspace` with its root package: its root must be `kernel`,
+/// and every package must be a member of it, with its manifest and the
+/// sources of its targets inside `kernel`; and the problems of
+/// [`root_shape`] in its root manifest. Paths are compared with symbolic
+/// links resolved; a path that cannot be resolved is a problem.
+pub fn check_kernel_metadata(metadata: &Json, kernel: &Path, workspace: [&str; 2]) -> Vec<String> {
     let kernel = match fs::canonicalize(kernel) {
         Ok(kernel) => kernel,
         Err(error) => return vec![format!("cannot resolve {}: {error}", kernel.display())],
@@ -405,7 +406,7 @@ pub fn check_kernel_metadata(metadata: &Json, kernel: &Path) -> Vec<String> {
             }
         }
     }
-    problems.extend(root_problems(packages, &kernel));
+    problems.extend(root_problems(packages, &kernel, workspace));
     problems
 }
 
@@ -443,16 +444,17 @@ pub fn root_package(text: &str) -> Result<Option<String>, String> {
 /// `manifest`, whose package has targets of the `kinds` that `cargo
 /// metadata` reports, as `(kind, source)`, and the library `lib`, as its
 /// path and text. A manifest without `[package]`, of a virtual workspace,
-/// passes. With it, the package is [`KERNEL_PACKAGE`], the manifest holds
-/// only the tables and keys of [`ROOT_TABLES`] and forbids unsafe code, the
-/// package has only targets of [`ROOT_KINDS`], even among those that Cargo
-/// finds by itself, and its library has an unconditional `#![no_std]`.
+/// passes. With it, the package is `root` of the workspace `kernel`, with
+/// only the tables and keys of [`ROOT_TABLES`], unsafe code forbidden, only
+/// targets of [`ROOT_KINDS`], even among those that Cargo finds by itself,
+/// and an unconditional `#![no_std]` in its library.
 pub fn root_shape(
+    [kernel, root]: [&str; 2],
     manifest: &str,
     kinds: &[(String, String)],
     lib: Option<(&str, &str)>,
 ) -> Vec<String> {
-    let path = format!("{KERNEL}/Cargo.toml");
+    let path = format!("{kernel}/Cargo.toml");
     let table: Table = match manifest.parse() {
         Ok(table) => table,
         Err(error) => return vec![format!("{path}: not valid TOML: {error}")],
@@ -462,9 +464,9 @@ pub fn root_shape(
     };
     let mut problems = Vec::new();
     let name = package.get("name").and_then(Value::as_str).unwrap_or("");
-    if name != KERNEL_PACKAGE {
+    if name != root {
         problems.push(format!(
-            "{path}: the root package is named `{name}`, not `{KERNEL_PACKAGE}`"
+            "{path}: the root package is named `{name}`, not `{root}`"
         ));
     }
     for (key, value) in &table {
@@ -521,15 +523,15 @@ pub fn root_shape(
 }
 
 /// The problems of [`root_shape`] for the root manifest in `kernel`, a
-/// resolved path, and the package of `packages` whose manifest it is.
-fn root_problems(packages: &[Json], kernel: &Path) -> Vec<String> {
+/// resolved path of `ws`, and the package of `packages` whose manifest it is.
+fn root_problems(packages: &[Json], kernel: &Path, ws: [&str; 2]) -> Vec<String> {
     let manifest = kernel.join("Cargo.toml");
     let text = |path: &Path| {
         fs::read_to_string(path).map_err(|error| format!("cannot read {}: {error}", path.display()))
     };
     let resolved = |value: &Json| value.as_str().and_then(|path| fs::canonicalize(path).ok());
     let below = |path: &Path| match path.strip_prefix(kernel) {
-        Ok(below) => format!("{KERNEL}/{}", below.display()),
+        Ok(below) => format!("{}/{}", ws[0], below.display()),
         Err(_) => path.display().to_string(),
     };
     let root = (packages.iter())
@@ -547,8 +549,8 @@ fn root_problems(packages: &[Json], kernel: &Path) -> Vec<String> {
     }
     match (text(&manifest), lib.map(|lib| (below(&lib), text(&lib)))) {
         (Err(error), _) | (_, Some((_, Err(error)))) => vec![error],
-        (Ok(manifest), Some((lib, Ok(text)))) => root_shape(&manifest, &kinds, Some((&lib, &text))),
-        (Ok(manifest), None) => root_shape(&manifest, &kinds, None),
+        (Ok(toml), Some((lib, Ok(text)))) => root_shape(ws, &toml, &kinds, Some((&lib, &text))),
+        (Ok(toml), None) => root_shape(ws, &toml, &kinds, None),
     }
 }
 
@@ -875,7 +877,11 @@ mod tests {
     fn metadata_problems(root: &str, packages: &[Json]) -> Vec<String> {
         let metadata =
             json!({ "workspace_root": at(root), "workspace_members": ["m"], "packages": packages });
-        check_kernel_metadata(&metadata, &repo::root().join(KERNEL))
+        check_kernel_metadata(
+            &metadata,
+            &repo::root().join(KERNEL),
+            [KERNEL, KERNEL_PACKAGE],
+        )
     }
 
     /// The single problem of a kernel workspace with `extra` next to a local
@@ -967,7 +973,11 @@ mod tests {
     #[test]
     fn metadata_without_packages_fails() {
         let metadata = json!({ "workspace_root": at(KERNEL), "workspace_members": [] });
-        let problems = check_kernel_metadata(&metadata, &repo::root().join(KERNEL));
+        let problems = check_kernel_metadata(
+            &metadata,
+            &repo::root().join(KERNEL),
+            [KERNEL, KERNEL_PACKAGE],
+        );
         assert_eq!(problems.len(), 1, "{problems:?}");
     }
 
@@ -991,7 +1001,12 @@ mod tests {
                 .chain(kinds)
                 .map(|(kind, source)| (kind.to_string(), source.to_string()))
                 .collect();
-        root_shape(manifest, &kinds, Some(("kernel/src/lib.rs", lib)))
+        root_shape(
+            [KERNEL, KERNEL_PACKAGE],
+            manifest,
+            &kinds,
+            Some(("kernel/src/lib.rs", lib)),
+        )
     }
 
     /// The problems of [`ROOT`] followed by `extra`.
@@ -1006,11 +1021,16 @@ mod tests {
         let virtual_workspace = include_str!("../../kernel/Cargo.toml");
         assert_eq!(root_package(virtual_workspace), Ok(None));
         assert_eq!(
-            root_shape(virtual_workspace, &[], None),
+            root_shape([KERNEL, KERNEL_PACKAGE], virtual_workspace, &[], None),
             Vec::<String>::new()
         );
         assert_eq!(
-            root_shape("[workspace]\n\n[features]\nx = []\n", &[], None),
+            root_shape(
+                [KERNEL, KERNEL_PACKAGE],
+                "[workspace]\n\n[features]\nx = []\n",
+                &[],
+                None
+            ),
             Vec::<String>::new()
         );
         assert_eq!(root_package(ROOT), Ok(Some(KERNEL_PACKAGE.to_string())));
@@ -1176,7 +1196,7 @@ mod tests {
         );
         let kinds = [("test".to_string(), "kernel/tests/t.rs".to_string())];
         assert_eq!(
-            root_shape(ROOT, &kinds, None),
+            root_shape([KERNEL, KERNEL_PACKAGE], ROOT, &kinds, None),
             ["kernel/Cargo.toml: the root package has no library"]
         );
     }
