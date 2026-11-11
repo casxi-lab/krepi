@@ -49,17 +49,20 @@ the other document of the component.
   address order, the set of the 2 MiB slots of its VM window that hold a
   level 3 table, and the cursor of the operation in progress.
 - **Row.** One row of a region table: the start and the pages of a region,
-  its neighbours in address order, the count of its committed pages and its
-  phase, live or pending with the progress of its release.
+  its neighbours in address order, the count of its pages that hold a
+  frame and its phase, live or pending with the progress of its release. A
+  commit raises the count by its pages, and the return of each frame of the
+  region to the pool lowers it by one.
 - **Page pool.** `vm::Pool` (planned): the frames that the boot carves in
   one range of RAM, with their free stack and their metadata
   ([Configuration and the page pool](#configuration-and-the-page-pool)).
 - **Frame.** A page of the page pool. A frame is free, on the free stack;
-  committed, the frame of a committed page of one process; or loaded, a
-  private page of an image loaded into one process.
+  committed, a frame that a commit has taken for a page of one process; or
+  loaded, a private page of an image loaded into one process.
 - **Committed chain.** The frames that one process holds, committed and
-  loaded, linked through the metadata of the frames, with its head in that
-  metadata.
+  loaded, linked in both directions through the metadata of the frames,
+  with its head in that metadata: a frame joins it at the head and leaves
+  it at any place in a fixed number of steps.
 - **Plan.** What an entry of this page gives the architecture crate to
   execute: a write plan of the page-tables component, `page_tables::WritePlan`,
   or a frame plan, `vm::FramePlan` (planned), which zeroes one frame or
@@ -71,7 +74,8 @@ the other document of the component.
   result of the operation.
 - **Cursor.** The field of the VM head that holds the operation in
   progress, the next page, its end and the frame of the plan in flight; it
-  is empty between transitions.
+  is empty between transitions. A plan is in flight from the entry that
+  gives it to its `acknowledge`.
 - **Pending and completed.** A region is pending from the transaction that
   starts its release to the end of its release, which completes it; a
   completed region no longer exists.
@@ -99,9 +103,8 @@ own process and take no handle. Their operation numbers, the registers of
 their arguments and results and the numeric values of their errors belong
 to the inventory; this page names the arguments and the results. The other
 entries are called by the boot wiring and by the composers. The first row
-holds constants and no entry, and the last row is the adapter of the
-architecture crate; the eleven rows between them hold the twelve entries of
-the core.
+holds constants, and the last row is the adapter of the architecture
+crate.
 
 | Entry point | Kind | Called by | ABI operation | Rules |
 | --- | --- | --- | --- | --- |
@@ -115,7 +118,7 @@ the core.
 | `vm::decommit` (planned) | Write entry on the copies of a write set, host-testable; gives write plans and frame plans | `dispatch` (planned), for the operation `decommit` | `decommit` | [Decommit](#decommit), [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
 | `vm::mprotect` (planned) | Write entry on the copies of a write set, host-testable; gives write plans | `dispatch` (planned), for the operation `mprotect` | `mprotect` | [Protection and W^X](#protection-and-wx) |
 | `vm::release` (planned) | Write entry on the copies of a write set, host-testable; one step of a long operation, which gives write plans and frame plans | `dispatch` (planned), for the operation `release`, also when the call is executed again | `release` | [Two-phase release](#two-phase-release) |
-| `vm::acknowledge` (planned) | Write entry on the copies of a write set, host-testable; gives the next step | `dispatch::resume` (planned), after the architecture crate has executed a plan that an entry of this page gave, through the module `lifecycle` for the plans of `revoke_step` | None | [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
+| `vm::acknowledge` (planned) | Write entry on the copies of a write set, host-testable; gives the next step | The dispatch of the core (planned), after the architecture crate has executed a plan that an entry of this page gave, through the module `lifecycle` for the plans of `revoke_step` | None | [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
 | `vm::revoke_step` (planned) | Write entry on the copies of a write set, host-testable; one step of a long operation, which gives frame plans | The module `lifecycle` (planned), in the destruction of a process, after the invalidation of its ASID and the reset of its lower tables | None | [Revocation at process destruction](#revocation-at-process-destruction) |
 | `krepi_arch::frames::apply` (planned) | `unsafe` function | `el0_dispatch` of each kernel image, for a frame plan that the dispatch of the core returns (planned) | None | [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
 
@@ -142,7 +145,9 @@ operations, which only the running thread of a live process calls.
 
 Its items are `pub(crate)` except the rows that the boot wiring calls,
 `check_config` and `Pool::new`, with the value types that those rows and
-the architecture crate take and return, `Config`, `Pool` and `FramePlan`
+the architecture crate take and return, `Config`, `Pool`, `FramePlan` and
+the error type, and the constants of the first row that the boot wiring
+uses, `MAX_POOL_PAGES`, `OWNER_PAGE_POOL` and `OWNER_PAGE_FRAMES`
 ([provable core](../../../architecture.md#the-provable-core)). The write
 entries receive the one kernel root by `&mut`
 ([rule 3](../../../conventions/provable-subset.md#3-flat-relations-and-one-kernel-root))
@@ -175,7 +180,7 @@ the change that adds the module writes its `paths` block here.
   pages under one level 2 table. Every region of every process lies in it,
   and so does every page that an entry of this page maps.
 - **Its neighbours.** The boot ranges of the root, from `0x4000000000` to
-  `0x4020000000`, and the image window of the loading component (planned),
+  `0x4020000000`, and the image window of the dispatch component (planned),
   which ends at or below `VM_START`, lie in the first 1 GiB slot of the EL0
   window; the windows of device grants, which the device-authority rules of
   the devices and DMA domain place, lie above `VM_END`. So the VM window
@@ -189,6 +194,23 @@ the change that adds the module writes its `paths` block here.
   chooses. With the `address` 0, the region starts at the lowest address of
   the VM window at which `pages` pages lie outside every region of the
   process.
+- **Checks of a reserve.** In this order, each before the first write:
+  1. the form of the arguments: `address` is a multiple of 4096
+     (`Alignment`); `pages` is at least 1 (`Length`); with an `address`
+     other than 0, the range of `pages` pages from `address`, which ends at
+     `address` $+ 4096 \cdot$ `pages`, does not wrap and lies in the VM
+     window, and with the `address` 0, `pages` is at most the 262,144 pages
+     of the window (`Window`);
+  2. object state: no plan is in flight in the VM head (`InvalidState`);
+     with an `address` other than 0, the range meets no region of the
+     caller, pending ones included (`Overlap`), and with the `address` 0,
+     the window holds `pages` pages in a row outside every region of the
+     caller (`WindowFull`);
+  3. the caller's quota: the region table of the caller has a free row
+     (`RegionTableFull`).
+- **Write set of a reserve.** At most 4 items: the new row, its neighbours
+  in address order and the VM head. A reserve gives no plan, and its result
+  is the `start`.
 - **Rows.** A region table has `vm_regions` rows. `MAX_REGIONS`, 256, is
   the number of rows that a row number names, and so the bound of
   `vm_regions` in check 2 of the
@@ -210,8 +232,8 @@ the change that adds the module writes its `paths` block here.
 - **The record of the pages.** A page of a region is committed exactly when
   the lower tables of the process map it, and the kind of its leaf is its
   protection. A row records neither the protection nor which of its pages
-  are committed, only their count; the entries read the tables with
-  `Tables::lookup_page` of the
+  are committed, only the count of its pages that hold a frame; the entries
+  read the tables with `Tables::lookup_page` of the
   [page-tables](../page-tables/contract.md#entry-points) component.
 
 ## Configuration and the page pool
@@ -260,12 +282,13 @@ record of the board, `DEFAULT_CAPACITIES` (planned) of the
 [objects](../../objects-capabilities/objects/contract.md#capacity-record)
 contract, gives the VM part, which is checked in the same way. In the
 default record of every board, `root_vm_pages` and `vm_page_cap` are each
-at least 256 pages, 1 MiB. The limit of the root is the smaller of the two,
-so at least 1 MiB, and the cap of every other process is at least 1 MiB as
-well: the commit limit of each process of the
-[capacities](../../../architecture.md#kernel-objects-and-capabilities) of
-the default record. A child's limit is in addition the share that its
-creator splits to it ([Quotas](#quotas)). The default `pool_pages` of each
+at least 256 pages, 1 MiB. The pages that the root may commit are bounded
+by the smaller of the two, so by at least 1 MiB, and the cap bounds every
+other process by at least 1 MiB as well: the commit limit of each process
+of the [capacities](../../../architecture.md#kernel-objects-and-capabilities)
+of the default record. The pages that a child may commit are bounded in
+addition by the share of the item that its creator splits to it
+([Quotas](#quotas)). The default `pool_pages` of each
 board, like the other default values, is a constant of its board crate,
 named by its field, which the tests of the limits of loading and VM measure
 (planned).
@@ -333,13 +356,15 @@ region of the caller, and gives no result value.
 - **Checks.** In this order, each before the first write:
   1. the form of the arguments: `address` is a multiple of 4096
      (`Alignment`); `pages` is at least 1 and at most `MAX_CALL_PAGES`, 512
-     (`Length`); the range `[address, address + 4096 pages)` does not wrap
-     and lies in the VM window (`Window`);
+     (`Length`); the range of `pages` pages from `address`, which ends at
+     `address` $+ 4096 \cdot$ `pages`, does not wrap and lies in the VM
+     window (`Window`);
   2. the region, which takes the place of handle resolution: the first page
      lies in a region of the caller (`NoRegion`), and the range ends at or
      before its end (`RegionBounds`);
-  3. object state: the region is not pending (`Pending`), and no page of
-     the range is committed (`AlreadyCommitted`);
+  3. object state: the region is not pending (`Pending`), no plan is in
+     flight in the VM head (`InvalidState`, a call that no composer makes),
+     and no page of the range is committed (`AlreadyCommitted`);
   4. the caller's quota: `QuotaRecord::check` of the committed VM pages
      with `pages` (`QuotaExceeded` of the objects component); the usage of
      that item plus `pages` is at most `vm_page_cap` (`CommitLimit`); the
@@ -349,15 +374,19 @@ region of the caller, and gives no result value.
   5. shared capacity: the pool has at least `pages` free frames
      (`OutOfPages`).
 - **Write set.** 3 items: the process slot of the caller, whose quota
-  record is charged `pages` committed VM pages; the row, whose count of
-  committed pages grows by `pages`; and the VM head, with the 2 MiB slots
-  of the range added to its set of slots and the cursor of the commit.
-- **Steps.** After the write-back, page by page in address order: the
+  record is charged `pages` committed VM pages; the row, whose count grows
+  by `pages`; and the VM head, with the 2 MiB slots of the range added to
+  its set of slots and the cursor of the commit.
+- **Steps.** After the write-back, page by page in address order, the
   commit takes the top frame of the free stack as a committed frame of the
-  caller, links it at the head of the committed chain, and gives the write
-  plan of `Tables::map_page` of the page, the frame and `UserReadWrite`;
-  after the `acknowledge` of the plan of the last page, the result is `ok`.
-  The checks fixed every plan, so each `map_page` passes its checks.
+  caller and links it at the head of the committed chain, so that the frame
+  of each page is linked just before the frame of the page before it. It
+  then gives the write plan of `Tables::map_page` of the first page, its
+  frame and `UserReadWrite`, and `acknowledge` gives that of each next
+  page; after the `acknowledge` of the plan of the last page, the result is
+  `ok`. The checks fixed every plan, so each `map_page` passes its checks,
+  and the frames of a commit have left the free stack before its first
+  plan.
 - A committed page reads zero, since its frame came zero from the pool, and
   is writable and never executable at EL0.
 - The commit runs to its result in one transition, without a preemption
@@ -372,9 +401,9 @@ it gives no result value.
 - **Checks.** The form of `address`, `pages` and the range, as for a
   commit (`Alignment`, `Length`, `Window`); the region (`NoRegion`,
   `RegionBounds`); then object state: the region is not pending
-  (`Pending`), and every page of the range is committed (`NotCommitted`).
-- **Write set.** 2 items: the row, whose count of committed pages falls by
-  `pages`, and the VM head, with the cursor of the decommit.
+  (`Pending`), no plan is in flight in the VM head (`InvalidState`), and
+  every page of the range is committed (`NotCommitted`).
+- **Write set.** 1 item: the VM head, with the cursor of the decommit.
 - **Steps.** After the write-back, page by page in address order: the
   write plan of `Tables::unmap_page` of the page, `Store` and then
   `Invalidate`
@@ -382,6 +411,7 @@ it gives no result value.
   which gives the frame; after its `acknowledge`, the frame plan that zeroes
   the frame; and after the `acknowledge` of that plan, the return of the
   frame to the pool with the credit of one committed VM page to the caller
+  and the count of the row lowered by one
   ([Acknowledgement and reclamation](#acknowledgement-and-reclamation)).
   After the last page, the result is `ok`.
 - The range stays a region of the caller, and its pages are not mapped
@@ -405,8 +435,9 @@ value 3 `UserReadWrite`.
   object of release 0.1 carries the execute right, and a later release
   refuses the bit in the same place for an object without that right
   ([address spaces and VM objects](../../../architecture.md#address-spaces-and-vm-objects));
-  then object state: the region is not pending (`Pending`), and every page
-  of the range is committed (`NotCommitted`).
+  then object state: the region is not pending (`Pending`), no plan is in
+  flight in the VM head (`InvalidState`), and every page of the range is
+  committed (`NotCommitted`).
 - **Write set.** 1 item: the VM head, with the cursor of the `mprotect`.
 - **Steps.** After the write-back, page by page in address order, for each
   page whose kind differs from the one requested: the write plan of
@@ -448,13 +479,15 @@ value 3 `UserReadWrite`.
 committed page of it, in two phases, and gives no result value.
 
 - **Checks.** `address` is a multiple of 4096 (`Alignment`) and lies in the
-  VM window (`Window`); a region starts at `address` (`NoRegion`). A region
-  that is pending passes: the call continues its release.
+  VM window (`Window`); a region starts at `address` (`NoRegion`); no plan
+  is in flight in the VM head (`InvalidState`). A region that is pending
+  passes: the call continues its release.
 - **Pending.** The call that finds the region live marks it pending, with
   its progress at its start, in the write set of its first step. From that
   write-back on, `commit`, `decommit` and `mprotect` in the region are
   refused with `Pending`, and a `reserve` that meets its range with
-  `Overlap`, so new accesses are refused at once.
+  `Overlap`, or with `InvalidState` while a plan of the release is in
+  flight, so new accesses are refused at once.
 - **Steps.** Each call of `release` takes one step: it examines the next
   pages of the region from its progress, at most `RELEASE_BATCH`, 64, and,
   for each committed page among them in address order, gives the plans of a
@@ -464,8 +497,8 @@ committed page of it, in two phases, and gives no result value.
   lowered by one. The write set of a step is 2 items, the row with its
   phase and progress and the VM head with the cursor. A step ends:
   - with the completion of the region, when its progress has reached its
-    end or its count of committed pages is 0: the row leaves the region
-    table and the result of the call is `ok`;
+    end or its count is 0: the row leaves the region table and the result
+    of the call is `ok`;
   - otherwise with `Again`, at a preemption point: the progress stays in
     the row, the call writes no result, and the dispatch of the core
     (planned) executes the call again from the saved user registers, at
@@ -484,12 +517,14 @@ committed page of it, in two phases, and gives no result value.
   mapped at EL0, and buffers shared with the kernel, futexes and user-copy
   points belong to later releases
   ([address spaces and VM objects](../../../architecture.md#address-spaces-and-vm-objects)).
-  On one CPU the execution of the unmap plan, whose `Invalidate` ends with
-  `DSB ISH` and `ISB`, is the acknowledgement of the invalidation; with
-  several CPUs, the acknowledgement of every CPU that may hold the
-  translation belongs to the multicore components (planned), as
+  The `Invalidate` of the unmap plan is the broadcast `TLBI VAAE1IS`, which
+  `DSB ISH` completes, and
   [S3](../../../conventions/smp.md#s3-reclamation-after-acknowledgement)
-  requires.
+  makes the completion of that invalidation on the executing CPU the
+  acknowledgement of every CPU that may hold the translation; so the
+  execution of the unmap plan is the acknowledgement of its invalidation.
+  The other references that several CPUs may hold belong to the multicore
+  components (planned).
 - **Who meets a pending region.** A process has one thread, which executes
   a release that stopped at a preemption point again before it runs any
   other code, so no thread at EL0 meets a pending region in release 0.1.
@@ -549,12 +584,18 @@ for all its regions and its loaded frames at once.
   as one of the results of a transition: the return to EL0, a write plan,
   the release plan of an ASID, a frame plan or the halt of the system.
   `el0_dispatch` executes a write plan with `krepi_arch::mmu::apply` and a
-  frame plan with `krepi_arch::frames::apply`, and then calls
-  `dispatch::resume` (planned), which calls `acknowledge` of the process
+  frame plan with `krepi_arch::frames::apply`, and then enters the dispatch
+  of the core again (planned), which calls `acknowledge` of the process
   whose VM head holds the cursor.
 - One plan is executed before the next is given, and no other entry runs
-  on the lower tables of the process or on the page pool in between
-  ([write plans](../page-tables/contract.md#write-plans-and-publication)).
+  on the lower tables or the VM head of the process in between
+  ([write plans](../page-tables/contract.md#write-plans-and-publication)):
+  an operation of the process and `revoke_step` refuse with `InvalidState`
+  while a plan is in flight in its VM head, a call that no composer makes.
+  The entries of other processes may take and return frames in between,
+  since no plan in flight needs a free frame: the frames of a commit leave
+  the free stack before its first plan, and a frame that a zero plan names
+  stays on the committed chain until the `acknowledge` of that plan.
 - The cursor is empty between transitions: a commit, a decommit and an
   `mprotect` run to their result in one transition, and a step of a release
   or of a revocation ends with its cursor empty and its progress in the row
@@ -570,24 +611,29 @@ for all its regions and its loaded frames at once.
   offset `source` of the boot bundle, read through the kernel's read-only
   mapping of the image, to the start of a frame, through the direct map.
   The creation component gives it for the file bytes of the RW segments of
-  an image that it loads, and continues after it itself (planned);
-  `acknowledge` continues only the plans of the entries of this page.
+  an image that it loads, and the creation component continues its own
+  operation after the plan (planned); `acknowledge` continues only the
+  plans of the entries of this page.
 
 **Acknowledgement.** `acknowledge(process)` records that the plan in
 flight of the cursor of the VM head of `process` has been executed and
 gives the next step:
 
-- after the write plan of a page of a commit, or the second write plan of
-  a page of an `mprotect`: the plan of the next page, or the result; after
-  the first write plan of a page of an `mprotect`, its second;
+- after the write plan of a page of a commit: the write plan of the next
+  page, with the frame that the commit took for it, which the chain links
+  just before the frame of the page, or the result;
+- after the first write plan of a page of an `mprotect`, its second; after
+  the second: the first plan of the next page whose kind differs from the
+  one requested, or the result;
 - after the unmap plan of a decommit or of a release: the zero plan of the
   frame that `unmap_page` gave;
 - after a zero plan: the frame leaves the committed chain and goes on top
   of the free stack, and one page of the item of its kind is credited to
   the process, in one write set of at most 5 items, the process slot and
-  the VM head and, for a release, the row and, at its completion, the
-  neighbours of the row in address order; then the plan of the next page,
-  the end of the step, or the result;
+  the VM head and, for a decommit or a release, the row, whose count falls
+  by one, and, at the completion of a release, the neighbours of the row in
+  address order; then the plan of the next page, the end of the step, or
+  the result;
 - with no plan in flight: `InvalidState`, a call that no composer makes,
   which changes nothing.
 
@@ -632,7 +678,8 @@ of its holder.
   takes or returns pages of the table afterwards, so the count of its
   extents does not grow at run time. On the 8 GB Pi 5 the holders take at
   most these extents of the 160 of the table
-  ([capacity](../page-tables/contract.md#page-ownership)):
+  ([capacity](../page-tables/contract.md#page-ownership)), counting at
+  most two for each allocation:
 
 | Holder | Allocations | Extents |
 | --- | ---: | ---: |
@@ -646,16 +693,20 @@ of its holder.
 | In all | 12 | At most 28 |
 
 - An allocation adds at most two extents, the held range and the rest of
-  the free extent that it splits, and at most one at a low placement and an
-  alignment of one page, as all these are carved; the twelve allocations
-  then add at most 12, and the count stays at most 16.
+  the free extent that it splits, as the rows above count. At a low
+  placement and an alignment of one page, as all these are carved, an
+  allocation starts at the start of a free extent and adds at most one, so
+  the twelve allocations add at most 12, and the count, with the 4 free
+  extents at boot, stays at most 16, within the 28 of the rows above.
 
 ## Quotas
 
 - **Committed VM pages.** A commit checks the item of its caller with
   `QuotaRecord::check` and charges `pages` in its write set; each frame
   that returns from a decommit, a release or a revocation is credited, one
-  page, in the write set that returns it. The root's limit of the item is
+  page, in the write set that returns it. Every charge and credit of this
+  component, of committed VM pages and of private pages of loaded images, is
+  of the ordinary class. The root's limit of the item is
   `root_vm_pages`, which the boot of the root passes to `root_limits`; a
   child's limit is the share that its creator splits to it from its own
   limit (planned)
@@ -682,11 +733,14 @@ of its holder.
   [conservation](../../objects-capabilities/objects/contract.md#metadata-quotas)
   of the objects component, this component counts as the committed VM
   pages of a process the committed frames of its chain, together with the
-  pages that a commit of the process in progress has charged and not yet
-  taken; and as its private pages of loaded images the loaded frames of its
-  chain, together with the pages that the creation of the process in
-  progress has charged and not yet taken (planned). Every charge and credit
-  of these items is in the write set that changes these counts, so both
+  pages that a commit of the process has charged at its write-back and not
+  yet taken; and as its private pages of loaded images the loaded frames of
+  its chain, together with the pages that the creation of the process in
+  progress has charged and not yet taken (planned), and, for the root, the
+  pages of the memory of its RW segments and of its stack in its private
+  allocation at boot, which the boot of the root charges to the item and
+  which are not frames of the pool (planned). Every charge and credit of
+  these items is in the write set that changes these counts, so both
   statements of conservation hold after every write-back.
 
 ## Errors
@@ -701,17 +755,17 @@ of its holder.
 | `NoRegion` | An address in no region of the caller; for `release`, one at which no region starts | `commit`, `decommit`, `mprotect`, `release` | Handle resolution: the region that the address names |
 | `RegionBounds` | A range that goes beyond the end of the region of its first page | `commit`, `decommit`, `mprotect` | Handle resolution, after `NoRegion` |
 | `ExecuteDenied` | A protection with the execute bit | `mprotect` | Rights |
-| `Overlap` | A range that meets a region of the caller, pending ones included | `reserve` | Object state |
-| `WindowFull` | With the address 0, no range of the pages in the window outside the regions of the caller | `reserve` | Object state |
+| `Overlap` | A range that meets a region of the caller, pending ones included | `reserve` | Object state, after `InvalidState` |
+| `WindowFull` | With the address 0, no range of the pages in the window outside the regions of the caller | `reserve` | Object state, after `InvalidState` |
 | `Pending` | A region whose release is pending | `commit`, `decommit`, `mprotect` | Object state, first |
-| `AlreadyCommitted` | A committed page in the range | `commit` | Object state, after `Pending` |
-| `NotCommitted` | A page of the range that is not committed | `decommit`, `mprotect` | Object state, after `Pending` |
+| `AlreadyCommitted` | A committed page in the range | `commit` | Object state, after `InvalidState` |
+| `NotCommitted` | A page of the range that is not committed | `decommit`, `mprotect` | Object state, after `InvalidState` |
 | `QuotaExceeded` of the objects component | The committed VM pages of the caller beyond its limit | `commit` | The caller's quota, first |
 | `CommitLimit` | The committed VM pages of the caller beyond `vm_page_cap` | `commit` | The caller's quota, after `QuotaExceeded` |
 | `OutOfTables` of the page-tables component | More tables than the segment of the caller has free | `commit` | The caller's quota, after `CommitLimit` |
 | `RegionTableFull` | No free row in the region table of the caller | `reserve` | The caller's quota |
 | `OutOfPages` | Fewer free frames than the pages; for `Pool::take`, an empty pool | `commit`, `Pool::take` | Shared capacity |
-| `InvalidState` | A call that no composer makes: `acknowledge` with no plan in flight, `revoke_step` with a plan in flight | `acknowledge`, `revoke_step` | Object state |
+| `InvalidState` | A call that no composer makes: an operation or `revoke_step` while a plan is in flight in the VM head of the process; `acknowledge` with no plan in flight | `reserve`, `commit`, `decommit`, `mprotect`, `release`, `acknowledge`, `revoke_step` | Object state: after `Pending` for `commit`, `decommit` and `mprotect`; first for the other entries |
 
 - **Order.** Each entry checks in the order of its rule section and
   returns the first error. The places of the last column are those of the
@@ -744,7 +798,11 @@ of its holder.
   `InvalidState` and `OutOfPages` of `Pool::take` answer calls that no
   composer makes.
 - **Names.** The names are those of this contract; the numeric values of
-  the errors that reach EL0 belong to the ABI inventory.
+  the errors that reach EL0 belong to the ABI inventory. `ExecuteDenied` is
+  the refusal at the place of rights: no capability is resolved, so it is
+  not `PermissionDenied` of the
+  [capabilities](../../objects-capabilities/capabilities/contract.md#errors)
+  component, which names a right that an entry of a table lacks.
 
 The prototype's VM registry had fourteen errors. Here:
 
@@ -792,13 +850,13 @@ follow plans that have been executed: the plans of an operation, and for
 | `Pool::free` | None | Nothing: a read entry | Nothing |
 | `Pool::take` | A free frame | Nothing | The metadata of the frame, the top of the free stack and the head of the chain of the process |
 | `Regions::new` | None | Nothing: a value | Nothing |
-| `reserve` | The form, the overlap or the free range in the window, a free row | At most 4: the new row, its neighbours in address order and the VM head | Nothing |
-| `commit` | The form, the region, its phase and its pages, the item, the cap, the tables and the free frames | 3: the process slot, the row and the VM head | For each page, the metadata of its frame, the free stack and the head of the chain, and the write plan |
-| `decommit` | The form, the region, its phase and its pages | 2: the row and the VM head | For each page, the write plan and the zero plan |
-| `mprotect` | The form and the protection, the region, the execute bit, its phase and its pages | 1: the VM head | For each page whose kind changes, two write plans |
-| `release` | The form, the region, and the pages of the step | 2: the row and the VM head; at a completion without a committed page in the step, at most 4: the row, its neighbours and the VM head | For each committed page of the step, the write plan and the zero plan |
-| `acknowledge` | A plan in flight | At most 5: the VM head, and with a returned frame the process slot, and for a release the row and at its completion its neighbours | The next plan; with a returned frame, its metadata, the free stack and the chain |
-| `revoke_step` | No plan in flight; the chain | 1: the VM head, with the cursor, or with `Regions::new()` at the completion | For each frame of the step, the zero plan |
+| `reserve` | The form, a plan in flight, the overlap or the free range in the window, a free row | At most 4: the new row, its neighbours in address order and the VM head | Nothing |
+| `commit` | The form, the region, its phase, a plan in flight and its pages, the item, the cap, the tables and the free frames | 3: the process slot, the row and the VM head | For each page, the take of its frame, with the metadata of the frame, the free stack and the head of the chain; then the write plan of the first page |
+| `decommit` | The form, the region, its phase, a plan in flight and its pages | 1: the VM head | The write plan of the first page |
+| `mprotect` | The form and the protection, the region, the execute bit, its phase, a plan in flight and its pages | 1: the VM head | The first write plan of the first page whose kind changes, if there is one |
+| `release` | The form, the region, a plan in flight, and the pages of the step | 2: the row and the VM head; at a completion without a committed page in the step, at most 4: the row, its neighbours and the VM head | The write plan of the first committed page of the step, if there is one |
+| `acknowledge` | A plan in flight | At most 5: the VM head, and with a returned frame the process slot, and for a decommit or a release the row and at the completion of a release its neighbours | With a returned frame, its metadata, the free stack and the chain; then the next plan |
+| `revoke_step` | No plan in flight; the chain | 1: the VM head, with the cursor, or with `Regions::new()` at the completion | The zero plan of the first frame of the step, if there is one |
 
 - `check_config`, `Pool::free` and `Regions::new` write nothing; the other
   entries cannot fail after their checks.
@@ -815,15 +873,16 @@ follow plans that have been executed: the plans of an operation, and for
   checks. `Pool::new` writes each entry of the metadata once, at most
   `MAX_POOL_PAGES` frames and the heads of at most the process capacity,
   at boot. `Pool::free`, `Pool::take` and `Regions::new` take a fixed
-  number of steps; `Regions::new` gives two sets of `MAX_REGIONS` and 512
-  bits.
+  number of steps; `Regions::new` gives two bit sets, of `MAX_REGIONS` bits
+  and of 512 bits.
 - `reserve` walks the rows in use once in address order, at most
   `vm_regions`, at most `MAX_REGIONS`, and the set of rows in use once for
   the lowest free row.
 - `commit` walks the rows to find its region, at most `vm_regions`; reads
   at most `MAX_CALL_PAGES` leaves with `lookup_page`, each at most three
   entries; counts at most two 2 MiB slots, since a range of at most 2 MiB
-  meets at most two; and gives at most `MAX_CALL_PAGES` write plans of at
+  meets at most two; takes at most `MAX_CALL_PAGES` frames, each in a fixed
+  number of steps; and gives at most `MAX_CALL_PAGES` write plans of at
   most seven steps each
   ([work bounds](../page-tables/contract.md#work-bounds)).
 - `decommit` reads at most `MAX_CALL_PAGES` leaves and gives at most
@@ -838,8 +897,14 @@ follow plans that have been executed: the plans of an operation, and for
 - `revoke_step` gives at most `RELEASE_BATCH` zero plans in one step; the
   revocation of a process with $m$ frames takes at most
   $\lceil m / \mathtt{RELEASE\_BATCH} \rceil + 1$ steps.
-- `acknowledge` takes a fixed number of steps; `krepi_arch::frames::apply`
-  writes or copies at most 4096 bytes.
+- `acknowledge` reads at most `MAX_CALL_PAGES` leaves, for an `mprotect`,
+  which passes over the pages that have the requested kind, or
+  `RELEASE_BATCH`, for a release, which passes over the pages of its step
+  that are not committed, each at most three entries; it writes a fixed
+  number of fields, since a frame leaves the committed chain, which is
+  linked in both directions, in a fixed number of steps; and it gives at
+  most one plan. `krepi_arch::frames::apply` writes or copies at most 4096
+  bytes.
 - **Long operations.** The release of a region and the revocation at the
   destruction of a process are the long operations of this page. A step
   ends at a preemption point; the progress of a release is in its row, and
@@ -899,7 +964,7 @@ The component leaves no other choice open.
 | --- | --- | --- | --- | --- |
 | The VM head of each process: its set of rows in use, its first row, its set of 2 MiB slots with a level 3 table and its cursor | Per-process | The token of the process; with one CPU, the executing CPU | The write-back of the write set that changes it | Under the token of the process |
 | The rows of the region table of each process | Per-process | The token of the process | The write-back of the write set that changes it | Under the token of the process |
-| The page pool: its base and its frames, its free stack with its count, and the metadata of its free frames | Shared | The token of the page pool, a field of the kernel root; with one CPU, the executing CPU | The end of the write of `Pool::take`, of the step of a commit that takes a frame, or of `acknowledge` that returns one | Under the token, by the release of the lock that provides it once CPUs share it |
+| The page pool: its base and its frames, its free stack with its count, and the metadata of its free frames | Shared | The token of the page pool, a field of the kernel root; with one CPU, the executing CPU | The end of the write of a frame that `Pool::take` or a commit takes, or that `acknowledge` returns | Under the token, by the release of the lock that provides it once CPUs share it |
 | The metadata of each frame that a process holds, and the head of its committed chain | Per-process | The token of its process, to which a frame passes when it is taken and from which it passes back to the pool token when it returns | As the page pool | At the handover: under the token of the page pool |
 | The VM part of the capacity record, the `Config` | Shared, read-only after boot | The boot CPU, which checks it before the first entry from EL0 | The return of `check_config` | Once, before the secondary CPUs start; it never changes afterwards |
 
@@ -957,7 +1022,10 @@ of a process, are fields of the
   `mprotect` in it are `Pending` and `reserve` over it `Overlap`, and that
   is executed again to its completion; a host test that holds an unmap plan
   and then a zero plan without `acknowledge`, during which the frame is off
-  the pool and its page in the usage of the process.
+  the pool and its page in the usage of the process, an operation of the
+  process on a range outside the region and `revoke_step` of the process
+  are `InvalidState`, and a commit of another process takes its frames
+  from the pool.
 - Revocation: a process with committed and loaded frames and a pending
   release, revoked after the invalidation and the reset in steps of
   `RELEASE_BATCH`, after which it holds no frame, its usages are 0 and its

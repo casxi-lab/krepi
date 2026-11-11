@@ -186,17 +186,17 @@ of the property test maps a frame executable or twice.
 
 **Two-phase release.** `release` removes a region in two phases: from the
 transaction that makes it pending, every new operation in the region is
-refused with `Pending`; the release reports its completion only after
-every committed page of it has been unmapped, its invalidation
-acknowledged and its frame zeroed, and only then do its frames return to
-the pool and its pages to the quota of the caller. A release works in steps
-of at most 64 pages with a preemption point between two steps, and a call
-executed again continues from the stored progress. The criterion: a release
-of a region larger than one step that is preempted at each step and
-executed again completes with the same result as one without preemption;
-an operation in the region between the steps is `Pending`; and while a
-host test holds a plan without its acknowledgement, the frame of the page
-is off the pool and its page in the usage of the caller.
+refused with `Pending`; each frame of the region returns to the pool, and
+its page to the quota of the caller, only after its page has been
+unmapped, its invalidation acknowledged and its frame zeroed, and the
+release reports its completion after the last of them. A release works in
+steps of at most 64 pages with a preemption point between two steps, and a
+call executed again continues from the stored progress. The criterion: a
+release of a region larger than one step that is preempted at each step
+and executed again completes with the same result as one without
+preemption; an operation in the region between the steps is `Pending`; and
+while a host test holds a plan without its acknowledgement, the frame of
+the page is off the pool and its page in the usage of the caller.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `vm::release` and `vm::acknowledge` (planned).
@@ -231,8 +231,8 @@ process keeps its bytes; and the frozen vector of a faulted owner holds.
 - **Contract.** [Revocation at process destruction](contract.md#revocation-at-process-destruction).
 - **Specification.** None: the component has no specification.
 - **Proof path.** None: the component has no proof path.
-- **Evidence.** The frozen vectors `vm-failures-3` and `vm-failures-4` as
-  host tests, and the host test of revocation of the
+- **Evidence.** The frozen vector `vm-failures-4` as a host test, and the
+  host test of revocation of the
   [contract](contract.md#testing-obligations). The order of the steps in
   the destruction and the gate of reaping are shown by the tests of the
   lifecycle component.
@@ -337,10 +337,11 @@ gets the error of the earlier; and the frozen vectors of refusals hold.
 - The user copies of the kernel and Privileged Access Never are not
   covered; they belong to a later release.
 - The validation of loading requests and the loading part of the capacity
-  record belong to the dispatch component; the mapping of loaded images, the
-  copy of their file bytes and the charge of their private pages to the
-  creation component; the order of the steps of a destruction and the gates
-  of reaping to the lifecycle component.
+  record belong to the dispatch component (planned); the mapping of loaded
+  images, the copy of their file bytes and the charge of their private
+  pages to the creation component (planned); the order of the steps of a
+  destruction and the gates of reaping to the lifecycle component
+  (planned).
 - A process has one thread; further threads of a process are not covered.
 - The operation numbers, the registers of arguments and results and the
   numeric codes of errors of the ABI inventory are not covered.
