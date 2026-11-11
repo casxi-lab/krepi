@@ -17,12 +17,14 @@ Three limits bound the domain. The kernel allocates no object memory after
 boot: every pool and table has the capacity that the boot fixes, so what
 EL0 can create is bounded by the capacity record and by the quotas that
 divide it. A generation is 64 bits wide inside the kernel and 48 bits wide
-in a handle, so a slot of a pool retires after $2^{64} - 1$ occupants and a
-slot of a capability table after $2^{48} - 1$, and a retired slot is never
-used again in the same boot. Revocation and destruction proceed in steps of
-bounded work, so the time until they complete grows with the size of what
-they withdraw, while every step stays short. A result on one CPU does not
-show the order in which several CPUs reach shared objects.
+in a handle. A slot of a pool retires after $2^{64} - 1$ occupants and is
+not used again before the next boot. A slot of a capability table retires
+after $2^{48} - 1$ capabilities of one process and stays retired while that
+process occupies the process slot of the table; a new process counts the
+generations of the table from 1. Revocation and destruction proceed in
+steps of bounded work, so the time until they complete grows with the size
+of what they withdraw, while every step stays short. A result on one CPU
+does not show the order in which several CPUs reach shared objects.
 
 The domain builds on others, listed in the
 [subject-domain index](../README.md). The memory and address-spaces domain
@@ -188,13 +190,17 @@ does not fit.
 
 **Description.** Every slot of a pool and of a capability table has a
 generation, which starts at 1, stays while the slot is occupied and grows
-by one when the slot is freed. A slot whose generation reaches its maximum
-retires when it is freed and is not used again before the next boot.
-Inside the kernel, a reference is a pool, a slot and a 64-bit generation; a
-handle of EL0 is a 64-bit value of the slot number of the caller's table
-and the generation of that slot, and the value 0 is never a valid handle.
-A reference or a handle whose generation is not that of its slot names
-nothing: its use fails with a fixed error and changes no state.
+by one when the slot is freed. A slot of a pool whose generation reaches
+its maximum retires when it is freed and is not used again before the next
+boot. The generations of a capability table count for the process that
+occupies its process slot: a slot of the table that retires stays retired
+while that process occupies the process slot, and a new process finds
+every slot of the table at generation 1. Inside the kernel, a reference is
+a pool, a slot and a 64-bit generation; a handle of EL0 is a 64-bit value
+of the slot number of the caller's table and the generation of that slot,
+and the value 0 is never a valid handle. A reference or a handle whose
+generation is not that of its slot names nothing: its use fails with a
+fixed error and changes no state.
 
 **Design background.** A generation that never wraps keeps a stale name from
 matching a later occupant of its slot, without a global counter that other

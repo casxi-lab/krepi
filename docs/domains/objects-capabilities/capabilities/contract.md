@@ -142,16 +142,19 @@ change that adds the module writes its `paths` block here.
   the process slot is empty at generation 1 for that process, whatever it
   held for an earlier one. `Tables::new` makes every entry of every table
   empty at generation 1 with the epoch 0, which no process has. Filling an
-  empty entry keeps its generation and sets its `epoch`, so the handle of a
-  new capability carries the generation of its slot. Deleting a filled
-  entry at generation $g < 2^{48} - 1$ empties it at $g + 1$; deleting it at
-  $2^{48} - 1$ retires the slot, which stays retired while the same process
-  occupies the process slot. For one process, a generation never wraps,
-  never decreases and never repeats for a slot, so a handle that has gone
-  stale never names a capability again. An entry reference carries the
-  generation of the process as well, and a process generation is never
-  reused for a process slot, so an entry reference that has gone stale
-  never names a capability again within the boot.
+  empty entry whose `epoch` is the generation of the process keeps its
+  generation; filling one whose `epoch` belongs to another process, or is
+  0, writes generation 1 and the generation of the process as its `epoch`.
+  Either way the handle of a new capability carries the generation of its
+  slot for the process. Deleting a filled entry at generation
+  $g < 2^{48} - 1$ empties it at $g + 1$; deleting it at $2^{48} - 1$
+  retires the slot, which stays retired while the same process occupies the
+  process slot. For one process, a generation never wraps, never decreases
+  and never repeats for a slot, so a handle that has gone stale never names
+  a capability again. An entry reference carries the generation of the
+  process as well, and a process generation is never reused for a process
+  slot, so an entry reference that has gone stale never names a capability
+  again within the boot.
 - **Earlier processes.** A process slot is released only when the
   capability slots of its process count no usage
   ([release](../objects/contract.md#identities-and-generations)), as the
@@ -514,21 +517,23 @@ restores a moved source.
   the source as `close` does, so the received capability takes the place of
   the source among its siblings. The `state` of the reservation tells a
   move from a copy, and the source of a move is the entry that the first
-  reference of its path names. A commit refuses a reservation that is no
-  longer reserved at its generation, or a reservation for a move whose
-  source is no longer live with the reservation in its `moving` field
+  reference of its path names. A commit refuses a reservation whose entry
+  is no longer reserved at both generations of its entry reference, that
+  of the process and that of the table slot, or a reservation for a move
+  whose source is no longer live with the reservation in its `moving` field
   (`TransferGone`), and a reservation in the subtree of a pending
   revocation (`RevocationPending`). A reservation for a copy whose source
   has been closed commits all the same, below the nearest live ancestor
   that it then has.
-- **Abort.** `abort(root, buffer, reservation)` deletes a reservation that
-  is still reserved at its generation, crediting the receiver and taking it
-  from the count of its object, and, for a move whose source is live,
-  clears the `moving` field of the source, which is usable again with its
-  original rights. It returns `aborted`, or `gone` without a change when
-  the reservation no longer exists; it never fails, never restores a source
-  that has been deleted and never touches a slot that another capability
-  has taken since.
+- **Abort.** `abort(root, buffer, reservation)` deletes a reservation whose
+  entry is still reserved at both generations of its entry reference,
+  crediting the receiver and taking it from the count of its object, and,
+  for a move whose source is live, clears the `moving` field of the source,
+  which is usable again with its original rights. It returns `aborted`, or
+  `gone` without a change when the reservation no longer exists; it never
+  fails, never restores a source that has been deleted and never touches a
+  slot that another capability has taken since, also when a new process of
+  the receiver's process slot holds that slot at the same table generation.
 - **Revocation.** A reservation is a descendant of its source, so it is in
   the subtree of every revocation of the source or of an ancestor: from the
   pending transition its commit is refused, and a step removes it as a
@@ -620,7 +625,7 @@ other steps of the destruction of a process.
 | `WrongType` | An entry of another kind than the operation needs | `lookup` | Handle resolution: the type |
 | `WrongPool` of the objects component | A reference of another pool than its kind's | `install`, `count` | Handle resolution: the type |
 | `StaleReference` of the objects component | A reference that is not live | `lookup`, `derive`, `copy`, `reserve`, `install`, `count` | Handle resolution: the liveness of the object |
-| `TransferGone` | A reservation that is no longer reserved at its generation, or a reservation for a move whose source is no longer live with it in its `moving` field | `commit` | Handle resolution: the liveness of the reservation |
+| `TransferGone` | A reservation whose entry is no longer reserved at both generations of its entry reference, or a reservation for a move whose source is no longer live with it in its `moving` field | `commit` | Handle resolution: the liveness of the reservation |
 | `PermissionDenied` | A right that the operation needs and the entry lacks: GRANT, REVOKE, a requested right, or a right of the operation | `lookup`, `derive`, `copy`, `revoke`, `reserve` | Rights |
 | `RevocationPending` | An entry, or a live ancestor, whose revocation mark is set, other than for a `revoke` that continues the revocation of the entry | `lookup`, `derive`, `copy`, `close`, `revoke`, `reserve`, `commit` | Object state |
 | `TransferPending` | The source of a pending move | `lookup`, `derive`, `copy`, `close`, `revoke`, `reserve` | Object state |
@@ -694,8 +699,9 @@ The prototype's capability registry had sixteen errors. Here:
   before its first write.
 - `teardown_step` checks its progress before its first write; its callers
   make the checks of the destruction.
-- `abort` checks that the reservation is reserved at its generation before
-  its first write, and writes nothing when it is not.
+- `abort` checks that the entry of the reservation is reserved at both
+  generations of its entry reference before its first write, and writes
+  nothing when it is not.
 - The write phase of every entry of this page allows only `WriteSetFull` of
   `stage`, which the write sets below never reach, `QuotaExceeded` of the
   charge of a capability slot, which an empty target slot excludes, and the
@@ -1050,8 +1056,8 @@ fixture and the endpoint E.
 
 | Vector | Line | Test | Expected output | Entry |
 | --- | ---: | --- | --- | --- |
-| `caps-endpoint-admission-1` | 4 | `endpoint_and_thread_capabilities_reject_cross_kind_resolution` | A[0] holds E with all rights, `0@1`; a derivation from `0@1` into A[1] with SEND and the badge 71 gives `1@1`, the prototype's seeded capability; and A[2] holds T with all rights, `2@1`. A's lookup of `1@1` for a thread is `err=WrongType`, and of `2@1` for an endpoint `err=WrongType`; A's lookup of `1@1` for an endpoint with SEND gives E with the badge 71; with RECEIVE, `err=PermissionDenied`; B's lookup of `1@1` with SEND is `err=NoCapability`. `count(E)=2`, the prototype's 1 and the capability that sets the badge, and `count(T)=1`. The teardown of A's table deletes the three in one step, after which `count(T)=0` and E, whose last capability is deleted, is released, its slot free at generation 2. The prototype's resolution for GRANT (`InvalidRights`) and its native receipts of E and of its owner do not apply | `install`, `derive`, `lookup`, `count`, `teardown_step` |
-| `caps-endpoint-admission-2` | 55 | `derivation_preserves_badge_kind_and_attenuation` | A[0] holds E with all rights; a derivation from `0@1` into A[1] with all rights and the badge 18446744073709551615 gives `1@1`, the prototype's seeded capability. A send of `1@1` from A to B[0] with SEND gives B `0@1`, and a derivation from `1@1` into A[2] with RECEIVE gives `2@1`. B's lookup of `0@1` for an endpoint with SEND and A's of `2@1` with RECEIVE each give E with the badge 18446744073709551615; A's lookup of `2@1` with SEND is `err=PermissionDenied`. B's derivation from `0@1` into B[1] with SEND and A's from `2@1` into A[3] with all rights are each `err=PermissionDenied` and leave the tables unchanged. `count(E)=4`: the prototype's 3 and the capability that sets the badge | `install`, `derive`, `reserve`, `commit`, `lookup`, `count` |
+| `caps-endpoint-admission-1` | 4 | `endpoint_and_thread_capabilities_reject_cross_kind_resolution` | A[0] holds E with all rights, `0@1`; a derivation from `0@1` into A[1] with SEND and the badge 71 gives `1@1`, the prototype's seeded capability; and A[2] holds T with all rights, `2@1`. A's lookup of `1@1` for a thread is `err=WrongType`, and of `2@1` for an endpoint `err=WrongType`; A's lookup of `1@1` for an endpoint with SEND gives E with the badge 71; with RECEIVE, `err=PermissionDenied`; B's lookup of `1@1` with SEND is `err=NoCapability`. `count(E)=2`, the prototype's 1 and A[0], the source of the derivation that sets the badge, and `count(T)=1`. The teardown of A's table deletes the three in one step, after which `count(T)=0` and E, whose last capability is deleted, is released, its slot free at generation 2. The prototype's resolution for GRANT (`InvalidRights`) and its native receipts of E and of its owner do not apply | `install`, `derive`, `lookup`, `count`, `teardown_step` |
+| `caps-endpoint-admission-2` | 55 | `derivation_preserves_badge_kind_and_attenuation` | A[0] holds E with all rights; a derivation from `0@1` into A[1] with all rights and the badge 18446744073709551615 gives `1@1`, the prototype's seeded capability. A send of `1@1` from A to B[0] with SEND gives B `0@1`, and a derivation from `1@1` into A[2] with RECEIVE gives `2@1`. B's lookup of `0@1` for an endpoint with SEND and A's of `2@1` with RECEIVE each give E with the badge 18446744073709551615; A's lookup of `2@1` with SEND is `err=PermissionDenied`. B's derivation from `0@1` into B[1] with SEND and A's from `2@1` into A[3] with all rights are each `err=PermissionDenied` and leave the tables unchanged. `count(E)=4`: the prototype's 3 and A[0], the source of the derivation that sets the badge | `install`, `derive`, `reserve`, `commit`, `lookup`, `count` |
 | `caps-endpoint-admission-3` | 94 | `seed_rejects_attenuated_foreign_and_stale_endpoints_atomically` | The prototype's installations from native endpoint handles restricted to OBSERVE or CONTROL (`PermissionDenied`) do not apply: a reference carries no rights. An installation into A[0] of the reference of an endpoint of another table, whose pools have other numbers, is `err=WrongPool`; with the slot of E released, an installation of the reference of E is `err=StaleReference`. The table is unchanged | `install` |
 | `caps-endpoint-admission-4` | 126 | `closed_endpoint_cannot_gain_new_authority_but_keeps_cleanup_identity` | A[0] holds E with all rights. The closure of E is a state of the IPC component, which no check of this page reads, so the prototype's refusals of a derivation and an installation after it (`InvalidState`) do not apply. A's lookup of `0@1` for an endpoint with RECEIVE gives E with no badge. The prototype's refused reaping of E (`ReferencesOutstanding`) does not apply: the close of `0@1` deletes the last capability of E and so releases it; a new endpoint then takes its slot at generation 2, and A's lookup of `0@1` is `err=NoCapability` | `install`, `lookup`, `close` |
 | `caps-endpoint-admission-5` | 163 | `token_and_capacity_failure_do_not_retain_endpoint` | A test sets the generation of A[0] to $2^{48} - 1$; an installation of E with all rights there gives `0@281474976710655`. The prototype's global token counter, which refused a further installation and a derivation (`TokenExhausted`), does not apply: an installation of E with all rights into A[1] gives `1@1`, a derivation from `0@281474976710655` into A[2] with SEND gives `2@1`, and `count(E)=3`. In a table with `capability_slots=1` whose A[0] holds E with all rights, a second installation into A[0] is `err=SlotOccupied` and leaves the table and `count(E)=1` unchanged | `install`, `derive`, `count` |
