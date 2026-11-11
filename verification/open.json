@@ -515,6 +515,22 @@
       "contract": "docs/domains/memory/page-tables/contract.md"
     },
     {
+      "item": "kernel/arch/src/percpu.rs#Cpu::ledger_mut",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of the SMP primitives and of the concurrency backend",
+      "stage": "0.2",
+      "contract": "docs/domains/scheduling/budget-ledger/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/percpu.rs#Cpu::run_queues_mut",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of the SMP primitives and of the concurrency backend",
+      "stage": "0.2",
+      "contract": "docs/domains/scheduling/scheduler/contract.md"
+    },
+    {
       "item": "kernel/arch/src/percpu.rs#enter_masked",
       "kind": "unsafe",
       "verified_state": "neither",
@@ -625,6 +641,86 @@
       "carrier": "The proof of contexts, user copies and the private VM",
       "stage": "0.2",
       "contract": "docs/domains/memory/address-space/contract.md"
+    },
+    {
+      "item": "kernel/src/scheduler.rs#RunQueues::new",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/scheduling/scheduler/contract.md"
+    },
+    {
+      "item": "kernel/src/scheduler.rs#admit",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/scheduling/scheduler/contract.md"
+    },
+    {
+      "item": "kernel/src/scheduler.rs#block",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/scheduling/scheduler/contract.md"
+    },
+    {
+      "item": "kernel/src/scheduler.rs#choose",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/scheduling/scheduler/contract.md"
+    },
+    {
+      "item": "kernel/src/scheduler.rs#enqueue",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/scheduling/scheduler/contract.md"
+    },
+    {
+      "item": "kernel/src/scheduler.rs#preempt",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/scheduling/scheduler/contract.md"
+    },
+    {
+      "item": "kernel/src/scheduler.rs#remove",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/scheduling/scheduler/contract.md"
+    },
+    {
+      "item": "kernel/src/scheduler.rs#requeue",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/scheduling/scheduler/contract.md"
+    },
+    {
+      "item": "kernel/src/scheduler.rs#validate_parameters",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/scheduling/scheduler/contract.md"
+    },
+    {
+      "item": "kernel/src/scheduler.rs#yield_now",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/scheduling/scheduler/contract.md"
     }
   ]
 }
