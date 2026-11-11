@@ -307,7 +307,7 @@ vectors hold.
 
 **Capacities.** The capacities are constants of the core, sized for 16 GiB
 of RAM: the pool of the direct map holds 80 tables, which leaves 61 free on
-the inferred shape of the 16 GB model; the lower kernel set holds 16; the
+the inferred shape of the 16 GB model; the lower kernel set holds 32; the
 page ownership table manages at most 16 GiB in at most 32 banks with at most
 160 extents and 132 exclusions. A request beyond a capacity fails before any
 write with `OutOfTables` or `MetadataExhausted`. The criterion: a direct map

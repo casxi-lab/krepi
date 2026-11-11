@@ -5,10 +5,16 @@
 The memory and address-spaces domain decides who owns each page of physical
 RAM, how the kernel and every process see memory through the translation
 tables, and when memory may change hands. It covers the ownership of
-physical pages, the page tables with the kernel direct map, the ASIDs that
-tag the translations of an address space, the VM objects and their kinds,
-the access of the kernel to buffers of a process, W^X with the publication
-of code, and the barriers that guard the reclamation of memory.
+physical pages, the page tables with the kernel direct map, the address
+spaces of processes with the ASIDs that tag their translations, the VM
+objects and their kinds, the access of the kernel to buffers of a process,
+W^X with the publication of code, and the barriers that guard the
+reclamation of memory. With the address spaces it covers the entry from EL0
+and the return to it, the classes of the exceptions and user faults of EL0,
+the creation of the first process with its boot information and the
+boot-bundle directory, the EL0 policy of the timers, the performance
+monitors and the debug communications channel, and the representation of
+kernel stacks and blocking calls.
 
 Three limits bound the domain. The translation regime is stage 1 of EL1&0
 with 4 KiB granules: two regions of 39 bits, the lower one for the address
@@ -31,7 +37,12 @@ capabilities domain holds the capabilities and quotas that name VM objects;
 the security and lifecycle domain decides who may add the execute right.
 The [page-tables](page-tables/requirements.md) component holds the
 descriptors, the table sets, the kernel's own mappings, the direct map and
-the page ownership table.
+the page ownership table. The [address-space](address-space/requirements.md)
+component holds the address spaces of processes with their ASIDs and table
+pools, the layout of EL0 and the range check of user buffers, the entry
+from EL0 and the return to it with the classes of exceptions and user
+faults, the first process with its boot information and the boot-bundle
+directory, the EL0 controls, and the kernel stacks and blocking calls.
 
 ## Conventions
 
@@ -63,11 +74,11 @@ the page ownership table.
 | --- | --- | --- | --- |
 | [Physical page ownership](#physical-page-ownership) | The owner of every managed page, allocation, staged reservation and release with receipts | - | [page-tables](page-tables/requirements.md) |
 | [Page tables and the kernel direct map](#page-tables-and-the-kernel-direct-map) | Descriptors and kinds, table sets and their writes, the kernel's mappings of its image and devices, the direct map | - | [page-tables](page-tables/requirements.md) |
-| [ASIDs](#asids) | The tags of the translations of an address space, their allocation and reuse | - | The ASID allocator of the address spaces |
+| [ASIDs](#asids) | The tags of the translations of an address space, their allocation and reuse | - | [address-space](address-space/requirements.md) |
 | [VM objects and their kinds](#vm-objects-and-their-kinds) | Regions and VM objects, their kinds, commit and release, the mappings that are not VM objects | - | The VM of the core |
-| [User-buffer access](#user-buffer-access) | How the kernel reads and writes memory that a process can write | - | The user copies of the kernel |
+| [User-buffer access](#user-buffer-access) | How the kernel reads and writes memory that a process can write | - | The user copies of the kernel; [address-space](address-space/requirements.md), for the range of a buffer |
 | [W^X and code publication](#wx-and-code-publication) | The rule against writable executable frames and the publication of code | - | [page-tables](page-tables/requirements.md) |
-| [Reclamation barriers](#reclamation-barriers) | The acknowledgements that precede the reuse of pages, tables and ASIDs | - | The reclamation of address spaces and VM objects |
+| [Reclamation barriers](#reclamation-barriers) | The acknowledgements that precede the reuse of pages, tables and ASIDs | - | The reclamation of address spaces and VM objects; [address-space](address-space/requirements.md), for the release of ASIDs |
 
 ## Physical page ownership
 
