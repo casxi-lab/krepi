@@ -723,8 +723,9 @@ fn unique(text: &str, start: usize, end: usize) -> Option<(usize, usize)> {
 }
 
 /// The source mutants of `target` with `operators` in the files that `read`
-/// gives by their paths, without a class, and the number of points without a text that occurs
-/// once in their file.
+/// gives by their paths, of class `no-theorem` in a function of `unclosed`
+/// and without a class otherwise, and the number of points without a text
+/// that occurs once in their file.
 pub fn generate(
     read: &dyn Fn(&str) -> Option<String>,
     target: &Target,
@@ -770,14 +771,16 @@ pub fn generate(
                     &text[left..right],
                     [&text[left..from], &to, &text[until..right]].concat(),
                 );
+                let function = format!("{file}#{name}");
+                let class = target.unclosed.contains(&function);
                 if seen.insert((file, find.to_string(), replace.clone())) {
                     mutants.push(Survivor {
                         point: format!("{file}:{}:{}", start.line, start.column + 1),
                         operator: operator.to_string(),
                         find: find.to_string(),
                         replace,
-                        function: format!("{file}#{name}"),
-                        class: None,
+                        function,
+                        class: class.then_some(Category::NoTheorem),
                         reason: None,
                     });
                 }
@@ -791,6 +794,8 @@ pub fn generate(
 /// export and runs each in a stage of its own, with the theorems of all its
 /// obligations to fail, as commands of its unit; concludes the unit, and
 /// writes the draft of its list of survivors when every mutant was decided.
+/// A theorem of the obligations outside the top-level theorems of the
+/// proofs rejects the unit before any mutant runs.
 fn generated(
     gate: &mut Gate,
     target: &Target,
@@ -798,10 +803,14 @@ fn generated(
     operators: &[String],
 ) -> Result<(), String> {
     let (layout, unit) = (*gate.layout(), generated_unit(&target.name));
+    let fails = Vec::from_iter(target.obligations.iter().flat_map(|o| o.theorems.clone()));
+    if let Some(problem) = unknown_failures(&fails, ranges) {
+        gate.conclude(&unit, (Status::Rejected, Some(problem)));
+        return Ok(());
+    }
     let source = gate.source();
     let read = |file: &str| fs::read_to_string(source.join(file)).ok();
     let (points, not_unique) = generate(&read, target, operators)?;
-    let fails = Vec::from_iter(target.obligations.iter().flat_map(|o| o.theorems.clone()));
     let (operators, generated) = (operators.to_vec(), points.len());
     let (target_name, schema) = (target.name.clone(), SCHEMA);
     let mut list = List {
@@ -862,7 +871,8 @@ fn generated(
 /// After a run of `formal mutants` of `target` that ended with `code`,
 /// writes its list of survivors from the draft of the run `run`, with the
 /// commit and the receipt summary, as `<mutants>/<target>.json` of `root`,
-/// and prints its counts; without a draft, the run writes no list.
+/// and prints its counts; a run that is not `SCOPED` or left no draft
+/// writes no list.
 pub fn write_list(
     root: &Path,
     layout: &Layout,
@@ -872,7 +882,8 @@ pub fn write_list(
     code: ExitCode,
 ) -> ExitCode {
     let draft = fs::read_to_string(run.path.join("work").join(DRAFT));
-    let (Ok(Ok(mut list)), Ok(bytes)) = (
+    let (true, Ok(Ok(mut list)), Ok(bytes)) = (
+        receipt.status == Status::Scoped,
         draft.map(|t| serde_json::from_str::<List>(&t)),
         fs::read(run.receipt()),
     ) else {
@@ -902,9 +913,10 @@ pub fn write_list(
 
 /// The problems of the lists of survivors in `tree` of `layout`, whose
 /// registry has `targets`: a list that does not parse, of another schema,
-/// of a target that the registry does not have or not at its path, and a
-/// survivor without a class or a reason; and the inventory keys of the
-/// functions of the survivors that no theorem covers.
+/// of a target that the registry does not have or not at its path, a
+/// survivor without a class or a reason, and one in a function of
+/// `unclosed` of another class than `no-theorem`; and the inventory keys of
+/// the functions of the survivors that no theorem covers.
 pub fn list_problems(
     tree: &Tree,
     layout: &Layout,
@@ -930,8 +942,8 @@ pub fn list_problems(
                 continue;
             }
         };
-        let registered = targets.iter().any(|target| target.name == list.target);
-        if !registered || path != list_path(layout, &list.target) {
+        let registered = targets.iter().find(|target| target.name == list.target);
+        if registered.is_none() || path != list_path(layout, &list.target) {
             problems.push(format!("{path}: not the list of a registered target"));
         }
         for survivor in &list.survivors {
@@ -940,12 +952,16 @@ pub fn list_problems(
                 .reason
                 .as_deref()
                 .is_none_or(|reason| reason.trim().is_empty());
+            let unclosed = registered.is_some_and(|t| t.unclosed.contains(&survivor.function));
             match survivor.class {
                 None => problems.push(format!("{path}: the survivor at {point} has no class")),
                 Some(_) if blank => {
                     problems.push(format!("{path}: the survivor at {point} has no reason"))
                 }
                 Some(Category::NoTheorem) => _ = uncovered.insert(survivor.function.clone()),
+                Some(_) if unclosed => problems.push(format!(
+                    "{path}: the survivor at {point} is in an unclosed function, not no-theorem"
+                )),
                 Some(_) => {}
             }
         }
@@ -992,7 +1008,7 @@ mod tests {
     use crate::formal::fixture::{self, Fixture};
     use crate::formal::process::{Ended, Limit, LimitBy};
     use crate::formal::run::tests::{
-        gate, generating_run, register, target_run, two_targets, with_targets,
+        Done, gate, generating_run, register, target_run, two_targets, with_targets,
     };
 
     const FAILED: &str = include_str!("fixtures/mutants/failed.txt");
@@ -1327,6 +1343,46 @@ mod tests {
         assert_eq!(code, ExitCode::FAILURE);
     }
 
+    #[test]
+    fn a_run_of_source_mutants_that_is_not_scoped_writes_no_list() {
+        let fixture = with_targets("generated-failed", &two_targets(1_800, 1));
+        let operators = Some(vec!["literal".to_string()]);
+        let done = gate(
+            &fixture,
+            &["t"],
+            generating_run(&fixture, &["t"], operators.clone()),
+        );
+        assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.failures());
+        let path = fixture.root().join(list_path(&Layout::PRODUCTION, "t"));
+        let write = |done: &Done, receipt: &Receipt| {
+            let (root, layout) = (fixture.root(), &Layout::PRODUCTION);
+            write_list(root, layout, "t", &done.run, receipt, ExitCode::FAILURE)
+        };
+        // The draft of a verified unit of mutants, in a run that another
+        // unit failed.
+        let mut receipt = done.receipt.clone();
+        receipt.status = Status::Rejected;
+        assert_eq!(write(&done, &receipt), ExitCode::FAILURE);
+        assert!(!path.exists());
+        // A theorem of the obligations that the ranges do not hold as a
+        // theorem rejects the unit before a mutant runs.
+        let ranges = "echo 'krepi-ranges-module Krepi.Proofs.T 0'; exit 0\n";
+        fixture::lake_script(&fixture, "ranges", ranges);
+        let done = gate(
+            &fixture,
+            &["t"],
+            generating_run(&fixture, &["t"], operators),
+        );
+        let reason = "not a theorem of the target's proof modules: Krepi.Proofs.T.f_spec";
+        assert_eq!(
+            fixture::status(&done, "mutants/t"),
+            (Status::Rejected, Some(reason))
+        );
+        assert!(fixture::commands(&done, "mutants/t").is_empty());
+        assert_eq!(write(&done, &done.receipt), ExitCode::FAILURE);
+        assert!(!path.exists());
+    }
+
     /// The source of the tests of the generation, in the file `FILE`.
     const SOURCE: &str = r#"pub struct Table { used: u32 }
 
@@ -1362,10 +1418,16 @@ mod tests { fn t() { let _ = 1 + 1; } }
     const FILE: &str = "kernel/src/lib.rs";
 
     /// The source mutants of the functions `keys` of [`SOURCE`] with
-    /// `operators`.
+    /// `operators`, which the target proves.
     fn generated_from(keys: &[&str], operators: &[&str]) -> (Vec<Survivor>, usize) {
+        generated_in("proves", keys, operators)
+    }
+
+    /// The source mutants of the functions `keys` of [`SOURCE`], in the
+    /// list `list` of the target, with `operators`.
+    fn generated_in(list: &str, keys: &[&str], operators: &[&str]) -> (Vec<Survivor>, usize) {
         let tree = Tree::from_files(&[(FILE, SOURCE)]);
-        let registry = serde_json::json!({"schema": 2, "specifications": [], "targets": [{"name": "t", "proves": keys}]});
+        let registry = serde_json::json!({"schema": 2, "specifications": [], "targets": [{"name": "t", list: keys}]});
         let target = registry::parse(&registry.to_string())
             .expect("a registry")
             .targets
@@ -1436,6 +1498,14 @@ mod tests { fn t() { let _ = 1 + 1; } }
         );
         let (some, _) = generated_from(&["kernel/src/lib.rs#Table::charge"], &["method"]);
         assert_eq!(some.len(), 2);
+        // The mutants of a proved function have no class, and those of an
+        // unclosed one no theorem.
+        assert!(mutants.iter().all(|m| m.class.is_none()));
+        let (unclosed, _) = generated_in("unclosed", &["kernel/src/lib.rs#other"], &["equality"]);
+        assert_eq!(
+            Vec::from_iter(unclosed.iter().map(|m| m.class)),
+            [Some(Category::NoTheorem)]
+        );
     }
 
     #[test]
@@ -1520,6 +1590,23 @@ mod tests { fn t() { let _ = 1 + 1; } }
             Vec::from_iter(uncovered),
             ["kernel/src/lib.rs#Table::charge"]
         );
+        let lemma = list(
+            "t",
+            Some(Category::MissingLemma),
+            Some("No lemma bounds it."),
+        );
+        assert_eq!(check(&lemma), (Vec::new(), BTreeSet::new()));
+        // A survivor in an unclosed function has no theorem.
+        let registry = r#"{"schema": 2, "specifications": [],
+            "targets": [{"name": "t", "unclosed": ["kernel/src/lib.rs#Table::charge"]}]}"#;
+        let unclosed = registry::parse(registry).expect("a registry").targets;
+        let tree = Tree::from_files(&[(path, &lemma)]);
+        assert_eq!(
+            list_problems(&tree, &Layout::PRODUCTION, &unclosed).0,
+            [format!(
+                "{path}: the survivor at kernel/src/lib.rs:5:22 is in an unclosed function, not no-theorem"
+            )]
+        );
         let (problems, _) = check(&list(
             "u",
             Some(Category::Equivalent),
@@ -1565,6 +1652,22 @@ mod tests { fn t() { let _ = 1 + 1; } }
             formal.contains(&format!("gate_budget={gate}\n"))
                 && formal.contains(&format!("receipt_margin={margin}\n"))
         );
+        // With these lines, which give 126 and 195 minutes without a formal
+        // target, and room for 9,900 s of formal budgets in a job of 360.
+        for line in [
+            r#"jq -e 'all(.targets[]; .name | test("^[a-z0-9][a-z0-9-]*$"))' "$registry" > /dev/null"#,
+            "minutes() { echo $(( (gate_budget + $1 + receipt_margin + 59) / 60 )); }",
+            r#"echo "gate=$((gate + 1))""#,
+            r#"echo "job=$((15 + 55 + gate))""#,
+            r#"echo "planned-gate=$((planned + 2))""#,
+            r#"echo "planned-job=$((15 + planned + 2 + 3))""#,
+            "if [ $((15 + 55 + gate)) -gt 360 ] || [ $((15 + planned + 2 + 3)) -gt 360 ]; then",
+        ] {
+            assert!(formal.contains(&format!("{line}\n")), "{line}");
+        }
+        let job = |budgets: u64| 15 + 55 + minutes(gate + budgets + margin);
+        assert_eq!((minutes(gate + margin) + 1, job(0)), (126, 195));
+        assert!(job(9_900) <= 360 && job(9_901) > 360);
         // `formal-calibration.yml` writes them for the registry of the
         // calibration.
         let text = include_str!("../../../.github/workflows/formal-calibration.yml");

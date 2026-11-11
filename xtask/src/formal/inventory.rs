@@ -1175,6 +1175,48 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
     }
 
     #[test]
+    fn the_lists_of_survivors_fail_the_check_and_name_what_no_theorem_covers() {
+        let lib = (LIB, "pub fn f() {}\npub fn g() {}\n");
+        let targets = r#"{"schema": 2, "targets": [{"name": "a", "state": "planned",
+            "proves": ["kernel/demo/src/lib.rs#f"], "unclosed": ["kernel/demo/src/lib.rs#g"]}]}"#;
+        let survivor = |function: &str, class: Option<mutants::Category>| mutants::Survivor {
+            point: format!("{LIB}:1:1"),
+            operator: "literal".into(),
+            find: "f()".into(),
+            replace: "f( )".into(),
+            function: format!("{LIB}#{function}"),
+            class,
+            reason: Some("No theorem is about it.".into()),
+        };
+        let path = mutants::list_path(&LAYOUT, "a");
+        let checked = |survivors: Vec<mutants::Survivor>| {
+            let list = mutants::List {
+                schema: mutants::SCHEMA,
+                target: "a".into(),
+                survivors,
+                ..mutants::List::default()
+            };
+            let text = serde_json::to_string(&list).expect("JSON");
+            let files = [lib, (LAYOUT.registry, targets), (path.as_str(), &text)];
+            let (read, problems) = check(&tree(&files), &roots(&[]), &LAYOUT);
+            (read, Vec::from_iter(problems))
+        };
+        let (read, problems) = checked(vec![survivor("f", None)]);
+        let no_class = format!("{path}: the survivor at {LIB}:1:1 has no class");
+        assert_eq!(problems, [no_class]);
+        assert_eq!(read, "1 files, 2 functions, 0 derived, 0 open");
+        let no_theorem = Some(mutants::Category::NoTheorem);
+        let (read, problems) = checked(vec![survivor("f", no_theorem), survivor("g", no_theorem)]);
+        assert_eq!(problems, Vec::<String>::new());
+        assert_eq!(
+            read,
+            format!(
+                "1 files, 2 functions, 0 derived, 0 open; survivors that no theorem covers in {LIB}#f, {LIB}#g"
+            )
+        );
+    }
+
+    #[test]
     fn the_modules_of_the_files_are_recorded() {
         let files = [
             (
