@@ -100,12 +100,13 @@ no credit gives way to the next. A thread that becomes ready by its
 admission or by the completion of its wait, whose dispatch ends with its
 time slice or its credit, or that yields joins the tail of its queue; a
 thread preempted with time slice left and with credit returns to the head
-with the rest of its slice. A thread is running, ready, blocked or removed:
-it blocks only by a call of its own while it runs, becomes ready only when
-its wait completes, and is never chosen again once removed, so it runs on
-at most one CPU at a time. `yield` ends the dispatch of its caller and puts
-it at the tail of its queue. The classes order selection and do not divide
-the CPU, which the caps of the classes do.
+with the rest of its slice. An admitted thread is running, ready, blocked
+or removed: it blocks only by a call of its own while it runs, becomes
+ready only when its wait completes, and is never chosen again once
+removed, so it runs on at most one CPU at a time. `yield` ends the
+dispatch of its caller and puts it at the tail of its queue. The classes
+order selection and do not divide the CPU, which the caps of the classes
+do.
 
 **Design background.** Strict priorities with round robin within a
 priority are the round-robin policy of POSIX real-time scheduling
@@ -148,7 +149,7 @@ scheduling state of a thread is per-thread state, classified in the
 contract.
 
 **Verification.** Invariants: a ready thread is in exactly one run queue,
-that of its effective class on its CPU; a running, blocked or removed
+that of its effective class on its CPU; a new, running, blocked or removed
 thread is in none; selection takes the first thread with credit of the
 highest class that has one. Required counterexamples: a control thread
 without credit beside a background thread with credit, two threads whose
@@ -354,9 +355,11 @@ and waits domain, which makes and withdraws the loans.
 ceiling of a thread is an argument of the creation of its process. Inside
 the kernel, the budget ledger lends a context and withdraws a loan
 ([lending](budget-ledger/contract.md#lending)). A loan beyond the depth is
-an error of shared capacity; a second lender of one borrower and a loan
-back to the owner of a context are errors, which the IPC component avoids
-by refusing a call to oneself and a cycle of calls before delivery.
+an error of shared capacity. A loan back to the owner of a context is an
+error, which the IPC component avoids by refusing a call to oneself and a
+cycle of calls before delivery; a second loan to a borrower that already
+borrows is an error as well, which the rules of the IPC component for the
+delivery of a call to a receiver avoid.
 
 **Prerequisites.** [Budgets and replenishment](#budgets-and-replenishment),
 [Priority classes](#priority-classes), and [Admission](#admission) for the
@@ -482,8 +485,9 @@ of the kernel objects and capabilities domain.
 
 **Engineering notes.** An admission writes the thread slots of the
 creator, of the new thread and of the last thread of its run queue, and the
-scheduler record of the CPU, within the write set of the creation. A process is reaped after its children, so holdings
-return up the tree in order. The holdings are fields of the budget records,
+scheduler record of the CPU, within the write set of the creation. A
+process is reaped after its children, so holdings return up the tree in
+order. The holdings are fields of the budget records,
 per-CPU state classified in the
 [State fields](budget-ledger/contract.md#state-fields) of the budget-ledger
 contract, and the scheduling state of a thread is classified in the
