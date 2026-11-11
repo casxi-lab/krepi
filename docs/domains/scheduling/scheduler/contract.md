@@ -436,9 +436,9 @@ and these entries and events change it:
   checked by `ledger::admit`
   ([admission and release](../budget-ledger/contract.md#admission-and-release)),
   with its errors: a budget of 0, an amount above 0 for a class above the
-  class of the thread, and an amount beyond the creator's holding of its
-  class. The composer makes the checks of both entries before its first
-  write, in the order of errors of [Errors](#errors).
+  class of the thread, and an amount beyond the creator's holding of the
+  same class. The composer makes the checks of both entries before its
+  first write, in the order of errors of [Errors](#errors).
 - **Effect.** `admit` makes the thread ready at the tail of the queue of its
   class with a whole slice, and sets the reschedule flag as
   [Preemption](#preemption) states. The creation component decides when, in
@@ -524,11 +524,14 @@ The values are read-only after boot.
 - **Order.** Each entry checks in the order of its rule section and
   returns the first error. A composing operation applies the order of
   errors of the [security model](../../../security.md#internal-choices):
-  the form of its arguments, among them the budget of 0 and the amounts
-  above the class of the thread that `ledger::admit` refuses, comes first;
-  then handle resolution, then object state, then the caller's quota,
-  where the class and the ceiling of this page come before the holdings
-  that `ledger::admit` checks.
+  handle resolution, then object state, then the caller's quota, where the
+  class and the ceiling of this page come before the holdings that
+  `ledger::admit` checks. The form of its arguments, among them a budget
+  of 0 and an amount above 0 for a class above the thread's, which
+  `ledger::admit` refuses, comes before handle resolution when the ABI
+  inventory passes them in registers, and after the rights and the user
+  buffers, before object state, when it copies them in an argument
+  structure.
 - **No change on failure.** No error changes state: an entry of this page
   that returns an error leaves every field of the kernel state as it was,
   the copies in the write set included, and writes no counter; a composing
@@ -553,7 +556,7 @@ pool, which the objects contract moved to the scheduler. Here:
 | Prototype error | Here |
 | --- | --- |
 | `InvalidConfiguration` | Kept, for the check of the time slice; the prototype's capacity of 0 does not apply, since the run queues take the threads of the thread pool and have no capacity of their own. The checks of the period, the caps, the margin and the amounts of an admission are the budget-ledger component's, with its own row |
-| `AdmissionRejected` | Kept, for a class or a ceiling above the creator's class; an amount beyond the creator's holding of its class is the budget-ledger component's |
+| `AdmissionRejected` | Kept, for a class or a ceiling above the creator's class; an amount beyond the creator's holding of the same class is the budget-ledger component's |
 | `Duplicate` | Not applicable: a thread is admitted once, in the write set that creates it, and a second `admit` of it, which no composer makes, is `InvalidState` |
 | `Capacity` | Not applicable: a run queue holds threads of the thread pool and has no capacity of its own |
 | `UnknownThread` | Not applicable: the entries take thread references, and a reference that is not live is `StaleReference` of the objects component |
@@ -756,6 +759,10 @@ pending queues are empty; no lock order is stated here.
 - States: a second `admit` of a thread, also after its `remove` and before
   its slot is released, is `InvalidState`, and a new thread is in no run
   queue and is never chosen.
+- Order of the composition: with `ledger::admit` composed in the order of
+  [Errors](#errors), an admission of a thread that is not new is
+  `InvalidConfiguration` with a budget of 0 and `InvalidState` with a
+  class above the creator's.
 - For each error of [Errors](#errors), a call that gives it leaves every
   field of the scheduler record and of the thread slots as before, compared
   field by field.

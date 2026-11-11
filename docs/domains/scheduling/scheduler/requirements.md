@@ -240,15 +240,16 @@ every period.
 **Admission.** A new thread is admitted once, when it is created, with the
 class, the amounts and the service ceiling that its creator gives: a class
 or a ceiling above the creator's class is refused with
-`AdmissionRejected`; the budget, the amount of its class, and the amounts
-of the classes below it come from the creator's holdings of the same
-classes, so the process of a thread can admit threads of its own class and
-of the classes below it in turn; and a refused admission changes nothing.
-The admitted thread is ready at the tail of the queue of its class. The
-criterion: the frozen vectors of admission hold, among them admissions
-within and beyond a holding of 20, a class whose cap is 0, nested
-admissions that take their budgets from their creators, and a second
-admission of a thread.
+`AdmissionRejected`; its budget, which is the amount of its class, and
+the amounts of the classes below it come from the creator's holdings of
+the same classes, so the process of a thread can admit threads of its own
+class and of the classes below it in turn; and a refused admission changes
+nothing. The admitted thread is ready at the tail of the queue of its
+class. The criterion: the frozen vectors of admission hold, among them
+admissions within and beyond a holding of 20, a class whose cap is 0,
+nested admissions that take their budgets from their creators, and a
+second admission of a thread; and the host test of the carving by class
+of the budget-ledger contract holds.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `scheduler::admit`, with `ledger::admit` of the

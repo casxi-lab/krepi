@@ -169,16 +169,16 @@ amount for its class and one for each class below it, each carved from its
 creator's holding of the same class: the amount of its class is its
 budget, and the others let its process admit threads of those classes in
 turn. A creator's own budget falls only when it admits a thread of its own
-class. A budget of 0 and an amount for a class above the thread's are
-refused with `InvalidConfiguration`, and an amount beyond the creator's
-holding with `AdmissionRejected`. The reap of a thread returns all its
-holdings to its owner at once, and the spending of its class stays in the
-class ledger. For each class, the holdings of all records and the part
-that the root has not taken add up to its cap. The criterion: the vectors
-hold, among them a chain of six processes each of which gives its whole
-holding to the next, and a thread admitted after the reap of one that
-overran its budget, which the class ledger throttles, and the host test of
-the carving by class holds.
+class. A budget of 0 and an amount above 0 for a class above the thread's
+are refused with `InvalidConfiguration`, and an amount beyond the
+creator's holding with `AdmissionRejected`. The reap of a thread returns
+all its holdings to its owner at once, and the spending of its class stays
+in the class ledger. For each class, the holdings of all records and the
+part that the root has not taken add up to its cap. The criterion: the
+vectors hold, among them a chain of six processes each of which gives its
+whole holding to the next, and a thread admitted after the reap of one
+that overran its budget, which the class ledger throttles; and the host
+test of the carving by class holds.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `ledger::admit` and `ledger::release` (planned).

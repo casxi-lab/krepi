@@ -11,7 +11,8 @@ budget of each thread with the caps of the classes and their
 replenishment, preemption by the timer and at the return to EL0, the
 lending of a caller's budget to the service of a synchronous call, the
 control capacity and the kernel margin that every period sets aside, and
-the admission of a new thread with its class, budget and ceiling.
+the admission of a new thread with its class, the amount of each class and
+its ceiling.
 
 Three limits bound the domain. Time is the count of the virtual counter of
 the board, read once on entry to each transition; within a boot it does
@@ -85,7 +86,7 @@ slice.
 | [Preemption](#preemption) | Time slices, the deadline of a dispatch, preemption by the timer and at the return of an entry, and the time of a transition | - | [scheduler](scheduler/requirements.md) |
 | [Synchronous budget lending](#synchronous-budget-lending) | The loan of a caller's context to the service of its call, nested loans, the effective class within a ceiling and the withdrawal of loans | - | [budget-ledger](budget-ledger/requirements.md); the IPC component of the IPC and waits domain, for when a loan is made and withdrawn |
 | [Reserved control capacity](#reserved-control-capacity) | The caps of the classes and the kernel margin within the period, and the share that the control class keeps under load | - | [scheduler](scheduler/requirements.md) |
-| [Admission](#admission) | The class, budget and ceiling of a new thread, their checks, and the holdings of each class carved from its creator and returned at its reap | - | [scheduler](scheduler/requirements.md); [budget-ledger](budget-ledger/requirements.md), for the holdings |
+| [Admission](#admission) | The class, the amount of each class and the ceiling of a new thread, their checks, and the holdings of each class carved from its creator and returned at its reap | - | [scheduler](scheduler/requirements.md); [budget-ledger](budget-ledger/requirements.md), for the holdings |
 
 ## Priority classes
 
@@ -446,8 +447,8 @@ thread under full load runs on its credit in every period.
 **Description.** A new thread is admitted once, in the creation of its
 process, with the class, the amounts and the ceiling that its creator
 gives. Neither the class nor the ceiling may be above the class of the
-creator. The creation gives one amount for the class of the thread and one
-for each class below it, each carved from the creator's holding of that
+creator. The creation gives one amount for each class, 0 for each class
+above the thread's, and carves each from the creator's holding of that
 class: the amount of its class, of at least 1 tick, is its budget, and
 those of the lower classes let its process admit threads of those classes
 in turn, so a process of the control class can create an interactive
@@ -481,9 +482,9 @@ release.
 **Interface.** The class, one amount for each class and the ceiling are
 arguments of the creation of a process, whose form belongs to the
 operation inventory. A class or a ceiling above the creator's class and an
-amount beyond the creator's holding of its class are refused with one
-error of the caller's quota, and a budget of 0 or an amount for a class
-above the thread's is an error of the form of the arguments
+amount beyond the creator's holding of the same class are refused with
+one error of the caller's quota, and a budget of 0 or an amount above 0
+for a class above the thread's is an error of the form of the arguments
 ([admission](scheduler/contract.md#admission)).
 
 **Prerequisites.** [Priority classes](#priority-classes),
@@ -513,13 +514,13 @@ contract.
 records and the part of the cap that the root has not taken add up to the
 cap; no record holds anything of a class above its own. Required
 counterexamples: a class above the creator's, a ceiling above it, a budget
-of 0, an amount for a class above the thread's, an amount one tick beyond
-the creator's holding of its class, a class whose cap is 0, a second
-admission of one thread, a chain of processes each of which gives its
-whole holding to the next, a thread that admits a thread of a lower class
-from the holding that its creator gave it. Environments: host tests with
-the frozen vectors of the prototype's admission and a property test of the
-conservation of holdings over trees of processes; QEMU runs that create
+of 0, an amount above 0 for a class above the thread's, an amount one tick
+beyond the creator's holding of the same class, a class whose cap is 0, a
+second admission of one thread, a chain of processes each of which gives
+its whole holding to the next, a thread that admits a thread of a lower
+class from the holding that its creator gave it. Environments: host tests
+with the frozen vectors of the prototype's admission and a property test of
+the conservation of holdings over trees of processes; QEMU runs that create
 processes with budgets from EL0.
 
 ## Dependencies
