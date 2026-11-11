@@ -309,7 +309,8 @@ vectors hold without the prototype's counts of failures.
 - The operations that create objects, the lifetimes of processes and
   threads with their reaping, the capability tables and the waits are not
   covered; they compose the entries of this component and have their own
-  requirements.
+  requirements, those of the capability tables in the
+  [capabilities requirements](../capabilities/requirements.md).
 - The VM and loading part of the capacity record, the counting of committed
   and loaded pages, the boot-bundle directory and the number of ASIDs are
   not covered.
