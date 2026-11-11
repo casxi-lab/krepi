@@ -427,6 +427,22 @@
       "contract": "docs/domains/boot-platform/context/contract.md"
     },
     {
+      "item": "kernel/arch/src/frames.rs",
+      "kind": "code",
+      "verified_state": "neither",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/vm/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/frames.rs#apply",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/vm/contract.md"
+    },
+    {
       "item": "kernel/arch/src/gic.rs",
       "kind": "code",
       "verified_state": "neither",
@@ -593,6 +609,14 @@
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
       "stage": "0.2",
       "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/boards/qemu-virt/src/main.rs#image::frame_metadata",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/vm/contract.md"
     },
     {
       "item": "kernel/boards/qemu-virt/src/main.rs#image::initialize",
