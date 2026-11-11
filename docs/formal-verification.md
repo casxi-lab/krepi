@@ -2166,13 +2166,14 @@ two runs 23 minutes more than their steps and the job of the mutants 20,
 `planned example` are an expression of their matrix, so the records of
 the runs of the workflow name no limit for them, as for the jobs
 `formal run` and `formal planned`. A newer event of the same pull request
-cancels a job that has not ended. Each job summarizes its receipt, with
-the budget and the seconds of each target and the SHA-256 of the receipt,
-with workflow commands turned off, since the receipt holds text of Lean
-and Lake, and uploads the receipt, the summary, and the record of the
-runner, the output of the check and the logs of the gate compressed into
-`logs.tar.gz`, as `formal-calibration-<job>-<commit>-<attempt>`. The job
-of the mutants uploads the list of survivors as well, from
+cancels a job that has not ended. Each job summarizes its receipt with
+workflow commands turned off, since the receipt holds text of Lean and
+Lake: the two run jobs list the budget and the seconds of each target, and
+every summary gives the SHA-256 of the receipt. Each job uploads the
+receipt, the summary, and the record of the runner and the logs of the
+gate compressed into `logs.tar.gz`, which for `calibration run` also holds
+the output of the check, as `formal-calibration-<job>-<commit>-<attempt>`.
+The job of the mutants uploads the list of survivors as well, from
 `artifacts/formal/mutants/` and only when its run passed: a run that fails
 writes no list, and the checkout may hold the list of an earlier run.
 
