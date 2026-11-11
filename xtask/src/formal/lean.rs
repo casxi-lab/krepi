@@ -16,7 +16,10 @@ use walkdir::WalkDir;
 
 use super::Layout;
 use super::guard::{self, State, Statement};
+use super::outcome::{self, Site};
 use super::process::Ran;
+use super::qualify;
+use super::run::Gate;
 
 /// The axioms that every Lean development may use. Anything else that
 /// `#print axioms` reports for a theorem must be allowed for it by name.
@@ -691,6 +694,354 @@ pub fn heartbeats(output: &str, inserted: &BTreeMap<usize, String>) -> BTreeMap<
     };
     let messages = output.lines().filter_map(|l| serde_json::from_str(l).ok());
     messages.filter_map(count).collect()
+}
+
+/// The line before the list of failed jobs at the end of a failed build.
+const FAILURE_SUMMARY: &str = "Some required targets logged failures:";
+
+/// A job line of a build log, `<mark> [<i>/<n>] <verb> <module> (<time>)`, as
+/// its mark and module.
+pub fn job_line(line: &str) -> Option<(char, &str)> {
+    let mut chars = line.chars();
+    let mark = (chars.next()).filter(|mark| ['✔', 'ℹ', '⚠', '✖'].contains(mark))?;
+    let (counter, rest) = chars.as_str().strip_prefix(" [")?.split_once("] ")?;
+    let (done, total) = counter.split_once('/')?;
+    let number = |text: &str| !text.is_empty() && text.chars().all(|c| c.is_ascii_digit());
+    if !number(done) || !number(total) {
+        return None;
+    }
+    rest.split_whitespace().nth(1).map(|module| (mark, module))
+}
+
+/// Reads the log of a failed `lake build` and returns the errors it reports
+/// in the source files of `modules`, as module, line and column, when nothing
+/// else explains the failure. Otherwise returns what does: Lake ending with a
+/// status other than 1, a line `Lean exited with code`, which Lake prints
+/// only when Lean ended otherwise than with 1 after an error, output that
+/// Lean or another process wrote besides its messages, a message in another
+/// file, a job of another module that failed or warned (warnings fail the
+/// build), a failed module without an error in its own file after its job
+/// line, any other `error:` or `warning:` line, or a failure summary that is
+/// missing or names another module or one that neither warned nor failed
+/// with an error in its file. Each job's messages follow its job line; lines
+/// without a recognized prefix continue a message, or are `trace:` and
+/// `info:` lines, and are skipped.
+pub fn confined_errors<'a>(
+    status: i32,
+    output: &str,
+    modules: &'a [String],
+) -> Result<Vec<(&'a str, usize, usize)>, Vec<String>> {
+    let files: Vec<String> = modules.iter().map(|module| module_file(module)).collect();
+    let mut problems = Vec::new();
+    let mut note = |problem: String| {
+        if !problems.contains(&problem) {
+            problems.push(problem);
+        }
+    };
+    if status != 1 {
+        note(format!("Lake ended with status {status}"));
+    }
+    // Each job: its mark, its module and whether its messages include an
+    // error in its own file.
+    let mut jobs: Vec<(char, &str, bool)> = Vec::new();
+    let (mut current, mut errors, mut summary, mut listing) = (None, vec![], vec![], false);
+    for line in output.lines() {
+        if listing {
+            if let Some(name) = line.strip_prefix("- ") {
+                summary.push(name.trim());
+                continue;
+            }
+            listing = false;
+        }
+        let stream = (line.trim_end().strip_prefix("info: ")).and_then(|r| r.strip_suffix(':'));
+        if line == FAILURE_SUMMARY {
+            (listing, current) = (true, None);
+        } else if let Some((mark, module)) = job_line(line) {
+            jobs.push((mark, module, false));
+            current = Some(jobs.len() - 1);
+        } else if let Some(code) = line.strip_prefix("error: Lean exited with code ") {
+            note(format!("Lean exited with code {}", code.trim()));
+        } else if let Some(stream @ ("stdout" | "stderr" | "stdout/stderr")) = stream {
+            // Output besides Lean's messages, such as a panic.
+            let writer = current.and_then(|at| jobs.get(at));
+            note(format!(
+                "{} wrote to {stream}",
+                writer.map_or("a process", |job| job.1)
+            ));
+        } else if let Some((error, file, number, column)) = diagnostic(line) {
+            match files.iter().position(|own| own == file) {
+                None => note(format!("a message outside the proofs: {line}")),
+                Some(index) if error => {
+                    let module = modules[index].as_str();
+                    errors.push((module, number, column));
+                    if let Some(job) = current.and_then(|at| jobs.get_mut(at))
+                        && job.1 == module
+                    {
+                        job.2 = true;
+                    }
+                }
+                Some(_) => {}
+            }
+        } else if (line.starts_with("error:") && line.trim_end() != "error: build failed")
+            || line.starts_with("warning:")
+        {
+            note(format!("Lake reported {line}"));
+        }
+    }
+    let proof = |name: &str| modules.iter().any(|module| module == name);
+    for &(mark, module, own_error) in &jobs {
+        if !proof(module) && (mark == '⚠' || mark == '✖') {
+            note(format!("{module} did not build"));
+        } else if proof(module) && mark == '✖' && !own_error {
+            note(format!("{module} failed without an error in its file"));
+        }
+    }
+    if summary.is_empty() {
+        note("the build failed without a failure summary".to_string());
+    }
+    for name in summary {
+        let failed = |&(mark, module, own): &(char, &str, bool)| {
+            module == name && (mark == '⚠' || (mark == '✖' && own))
+        };
+        if !proof(name) {
+            note(format!("{name} did not build"));
+        } else if !jobs.iter().any(failed) {
+            note(format!(
+                "{name} is in the failure summary without a warning or an error in its file"
+            ));
+        }
+    }
+    if problems.is_empty() {
+        Ok(errors)
+    } else {
+        Err(problems)
+    }
+}
+
+/// The file of a stage's project that prints its declaration ranges.
+pub const RANGES_FILE: &str = "Ranges.lean";
+
+/// A Lean command that prints, for each module it names, the range that Lean
+/// stored for every declaration of that module, as `krepi-range <module>
+/// <line> <column> <end line> <end column> <kind> <name>`, with the kind
+/// `theorem`, `definition` or `other` and the name without its private
+/// prefix, and then `krepi-ranges-module <module> <count>`. A module that the
+/// file does not import is printed as `krepi-ranges-missing <module>`. Its
+/// identifiers avoid `name`, which the syntax of the Aeneas library makes a
+/// keyword.
+const RANGES: &str = r##"
+namespace KrepiDeclarationRanges
+
+open Lean Elab Command
+
+def declKind (env : Environment) (n : Name) : String :=
+  match env.find? n with
+  | some (.thmInfo _) => "theorem"
+  | some (.defnInfo _) => "definition"
+  | _ => "other"
+
+elab "#krepi_declaration_ranges " modules:ident* : command => do
+  let env ← getEnv
+  for arg in modules do
+    let moduleName := arg.getId
+    match env.getModuleIdx? moduleName with
+    | none => IO.println s!"krepi-ranges-missing {moduleName}"
+    | some moduleIdx =>
+      let mut printed := 0
+      for n in env.header.moduleData[moduleIdx.toNat]!.constNames do
+        if let some found ← findDeclarationRangesCore? n then
+          let (startPos, stopPos) := (found.range.pos, found.range.endPos)
+          IO.println s!"krepi-range {moduleName} {startPos.line} {startPos.column} {stopPos.line} {stopPos.column} {declKind env n} {privateToUserName n}"
+          printed := printed + 1
+      IO.println s!"krepi-ranges-module {moduleName} {printed}"
+
+end KrepiDeclarationRanges
+"##;
+
+/// The Lean file that prints the declaration ranges of `modules`. It is not
+/// a module file, so that its imports bring the private declarations of the
+/// modules, whose ranges it prints too.
+pub fn ranges_source(modules: &[String]) -> String {
+    let imports = modules.iter().map(|module| format!("import {module}\n"));
+    let mut source = String::from("import Lean\n") + &imports.collect::<String>();
+    source.push_str(RANGES);
+    source + &format!("\n#krepi_declaration_ranges {}\n", modules.join(" "))
+}
+
+/// A top-level declaration of a proof module: the range that Lean stored for
+/// it, from its first position to its end as line and column, and the names
+/// that Lean stored this range for, each with whether it is a theorem.
+#[derive(Debug, PartialEq)]
+pub struct Declared {
+    pub start: (usize, usize),
+    pub end: (usize, usize),
+    pub names: BTreeMap<String, bool>,
+}
+
+/// The top-level declarations of each proof module, in order: those whose
+/// range no other range of the module contains.
+///
+/// Lean records the range of a declaration command, such as `theorem`, `def`
+/// or `instance`, from its documentation comment, attributes and modifiers to
+/// its last token, so it covers every message of the declaration, including
+/// those Lean places at the start of the command, such as a failed `simp`
+/// attribute. Other declarations may have narrower ranges: that of a derived
+/// instance is the name of the class it derives. A declaration nested in
+/// another one, such as a constructor, a structure field or a `where`
+/// function, counts as part of the outer one, and declarations that share a
+/// range share it here. Lean records no range for `example` or for commands
+/// that declare nothing, such as `variable`, `open`, `namespace`, `section`,
+/// `end`, module documentation and the prefix of `omit … in`.
+#[derive(Debug)]
+pub struct Ranges(BTreeMap<String, Vec<Declared>>);
+
+/// One `krepi-range` line: module, start, end, name and whether it is a
+/// theorem.
+type Printed<'a> = (&'a str, (usize, usize), (usize, usize), String, bool);
+
+fn range_line(rest: &str) -> Option<Printed<'_>> {
+    let mut fields = rest.splitn(7, ' ');
+    let module = fields.next()?;
+    let mut number = || fields.next()?.parse::<usize>().ok();
+    let (start, end) = ((number()?, number()?), (number()?, number()?));
+    let theorem = match fields.next()? {
+        "theorem" => true,
+        "definition" | "other" => false,
+        _ => return None,
+    };
+    let name = fields.next().filter(|name| !name.is_empty())?;
+    (start <= end).then(|| (module, start, end, name.to_string(), theorem))
+}
+
+impl Ranges {
+    /// Reads the output of the file of [`ranges_source`] for `modules`. Fails
+    /// when a module is not counted exactly once, when its count differs from
+    /// the ranges read for it, when a line is malformed or names another
+    /// module, when a module is not imported, or when a range of a module
+    /// starts inside one of its top-level ranges and ends after it (see
+    /// [`top_level`]).
+    pub fn parse(output: &str, modules: &[String]) -> Result<Self, Vec<String>> {
+        let mut problems = Vec::new();
+        let mut read: BTreeMap<&str, Vec<Printed<'_>>> =
+            BTreeMap::from_iter(modules.iter().map(|module| (module.as_str(), Vec::new())));
+        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+        for line in output.lines() {
+            if let Some(rest) = line.strip_prefix("krepi-range ") {
+                if let Some(range) = range_line(rest)
+                    && let Some(list) = read.get_mut(range.0)
+                {
+                    list.push(range);
+                } else {
+                    problems.push(format!("malformed line: {line}"));
+                }
+            } else if let Some(rest) = line.strip_prefix("krepi-ranges-module ") {
+                let counted = (rest.split_once(' '))
+                    .and_then(|(module, count)| Some((module, count.parse::<usize>().ok()?)))
+                    .filter(|(module, _)| read.contains_key(module));
+                match counted {
+                    Some((module, count)) if counts.insert(module, count).is_some() => {
+                        problems.push(format!("{module} is counted twice"));
+                    }
+                    Some(_) => {}
+                    None => problems.push(format!("malformed line: {line}")),
+                }
+            } else if let Some(module) = line.strip_prefix("krepi-ranges-missing ") {
+                problems.push(format!("{module} is not imported"));
+            }
+        }
+        let mut ranges = BTreeMap::new();
+        for (module, entries) in read {
+            match counts.get(module) {
+                None => problems.push(format!("{module} is not counted")),
+                Some(&count) if count != entries.len() => {
+                    let read = entries.len();
+                    problems.push(format!("{module}: {count} ranges counted, {read} read"));
+                }
+                Some(_) => {}
+            }
+            match top_level(entries) {
+                Ok(declared) => _ = ranges.insert(module.to_string(), declared),
+                Err(problem) => problems.push(format!("{module}: {problem}")),
+            }
+        }
+        problems.is_empty().then_some(Self(ranges)).ok_or(problems)
+    }
+
+    /// The top-level declaration of `module` whose range contains the
+    /// position, both ends included.
+    pub fn at(&self, module: &str, line: usize, column: usize) -> Option<&Declared> {
+        let (declared, position) = (self.0.get(module)?, (line, column));
+        let after = declared.partition_point(|item| item.start <= position);
+        let item = declared.get(after.checked_sub(1)?)?;
+        (position <= item.end).then_some(item)
+    }
+
+    /// Whether `name` is a top-level theorem of one of the modules.
+    pub fn theorem(&self, name: &str) -> bool {
+        let mut declared = self.0.values().flatten();
+        declared.any(|declared| declared.names.get(name) == Some(&true))
+    }
+}
+
+/// The ranges no other range contains, in order, with the names of identical
+/// ranges together; an error when a range starts inside a top-level range and
+/// ends after it. Ranges inside the same top-level range are not compared with
+/// each other: only the top-level ones take errors.
+fn top_level(mut entries: Vec<Printed<'_>>) -> Result<Vec<Declared>, String> {
+    entries.sort_by(|a, b| a.1.cmp(&b.1).then(b.2.cmp(&a.2)));
+    let mut kept: Vec<Declared> = Vec::new();
+    for (_, start, end, name, theorem) in entries {
+        if let Some(last) = kept.last_mut()
+            && start <= last.end
+        {
+            if (start, end) == (last.start, last.end) {
+                last.names.insert(name, theorem);
+            } else if end > last.end {
+                let outer = last.names.keys().next().map_or("", String::as_str);
+                return Err(format!("the ranges of {outer} and {name} overlap"));
+            }
+            continue;
+        }
+        let names = BTreeMap::from([(name, theorem)]);
+        kept.push(Declared { start, end, names });
+    }
+    Ok(kept)
+}
+
+/// Prints the declaration ranges of `modules` in the stage project `project`
+/// with the file of [`ranges_source`], as a command of `unit`, and reads
+/// them; the inner error says why they make no table.
+pub fn declaration_ranges(
+    gate: &mut Gate,
+    unit: &str,
+    project: &Path,
+    modules: &[String],
+) -> Result<Result<Ranges, Vec<String>>, String> {
+    let path = project.join(RANGES_FILE);
+    let written = fs::write(&path, ranges_source(modules));
+    written.map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    let args = check_args(RANGES_FILE);
+    let request = qualify::lake(Site::DeclarationRanges, &args, project);
+    let (ran, verdict, _) = gate.run(unit, &request, |_| Ok(()));
+    let not_run = || Err(vec![verdict.reason.clone().unwrap_or_default()]);
+    Ok(ran.map_or_else(not_run, |ran| ranges_of(&ran, modules)))
+}
+
+/// The declaration ranges of `modules` that `ran`, the check of the file of
+/// [`ranges_source`], printed, or what makes them no table: Lean failed or
+/// was killed, and its output is not read, or its output is not a complete
+/// table.
+pub fn ranges_of(ran: &Ran, modules: &[String]) -> Result<Ranges, Vec<String>> {
+    if let Some(reason) = outcome::killed(ran) {
+        return Err(vec![reason]);
+    }
+    match ran.code() {
+        Some(0) => Ranges::parse(&ran.output, modules),
+        code => {
+            let ended = format!("Lean ended with status {}", code.unwrap_or_default());
+            Err([ended].into_iter().chain(errors(&ran.output)).collect())
+        }
+    }
 }
 
 /// The mode, size, modification and change times, and link target by path.
@@ -1832,5 +2183,450 @@ mod tests {
             missing.starts_with(&scratch.0.join("absent").display().to_string()),
             "{missing}"
         );
+    }
+
+    /// The texts of `fixtures/mutants/`: what the pinned Lean 4.35.0 printed
+    /// on `darwin-arm64` in the environment of the gate for a stage with
+    /// `Fixture.lean`, as their first lines say.
+    mod mutants {
+        pub const FAILED: &str = include_str!("fixtures/mutants/failed.txt");
+        pub const WARNED: &str = include_str!("fixtures/mutants/warned.txt");
+        pub const MUTANT: &str = include_str!("fixtures/mutants/calibration-mutant.txt");
+        pub const RANGES: &str = include_str!("fixtures/mutants/ranges.txt");
+        pub const FAILED_RANGES: &str = include_str!("fixtures/mutants/ranges-failed.txt");
+        pub const CALIBRATION_RANGES: &str =
+            include_str!("fixtures/mutants/calibration-ranges.txt");
+    }
+
+    const FIXTURE: &str = "Krepi.Proofs.Fixture";
+
+    const CALIBRATION: &str = "Krepi.Proofs.Calibration";
+
+    /// The edits of `Fixture.lean` for the build of `failed.txt`, each a line
+    /// before and after, so that the lines keep their numbers.
+    const EDITS: [(&str, &str); 5] = [
+        (
+            "@[simp] public theorem documented : 1 + 1 = 2 := rfl",
+            "@[simp] public theorem documented : 1 + 1 = 3 := rfl",
+        ),
+        ("  simp\n\npublic def double", "  rfl\n\npublic def double"),
+        ("Nat := n + n", "Nat := n + true"),
+        ("m * 2", "m * \"2\""),
+        ("omit [Inhabited α] in", "omit [Inhabited Nat] in"),
+    ];
+
+    /// `text` with `edits`, each of which must occur once.
+    fn edited(text: &str, edits: &[(&str, &str)]) -> String {
+        let mut text = text.to_string();
+        for (from, to) in edits {
+            assert_eq!(text.matches(from).count(), 1, "{from}");
+            text = text.replacen(from, to, 1);
+        }
+        text
+    }
+
+    #[test]
+    fn the_edits_of_the_failed_build_keep_the_lines_of_the_fixture() {
+        let fixture = include_str!("fixtures/mutants/Fixture.lean");
+        let edited = edited(fixture, &EDITS);
+        assert_eq!(edited.lines().count(), fixture.lines().count());
+        // Each error of the log is on an edited line or in the example.
+        let lines = Vec::from_iter(edited.lines());
+        for (line, expected) in [
+            (12, "1 + 1 = 3"),
+            (18, "rfl"),
+            (20, "n + true"),
+            (39, "\"2\""),
+        ] {
+            assert!(lines[line - 1].contains(expected), "{line}");
+        }
+        assert!(lines[44].starts_with("omit [Inhabited Nat] in"));
+        assert!(lines[47].starts_with("example"));
+    }
+
+    #[test]
+    fn errors_confined_to_the_proofs_are_returned() {
+        // The real log of a build that failed in the proof module alone, with
+        // its `trace:` line and the continuations of its messages.
+        let log = captured(mutants::FAILED);
+        assert!(log.lines().any(|line| line.starts_with("trace: ")));
+        let fixture = modules(&[FIXTURE]);
+        let errors = confined_errors(1, log, &fixture).expect("confined errors");
+        let at = |line, column| (FIXTURE, line, column);
+        let expected = [
+            at(11, 0),
+            at(12, 49),
+            at(18, 2),
+            at(20, 37),
+            at(39, 28),
+            at(45, 0),
+            at(48, 26),
+        ];
+        assert_eq!(errors, expected);
+        // A build that failed on a warning in the proof module has no error.
+        assert_eq!(
+            confined_errors(1, captured(mutants::WARNED), &fixture),
+            Ok(vec![])
+        );
+        let calibration = modules(&[CALIBRATION]);
+        let found = confined_errors(1, captured(mutants::MUTANT), &calibration);
+        assert_eq!(found, Ok(vec![(CALIBRATION, 120, 2)]));
+    }
+
+    /// The problems of the real log `log` of the module `modules` with
+    /// `edits`, ended with `status`.
+    fn unconfined(log: &str, edits: &[(&str, &str)], status: i32, modules: &[&str]) -> Vec<String> {
+        let log = edited(captured(log), edits);
+        confined_errors(status, &log, &self::modules(modules)).expect_err("not confined")
+    }
+
+    /// A case of a rule of the log: the captured log, its edits, the status
+    /// of Lake, the proof modules and the problem.
+    type LogCase<'a> = (
+        &'a str,
+        &'a [(&'a str, &'a str)],
+        i32,
+        &'a [&'a str],
+        &'a str,
+    );
+
+    /// A case of a rule of the range table: the edits of the captured table,
+    /// the modules and a problem.
+    type TableCase<'a> = (Vec<(&'a str, &'a str)>, &'a [&'a str], &'a str);
+
+    #[test]
+    fn each_rule_of_the_log_of_a_rejected_mutant_is_kept() {
+        let (failed, mutant) = (mutants::FAILED, mutants::MUTANT);
+        let summary = "Some required targets logged failures:";
+        let error = "error: Krepi/Proofs/Calibration.lean:120:2: unsolved goals";
+        let job = "\u{2716} [1806/1806] Building Krepi.Proofs.Calibration (2.7s)";
+        let other = "\u{2714} [1804/1806] Built KrepiGen.Calibration.Funs (1.7s)";
+        let warned = "\u{26a0} [1804/1806] Built KrepiGen.Calibration.Funs (1.7s)";
+        let cases: [LogCase; 10] = [
+            // 1: Lake exits with 1.
+            (mutant, &[], 2, &[CALIBRATION], "Lake ended with status 2"),
+            // 2: no line says how Lean exited.
+            (
+                mutant,
+                &[(
+                    summary,
+                    &format!("error: Lean exited with code 1\n{summary}"),
+                )],
+                1,
+                &[CALIBRATION],
+                "Lean exited with code 1",
+            ),
+            // 3: no output besides the messages.
+            (
+                mutant,
+                &[(error, &format!("info: stdout:\n{error}"))],
+                1,
+                &[CALIBRATION],
+                "Krepi.Proofs.Calibration wrote to stdout",
+            ),
+            // 4: every message is in a proof module.
+            (
+                failed,
+                &[(
+                    "error: Krepi/Proofs/Fixture.lean:20:37",
+                    "error: KrepiGen/Fixture/Funs.lean:20:37",
+                )],
+                1,
+                &[FIXTURE],
+                "a message outside the proofs: error: KrepiGen/Fixture/Funs.lean:20:37: failed to synthesize instance of type class",
+            ),
+            // 5: no other module warns or fails.
+            (
+                mutant,
+                &[(other, warned)],
+                1,
+                &[CALIBRATION],
+                "KrepiGen.Calibration.Funs did not build",
+            ),
+            // 6: a failed proof module has an error of its file after its job line.
+            (
+                mutant,
+                &[(job, "@"), (error, job), ("@", error)],
+                1,
+                &[CALIBRATION],
+                "Krepi.Proofs.Calibration failed without an error in its file",
+            ),
+            // 7: no other line of an error or a warning.
+            (
+                mutant,
+                &[(
+                    "error: build failed",
+                    "warning: a lock is held\nerror: build failed",
+                )],
+                1,
+                &[CALIBRATION],
+                "Lake reported warning: a lock is held",
+            ),
+            // 8: a failure summary.
+            (
+                mutant,
+                &[(&format!("{summary}\n- {CALIBRATION}\n"), "")],
+                1,
+                &[CALIBRATION],
+                "the build failed without a failure summary",
+            ),
+            // 9: the summary names proof modules alone.
+            (
+                mutant,
+                &[(
+                    &format!("- {CALIBRATION}"),
+                    &format!("- {CALIBRATION}\n- KrepiGen.Calibration.Funs"),
+                )],
+                1,
+                &[CALIBRATION],
+                "KrepiGen.Calibration.Funs did not build",
+            ),
+            // 10: each proof module of the summary warned or failed with an error.
+            (
+                mutant,
+                &[(
+                    &format!("- {CALIBRATION}"),
+                    &format!("- {CALIBRATION}\n- KrepiGen.Calibration.Funs"),
+                )],
+                1,
+                &[CALIBRATION, "KrepiGen.Calibration.Funs"],
+                "KrepiGen.Calibration.Funs is in the failure summary without a warning or an error in its file",
+            ),
+        ];
+        for (rule, (log, edits, status, modules, problem)) in cases.into_iter().enumerate() {
+            let problems = unconfined(log, edits, status, modules);
+            // The rule is the first problem; the summary may name the module again.
+            assert_eq!(problems[0], problem, "rule {}: {problems:?}", rule + 1);
+        }
+    }
+
+    /// The ranges of `fixtures/mutants/ranges.txt` with `edits`, read for
+    /// `modules`.
+    fn fixture_ranges(edits: &[(&str, &str)], modules: &[&str]) -> Result<Ranges, Vec<String>> {
+        let text = edited(captured(mutants::RANGES), edits);
+        Ranges::parse(&text, &self::modules(modules))
+    }
+
+    /// The names of the declaration of the fixture at the position.
+    fn names_at(ranges: &Ranges, line: usize, column: usize) -> Option<Vec<&str>> {
+        let declared = ranges.at(FIXTURE, line, column)?;
+        Some(
+            declared
+                .names
+                .keys()
+                .map(|name| name.strip_prefix("Krepi.Proofs.Fixture.").unwrap_or(name))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn errors_count_against_the_declaration_whose_range_holds_them() {
+        let missing = "krepi-ranges-missing Krepi.Proofs.Missing";
+        let ranges = fixture_ranges(&[(missing, "")], &[FIXTURE]).expect("a table");
+        // 1: the range of a declaration runs from its documentation comment
+        // and its attribute, where Lean puts the failure of the attribute, to
+        // its last token, both included.
+        for (line, column) in [(11, 0), (12, 49), (12, 52)] {
+            assert_eq!(names_at(&ranges, line, column), Some(vec!["documented"]));
+        }
+        assert_eq!(names_at(&ranges, 12, 53), None);
+        // 2: a `where` function, the constructor and the fields of a
+        // structure and its derived instances count against the declaration
+        // around them.
+        assert_eq!(names_at(&ranges, 39, 28), Some(vec!["withHelper"]));
+        for (line, column) in [(24, 18), (25, 2), (27, 12), (27, 18)] {
+            assert_eq!(names_at(&ranges, line, column), Some(vec!["Point"]));
+        }
+        // 3: the names of one range count together.
+        assert_eq!(
+            names_at(&ranges, 33, 19),
+            Some(vec!["instBEqColor", "instBEqColor.beq"])
+        );
+        // 4: the prefix `omit … in`, a `variable`, an `example`, the module
+        // documentation, the namespace and its end are in no range.
+        for (line, column) in [(45, 0), (41, 0), (48, 26), (3, 0), (9, 0), (50, 0)] {
+            assert_eq!(names_at(&ranges, line, column), None, "{line}:{column}");
+        }
+        // 5: only theorems are theorems.
+        let theorem = |name: &str| ranges.theorem(&format!("{FIXTURE}.{name}"));
+        assert!(theorem("documented") && theorem("plain") && theorem("after_omit"));
+        for name in [
+            "double",
+            "Pair",
+            "Point",
+            "instInhabitedPoint",
+            "withHelper",
+            "withHelper.helper",
+        ] {
+            assert!(!theorem(name), "{name}");
+        }
+        // A range nested in another that starts where it does counts with it.
+        let nested = "krepi-range Krepi.Proofs.Fixture 37 0 37 20 definition Krepi.Proofs.Fixture.withHelper.start";
+        let count = (
+            "krepi-ranges-module Krepi.Proofs.Fixture 23",
+            "krepi-ranges-module Krepi.Proofs.Fixture 24",
+        );
+        let more = format!("{nested}\n{}", count.1);
+        let ranges =
+            fixture_ranges(&[(missing, ""), (count.0, &more)], &[FIXTURE]).expect("a table");
+        assert_eq!(names_at(&ranges, 37, 5), Some(vec!["withHelper"]));
+    }
+
+    #[test]
+    fn a_private_theorem_of_a_module_file_has_its_range_without_its_prefix() {
+        // The fixture and the calibration proofs are module files, and the
+        // file of the printer is not: it reads their private theorems.
+        let ranges = fixture_ranges(&[], &[FIXTURE, "Krepi.Proofs.Missing"]);
+        assert_eq!(
+            ranges.expect_err("one is not imported")[0],
+            "Krepi.Proofs.Missing is not imported"
+        );
+        let ranges = fixture_ranges(
+            &[("krepi-ranges-missing Krepi.Proofs.Missing", "")],
+            &[FIXTURE],
+        );
+        let ranges = ranges.expect("a table");
+        assert_eq!(names_at(&ranges, 18, 2), Some(vec!["hidden"]));
+        assert!(ranges.theorem("Krepi.Proofs.Fixture.hidden"));
+        let calibration = Ranges::parse(
+            captured(mutants::CALIBRATION_RANGES),
+            &modules(&[CALIBRATION]),
+        );
+        let calibration = calibration.expect("a table");
+        for private in ["encode_step", "slot_eq"] {
+            assert!(
+                calibration.theorem(&format!("{CALIBRATION}.{private}")),
+                "{private}"
+            );
+        }
+        assert!(!calibration.theorem(&format!("{CALIBRATION}.encode_step.mvcgen_spec")));
+        assert!(
+            calibration
+                .at(CALIBRATION, 120, 2)
+                .is_some_and(|d| d.names.contains_key(&format!("{CALIBRATION}.alloc_spec")))
+        );
+    }
+
+    #[test]
+    fn an_incomplete_or_inconsistent_range_table_is_rejected() {
+        let missing = ("krepi-ranges-missing Krepi.Proofs.Missing", "");
+        let count = "krepi-ranges-module Krepi.Proofs.Fixture 23";
+        let twice = format!("{count}\n{count}");
+        let first = "krepi-range Krepi.Proofs.Fixture 27 17 27 20 definition Krepi.Proofs.Fixture.instBEqPoint\n";
+        let cases: [TableCase; 7] = [
+            // 6: each module has one count, of the ranges read.
+            (
+                vec![missing, (count, "")],
+                &[FIXTURE],
+                "Krepi.Proofs.Fixture is not counted",
+            ),
+            (
+                vec![missing, (count, &twice)],
+                &[FIXTURE],
+                "Krepi.Proofs.Fixture is counted twice",
+            ),
+            (
+                vec![missing, (first, "")],
+                &[FIXTURE],
+                "Krepi.Proofs.Fixture: 23 ranges counted, 22 read",
+            ),
+            // 7: every module is imported.
+            (
+                vec![],
+                &[FIXTURE, "Krepi.Proofs.Missing"],
+                "Krepi.Proofs.Missing is not imported",
+            ),
+            // 8: lines that do not parse or name another module.
+            (
+                vec![
+                    missing,
+                    (
+                        first,
+                        "krepi-range Krepi.Proofs.Fixture 27 17 27 20 lemma Krepi.Proofs.Fixture.instBEqPoint\n",
+                    ),
+                ],
+                &[FIXTURE],
+                "malformed line: krepi-range Krepi.Proofs.Fixture 27 17 27 20 lemma Krepi.Proofs.Fixture.instBEqPoint",
+            ),
+            (
+                vec![
+                    missing,
+                    (
+                        first,
+                        "krepi-range Krepi.Proofs.Other 27 17 27 20 definition Krepi.Proofs.Other.x\n",
+                    ),
+                ],
+                &[FIXTURE],
+                "malformed line: krepi-range Krepi.Proofs.Other 27 17 27 20 definition Krepi.Proofs.Other.x",
+            ),
+            // 9: ranges that overlap without one holding the other.
+            (
+                vec![
+                    missing,
+                    (
+                        first,
+                        "krepi-range Krepi.Proofs.Fixture 26 0 28 0 definition Krepi.Proofs.Fixture.instBEqPoint\n",
+                    ),
+                ],
+                &[FIXTURE],
+                "Krepi.Proofs.Fixture: the ranges of Krepi.Proofs.Fixture.Point and Krepi.Proofs.Fixture.instBEqPoint overlap",
+            ),
+        ];
+        for (index, (edits, modules, problem)) in cases.into_iter().enumerate() {
+            let problems = fixture_ranges(&edits, modules).expect_err("no table");
+            assert!(
+                problems.iter().any(|found| found == problem),
+                "case {index}: {problems:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ranges_that_a_failed_or_killed_lean_printed_are_not_read() {
+        // 10: the real output of a printer that imports an unbuilt module,
+        // and a table that a Lean ended by a signal or its limit printed.
+        let fixture = modules(&[FIXTURE]);
+        let failed =
+            ranges_of(&ran(1, captured(mutants::FAILED_RANGES)), &fixture).expect_err("failed");
+        assert_eq!(failed[0], "Lean ended with status 1");
+        assert!(
+            failed[1].contains("Krepi.Proofs.Absent does not exist"),
+            "{failed:?}"
+        );
+        let table = edited(
+            captured(mutants::RANGES),
+            &[("krepi-ranges-missing Krepi.Proofs.Missing", "")],
+        );
+        assert!(ranges_of(&ran(0, &table), &fixture).is_ok());
+        for ended in [Ended::Signaled(9), Ended::TimedOut, Ended::Exited(137)] {
+            let killed = Ran {
+                ended,
+                ..ran(0, &table)
+            };
+            let problems = ranges_of(&killed, &fixture).expect_err("killed");
+            assert_eq!(problems.len(), 1, "{problems:?}");
+        }
+    }
+
+    #[test]
+    fn the_range_printer_imports_and_names_the_modules() {
+        let source = ranges_source(&modules(&["A.B", "C"]));
+        assert!(
+            source.starts_with("import Lean\nimport A.B\nimport C\n"),
+            "{source}"
+        );
+        assert!(
+            source.ends_with("\n#krepi_declaration_ranges A.B C\n"),
+            "{source}"
+        );
+        // The printer of the captured outputs is this one.
+        assert!(!source.contains("\nmodule\n") && source.contains("privateToUserName n"));
+        let read = range_line;
+        assert_eq!(
+            read("M 1 2 3 4 theorem M.a b"),
+            Some(("M", (1, 2), (3, 4), "M.a b".to_string(), true))
+        );
+        assert_eq!(read("M 3 4 1 2 theorem M.a"), None);
+        assert_eq!(read("M 1 2 3 4 theorem "), None);
     }
 }

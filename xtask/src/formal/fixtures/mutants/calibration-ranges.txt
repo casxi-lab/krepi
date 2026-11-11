@@ -1,0 +1,21 @@
+# Lean 4.35.0 on darwin-arm64 in the environment of the gate: `lake env lean Ranges.lean` in a stage of the calibration target, for the module `Krepi.Proofs.Calibration`, exit 0
+krepi-range Krepi.Proofs.Calibration 104 0 114 16 theorem Krepi.Proofs.Calibration.new_spec
+krepi-range Krepi.Proofs.Calibration 30 2 30 6 theorem Krepi.Proofs.Calibration.encode_step.mvcgen_spec
+krepi-range Krepi.Proofs.Calibration 57 0 59 19 theorem Krepi.Proofs.Calibration.generation_step
+krepi-range Krepi.Proofs.Calibration 85 0 90 20 theorem Krepi.Proofs.Calibration.charge_spec
+krepi-range Krepi.Proofs.Calibration 99 0 102 7 theorem Krepi.Proofs.Calibration.fits_spec
+krepi-range Krepi.Proofs.Calibration 50 0 55 36 theorem Krepi.Proofs.Calibration.generation_spec
+krepi-range Krepi.Proofs.Calibration 163 0 184 14 theorem Krepi.Proofs.Calibration.is_current_spec
+krepi-range Krepi.Proofs.Calibration 46 0 48 14 theorem Krepi.Proofs.Calibration.index_step
+krepi-range Krepi.Proofs.Calibration 19 0 28 59 theorem Krepi.Proofs.Calibration.encode_spec
+krepi-range Krepi.Proofs.Calibration 186 0 208 8 theorem Krepi.Proofs.Calibration.retired_spec
+krepi-range Krepi.Proofs.Calibration 57 2 57 6 theorem Krepi.Proofs.Calibration.generation_step.mvcgen_spec
+krepi-range Krepi.Proofs.Calibration 30 0 37 30 theorem Krepi.Proofs.Calibration.encode_step
+krepi-range Krepi.Proofs.Calibration 92 0 97 9 theorem Krepi.Proofs.Calibration.split_spec
+krepi-range Krepi.Proofs.Calibration 116 0 122 14 theorem Krepi.Proofs.Calibration.alloc_spec
+krepi-range Krepi.Proofs.Calibration 132 0 161 55 theorem Krepi.Proofs.Calibration.retire_spec
+krepi-range Krepi.Proofs.Calibration 124 0 130 67 theorem Krepi.Proofs.Calibration.slot_eq
+krepi-range Krepi.Proofs.Calibration 61 0 83 16 theorem Krepi.Proofs.Calibration.next_spec
+krepi-range Krepi.Proofs.Calibration 46 2 46 6 theorem Krepi.Proofs.Calibration.index_step.mvcgen_spec
+krepi-range Krepi.Proofs.Calibration 39 0 44 43 theorem Krepi.Proofs.Calibration.index_spec
+krepi-ranges-module Krepi.Proofs.Calibration 19

@@ -1,0 +1,26 @@
+# Lean 4.35.0 on darwin-arm64 in the environment of the gate: `lake env lean Ranges.lean` in a stage with `Fixture.lean` as `Krepi/Proofs/Fixture.lean`, for the modules `Krepi.Proofs.Fixture Krepi.Proofs.Missing`, exit 0
+krepi-range Krepi.Proofs.Fixture 27 17 27 20 definition Krepi.Proofs.Fixture.instBEqPoint
+krepi-range Krepi.Proofs.Fixture 30 2 30 7 other Krepi.Proofs.Fixture.Color.red
+krepi-range Krepi.Proofs.Fixture 25 2 25 3 definition Krepi.Proofs.Fixture.Point.x
+krepi-range Krepi.Proofs.Fixture 35 0 35 45 definition Krepi.Proofs.Fixture.instInhabitedPoint
+krepi-range Krepi.Proofs.Fixture 24 0 27 20 other Krepi.Proofs.Fixture.Point
+krepi-range Krepi.Proofs.Fixture 27 17 27 20 definition Krepi.Proofs.Fixture.instBEqPoint.beq
+krepi-range Krepi.Proofs.Fixture 33 18 33 21 definition Krepi.Proofs.Fixture.instBEqColor.beq
+krepi-range Krepi.Proofs.Fixture 43 0 43 70 theorem Krepi.Proofs.Fixture.uses_instance
+krepi-range Krepi.Proofs.Fixture 33 18 33 21 definition Krepi.Proofs.Fixture.instBEqColor
+krepi-range Krepi.Proofs.Fixture 29 0 31 9 other Krepi.Proofs.Fixture.Color
+krepi-range Krepi.Proofs.Fixture 14 0 15 6 theorem Krepi.Proofs.Fixture.plain
+krepi-range Krepi.Proofs.Fixture 17 0 18 6 theorem Krepi.Proofs.Fixture.hidden
+krepi-range Krepi.Proofs.Fixture 24 17 24 22 other Krepi.Proofs.Fixture.Point.mk
+krepi-range Krepi.Proofs.Fixture 20 0 20 42 definition Krepi.Proofs.Fixture.double
+krepi-range Krepi.Proofs.Fixture 37 0 39 33 definition Krepi.Proofs.Fixture.withHelper
+krepi-range Krepi.Proofs.Fixture 11 0 12 52 theorem Krepi.Proofs.Fixture.documented
+krepi-range Krepi.Proofs.Fixture 31 2 31 9 other Krepi.Proofs.Fixture.Color.green
+krepi-range Krepi.Proofs.Fixture 27 11 27 15 definition Krepi.Proofs.Fixture.instReprPoint
+krepi-range Krepi.Proofs.Fixture 26 2 26 3 definition Krepi.Proofs.Fixture.Point.y
+krepi-range Krepi.Proofs.Fixture 27 11 27 15 definition Krepi.Proofs.Fixture.instReprPoint.repr
+krepi-range Krepi.Proofs.Fixture 39 2 39 33 definition Krepi.Proofs.Fixture.withHelper.helper
+krepi-range Krepi.Proofs.Fixture 22 0 22 31 definition Krepi.Proofs.Fixture.Pair
+krepi-range Krepi.Proofs.Fixture 46 0 46 48 theorem Krepi.Proofs.Fixture.after_omit
+krepi-ranges-module Krepi.Proofs.Fixture 23
+krepi-ranges-missing Krepi.Proofs.Missing

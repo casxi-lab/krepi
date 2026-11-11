@@ -197,7 +197,8 @@ pub fn build(tree: &Tree, ws: &str, case: Option<&Case>, work: &Path) -> Result<
 /// workspace, and each case, a TOML file in a `compile-fail` directory in it.
 pub fn run(root: &Path, facts: &mut Facts) -> Result<(), String> {
     let tree = Tree::load(root)?;
-    let metadata = || manifests::kernel_metadata(root).and_then(|m| inventory::roots(&m, KERNEL));
+    let metadata =
+        || manifests::kernel_metadata(root, KERNEL).and_then(|m| inventory::roots(&m, KERNEL));
     let roots = (!listed(&tree).0.is_empty()).then(metadata).transpose()?;
     let (files, mut problems) = check(&tree, &roots.unwrap_or_default());
     let case = |p: &&str| p.ends_with(".toml") && repo::parent(p).ends_with("/compile-fail");

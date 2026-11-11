@@ -16,6 +16,7 @@ mod fixture;
 pub mod guard;
 pub mod inventory;
 pub mod lean;
+pub mod mutants;
 pub mod outcome;
 pub mod paths;
 pub mod process;
@@ -81,8 +82,10 @@ pub struct Layout {
     /// The model registry, relative to the repository root.
     pub models: &'static str,
     /// The open obligations that the contracts list, relative to the
-    /// repository root.
+    /// repository root, or none for code that no contract describes.
     pub open: &'static str,
+    /// The directory of the lists of survivors of the source mutants.
+    pub mutants: &'static str,
     /// The tool manifest, relative to the repository root.
     pub toolchain: &'static str,
     /// The pin of the image that the CI jobs run, relative to the
@@ -114,6 +117,7 @@ impl Layout {
         registry: "verification/targets.json",
         models: "verification/models.json",
         open: "verification/open.json",
+        mutants: "verification/mutants",
         toolchain: "verification/toolchain.json",
         image_pin: "verification/image-pin.json",
         tooling: "verification/tooling",
@@ -130,6 +134,8 @@ impl Layout {
         tcb: "verification/qualification/calibration/tcb.json",
         registry: "verification/qualification/calibration/targets.json",
         models: "verification/qualification/calibration/models.json",
+        open: "",
+        mutants: "verification/qualification/calibration/mutants",
         ..Layout::PRODUCTION
     };
 }
@@ -153,7 +159,12 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "check",
-        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, that the target registry and verification/axioms.json keep their rules, with every key of a target in the inventory, and that the registries hold nothing that the gate does not support; --write first writes the file",
+        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, that the target registry and verification/axioms.json keep their rules, with every key of a target in the inventory, that the registries hold nothing that the gate does not support, and that every survivor of the lists of survivors has a class; --write first writes the file, and --calibration checks the calibration target",
+        subcommands: &[],
+    },
+    Command {
+        name: "mutants",
+        about: "Generate the source mutants of TARGET with every operator, or those that --operator names, run each through the proof gate with the theorems of the target, and write the survivors to the list of survivors of the target; --calibration takes a target of the calibration",
         subcommands: &[],
     },
     Command {
@@ -201,8 +212,14 @@ fn cli() -> clap::Command {
                 .arg(path("charon")),
         )
         .subcommand(inventory::cli(about("check")))
+        .subcommand(mutants::cli(about("mutants")))
         .subcommand(vectors::cli(about("vectors")))
         .subcommand(canary::cli(about("canary")))
+}
+
+/// The layout that `--calibration` selects.
+fn layout(matches: &ArgMatches) -> &'static Layout {
+    [&Layout::PRODUCTION, &Layout::CALIBRATION][usize::from(matches.get_flag("calibration"))]
 }
 
 /// The targets that `cargo xtask formal run` was given.
@@ -224,10 +241,16 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
             }
         };
     match matches.subcommand() {
-        Some(("run", matches)) => {
-            let calibration = matches.get_flag("calibration");
-            let layout = [&Layout::PRODUCTION, &Layout::CALIBRATION][usize::from(calibration)];
-            run::command(root, layout, targets(matches))
+        Some(("run", matches)) => run::command(root, layout(matches), targets(matches), None),
+        Some(("mutants", matches)) => {
+            let target = matches.get_one::<String>("target").cloned().into_iter();
+            let operators = Some(mutants::operators(matches));
+            run::command(
+                root,
+                layout(matches),
+                BTreeSet::from_iter(target),
+                operators,
+            )
         }
         Some(("guard", matches)) => guard::command(root, &Layout::PRODUCTION, matches),
         Some(("toolchain-check", matches)) => {
@@ -235,7 +258,7 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
             toolchain::command(root, &Layout::PRODUCTION, path("aeneas"), path("charon"))
         }
         Some(("check", matches)) => {
-            inventory::command(root, &Layout::PRODUCTION, matches.get_flag("write"))
+            inventory::command(root, layout(matches), matches.get_flag("write"))
         }
         Some(("vectors", matches)) => vectors::command(root, &Layout::PRODUCTION, matches),
         Some(("canary", matches)) => canary::command(root, &Layout::PRODUCTION, matches),
@@ -301,7 +324,40 @@ mod tests {
             let matches = read(args).expect("a valid command line");
             let (name, matches) = matches.subcommand().expect("a subcommand");
             assert_eq!((name, matches.get_flag("write")), ("check", write));
+            assert!(!matches.get_flag("calibration"));
         }
+        let matches = read(&["check", "--calibration"]).expect("a valid command line");
+        assert!(
+            matches
+                .subcommand()
+                .expect("check")
+                .1
+                .get_flag("calibration")
+        );
+        let mutants = |args: &[&str]| {
+            let matches = read(args).expect("a valid command line");
+            let (name, matches) = matches.subcommand().expect("a subcommand");
+            assert_eq!(name, "mutants");
+            let target = matches.get_one::<String>("target").cloned();
+            (
+                target,
+                mutants::operators(matches),
+                matches.get_flag("calibration"),
+            )
+        };
+        let all = Vec::from_iter(mutants::OPERATORS.split(' ').map(String::from));
+        assert_eq!(mutants(&["mutants", "t"]), (Some("t".into()), all, false));
+        let args = [
+            "mutants",
+            "t",
+            "--operator",
+            "method",
+            "--operator",
+            "literal",
+            "--calibration",
+        ];
+        let some = vec!["literal".to_string(), "method".to_string()];
+        assert_eq!(mutants(&args), (Some("t".into()), some, true));
         for (args, component) in [(&["vectors"][..], None), (&["vectors", "d/c"], Some("d/c"))] {
             let matches = read(args).expect("a valid command line");
             let (name, matches) = matches.subcommand().expect("a subcommand");
@@ -333,6 +389,9 @@ mod tests {
             &["check", "a"],
             &["check", "--frobnicate"],
             &["vectors", "a", "b"],
+            &["mutants"],
+            &["mutants", "t", "--operator", "loops"],
+            &["mutants", "t", "u"],
             &["vectors", "--frobnicate"],
             &["canary"],
             &["canary", "frobnicate"],
@@ -476,9 +535,13 @@ mod tests {
                 layout.image_pin,
                 layout.tooling,
             ];
-            [paths, names, tools, [layout.open; 4]]
+            [paths, names, tools]
         };
         assert_eq!(shared(&layout), shared(&production));
+        // No contract describes the calibration, whose survivors are its own.
+        assert!(layout.open.is_empty() && !production.open.is_empty());
+        let own = format!("{}/", layout.qualification);
+        assert!(layout.mutants.starts_with(&own) && !production.mutants.starts_with(&own));
     }
 
     #[test]

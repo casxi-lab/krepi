@@ -199,7 +199,7 @@ pub const CRATE_MANIFEST: &str = "[package]\nname = \"formal-qualification\"\nve
     edition = \"2024\"\nlicense = \"MIT\"\npublish = false\n\n[workspace]\n";
 
 /// A Charon stand-in that writes the LLBC file it is asked for.
-const CHARON: &str = "while [ $# -gt 0 ]; do\n  \
+pub const CHARON: &str = "while [ $# -gt 0 ]; do\n  \
     if [ \"$1\" = --dest-file ]; then : > \"$2\"; fi\n  shift\ndone";
 
 /// The Aeneas stand-in of the fixture at `root`.
@@ -239,12 +239,15 @@ fn aeneas(root: &str) -> String {
 /// `artifacts/lake/statements/<statement>`, else the name without its last
 /// component when that file exists, and `true`. A
 /// heartbeat copy is counted ten heartbeats per line at each inserted line.
-/// `leanchecker` passes.
+/// `leanchecker` passes. The range printer `Ranges.lean`, keyed `ranges`,
+/// prints for each module that it names a range on the line of each theorem
+/// of its file, and their count.
 const LAKE: &str = r##"lake='@ROOT@/artifacts/lake'
 mkdir -p "$lake"
 echo "$PWD $*" >> "$lake/calls"
 file=$4
 case "$PWD $1 $2 $3" in
+  *" env lean Ranges.lean") key=ranges ;;
   */base/stage/*" build "*) key=planned; case " $* " in *" --wfail "*) key=build ;; esac ;;
   */base/stage/*" env lean --json") key=heartbeats ;;
   */base/stage/*" env lean "*) key=audit ;;
@@ -293,6 +296,16 @@ case $key in
       echo "{\"severity\":\"information\",\"data\":\"$data\",\"pos\":{\"line\":$line,\"column\":0}}"
     done ;;
   leanchecker-*) ;;
+  ranges)
+    for module in $(sed -n 's/^#krepi_declaration_ranges //p' Ranges.lean); do
+      count=0
+      file="$(path "$module").lean"
+      for entry in $(grep -n -E '^(public |private )?theorem ' "$file" | sed -E 's/^([0-9]+):(public |private )?theorem ([^ ]+).*/\1:\3/'); do
+        echo "krepi-range $module ${entry%%:*} 0 ${entry%%:*} 80 theorem $module.${entry#*:}"
+        count=$((count + 1))
+      done
+      echo "krepi-ranges-module $module $count"
+    done ;;
   *) echo 'Build completed successfully (2 jobs).' ;;
 esac"##;
 

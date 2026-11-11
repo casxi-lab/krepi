@@ -1,0 +1,12 @@
+# Lean 4.35.0 on darwin-arm64 in the environment of the gate: `lake build --no-cache --wfail Krepi.Proofs.Fixture` with the variable `_a` of `uses_instance` named `a`, exit 1; <stage>, <backend> and <lean> replace absolute paths
+⚠ [2/2] Building Krepi.Proofs.Fixture (278ms)
+trace: .> LEAN_PATH=<backend>/.lake/packages/Cli/.lake/build/lib/lean:<backend>/.lake/packages/batteries/.lake/build/lib/lean:<backend>/.lake/packages/Qq/.lake/build/lib/lean:<backend>/.lake/packages/aesop/.lake/build/lib/lean:<backend>/.lake/packages/proofwidgets/.lake/build/lib/lean:<backend>/.lake/packages/importGraph/.lake/build/lib/lean:<backend>/.lake/packages/LeanSearchClient/.lake/build/lib/lean:<backend>/.lake/packages/plausible/.lake/build/lib/lean:<backend>/.lake/packages/mathlib/.lake/build/lib/lean:<backend>/.lake/build/lib/lean:<stage>/calibration/.lake/build/lib/lean <lean>/bin/lean <stage>/calibration/Krepi/Proofs/Fixture.lean -o <stage>/calibration/.lake/build/lib/lean/Krepi/Proofs/Fixture.olean -i <stage>/calibration/.lake/build/lib/lean/Krepi/Proofs/Fixture.ilean -c <stage>/calibration/.lake/build/ir/Krepi/Proofs/Fixture.c --setup <stage>/calibration/.lake/build/ir/Krepi/Proofs/Fixture.setup.json --json
+warning: Krepi/Proofs/Fixture.lean:43:30: Variable name `a` is not explicitly referenced.
+
+Hint: The binding can be removed (if unused) or named `_` (if used implicitly). Alternatively, prefix the name with `_` to silence this warning:
+  [apply] _a
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+Some required targets logged failures:
+- Krepi.Proofs.Fixture
+error: build failed

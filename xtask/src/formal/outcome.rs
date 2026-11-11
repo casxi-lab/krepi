@@ -21,6 +21,8 @@ pub enum Site {
     BaseBuild,
     TargetBuild,
     AxiomAudit,
+    DeclarationRanges,
+    CargoCheck,
     Leanchecker,
     Comparator,
     Git,
@@ -32,6 +34,7 @@ impl Site {
     pub fn cap(self) -> Option<Duration> {
         let seconds = match self {
             Site::Charon | Site::CaseAudit | Site::AxiomAudit => 1_800,
+            Site::DeclarationRanges | Site::CargoCheck => 1_800,
             Site::Aeneas => 3_600,
             Site::QualificationBuild | Site::IllTypedBuild | Site::BaseBuild => 7_200,
             Site::TargetBuild => 7_200,
@@ -102,9 +105,13 @@ pub fn classify(site: Site, ran: &Ran, own: usize, unread: Option<&str>) -> Verd
         | Site::BaseBuild
         | Site::TargetBuild
         | Site::AxiomAudit => killed(ran),
-        Site::Aeneas | Site::Leanchecker | Site::Comparator | Site::Git | Site::CargoMetadata => {
-            stopped(ran)
-        }
+        Site::DeclarationRanges => killed(ran),
+        Site::Aeneas
+        | Site::CargoCheck
+        | Site::Leanchecker
+        | Site::Comparator
+        | Site::Git
+        | Site::CargoMetadata => stopped(ran),
     };
     let signal = ran.code().filter(|code| *code > 128).map(|code| {
         format!("{name} exited with {code}, the status of a process that a signal ended")
@@ -134,7 +141,8 @@ pub fn classify(site: Site, ran: &Ran, own: usize, unread: Option<&str>) -> Verd
             format!("{exited}: what it compares was not built"),
         ),
         Site::Comparator if code == 1 => (Class::ProofFailure, exited),
-        Site::Comparator | Site::Git | Site::CargoMetadata => (Class::ToolFailure, exited),
+        Site::DeclarationRanges | Site::Comparator => (Class::ToolFailure, exited),
+        Site::Git | Site::CargoMetadata => (Class::ToolFailure, exited),
         Site::Charon
         | Site::Aeneas
         | Site::QualificationBuild
@@ -142,6 +150,7 @@ pub fn classify(site: Site, ran: &Ran, own: usize, unread: Option<&str>) -> Verd
         | Site::CaseAudit
         | Site::TargetBuild
         | Site::AxiomAudit
+        | Site::CargoCheck
         | Site::Leanchecker => (Class::ProofFailure, exited),
     };
     let reason = (class != Class::Passed).then_some(reason);
@@ -317,7 +326,7 @@ pub(crate) mod conventions {
     use crate::formal::process::{Ended, Limit, LimitBy};
 
     /// Every site.
-    pub const SITES: [Site; 12] = [
+    pub const SITES: [Site; 14] = [
         Site::Charon,
         Site::Aeneas,
         Site::QualificationBuild,
@@ -326,6 +335,8 @@ pub(crate) mod conventions {
         Site::BaseBuild,
         Site::TargetBuild,
         Site::AxiomAudit,
+        Site::DeclarationRanges,
+        Site::CargoCheck,
         Site::Leanchecker,
         Site::Comparator,
         Site::Git,
@@ -1022,6 +1033,8 @@ mod tests {
             ("base-build", Some(7_200)),
             ("target-build", Some(7_200)),
             ("axiom-audit", Some(1_800)),
+            ("declaration-ranges", Some(1_800)),
+            ("cargo-check", Some(1_800)),
             ("leanchecker", None),
             ("comparator", None),
             ("git", None),

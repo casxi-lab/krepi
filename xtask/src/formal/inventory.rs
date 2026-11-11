@@ -15,7 +15,7 @@ use syn::punctuated::Punctuated;
 use syn::visit::{self, Visit};
 use syn::{Attribute, Expr, Ident, Lit, Token, Type};
 
-use super::{Layout, classify, registry};
+use super::{Layout, classify, mutants, registry};
 use crate::manifests;
 use crate::repo::{self, Tree};
 
@@ -151,7 +151,7 @@ fn path_of(attrs: &[Attribute]) -> Option<String> {
 }
 
 /// The last path segment of the self type `ty`, under `&`, `*` and `()`.
-fn owner(ty: &Type) -> Option<String> {
+pub(super) fn owner(ty: &Type) -> Option<String> {
     match ty {
         Type::Path(ty) => Some(ty.path.segments.last()?.ident.to_string()),
         Type::Reference(ty) => owner(&ty.elem),
@@ -400,7 +400,13 @@ pub fn check(tree: &Tree, roots: &[(String, bool)], layout: &Layout) -> (String,
         }
         problems.extend(classify::derived_problems(target, &inventory));
     }
-    let (obligations, tables) = obligations(tree, layout.kernel);
+    let (lists, uncovered) = mutants::list_problems(tree, layout, &targets);
+    problems.extend(lists);
+    // A layout without open obligations reads no contract.
+    let (obligations, tables) = match layout.open {
+        "" => (Vec::new(), Problems::new()),
+        _ => obligations(tree, layout.kernel),
+    };
     problems.extend(refused.into_iter().chain(tables));
     let mut items = Vec::new();
     for entry in &obligations {
@@ -412,7 +418,7 @@ pub fn check(tree: &Tree, roots: &[(String, bool)], layout: &Layout) -> (String,
         problems.extend(silent.then(|| format!("{item}: unsafe without a verified state")));
         items.push(item);
     }
-    if tree.text(layout.open) != Some(open_json(&obligations).as_str()) {
+    if !layout.open.is_empty() && tree.text(layout.open) != Some(open_json(&obligations).as_str()) {
         problems.insert(format!("{}: not what the contracts give", layout.open));
     }
     for key in &inventory.functions {
@@ -423,7 +429,13 @@ pub fn check(tree: &Tree, roots: &[(String, bool)], layout: &Layout) -> (String,
     }
     let (files, functions) = (inventory.reached.len(), inventory.functions.len());
     let (derived, open) = (inventory.derived.len(), obligations.len());
-    let read = format!("{files} files, {functions} functions, {derived} derived, {open} open");
+    let mut read = format!("{files} files, {functions} functions, {derived} derived, {open} open");
+    if !uncovered.is_empty() {
+        let uncovered = Vec::from_iter(uncovered).join(", ");
+        read.push_str(&format!(
+            "; survivors that no theorem covers in {uncovered}"
+        ));
+    }
     (read, problems)
 }
 
@@ -431,7 +443,10 @@ pub fn check(tree: &Tree, roots: &[(String, bool)], layout: &Layout) -> (String,
 pub fn cli(about: &'static str) -> clap::Command {
     let write = Arg::new("write").long("write").action(ArgAction::SetTrue);
     let write = write.help("First write verification/open.json, unless a table is malformed");
-    clap::Command::new("check").about(about).arg(write)
+    let calibration = clap::arg!(--calibration "Check the calibration target");
+    clap::Command::new("check")
+        .about(about)
+        .args([write, calibration])
 }
 
 /// `cargo xtask formal check` in `root`; with `write`, it first writes
@@ -440,12 +455,15 @@ pub fn command(root: &Path, layout: &Layout, write: bool) -> ExitCode {
     let checked = || -> Result<_, String> {
         let (mut tree, open) = (Tree::load(root)?, root.join(layout.open));
         let (obligations, tables) = obligations(&tree, layout.kernel);
-        if write && tables.is_empty() {
+        if write && tables.is_empty() && !layout.open.is_empty() {
             let written = fs::write(&open, open_json(&obligations));
             written.map_err(|error| format!("{}: {error}", open.display()))?;
             tree = Tree::load(root)?;
         }
-        let roots = roots(&manifests::kernel_metadata(root)?, layout.kernel)?;
+        let roots = roots(
+            &manifests::kernel_metadata(root, layout.kernel)?,
+            layout.kernel,
+        )?;
         Ok(check(&tree, &roots, layout))
     };
     let (read, problems) = checked().unwrap_or_else(|e| (String::new(), BTreeSet::from([e])));
