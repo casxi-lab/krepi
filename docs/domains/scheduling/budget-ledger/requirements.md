@@ -314,8 +314,9 @@ unchanged, and the frozen vectors of refused loans hold.
   they are the [scheduler requirements](../scheduler/requirements.md).
 - When a loan is made and withdrawn, the creation and reap calls that
   admit and release a thread, and the query of the CPU time of a process
-  are not covered; the IPC, creation and lifecycle components compose the
-  entries of this component and have their own requirements.
+  are not covered; the [IPC](../../ipc-waits/ipc/requirements.md),
+  creation and lifecycle components compose the entries of this component
+  and have their own requirements.
 - No scheduling-context object, replenishment list, sporadic server or
   timeout handler exists, and no charge reaches an ancestor of a process.
 - A process has one thread; further threads of a process are not covered.

@@ -366,9 +366,11 @@ vectors of refusals hold.
   [budget-ledger requirements](../budget-ledger/requirements.md).
 - When a wait completes, the deadlines of waits and sleeps, when a loan is
   made and withdrawn, the creation call that composes admission and the
-  destruction that composes removal are not covered; the waits, IPC,
-  creation and lifecycle components compose the entries of this component
-  and have their own requirements.
+  destruction that composes removal are not covered; the
+  [waits](../../ipc-waits/waits/requirements.md),
+  [IPC](../../ipc-waits/ipc/requirements.md), creation and lifecycle
+  components compose the entries of this component and have their own
+  requirements.
 - Scheduling on several CPUs, migration between them, and the proofs of
   fairness and of time bounds belong to later releases.
 - A process has one thread; further threads of a process are not covered.

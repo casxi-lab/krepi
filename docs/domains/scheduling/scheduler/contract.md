@@ -11,8 +11,9 @@ the class ledgers, charging, replenishment, the holdings that admission
 carves and the loans of budgets belong to the
 [budget-ledger](../budget-ledger/contract.md) component, whose entries this
 page calls; when a loan is made and withdrawn, and when a wait completes,
-belong to the IPC and waits components of the IPC and waits domain
-(planned), which compose the entries of this page. The observable behaviour
+belong to the [IPC](../../ipc-waits/ipc/contract.md) and
+[waits](../../ipc-waits/waits/contract.md) components of the IPC and waits
+domain, which compose the entries of this page. The observable behaviour
 that these rules serve, with its evidence, is in the
 [requirements](requirements.md), the other document of the component.
 
@@ -60,8 +61,10 @@ that these rules serve, with its evidence, is in the
   **time slice left** of a thread is the part of it that its dispatches
   have not used.
 - **External deadline.** The earliest deadline of the waits of the CPU that
-  have not settled, which the composer takes from the waits component
-  (planned) and passes to `choose`; none when no such wait has a deadline.
+  have not settled, which the composer takes from `waits::first_deadline`
+  (planned) of the
+  [waits](../../ipc-waits/waits/contract.md#deadlines-and-sleep) component
+  and passes to `choose`; none when no such wait has a deadline.
 - **Reschedule flag.** A field of the scheduler record that asks the
   composer of the return to stop the current dispatch
   ([Preemption](#preemption)).

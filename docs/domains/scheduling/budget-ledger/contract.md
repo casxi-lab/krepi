@@ -13,7 +13,8 @@ the thread that runs, its time slice, preemption and the admission checks
 of the class and the ceiling belong to the
 [scheduler](../scheduler/contract.md) component, the module `scheduler` of
 the core (planned), which reads the dispatch credit that this page gives;
-when a loan is made and withdrawn belongs to the module `ipc` (planned);
+when a loan is made and withdrawn belongs to the
+[IPC](../../ipc-waits/ipc/contract.md) component, the module `ipc` (planned);
 the creation and the reap of the thread of a process belong to the modules
 `creation` and `lifecycle` (planned), which compose the admission and the
 release of this page. The observable behaviour that these rules serve,
@@ -94,8 +95,8 @@ of the lifecycle component.
 | `ledger::release` (planned) | Write entry on the copies of a write set, host-testable | The module `lifecycle` (planned), in the write set that reaps a process and releases its thread slot | None | [Admission and release](#admission-and-release) |
 | `ledger::charge` (planned) | Write entry on the copies of a write set, host-testable | The [scheduler](../scheduler/contract.md#entry-points), when the dispatch of the current thread stops, by its preemption, yield, block or removal, and when `requeue` charges the current dispatch up to a change of its context or of the record of the owner of its context, with the start of the dispatch or its last charge and the owner of its context | None | [Charging and debt](#charging-and-debt), [CPU time](#cpu-time) |
 | `ledger::replenish` (planned) | Write entry on the copies of a write set, host-testable | The write entries of this page, for each record and class ledger that they change, before they change it; and the tests. The scheduler needs no call of its own, since `available` gives the credit as brought up to date | None | [Replenishment](#replenishment) |
-| `ledger::lend` (planned) | Write entry on the copies of a write set, host-testable | The module `ipc` (planned), when a call is delivered to its receiver | None | [Lending](#lending) |
-| `ledger::withdraw` (planned) | Write entry on the copies of a write set, host-testable | The module `ipc` (planned), when a call ends for any reason, for its receiver and each thread downstream of it, at most `MAX_LOAN_DEPTH` in one transition | None | [Lending](#lending) |
+| `ledger::lend` (planned) | Write entry on the copies of a write set, host-testable | The module `ipc` (planned), when a call is delivered to its receiver, in `ipc::call` and `ipc::receive` | None | [Lending](#lending) |
+| `ledger::withdraw` (planned) | Write entry on the copies of a write set, host-testable | The module `ipc` (planned), when a call ends for any reason, in `ipc::reply`, `ipc::settle`, `ipc::reply_deleted` and `ipc::drain_step`, for its receiver and each thread downstream of it, at most `MAX_LOAN_DEPTH` in one transition | None | [Lending](#lending) |
 | `ledger::available` (planned) | Read entry, host-testable | The [scheduler](../scheduler/contract.md#selection-and-time-slices), in its selection, for the deadline of a dispatch, and for the place and the reschedule flag of a thread that it makes ready or moves | None | [Charging and debt](#charging-and-debt), [Replenishment](#replenishment), [Lending](#lending) |
 | `ledger::cpu_time` (planned) | Read entry, host-testable | The module `lifecycle` (planned), for the query of the CPU time of a process, and the tests | None | [CPU time](#cpu-time) |
 
@@ -468,7 +469,8 @@ ceiling of `borrower`.
     refuses before delivery;
   - a second loan to a borrower that has a source, which a delivery to a
     receiver that still serves an earlier call would need; the IPC
-    component states what such a delivery does.
+    component refuses the receive of such a receiver
+    ([budget lending](../../ipc-waits/ipc/contract.md#budget-lending)).
 - **Premises of the composition.** `lend` and `release` rely on two rules
   of the IPC component, which they do not check and which no case of
   `OutstandingLoan` covers:
@@ -633,7 +635,8 @@ The withdrawal of a chain when a call ends writes at most 11 items:
   ledger of its class. The other threads of the chain are blocked in their
   calls and in no run queue.
 
-The IPC component counts these items with the settlement of the call.
+The [IPC](../../ipc-waits/ipc/contract.md#check-and-execute) component
+counts these items with the settlement of the call.
 
 ## Work bounds
 
@@ -717,9 +720,11 @@ whose state, generation and owner the
 classifies. The run queues of each CPU, per-CPU like the ledger, and the
 current thread with the start, the deadline and the context of its
 dispatch are fields of the
-[scheduler](../scheduler/contract.md#state-fields); the wait records that
-tie the threads of a chain of loans are fields of the waits component. No
-lock order is stated here.
+[scheduler](../scheduler/contract.md#state-fields); the reply records and
+endpoint bindings of the [IPC](../../ipc-waits/ipc/contract.md#state-fields)
+component and the wait records of the
+[waits](../../ipc-waits/waits/contract.md#state-fields) component tie the
+threads of a chain of loans. No lock order is stated here.
 
 ## Testing obligations
 
