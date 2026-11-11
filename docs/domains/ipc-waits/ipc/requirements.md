@@ -16,15 +16,15 @@ component, so the metadata lists none.
 ## Sources
 
 - The messages of two words, the endpoint bound to one service thread that
-  alone receives, the delivery of calls in the order of their calls, the
-  refusal of calls to oneself and of cycles of pending calls, one reply
+  alone receives, the delivery of calls in the order in which they were made,
+  the refusal of calls to oneself and of cycles of pending calls, one reply
   right for each delivered call that is used once, deadlines that settle
-  before every other outcome, results that never change, one outcome for
-  the death of a peer and the end of an endpoint, the copy and move of a
+  before every other outcome, results that never change, one outcome for the
+  death of a peer and the end of an endpoint, the copy and move of a
   capability that becomes visible with its message, and the loan of the
-  caller's context, nested to a bounded depth within a ceiling and
-  withdrawn before the caller wakes, take the rules of the prototype's IPC,
-  capability transfer and synchronous budgets, which the
+  caller's context, nested to a bounded depth within a ceiling and withdrawn
+  before the caller wakes, take the rules of the prototype's IPC, capability
+  transfer and synchronous budgets, which the
   [references](contract.md#references) of the contract list, with their host
   tests as the frozen [vectors](contract.md#legacy-test-vectors).
 - The reply capability in the table of the server with the generation of
@@ -105,18 +105,18 @@ destroyed queues nothing.
 
 ### IPC-R02
 
-**Calls and receives.** A call sends two words through a capability with
-SEND and, unless it ends at once, blocks until its outcome. A call that finds the receiver waiting is
-delivered at once; otherwise it waits in the queue of its endpoint, and the
-calls of an endpoint are delivered in the order in which they were made. A
-receive through a capability with RECEIVE returns at once with the first
-queued call, without blocking, or blocks until a call arrives. The receiver
-gets the reply capability, the badge, the two words and the handle of a
-transferred capability in its result registers; the caller gets the two
-words of the reply. The criterion: three calls of two callers are received
-in the order of the calls with their badges and words, also after earlier
-calls have ended, and a receive before the call and one after it give the
-same results.
+**Calls and receives.** A call sends two words through a capability with SEND
+and, unless it ends at once, blocks until its outcome. A call that finds the
+receiver waiting is delivered at once; otherwise it waits in the queue of its
+endpoint, and the calls of an endpoint are delivered in the order in which
+they were made. A receive through a capability with RECEIVE returns at once
+with the first queued call, without blocking, or blocks until a call arrives.
+The receiver gets the reply capability, the badge, the two words and the
+handle of a transferred capability in its result registers; the caller gets
+the two words of the reply. The criterion: three calls of two callers are
+received in the order of the calls with their badges and words, also after
+earlier calls have ended, and a receive before the call and one after it give
+the same results.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `ipc::call`, `ipc::receive` and `ipc::has_call`
@@ -138,12 +138,13 @@ same results.
 is the caller is refused with `SelfCall`, and a call that would close a
 cycle of calls, along the calls that are queued or delivered and the bound
 threads of their endpoints, with `Cycle`; both are refused before any
-write, change nothing and reach EL0 with one status of a call dependency.
-A call whose deadline has expired is no part of a cycle. The check takes at
-most the thread capacity less one steps, each of two reads. The criterion:
-a cycle of three threads through queued calls is refused, the same calls
-are accepted once one of them has timed out, and after every write-back no
-thread has more than one outgoing call and the calls form no cycle.
+write, change nothing and reach EL0 as one status, that of a call
+dependency. A call whose deadline has expired is no part of a cycle. The
+check takes at most the thread capacity less one steps, each of two reads.
+The criterion: a cycle of three threads through queued calls is refused,
+the same calls are accepted once one of them has timed out, and after
+every write-back no thread has more than one outgoing call and the calls
+form no cycle.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `ipc::call` (planned).
@@ -236,13 +237,16 @@ receive.
 budget or the one that it borrows, to the receiver, which runs on it within
 the ceiling of its admission; nested calls lend the same context on, to a
 depth of at most eight. A context has one holder that runs, and no credit
-is copied. When a call ends, by any outcome, the loans of its receiver and
-of every thread downstream of it are withdrawn before the caller is made
-ready, and the loans upstream stay. A server that serves a call does not
-receive again until the call ends (`ReplyPending`). The criterion: after the
-end of each kind of call, no thread downstream of its receiver has a
-borrowed context and the caller is ready, and a ninth nested delivery is
-refused with `LoanDepth`.
+is copied. When a call ends, by any outcome, the context that it lent is
+withdrawn from its receiver and from every thread downstream of it that
+holds it, before the caller is made ready; the loans upstream stay, and so
+do the contexts that a thread downstream lent after it had lost that one. A
+server that serves a call does not receive again until the call ends
+(`ReplyPending`). The criterion: after the end of each kind of call, no
+thread downstream of the caller holds the context that the call lent and
+the caller is ready, a context that a thread downstream lent later stays
+with its borrower, and a ninth nested delivery is refused with
+`LoanDepth`.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `ipc::call`, `ipc::receive`, `ipc::reply`,

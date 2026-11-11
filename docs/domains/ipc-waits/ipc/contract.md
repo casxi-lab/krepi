@@ -68,9 +68,13 @@ document of the component.
 - **Context, source, owner and depth.** As the
   [budget-ledger](../../scheduling/budget-ledger/contract.md#terms)
   component defines them.
-- **Chain of a call.** The receiver of a delivered call and the threads
-  downstream of it: while a thread of the chain waits for the reply of a
-  delivered call of its own, the receiver of that call follows it.
+- **Chain of a call.** The threads that hold the context that a delivered
+  call lent: its receiver while it holds that loan and, while a thread of
+  the chain waits for the reply of a delivered call of its own, the
+  receiver of that call, to which it lent the same context one level
+  deeper ([Budget lending](#budget-lending)). These threads are
+  **downstream** of the receiver; the threads that lent the context to the
+  caller are **upstream** of it.
 - **Call edge.** For a thread whose call is live, queued or delivered, the
   edge from that thread to the bound thread of the endpoint of the call.
   The **call graph** is the set of all call edges.
@@ -182,8 +186,8 @@ thread with `waits::source_ready`.
   and it is not served ([Release and peer closure](#release-and-peer-closure)).
 - **Queue of calls.** The queue links the queued callers through the queue
   links of their wait records, which the waits component defines, in the
-  order of their calls. A call joins the tail, and a delivery takes the
-  head; a settlement or a drain takes a call out wherever it is.
+  order in which the calls were made. A call joins the tail, and a delivery
+  takes the head; a settlement or a drain takes a call out wherever it is.
 - **One receiver.** Only the bound thread receives, and a thread waits in at
   most one receive, so an endpoint has at most one receiver and a thread is
   the receiver of at most one endpoint. For the same reason only the bound
@@ -237,8 +241,9 @@ first error, writing nothing:
    `waits::begin`);
 6. the new path of the transferred capability holds at most `MAX_DEPTH`
    references (`DepthExceeded` of the capabilities component); and, when
-   the receiver waits, the loan of its delivery passes the depth check of
-   `ledger::lend` (`LoanDepth` of the
+   the call would be delivered at once, since its deadline has not passed,
+   the endpoint is served and the receiver waits, the loan of its delivery
+   passes the depth check of `ledger::lend` (`LoanDepth` of the
    [budget-ledger](../../scheduling/budget-ledger/contract.md#lending)
    component).
 
@@ -281,7 +286,15 @@ first error, writing nothing:
    and has not retired (`GenerationExhausted` of the capabilities
    component), the checks of `Tables::install` and `Tables::reserve` of the
    [capabilities](../../objects-capabilities/capabilities/contract.md#derivation-and-badges)
-   component on the receiver's table.
+   component on the receiver's table;
+6. when the receive would block, since its deadline has not passed, the
+   endpoint is served and no queued call passes the checks of its
+   delivery, the receiver's wait generation is below $2^{64} - 1$
+   (`GenerationExhausted` of the
+   [waits](../waits/contract.md#wait-records) component, the check of
+   `waits::begin`); to find whether it would block, the receive reads the
+   queued calls and makes the checks of their deliveries, and writes
+   nothing.
 
 Then, in this order:
 
@@ -300,14 +313,14 @@ Then, in this order:
   of the [waits](../waits/contract.md#wait-records) component, with the
   endpoint, the entry reference of its capability and its deadline; its
   reply record keeps its two slots, and `scheduler::block` stops its
-  dispatch. A receiver whose wait generation is $2^{64} - 1$ cannot block:
-  the check of `waits::begin` refuses the receive with
-  `GenerationExhausted` of the waits component, which changes nothing, and
-  the calls that the receive has ended before stay ended.
+  dispatch.
 
-A receive that finds a call never blocks: its results are those of its
-return, and the scheduler takes part only through `scheduler::requeue`,
-which charges the receiver's dispatch up to the loan of the delivery.
+A receive makes all its checks, also whether it can block, before it ends
+the first queued call whose delivery fails, so after such an end it
+delivers a call or blocks, and never fails. A receive that finds a call
+whose delivery passes never blocks: its results are those of its return,
+and the scheduler takes part only through `scheduler::requeue`, which
+charges the receiver's dispatch up to the loan of the delivery.
 
 ### Delivery
 
@@ -389,7 +402,7 @@ A receiver:
 | Idle | `receive`, the queue is empty | Waiting | None; the receiver blocks |
 | Waiting | `call` | Serving | The receiver's results; the receiver is made ready |
 | Waiting | The expiry of the deadline | Idle | `Timeout`; the receiver is made ready |
-| Waiting | The forced kill of the receiver | Removed | None |
+| Waiting | The forced kill of the receiver | Idle | `Cancelled`, which it does not observe: the receiver does not run again |
 | Waiting | The pending transition of a revocation whose subtree holds its capability | Idle | `Revoked`; the receiver is paused until the step that removes that capability |
 | Waiting | A drain of the endpoint | Idle | `PeerClosed`; the receiver is made ready |
 | Serving | The end of the served call, by any outcome | Idle | As for the call |
@@ -556,8 +569,8 @@ the same write-back.
   to receive, and `receive` checks that the slot is empty and has not
   retired. While the receiver waits, no operation fills it: a process has
   one thread, and only operations of the receiver's own thread fill slots of
-  its table. So the slot is reserved, by the receiver, before the message is
-  sent, as the
+  its table. So the slot is held for the transfer from the start of the
+  receive, before the message is sent, as the
   [IPC](../../../architecture.md#ipc-notifications-and-waits) of the kernel
   requires.
 - **At the call.** The call checks the source as a derivation does, with
@@ -652,16 +665,33 @@ the same write-back.
   the served call first, by its reply, or the call ends by another outcome;
   the next receive then takes the next call.
 - **Withdrawal before the wake.** Every end of a delivered call, by any
-  outcome, withdraws in the write set that settles it, before it writes the
-  caller's results and makes the caller ready: `ledger::withdraw` of the
-  receiver, and then of each thread downstream of it, following the
-  receiver of each delivered call that a thread of the chain waits for, to
-  the end of the chain, at most `MAX_LOAN_DEPTH` withdrawals; and
-  `scheduler::requeue` of the last thread of the chain when it is ready or
-  running, the only one that can be. The loans upstream of the receiver
-  stay: when, in a chain from A through B and C to D, the call of B to C
-  ends, C and D return to their own records, and B keeps running on the
-  context of A.
+  outcome, withdraws the context that the call lent, in the write set that
+  settles it, before it writes the caller's results and makes the caller
+  ready: `ledger::withdraw` of the receiver and, while a withdrawal gives
+  `withdrawn`, of the receiver of the delivered call that the withdrawn
+  thread waits for, at most `MAX_LOAN_DEPTH` withdrawals; and
+  `scheduler::requeue` of the last thread withdrawn when it is ready or
+  running, the only one that can be.
+- **The chain that is withdrawn.** A thread gets its source only at the
+  delivery of the call that it serves, loses it only by a withdrawal, and
+  receives no other call until that call ends; its own call comes after
+  that delivery. So a receiver whose withdrawal gives `withdrawn` has held
+  the context of the call since its delivery and has lent it at the
+  delivery of its own call, and so on down the chain: the threads
+  withdrawn are the chain of the call, each one level deeper, at most
+  eight. A receiver whose withdrawal gives `none` has lost the context to
+  the end of a call upstream, which withdrew the chain with it; the calls
+  that it and the threads after it made since then lent other contexts,
+  which stay, and the settlement withdraws nothing more and requeues no
+  thread.
+- **Loans that stay.** The loans upstream of the receiver stay, and so do
+  those that a thread downstream made after it lost the context: when, in
+  a chain from A through B and C to D, the call of B to C ends, C and D
+  return to their own records, and B keeps running on the context of A.
+  When D, still serving the call of C, then calls E, its delivery lends D's
+  own record to E; the later end of the call of C to D withdraws nothing,
+  since D has no source, and E keeps the context of D while D waits for
+  it.
 - **No re-lending.** A thread downstream that waits for the reply of its
   own call stays blocked, with no context lent to it, until that call ends;
   nothing lends it a context again.
@@ -814,7 +844,7 @@ state.
 | `SameSlot` | A reply slot and a transfer slot that are the same slot | `receive` | The form of the register arguments |
 | `InvalidHandle`, `NoCapability`, `StaleHandle`, `WrongType` of the capabilities component | A handle that does not name a usable capability of the kind in the caller's table | `call`, `receive`, `reply` | Handle resolution: the range, the empty slot, the generation, the type |
 | `WrongPool` of the objects component | A reference of another pool than its kind's | `init_endpoint`, `settle`, `drain_step`, `check_receiver`, `has_call` | Handle resolution: the type |
-| `StaleReference` of the objects component | A reference that is not live: the endpoint or the source of a capability, the caller of a reply capability, or a reference that a composer passes | Every entry; a delivery by a receive | Handle resolution: the liveness of the object |
+| `StaleReference` of the objects component | A reference that is not live: the endpoint or the source of a capability, the caller of a reply capability, or a reference that a composer passes | Every entry but `reply_deleted`, which gives `none` for a caller that has been reaped; a delivery by a receive | Handle resolution: the liveness of the object |
 | `PermissionDenied` of the capabilities component | A capability without SEND for `call`, without RECEIVE for `receive`, without REPLY for `reply`, or a source without GRANT or a requested right | `call`, `receive`, `reply` | Rights |
 | `RevocationPending`, `TransferPending` of the capabilities component | A capability of the subtree of a pending revocation or its target, or the source of a pending move | `call`, `receive`, `reply` | Object state |
 | `NotReceiver` | A receive, or the registration of the endpoint in a wait set, by a thread other than the bound thread | `receive`, `check_receiver` | Object state |
@@ -823,7 +853,7 @@ state.
 | `ReplyExhausted` | A call by a thread whose reply record has the generation $2^{64} - 1$ | `call` | Object state |
 | `SelfCall` | A call to an endpoint whose bound thread is the caller | `call` | Object state |
 | `Cycle` | A call whose edge would close a cycle of the call graph | `call` | Object state |
-| `GenerationExhausted` of the waits component | A call or a receive that would block while the wait generation of its thread is $2^{64} - 1$, the check of `waits::begin` | `call`, `receive` | Object state |
+| `GenerationExhausted` of the waits component | A call or a receive that would block while the wait generation of its thread is $2^{64} - 1$, the check of `waits::begin`; a receive would block when no queued call passes the checks of its delivery | `call`, `receive` | Object state |
 | `ReplyGone` | A reply with a capability whose call has ended | `reply` | Object state |
 | `DepthExceeded` of the capabilities component | A transferred capability whose new path would be longer than `MAX_DEPTH` | `call` | Shared capacity |
 | `LoanDepth` of the budget-ledger component | A delivery whose loan would be deeper than `MAX_LOAN_DEPTH` | `call`; a delivery by a receive | Shared capacity |
@@ -836,12 +866,14 @@ state.
   dispatch component checks as the ABI inventory states. `SelfCall` and
   `Cycle` depend on the calls of other threads; [Determinism](#determinism)
   states their sources.
-- **Outcomes are not errors.** `Timeout`, `Cancelled`, `Revoked` and
-  `PeerClosed` are outcomes of an accepted call or receive, written into
-  its results, and so is the error of a refused delivery, which ends a
-  queued call: they are not refusals, and the operation that they end has
-  had its effect, the call queued or delivered and the receive waiting. An
-  operation that ends at once with `Timeout` or `PeerClosed` changes nothing.
+- **Outcomes are not errors.** `Timeout`, `Revoked` and `PeerClosed` are
+  outcomes of an accepted call or receive, written into its results, and so
+  is the error of a refused delivery, which ends a queued call; `Cancelled`
+  is an outcome as well, which writes no result, since the killed thread
+  never runs again. They are not refusals, and the operation that they end
+  has had its effect, the call queued or delivered and the receive waiting.
+  An operation that ends at once with `Timeout` or `PeerClosed` changes
+  nothing.
 - **No change on failure.** No error changes state: an entry of this page
   that returns an error leaves every field of the kernel state as it was,
   the copies in the write set included, and writes no counter; a composing
@@ -858,7 +890,7 @@ state.
   an endpoint without a wait of this page.
 - **Names.** The names are those of this contract; the numeric values of
   the errors and of the statuses of the outcomes belong to the ABI
-  inventory. `SelfCall` and `Cycle` reach EL0 with one status, of a call
+  inventory. `SelfCall` and `Cycle` reach EL0 as one status, that of a call
   dependency, and `NotReceiver` with the status of a missing right.
 
 The prototype's IPC had fourteen errors, and its ABI five statuses of its
@@ -868,7 +900,7 @@ own. Here:
 | --- | --- |
 | `InvalidConfiguration` | Not applicable: there is no registry of calls and receives, whose capacity could be 0; the queues of endpoints hold threads of the thread pool |
 | `Object(_)` | Not kept as a wrapper: the errors of the objects and capabilities components that this page meets are returned as they are |
-| `InvalidState` | Replaced: a receive by a thread that serves a call is `ReplyPending`; a call or a receive by a thread that already waits does not arise, since only a running thread makes one; an endpoint that is closed or whose bound thread is dead ends a call with `PeerClosed`, or fails its lookup with `StaleReference` once released; a cancellation of an ended call is a kill that finds no wait |
+| `InvalidState` | Replaced: a receive by a thread that serves a call is `ReplyPending`; a call or a receive by a thread that already waits does not arise, since only a running thread makes one; a call on an endpoint that the prototype closed, or whose bound thread is dead, ends with `PeerClosed`, since the endpoint is not served, and a released endpoint fails its lookup with `StaleReference`; a cancellation of an ended call is a kill that finds no wait |
 | `InvalidDeadline` | Not applicable: every 64-bit deadline is valid, and 0 is none |
 | `ClockReversed` | Not applicable: the time does not decrease within a boot, a premise that no entry checks |
 | `Capacity` | Not applicable: there is no registry; a call or a receive uses the records embedded in its thread and the queue of its endpoint, which have no capacity of their own |
@@ -935,8 +967,10 @@ transition fails after an earlier part has committed.
   delivery a receive refuses, and the operation of the transition are
   transactions of their own. Each rolls back on its own to the state before
   it: an operation that fails leaves the settlements before it, which are
-  the results of time, of revocation or of a source that has gone, not of
-  the operation.
+  the results of time and of revocation, not of the operation. The ends of
+  the refused deliveries are parts of a receive that has made all its
+  checks, also whether it can block, before the first of them, so that
+  receive does not fail after them.
 - **Reads that decide the effect.** The walk of the call graph, the state
   of the queue and of the receiver, and the generation of a reply record
   decide what an entry does, not whether it fails after its checks, and
@@ -953,15 +987,17 @@ transition fails after an earlier part has committed.
   `Tables::reserve` and of `ledger::lend`; and a fixed number of writes,
   with `waits::begin`, whose insertion into the deadline table the
   [waits](../waits/contract.md#work-bounds) contract bounds by the thread
-  capacity. The
-  walk has no preemption point: the transition that makes it takes time in
-  proportion to the thread capacity, as the expiry of deadlines that expire
-  together does.
-- `receive` makes one lookup and the checks of two slots, and takes at most
-  the queued calls of its endpoint, at most the thread capacity less one:
-  each call whose delivery its checks refuse ends in a settlement of its
-  own, a fixed number of steps, before the receive delivers a call or
-  blocks.
+  capacity. The walk has no preemption point: the transition that makes it
+  takes time in proportion to the thread capacity, as the expiry of
+  deadlines that expire together does.
+- `receive` makes one lookup and the checks of two slots; at the limit of
+  its wait generation, the checks of the deliveries of at most the queued
+  calls of its endpoint, without a write; and it takes at most those calls,
+  at most the thread capacity less one: each call whose delivery its checks
+  refuse ends in a settlement of its own, a fixed number of steps, before
+  the receive delivers a call or blocks. A receive that blocks calls
+  `waits::begin`, whose insertion into the deadline table walks at most the
+  thread capacity of waits.
 - `reply` makes one lookup and one check of a generation, one withdrawal and
   a fixed number of writes.
 - `settle`, `reply_deleted` and `drain_step` make one settlement each: at
@@ -983,8 +1019,8 @@ transition fails after an earlier part has committed.
 
 - **Requests.** Requests that contend for an endpoint or a reply record
   take effect in the order in which they enter the kernel.
-- **Queue.** The calls queued on an endpoint are delivered in the order of
-  their calls; a receive takes the first.
+- **Queue.** The calls queued on an endpoint are delivered in the order in
+  which they were made; a receive takes the first.
 - **Receivers.** An endpoint has at most one receiver, its bound thread, and
   at most one waiter of a wait set, the same thread, so no choice among
   receivers arises; a call that finds the receiver waiting is delivered to
@@ -1008,9 +1044,9 @@ transition fails after an earlier part has committed.
   those woken by timeouts first, then those woken by the event of the
   operation.
 - **Loans.** A loan is made in the write set of its delivery and withdrawn,
-  with every loan downstream of it, in the write set of the end of its
-  call, before the caller is woken; it settles as a whole within one
-  transition.
+  with every loan of its context downstream of it, in the write set of the
+  end of its call, before the caller is woken; it settles as a whole within
+  one transition.
 - **Badges and handles.** The badge of a delivery is that of the caller's
   capability; the handles of the reply capability and of a transferred
   capability name the slots that the receiver named, with their
@@ -1055,8 +1091,7 @@ The component leaves no other choice open.
 The wait records of the threads, with their queue links, deadlines and
 pauses, the deadline table and the registrations of wait sets are fields
 of the [waits](../waits/contract.md#state-fields) component; the sources
-and
-effective classes of the budget records, of the
+and effective classes of the budget records, of the
 [budget-ledger](../../scheduling/budget-ledger/contract.md#state-fields)
 component; the scheduling states and run queues, of the
 [scheduler](../../scheduling/scheduler/contract.md#state-fields); the
@@ -1090,7 +1125,10 @@ kernel classify them; no lock order is stated here.
   endpoint whose bound thread's process, or whose owner, is not alive; and
   a call and a receive at the wait generation $2^{64} - 1$, refused with
   `GenerationExhausted` when they would block and ending at once with
-  `Timeout` when their deadline has passed.
+  `Timeout` when their deadline has passed; and at that generation, a
+  receive that finds a call whose delivery passes, which delivers it, and
+  one whose queued calls all fail the checks of their deliveries, which is
+  refused with `GenerationExhausted` and ends none of them.
 - Calls to oneself and cycles: `SelfCall`; for every length from 2 to the
   thread capacity of the fixture, a cycle closed through queued calls,
   through delivered calls and through both, refused with `Cycle`, and the
@@ -1118,11 +1156,14 @@ kernel classify them; no lock order is stated here.
   the received capability; and a property check that no reserved entry
   exists after any write-back of this page.
 - Lending: chains of every depth from 1 to 8 and a ninth delivery, refused
-  at a call and ending a queued call at a receive; the end of a call in
-  the middle of a chain, which leaves the loans upstream; each outcome,
-  after whose write-back the caller is ready and no thread downstream of
-  the receiver has a source; and `ReplyPending` for a receive by a thread
-  that serves a call.
+  at a call and ending a queued call at a receive; the end of a call in the
+  middle of a chain, which leaves the loans upstream; each outcome, after
+  whose write-back the caller is ready and no thread downstream of the
+  caller holds the context that the call lent; the chain from A to E of
+  [Budget lending](#budget-lending), after which E keeps the context of D; a
+  chain whose last thread, after the end of a call upstream, lends its own
+  record along eight more deliveries, whose ends each withdraw at most eight
+  loans; and `ReplyPending` for a receive by a thread that serves a call.
 - Outcomes: for each pair of a timeout and another event in one
   transition, the timeout; and the order of
   [Settlement of a call](#settlement-of-a-call) for the events that a
@@ -1200,9 +1241,9 @@ badge 0, the words `[0, 0]`, no deadline and no transfer; "S receives at t"
 is `receive` by S from E, or from the endpoint that the row names, with the
 deadline that the row gives and, unless the row gives others, slot 1 of its
 own table for the reply capability and slot 2 for a transferred capability.
-"S replies w with r at t" is `reply` with the handle r. A
-handle is written `<slot>@<generation>`, the value 65,536 times the
-generation plus the slot. The output of a call is `reply [w0, w1]`, an outcome, `queued` or
+"S replies w with r at t" is `reply` with the handle r. A handle is written
+`<slot>@<generation>`, the value 65,536 times the generation plus the slot.
+The output of a call is `reply [w0, w1]`, an outcome, `queued` or
 `delivered` while it blocks, or `err=<error>` for a refused call; that of a
 receive is `ok reply=<handle> badge=<badge> words=[w0, w1]
 transfer=<handle>`, an outcome, `blocked`, or `err=<error>`; that of a reply
@@ -1306,10 +1347,10 @@ destruction of its owner O here.
 
 | Vector | Line | Test | Expected output | Entry |
 | --- | ---: | --- | --- | --- |
-| `ipc-closure-1` | 4 | `closure_timestamp_orders_queued_and_delivered_calls_against_their_deadlines` | For a queued call and for a delivered one, and for the drain of E at 9, 10 and 11 in turn: A calls with the badge 1, the words [1, 2] and the deadline 10 at 1, and in the second case S receives at 2. The drain at 9 ends A's call with `PeerClosed`; at 10 and at 11 the expiry ends it first with `Timeout`, and the drain finds no call. A later expiry at 20 changes neither result, and S's reply [3, 4] with `1@1` at 20 is `err=ReplyGone`. The prototype's closed state of E does not apply: E is released after its drain | `drain_step`, `settle`, `reply` |
-| `ipc-closure-2` | 37 | `closure_completes_receiver_immediately_without_touching_other_endpoints` | O creates the endpoint ED, with the thread of D bound. S receives with the deadline 10 at 1: `blocked`; A calls ED with the badge 2, the words [3, 4] and the deadline 12 at 2: `queued`, since D does not receive. The drain of E at 9 ends S's receive with `PeerClosed`, and S is made ready; A's call stays `queued`, and ED is untouched. The expiry at 10 does not change S's result, and A's call stays `queued`. The prototype's abandonment of A's call at 10 is not a case here | `receive`, `call`, `drain_step` |
+| `ipc-closure-1` | 4 | `closure_timestamp_orders_queued_and_delivered_calls_against_their_deadlines` | For a queued call and for a delivered one, and for the drain of E at 9, 10 and 11 in turn: A calls with the badge 1, the words [1, 2] and the deadline 10 at 1, and in the second case S receives at 2. The drain at 9 ends A's call with `PeerClosed`; at 10 and at 11 the expiry ends it first with `Timeout`, and the drain finds no call. A later expiry at 20 changes neither result, and in the second case S's reply [3, 4] with `1@1` at 20 is `err=ReplyGone`. The prototype's closed state of E does not apply: E is released after its drain | `drain_step`, `settle`, `reply` |
+| `ipc-closure-2` | 37 | `closure_completes_receiver_immediately_without_touching_other_endpoints` | The root, not O, creates the endpoint ED, which it owns, with the thread of D bound and the capabilities of an added endpoint, so that the destruction of O does not drain it. S receives with the deadline 10 at 1: `blocked`; A calls ED with the badge 2, the words [3, 4] and the deadline 12 at 2: `queued`, since D does not receive. The drain of E at 9 ends S's receive with `PeerClosed`, and S is made ready; A's call stays `queued`, and ED is untouched. The expiry at 10 does not change S's result, and A's call stays `queued`. The prototype's abandonment of A's call at 10 is not a case here | `receive`, `call`, `drain_step` |
 | `ipc-closure-3` | 62 | `invalid_or_reversed_closure_preserves_native_state_and_pending_outcomes` | A calls with the badge 1, the words [1, 2] and the deadline 10 at 5: `queued`. The prototype's refusals of a closure at 4, before the last time (`ClockReversed`), and through a handle with OBSERVE alone (`PermissionDenied`) do not apply: the time does not decrease, and no operation closes an endpoint. `drain_step` of an endpoint of a table whose pools have other numbers is `err=WrongPool` and changes nothing. The drain of E at 9 ends A's call with `PeerClosed` | `drain_step` |
-| `ipc-closure-4` | 99 | `closing_again_preserves_an_earlier_reply_or_cancellation` | A calls with the badge 1, the words [1, 2] and the deadline 10 at 1. Either S receives at 2 and replies [3, 4] at 3, after which A has `reply [3, 4]`; or the kill of A at 3 ends its call with `Cancelled`. A drain of E at 4 and another at 20 find no wait of A and change neither result: the first end of a call is its only one | `receive`, `reply`, `settle`, `drain_step` |
+| `ipc-closure-4` | 99 | `closing_again_preserves_an_earlier_reply_or_cancellation` | A calls with the badge 1, the words [1, 2] and the deadline 10 at 1. Either S receives at 2 and replies [3, 4] at 3, after which A has `reply [3, 4]`; or the kill of A at 3 ends its call with `Cancelled`. The drain of E at 4, at the destruction of O, finds no wait of A and changes neither result, and E is then released, where the prototype closed it a second time at 20: the first end of a call is its only one | `receive`, `reply`, `settle`, `drain_step` |
 
 ### `src/ipc/tests/lifetime.rs`
 
@@ -1320,7 +1361,7 @@ destruction of its owner O here.
 | --- | ---: | --- | --- | --- |
 | `ipc-lifetime-1` | 4 | `endpoint_closure_completes_queued_and_delivered_calls_before_reaping` | A calls with the badge 1 and the words [1, 2] at 1, and S receives at 2: badge 1 and words [1, 2]; B calls with 2 and [3, 4] at 3: `queued`. The drain of E at 4, at the destruction of O, makes two settlements: B's call, queued, and then A's, which S serves, each ending with `PeerClosed`; after them E is released. S's reply [5, 6] with `1@1` at 4 is `err=ReplyGone`. The prototype's refused reaping of E while references remained (`ReferencesOutstanding`) and its reference of E to S do not apply | `call`, `receive`, `drain_step`, `reply` |
 | `ipc-lifetime-2` | 35 | `peer_death_completes_calls_and_caller_death_invalidates_delivered_reply` | A calls with the badge 1 and the words [1, 2] at 1, and S receives at 2. The kill of A at 3 ends its call with `Cancelled` and withdraws S's loan; S's reply [3, 4] with `1@1` at 3 is `err=ReplyGone`. The prototype's refused reaping of A while S held a reference (`ReferencesOutstanding`) and its abandonment do not apply: A is reaped, after which a reply with `1@1` fails in its lookup with `StaleReference`. B calls with 2 and [5, 6] at 4: `queued`. The fault of S's process at 5 is its destruction: the drain of E, whose bound thread is S's, ends B's call with `PeerClosed`, and a call of D at 5 ends at once with `PeerClosed`, since E is not served | `call`, `receive`, `settle`, `reply`, `drain_step` |
-| `ipc-lifetime-3` | 67 | `blocked_receive_closes_and_reused_endpoint_generation_cannot_alias` | S receives at 1: `blocked`. The drain of E at 2 ends S's receive with `PeerClosed`, and E is released; O creates the endpoint E2, bound to S, which takes the slot of E at the next generation. A's call through its capability to E at 3 is `err=StaleReference`, since the capability names the old generation, where the prototype gave `StaleHandle`, and changes nothing; A's call through a send capability to E2 with the badge 3 and the words [7, 8] at 3 is `queued` | `receive`, `drain_step`, `init_endpoint`, `call` |
+| `ipc-lifetime-3` | 67 | `blocked_receive_closes_and_reused_endpoint_generation_cannot_alias` | S receives at 1: `blocked`. The drain of E at 2, at the destruction of O, ends S's receive with `PeerClosed`, and E is released; the root creates the endpoint E2, bound to S, with the capabilities of an added endpoint, and E2 takes the slot of E at the next generation. A's call through its capability to E at 3 is `err=StaleReference`, since the capability names the old generation, where the prototype gave `StaleHandle`, and changes nothing; A's call through a send capability to E2 with the badge 3 and the words [7, 8] at 3 is `queued` | `receive`, `drain_step`, `init_endpoint`, `call` |
 | `ipc-lifetime-4` | 94 | `saturated_receive_table_still_admits_calls_and_counts_both_quotas` | O creates the endpoint ED, with the thread of D bound. S receives at 1: `blocked`. D receives from ED at 2: `blocked`, where the prototype's table of one receive refused it (`Capacity`). A calls with the badge 12 and the words [13, 14] at 2: `delivered`, and S is made ready with badge 12 and words [13, 14]. S replies [15, 16] at 3, and A has `reply [15, 16]`. The prototype's counts of records and references do not apply | `receive`, `call`, `reply` |
 | `ipc-lifetime-5` | 121 | `failed_take_preserves_completion_and_both_native_references` | Not applicable: a result is written into the saved context of its thread at the end of its wait and is never taken, so the prototype's take before the end (`NotCompleted`) and its takes through another pool and through a handle with OBSERVE alone do not exist; its cancellation of A is the kill of A, whose result A does not observe | None |
 | `ipc-lifetime-6` | 148 | `retired_caller_generation_cannot_abandon_replacement_call` | A calls with the badge 1 and the words [1, 2] at 1: `queued`. The kill of A at 2 ends its call with `Cancelled`, and A is reaped; a new process A2, created at 3, has its thread in the slot of A's at the next generation, and calls E with the badge 2 and the words [3, 4] at 3: `queued`. `settle` of the old reference of A at 4 is `err=StaleReference` and leaves A2's call `queued`. The prototype's abandonment of a call is the kill here | `call`, `settle` |
@@ -1333,7 +1374,7 @@ destruction of its owner O here.
 | Vector | Line | Test | Expected output | Entry |
 | --- | ---: | --- | --- | --- |
 | `ipc-ordering-1` | 4 | `expired_admission_never_delivers_or_advances_other_waits` | S receives with the deadline 10 at 1: `blocked`. In the transition of A's call with the badge 1, the words [1, 2] and the deadline 10 at 10, the expiry first ends S's receive with `Timeout`, and S is made ready, where the prototype settled it only at its next poll; the call then ends at once with `Timeout`, delivers nothing and changes nothing. No deadline remains | `settle`, `call` |
-| `ipc-ordering-2` | 22 | `deadline_wins_over_exact_time_reply_and_stale_token_cannot_complete_next_call` | A calls with the badge 1, the words [1, 2] and the deadline 10 at 1, and S receives at 2 with `1@1`; the earliest deadline is 10. In the transition of S's reply [3, 4] with `1@1` at 10, the expiry first ends A's call with `Timeout`, so the reply is `err=ReplyGone`. A calls with 2 and [5, 6] at 11; S receives at 12 with slot 3 for the reply, since slot 1 still holds the old capability: reply `3@1`, another handle. S's reply [7, 8] with `1@1` at 13 is `err=ReplyGone` and changes nothing, and A has no result; its reply [9, 10] with `3@1` is `ok`, and A has `reply [9, 10]` | `call`, `receive`, `settle`, `reply` |
+| `ipc-ordering-2` | 22 | `deadline_wins_over_exact_time_reply_and_stale_token_cannot_complete_next_call` | A calls with the badge 1, the words [1, 2] and the deadline 10 at 1, and S receives at 2 with `1@1`; the earliest deadline is 10. In the transition of S's reply [3, 4] with `1@1` at 10, the expiry first ends A's call with `Timeout`, so the reply is `err=ReplyGone`. A calls with 2 and [5, 6] at 11; S receives at 12 with slot 3 for the reply, since slot 1 still holds the old capability: reply `3@1`, another handle. S's reply [7, 8] with `1@1` at 13 is `err=ReplyGone` and changes nothing, and A has no result; S's reply [9, 10] with `3@1` at 13 is `ok`, and A has `reply [9, 10]` | `call`, `receive`, `settle`, `reply` |
 | `ipc-ordering-3` | 54 | `unknown_wrong_server_and_replayed_replies_do_not_mutate_other_calls` | A calls with the badge 1 and the words [1, 2] at 1, and S receives at 2 with `1@1`. D's reply [3, 4] with `1@1` at 3 names slot 1 of D's own table, which is empty: `err=NoCapability`, where the prototype gave `PermissionDenied`. S's reply with the handle 0, slot 0 at the generation 0, is `err=StaleHandle`, slot 0 holding a capability of generation 1. Both change nothing. S's reply [5, 6] with `1@1` at 3 is `ok`; a second reply [7, 8] with `1@1` at 4 is `err=NoCapability`, since the reply deleted the capability; `settle` of A at 4 gives `none`, where the prototype's cancellation gave `InvalidState`; each changes nothing. A drain of E at 99 finds no wait, and A has `reply [5, 6]` | `reply`, `settle`, `drain_step` |
 | `ipc-ordering-4` | 91 | `cancellation_before_and_after_delivery_is_single_winner` | In three runs, each from the fixture. A calls with the badge 1 and the words [1, 2] at 1, and the kill of A at 2 ends the queued call with `Cancelled`. A calls with 2, [3, 4] and the deadline 10 at 3, S receives at 4, and the kill of A at 5 ends the delivered call with `Cancelled`; the expiry at 10 finds no wait, and S's reply [5, 6] with `1@1` at 10 is `err=ReplyGone`. A calls with 3, [7, 8] and the deadline 20 at 11, and in the transition of the kill of A at 20 the expiry first ends the call with `Timeout`. A killed thread observes no result: the rows check the order of the outcomes and the fixed error of the reply, where the prototype's cancelled thread took its result and called again | `call`, `receive`, `settle`, `reply` |
 | `ipc-ordering-5` | 121 | `queued_timeout_is_not_delivered_and_received_snapshot_remains_immutable` | A calls with the badge 1, the words [1, 2] and the deadline 3 at 1: `queued`. In the transition of S's receive with the deadline 9 at 3, the expiry first ends A's call with `Timeout`, so the receive finds no call: `blocked`. A calls with 2, [3, 4] and the deadline 5 at 4: `delivered`, and S is made ready with badge 2 and words [3, 4]. The expiry at 5 ends A's call with `Timeout`; S's results stay as they were, and S's reply [0, 0] with `1@1` at 5 is `err=ReplyGone` | `call`, `receive`, `settle`, `reply` |
@@ -1368,7 +1409,7 @@ destruction of its owner O here.
 | `abi-ipc-lifecycle-4` | 70 | `cancelled_calls_publish_a_distinct_status_without_restoring_reply_authority` | C's call is delivered. The kill of C at 12 ends its call with `Cancelled`, which C does not observe, where the prototype gave C the status `CANCELLED`; S's reply with `1@1` at 13 is `err=ReplyGone` | `call`, `receive`, `settle`, `reply` |
 | `abi-ipc-lifecycle-5` | 82 | `endpoint_close_settles_at_request_time_and_leaves_wait_delivery_to_controller` | C calls with W and the deadline 12 at 10: `queued`. The drain of E at 11, at the destruction of S, which owns E and whose thread is bound to it, in place of the prototype's closure by S: C's call ends with `PeerClosed`, every other result register 0, and C is made ready. The expiry of the deadline 12 finds no wait | `call`, `drain_step` |
 | `abi-ipc-lifecycle-6` | 103 | `server_death_publishes_peer_closed_without_losing_deadline_precedence` | For the deadlines 0 and 12 in turn, C's call with that deadline is delivered, and the destruction of S runs at 12, its teardown deleting the reply capability `1@1`. With the deadline 0, `reply_deleted` ends C's call with `PeerClosed`; with the deadline 12, the expiry at 12 first ends it with `Timeout`, and `reply_deleted`, whose generation is then old, gives `none`. Every other result register is 0 | `call`, `receive`, `reply_deleted`, `settle` |
-| `abi-ipc-lifecycle-7` | 119 | `reused_call_record_cannot_be_completed_by_an_old_reply` | C's call is delivered, and S replies [1, 2] with `1@1` at 12: `ok`, and C has `reply [1, 2]`. C calls at 13: `queued`; S receives at 14 with the same reply slot: reply `1@2`, the next generation of the slot. S's reply [99, 99] with `1@1` at 15 is `err=StaleHandle`, and C has no result; its reply [3, 4] with `1@2` at 16 is `ok`, and C has `reply [3, 4]` | `call`, `receive`, `reply` |
+| `abi-ipc-lifecycle-7` | 119 | `reused_call_record_cannot_be_completed_by_an_old_reply` | C's call is delivered, and S replies [1, 2] with `1@1` at 12: `ok`, and C has `reply [1, 2]`. C calls at 13: `queued`; S receives at 14 with the same reply slot: reply `1@2`, the next generation of the slot. S's reply [99, 99] with `1@1` at 15 is `err=StaleHandle`, and C has no result; S's reply [3, 4] with `1@2` at 16 is `ok`, and C has `reply [3, 4]` | `call`, `receive`, `reply` |
 | `abi-ipc-lifecycle-8` | 148 | `endpoint_close_rejects_reversed_time_without_closing_or_settling_waits` | Not applicable: the prototype's closure at 9 after a call at 10, which it refused with `INVALID_ARGUMENT`, lies outside the premise that the time does not decrease, and no operation closes an endpoint | None |
 | `abi-ipc-lifecycle-9` | 168 | `endpoint_close_at_the_call_deadline_preserves_timeout_precedence` | C calls with the deadline 11 at 10: `queued`. In the transition of the drain of E at 11, at the destruction of S, the expiry first ends C's call with `Timeout`, and the drain finds no call | `call`, `settle`, `drain_step` |
 
