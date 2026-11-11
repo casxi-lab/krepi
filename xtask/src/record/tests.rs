@@ -489,14 +489,23 @@ fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
     // committed file gives them: a job of a matrix is named by its mode.
     let path = ".github/workflows/formal.yml";
     let committed = fs::read_to_string(crate::repo::root().join(path)).expect("the workflow");
-    for text in [FORMAL, committed.as_str()] {
+    // The committed file has the jobs of the limits and of the planned
+    // targets, and its gates take their limits from the first: expressions,
+    // which give no limit.
+    let both = [
+        (FORMAL, Some(195), None, None),
+        (committed.as_str(), None, Some(5), None),
+    ];
+    for (text, gate, before, planned) in both {
         let limits = limits(text).expect("the workflow reads");
         for (name, limit) in [
             ("leanchecker fresh", Some(120)),
             ("leanchecker prefix", Some(120)),
             ("leanchecker ${{ matrix.mode }}", Some(120)),
             ("leanchecker ", Some(120)),
-            ("formal run", Some(195)),
+            ("formal limits", before),
+            ("formal run", gate),
+            ("formal planned", planned),
             ("lake comparator", Some(30)),
             ("leanchecker", None),
             ("lake", None),

@@ -3,7 +3,10 @@
 # and on every push to main, and uploads its receipt; it is not a required
 # check. Before the gate, on a pull request that changes xtask, the Lake
 # project, a workspace, a component's directory or this workflow, a step of
-# that job compares the test vectors in the image. The measurement jobs run
+# that job compares the test vectors in the image. The job `formal planned`,
+# beside it, runs the gate on the planned targets of the head's registry,
+# when it has any. The job `formal limits` before them computes their time
+# limits from the budgets of the registry. The measurement jobs run
 # on a manual dispatch, or on a pull request that carries the label
 # formal-measure: `leanchecker`, in two modes, replays the stage of the
 # gate's base round with and without --fresh on a cold page cache, and
@@ -36,13 +39,74 @@ env:
   HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
-  gate:
-    name: formal run
+  # The gate's deadline is 7,200 s and the budget of each target that its
+  # run selects, then the 300 s of its receipt: a whole run selects the
+  # formal targets, and a run of the planned ones selects those. The step
+  # of each gate has the minutes of that deadline and its receipt, rounded
+  # up, and one more as a backstop, two for the planned targets, whose
+  # command `deadline.sh` kills a minute after its deadline. The job of the
+  # gate has 15 minutes before the vectors step, its 55 and the minutes of
+  # the deadline and the receipt; that of the planned targets 15 minutes
+  # before its step, the step and 3 minutes after it. A job of the hosted
+  # runners ends after 360 minutes, so a registry whose budgets need a
+  # longer job fails here. Target
+  # names are checked before they are passed on.
+  limits:
+    name: formal limits
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-24.04-arm
-    # 15 minutes before the vectors step, its 55, then the gate's 7,200 s and
-    # the 300 s of its receipt.
-    timeout-minutes: 195
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      gate: ${{ steps.limits.outputs.gate }}
+      job: ${{ steps.limits.outputs.job }}
+      planned: ${{ steps.limits.outputs.planned }}
+      planned-gate: ${{ steps.limits.outputs.planned-gate }}
+      planned-job: ${{ steps.limits.outputs.planned-job }}
+    steps:
+      - name: Check out the candidate commit
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Compute the limits from the registered budgets
+        id: limits
+        timeout-minutes: 1
+        run: |
+          gate_budget=7200
+          receipt_margin=300
+          registry=verification/targets.json
+          jq -e 'all(.targets[]; .name | test("^[a-z0-9][a-z0-9-]*$"))' "$registry" > /dev/null
+          budgets() {
+            jq -er --arg state "$1" \
+              '[.targets[] | select((.state // "formal") == $state) | .budget // 1800] | add // 0' \
+              "$registry"
+          }
+          minutes() { echo $(( (gate_budget + $1 + receipt_margin + 59) / 60 )); }
+          gate=$(minutes "$(budgets formal)")
+          planned=$(minutes "$(budgets planned)")
+          names=$(jq -r '[.targets[] | select(.state == "planned") | .name] | join(" ")' "$registry")
+          {
+            echo "gate=$((gate + 1))"
+            echo "job=$((15 + 55 + gate))"
+            echo "planned=$names"
+            echo "planned-gate=$((planned + 2))"
+            echo "planned-job=$((15 + planned + 2 + 3))"
+          } | tee -a "$GITHUB_OUTPUT"
+          if [ $((15 + 55 + gate)) -gt 360 ] || [ $((15 + planned + 2 + 3)) -gt 360 ]; then
+            echo "the registered budgets need a job longer than 360 minutes" >&2
+            exit 1
+          fi
+
+  gate:
+    name: formal run
+    needs: limits
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: ${{ fromJSON(needs.limits.outputs.job) }}
     permissions:
       contents: read
     concurrency:
@@ -212,12 +276,13 @@ jobs:
           } 2>&1 | tee artifacts/formal/vectors.txt
 
       # The gate ends by its own deadline; the step's limit is a backstop one
-      # minute after it. The receipt is the gate's verdict, so the step fails
-      # whenever the gate does, `REJECTED` included.
+      # minute after it and its receipt, from the job `formal limits`. The
+      # receipt is the gate's verdict, so the step fails whenever the gate
+      # does, `REJECTED` included.
       - name: Run the gate in the image
         id: gate
         if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
-        timeout-minutes: 126
+        timeout-minutes: ${{ fromJSON(needs.limits.outputs.gate) }}
         run: |
           read -r -a gate_flags <<< "$GATE_FLAGS"
           echo "== gate started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
@@ -301,6 +366,149 @@ jobs:
             artifacts/formal/vectors-fixture.txt
             artifacts/formal/vectors/
             artifacts/formal/event.json
+            artifacts/formal/runs/*/receipt.json
+            artifacts/formal/runs/*/logs/
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+  # Runs the gate on every planned target of the head's registry, as the
+  # job `formal run` does, besides it: `formal run --target` with each of
+  # them, which concludes them as `SCOPED` and is never required. Without a
+  # planned target it runs nothing and passes. The main command runs under
+  # `deadline.sh`, which passes a cancellation on to it.
+  planned:
+    name: formal planned
+    needs: limits
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: ${{ fromJSON(needs.limits.outputs.planned-job) }}
+    permissions:
+      contents: read
+    concurrency:
+      group: formal-planned-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    env:
+      PLANNED: ${{ needs.limits.outputs.planned }}
+    steps:
+      - name: Check out the candidate commit
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record the runner and pull the image
+        if: env.PLANNED != ''
+        timeout-minutes: 8
+        run: |
+          mkdir -p artifacts/formal
+          {
+            echo "== prepare started $(date -u +%FT%TZ)"
+            echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, planned targets: $PLANNED"
+            echo "user: $(id)"
+            echo "processors: $(nproc)"
+            free -b
+            df -B1 /
+            if [ "$(id -u)" = 0 ] || [ "$(stat -c %u "$GITHUB_WORKSPACE")" != "$(id -u)" ]; then
+              echo "the runner's user is root or does not own the checkout" >&2
+              exit 1
+            fi
+            echo "== docker pull $IMAGE"
+            docker pull "$IMAGE"
+            docker image inspect --format 'pulled {{json .RepoDigests}}, {{.Size}} bytes' "$IMAGE"
+          } 2>&1 | tee artifacts/formal/job.txt
+
+      - name: Build xtask
+        if: env.PLANNED != ''
+        timeout-minutes: 3
+        run: |
+          {
+            echo "== build xtask, started $(date -u +%FT%TZ)"
+            rustup toolchain install
+            cargo build --locked --manifest-path xtask/Cargo.toml
+          } 2>&1 | tee -a artifacts/formal/job.txt
+
+      # The same probe as that of the job `formal run`, shorter: a user other
+      # than root, a read-only root file system, no capabilities and no
+      # network.
+      - name: Probe the container of the gate
+        id: probe
+        if: env.PLANNED != ''
+        timeout-minutes: 1
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          docker run --rm -i "${gate_flags[@]}" --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE:ro" --workdir "$GITHUB_WORKSPACE" \
+            "$IMAGE" bash -s 2>&1 <<'PROBE' | tee -a artifacts/formal/job.txt
+          [ "$(id -u)" != 0 ] || { echo "FAILED: the container runs as root"; exit 1; }
+          grep -q '^CapBnd:[[:space:]]*0*$' /proc/self/status || { echo "FAILED: capabilities"; exit 1; }
+          [ "$(ls /sys/class/net)" = lo ] || { echo "FAILED: the container has a network"; exit 1; }
+          "$PWD/xtask/target/debug/xtask" help > /dev/null
+          echo "the probe passed"
+          PROBE
+
+      - name: Run the gate on the planned targets
+        id: planned
+        if: ${{ !cancelled() && (env.PLANNED == '' || steps.probe.outcome == 'success') }}
+        timeout-minutes: ${{ fromJSON(needs.limits.outputs.planned-gate) }}
+        run: |
+          if [ -z "$PLANNED" ]; then
+            echo "the registry has no planned target: 0 targets"
+            exit 0
+          fi
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          read -r -a names <<< "$PLANNED"
+          targets=()
+          for name in "${names[@]}"; do targets+=(--target "$name"); done
+          limit=$(( (PLANNED_GATE - 2) * 60 ))s
+          exec bash .github/scripts/deadline.sh --stop-commands "$limit" 1m \
+            docker run --rm --name "formal-planned-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            --env KREPI_FORMAL_IMAGE="$IMAGE" \
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run "${targets[@]}"
+        env:
+          PLANNED_GATE: ${{ needs.limits.outputs.planned-gate }}
+
+      - name: Remove the container of the gate
+        if: always()
+        run: |
+          docker rm --force "formal-planned-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
+
+      - name: Summarize the receipt
+        if: always()
+        env:
+          GATE_OUTCOME: ${{ steps.planned.outcome }}
+        run: |
+          shopt -s nullglob
+          receipts=(artifacts/formal/runs/*/receipt.json)
+          {
+            echo "## formal planned"
+            echo
+            echo "Planned targets: ${PLANNED:-none}; the gate step: $GATE_OUTCOME."
+            echo
+            for receipt in "${receipts[@]}"; do
+              jq -r --arg path "$receipt" '
+                "- Receipt `\($path)`: `\(.status)`, complete \(.complete), \(.seconds) s",
+                (.units | to_entries[] | "- `\(.key)`: \(.value.status)"),
+                (.failures[] | "- \(.status): \(.message | .[0:500])")
+              ' "$receipt"
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -n "$PLANNED" ] && [ "${#receipts[@]}" = 0 ] && [[ "$GATE_OUTCOME" =~ ^(success|failure)$ ]]; then
+            echo "the gate step ran and left no receipt" >&2
+            exit 1
+          fi
+
+      - name: Upload the receipt and the logs of the planned targets
+        if: always() && env.PLANNED != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-planned-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: |
+            artifacts/formal/job.txt
             artifacts/formal/runs/*/receipt.json
             artifacts/formal/runs/*/logs/
           if-no-files-found: warn

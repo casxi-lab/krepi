@@ -1552,4 +1552,69 @@ mod tests { fn t() { let _ = 1 + 1; } }
         assert!(units(&target.targets[0], false).is_empty());
         assert_eq!(units(&target.targets[0], true), ["mutants/t"]);
     }
+
+    #[test]
+    fn the_limits_of_the_workflows_cover_the_deadlines_of_their_gates_and_receipts() {
+        use crate::formal::run::{GATE_BUDGET, RECEIPT_MARGIN};
+        use yaml_rust2::YamlLoader;
+        let minutes = |seconds: u64| seconds.div_ceil(60);
+        let (gate, margin) = (GATE_BUDGET.as_secs(), RECEIPT_MARGIN.as_secs());
+        // `formal.yml` computes them from these two numbers.
+        let formal = include_str!("../../../.github/workflows/formal.yml");
+        assert!(
+            formal.contains(&format!("gate_budget={gate}\n"))
+                && formal.contains(&format!("receipt_margin={margin}\n"))
+        );
+        // `formal-calibration.yml` writes them for the registry of the
+        // calibration.
+        let text = include_str!("../../../.github/workflows/formal-calibration.yml");
+        let document = YamlLoader::load_from_str(text).expect("YAML").remove(0);
+        let registry = include_str!("../../../verification/qualification/calibration/targets.json");
+        let registry = registry::parse(registry).expect("a registry");
+        let budget = |state| {
+            registry
+                .targets
+                .iter()
+                .filter(|t| t.state == state)
+                .map(|t| t.budget)
+                .sum::<u64>()
+        };
+        let rows = document["jobs"]["calibration"]["strategy"]["matrix"]["include"]
+            .as_vec()
+            .expect("the matrix")
+            .clone();
+        for (row, budget) in rows.iter().zip([
+            budget(registry::State::Formal),
+            budget(registry::State::Planned),
+        ]) {
+            let deadline = minutes(gate + budget + margin);
+            assert_eq!(
+                row["deadline"].as_str(),
+                Some(format!("{deadline}m").as_str())
+            );
+            assert_eq!(row["step"].as_i64(), Some(deadline as i64 + 2));
+            assert!(
+                row["job"]
+                    .as_i64()
+                    .is_some_and(|job| job >= deadline as i64 + 2 + 20)
+            );
+        }
+        let deadline = minutes(RUN_BUDGET.as_secs() + margin);
+        assert!(text.contains(&format!("deadline.sh --stop-commands {deadline}m 1m")));
+        let job = &document["jobs"]["mutants"];
+        let step = job["steps"]
+            .as_vec()
+            .expect("steps")
+            .iter()
+            .find(|s| s["id"].as_str() == Some("mutants"));
+        assert_eq!(
+            step.expect("the step")["timeout-minutes"].as_i64(),
+            Some(deadline as i64 + 2)
+        );
+        assert!(
+            job["timeout-minutes"]
+                .as_i64()
+                .is_some_and(|job| (deadline as i64 + 20..=270).contains(&job))
+        );
+    }
 }
