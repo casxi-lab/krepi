@@ -23,7 +23,7 @@ use super::receipt::{self, Budgets, Failure, Mode, Receipt, Trigger};
 use super::registry::{self, State, Target};
 use super::toolchain::environment::{self, Installation, RunDirs, Tool};
 use super::toolchain::{self, Manifest};
-use super::{base, classify, externals, extract, guard, qualify};
+use super::{base, classify, externals, extract, guard, mutants, qualify};
 use crate::manifests;
 use crate::repo::{self, Entry, Tree};
 
@@ -124,6 +124,8 @@ pub(crate) struct Context<'a> {
     pub host: Option<&'a str>,
     pub uid: u32,
     pub var: &'a dyn Fn(&str) -> Option<String>,
+    /// The budget of the run when it does not grow by those of its targets.
+    pub budget: Option<Duration>,
 }
 
 /// A command, with the environment of `tool` and its input from `stdin`.
@@ -144,6 +146,8 @@ pub struct Gate {
     /// The tool manifest that the run read from the checkout, and its text.
     manifest: Option<(Manifest, String)>,
     deadline: Instant,
+    /// Whether the run has a budget of its own, which its targets do not grow.
+    fixed: bool,
     /// The phase that runs, and its deadline.
     phase: Option<(String, Instant)>,
     conclusions: Vec<(String, Conclusion)>,
@@ -194,11 +198,14 @@ impl Gate {
         let left = |end: Instant| end.saturating_duration_since(now);
         let phase_end = self.phase.as_ref().map_or(self.deadline, |(_, end)| *end);
         let mut limit = limit(request.site.cap(), left(phase_end), left(self.deadline));
-        // The commands of a target's unit share its budget.
-        let mine = |command: &&receipt::Command| unit.is_some() && command.unit.as_deref() == unit;
+        // The commands of a target's unit, and of its mutants, share its budget.
+        let owner = unit.map(mutants::owner);
+        let mine = |c: &&receipt::Command| {
+            owner.is_some() && c.unit.as_deref().map(mutants::owner) == owner
+        };
         let spent = (self.receipt.commands.iter().filter(mine)).map(|command| command.seconds);
         let spent = Duration::from_secs_f64(spent.sum());
-        let rest = (unit.and_then(|unit| self.budgets.get(unit))).map(|b| b.saturating_sub(spent));
+        let rest = (owner.and_then(|unit| self.budgets.get(unit))).map(|b| b.saturating_sub(spent));
         if let Some(rest) = rest.filter(|rest| *rest < limit.duration) {
             (limit.duration, limit.by) = (rest, LimitBy::Target);
         }
@@ -416,7 +423,7 @@ fn blank(context: &Context, targets: &BTreeSet<String>, run: &str, directory: &s
         directory: directory.to_string(),
         started: unix_seconds(),
         budgets: Budgets {
-            gate_seconds: GATE_BUDGET.as_secs(),
+            gate_seconds: context.budget.unwrap_or(GATE_BUDGET).as_secs(),
             receipt_margin_seconds: RECEIPT_MARGIN.as_secs(),
         },
         ..Receipt::default()
@@ -452,7 +459,8 @@ pub(crate) fn execute(
         layout: *context.layout,
         run: run.clone(),
         manifest: None,
-        deadline: start + GATE_BUDGET,
+        deadline: start + context.budget.unwrap_or(GATE_BUDGET),
+        fixed: context.budget.is_some(),
         phase: None,
         conclusions: Vec::new(),
         receipt: blank(context, targets, &run.id, &directory),
@@ -494,11 +502,7 @@ pub(crate) fn execute(
         }
     }
     let mut receipt = gate.receipt;
-    // The seconds of the commands of the unit of each selected target.
-    for target in receipt.proof_targets.values_mut() {
-        let own = (receipt.commands.iter()).filter(|c| c.unit.is_some() && c.unit == target.unit);
-        target.seconds = receipt::seconds(Duration::from_secs_f64(own.map(|c| c.seconds).sum()));
-    }
+    mutants::seconds(&mut receipt);
     receipt.resources.largest_process_max_rss = process::largest_child_rss();
     receipt.resources.cgroup_memory_peak = process::cgroup_memory_peak();
     let scoped = !targets.is_empty();
@@ -590,9 +594,10 @@ fn export_and_check(
     let extracts = !chosen.is_empty();
     // The gate's budget grows by the budget of each target that it selects.
     let budget = |name: &str| Duration::from_secs(states[name].1);
-    let all: Duration = chosen.iter().map(|name| budget(name)).sum();
-    (gate.deadline, gate.receipt.budgets.gate_seconds) =
-        (gate.deadline + all, (GATE_BUDGET + all).as_secs());
+    let all: Duration =
+        chosen.iter().map(|name| budget(name)).sum::<Duration>() * u32::from(!gate.fixed);
+    gate.deadline += all;
+    gate.receipt.budgets.gate_seconds += all.as_secs();
     gate.budgets = BTreeMap::from_iter(chosen.iter().map(|name| (target_unit(name), budget(name))));
     for problem in paths::rejected(&files, &gate.layout) {
         gate.fail(Status::Rejected, problem);
@@ -721,8 +726,15 @@ pub fn target_project(gate: &Gate, name: &str) -> PathBuf {
 /// `extraction`, before the base round, which extracts the selected targets
 /// and the formal ones, whose proofs the base round builds, and concludes
 /// the selected planned ones; and `targets`, after it, which concludes the
-/// selected formal ones. The first stops on another registry in the export.
-fn target_phases<'a>(root: &Path, layout: &Layout, named: &BTreeSet<String>) -> [Phase<'a>; 2] {
+/// selected formal ones and their mutants, the source mutants of `generate`
+/// in a run that generates them. The first stops on another registry in the
+/// export.
+fn target_phases<'a>(
+    root: &Path,
+    layout: &Layout,
+    named: &BTreeSet<String>,
+    generate: Option<Vec<String>>,
+) -> [Phase<'a>; 2] {
     let path = layout.registry;
     let read = fs::read_to_string(root.join(path)).map_err(|error| error.to_string());
     let read = read.and_then(|text| Ok((registry::parse(&text)?.targets, text)));
@@ -737,9 +749,18 @@ fn target_phases<'a>(root: &Path, layout: &Layout, named: &BTreeSet<String>) -> 
     let planned = Vec::from_iter(all.iter().filter(|t| pick(t, State::Planned)).cloned());
     let units = |targets: &[Target]| Vec::from_iter(targets.iter().map(|t| target_unit(&t.name)));
     let budget = |targets: &[Target]| Duration::from_secs(targets.iter().map(|t| t.budget).sum());
+    let mut finish = units(&formal);
+    finish.extend(
+        formal
+            .iter()
+            .flat_map(|t| mutants::units(t, generate.is_some())),
+    );
+    let finished = generate
+        .as_ref()
+        .map_or(budget(&formal), |_| mutants::RUN_BUDGET);
     let phases = [
         ("extraction", budget(&all), units(&planned)),
-        ("targets", budget(&formal), units(&formal)),
+        ("targets", finished, finish),
     ];
     let bodies: [Body<'a>; 2] = [
         Box::new(move |gate| {
@@ -749,7 +770,10 @@ fn target_phases<'a>(root: &Path, layout: &Layout, named: &BTreeSet<String>) -> 
             }
             (all.iter()).try_for_each(|t| extract_target(gate, t, chosen.contains(&t.name)))
         }),
-        Box::new(move |gate| (formal.iter()).try_for_each(|t| finish_target(gate, t))),
+        Box::new(move |gate| {
+            let generate = generate.as_deref();
+            (formal.iter()).try_for_each(|t| finish_target(gate, t, generate))
+        }),
     ];
     let mut phases = (phases.into_iter().zip(bodies)).map(|((name, budget, units), body)| {
         let name = name.to_string();
@@ -848,12 +872,17 @@ fn extract_target(gate: &mut Gate, target: &Target, chosen: bool) -> Result<(), 
 /// Builds the proof modules of the selected formal target `target` in its
 /// stage, with the hand-written Lean of the export and warnings as errors,
 /// audits the theorems of its obligations with the allowlist of a target,
-/// its trusted axioms and the declarations that its templates keep, and
-/// concludes its unit, unless its extraction concluded it.
-fn finish_target(gate: &mut Gate, target: &Target) -> Result<(), String> {
+/// its trusted axioms and the declarations that its templates keep, runs
+/// its mutants, or the source mutants of `generate`, once it is verified,
+/// and concludes its unit, unless its extraction concluded it.
+fn finish_target(
+    gate: &mut Gate,
+    target: &Target,
+    generate: Option<&[String]>,
+) -> Result<(), String> {
     let (layout, source, unit) = (gate.layout, gate.source(), target_unit(&target.name));
     if (gate.conclusions.iter()).any(|(concluded, _)| *concluded == unit) {
-        return Ok(());
+        return mutants::after(gate, target, None, generate).map(|_| ());
     }
     let mut record = gate.receipt.proof_targets[&target.name].clone();
     let (project, modules) = (target_project(gate, &target.name), &target.proof_modules);
@@ -866,26 +895,24 @@ fn finish_target(gate: &mut Gate, target: &Target) -> Result<(), String> {
     if theorems.is_empty() {
         problems.push("its obligations name no theorem".to_string());
     }
-    let write = |file: &str, text: String| {
-        fs::write(project.join(file), text).map_err(|error| format!("{file}: {error}"))
-    };
-    let (mut audited, mut built) = (None, false);
+    let (mut audited, mut built, mut tool) = (None, false, None);
     if record.typed {
-        for file in gate.handwritten.clone() {
-            lean::copy_into(&source.join(layout.project), &project, &file)?;
-        }
-        let root = lean::root_source(&BTreeSet::from_iter(modules.iter().cloned()));
-        write(&lean::module_file(layout.namespace), root)?;
-        let (ran, verdict, _) = gate.run(&unit, &build, |_| Ok(()));
+        let (ran, verdict) = mutants::prove(gate, &unit, &project, modules)?;
         built = verdict.class == Class::Passed;
-        let errors = (ran.filter(|_| !built)).map(|ran| lean::errors(&ran.output).join(" | "));
-        problems.extend(errors.map(|errors| format!("the proofs do not build: {errors}")));
+        match ran
+            .filter(|_| !built)
+            .map(|ran| mutants::build_failure(modules, &ran))
+        {
+            Some(Ok(problem)) => problems.push(problem),
+            failure => tool = failure.and_then(Result::err),
+        }
     } else {
         gate.skip(&unit, &build, "its generated definitions do not type-check");
     }
     if built {
         let text = lean::audit_source(layout.namespace, &[], modules);
-        write(lean::AUDIT, text)?;
+        let written = fs::write(project.join(lean::AUDIT), text);
+        written.map_err(|error| format!("{}: {error}", lean::AUDIT))?;
         let (ran, verdict, _) = gate.run(&unit, &audit, |_| Ok(()));
         let passed = ran.filter(|_| verdict.class == Class::Passed);
         audited = passed.map(|ran| lean::audit_output(&ran.output));
@@ -907,7 +934,22 @@ fn finish_target(gate: &mut Gate, target: &Target) -> Result<(), String> {
     } else if built {
         problems.push("the audit did not pass".to_string());
     }
-    gate.conclude(&unit, qualify::conclusion(&problems));
+    let verified = (audited.is_some() && problems.is_empty() && tool.is_none()).then_some(&project);
+    tool = tool.or(mutants::after(
+        gate,
+        target,
+        verified.map(PathBuf::as_path),
+        generate,
+    )?);
+    problems.extend(tool.clone());
+    let (status, reason) = qualify::conclusion(&problems);
+    gate.conclude(
+        &unit,
+        (
+            [status, Status::ToolFailure][usize::from(tool.is_some())],
+            reason,
+        ),
+    );
     record.problems = problems;
     (gate.receipt.proof_targets).insert(target.name.clone(), record);
     Ok(())
@@ -1004,8 +1046,14 @@ pub(crate) fn finish(
     ExitCode::from(120)
 }
 
-/// Entry point of `cargo xtask formal run`.
-pub fn command(root: &Path, layout: &Layout, targets: BTreeSet<String>) -> ExitCode {
+/// Entry point of `cargo xtask formal run`, and of `cargo xtask formal
+/// mutants` for the source mutants of `generate`.
+pub fn command(
+    root: &Path,
+    layout: &Layout,
+    targets: BTreeSet<String>,
+    generate: Option<Vec<String>>,
+) -> ExitCode {
     process::init();
     let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
     let context = Context {
@@ -1014,12 +1062,14 @@ pub fn command(root: &Path, layout: &Layout, targets: BTreeSet<String>) -> ExitC
         host: host(),
         uid: process::effective_uid(),
         var: &var,
+        budget: generate.as_ref().map(|_| mutants::RUN_BUDGET),
     };
+    let lists = generate.as_ref().and_then(|_| targets.first().cloned());
     let run = RunDir::create(root);
     let receipt = match &run {
         Ok(run) => {
             let mut phases = Vec::from_iter(guard::phase(&var));
-            let [extraction, finish] = target_phases(root, layout, &targets);
+            let [extraction, finish] = target_phases(root, layout, &targets, generate);
             phases.extend([qualify::phase(root, layout), extraction]);
             phases.extend([base::phase(root, layout), finish]);
             execute(&context, run, &targets, phases, Box::new(io::stdout()))
@@ -1035,7 +1085,11 @@ pub fn command(root: &Path, layout: &Layout, targets: BTreeSet<String>) -> ExitC
     // A stop signal after the last command ends the run without a receipt.
     process::stop_if_asked();
     let (stdout, stderr) = (&mut io::stdout(), &mut io::stderr());
-    finish(&receipt, run.as_ref().ok(), stdout, stderr)
+    let code = finish(&receipt, run.as_ref().ok(), stdout, stderr);
+    match (lists, run) {
+        (Some(target), Ok(run)) => mutants::write_list(root, layout, &target, &run, &receipt, code),
+        _ => code,
+    }
 }
 
 #[cfg(test)]
@@ -1150,6 +1204,7 @@ pub(crate) mod tests {
             host,
             uid: other_uid(),
             var: &|_| None,
+            budget: None,
         };
         gate_with(&context, run, targets, phases, progress)
     }
@@ -1356,7 +1411,7 @@ pub(crate) mod tests {
 
     /// Registers the targets `targets`, a JSON list, in `fixture` and
     /// commits them.
-    fn register(fixture: &Fixture, targets: &str) {
+    pub(crate) fn register(fixture: &Fixture, targets: &str) {
         fixture.write(
             "verification/targets.json",
             &format!("{{\"schema\": 2, \"specifications\": [], \"targets\": {targets}}}\n"),
@@ -1453,8 +1508,9 @@ pub(crate) mod tests {
     /// A fixture with the Lake project and the stand-ins of the
     /// qualification, a kernel workspace with its root package, the empty
     /// registries of the base round and of models, the proof module of the
-    /// target `t`, and the target registry `targets`, committed.
-    fn with_targets(label: &str, targets: &str) -> Fixture {
+    /// target `t`, whose build in the stage of a mutant fails in its theorem,
+    /// and the target registry `targets`, committed.
+    pub(crate) fn with_targets(label: &str, targets: &str) -> Fixture {
         let fixture = fixture::qualification(label, &serde_json::json!([]));
         for (file, list) in [("models", "models"), ("axioms", "axioms"), ("tcb", "items")] {
             let text = format!("{{\"schema\": 1, \"{list}\": []}}\n");
@@ -1462,6 +1518,10 @@ pub(crate) mod tests {
         }
         let proof = "module\n\npublic theorem f_spec : True := trivial\n";
         fixture.write("verification/Krepi/Proofs/T.lean", proof);
+        let failed = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
+        let failing = fixture::failing("Krepi.Proofs.T", &[failed], 1);
+        let mutant = format!("case $PWD in */mutants/*) {failing};; esac\n");
+        fixture::lake_script(&fixture, "+Krepi", &mutant);
         root_package(&fixture, "krepi-kernel", "");
         register(&fixture, targets);
         fixture
@@ -1469,7 +1529,7 @@ pub(crate) mod tests {
 
     /// The registry of the formal target `t`, with `budget` and `mutants`,
     /// and of the planned target `p`.
-    fn two_targets(budget: u64, mutants: usize) -> String {
+    pub(crate) fn two_targets(budget: u64, mutants: usize) -> String {
         let theorem = "Krepi.Proofs.T.f_spec";
         let mutant = |index| {
             let name = format!("m{index}");
@@ -1487,9 +1547,20 @@ pub(crate) mod tests {
 
     /// The phases of the targets of `fixture` for `named`, around a base
     /// round that finds the proof module of `t` and is verified.
-    fn target_run<'a>(fixture: &Fixture, named: &[&str]) -> Vec<Phase<'a>> {
+    pub(crate) fn target_run<'a>(fixture: &Fixture, named: &[&str]) -> Vec<Phase<'a>> {
+        generating_run(fixture, named, None)
+    }
+
+    /// The phases of [`target_run`], which generate the source mutants of
+    /// `generate` when given.
+    pub(crate) fn generating_run<'a>(
+        fixture: &Fixture,
+        named: &[&str],
+        generate: Option<Vec<String>>,
+    ) -> Vec<Phase<'a>> {
         let named = BTreeSet::from_iter(named.iter().map(|name| name.to_string()));
-        let [extraction, finish] = target_phases(fixture.root(), &Layout::PRODUCTION, &named);
+        let [extraction, finish] =
+            target_phases(fixture.root(), &Layout::PRODUCTION, &named, generate);
         let base = phase("base", LONG, &["base"], |run| {
             run.handwritten = vec!["Krepi/Proofs/T.lean".to_string()];
             run.conclude("base", (Status::Verified, None));
@@ -1503,7 +1574,7 @@ pub(crate) mod tests {
     pub(crate) fn every_phase<'a>(root: &Path, named: &[&str]) -> Vec<Phase<'a>> {
         let named = BTreeSet::from_iter(named.iter().map(|name| name.to_string()));
         let layout = &Layout::PRODUCTION;
-        let [extraction, finish] = target_phases(root, layout, &named);
+        let [extraction, finish] = target_phases(root, layout, &named, None);
         let (qualification, base) = (qualify::phase(root, layout), base::phase(root, layout));
         vec![qualification, extraction, base, finish]
     }
@@ -1514,12 +1585,15 @@ pub(crate) mod tests {
         let done = gate(&fixture, &[], target_run(&fixture, &[]));
         assert_eq!(done.receipt.status, Status::Verified, "{:?}", done.receipt);
         assert_eq!(fixture::status(&done, "target/t"), (Status::Verified, None));
-        let sites = Vec::from_iter(fixture::commands(&done, "target/t").iter().map(|c| c.site));
+        let sites = |unit| Vec::from_iter(fixture::commands(&done, unit).iter().map(|c| c.site));
         let expected = [Site::Charon, Site::Aeneas, Site::TargetBuild];
-        assert_eq!(
-            sites,
-            [&expected[..], &[Site::TargetBuild, Site::AxiomAudit]].concat()
-        );
+        let after = [Site::TargetBuild, Site::AxiomAudit, Site::DeclarationRanges];
+        assert_eq!(sites("target/t"), [&expected[..], &after].concat());
+        // Its mutant is extracted and built in a stage of its own, where the
+        // build fails in the theorem that it names, and is verified.
+        assert_eq!(sites("target/t/mutant/m0"), expected);
+        let mutant = (Status::Verified, None);
+        assert_eq!(fixture::status(&done, "target/t/mutant/m0"), mutant);
         // The target is extracted for the extraction triple, and the planned
         // one not at all.
         let charon = &fixture::commands(&done, "target/t")[0];
@@ -1578,7 +1652,9 @@ pub(crate) mod tests {
             (
                 serde_json::json!({}),
                 Some(("+Krepi", fixture::failing("Krepi.Proofs.T", &[proofs], 1))),
-                format!("the proofs do not build: {proofs} | error: build failed"),
+                format!(
+                    "the proofs failed at Krepi/Proofs/T.lean:3:0: {proofs} | error: build failed"
+                ),
             ),
             (
                 serde_json::json!({}),
@@ -1723,7 +1799,8 @@ pub(crate) mod tests {
         // `formal check` in the production layout reads its own registry
         // alone: a calibration registry that it would refuse changes nothing.
         let mut tree = Tree::load(&repo::root()).expect("the repository");
-        let roots = manifests::kernel_metadata(&repo::root()).expect("the kernel workspace");
+        let roots = manifests::kernel_metadata(&repo::root(), manifests::KERNEL)
+            .expect("the kernel workspace");
         let roots = inventory::roots(&roots, manifests::KERNEL).expect("the roots");
         let before = inventory::check(&tree, &roots, &Layout::PRODUCTION);
         tree.insert(
@@ -2562,6 +2639,7 @@ pub(crate) mod tests {
             host: Some("linux-aarch64"),
             uid,
             var: &var,
+            budget: None,
         };
         let run = RunDir::create(fixture.root()).expect("create the run directory");
         let phases = vec![phase("checks", LONG, &["u1"], |run| {

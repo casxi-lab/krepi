@@ -1,0 +1,44 @@
+# Lean 4.35.0 on darwin-arm64 in the environment of the gate: `lake build --no-cache --wfail Krepi.Proofs.Fixture` with the edits of the test in `Fixture.lean`, exit 1; <stage>, <backend> and <lean> replace absolute paths
+✖ [2/2] Building Krepi.Proofs.Fixture (267ms)
+trace: .> LEAN_PATH=<backend>/.lake/packages/Cli/.lake/build/lib/lean:<backend>/.lake/packages/batteries/.lake/build/lib/lean:<backend>/.lake/packages/Qq/.lake/build/lib/lean:<backend>/.lake/packages/aesop/.lake/build/lib/lean:<backend>/.lake/packages/proofwidgets/.lake/build/lib/lean:<backend>/.lake/packages/importGraph/.lake/build/lib/lean:<backend>/.lake/packages/LeanSearchClient/.lake/build/lib/lean:<backend>/.lake/packages/plausible/.lake/build/lib/lean:<backend>/.lake/packages/mathlib/.lake/build/lib/lean:<backend>/.lake/build/lib/lean:<stage>/calibration/.lake/build/lib/lean <lean>/bin/lean <stage>/calibration/Krepi/Proofs/Fixture.lean -o <stage>/calibration/.lake/build/lib/lean/Krepi/Proofs/Fixture.olean -i <stage>/calibration/.lake/build/lib/lean/Krepi/Proofs/Fixture.ilean -c <stage>/calibration/.lake/build/ir/Krepi/Proofs/Fixture.c --setup <stage>/calibration/.lake/build/ir/Krepi/Proofs/Fixture.setup.json --json
+error: Krepi/Proofs/Fixture.lean:11:0: Not a definitional equality: the left-hand side
+  1 + 1
+is not definitionally equal to the right-hand side
+  3
+error: Krepi/Proofs/Fixture.lean:12:49: Type mismatch
+  rfl
+has type
+  ?m.16 = ?m.16
+but is expected to have type
+  1 + 1 = 3
+error: Krepi/Proofs/Fixture.lean:18:2: Tactic `rfl` failed: The left-hand side
+  0 + n
+is not definitionally equal to the right-hand side
+  n
+
+n : Nat
+⊢ 0 + n = n
+error: Krepi/Proofs/Fixture.lean:20:37: failed to synthesize instance of type class
+  HAdd Nat Bool ?m.3
+
+Hint: Type class instance resolution failures can be inspected with the `set_option trace.Meta.synthInstance true` command.
+error: Krepi/Proofs/Fixture.lean:39:28: failed to synthesize instance of type class
+  HMul Nat String ?m.4
+
+Hint: Type class instance resolution failures can be inspected with the `set_option trace.Meta.synthInstance true` command.
+error: Krepi/Proofs/Fixture.lean:45:0: `[Inhabited Nat]` did not match any variables in the current scope
+warning: Krepi/Proofs/Fixture.lean:46:7: automatically included section variable(s) unused in theorem `Krepi.Proofs.Fixture.after_omit`:
+  [Inhabited α]
+consider restructuring your `variable` declarations so that the variables are not in scope or explicitly omit them:
+  omit [Inhabited α] in theorem ...
+
+Note: This linter can be disabled with `set_option linter.unusedSectionVars false`
+error: Krepi/Proofs/Fixture.lean:48:26: Type mismatch
+  rfl
+has type
+  ?m.7 = ?m.7
+but is expected to have type
+  double 1 = 2
+Some required targets logged failures:
+- Krepi.Proofs.Fixture
+error: build failed

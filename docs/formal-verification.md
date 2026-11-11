@@ -36,11 +36,17 @@ of the [proof targets](#proof-targets), none of which is registered; the
 [base round](#base-round), which builds, audits and replays krepi's own
 Lean: today the qualification proofs and the definitions that they use;
 and the targets, which build and audit the proofs of each target in a
-stage of its own. On a pull request, a first phase records the
+stage of its own and then build each of its registered
+[mutants](#mutants) in a stage of its own, which its proofs must reject.
+On a pull request, a first phase records the
 [guard](#guard), which `cargo xtask formal guard` runs on its own. The
 [calibration target](#calibration-target), a crate with the shapes of the
 first kernel targets and its proofs, runs through the same phases with
-`cargo xtask formal run --calibration`. `cargo xtask formal check`
+`cargo xtask formal run --calibration`, in the workflow
+`formal calibration` too. `cargo xtask formal mutants` generates the
+source mutants of a target and writes the list of those that survive
+([source mutants and survivors](#source-mutants-and-survivors)).
+`cargo xtask formal check`
 holds the inventory of the production functions of the kernel workspace
 against the targets and the open obligations
 ([legacy inventory and admission](#legacy-inventory-and-admission)), and
@@ -57,10 +63,10 @@ explained ([qualification](#qualification)). CI runs the gate in the
 pinned image on every pull request to `main` and every push to `main`, in
 a job that is not required ([CI job](#ci-job)). Everything else
 on this page is planned: specifications, statements and targets of the
-kernel, the mutants of a target, the required gate and the other commands
-of `cargo xtask formal`. They are set up by porting the tooling of the CAS
-project and the prototype tree, and this page changes with them. Nothing
-about the kernel is proved.
+kernel, the required gate and the other commands of `cargo xtask formal`.
+They are set up by porting the tooling of the CAS project and the
+prototype tree, and this page changes with them. Nothing about the kernel
+is proved.
 
 Proofs of the prototype are proofs about that code.
 They do not carry over: a module taken into krepi is proved again against the
@@ -111,8 +117,9 @@ never moved into the trusted boundary to close a gap.
 | `verification/legacy.json` | Kept empty: production functions without a proof are listed in `open.json` ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty by design |
 | `verification/open.json` | The open obligations of the production code, generated from the `Open obligations` tables of the contracts of the components ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
-| `verification/qualification/calibration/` | The [calibration target](#calibration-target): a workspace with a root package and a member, its Lake project with its statements and proofs, and its registries | Present |
-| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `vectors` and `canary` present, the others planned |
+| `verification/qualification/calibration/` | The [calibration target](#calibration-target): a workspace with a root package and a member, its Lake project with its statements and proofs, its registries, and the lists of survivors of its source mutants in `mutants/` | Present |
+| `verification/mutants/` | The list of survivors of the source mutants of each target that has one, `<target>.json` ([source mutants and survivors](#source-mutants-and-survivors)) | Absent until a list is written |
+| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `mutants`, `vectors` and `canary` present, the others planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
 `artifacts/formal/` directory, and the Lake build directory
@@ -123,8 +130,11 @@ the two output files of each command, and `work/` with the export of the
 gate inputs, the home and temporary directories of the tools; in
 `cases/`, the extraction and the Lake stage of each qualification case; in
 `targets/<name>/`, the extraction of each target that the run extracts
-in `extract/` and its stage in `stage/`, with the root module and the
-audit file of a selected formal target; in `base/`, the stage of the base
+in `extract/` and its stage in `stage/`, with the root module, the audit
+file and the range printer `Ranges.lean` of a selected formal target, and
+the copied package, the extraction and the stage of each registered mutant
+in `mutants/<mutant>/`; in `mutants/<target>/`, those of each source
+mutant of a run of `formal mutants`, removed once it is judged; in `base/`, the stage of the base
 round with the root module `Krepi.lean` that the run writes, its audit
 file `Audit.lean` and its heartbeat copies in `.heartbeats/`, and
 `mktree`, the input of
@@ -614,19 +624,19 @@ finding.
 The commands of `cargo xtask formal` follow the design of the gate.
 `cargo xtask formal toolchain-check`, `cargo xtask formal run`,
 `cargo xtask formal guard`, `cargo xtask formal check`,
-`cargo xtask formal vectors` and `cargo xtask formal canary` exist; the
-others are planned.
+`cargo xtask formal mutants`, `cargo xtask formal vectors` and
+`cargo xtask formal canary` exist; the others are planned.
 
 | Command | Purpose |
 | --- | --- |
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
-| `cargo xtask formal run [--target NAME]... [--calibration]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets, and `--calibration` runs in the layout of the [calibration target](#calibration-target). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets), which every run has; the mutants of a target are planned |
+| `cargo xtask formal run [--target NAME]... [--calibration]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets, and `--calibration` runs in the layout of the [calibration target](#calibration-target). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run has |
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs and sources ([guard](#guard)) |
-| `cargo xtask formal check [--write]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`. It runs no tool and proves nothing |
+| `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
 | `cargo xtask formal receipt [--require-fresh]` (planned) | Says whether a receipt is current for the checkout: the same gate inputs and image, one conclusion for each unit, complete and `VERIFIED`; `--require-fresh` also requires a run of the whole gate from a clean checkout without planned statements |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its job fetched and built: `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from the outcomes of the steps of the job ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
-| `cargo xtask formal mutants TARGET` (planned) | Generates the source mutants of a target and records the survivors with their classification |
+| `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration |
 | `cargo xtask formal impact --base REV` (planned) | Lists the targets that a change since `REV` affects |
 | `cargo xtask formal merge` (planned) | Combines the receipts of the shards of a run and of its qualification into the conclusion of the whole gate |
 
@@ -1349,6 +1359,7 @@ statement about the code. The conventions:
 | The base build fails without an error or a warning in krepi's own modules | The base build | `TOOL_FAILURE` |
 | The comparator exits with 1 and prints a line that starts with `error: Child exited with ` | The comparator | `TOOL_FAILURE` |
 | The comparator exits with 1 otherwise | The comparator | `PROOF_FAILURE` |
+| The range printer exits with another status than 0 | Declaration ranges | `TOOL_FAILURE` |
 
 A process of the group that survives the kill is a tool failure as well, and
 so is any failure of Git or `cargo metadata`, which the gate runs itself,
@@ -1357,8 +1368,11 @@ a tool is a `PROOF_FAILURE`, which its call site compares with what it
 expects. The call sites are Charon and Aeneas, the qualification builds,
 the ill-typed builds and the case audits of the qualification, the base
 build, the axiom audit and `leanchecker` of the [base round](#base-round),
-the target builds of the [targets](#proof-targets), whose audits are axiom
-audits, and, planned, the comparator.
+the target builds of the [targets](#proof-targets) and their
+[mutants](#mutants), whose audits are axiom audits, the declaration ranges
+of a target, `lake env lean Ranges.lean` with a cap of 1,800 s, the
+`cargo check` of a source mutant, with a cap of 1,800 s, and, planned, the
+comparator.
 
 krepi's own modules, in the rows of the base build, are every module below
 `Krepi` but the root module, and the reviewed external declarations
@@ -1381,7 +1395,9 @@ well, it is `NOT_RUN` for the budget, as any command whose limit is used
 up.
 
 A unit is a registered piece of work that gets exactly one conclusion: a
-qualification case, an audited theorem, the base round, a target. A phase is a part
+qualification case, an audited theorem, the base round, a target, a
+registered mutant of a target, the source mutants of a run of
+`formal mutants`. A phase is a part
 of the pipeline with a budget of its own, such as the qualification. A unit
 with a command that was a tool failure is concluded `TOOL_FAILURE`, and one
 with a command that met a budget, or did not start because its limit was
@@ -1435,7 +1451,7 @@ keys; times are seconds, rounded to milliseconds.
 | `started`, `seconds` | The Unix time in seconds at which the run started, and how long it took |
 | `commit`, `tree` | The snapshot commit and its root tree, or `null` |
 | `inputs` | `before` and `after`, the object of each gate input (`mode`, `type`, `oid`, or `null` when the commit does not have it) at the start and at the end, or `null` when they were not taken; `clean_after`, whether the gate inputs were clean at the end, or `null` |
-| `budgets` | `gate_seconds`, 7200 and the budget of each target that the run selects, and `receipt_margin_seconds`, 300 |
+| `budgets` | `gate_seconds`, 7200 and the budget of each target that the run selects, or 14,400 for a run of `cargo xtask formal mutants`, whatever the budgets of its targets ([source mutants and survivors](#source-mutants-and-survivors)), and `receipt_margin_seconds`, 300 |
 | `resources` | What the run used of the host, below |
 | `phases` | For each phase, `budget_seconds`, `seconds` and `ran` |
 | `units` | For each unit, its `phase`, its `status` and the `reason` for it, or `null` |
@@ -1517,13 +1533,13 @@ Each record of `proof_targets` has these fields:
 | --- | --- |
 | `unit` | The unit of the target, `target/<name>`, or `null` for a target that the run did not select and extracted for the base round alone |
 | `state` | `formal` or `planned`, as the registry gives it |
-| `budget_seconds`, `seconds` | The budget of the target, and the seconds of the commands of its unit, or 0 without a unit |
+| `budget_seconds`, `seconds` | The budget of the target, and the seconds of the commands of its unit and of the units of its registered mutants, or 0 without a unit |
 | `observed` | What the extraction gave, as for a qualification case |
 | `generated` | The SHA-256 of each Lean file that Aeneas wrote, by its path below the output of Aeneas |
 | `declarations` | The declarations of its templates that stay axioms once its reviewed external declarations are installed |
 | `proof_modules` | Its proof modules, as the registry gives them |
 | `typed` | Whether its generated definitions type-check with warnings as errors |
-| `mutants` | The seconds of each mutant that the run ran, by its name; empty until the mutants are run (planned) |
+| `mutants` | The seconds of the commands of each registered mutant that the run ran, by its name; they count in `seconds` too |
 | `problems` | The problems that reject the target |
 
 The `guard` record has these fields:
@@ -1553,11 +1569,12 @@ of CI runs are evidence.
 ### CI job
 
 The workflow `formal`, `.github/workflows/formal.yml`, runs the gate in CI.
-Its job `formal run` runs on every push to `main` and on every pull request
-to `main` when it is opened, reopened or updated, when a label is added or
-removed, and when its description is edited, since the guard reads the
-labels and the description. It is not a required check. A newer event of
-the same pull request cancels a run of the job that has not ended. The job
+Its job `formal run`, after the job `formal limits`, runs on every push to
+`main` and on every pull request to `main` when it is opened, reopened or
+updated, when a label is added or removed, and when its description is
+edited, since the guard reads the labels and the description. It is not a
+required check. A newer event of the same pull request cancels a run of
+the job that has not ended. The job
 runs on a GitHub-hosted `ubuntu-24.04-arm` runner, may only read the
 repository's contents, uses no stored credentials, and runs actions pinned
 to full commit SHAs. Its steps:
@@ -1624,23 +1641,57 @@ process collects processes that leave their group, which the gate as
 process 1 would not, and `--pull never` makes a missing image an error
 instead of a pull.
 
-The job may take 195 minutes: 15 for the steps before the vectors step (2
-to check out, 8 to record the runner and pull, 3 to build xtask, 1 for the
-probe and 1 for the guard), the 55 of the vectors step, and the gate's own
-7,200 s with the 300 s of its receipt. That is the budget of a whole run
-while the registry has no formal target; each formal target adds its
-budget to the gate's, which these limits do not take into account yet.
-The gate's step has a limit of 126 minutes, a backstop one minute after the
-gate's own end. When the steps before the gate and the gate use all their
-time, the steps after it have almost none, and the limit of the job may cut
-the upload; the receipt is still written in the checkout. When the gate's
+The job may take the time that the job `formal limits` computes, below:
+15 minutes for the steps before the vectors step (2 to check out, 8 to
+record the runner and pull, 3 to build xtask, 1 for the probe and 1 for the
+guard), the 55 of the vectors step, and the minutes of the gate's deadline
+with the 300 s of its receipt, 195 in all while the registry has no formal
+target. The gate's step has a backstop one minute after the gate's own
+end, 126 minutes while the registry has no formal target. When the steps
+before the gate and the gate use all their time, the steps after it have
+almost none, and the limit of the job may cut the upload; the receipt is
+still written in the checkout. When the gate's
 step is cancelled or reaches its limit, the step after it removes the
 container, and the gate writes no receipt.
 
 The gate's step fails whenever the gate does not exit with 0, `REJECTED`
-included, and nothing marks a failure as expected. While the qualification
-rejects the cases kept from the CAS project, every run of the job fails, and
-the summary shows whether exactly those units are rejected.
+included, and nothing marks a failure as expected.
+
+The job `formal limits`, before the job `formal run`, checks out the head
+and computes the limits of the gates of the workflow from the head's
+`verification/targets.json`, with the gate's 7,200 s and the 300 s of the
+receipt: the deadline of a whole run is the 7,200 s and the budgets of the
+formal targets, 1,800 s each unless the registry gives another, and that
+of a run of the planned targets the 7,200 s and their budgets. The gate's
+step then has the minutes of its deadline and its receipt, rounded up, and
+one more as a backstop, 126 with no formal target. So the receipt of a
+whole run is written before its step ends, however many formal targets the
+registry has. The job `formal run` then has the 15 minutes before the
+vectors step, the 55 of that step and the minutes of the deadline and the
+receipt, 195 with no formal target, and the job `formal planned` 15
+minutes before its gate, the step of the gate and 3 minutes after it. The
+records of the runs of the workflow name no limit for these two jobs,
+whose limits are expressions. A job of a hosted runner ends after 360
+minutes, so the formal targets may register 9,900 s of budgets in all,
+five targets of the default budget but not six; when the budgets need a
+longer job, or a target name is not of lowercase letters, digits and
+hyphens, the job `formal limits` fails, and the jobs after it do not run.
+
+The job `formal planned`, beside `formal run`, runs the gate on the planned
+targets of the head's registry, which a whole run does not select: with the
+names that `formal limits` read, in a container of the image as the gate,
+`cargo xtask formal run --target NAME` for each planned target, which
+concludes each as `SCOPED` and is never required. Its main command runs
+under `.github/scripts/deadline.sh --stop-commands` with the minutes of the
+deadline and the receipt, and a minute for its kill, so that a cancellation
+reaches the gate and it writes its receipt; the step has two minutes more
+than that deadline. Its steps
+are those of `formal run`, without the guard and the vectors, and with a
+shorter probe; without a planned target it checks out the head, says that
+there are none and passes. It summarizes the receipt, with workflow
+commands turned off, and uploads it with the logs as
+`formal-planned-<commit>-<attempt>`. Until a planned target is
+registered in `verification/targets.json`, it runs nothing.
 
 The measurement jobs `leanchecker fresh`, `leanchecker prefix` and
 `lake comparator` run on a manual run of the workflow (`workflow_dispatch`,
@@ -1742,6 +1793,11 @@ a tool, and each broken rule is a problem:
   `#[derive(..)]` of a production type in the file defines, not a
   production function.
 
+A target name is made of lowercase letters, digits and hyphens and starts
+with a letter or a digit. `cargo xtask formal check` does not check it: the
+job `formal limits` of the workflow `formal` ([CI job](#ci-job)) fails on
+another name before the names reach a gate.
+
 The targets of the registry run in two phases of the gate. The phase
 `extraction`, before the base round, extracts the targets that the run
 selects and every formal target, since the base round builds every proof
@@ -1791,14 +1847,19 @@ its proof modules with only the axioms that the target row of the
 allowlist admits, its `trusted_axioms` and the declarations that its
 templates keep, and unless its registration, its installation and its
 type check had no problem. A formal target whose obligations name no
-theorem is rejected. The mutants of a target, which are to make a named
-theorem fail, are planned.
+theorem is rejected. A build of the proofs that fails without an error or a
+warning in a proof module is a tool failure of the target, generated or
+model code that did not build. Once the target is verified, each of its
+registered [mutants](#mutants) runs in a unit of its own.
 
-The commands of the unit of a target share its `budget`, 1,800 s unless
-the registry gives another: each runs for at most the budget less the
-seconds of the earlier commands of the unit, in either phase, and the base
-round between them does not count. A command that meets that limit is
-`BUDGET`, and so is the target. The calibration target registers a
+The commands of the unit of a target and of the units of its registered
+mutants share its `budget`, 1,800 s unless the registry gives another: each
+runs for at most the budget less the seconds of the earlier commands of
+these units, in either phase, and the base round between them does not
+count. A command that meets that limit concludes its own unit `BUDGET`:
+the unit of the target while the target is extracted, built and checked,
+or that of a mutant, which leaves the target as it was concluded; the run
+is `BUDGET` either way. The calibration target registers a
 budget of 3,000 s ([calibration target](#calibration-target)); a target
 of the kernel keeps the default.
 
@@ -1830,6 +1891,193 @@ only one of them is reached.
 A target extracts the production code itself. A hand-written mirror of the
 implementation, an unmatched extraction root, an unreviewed rewrite of
 execution semantics or an edited generated file is rejected.
+
+## Mutants
+
+A mutant is an edit of the source of a target that its proofs are to
+reject: the proof of a theorem of the target fails on the mutant. A formal
+target registers its mutants in `targets.json`
+([proof targets](#proof-targets)), and
+`cargo xtask formal mutants` generates more
+([source mutants and survivors](#source-mutants-and-survivors)); both are
+built and judged the same way.
+
+### Registered mutants
+
+Once the phase `targets` has verified a formal target, the run prints the
+declaration ranges of its proof modules in its stage, as a command of the
+target's unit, and takes each of its registered mutants, in the order of
+the registry, in a unit of its own, `target/<name>/mutant/<mutant>`, whose
+commands share the budget of the target:
+
+1. a mutant whose `fails` names a theorem that the ranges do not give as a
+   top-level theorem of the proof modules is rejected, without a command;
+2. its `find` must occur exactly once in its `file`, which is relative to
+   the package of the target, in the export; otherwise it is rejected;
+3. the package is copied from the export, with the Cargo configuration of
+   the export, into `source/` of its work directory and edited there,
+   `find` replaced with `replace`;
+4. the copy is extracted as the target is, with the extraction triple, its
+   roots and its cut points, and what the tools generated is installed in a
+   new stage of its own; an extraction that is not complete and generated
+   files that cannot be installed make the mutant inconclusive;
+5. the proofs are built there as those of the target, with the hand-written
+   Lean of the export, the root module of its proof modules and
+   `lake build --no-cache --wfail +Krepi`, at the call site of the target
+   builds, and the build is judged.
+
+The mutant is `VERIFIED` when its build is rejected, `REJECTED` when it is
+accepted, with the reason `the mutant was not rejected by` and its `fails`,
+when it is inconclusive, with a reason that starts with `inconclusive`, and
+in the two cases before its build; a build that Lake or a Lean process it
+ran did not finish makes it `TOOL_FAILURE`. Each of them but `VERIFIED`
+fails the run. The mutants of a target that is not verified are `NOT_RUN`.
+When the ranges make no table, the target is a tool failure and its mutants
+are inconclusive.
+
+### Judging the build of a mutant
+
+A build that passes is accepted. A build whose Lake or a Lean process that
+it ran was killed or ran out of time tells nothing. Otherwise the log of
+the failed build is read; it is confined to the proof modules when all of
+these rules hold, and the mutant is inconclusive, with the rules that do
+not, otherwise:
+
+1. Lake exits with 1;
+2. no line is `error: Lean exited with code <n>`, which Lean 4.35.0 prints
+   only when Lean ends otherwise than with 1 after an error;
+3. no line is `info: stdout:`, `info: stderr:` or `info: stdout/stderr:`,
+   output of a process besides its messages, such as a panic;
+4. every `error:` and `warning:` message with a position is in the source
+   file of a proof module;
+5. no job line of another module is marked `⚠` or `✖`;
+6. each `✖` job of a proof module has an error in its own file after its
+   job line and before the next one;
+7. no other `error:` or `warning:` line appears than the last
+   `error: build failed`;
+8. the log has the failure summary `Some required targets logged
+   failures:`;
+9. the summary lists proof modules alone;
+10. each module that it lists has a `⚠` job, or a `✖` job with an error in
+    its file.
+
+A job line is `<mark> [<i>/<n>] <verb> <module> (<time>)`; `trace:` lines,
+other `info:` lines and the continuation lines of a message do not count.
+
+The errors of a confined log are placed by the declaration ranges of the
+build of the target. Its stage prints them with
+`lake env lean Ranges.lean`, at the call site `declaration-ranges`: for
+each proof module, the range that Lean stored for each of its
+declarations, a private one by its name without the private prefix, and
+their count. The file of the printer is not a module file, so its imports
+bring the private declarations of the proof modules, which are module
+files. By the ranges:
+
+1. an error counts against the top-level declaration whose range holds its
+   position, both ends included; the range of a declaration command runs
+   from its documentation comment, attributes and modifiers to its last
+   token, so a failed attribute, which Lean reports at the start of the
+   command, counts against the declaration;
+2. a nested declaration, such as a constructor, a field of a structure, a
+   `where` function or a derived instance in its structure, and a range
+   that starts where the one around it starts, count with the declaration
+   around them;
+3. the names of one range count together, such as a derived instance and
+   its method, whose range is the name of the class;
+4. an error in no top-level range, as in the prefix `omit … in`, a
+   `variable`, an `example`, the module documentation, a namespace or its
+   `end`, counts against no declaration and is listed by its position;
+5. only a top-level `theorem` is a theorem: errors in a `def`, an
+   `abbrev`, an instance or a structure alone reject no mutant.
+
+The build is rejected when an error counts against a theorem of `fails`,
+and accepted otherwise. The ranges make no table when
+
+6. a proof module is not counted exactly once, or its count differs from
+   the ranges read for it;
+7. the printer reports a module that it does not import;
+8. a line is malformed or names a module that was not asked for;
+9. two ranges overlap without one holding the other;
+10. the printer did not exit with 0 by itself; its output is then not read.
+
+### Source mutants and survivors
+
+`cargo xtask formal mutants TARGET [--operator NAME]... [--calibration]` is
+a run of the gate with `--target TARGET`, `SCOPED` and never complete as
+any run of named targets, with a budget of 14,400 s in place of the gate's
+7,200 s and those of its targets. Once the phase `targets` has verified the
+target, the run generates its source mutants from the export instead of
+running its registered ones, and runs each in the unit
+`mutants/<target>`, with the theorems of all the obligations of the target
+as its `fails`.
+
+The points of the mutants are in the bodies of the functions of `proves`
+and `unclosed`, which the extraction reaches from the roots; `derived`
+methods have no source, and test code is not edited. The parser of the
+inventory finds the bodies, and the positions of their tokens give the
+points. Nothing is edited in a pattern, such as the arms of a `match` or
+an `if let`, a type, an attribute, a macro call, a nested item such as a
+`const`, the length of an array or a generic argument. The operators are
+all of these, or those that `--operator` names:
+
+| Operator | Change |
+| --- | --- |
+| `ordering` | `<` to `<=`, `<=` to `<`, `>` to `>=`, `>=` to `>` |
+| `equality` | `==` to `!=`, `!=` to `==` |
+| `arithmetic` | `+` to `-`, `-` to `+`, `*` to `+`, `/` to `*`, `%` to `/`, and the same for compound assignments |
+| `bitwise` | `&` to `\|`, `\|` to `&`, `^` to `\|`, `<<` to `>>`, `>>` to `<<`, and the same for compound assignments |
+| `logical` | `&&` to `\|\|`, `\|\|` to `&&` |
+| `negation` | A unary `!` removed |
+| `literal` | An integer literal `0` to `1`, `1` to `0` and any other `n` to `n + 1`, with its suffix |
+| `condition` | The condition of an `if`, not of an `if let`, to `true` and to `false`, two mutants; conditions of `while` and guards of `match` stay |
+| `method` | `checked_add` and `checked_sub`, `wrapping_add` and `wrapping_sub`, `saturating_add` and `saturating_sub`, `min` and `max`, each to the other |
+
+Each keeps the types of the code. The `find` of a mutant is the shortest
+text of its file that holds its point, lies within its lines, cuts no word
+and occurs once in the file, and its `replace` is that text edited; a
+point without such a text is not generated and is counted. Each mutant is
+copied, edited and checked with
+`cargo check --lib --locked --quiet --target aarch64-unknown-none` at the
+call site `cargo-check`, in the environment of Charon, then extracted,
+staged, built and judged as a registered mutant. A mutant that
+`cargo check` does not build is not run and is counted. A mutant whose
+build is rejected is killed, and one whose build is accepted survives. An
+inconclusive mutant, and one with a command that fails as a tool or meets
+the budget, conclude the unit otherwise than `VERIFIED`, and the command
+then writes no list and exits with 1. So does a run that is not `SCOPED`
+for another reason, such as a unit of the qualification or of the base
+round that is not `VERIFIED`. A theorem of the obligations that is not a
+top-level theorem of the proof modules, against which no error could
+count, concludes the unit `REJECTED` before any mutant is generated.
+
+The run writes the list of survivors of the target,
+`verification/mutants/<target>.json`, or that of the calibration below
+`verification/qualification/calibration/mutants/`, and prints its counts.
+Its fields:
+
+| Field | Meaning |
+| --- | --- |
+| `schema` | 1 |
+| `target` | The target |
+| `commit` | The commit of the run |
+| `operators` | The operators of the run |
+| `run`, `run_id`, `receipt_sha256` | The run directory of the run, the ID of the CI run, if any, and the SHA-256 of its receipt |
+| `generated`, `killed`, `unbuildable`, `not_unique` | The numbers of mutants generated, killed and not built by `cargo check`, and of points without a text that occurs once |
+| `survivors` | Each survivor: its `point`, `<file>:<line>:<column>`, its `operator`, `find` and `replace`, the inventory key of the `function` that it edits, and the `class` and the `reason` that a reviewer gives it |
+
+A reviewer gives every survivor a class, `missing-lemma` for a property
+that the proofs lack, `no-theorem` for a function that no theorem covers,
+or `equivalent` for a mutant with the meaning of the source, and a reason
+that is not blank. A survivor in a function of `unclosed`, which no
+theorem is about, is written with the class `no-theorem` and keeps it.
+`cargo xtask formal check` fails on a survivor without a class or a
+reason, on one in a function of `unclosed` of another class, and on a
+list that does not parse or is not that of a registered target at its
+path; it names the functions of the survivors of
+class `no-theorem` in its report
+([legacy inventory and admission](#legacy-inventory-and-admission)). A
+refinement task names the operators that it uses; an operator is added to
+this command, not by the task that uses it.
 
 ## Calibration target
 
@@ -1876,8 +2124,58 @@ target is in `verification/targets.json` or among the declared targets: a
 run in the production layout cannot name them and records none, and
 `cargo xtask formal check` reads the registry of production alone. Its
 Lean is on neither the statement side nor the source rules of the
-production project ([statements and proofs](#statements-and-proofs)). The
-runs of its mutants and the workflow that runs it are planned.
+production project ([statements and proofs](#statements-and-proofs)).
+`cargo xtask formal check --calibration` checks it as the production
+layout is checked, without contracts and open obligations, which describe
+the kernel alone, and `cargo xtask formal mutants calibration --calibration`
+writes the list of survivors of its source mutants in
+`verification/qualification/calibration/mutants/`.
+
+The workflow `formal calibration`, `.github/workflows/formal-calibration.yml`,
+runs it in the pinned image: once a week, on Wednesdays at 13:23 UTC, on a
+manual run, and on a pull request to `main` that carries the label
+`formal-calibration`, when it is opened, reopened or updated and when that
+label is added. It is not a required check, and it is not on the path of
+the required gate. Its jobs run on GitHub-hosted `ubuntu-24.04-arm`
+runners, may only read the repository's contents, use no stored
+credentials and run actions pinned to full commit SHAs:
+
+- `calibration run` checks out the head, pulls the image, builds xtask,
+  probes a container of the gate, runs `cargo xtask formal check
+  --calibration` on the runner and `cargo xtask formal run --calibration`
+  in a container of the image, with the flags, the user and the mounted
+  checkout of the job `formal run` ([CI job](#ci-job)), and the variables
+  `GITHUB_REF`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and
+  `KREPI_FORMAL_IMAGE`, but no event, so that the guard does not run;
+- `planned example`, beside it, runs
+  `cargo xtask formal run --calibration --target calibration-planned` in
+  the same way;
+- `calibration mutants`, on a manual run whose input `mutants` asks for it
+  and on a pull request with the label, runs
+  `cargo xtask formal mutants calibration --calibration`.
+
+Each main command runs under `.github/scripts/deadline.sh --stop-commands`,
+which passes a cancellation on to it and turns workflow commands off while
+it prints. The deadline of the calibration run is the gate's 7,200 s and
+the 3,000 s of the formal target of the calibration, that of the planned
+example the 7,200 s and the 1,800 s of its planned target, and that of the
+mutants the 14,400 s of `formal mutants`; with the 300 s of the receipt,
+175, 155 and 245 minutes. Each step has two minutes more, the jobs of the
+two runs 23 minutes more than their steps and the job of the mutants 20,
+267 minutes in all. The limits of the jobs `calibration run` and
+`planned example` are an expression of their matrix, so the records of
+the runs of the workflow name no limit for them, as for the jobs
+`formal run` and `formal planned`. A newer event of the same pull request
+cancels a job that has not ended. Each job summarizes its receipt with
+workflow commands turned off, since the receipt holds text of Lean and
+Lake: the two run jobs list the budget and the seconds of each target, and
+every summary gives the SHA-256 of the receipt. Each job uploads the
+receipt, the summary, and the record of the runner and the logs of the
+gate compressed into `logs.tar.gz`, which for `calibration run` also holds
+the output of the check, as `formal-calibration-<job>-<commit>-<attempt>`.
+The job of the mutants uploads the list of survivors as well, from
+`artifacts/formal/mutants/` and only when its run passed: a run that fails
+writes no list, and the checkout may hold the list of an earlier run.
 
 ## Specifications
 
@@ -2258,6 +2556,7 @@ they serve only the type checking of three qualification cases
 | Mathlib and the Aeneas Lean library | Mathematical definitions and models of integers, slices, `Option`, `Result` and other core items | Pinned Lake lock; library axioms appear in the audit and must be registered in `verification/axioms.json` |
 | Charon, the Rust nightly and Aeneas with reviewed patches | Translation of the production source into Lean | Pinned sources and binaries; qualification regression; mutants |
 | Unconstrained declarations | External functions and types without a model | Theorems hold for every interpretation; listed per target |
+| Cut points (`opaque`) | Items translated without their bodies, modelled as deterministic functions of their arguments | Each cut point has a source and a reason, which states that no statement depends on two calls with the same arguments agreeing; review checks this for a function that reads hardware or global state |
 | Trusted axioms | Reviewed exceptions | Items of `verification/tcb.json`, each with a reason |
 | Library models (`models.json`) | Behaviour of items that are not extracted | Compared with the real implementation in every qualification |
 | Compiler, linker and the production toolchain | The binary that runs | Not proved; the architecture and binary layer narrows this item |
@@ -2370,11 +2669,19 @@ there is any:
 - a committed `open.json` that differs from what the contracts give;
 - a broken rule of the registry ([proof targets](#proof-targets)), such as
   a key of a target that is no production function of the inventory;
+- a list of survivors that does not parse, is not that of a registered
+  target at its path, or has a survivor without a class or a reason
+  ([source mutants and survivors](#source-mutants-and-survivors));
 - what the gate does not support yet: non-empty `premises` of a target, an
   `exclude` cut point and a model in `verification/models.json`.
 
-No CI job runs it yet, nor does `cargo xtask check`: run it before
+Its last line counts the files, functions, derived methods and open
+obligations of the inventory and, after them, names the function of each
+survivor of class `no-theorem`, which no theorem covers yet. No CI job runs
+it in the production layout, nor does `cargo xtask check`: run it before
 proposing a change to the kernel workspace, a contract or the registries.
+The job `calibration run` of the workflow `formal calibration` runs it in
+the layout of the calibration.
 The removal of a target, a theorem or a proved function, and any widening
 of the trusted base, are reviewed through the registry rules of the
 [guard](#guard) (planned), and `cargo xtask formal impact --base REV`

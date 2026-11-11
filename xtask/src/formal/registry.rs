@@ -135,7 +135,6 @@ pub struct Obligation {
 /// `replace`, must make a theorem of `fails` fail.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "the target phase of the gate reads the edit")]
 pub struct Mutant {
     pub name: String,
     pub file: String,

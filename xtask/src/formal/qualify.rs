@@ -671,7 +671,7 @@ fn qualify_case(gate: &mut Gate, backend: &Path, case: &Case) -> Result<(), Stri
 /// stage.
 pub fn lake<'a>(site: Site, args: &'a [String], project: &'a Path) -> run::Request<'a> {
     let tool = match site {
-        Site::CaseAudit | Site::AxiomAudit => Tool::LakeEnvLean,
+        Site::CaseAudit | Site::AxiomAudit | Site::DeclarationRanges => Tool::LakeEnvLean,
         Site::Leanchecker => Tool::Leanchecker,
         _ => Tool::LakeBuild,
     };

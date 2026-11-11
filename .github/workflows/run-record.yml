@@ -21,6 +21,7 @@ on:
       - cache
       - check
       - formal
+      - formal calibration
       - formal canary
       - formal image build
       - formal image publish

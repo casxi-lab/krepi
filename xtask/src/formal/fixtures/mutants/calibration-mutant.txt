@@ -1,0 +1,23 @@
+# Lean 4.35.0 on darwin-arm64 in the environment of the gate: `lake build --no-cache --wfail +Krepi` in a stage of the calibration target with the mutant `alloc-bound`, exit 1; <stage>, <backend> and <lean> replace absolute paths
+✔ [1803/1806] Built KrepiGen.Calibration.Types (1.8s)
+✔ [1804/1806] Built KrepiGen.Calibration.Funs (1.7s)
+✔ [1805/1806] Built Krepi.Calibration.Statements (1.6s)
+✖ [1806/1806] Building Krepi.Proofs.Calibration (2.7s)
+trace: .> LEAN_PATH=<backend>/.lake/packages/Cli/.lake/build/lib/lean:<backend>/.lake/packages/batteries/.lake/build/lib/lean:<backend>/.lake/packages/Qq/.lake/build/lib/lean:<backend>/.lake/packages/aesop/.lake/build/lib/lean:<backend>/.lake/packages/proofwidgets/.lake/build/lib/lean:<backend>/.lake/packages/importGraph/.lake/build/lib/lean:<backend>/.lake/packages/LeanSearchClient/.lake/build/lib/lean:<backend>/.lake/packages/plausible/.lake/build/lib/lean:<backend>/.lake/packages/mathlib/.lake/build/lib/lean:<backend>/.lake/build/lib/lean:<stage>/calibration/.lake/build/lib/lean <lean>/bin/lean <stage>/calibration/Krepi/Proofs/Calibration.lean -o <stage>/calibration/.lake/build/lib/lean/Krepi/Proofs/Calibration.olean -i <stage>/calibration/.lake/build/lib/lean/Krepi/Proofs/Calibration.ilean -c <stage>/calibration/.lake/build/ir/Krepi/Proofs/Calibration.c --setup <stage>/calibration/.lake/build/ir/Krepi/Proofs/Calibration.setup.json --json
+error: Krepi/Proofs/Calibration.lean:120:2: unsolved goals
+case hmax
+t : table.Table
+hused : ↑t.used ≤ ↑t.capacity
+h✝ : t.used ≤ t.capacity
+⊢ ↑t.used + ↑1#u32 ≤ U32.max
+
+t : table.Table
+hused : ↑t.used ≤ ↑t.capacity
+h✝ : t.used ≤ t.capacity
+i : U32
+_ : [> let i ← t.used + 1#u32 <]
+i_post : ↑i = ↑t.used + 1
+⊢ ↑t.used < ↑t.capacity ∧ ↑i = ↑t.used + 1
+Some required targets logged failures:
+- Krepi.Proofs.Calibration
+error: build failed

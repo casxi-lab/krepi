@@ -322,8 +322,8 @@ pub fn kernel_metadata_args(kernel: &str) -> Vec<String> {
 /// [`kernel_metadata_args`] and returns what it reports. A registry or Git
 /// package that is not cached, or a stale `Cargo.lock`, fails the
 /// resolution.
-pub fn kernel_metadata(root: &Path) -> Result<Json, String> {
-    let args = kernel_metadata_args(KERNEL);
+pub fn kernel_metadata(root: &Path, kernel: &str) -> Result<Json, String> {
+    let args = kernel_metadata_args(kernel);
     let program = check::cargo();
     let shown = format!("{} {}", program.to_string_lossy(), args.join(" "));
     println!("$ {shown}");
@@ -349,7 +349,7 @@ pub fn kernel_metadata(root: &Path) -> Result<Json, String> {
 /// checks what Cargo reports.
 pub fn check_kernel_workspace(root: &Path) -> Vec<String> {
     let workspace = [KERNEL, KERNEL_PACKAGE];
-    match kernel_metadata(root) {
+    match kernel_metadata(root, KERNEL) {
         Ok(metadata) => check_kernel_metadata(&metadata, &root.join(KERNEL), workspace),
         Err(problem) => vec![problem],
     }

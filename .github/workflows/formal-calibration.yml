@@ -1,0 +1,352 @@
+# Runs the proof gate on the calibration target, krepi's own target of the
+# gate, in the pinned proof-tool image: once a week, on Wednesdays at 13:23
+# UTC, on a manual run, and on a pull request to main that carries the
+# label formal-calibration, when it is opened, reopened or updated and when
+# that label is added. The job `calibration run` runs
+# `cargo xtask formal run --calibration`, after
+# `cargo xtask formal check --calibration`, and the job `planned example`,
+# beside it, the gate on the planned target of the calibration alone. On a
+# manual run that asks for it, and on a pull request with the label, the
+# job `calibration mutants` runs `cargo xtask formal mutants calibration
+# --calibration` and uploads the list of survivors that it writes. None of
+# them is a required check; they log in to no registry, push nothing and
+# use no secret. Each main command runs under `deadline.sh`, which passes a
+# cancellation on to it and turns workflow commands off while it prints;
+# each limit covers the deadline of its gate and the 300 s of its receipt.
+# The summaries, which print text of the receipts, turn workflow commands
+# off as well. The uploads hold the receipts, the summaries and the logs
+# compressed, and the list of survivors that a passing run of the mutants
+# wrote.
+# Actions are pinned to full commit SHAs; the comment names the release.
+name: formal calibration
+
+on:
+  schedule:
+    - cron: "23 13 * * 3"
+  workflow_dispatch:
+    inputs:
+      mutants:
+        description: Also generate and run the source mutants of the calibration target
+        type: boolean
+        default: false
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled]
+
+# `bash` runs every step with `-eo pipefail`.
+defaults:
+  run:
+    shell: bash
+
+env:
+  # The image that verification/image-pin.json pins. The workflows step of
+  # `cargo xtask check` requires every mention of the image's repository in
+  # this file to be this reference.
+  IMAGE: ghcr.io/casxi-lab/krepi-formal@sha256:cd3bd69b780538593e4cfe247c45145d82a0c351048bcc21882062537300f013
+  # The flags of every container that runs the gate, besides the user, the
+  # mount and the working directory.
+  GATE_FLAGS: "--pull never --init --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --network none"
+  HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  # The deadline of the calibration run is the gate's 7,200 s and the
+  # 3,000 s that the calibration registers for its formal target, that of
+  # the planned example the 7,200 s and the default 1,800 s of its planned
+  # target; with the 300 s of the receipt, 175 and 155 minutes. Each step
+  # has two minutes more, and each job 23 minutes more than its step.
+  calibration:
+    name: ${{ matrix.name }}
+    if: >-
+      github.event_name != 'pull_request'
+      || (contains(github.event.pull_request.labels.*.name, 'formal-calibration')
+      && (github.event.action != 'labeled' || github.event.label.name == 'formal-calibration'))
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: ${{ matrix.job }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: calibration run
+            key: run
+            targets: ""
+            deadline: 175m
+            step: 177
+            job: 200
+          - name: planned example
+            key: planned
+            targets: --target calibration-planned
+            deadline: 155m
+            step: 157
+            job: 180
+    concurrency:
+      group: formal-calibration-${{ matrix.key }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    env:
+      KEY: ${{ matrix.key }}
+    steps:
+      - name: Check out the candidate commit
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record the runner and pull the image
+        timeout-minutes: 8
+        run: |
+          mkdir -p artifacts/formal
+          {
+            echo "== prepare started $(date -u +%FT%TZ)"
+            echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, job $KEY"
+            echo "user: $(id)"
+            echo "processors: $(nproc)"
+            free -b
+            df -B1 /
+            if [ "$(id -u)" = 0 ] || [ "$(stat -c %u "$GITHUB_WORKSPACE")" != "$(id -u)" ]; then
+              echo "the runner's user is root or does not own the checkout" >&2
+              exit 1
+            fi
+            echo "== docker pull $IMAGE"
+            docker pull "$IMAGE"
+            docker image inspect --format 'pulled {{json .RepoDigests}}, {{.Size}} bytes' "$IMAGE"
+          } 2>&1 | tee artifacts/formal/job.txt
+
+      - name: Build xtask
+        timeout-minutes: 3
+        run: |
+          {
+            echo "== build xtask, started $(date -u +%FT%TZ)"
+            rustup toolchain install
+            cargo build --locked --manifest-path xtask/Cargo.toml
+          } 2>&1 | tee -a artifacts/formal/job.txt
+
+      # A user other than root, a read-only root file system, no
+      # capabilities and no network, as the probe of the job `formal run`.
+      - name: Probe the container of the gate
+        id: probe
+        timeout-minutes: 1
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          docker run --rm -i "${gate_flags[@]}" --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE:ro" --workdir "$GITHUB_WORKSPACE" \
+            "$IMAGE" bash -s 2>&1 <<'PROBE' | tee -a artifacts/formal/job.txt
+          [ "$(id -u)" != 0 ] || { echo "FAILED: the container runs as root"; exit 1; }
+          grep -q '^CapBnd:[[:space:]]*0*$' /proc/self/status || { echo "FAILED: capabilities"; exit 1; }
+          [ "$(ls /sys/class/net)" = lo ] || { echo "FAILED: the container has a network"; exit 1; }
+          "$PWD/xtask/target/debug/xtask" help > /dev/null
+          echo "the probe passed"
+          PROBE
+
+      # The registry rules, the inventory and the lists of survivors of the
+      # calibration; its failure fails the job, and the gate still runs.
+      - name: Check the calibration with formal check
+        if: matrix.key == 'run'
+        timeout-minutes: 6
+        run: |
+          exec bash .github/scripts/deadline.sh --stop-commands 5m 30s \
+            bash -o pipefail -c 'xtask/target/debug/xtask formal check --calibration 2>&1 | tee artifacts/formal/check.txt'
+
+      - name: Run the gate on the calibration in the image
+        id: gate
+        if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
+        timeout-minutes: ${{ matrix.step }}
+        env:
+          DEADLINE: ${{ matrix.deadline }}
+          TARGETS: ${{ matrix.targets }}
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          read -r -a targets <<< "$TARGETS"
+          exec bash .github/scripts/deadline.sh --stop-commands "$DEADLINE" 1m \
+            docker run --rm --name "formal-calibration-$KEY-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            --env KREPI_FORMAL_IMAGE="$IMAGE" \
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --calibration "${targets[@]}"
+
+      - name: Remove the container of the gate
+        if: always()
+        run: |
+          docker rm --force "formal-calibration-$KEY-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
+
+      - name: Summarize the receipt and compress the logs
+        if: always()
+        env:
+          GATE_OUTCOME: ${{ steps.gate.outcome }}
+        run: |
+          shopt -s nullglob
+          # The receipts hold text of Lean and Lake: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          logs=()
+          for file in artifacts/formal/job.txt artifacts/formal/check.txt artifacts/formal/runs/*/logs; do
+            if [ -e "$file" ]; then logs+=("$file"); fi
+          done
+          if [ "${#logs[@]}" -gt 0 ]; then
+            tar -czf artifacts/formal/logs.tar.gz "${logs[@]}"
+          fi
+          receipts=(artifacts/formal/runs/*/receipt.json)
+          {
+            echo "## formal calibration: $KEY"
+            echo
+            echo "Image \`$IMAGE\`; the gate step: $GATE_OUTCOME."
+            echo
+            for receipt in "${receipts[@]}"; do
+              jq -r --arg path "$receipt" --arg sha "$(sha256sum "$receipt" | cut -d ' ' -f 1)" '
+                "- Receipt `\($path)`, SHA-256 `\($sha)`: `\(.status)`, complete \(.complete), \(.seconds) s",
+                "- Phases: " + ([.phases | to_entries[] | "\(.key) \(.value.seconds) s"] | join(", ")),
+                "- Units: " + ([.units[].status] | group_by(.) | map("\(length) \(.[0])") | join(", ")),
+                (.proof_targets | to_entries[] | "- Target `\(.key)`: budget \(.value.budget_seconds) s, \(.value.seconds) s"),
+                (.units | to_entries[] | select(.value.status != "VERIFIED") | "- `\(.key)`: \(.value.status)"),
+                (.failures[] | "- \(.status): \(.message | .[0:500])")
+              ' "$receipt"
+            done
+          } | tee artifacts/formal/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "${#receipts[@]}" = 0 ] && [[ "$GATE_OUTCOME" =~ ^(success|failure)$ ]]; then
+            echo "the gate step ran and left no receipt" >&2
+            exit 1
+          fi
+
+      - name: Upload the receipt, the summary and the logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-calibration-${{ matrix.key }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: |
+            artifacts/formal/summary.md
+            artifacts/formal/logs.tar.gz
+            artifacts/formal/runs/*/receipt.json
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+  # The run of `formal mutants` has a budget of 14,400 s; with the 300 s of
+  # its receipt, 245 minutes, its step two more and its job 20 more.
+  mutants:
+    name: calibration mutants
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.mutants)
+      || (github.event_name == 'pull_request'
+      && contains(github.event.pull_request.labels.*.name, 'formal-calibration')
+      && (github.event.action != 'labeled' || github.event.label.name == 'formal-calibration'))
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 267
+    permissions:
+      contents: read
+    concurrency:
+      group: formal-calibration-mutants-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Check out the candidate commit
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record the runner and pull the image
+        timeout-minutes: 8
+        run: |
+          mkdir -p artifacts/formal
+          {
+            echo "== prepare started $(date -u +%FT%TZ)"
+            echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, job mutants"
+            echo "processors: $(nproc)"
+            free -b
+            df -B1 /
+            if [ "$(id -u)" = 0 ] || [ "$(stat -c %u "$GITHUB_WORKSPACE")" != "$(id -u)" ]; then
+              echo "the runner's user is root or does not own the checkout" >&2
+              exit 1
+            fi
+            echo "== docker pull $IMAGE"
+            docker pull "$IMAGE"
+            docker image inspect --format 'pulled {{json .RepoDigests}}, {{.Size}} bytes' "$IMAGE"
+          } 2>&1 | tee artifacts/formal/job.txt
+
+      - name: Build xtask
+        timeout-minutes: 3
+        run: |
+          {
+            echo "== build xtask, started $(date -u +%FT%TZ)"
+            rustup toolchain install
+            cargo build --locked --manifest-path xtask/Cargo.toml
+          } 2>&1 | tee -a artifacts/formal/job.txt
+
+      - name: Run the source mutants of the calibration in the image
+        id: mutants
+        timeout-minutes: 247
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          exec bash .github/scripts/deadline.sh --stop-commands 245m 1m \
+            docker run --rm --name "formal-calibration-mutants-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            --env KREPI_FORMAL_IMAGE="$IMAGE" \
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal mutants calibration --calibration
+
+      - name: Remove the container of the run
+        if: always()
+        run: |
+          docker rm --force "formal-calibration-mutants-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
+
+      - name: Summarize the list of survivors and compress the logs
+        if: always()
+        env:
+          OUTCOME: ${{ steps.mutants.outcome }}
+        run: |
+          shopt -s nullglob
+          # The receipts hold text of Lean and Lake: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          logs=()
+          for file in artifacts/formal/job.txt artifacts/formal/runs/*/logs; do
+            if [ -e "$file" ]; then logs+=("$file"); fi
+          done
+          if [ "${#logs[@]}" -gt 0 ]; then
+            tar -czf artifacts/formal/logs.tar.gz "${logs[@]}"
+          fi
+          # A run that fails writes no list, and the checkout may hold one
+          # of an earlier run, so only that of a passing run is read.
+          written=verification/qualification/calibration/mutants/calibration.json
+          list=artifacts/formal/mutants/calibration.json
+          if [ "$OUTCOME" = success ] && [ -f "$written" ]; then
+            mkdir -p artifacts/formal/mutants
+            cp "$written" "$list"
+          fi
+          {
+            echo "## formal calibration: mutants"
+            echo
+            echo "The run step: $OUTCOME."
+            echo
+            for receipt in artifacts/formal/runs/*/receipt.json; do
+              jq -r --arg path "$receipt" --arg sha "$(sha256sum "$receipt" | cut -d ' ' -f 1)" '
+                "- Receipt `\($path)`, SHA-256 `\($sha)`: `\(.status)`, \(.seconds) s",
+                (.units | to_entries[] | select(.value.status != "VERIFIED") | "- `\(.key)`: \(.value.status)"),
+                (.failures[] | "- \(.status): \(.message | .[0:500])")
+              ' "$receipt"
+            done
+            if [ -f "$list" ]; then
+              jq -r '"- List: \(.generated) generated, \(.killed) killed, \(.survivors | length) survived, \(.unbuildable) do not build, \(.not_unique) without a text that occurs once"' "$list"
+            else
+              echo "- No list of survivors from this run"
+            fi
+          } | tee artifacts/formal/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the list of survivors, the receipt and the logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-calibration-mutants-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: |
+            artifacts/formal/mutants/calibration.json
+            artifacts/formal/summary.md
+            artifacts/formal/logs.tar.gz
+            artifacts/formal/runs/*/receipt.json
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
