@@ -1,0 +1,13 @@
+# The member of the calibration workspace, beside its root package, as the
+# kernel workspace has members beside its root package. The root package
+# does not depend on it, so no extraction reaches it.
+[package]
+name = "formal-calibration-member"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The member of the calibration workspace of the krepi proof gate"
+
+[lints.rust]
+unsafe_code = "forbid"

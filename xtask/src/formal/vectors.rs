@@ -96,7 +96,8 @@ pub fn vectors(root: &Path, layout: &Layout, tree: &Tree, name: &str, end: Insta
     let run = run::RunDir::create(root).map_err(|error| format!("no run directory: {error}"))?;
     let [stage, input, output, home, tmp] =
         ["stage", "vectors", "results", "home", "tmp"].map(|name| run.path.join("work").join(name));
-    lean::create_stage(&root.join(layout.project), &stage, &backend)?;
+    let project = root.join(layout.project);
+    lean::create_stage(&project, &project, &stage, &backend)?;
     for (path, _) in (tree.entries()).filter(|(path, _)| path.starts_with(&below)) {
         lean::copy_into(root, &stage, path)?;
     }

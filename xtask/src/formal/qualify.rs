@@ -290,7 +290,7 @@ fn installed_external(
 /// What `extractions`, those of a case or of each of its parts, show
 /// together: complete when each is, with the diagnostics of each in order
 /// and the union of their items.
-fn observed(extractions: &[Extraction]) -> Observed {
+pub(super) fn observed(extractions: &[Extraction]) -> Observed {
     let union = |items: &dyn Fn(&Extraction) -> Vec<String>| {
         sorted(&extractions.iter().flat_map(items).collect::<Vec<_>>())
     };
@@ -587,6 +587,7 @@ fn qualify_case(gate: &mut Gate, backend: &Path, case: &Case) -> Result<(), Stri
             start_from,
             opaque: &case.opaque,
             work: directory,
+            triple: None,
         };
         extractions.push(extract::extract(gate, &request)?);
     }
@@ -623,7 +624,7 @@ fn qualify_case(gate: &mut Gate, backend: &Path, case: &Case) -> Result<(), Stri
         _ => Site::QualificationBuild,
     };
     let stage = case_stage(gate, &case.name);
-    let project = stage.join(layout.project);
+    let project = stage.join(layout.root_project);
     let arguments = lean::build_args(&[&target], true);
     let build = lake(site, &arguments, &project);
     // Whether the generated code built, as the proofs of the case need.
@@ -633,8 +634,8 @@ fn qualify_case(gate: &mut Gate, backend: &Path, case: &Case) -> Result<(), Stri
     } else if !record.observed.complete {
         gate.skip(&unit, &build, "the extraction is not complete");
     } else {
-        let export = source.join(layout.project);
-        lean::create_stage(&export, &stage, backend)?;
+        let export = source.join(layout.root_project);
+        lean::create_stage(&export, &export, &stage, backend)?;
         let declarations = &mut record.declarations;
         let installed = install(&source, case, &extractions, &project, declarations)?;
         if case.models.is_some() {
@@ -751,7 +752,7 @@ fn prove(
         }
         every.push("its case did not build its generated code".to_string());
     } else {
-        let export = gate.source().join(gate.layout().project);
+        let export = gate.source().join(gate.layout().root_project);
         let file = lean::module_file(&proof.module);
         if export.join(&file).is_file() {
             lean::copy_into(&export, project, &file)?;

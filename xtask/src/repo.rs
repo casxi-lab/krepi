@@ -87,8 +87,7 @@ impl Tree {
         tree
     }
 
-    /// Adds or replaces an entry, for tests.
-    #[cfg(test)]
+    /// Adds or replaces an entry.
     pub fn insert(&mut self, path: &str, entry: Entry) {
         self.entries.insert(path.to_string(), entry);
     }

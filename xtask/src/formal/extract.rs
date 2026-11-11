@@ -51,8 +51,8 @@ pub struct Kernel {
 
 /// Reads the extraction configuration `text`, schema 1. The qualification
 /// crate must have a triple for every host of the tool manifest and for no
-/// other, whose value the gate does not check, and no features and no `cfg`
-/// settings; the kernel's triple must be the one of `layout`.
+/// other, whose value the gate does not check; the kernel's triple must be
+/// the one of `layout`; and neither has features or `cfg` settings.
 pub fn configuration(text: &str, layout: &Layout) -> Result<Configuration, String> {
     let configuration: Configuration = toml::from_str(text)
         .map_err(|error| format!("not an extraction configuration: {error}"))?;
@@ -76,6 +76,8 @@ pub fn configuration(text: &str, layout: &Layout) -> Result<Configuration, Strin
             "[kernel] has the triple {}, not {}",
             kernel.triple, layout.triple
         )
+    } else if !kernel.features.is_empty() || !kernel.cfg.is_empty() {
+        "[kernel] has features or cfg settings, which the gate does not pass".to_string()
     } else {
         return Ok(configuration);
     };
@@ -135,6 +137,8 @@ pub struct Request<'a> {
     pub opaque: &'a [String],
     /// A work directory that no extraction has used.
     pub work: &'a Path,
+    /// The triple for which Cargo compiles the package, or none for the host.
+    pub triple: Option<&'a str>,
 }
 
 /// The fields of `translation.json` that the gate reads; Aeneas writes all of
@@ -166,6 +170,7 @@ pub struct Function {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Type {
     pub rust_name: String,
+    pub lean_name: String,
     pub lean_file: String,
 }
 
@@ -230,10 +235,6 @@ impl Extraction {
     /// Local (crate) functions translated with a body (`opaque == false`) or
     /// left as declarations (`opaque == true`), as
     /// `(rust name, source file, lean name)`.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the target phase is the first caller")
-    )]
     pub fn local_functions(&self, opaque: bool) -> Vec<(String, String, String)> {
         (self.translation.functions.iter())
             .filter(|entry| entry.is_local && entry.is_opaque == opaque)
@@ -341,6 +342,11 @@ pub fn extract(gate: &mut Gate, request: &Request) -> Result<Extraction, String>
     }
     charon_args.extend(["--dest-file".to_string(), text(&llbc)?]);
     charon_args.extend(["--", "--lib", "--locked"].map(str::to_string));
+    let triple = request
+        .triple
+        .iter()
+        .flat_map(|triple| ["--target", triple]);
+    charon_args.extend(triple.map(str::to_string));
     // Aeneas runs on one thread (`-sequential`): its pool of threads takes a
     // time that varies with the load and, after an internal exception, can
     // report errors in other functions.
@@ -572,6 +578,7 @@ mod tests {
                 start_from: &start_from,
                 opaque: &opaque,
                 work: &work,
+                triple: None,
             };
             let extracted = extract(gate, &request);
             let stopped = extracted.as_ref().err().cloned();
@@ -1245,6 +1252,7 @@ mod tests {
                     start_from: &roots,
                     opaque: &[],
                     work: &work,
+                    triple: None,
                 };
                 result = Some(extract(gate, &request).map(|_| ()));
                 Ok(())
@@ -1394,6 +1402,17 @@ mod tests {
             refused("\"aarch64-unknown-none\"", "\"x86_64-unknown-none\""),
             "[kernel] has the triple x86_64-unknown-none, not aarch64-unknown-none"
         );
+        // Nor does the gate pass them to the extraction of a kernel target.
+        let kernel = "\"aarch64-unknown-none\"\nfeatures = []\ncfg = []";
+        for list in [
+            "features = [\"x\"]\ncfg = []",
+            "features = []\ncfg = [\"x\"]",
+        ] {
+            assert_eq!(
+                refused(kernel, &format!("\"aarch64-unknown-none\"\n{list}")),
+                "[kernel] has features or cfg settings, which the gate does not pass"
+            );
+        }
         let unknown = refused("[kernel]\n", "[kernel]\ntarget = \"x\"\n");
         assert!(
             unknown.starts_with("not an extraction configuration: "),
