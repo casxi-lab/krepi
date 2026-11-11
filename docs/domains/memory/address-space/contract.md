@@ -301,10 +301,11 @@ block here.
 - The first four rows lie in the first 2 MiB block of the EL0 window, the
   root block, and the bundle window starts at the 2 MiB block after it; all
   five lie in the first 1 GiB slot of the window.
-- **Other ranges.** The image windows of the loading component and the
-  windows of the VM component (planned), in which a process maps its
-  segments, stacks and VM regions, lie in the EL0 window outside the boot
-  ranges; their values and their checks belong to those components.
+- **Other ranges.** The image windows of the loading component (planned)
+  and the [VM window](../vm/contract.md#vm-window-and-regions) of the VM
+  component, in which a process maps its segments, stacks and VM regions,
+  lie in the EL0 window outside the boot ranges; their values and their
+  checks belong to those components.
 - **The bounds of a thread.** The composer of the return checks every
   saved context with the bounds of the EL0 window:
   `Bounds::new(EL0_START, EL0_END - EL0_START, EL0_START, EL0_END - EL0_START)`,
