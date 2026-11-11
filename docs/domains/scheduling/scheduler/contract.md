@@ -38,15 +38,16 @@ that these rules serve, with its evidence, is in the
   context, that a dispatch may still use in the current period. A ready
   thread whose credit is 0 is **throttled**.
 - **Scheduler record.** `scheduler::RunQueues` (planned): the record of one
-  CPU that this page keeps: the run queue of each class, the current
-  thread with its dispatch, the timer deadline and the reschedule flag. It
-  lives in the per-CPU record of the architecture crate (planned).
+  CPU that this page keeps: the time slice in ticks, the run queue of each
+  class, the current thread with its dispatch, the timer deadline and the
+  reschedule flag. It lives in the per-CPU record of the architecture crate
+  (planned).
 - **Run queue.** The FIFO of the ready threads of one class on one CPU
   ([Run queues](#run-queues)).
 - **Scheduling state.** The fields of this page in the slot of a thread:
-  its state, running, ready, blocked or removed; the class of the run queue
-  that holds it while it is ready; its link in that queue; and its time
-  slice left ([Blocking and readiness](#blocking-and-readiness)).
+  its state, new, running, ready, blocked or removed; the class of the run
+  queue that holds it while it is ready; its link in that queue; and its
+  time slice left ([Blocking and readiness](#blocking-and-readiness)).
 - **Dispatch.** The interval in which a CPU runs one thread at EL0 and in
   the entries that it makes, from the `choose` that selects the thread to
   the stop of the dispatch: `preempt`, `yield_now`, `block` or `remove`. A
@@ -91,7 +92,7 @@ composers.
 | Entry point | Kind | Called by | ABI operation | Rules |
 | --- | --- | --- | --- | --- |
 | `scheduler::validate_parameters` (planned), with the value type `scheduler::Parameters` | Function that writes nothing, host-testable | The boot wiring of each board, once, after `Ledger::new` of the budget-ledger component has accepted the period and the counter frequency, before the first entry from EL0 | None | [Platform parameters and time](#platform-parameters-and-time) |
-| `RunQueues::new` (planned), with the value type `scheduler::RunQueues` | Function that writes nothing, host-testable | The boot wiring, once for each CPU, which stores the record in the per-CPU record of the CPU (planned) | None | [Run queues](#run-queues) |
+| `RunQueues::new` (planned), with the value type `scheduler::RunQueues` | Function that writes nothing, host-testable | The boot wiring, once for each CPU, with the time slice that `validate_parameters` gives, which stores the record in the per-CPU record of the CPU (planned) | None | [Run queues](#run-queues), [Platform parameters and time](#platform-parameters-and-time) |
 | `scheduler::admit` (planned) | Write entry on the copies of a write set, host-testable | `creation`, for the thread of a new process; the boot of the root by the kernel root (planned), for the root's thread | None | [Admission](#admission), [Reserved control capacity](#reserved-control-capacity), [Run queues](#run-queues) |
 | `scheduler::enqueue` (planned) | Write entry on the copies of a write set, host-testable | The composers that complete a wait or end the pause of a thread: `ipc`, `lifecycle` and `dispatch` (planned) | None | [Blocking and readiness](#blocking-and-readiness), [Run queues](#run-queues), [Preemption](#preemption) |
 | `scheduler::choose` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), as the composer of the return to EL0 and of the wait of an idle CPU | None | [Selection and time slices](#selection-and-time-slices) |
@@ -99,7 +100,7 @@ composers.
 | `scheduler::yield_now` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `yield` | `yield` | [Run queues](#run-queues), [Selection and time slices](#selection-and-time-slices) |
 | `scheduler::block` (planned) | Write entry on the copies of a write set, host-testable | The composers of the calls that block their caller: `ipc` for `call` and `receive`, and `dispatch` for the waits on notifications and wait sets and for sleeps (planned) | None | [Blocking and readiness](#blocking-and-readiness) |
 | `scheduler::remove` (planned) | Write entry on the copies of a write set, host-testable | `lifecycle` (planned), in the steps of the destruction of a process | None | [Blocking and readiness](#blocking-and-readiness) |
-| `scheduler::requeue` (planned) | Write entry on the copies of a write set, host-testable | `ipc` (planned), after `ledger::lend` or `ledger::withdraw` of the budget-ledger component has changed the context of a thread that is ready or running | None | [Priority classes](#priority-classes), [Run queues](#run-queues) |
+| `scheduler::requeue` (planned) | Write entry on the copies of a write set, host-testable | `ipc` (planned), after `ledger::lend` or `ledger::withdraw` of the budget-ledger component has changed the context of a thread that is ready or running; `creation` and `lifecycle` (planned), for the current thread, before `ledger::admit` or `ledger::release` changes the record of the owner of the context of its dispatch | None | [Priority classes](#priority-classes), [Run queues](#run-queues) |
 
 `yield_now` is the entry of the operation `yield`, a reserved word of Rust.
 
@@ -107,17 +108,17 @@ composers.
 
 The module `scheduler` of the core (planned), in `kernel/src/scheduler.rs`
 (planned), follows the
-[provable Rust subset](../../../conventions/provable-subset.md): the order
-of the classes, the run queues, the selection with the deadline of a
-dispatch, the stops of a dispatch, readiness and removal, the checks of
-admission and the check of the time slice. It is not among the roles of
-the subset's scope, which lists the modules for which a specification is
-planned; no specification of it is planned in this release, and its entries
-are [open obligations](#open-obligations).
+[provable Rust subset](../../../conventions/provable-subset.md): the run
+queues, the selection by class with the deadline of a dispatch, the stops
+of a dispatch, readiness and removal, the checks of admission and the check
+of the time slice. It is not among the roles of the subset's scope, which
+lists the modules for which a specification is planned; no specification
+of it is planned in release 0.1, and its entries are
+[open obligations](#open-obligations).
 
-It is in layer 5 of the
+It takes layer 5 by the rules of the
 [module order](../../../architecture.md#module-order-in-the-core), whose
-table gains its row with the change that adds its code: it refers to the
+table lists only the modules of the subset's roles: it refers to the
 modules `objects` and `ledger` and to the kernel root, and to no module of
 its own layer, `vm` and `waits`, or above; the module `waits` does not
 refer to it either. So the operations that make a thread ready are
@@ -162,9 +163,11 @@ the change that adds the module writes its `paths` block here.
 
 - **Three classes.** `scheduler::PRIORITIES` (planned) = 3: control,
   interactive and background, in this order. Every thread has one class,
-  fixed when it is admitted ([Admission](#admission)). The values of a
-  class are `ledger::Class` (planned) of the budget-ledger component, since
-  the module `ledger` is below this one; this page defines their order.
+  fixed when it is admitted ([Admission](#admission)). The classes and
+  their order are those of `ledger::Class` (planned), which the
+  [budget-ledger](../budget-ledger/contract.md#terms) component defines,
+  since its loans compare classes and its module is below this one;
+  selection takes the classes in that order.
 - **Strict priority.** Selection takes a thread of a higher effective class
   before any thread of a lower one, as long as the higher one has credit
   ([Selection and time slices](#selection-and-time-slices)); within a
@@ -184,10 +187,10 @@ the change that adds the module writes its `paths` block here.
   a FIFO run queue for each class: its first and its last thread, with a
   link from each thread to the next in the scheduling state of its slot. A
   ready thread is in exactly one run queue, that of its effective class on
-  the CPU that holds it; a running, blocked or removed thread is in none. A
-  thread joins the run queue of the CPU that runs the entry; with more than
-  one CPU, the choice of the CPU and the pending queues of the CPUs belong
-  to the multicore components (planned).
+  the CPU that holds it; a new, running, blocked or removed thread is in
+  none. A thread joins the run queue of the CPU that runs the entry; with
+  more than one CPU, the choice of the CPU and the pending queues of the
+  CPUs belong to the multicore components (planned).
 - **Tail.** A thread that becomes ready joins the tail of its queue with a
   whole time slice: a thread that `admit` makes ready, that `enqueue`
   wakes, whose dispatch stops with no time slice left, whose dispatch stops
@@ -201,7 +204,20 @@ the change that adds the module writes its `paths` block here.
   the tail and keeps that place while it is throttled; selection passes
   over it until the replenishment of its context gives it credit, and it
   resumes from that place. A thread that `enqueue` wakes without credit
-  joins the tail in the same way.
+  joins the tail in the same way, and so does a thread that `preempt` stops
+  with time slice left but without credit.
+- **Reading of the rule for queues.** The
+  [internal choices](../../../security.md#internal-choices) of the security
+  model put a thread that resumes after replenishment at the tail, and a
+  thread preempted with time slice left at the head. This page reads the
+  first as the tail that the thread takes when it stops, or is woken,
+  without credit, and keeps while it is throttled; and it reads the second
+  for a thread that has credit, so a thread without credit joins the tail
+  also with time slice left. Replenishment is computed when a record is
+  read ([replenishment](../budget-ledger/contract.md#replenishment)), so
+  moving every thread that a boundary resumes to the tail would need a
+  loop over the throttled threads at each boundary and a write set with no
+  bound within $W$.
 - **Several in one transition.** When one transition makes several threads
   ready, the composer calls `enqueue` in the order of
   [Determinism](#determinism), and each joins the tail in the order of the
@@ -216,7 +232,11 @@ the change that adds the module writes its `paths` block here.
   the context that the dispatch had, takes that interval from its time
   slice left, continues the dispatch from `now` on the new context and sets
   the reschedule flag, so that the return chooses again with a deadline for
-  the new context.
+  the new context. The composers of creation and reaping call it for the
+  current thread with its context unchanged, before an admission or a
+  release changes the record of the owner of that context
+  ([admission and release](../budget-ledger/contract.md#admission-and-release)),
+  so that the charge up to `now` uses the budget from before the change.
 
 ## Selection and time slices
 
@@ -252,13 +272,13 @@ has settled every wait whose deadline is not later than `now`:
   dispatch stay. A `choose` while a dispatch runs is `InvalidState` and
   changes nothing.
 - **Stops.** A dispatch ends only with `preempt`, `yield_now`, `block` or
-  `remove`. Each charges the interval from the start of the dispatch to
-  `now` to the context of the dispatch, with `ledger::charge` of the
-  budget-ledger component, and takes it from the time slice left of the
-  thread; an interval longer than the slice left leaves no slice. Every
-  stop charges, whatever its reason and however short the interval: a
-  preemption, a yield, a block for a wait or a sleep, an exit, a fault or a
-  kill.
+  `remove`. Each charges the interval from the start of the dispatch, or
+  from its last charge by `requeue`, to `now` to the context of the
+  dispatch, with `ledger::charge` of the budget-ledger component, and takes
+  it from the time slice left of the thread; an interval longer than the
+  slice left leaves no slice. Every stop charges, whatever its reason and
+  however short the interval: a preemption, a yield, a block for a wait or
+  a sleep, an exit, a fault or a kill.
 - **Bounds of the arithmetic.** $s$ and $a$ are below $2^{62}$, and $p$ is
   at most $\mathit{now}$ plus the period, which is below $2^{62}$
   ([Platform parameters and time](#platform-parameters-and-time)); with
@@ -273,13 +293,19 @@ has settled every wait whose deadline is not later than `now`:
   `choose`. So a dispatch ends when its time slice ends, when its credit
   ends, at the end of a period and at the external deadline, whichever comes
   first.
-- **A higher class made ready.** `enqueue`, `admit` and `requeue` of a
-  ready thread set the reschedule flag when the thread that they make ready,
-  or move, has credit and an effective class above that of the current
-  thread; `requeue` of the current thread sets it always
-  ([Run queues](#run-queues)). The
-  execution model schedules only before a return to EL0 and at the explicit
-  preemption points of long operations
+- **A higher class made ready.** While a dispatch runs, `enqueue`, `admit`
+  and `requeue` of a ready thread set the reschedule flag when the thread
+  that they make ready, or move, has credit and an effective class above
+  that of the current thread; `requeue` of the current thread sets it
+  always ([Run queues](#run-queues)). On an idle CPU they leave the flag
+  clear, since the composer of the return calls `choose` in any case.
+- **The life of the flag.** The flag is set only while a dispatch runs, and
+  every stop of a dispatch, `preempt`, `yield_now`, `block` and `remove` of
+  the current thread, clears it, so a flag that an entry sets for a
+  dispatch that then stops in the same operation does not reach the next
+  dispatch.
+- **Where it acts.** The execution model schedules only before a return to
+  EL0 and at the explicit preemption points of long operations
   ([execution model](../../../architecture.md#system-calls-and-the-abi)),
   so:
   - a thread made ready by the entry itself, by a system call of the
@@ -300,16 +326,17 @@ has settled every wait whose deadline is not later than `now`:
 - **Placement.** `preempt` charges the dispatch and makes its thread ready:
   at the tail with a whole slice when the thread has no credit at `now`; at
   the head with the rest of its slice when it has time slice left; at the
-  tail with a whole slice otherwise. It clears the reschedule flag.
+  tail with a whole slice otherwise. Like every stop, it clears the
+  reschedule flag.
 
 ## Blocking and readiness
 
-The scheduling state of a thread starts as removed when its slot is
-occupied, and these entries and events change it:
+The scheduling state of a thread starts as new when its slot is occupied,
+and these entries and events change it:
 
 | From | Entry or event | To |
 | --- | --- | --- |
-| Removed | `admit` | Ready, at the tail of the queue of its class |
+| New | `admit` | Ready, at the tail of the queue of its class |
 | Ready | `choose` | Running, the current thread |
 | Running | `preempt` | Ready, at the head or the tail ([Preemption](#preemption)) |
 | Running | `yield_now` | Ready, at the tail |
@@ -341,10 +368,13 @@ occupied, and these entries and events change it:
   out of its run queue; a blocked one, whose wait the destruction completes
   in the waits component, as it is. The lifecycle component holds the
   terminal states of processes and threads and calls `remove` in the
-  destruction of a process; a removed thread is never chosen.
+  destruction of a process; a removed thread is never chosen and never
+  admitted again, and its state stays removed until its slot is released.
+  A new thread, not yet admitted, is in no run queue either; a thread is
+  admitted once, in the write set that creates it.
 - **One CPU at a time.** A thread is the current thread of at most one CPU,
-  and only a ready thread is chosen, so neither a blocked nor a removed
-  thread runs, and a running thread is not chosen a second time.
+  and only a ready thread is chosen, so no new, blocked or removed thread
+  runs, and a running thread is not chosen a second time.
 
 ## Reserved control capacity
 
@@ -387,12 +417,13 @@ occupied, and these entries and events change it:
      (`WrongPool` and `StaleReference` of `ObjectTable::resolve` of the
      [objects](../../objects-capabilities/objects/contract.md#identities-and-generations)
      component);
-  2. the scheduling state of the new thread is removed (`InvalidState`);
+  2. the scheduling state of the new thread is new (`InvalidState`);
   3. its class is not above the class of the creator, and its ceiling is
      not above the class of the creator (`AdmissionRejected`).
 
-  A ceiling below the class of the thread lends it no class below its own,
-  since its effective class is never below its own class
+  A ceiling at or below the class of the thread lends it no higher class,
+  since its effective class is the higher of its own class and the class
+  that a loan gives it within the ceiling
   ([lending](../budget-ledger/contract.md#lending)).
   The budget of 0 and a budget beyond the creator's holding of the class
   are refused by `ledger::admit`
@@ -420,14 +451,15 @@ which converts and checks the period, the caps and the margin, and then
 `TIME_SLICE` and `REPLENISH_PERIOD` with the frequency to
 `validate_parameters`, which converts the time slice and the period by the
 same rule, $\lfloor u \cdot f / 10^6 \rfloor$ ticks for $u$ microseconds at
-the frequency $f$, and checks the time slice. The values are read-only
-after boot.
+the frequency $f$, checks the time slice and gives it in ticks;
+`RunQueues::new` keeps that time slice in the scheduler record of each CPU.
+The values are read-only after boot.
 
 | Parameter | Meaning | Constraint, and the entry that checks it | QEMU virt | Raspberry Pi 5 |
 | --- | --- | --- | --- | --- |
 | `TIME_SLICE` | The time slice of a dispatch | At least 1 tick and fewer ticks than `REPLENISH_PERIOD`: `validate_parameters` | Set by the board (planned) | Set by the board (planned) |
 | `REPLENISH_PERIOD` | The period of replenishment, one for every class and record of a CPU | At least 1 tick and fewer than $2^{62}$: `Ledger::new` | Set by the board (planned) | Set by the board (planned) |
-| `CONTROL_CAP`, `INTERACTIVE_CAP` and `BACKGROUND_CAP` | The cap of each class for each period | With `KERNEL_MARGIN`, at most `REPLENISH_PERIOD` in ticks: `Ledger::new` | Set by the board (planned) | Set by the board (planned) |
+| `CONTROL_CAP`, `INTERACTIVE_CAP` and `BACKGROUND_CAP` | The cap of each class for each period | With `KERNEL_MARGIN`, at most `REPLENISH_PERIOD` in ticks: `Ledger::new`. For a board, `CONTROL_CAP` is at least 1 tick, since the root's thread runs on it; no entry checks this ([classes](../budget-ledger/contract.md#classes)) | Set by the board (planned) | Set by the board (planned) |
 | `KERNEL_MARGIN` | The part of each period set aside for the kernel and interrupts | As the caps: `Ledger::new` | Set by the board (planned) | Set by the board (planned) |
 
 - **Counter frequency.** `CNTFRQ_EL0` is not 0, and each converted value
@@ -458,9 +490,9 @@ after boot.
   this page that needs time; this page reads no counter. A host test passes
   `now` itself, so the time source is injected.
 - **Premises.** Within one boot, `now` never decreases and stays below
-  $2^{63}$. They are premises of the adapter that reads the counter, and no
-  entry checks them, so time that goes backwards and times near $2^{64}$
-  have no error here.
+  $2^{63}$. They are premises of the architecture crate, which reads the
+  counter, and no entry checks them, so time that goes backwards and times
+  near $2^{64}$ have no error here.
 - **Deadlines from EL0.** A deadline that EL0 gives may be any 64-bit value;
   the waits component only compares it, and this page only compares the
   external deadline that results.
@@ -477,7 +509,7 @@ after boot.
 | `InvalidConfiguration` | A `TIME_SLICE` of fewer than 1 tick, or of no fewer ticks than `REPLENISH_PERIOD` | `validate_parameters` | At boot |
 | `WrongPool` of the objects component | A reference of another pool than the thread pool | `admit`, `enqueue`, `remove`, `requeue` | Handle resolution: the type |
 | `StaleReference` of the objects component | A reference to a thread that is not live | `admit`, `enqueue`, `remove`, `requeue` | Handle resolution: the liveness of the object |
-| `InvalidState` | A thread or a dispatch in another state than the entry needs: `admit` of a thread that is not removed; `enqueue` of one that is not blocked; `requeue` of one that is neither ready nor running; `remove` of one that is removed; `choose` while a dispatch runs; `preempt`, `yield_now` and `block` without a dispatch; `preempt` before the deadline of the dispatch without the reschedule flag | `admit`, `enqueue`, `requeue`, `remove`, `choose`, `preempt`, `yield_now`, `block` | Object state |
+| `InvalidState` | A thread or a dispatch in a state other than the one that the entry needs: `admit` of a thread that is not new; `enqueue` of one that is not blocked; `requeue` of one that is neither ready nor running; `remove` of one that is new or removed; `choose` while a dispatch runs; `preempt`, `yield_now` and `block` without a dispatch; `preempt` before the deadline of the dispatch without the reschedule flag | `admit`, `enqueue`, `requeue`, `remove`, `choose`, `preempt`, `yield_now`, `block` | Object state |
 | `AdmissionRejected` | A class, or a service ceiling, above the class of the creator | `admit` | The caller's quota |
 
 - **Order.** Each entry checks in the order of its rule section and returns
@@ -504,9 +536,9 @@ after boot.
   inventory.
 
 The prototype's scheduler had 23 errors, which this page and the
-[budget-ledger](../budget-ledger/contract.md#errors) component divide, with
-`Busy` of the prototype's object pool, which the objects contract moved to
-the scheduler for its activation. Here:
+[budget-ledger](../budget-ledger/contract.md#errors) component divide; this
+page also maps the activation part of the prototype's `Busy` of its object
+pool, which the objects contract moved to the scheduler. Here:
 
 | Prototype error | Here |
 | --- | --- |
@@ -516,7 +548,7 @@ the scheduler for its activation. Here:
 | `Capacity` | Not applicable: a run queue holds threads of the thread pool and has no capacity of its own |
 | `UnknownThread` | Not applicable: the entries take thread references, and a reference that is not live is `StaleReference` of the objects component |
 | `Busy` | Not applicable: every operation runs within the dispatch of its caller or on an idle CPU, and no entry needs the dispatch to have stopped; a thread can be made ready, admitted or removed while another runs, and a `choose` while a dispatch runs is `InvalidState` |
-| `InvalidState` | Kept, for a thread or a dispatch in another state than the entry needs |
+| `InvalidState` | Kept, for a thread or a dispatch in a state other than the one that the entry needs |
 | `ClockWentBackwards` | Not applicable: `now` never decreases within a boot, a premise of [Platform parameters and time](#platform-parameters-and-time); the budget-ledger component has its own row |
 | `InvalidDeadline` | Not applicable: this page computes the deadline of a dispatch, and the composer settles every wait whose deadline has passed before `choose`; an early `preempt` is `InvalidState` |
 | `Object(_)` | Not kept as a wrapper: the errors of the objects component that this page meets, `WrongPool` and `StaleReference`, are returned as they are; the budget-ledger component has its own row |
@@ -527,7 +559,7 @@ the scheduler for its activation. Here:
 | `ScopeCapacity` | Not applicable: there are no scopes |
 | `GenerationExhausted` | Not applicable: the prototype used it for the generations of its scopes; the activation serials of the prototype's object pool do not exist either |
 | `OwnerMismatch` | Not applicable: admission is composed into the creation of a process with its thread, so the thread always belongs to the process that the creation names |
-| `Busy` of the objects component, its activation part | Not applicable: there is no activation; the current thread of a CPU is the one that `choose` takes from the run queues, so a second activation of a thread does not exist. Its part for the reaping of a running thread belongs to the lifecycle component |
+| The activation part of the prototype's `Busy` of its object pool | Not applicable: there is no activation; the current thread of a CPU is the one that `choose` takes from the run queues, so a second activation of a thread does not exist. Its part for the reaping of a running thread belongs to the lifecycle component |
 
 ## Check and execute
 
@@ -536,7 +568,11 @@ that its effect needs, as [Errors](#errors) lists, then changes only the
 copies in the write set of its caller
 ([write sets](../../objects-capabilities/objects/contract.md#write-set-transactions)).
 The items of this page are thread slots, keyed by their pool and slot, and
-the scheduler record of the CPU, one item keyed by its CPU. The composer
+the scheduler record of the CPU, one item keyed by its CPU. That kind of
+key is this component's, as the objects component leaves the items of the
+composing components to their contracts, like the queue links of other
+components; with more than one CPU, an entry stages only the scheduler
+record of the executing CPU. The composer
 completes the checks of every entry that it composes before its first
 write; afterwards only `WriteSetFull` of `stage`, which a write set within
 $W$ = 64 items never meets, and the fault-injection points of test builds
@@ -546,24 +582,24 @@ before the operation.
 | Entry | Checks before the first write | Write set of this page |
 | --- | --- | --- |
 | `validate_parameters` | The constraints of the time slice | Nothing: a function of values |
-| `RunQueues::new` | None | Nothing: it gives the empty record, which the boot wiring stores before any token exists |
-| `admit` | The references, the state removed, the class and the ceiling; the composer adds those of `ledger::admit` | At most 3: the slot of the new thread, the slot of the last thread of its queue, the scheduler record; with the items of `ledger::admit` |
+| `RunQueues::new` | None | Nothing: it gives the empty record with the time slice, which the boot wiring stores before any token exists |
+| `admit` | The references, the state new, the class and the ceiling; the composer adds those of `ledger::admit` | At most 3: the slot of the new thread, the slot of the last thread of its queue, the scheduler record; with the items of `ledger::admit` |
 | `enqueue` | The reference, the state blocked | At most 3: the slot of the thread, the slot of the last thread of its queue, the scheduler record |
 | `choose` | No dispatch | At most 3: the slot of the chosen thread, the slot of the thread before it in its queue when it is not the first, the scheduler record; 1, the scheduler record, when the CPU is idle |
 | `preempt` | A dispatch at or after its deadline, or the reschedule flag | At most 3: the slot of the thread, the slot of the last thread of its queue when it joins the tail, the scheduler record; with the items of `ledger::charge` |
 | `yield_now` | A dispatch | At most 3, as `preempt`; with the items of `ledger::charge` |
 | `block` | A dispatch | 2: the slot of the thread and the scheduler record; with the items of `ledger::charge` |
-| `remove` | The reference, a state other than removed | The current thread: 2, its slot and the scheduler record, with the items of `ledger::charge`; a ready thread: at most 3, its slot, the slot of the thread before it in its queue and the scheduler record; a blocked thread: 1, its slot |
+| `remove` | The reference, a state other than new and removed | The current thread: 2, its slot and the scheduler record, with the items of `ledger::charge`; a ready thread: at most 3, its slot, the slot of the thread before it in its queue and the scheduler record; a blocked thread: 1, its slot |
 | `requeue` | The reference, the state ready or running | A ready thread: at most 4, its slot, the slot of the thread before it in its old queue, the slot of the last thread of its new queue and the scheduler record; the current thread: 2, its slot and the scheduler record, with the items of `ledger::charge` |
 
 - `validate_parameters` and `RunQueues::new` run once at boot and cannot
   fail after their checks; the other entries cannot fail after theirs.
-- What decides the effect of an entry, and not whether it fails, the entry
-  reads without a failure: the credit of each thread that `choose` walks
-  past; the credit after the charge, on the copies that `ledger::charge`
-  has changed, which decides where `preempt` puts its thread; the credit
-  that decides the reschedule flag; and the walk of a run queue to the
-  thread before another.
+- Reads that decide the effect of an entry, not whether it fails, cannot
+  fail: the credit of each thread that `choose` walks past; the credit
+  after the charge, on the copies that `ledger::charge` has changed, which
+  decides where `preempt` puts its thread; the credit that decides the
+  reschedule flag; and the walk of a run queue to the thread before
+  another.
 - An operation that composes several entries of this page with those of
   other components, such as the return of a timer interrupt with
   `enqueue`, `preempt` and `choose`, keeps its whole write set within $W$;
@@ -572,8 +608,9 @@ before the operation.
 
 ## Work bounds
 
-- `validate_parameters` converts one value and makes two comparisons;
-  `RunQueues::new` sets `PRIORITIES` queues empty.
+- `validate_parameters` converts two values, the time slice and the
+  period, and makes two comparisons; `RunQueues::new` sets `PRIORITIES`
+  queues empty and stores the time slice.
 - `admit` resolves two references, reads the classes of the creator and of
   the thread and writes 3 items.
 - `enqueue` resolves one reference, reads the credit of the thread once and
@@ -604,10 +641,13 @@ before the operation.
   that becomes ready, being woken, created, out of time slice or out of
   credit, or that yields, joins the tail; a thread preempted with time
   slice left and with credit returns to the head; selection takes the first
-  thread with credit of the highest class that has one, as the rule for
-  queues of the [internal choices](../../../security.md#internal-choices)
-  states. A throttled thread resumes from the place that it took when it
-  stopped or was woken.
+  thread with credit of the highest class that has one. This is the rule
+  for queues of the
+  [internal choices](../../../security.md#internal-choices) as
+  [Run queues](#run-queues) reads it: a thread that resumes after
+  replenishment does so from the place at the tail that it took when it
+  stopped or was woken without credit, and a thread without credit joins
+  the tail also with time slice left.
 - **Several wake-ups.** When one transition makes several threads ready,
   the composer calls `enqueue` in the order of the internal choices: the
   threads woken by timeouts first, earliest deadline first with ties in
@@ -651,7 +691,7 @@ The component leaves no other choice open.
 | The current thread of each CPU, with the start, the deadline and the context of its dispatch, and the timer deadline | Per-CPU | Its CPU, as above | The write-back of the write set that changes it, on its CPU | `none`: its single owner never changes |
 | The reschedule flag of each CPU | Per-CPU | Its CPU, as above; another CPU sets it through the pending queue of the CPU | The write-back of the write set that changes it, on its CPU | `none`: its single owner never changes |
 | The scheduling state of each thread, in its thread slot: its state, the class of the queue that holds it, its link in that queue and its time slice left | Per-thread | The CPU that runs the thread, the CPU whose run queue holds it while it is ready, or the object that it waits on while it is blocked | The write-back of the write set that changes it, under the token of its owner | At a handover: by the release of the token of the object whose completion makes it ready, or through the pending queue of the CPU that it goes to |
-| The time slice in ticks, `scheduler::Parameters` | Shared, read-only after boot | The boot CPU, which computes it before any entry from EL0 | The return of `validate_parameters` | Once, before the secondary CPUs start; it never changes afterwards |
+| The time slice in ticks of the scheduler record of each CPU | Per-CPU, read-only after boot | Its CPU, which `RunQueues::new` builds the record for before any entry from EL0 | The return of `RunQueues::new` | `none`: its single owner never changes |
 
 The scheduler record is a compound record whose fields are classified one by
 one; it lives in the per-CPU record of the architecture crate, so this page
@@ -700,7 +740,13 @@ pending queues are empty; no lock order is stated here.
   thread makes ready runs at the return of that call; one that the expiry
   of a sleep makes ready, and one whose context a replenishment gives
   credit, run at the timer interrupt; an interrupt before the deadline
-  without the reschedule flag leaves the dispatch as it was.
+  without the reschedule flag leaves the dispatch as it was. A thread of a
+  higher class made ready by a call whose caller then blocks leaves no
+  reschedule flag for the next dispatch, and an entry on an idle CPU sets
+  none.
+- States: a second `admit` of a thread, also after its `remove` and before
+  its slot is released, is `InvalidState`, and a new thread is in no run
+  queue and is never chosen.
 - For each error of [Errors](#errors), a call that gives it leaves every
   field of the scheduler record and of the thread slots as before, compared
   field by field.
@@ -719,15 +765,15 @@ pending queues are empty; no lock order is stated here.
 ## Open obligations
 
 The module `scheduler` has no `unsafe` code, no assembly and no MMIO. No
-specification of it is planned in this release, so each of its entries has
+specification of it is planned in release 0.1, so each of its entries has
 a row here, carried by the proof of object lifetimes, waits and sequential
 composition, by release 0.2; a function of the module that is not an entry
 of this page is covered by a row that the change that adds it writes. The
 fairness of selection and the time bounds of scheduling are progress
-obligations, which the change that adds the code registers, carried by the
-budgets, reuse and progress registration of the proof gate, by release 0.2,
-and proved with the proof of SMP composition and progress, by release 0.3;
-they are not rows of this table. The adapter that lends the scheduler
+obligations, which the change that adds the code records; the proof gate
+is to register them as its progress obligations by release 0.2, and the
+proof of SMP composition and progress is to prove them by release 0.3.
+They are not rows of this table. The adapter that lends the scheduler
 record of the executing CPU has a row as well
 ([rule 8](../../../conventions/provable-subset.md#8-no-interior-mutability));
 finding the per-CPU record and masking interrupts is the row of the
@@ -837,10 +883,12 @@ a thread is `ledger::cpu_time` of the budget-ledger component.
   `INTERACTIVE_CAP` 50, `BACKGROUND_CAP` 20 and `KERNEL_MARGIN` 10, the
   prototype's configuration with its 10 ticks of slack as the margin; the
   epoch of the ledger is 0. R is the root's thread, admitted at the epoch
-  with every cap as its holdings, as the budget-ledger component's vectors
-  have it, and no case makes it ready; it admits every thread of the case,
-  in the order of the test, and its holdings fall by what it admits. Where
-  a row names other creators, each holds what the row states.
+  with every cap as its holdings by `ledger::admit` alone, as the
+  budget-ledger component's vectors have it: no case calls `admit` of this
+  page for R, so its scheduling state stays new, it is in no run queue and
+  no case makes it ready. R admits every thread of the case, in the order
+  of the test, and its holdings fall by what it admits. Where a row names
+  other creators, each holds what the row states.
 - **Round-robin fixture**, for `src/scheduler/tests.rs` and its `tests/`
   files: the prototype's round robin had no budgets, so the threads are in
   one class, interactive, and no budget, cap or end of a period limits a
@@ -1045,7 +1093,7 @@ component's.
 
 | Vector | Line | Test | Expected output | Entry |
 | --- | ---: | --- | --- | --- |
-| `scheduler-budget-scopes-lifecycle-2` | 24 | `release_requires_no_children_no_bindings_and_no_spending` | Not applicable as written: there are no scopes to release. The threads a and b are taken out of scheduling with `remove`, ok, and the budget-ledger component returns their holdings to their creators when they are reaped | `remove`; `ledger::release` of the budget-ledger component |
+| `scheduler-budget-scopes-lifecycle-2` | 24 | `release_requires_no_children_no_bindings_and_no_spending` | One case: a and b (control, 10 each) admitted; `remove(a, 0)` and `remove(b, 0)` of the ready a and b: each ok, after which neither is in a run queue. The budget-ledger component returns their holdings to R when they are reaped. The prototype's release of scopes and its refusals while a scope has children, threads or spending (`InvalidState`) are not applicable, since there are no scopes, and have no line | `admit`, `remove`; `ledger::release` of the budget-ledger component |
 | `scheduler-budget-scopes-lifecycle-4` | 73 | `foreign_scheduler_and_stale_scope_receipts_cannot_mutate_live_scopes` | Not applicable: each CPU has one scheduler record, and there are no scopes and no receipts (`WrongRegistry`, `StaleScope`) | None |
 | `scheduler-budget-scopes-lifecycle-5` | 104 | `dead_and_reaped_owners_keep_accounting_but_cannot_admit_or_delegate` | t (control, 20) admitted; `choose(0)` gives t; t faults at 3, `remove(t, 3)`: ok, with 3 ticks charged, which leaves 17 of its budget. Its process, dying, runs no thread and makes no further creation, where the prototype refused one (`InvalidState`). The return of its holding at its reaping and the spending that its class keeps are the budget-ledger component's, where the prototype kept the scope until the period repaid it (`OutstandingBudget`) | `admit`, `choose`, `remove`; `ledger::release` of the budget-ledger component |
 | `scheduler-budget-scopes-lifecycle-6` | 133 | `process_slot_reuse_does_not_rebind_old_scope_or_erase_debt` | P (control, 20) admitted by R and reaped, its holding of 20 returned to R; a new process in its slot, at the next generation, is created with its thread, and `admit` of that thread with control 20: ok, where the prototype's old scope still held the reservation (`AdmissionRejected`); an `admit` of the reference of P's old thread is `err=StaleReference` | `admit`; `ledger::release` of the budget-ledger component; `ObjectTable::resolve` of the objects component |
@@ -1059,7 +1107,7 @@ thread in a table of two processes and three threads.
 
 | Vector | Line | Test | Expected output | Entry |
 | --- | ---: | --- | --- | --- |
-| `activation-1` | 4 | `simultaneous_claims_preserve_unique_thread_and_cpu_ownership` | Not applicable as written: activation on four CPUs belongs to the multicore components (planned). On one CPU its rule is the one of [Blocking and readiness](#blocking-and-readiness): a thread is the current thread of at most one CPU, and a running thread is in no run queue, so `choose` never takes it a second time; with a thread running, `choose` is `err=InvalidState`. The states dying and dead of a process are the lifecycle component's | `choose`; the multicore and lifecycle components |
+| `activation-1` | 4 | `simultaneous_claims_preserve_unique_thread_and_cpu_ownership` | One case, on one CPU with the round-robin fixture: a admitted; `choose(0)` gives a; `choose(0)` while a runs is `err=InvalidState` and changes nothing, so a running thread, which is in no run queue, is not taken a second time ([Blocking and readiness](#blocking-and-readiness)). The claims of four threads on four CPUs belong to the multicore components (planned), and the states dying and dead of a process to the lifecycle component; they are not applicable here and have no line | `admit`, `choose`; the multicore and lifecycle components |
 | `activation-2` | 44 | `a_stale_stop_cannot_release_a_migrated_or_restarted_dispatch` | Not applicable: migration between CPUs belongs to the multicore components; on one CPU a dispatch is that of the current thread, and the stops act on the current dispatch, so a stop with a stale receipt does not exist | None |
 | `activation-3` | 58 | `serialized_and_parallel_claims_cannot_bypass_each_other` | a and b admitted with the round-robin fixture. `choose(0)` gives a; `choose(0)` while a runs is `err=InvalidState`; `yield_now(1)`; `choose(1)` gives b; `choose(1)` while b runs is `err=InvalidState`; `yield_now(2)`; `choose(2)` gives a; `yield_now(3)`. So no thread runs beside the current one; the activation on other CPUs belongs to the multicore components | `admit`, `choose`, `yield_now` |
 | `activation-4` | 72 | `activation_generation_exhaustion_and_foreign_receipts_are_retained` | Not applicable: there is no activation serial and no receipt of an activation | None |
@@ -1075,7 +1123,7 @@ premises ([Platform parameters and time](#platform-parameters-and-time)).
 
 | Vector | Line | Test | Expected output | Entry |
 | --- | ---: | --- | --- | --- |
-| `abi-clock-1` | 24 | `frequency_is_nonzero_bounded_and_fixed_for_the_boot` | The parameters of the budget fixture taken as seconds: `TIME_SLICE` 1,000,000, `REPLENISH_PERIOD` 100,000,000, the caps 20,000,000, 50,000,000 and 20,000,000 and `KERNEL_MARGIN` 10,000,000 microseconds. The counter frequency 0 is `err=InvalidConfiguration` of `Ledger::new`; $2^{64} - 1$ is `err=Overflow` of `Ledger::new`, since the period does not fit 64 bits in ticks; 1, 25, 54,000,000, $2^{32} - 1$ and $2^{32}$ pass `Ledger::new` and `validate_parameters`, the time slice taking as many ticks as the frequency and the period a hundred times as many. The prototype's bound of $2^{32}$ on the frequency does not apply, and its query, which returned the frequency, does not exist | `validate_parameters`; `Ledger::new` of the budget-ledger component |
+| `abi-clock-1` | 24 | `frequency_is_nonzero_bounded_and_fixed_for_the_boot` | The parameters of the budget fixture taken as seconds: `TIME_SLICE` 10,000,000, `REPLENISH_PERIOD` 100,000,000, the caps 20,000,000, 50,000,000 and 20,000,000 and `KERNEL_MARGIN` 10,000,000 microseconds. The counter frequency 0 is `err=InvalidConfiguration` of `Ledger::new`; $2^{64} - 1$ is `err=Overflow` of `Ledger::new`, since the period does not fit 64 bits in ticks; 1, 25, 54,000,000, $2^{32} - 1$ and $2^{32}$ pass `Ledger::new` and `validate_parameters`, the time slice taking ten times as many ticks as the frequency and the period a hundred times as many. The prototype's bound of $2^{32}$ on the frequency does not apply, and its query, which returned the frequency, does not exist | `validate_parameters`; `Ledger::new` of the budget-ledger component |
 | `abi-clock-2` | 42 | `repeated_samples_preserve_all_tick_bits_without_rebasing` | Not applicable: there is no query of the clock; that `now` stays below $2^{63}$ and never decreases is a premise | None |
 | `abi-clock-3` | 58 | `regression_fails_without_clamping_or_changing_the_last_sample` | Not applicable: there is no query of the clock, and time that goes backwards does not occur, a premise | None |
 | `abi-clock-4` | 74 | `every_unused_register_is_checked_at_full_width` | Not applicable: there is no such operation; the form of the arguments of an operation belongs to the ABI dispatch | None |
@@ -1083,7 +1131,7 @@ premises ([Platform parameters and time](#platform-parameters-and-time)).
 | `abi-clock-6` | 122 | `observation_handle_cannot_impersonate_the_captured_caller` | Not applicable: there is no such operation, and the caller of an operation is the running thread, not a handle | None |
 | `abi-clock-7` | 133 | `foreign_and_reused_thread_handles_are_rejected` | Not applicable: there is no such operation | None |
 | `abi-clock-8` | 159 | `running_blocked_and_terminal_callers_cannot_query` | Not applicable: there is no such operation, and EL0 reads the counter without a call | None |
-| `abi-clock-9` | 184 | `callers_share_one_guard_without_needing_capability_or_resource_slots` | Not applicable: there is no query and no guard of the last sample; that `now` never decreases within a boot is a premise of the adapter that reads the counter | None |
+| `abi-clock-9` | 184 | `callers_share_one_guard_without_needing_capability_or_resource_slots` | Not applicable: there is no query and no guard of the last sample; that `now` never decreases within a boot is a premise of the architecture crate, which reads the counter | None |
 | `abi-clock-10` | 206 | `queried_ticks_and_frequency_construct_an_exact_notification_deadline` | EL0 reads the count 100 and the frequency 25, and builds the deadline $100 + \lceil 25/25 \rceil = 101$ in the count of `now`. A wait on a notification with that deadline at 100 does not expire at 100 and times out at 101, and a wait at 101 with the deadline 101 times out at once, as the waits component's expiry states; between 100 and 101 the composer passes 101 as the external deadline, so `choose(100, 101)` with a ready thread gives a deadline of at most 101 | `choose`; the waits component, for the wait |
 
 ### Vectors of other pages
@@ -1094,9 +1142,9 @@ premises ([Platform parameters and time](#platform-parameters-and-time)).
 `activation_is_single_owner_and_never_schedules_a_blocked_or_dead_thread`,
 is frozen there and replayed here, and the count of 86 leaves it out. Its
 rule is that of [Blocking and readiness](#blocking-and-readiness): with a
-running, `choose` is `err=InvalidState`, so a second thread does not run
-beside it; a blocked thread and a removed one are in no run queue and are
-never chosen. A wait begins only by a call of the running thread itself,
+thread running, `choose` is `err=InvalidState`, so a second thread does not
+run beside it; a blocked thread and a removed one are in no run queue and
+are never chosen. A wait begins only by a call of the running thread itself,
 which then blocks with `block`, so the prototype's refusal to begin a wait
 of a running thread (`InvalidState`) is the converse of the rule here; its
 activation and quiescence (`Busy`, `InvalidState`) do not apply. The entry

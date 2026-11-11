@@ -193,11 +193,11 @@ own while it runs, and a blocked thread becomes ready only when its wait
 completes; this component never wakes one by itself. A removed thread is
 never chosen again, whatever state it was removed in, and only a ready
 thread is chosen, so a thread runs on at most one CPU at a time. Each
-transition in another state than its entry needs is refused and changes
-nothing. The criterion: a waiting thread without a deadline stays blocked
-until it is made ready, a ready, a running and a blocked thread can each
-be removed, a second wake and a wake of a removed or stale thread are
-refused, and a thread can be made ready while another runs.
+transition from a state other than the one that its entry needs is refused
+and changes nothing. The criterion: a waiting thread without a deadline
+stays blocked until it is made ready, a ready, a running and a blocked
+thread can each be removed, a second wake and a wake of a removed or stale
+thread are refused, and a thread can be made ready while another runs.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `scheduler::block`, `scheduler::enqueue` and
@@ -375,11 +375,8 @@ vectors of refusals hold.
 - [Terms](contract.md#terms): definitions only.
 - [Extractability](contract.md#extractability) states the module, its layer
   and its adapter, which no requirement observes.
-- [Check and execute](contract.md#check-and-execute),
-  [Determinism](contract.md#determinism) and
-  [State fields](contract.md#state-fields) bind the code without an
-  observable behaviour of their own; the errors of
-  [Errors](contract.md#errors) are those of the requirements above.
+- [State fields](contract.md#state-fields) binds the code without an
+  observable behaviour of its own.
 - [Work bounds](contract.md#work-bounds) states the bounds that
   [Liveness, time and performance](#liveness-time-and-performance) relies
   on.
