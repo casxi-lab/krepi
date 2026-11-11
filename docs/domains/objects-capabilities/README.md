@@ -17,12 +17,14 @@ Three limits bound the domain. The kernel allocates no object memory after
 boot: every pool and table has the capacity that the boot fixes, so what
 EL0 can create is bounded by the capacity record and by the quotas that
 divide it. A generation is 64 bits wide inside the kernel and 48 bits wide
-in a handle, so a slot of a pool retires after $2^{64} - 1$ occupants and a
-slot of a capability table after $2^{48} - 1$, and a retired slot is never
-used again in the same boot. Revocation and destruction proceed in steps of
-bounded work, so the time until they complete grows with the size of what
-they withdraw, while every step stays short. A result on one CPU does not
-show the order in which several CPUs reach shared objects.
+in a handle. A slot of a pool retires after $2^{64} - 1$ occupants and is
+not used again before the next boot. A slot of a capability table retires
+after $2^{48} - 1$ capabilities of one process and stays retired while that
+process occupies the process slot of the table; a new process counts the
+generations of the table from 1. Revocation and destruction proceed in
+steps of bounded work, so the time until they complete grows with the size
+of what they withdraw, while every step stays short. A result on one CPU
+does not show the order in which several CPUs reach shared objects.
 
 The domain builds on others, listed in the
 [subject-domain index](../README.md). The memory and address-spaces domain
@@ -36,10 +38,11 @@ directory and of device grants; the EL0 services and storage domain builds
 the root's grants and process creation on these objects. The
 [objects](objects/requirements.md) component holds the kinds and pools, the
 identities and generations, the capacity record, the metadata quotas and
-the write-set transactions. The capability tables of the core hold handles,
-rights, delegation and revocation; the creation and the lifecycle state
-machine of the core hold the creation of objects and the lifetimes of
-processes and threads.
+the write-set transactions. The [capabilities](capabilities/requirements.md)
+component holds the capability tables with their handles and rights, and
+delegation and revocation. The creation and the lifecycle state machine of
+the core hold the creation of objects and the lifetimes of processes and
+threads.
 
 ## Conventions
 
@@ -70,12 +73,12 @@ processes and threads.
 | --- | --- | --- | --- |
 | [Object table](#object-table) | The kinds of kernel objects, their pools and slots, and the records that are not objects | - | [objects](objects/requirements.md) |
 | [Boot-time capacities](#boot-time-capacities) | The capacity record, its checks and defaults, and the storage that the boot carves for the object table | - | [objects](objects/requirements.md) |
-| [Generations](#generations) | The generations of slots, their retirement, the references inside the kernel and the generations in handles | - | [objects](objects/requirements.md); the capability tables of the core, for handles |
+| [Generations](#generations) | The generations of slots, their retirement, the references inside the kernel and the generations in handles | - | [objects](objects/requirements.md); [capabilities](capabilities/requirements.md), for handles |
 | [Metadata quotas](#metadata-quotas) | Calling domains and owners, the seven quota items, split and returned limits, and the conservation of usages | - | [objects](objects/requirements.md) |
 | [Write-set transactions](#write-set-transactions) | Check, then execute; the write set of an entry, its buffer, its write-back and its failure | - | [objects](objects/requirements.md) |
 | [Process and thread lifetimes](#process-and-thread-lifetimes) | Creation, the states alive, dying, dead and reaped, exit reasons, destruction in bounded steps and reaping | - | The creation and the lifecycle state machine of the core |
-| [Capability tables](#capability-tables) | The capability table of each process, handles, rights and lookup | - | The capability tables of the core |
-| [Delegation and revocation](#delegation-and-revocation) | Copy, derivation and transfer of capabilities, badges, close, and revocation in two phases | - | The capability tables of the core |
+| [Capability tables](#capability-tables) | The capability table of each process, handles, rights and lookup | - | [capabilities](capabilities/requirements.md) |
+| [Delegation and revocation](#delegation-and-revocation) | Copy, derivation and transfer of capabilities, badges, close, and revocation in two phases | - | [capabilities](capabilities/requirements.md) |
 
 ## Object table
 
@@ -187,13 +190,17 @@ does not fit.
 
 **Description.** Every slot of a pool and of a capability table has a
 generation, which starts at 1, stays while the slot is occupied and grows
-by one when the slot is freed. A slot whose generation reaches its maximum
-retires when it is freed and is not used again before the next boot.
-Inside the kernel, a reference is a pool, a slot and a 64-bit generation; a
-handle of EL0 is a 64-bit value of the slot number of the caller's table
-and the generation of that slot, and the value 0 is never a valid handle.
-A reference or a handle whose generation is not that of its slot names
-nothing: its use fails with a fixed error and changes no state.
+by one when the slot is freed. A slot of a pool whose generation reaches
+its maximum retires when it is freed and is not used again before the next
+boot. The generations of a capability table count for the process that
+occupies its process slot: a slot of the table that retires stays retired
+while that process occupies the process slot, and a new process finds
+every slot of the table at generation 1. Inside the kernel, a reference is
+a pool, a slot and a 64-bit generation; a handle of EL0 is a 64-bit value
+of the slot number of the caller's table and the generation of that slot,
+and the value 0 is never a valid handle. A reference or a handle whose
+generation is not that of its slot names nothing: its use fails with a
+fixed error and changes no state.
 
 **Design background.** A generation that never wraps keeps a stale name from
 matching a later occupant of its slot, without a global counter that other
@@ -211,7 +218,8 @@ observable outputs of the
 
 **Prerequisites.** [Object table](#object-table),
 [Capability tables](#capability-tables); the
-[objects contract](objects/contract.md#identities-and-generations).
+[objects contract](objects/contract.md#identities-and-generations) and the
+[capabilities contract](capabilities/contract.md#handles).
 
 **Engineering notes.** Retired slots are counted apart: free, allocated and
 retired slots add up to the capacity. The generations of ASIDs are of the
@@ -364,7 +372,8 @@ waits domain.
 **Engineering notes.** A process has one thread, created with it, which is
 a limit of the implementation and not of the identities. The capability
 table of a dying process is closed in steps of at most as many entries as a
-step of revocation removes.
+step of revocation removes
+([teardown](capabilities/contract.md#teardown-of-a-table)).
 
 **Verification.** Invariants: a process is reaped only after its children;
 its exit reason never changes once set. Required counterexamples: a reap
@@ -385,7 +394,8 @@ liveness of the object, and then the rights; a lookup that fails returns a
 fixed error and changes no state. Each kind of object that EL0 holds has
 its set of rights; the rights of a process include control, observation
 and the creation right. A capability whose object has gone stays in its
-slot, and fails every lookup, until its holder closes it.
+slot, and fails every operation that uses its object, until its holder
+closes it.
 
 **Design background.** Handles that name slots of the caller's own table
 depend only on the caller's state, so they leak nothing about other
@@ -398,14 +408,19 @@ holds the first capabilities; the services, which hold their endpoints.
 
 **Interface.** Handles as the arguments of operations; the errors of a slot
 out of range, an empty slot, a stale generation, another type, an object
-that is gone and missing rights, in this order.
+that is gone and missing rights, in this order
+([lookup](capabilities/contract.md#lookup)).
 
 **Prerequisites.** [Generations](#generations),
-[Object table](#object-table).
+[Object table](#object-table); the
+[capabilities contract](capabilities/contract.md#rights).
 
 **Engineering notes.** A table has at most 65,536 slots, so a handle holds
-a 16-bit slot number and a 48-bit generation. The tables are per-process
-state.
+a 16-bit slot number and a 48-bit generation. A lookup checks at most 16
+ancestors of the capability for a pending revocation. The tables are
+per-process state, classified in the
+[State fields](capabilities/contract.md#state-fields) of the capabilities
+contract.
 
 **Verification.** Invariants: a lookup succeeds only for a filled slot of
 the caller's table at its generation with the rights asked. Required
@@ -444,20 +459,26 @@ supervisors that withdraw the authority of a session.
 
 **Interface.** Copy, derivation, `close` and `revoke` on handles of the
 caller's table, each with the slot that it fills where it creates a
-capability; the transfer of capabilities with a message. A pending
+capability; the transfer of capabilities with a message
+([entry points](capabilities/contract.md#entry-points)). A pending
 revocation is a state of the capability that started it; operations on its
 subtree fail with an error of their own.
 
 **Prerequisites.** [Capability tables](#capability-tables),
 [Write-set transactions](#write-set-transactions); the IPC of the IPC and
 waits domain for transfer, and the device grants of the devices and DMA
-domain, whose mappings a revocation drains.
+domain, whose mappings a revocation drains; the
+[capabilities contract](capabilities/contract.md#revocation).
 
-**Engineering notes.** A step of revocation removes a bounded number of
-capabilities, each with a bounded walk of the tree; an interrupt that is
-pending at a preemption point stores the progress in the capability that
-started the revocation, and the interrupted call continues from it. The
-depth of derivation has a bound of its own.
+**Engineering notes.** A step of revocation removes at most four
+capabilities, each with a walk of the tree of at most 16 entries; the
+progress stays in the capability that started the revocation and in the
+subtree that remains, so an interrupt that is pending at a preemption point
+ends the call, which is dispatched again and continues from it. A
+capability has at most 16 live ancestors when it is made. The derivation
+links and the revocation mark are per-process state, classified in the
+[State fields](capabilities/contract.md#state-fields) of the capabilities
+contract.
 
 **Verification.** Invariants: a derived capability has at most the rights
 of its source; after completion the subtree holds no usable capability and

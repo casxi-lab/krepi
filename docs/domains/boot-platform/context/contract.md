@@ -9,10 +9,11 @@ the FP/SIMD and TLS registers of EL0 at an entry from EL0 and at the
 return to it, with the switch of `CPACR_EL1.FPEN` that they need. The
 entry from EL0 and the return to it, which save and restore the general
 registers and call the save and the restore of this page, follow the rules
-of the address-space component of the [memory](../../memory/README.md)
-domain (planned). The observable behaviour that these rules serve, with its
-evidence, is in the [requirements](requirements.md), the other document of
-the component.
+of the
+[address-space](../../memory/address-space/contract.md#entry-and-return)
+component of the [memory](../../memory/README.md) domain. The observable
+behaviour that these rules serve, with its evidence, is in the
+[requirements](requirements.md), the other document of the component.
 
 ## Terms
 
@@ -34,8 +35,9 @@ the component.
 - **Bounds.** `context::Bounds` (planned): the code range
   `[code_start, code_start + code_len)` and the stack range
   `[stack_start, stack_start + stack_len]` of a thread, against which
-  `validate` checks a context. The address-space component gives them,
-  inside the EL0 window of the process (planned).
+  `validate` checks a context. The
+  [address-space](../../memory/address-space/contract.md#el0-address-layout)
+  component gives them, inside the EL0 window of the process.
 - **FP window.** The instructions of an entry from EL0 up to the point at
   which the save sets `CPACR_EL1.FPEN` to `0b00`, and those of a return to
   EL0 from the point at which the restore sets it to `0b11`: the only
@@ -63,8 +65,8 @@ its layout, the constants of its values, `Context::new`, `Bounds::new`,
 | `context::Context` with the offset constants of its fields (planned) | Value type and constants, host-testable | The modules of the core above it that hold or pass the saved context of a thread (planned); `krepi_arch::fpsimd` and the entry from EL0 and the return to EL0 of `krepi_arch` (planned), for the offsets | [Layout](#layout) |
 | `context::USER_PSTATE`, `NZCV_MASK`, `DEFAULT_FPCR` and `DEFAULT_FPSR` (planned) | Constants, host-testable | The entries of this page; the module `creation` of the core (planned) | [Initial context](#initial-context), [Validation](#validation) |
 | `Context::new` (planned) | Function that writes nothing, host-testable | The module `creation` of the core (planned), for each new thread, the first thread of the first process at boot among them | [Initial context](#initial-context) |
-| `Bounds::new` (planned), with the value types `context::Bounds` and `context::Error` | Function that writes nothing, host-testable | The callers of `validate`, `set_return_values` and `set_return_registers`, with the code and stack ranges of the thread that the address-space component gives (planned) | [Validation](#validation) |
-| `Context::validate` (planned) | Read entry, host-testable | The return to EL0, for the saved context of the thread that is to run, before the restore, by the module that the address-space component names as the composer of the return (planned); the module `creation` of the core (planned), for an initial context | [Validation](#validation) |
+| `Bounds::new` (planned), with the value types `context::Bounds` and `context::Error` | Function that writes nothing, host-testable | The callers of `validate`, `set_return_values` and `set_return_registers`, with the code and stack ranges of the thread that the [address-space](../../memory/address-space/contract.md#el0-address-layout) component gives | [Validation](#validation) |
+| `Context::validate` (planned) | Read entry, host-testable | The return to EL0, for the saved context of the thread that is to run, before the restore, by the module that the [address-space](../../memory/address-space/contract.md#entry-and-return) component names as the composer of the return (planned); the module `creation` of the core (planned), for an initial context | [Validation](#validation) |
 | `Context::set_return_values` and `Context::set_return_registers` (planned) | Write entries, host-testable | A completer: the module `dispatch` of the core (planned), for a call that returns at once; the modules of the core that complete wait records (planned), in their own transactions | [Results of a call](#results-of-a-call) |
 | `__fpsimd_save` and `__fpsimd_restore` in `kernel/arch/src/fpsimd.S` (planned) | Assembly routines | `__fpsimd_save`: the entry from EL0 of `krepi_arch` (planned), after it saved the general registers and before any Rust code; `__fpsimd_restore`: the return to EL0 of `krepi_arch` (planned), after `validate` passed for the context and the address space of its process is loaded, before the general registers are loaded | [FP/SIMD and TLS state](#fpsimd-and-tls-state) |
 
@@ -135,8 +137,9 @@ value with which the kernel creates it:
   debug exception at EL0, since `PSTATE.D` masks none whose target
   Exception level is higher than the current one: the debug exceptions of
   EL0, other than those of `BRK`, which are always enabled, follow the
-  enables of `MDSCR_EL1`, which the EL0 controls of the address-space
-  component fix (planned); NZCV and every other bit are 0;
+  enables of `MDSCR_EL1`, which the
+  [EL0 controls](../../memory/address-space/contract.md#el0-controls)
+  of the address-space component fix; NZCV and every other bit are 0;
 - `fpcr` is `DEFAULT_FPCR`, `0x0000_0000`, and `fpsr` is `DEFAULT_FPSR`, 0.
 
 `DEFAULT_FPCR` gives every field of FPCR the value 0: RMode `0b00`, round
@@ -160,10 +163,10 @@ thread takes the slot of a destroyed one.
 
 `Bounds::new(code_start, code_len, stack_start, stack_len)` and
 `Context::validate` check a context against the ranges of its thread. The
-address-space component gives the ranges, inside the EL0 window of the
-process (planned); these entries do not check the window themselves. The
-rules, in the order in which the entries check them, each with its error
-of `context::Error`:
+[address-space](../../memory/address-space/contract.md#el0-address-layout)
+component gives the ranges, inside the EL0 window of the process; these
+entries do not check the window themselves. The rules, in the order in
+which the entries check them, each with its error of `context::Error`:
 
 | Rule | Statement | Error | Entry |
 | ---: | --- | --- | --- |
@@ -181,8 +184,9 @@ of `context::Error`:
   vector registers, FPCR and FPSR may hold any value.
 - A context that fails `validate` is never restored: the return to EL0
   executes no `ERET` with it, and the process of the thread ends by a user
-  fault, by the rules of the address-space component and of the component
-  that terminates processes (planned).
+  fault, by the rules of the
+  [address-space](../../memory/address-space/contract.md#user-faults)
+  component and of the component that terminates processes (planned).
 - Rule 5 refuses the context of a thread that left `PSTATE.SSBS`, bit 12,
   set at EL0. The Cortex-A76 of both boards implements FEAT_SSBS, under
   which `MSR SSBS, #<imm>` sets or clears the bit at EL0. It does not
@@ -194,8 +198,9 @@ of `context::Error`:
 - Apart from SSBS, the only bits of PSTATE that EL0 can change directly on
   the Cortex-A76 are NZCV and DAIF: the core implements none of FEAT_DIT,
   FEAT_BTI and FEAT_MTE, whose fields of PSTATE EL0 could otherwise
-  change. With `SCTLR_EL1.UMA` 0, which the EL0 controls of the
-  address-space component fix (planned), an access of EL0 to `DAIF` traps
+  change. With `SCTLR_EL1.UMA` 0, which the
+  [EL0 controls](../../memory/address-space/contract.md#el0-controls)
+  of the address-space component fix, an access of EL0 to `DAIF` traps
   with the exception class `0x18` and changes nothing. So the SPSR that an
   entry from EL0 saves differs from `USER_PSTATE` only in NZCV and SSBS,
   unless the kernel changed it, and rule 5 refuses it exactly when its
@@ -308,8 +313,9 @@ and from one context in a fixed order. The specification of the component
 (planned) leaves no choice open either, so no entry of the register of
 [permitted nondeterminism](../../../security.md#permitted-nondeterminism)
 applies to it. Which instruction an interrupt interrupts, and so the values
-that a save finds, follows from when the interrupt arrives, which the entry
-from EL0 of the address-space component accounts for (planned).
+that a save finds, follows from when the interrupt arrives, which the
+[determinism](../../memory/address-space/contract.md#determinism)
+of the address-space component accounts for.
 
 ## State fields
 

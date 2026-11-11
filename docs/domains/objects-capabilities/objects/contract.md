@@ -7,7 +7,8 @@ the pools, the object part of the capacity record and the storage that the
 boot carves for it, the metadata quotas of the calling domains, and the
 write-set transactions through which the entries of the core change kernel
 state. The capability tables, which name objects to EL0, belong to the
-module `capabilities` of the core (planned); the creation of objects and the
+[capabilities](../capabilities/contract.md) component, the module
+`capabilities` of the core (planned); the creation of objects and the
 lifetimes of processes and threads belong to the modules `creation` and
 `lifecycle` (planned), which compose the entries of this page. The
 observable behaviour that these rules serve, with its evidence, is in the
@@ -83,8 +84,9 @@ observable behaviour that these rules serve, with its evidence, is in the
 The entries of the core are in the module `objects` of `krepi-kernel`
 (planned). No entry of this page is an operation of the ABI inventory: the
 operations that create objects, and those that copy, derive, close and
-revoke capabilities, belong to the creation and capabilities components,
-which compose these entries.
+revoke capabilities, belong to the creation and
+[capabilities](../capabilities/contract.md#entry-points) components, which
+compose these entries.
 
 | Entry point | Kind | Called by | ABI operation | Rules |
 | --- | --- | --- | --- | --- |
@@ -93,7 +95,7 @@ which compose these entries.
 | `ObjectTable::resolve` (planned) | Read entry, host-testable | Every module of the core that follows a reference: `capabilities`, `waits`, `ipc`, `vm`, `lifecycle`, `creation` and `dispatch` (planned) | None | [Identities and generations](#identities-and-generations) |
 | `ObjectTable::choose` (planned) | Read entry, host-testable | The module `creation` and the boot of the root by the kernel root (planned), in their checks | None | [Identities and generations](#identities-and-generations), [Determinism](#determinism) |
 | `ObjectTable::occupy` and `ObjectTable::release` (planned) | Write entries on the copies of a write set, host-testable | `occupy`: the module `creation` and the boot of the root; `release`: the module `lifecycle`, for a process and its thread when they are reaped, and for the endpoints and notifications of an owner that is destroyed, in the steps of its destruction; and the module `capabilities`, for an endpoint or a notification whose last capability of its current generation is deleted (planned) | None | [Identities and generations](#identities-and-generations), [Metadata quotas](#metadata-quotas), [Write-set transactions](#write-set-transactions) |
-| `QuotaRecord::check`, `charge`, `credit`, `split`, `merge` and `start_root` (planned) | A read entry and write entries on the copies of a write set, host-testable | `check`, `charge` and `split`: the module `creation`; `credit` and `merge`: the module `lifecycle`; `charge` and `credit` of capability slots: the module `capabilities`; of committed VM pages and of private pages of loaded images: the VM and loading components; `charge` and `start_root`: the boot of the root by the kernel root (planned), `charge` for the root's pair in the control usage of the kernel domain | None | [Metadata quotas](#metadata-quotas) |
+| `QuotaRecord::check`, `charge`, `credit`, `split`, `merge` and `start_root` (planned) | A read entry and write entries on the copies of a write set, host-testable | `check`, `charge` and `split`: the module `creation`; `credit` and `merge`: the module `lifecycle`; `charge` and `credit` of capability slots, and `credit` of endpoints and notifications at their last capability: the module `capabilities`; of committed VM pages and of private pages of loaded images: the VM and loading components; `charge` and `start_root`: the boot of the root by the kernel root (planned), `charge` for the root's pair in the control usage of the kernel domain | None | [Metadata quotas](#metadata-quotas) |
 | `WriteSet::stage`, `commit` and `discard` (planned) | Write entries on the write-set buffer of the executing CPU, host-testable | Every entry of the core that changes more than one item (planned) | None | [Write-set transactions](#write-set-transactions) |
 | `ObjectTable::counts` and `QuotaRecord::usage` (planned) | Read entries, host-testable | The modules `creation` and `lifecycle` (planned), and the tests | None | [Identities and generations](#identities-and-generations), [Metadata quotas](#metadata-quotas) |
 
@@ -179,11 +181,14 @@ that counts it, and a creator:
 - **Slots.** A slot records its state, its generation and, while allocated,
   its owner; the fields of its object are those of the kind's component. A
   process slot also holds the quota record of the process
-  ([Metadata quotas](#metadata-quotas)). The owner of a thread is the owner
-  of its process, which the thread records besides the reference of its
-  process. The capability table and the VM region table of a process are
-  those of its process slot: their storage holds one table of each for every
-  slot of the process pool.
+  ([Metadata quotas](#metadata-quotas)), and every slot of the five carved
+  pools and of the device directory holds the count of capabilities of its
+  object, a field of the
+  [capabilities](../capabilities/contract.md#capability-counts) component.
+  The owner of a thread is the owner of its process, which the thread
+  records besides the reference of its process. The capability table and
+  the VM region table of a process are those of its process slot: their
+  storage holds one table of each for every slot of the process pool.
 - **Threads.** Since a process has one thread, the thread pool holds at most
   as many allocated slots as the process pool; a thread capacity above the
   process capacity leaves the rest of the thread pool unused.
@@ -253,8 +258,7 @@ requires.
 - **References.** A reference names the object that its slot holds at its
   generation. A reference is never a handle of EL0: handles name slots of
   capability tables, and the capability entry holds the reference of its
-  object
-  ([handles](../../../architecture.md#kernel-objects-and-capabilities)).
+  object ([handles](../capabilities/contract.md#handles)).
 - **Generations.** Every slot of a pool starts free at generation 1. An
   occupation makes a free slot allocated and leaves its generation as it
   is, so the new object's reference carries the generation of the slot. A
@@ -270,8 +274,9 @@ requires.
   the two are equal the slot is allocated and holds an object of the kind
   of its pool. A reference in a capability entry goes stale lazily: the
   release of its slot raises the current generation above the reference,
-  and every lookup compares them. The generations of ASIDs are not
-  generations of this page and are not covered by this rule.
+  and every [lookup](../capabilities/contract.md#lookup) compares them.
+  The generations of ASIDs are not generations of this page and are not
+  covered by this rule.
 - **Resolution.** `resolve(reference, kind)` gives the slot of a live
   reference to an object of the kind. It checks in this order and returns
   the first error: the pool number is the number of the pool of the kind
@@ -617,7 +622,7 @@ The prototype's object pool had sixteen errors. Here:
 | `InvalidConfiguration` | Kept, for the checks of the capacity record and of the storage |
 | `WrongPool` | Kept, for a reference or pool number of another pool |
 | `StaleHandle` | Renamed `StaleReference`: references are not handles |
-| `PermissionDenied` | Moved to the capabilities component: rights live in capability entries, and a reference carries none |
+| `PermissionDenied` | Moved to the [capabilities](../capabilities/contract.md#errors) component: rights live in capability entries, and a reference carries none |
 | `QuotaExceeded` | Kept, for the caller's quota |
 | `PoolExhausted` | Kept, for shared capacity |
 | `GenerationExhausted` | Not kept: a slot retires instead of the whole pool, and a range without a free slot is `PoolExhausted` |
@@ -688,7 +693,8 @@ The prototype's object pool had sixteen errors. Here:
   which is the rule for slots of the security model's
   [internal choices](../../../security.md#internal-choices); a retired slot
   is never chosen. The slot of a capability is the caller's choice, a rule
-  of the capabilities component.
+  of the [capabilities](../capabilities/contract.md#determinism)
+  component.
 - **Generations.** The generation of a new object is the generation of its
   slot, which follows from the slot's history alone.
 - **Quotas.** Charges, credits, splits and merges are fixed arithmetic on
@@ -720,7 +726,10 @@ The component leaves no other choice open.
 
 The fields of the objects in the slots, the capability tables, the VM
 region tables and the count of capabilities of each object are fields of
-the components that define them, which classify them in their contracts.
+the components that define them, which classify them in their contracts;
+the capability tables and the counts are in the
+[State fields](../capabilities/contract.md#state-fields) of the
+capabilities contract.
 The page ownership table that holds the storage is a field of the
 [page-tables](../../memory/page-tables/contract.md#state-fields) component.
 
@@ -925,7 +934,7 @@ steps the row assigns to their components.
 | `objects-4` | 72 | `thread_exhaustion_leaves_free_process_slot_unpublished` | Table `processes=2 threads=2 reserved_threads=1`, whose ordinary range of threads has one slot, with one ordinary pair: the checks of a second ordinary pair give `err=PoolExhausted` for the thread pool, before any write and any fault-injection point; the counts are unchanged and process slot 1 stays free. The prototype's table of 2 processes and 1 thread fails check 3 of the capacity record | `choose`, `counts` |
 | `objects-5` | 86 | `control_reserve_requires_pool_bound_internal_authority` | Table `processes=2 threads=2 reserved_processes=1 reserved_threads=1` with one ordinary pair: an ordinary thread slot and an ordinary pair are each `err=PoolExhausted`; a control pair takes process slot 1 and thread slot 1, and 2 processes and 2 threads are allocated. The prototype's control token of another pool, `PermissionDenied`, does not apply | `choose`, `occupy`, `counts` |
 | `objects-6` | 110 | `bootstrap_is_explicit_and_all_reserved_pool_excludes_ordinary_allocations` | Table `processes=1 threads=1 reserved_processes=1 reserved_threads=1` with the first pool number 13: the root's pair, a control allocation of the kernel domain, gets `13:0:1` and `14:0:1`, references into the process and thread pools of the table; an ordinary pair is `err=PoolExhausted`; the root's process slot resolves. That the root is alive is the lifecycle component's state | `ObjectTable::new`, `choose`, `occupy`, `resolve` |
-| `objects-7` | 122 | `attenuated_receipts_cannot_regain_control_or_change_state` | A process and its thread, each named with only the right to observe: both can be queried; widening either to all rights is `PermissionDenied`; creating a thread, terminating the process, beginning a wait, terminating the thread and retaining a resource through them are each `PermissionDenied`; 1 process is allocated and stays alive | The capabilities component, which holds the rights: no entry of this page, since references carry no rights |
+| `objects-7` | 122 | `attenuated_receipts_cannot_regain_control_or_change_state` | A process and its thread, each named with only the right to observe: both can be queried; widening either to all rights is `PermissionDenied`; creating a thread, terminating the process, beginning a wait, terminating the thread and retaining a resource through them are each `PermissionDenied`; 1 process is allocated and stays alive | The [capabilities](../capabilities/contract.md#rights) component, which holds the rights and replays this vector: no entry of this page, since references carry no rights |
 | `objects-8` | 159 | `a_receipt_from_another_pool_cannot_name_a_matching_slot` | Two tables, each `processes=1 threads=1` with one pair, the first with the first pool number 1 and the second with 7, so that their pools have no number in common: the process reference `1:0:1` and the thread reference `2:0:1` of the first, resolved in the second, are each `err=WrongPool`. A wait ticket of the first, completed in the second, is `WrongPool` and leaves no pending wait there: a case of the waits component | `resolve`; the waits component, for the ticket |
 | `objects-9` | 257 | `all_wait_completion_orders_have_exactly_one_winner` | For each of the four outcomes signalled, timed out, cancelled and peer closed as the winner: during the wait, another begin and a take of the result are `WaitInProgress`; the previous ticket is `StaleWait`; the winner completes and each loser is `AlreadyCompleted`; the take gives the winner, and another take `StaleWait`; 4 completions | The waits component; no entry of this page |
 | `objects-10` | 345 | `repeated_command_cycles_retain_the_root_and_never_reuse_generation` | Property. Table `processes=8 threads=16 reserved_processes=1 reserved_threads=2` with the root's pair, a control allocation, in process slot 7 and thread slot 14. Rounds $n$ from 1 to 128: an ordinary pair is occupied and its slots are then released; it gets `1:0:<n>` and `2:0:<n>`, a generation larger than in every earlier round; the process reference of round $n - 1$ is `err=StaleReference`, and in round 1 there is none; after each round the counts equal those before the first and the root's slots are unchanged. At the end the audit counts of occupied and released process slots are 129 and 128. Lines `objects-10.1` to `objects-10.128`, one for each round: `process=<reference> thread=<reference> stale=<output>`, the output `-` in round 1; line `objects-10.129`: `occupied=129 released=128` | `choose`, `occupy`, `release`, `resolve`, `counts` |

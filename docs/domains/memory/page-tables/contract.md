@@ -71,8 +71,9 @@ the component.
   into them.
 - **Boot storage.** The spans, at most 4, that the board gives the boot
   memory map for what the firmware or the loader placed: the kernel image,
-  with its BSS and stacks, the device tree, and the boot bundle when it is
-  loaded as a file of its own.
+  with its BSS and stacks, the device tree, and the boot bundle, the
+  read-only segment of the image that the symbols of its link bound, as a
+  span of its own.
 - **Boot wiring.** The code of a board crate that runs on the boot CPU
   before the MMU is on: it builds the boot memory map, the kernel tables and
   the page ownership table, and turns the MMU on.
@@ -209,11 +210,12 @@ every alias in every table set together
    text of the image through `ReadExecute` in the lower kernel set and its
    copies, and the code of the boot bundle through `UserReadExecute` in an
    address space. Neither has a writable mapping, since the text has one
-   kind in every set that maps it and the pages of the boot bundle, a range
-   of their own or part of the image, are mapped by the kernel read-only or
-   executable only. No VM object carries the execute right and `mprotect`
-   cannot add it, so no page of a holder is mapped executable; a page that
-   becomes executable at run time comes with the full VM object model.
+   kind in every set that maps it and the pages of the boot bundle, a
+   segment of the image in a span of its own, are mapped by the kernel
+   read-only or executable only. No VM object carries the execute right
+   and `mprotect` cannot add it, so no page of a holder is mapped
+   executable; a page that becomes executable at run time comes with the
+   full VM object model.
 
 ### Kernel mappings
 
@@ -475,7 +477,7 @@ The page ownership table records one owner for every managed page:
 | Free | Pages that no one holds | `Ownership::new`, `cancel`, `release` |
 | Firmware | Every page that a firmware reservation touches, `no-map`, `reusable` or neither | `Ownership::new`; never changed |
 | Image | Every page of the boot storage of the kernel image, with its BSS, its stacks and the pools of the kernel tables | `Ownership::new`; never changed |
-| Boot storage | Every page of the other spans of boot storage, such as the device tree and a separately loaded boot bundle | `Ownership::new`; never changed |
+| Boot storage | Every page of the other spans of boot storage, such as the device tree and the boot bundle, a segment of the image in a span of its own | `Ownership::new`; never changed |
 | A holder, $\mathrm{held}(o, n, s)$ | The pages of one allocation or reservation: owner identity $o$, a 64-bit value that the holder's component gives, generation $n$ and state $s$, reserved or published | `assign`, `reserve`, `publish` |
 
 The holders of release 0.1 are the pools of the tables of address spaces,
@@ -629,10 +631,18 @@ records never change after it.
   2 MiB block that a usable range covers in part.
 - **Kernel tables.** Both pools are BSS of the image, so their pages are
   image pages. The pool of the direct map holds 80 tables and the pool of
-  the lower kernel set 16.
-- **The lower kernel set.** It needs 7 tables on QEMU virt and on the Pi 5
-  for an image within one 2 MiB block, the device tree, the console and the
-  interrupt controller, so 16 leave 9.
+  the lower kernel set 32.
+- **The lower kernel set.** On QEMU virt and on the Pi 5 it needs
+  $6 + \lceil (o + S) / 2\,\mathrm{MiB} \rceil$ tables: the root, a level 2
+  table for the 1 GiB slot of the image and the device tree, a level 3
+  table for each 2 MiB block that the image touches, one for the device
+  tree, and a level 2 table and two level 3 tables for the console and the
+  interrupt controller. $S$ is the size of the image with its boot bundle,
+  BSS, stacks and the pools of the kernel tables, and $o$ the offset of the
+  start of the image in its 2 MiB block, `0x80000` on the Pi 5 and 0 on
+  QEMU virt. An image within one 2 MiB block needs 7, so 32 leave 25. The
+  table pool of each address space has the same capacity, as
+  [copying the kernel tables](#copying-the-kernel-tables) requires.
 - **Beyond capacity.** The boot memory map admits maps whose ranges cover
   more blocks in part than 80 tables allow. `direct_map` then fails with
   `OutOfTables` in its check, before any write, and the boot stops.
