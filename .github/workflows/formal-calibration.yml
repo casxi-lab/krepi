@@ -13,7 +13,10 @@
 # use no secret. Each main command runs under `deadline.sh`, which passes a
 # cancellation on to it and turns workflow commands off while it prints;
 # each limit covers the deadline of its gate and the 300 s of its receipt.
-# The uploads hold the receipts, the summaries and the logs compressed.
+# The summaries, which print text of the receipts, turn workflow commands
+# off as well. The uploads hold the receipts, the summaries and the logs
+# compressed, and the list of survivors that a passing run of the mutants
+# wrote.
 # Actions are pinned to full commit SHAs; the comment names the release.
 name: formal calibration
 
@@ -175,6 +178,17 @@ jobs:
           GATE_OUTCOME: ${{ steps.gate.outcome }}
         run: |
           shopt -s nullglob
+          # The receipts hold text of Lean and Lake: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          logs=()
+          for file in artifacts/formal/job.txt artifacts/formal/check.txt artifacts/formal/runs/*/logs; do
+            if [ -e "$file" ]; then logs+=("$file"); fi
+          done
+          if [ "${#logs[@]}" -gt 0 ]; then
+            tar -czf artifacts/formal/logs.tar.gz "${logs[@]}"
+          fi
           receipts=(artifacts/formal/runs/*/receipt.json)
           {
             echo "## formal calibration: $KEY"
@@ -192,10 +206,6 @@ jobs:
               ' "$receipt"
             done
           } | tee artifacts/formal/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
-          logs=(artifacts/formal/runs/*/logs)
-          if [ "${#logs[@]}" -gt 0 ]; then
-            tar -czf artifacts/formal/logs.tar.gz "${logs[@]}"
-          fi
           if [ "${#receipts[@]}" = 0 ] && [[ "$GATE_OUTCOME" =~ ^(success|failure)$ ]]; then
             echo "the gate step ran and left no receipt" >&2
             exit 1
@@ -207,8 +217,6 @@ jobs:
         with:
           name: formal-calibration-${{ matrix.key }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: |
-            artifacts/formal/job.txt
-            artifacts/formal/check.txt
             artifacts/formal/summary.md
             artifacts/formal/logs.tar.gz
             artifacts/formal/runs/*/receipt.json
@@ -292,7 +300,25 @@ jobs:
           OUTCOME: ${{ steps.mutants.outcome }}
         run: |
           shopt -s nullglob
-          list=verification/qualification/calibration/mutants/calibration.json
+          # The receipts hold text of Lean and Lake: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          logs=()
+          for file in artifacts/formal/job.txt artifacts/formal/runs/*/logs; do
+            if [ -e "$file" ]; then logs+=("$file"); fi
+          done
+          if [ "${#logs[@]}" -gt 0 ]; then
+            tar -czf artifacts/formal/logs.tar.gz "${logs[@]}"
+          fi
+          # A run that fails writes no list, and the checkout may hold one
+          # of an earlier run, so only that of a passing run is read.
+          written=verification/qualification/calibration/mutants/calibration.json
+          list=artifacts/formal/mutants/calibration.json
+          if [ "$OUTCOME" = success ] && [ -f "$written" ]; then
+            mkdir -p artifacts/formal/mutants
+            cp "$written" "$list"
+          fi
           {
             echo "## formal calibration: mutants"
             echo
@@ -308,13 +334,9 @@ jobs:
             if [ -f "$list" ]; then
               jq -r '"- List: \(.generated) generated, \(.killed) killed, \(.survivors | length) survived, \(.unbuildable) do not build, \(.not_unique) without a text that occurs once"' "$list"
             else
-              echo "- No list of survivors"
+              echo "- No list of survivors from this run"
             fi
           } | tee artifacts/formal/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
-          logs=(artifacts/formal/runs/*/logs)
-          if [ "${#logs[@]}" -gt 0 ]; then
-            tar -czf artifacts/formal/logs.tar.gz "${logs[@]}"
-          fi
 
       - name: Upload the list of survivors, the receipt and the logs
         if: always()
@@ -322,8 +344,7 @@ jobs:
         with:
           name: formal-calibration-mutants-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: |
-            verification/qualification/calibration/mutants/calibration.json
-            artifacts/formal/job.txt
+            artifacts/formal/mutants/calibration.json
             artifacts/formal/summary.md
             artifacts/formal/logs.tar.gz
             artifacts/formal/runs/*/receipt.json

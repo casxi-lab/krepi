@@ -483,6 +483,10 @@ jobs:
           GATE_OUTCOME: ${{ steps.planned.outcome }}
         run: |
           shopt -s nullglob
+          # The receipts hold text of Lean and Lake: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
           receipts=(artifacts/formal/runs/*/receipt.json)
           {
             echo "## formal planned"
