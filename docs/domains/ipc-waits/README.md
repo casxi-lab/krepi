@@ -51,15 +51,16 @@ settlement of waits under revocation and at the release of their objects.
 
 ## Conventions
 
-- **Authority by capability.** Every operation of the domain acts through
-  a capability of the caller's own table, with the right that its contract
+- **Authority by capability.** Every operation of the domain acts through a
+  capability of the caller's own table, with the right that its contract
   states; RECEIVE on an endpoint is valid only for its bound thread. A
   receiver learns of its caller only the badge of the caller's capability,
   which the party that minted it chose; no word of a request changes it.
 - **Outcomes are not errors.** `Timeout`, `PeerClosed` and `Revoked` are
-  outcomes of a wait that was accepted, written into its result registers,
-  and so is `Cancelled`, the outcome of a kill, which no thread observes.
-  An error refuses its operation and changes no state.
+  outcomes of a wait that was accepted and are written into its result
+  registers; `Cancelled`, the outcome of a kill, is an outcome as well but
+  writes no result, since the killed thread never runs again. An error
+  refuses its operation and changes no state.
 - **One result.** A wait ends by its first completion, which writes its
   result into the saved context of its thread in that transition; the
   result never changes, and the woken thread only returns with it.
@@ -96,40 +97,39 @@ settlement of waits under revocation and at the release of their objects.
 ## Calls
 
 **Description.** An endpoint is an object that its creator owns. Its
-creation binds one receive thread, given by a capability to the thread
-with CONTROL, and the binding never changes. `call` sends a message of two
-64-bit words through a capability with SEND, with a deadline and at most
-one capability to transfer; `receive` takes a call through a capability
-with RECEIVE, which only the bound thread may use; `reply` answers a
-delivered call through its reply capability. A call that finds the bound
-thread waiting in `receive` is delivered to it at once, and otherwise joins
-the tail of the FIFO queue of the endpoint; a receive takes the first
-queued call without blocking, or else blocks as the receiver of the
-endpoint. A delivered call waits for its reply, and its caller lends its
-budget to the receiver, which serves that call and receives no other until
-it ends. A call or a receive ends by its reply or its delivery, or by an
-outcome: `Timeout` at its deadline, `Cancelled` when its thread is killed,
-`Revoked` when a capability through which it waits comes under revocation,
-and `PeerClosed` when its endpoint, its bound thread or the holder of its
-reply capability goes. A call to an endpoint whose bound thread is the
-caller is refused with `SelfCall`, and a call that would close a cycle,
-from the bound thread along the calls in which threads are blocked back to
-the caller, with `Cycle`; both change nothing. No operation closes an
-endpoint: it is released with its last capability or with its owner, and
-the calls on it end with `PeerClosed`. Replies are not fused with
-receives, and the kernel makes no direct switch to the receiver and no
-promise of latency.
+creation binds one receive thread, given by a capability to the thread with
+CONTROL, and the binding never changes. `call` sends a message of two 64-bit
+words through a capability with SEND, with a deadline and at most one
+capability to transfer; `receive` takes a call through a capability with
+RECEIVE, which only the bound thread may use; `reply` answers a delivered
+call through its reply capability. A call that finds the bound thread
+waiting in `receive` is delivered to it at once, and otherwise joins the
+tail of the FIFO queue of the endpoint; a receive takes the first queued
+call without blocking, or else blocks as the receiver of the endpoint. A
+delivered call waits for its reply, and its caller lends its budget to the
+receiver, which serves that call and receives no other until it ends. A call
+or a receive ends by its reply or its delivery, or by an outcome: `Timeout`
+at its deadline, `Cancelled` when its thread is killed, `Revoked` when a
+capability through which it waits comes under revocation, and `PeerClosed`
+when its endpoint, its bound thread or the holder of its reply capability
+goes. A call to an endpoint whose bound thread is the caller is refused with
+`SelfCall`, and a call that would close a cycle, from the bound thread along
+the calls in which threads are blocked back to the caller, with `Cycle`;
+both change nothing. No operation closes an endpoint: it is released with
+its last capability or with its owner; when its owner is destroyed, the
+calls on it end with `PeerClosed`. Replies are not fused with receives, and
+the kernel makes no direct switch to the receiver and no promise of latency.
 
-**Design background.** Synchronous calls with a short message in
-registers and a reply right made for each call follow the IPC of the L4
-family (Liedtke 1993) and of seL4. Binding one receive thread to each
-endpoint makes the receiver of a call known when the call is made, so the
-kernel can refuse a call that its receiver could never take: a process has
-one thread, and a thread blocked in a call does not receive. The binding is
-a reference that holds back no reclamation, and an endpoint whose bound
-thread has gone ends every call at once. Delivering calls in the order of
-their calls, and settling deadlines first, make each outcome a fixed rule
-of the [internal choices](../../security.md#internal-choices).
+**Design background.** Synchronous calls with a short message in registers
+and a reply right made for each call follow the IPC of the L4 family
+(Liedtke 1993) and of seL4. Binding one receive thread to each endpoint
+makes the receiver of a call known when the call is made, so the kernel can
+refuse a call that its receiver could never take: a process has one thread,
+and a thread blocked in a call does not receive. The binding is a reference
+that holds back no reclamation, and an endpoint whose bound thread has gone
+ends every call at once. Delivering calls in the order in which they were
+made, and settling deadlines first, make each outcome a fixed rule of the
+[internal choices](../../security.md#internal-choices).
 
 **Consumers.** The services that answer calls, such as the file, block,
 stream and process services, the root and supervisors; their clients, the
@@ -143,13 +143,13 @@ client.
 deadline and a transfer, and returns the two words of the reply or an
 outcome; `receive` takes the handle of the endpoint, the deadline, the slot
 for the reply capability and the slot for a transferred capability, and
-returns the handle of the reply capability, the badge, the two words and
-the handle of the transferred capability, 0 without one
+returns the handle of the reply capability, the badge, the two words and the
+handle of the transferred capability, 0 without one
 ([calls and receives](ipc/contract.md#calls-and-receives)). Errors refuse
 the operation: those of the lookup of a handle; `NotReceiver` for a thread
 other than the bound thread; `ReplyPending` for a receive by a thread that
-serves a call; `SelfCall` and `Cycle`, which reach EL0 with one status of
-a call dependency. The outcomes are states written into the results. The
+serves a call; `SelfCall` and `Cycle`, which reach EL0 as one status, that
+of a call dependency. The outcomes are states written into the results. The
 creation of an endpoint, with its receive thread, is an operation of the
 creation of objects.
 
@@ -168,7 +168,7 @@ scheduling and budgets domain.
 **Engineering notes.** `MESSAGE_WORDS` = 2. An endpoint has at most one
 receiver, its bound thread, and its queue links the queued callers through
 their wait records, so a queue has no capacity of its own. The check of
-cycles walks at most the thread capacity less one threads, with two reads
+cycles takes at most the thread capacity less one steps, with two reads
 each and no preemption point; the delivery of a call writes at most 25
 items, a settlement at most 17, and the withdrawal of a chain of loans at
 most `MAX_LOAN_DEPTH` = 8 records. The queues of endpoints are shared state
@@ -263,7 +263,8 @@ with `Revoked`.
 delivery leaves no reservation from one transition to the next, so no
 failure between a reservation and its commit can arise and no moved source
 has to be restored. A slot that the receiver names, and that only its own
-thread can fill, is reserved before the message is sent, as the
+thread can fill, is held for the transfer from the start of the receive,
+before the message is sent, as the
 [IPC](../../architecture.md#ipc-notifications-and-waits) of the kernel
 requires; copy and move stay distinct operations of the table.
 
@@ -373,7 +374,8 @@ count of messages, and repeated bits merge. A signal allocates nothing and
 never blocks, so the interrupt paths of drivers and the death notifications
 of processes use it as it is. A notification has no recipient and no
 closure, and its capability carries no badge; its release by the
-destruction of its owner ends its waits with `PeerClosed`.
+destruction of its owner ends its direct waits with `PeerClosed` and
+reports it removed to its wait-set waiters.
 
 **Design background.** A word of pending bits, as the notifications of
 seL4, holds any number of signals in a fixed size, so a signal needs no
@@ -389,11 +391,12 @@ notifications signal one; services and clients that announce data in
 shared buffers; the event loops of runtimes.
 
 **Interface.** `signal` takes the handle of the notification and the bits
-and returns success; `wait` takes the handle and a deadline and returns
-the bits or an outcome ([notifications](waits/contract.md#notifications)).
-Bits of 0 are refused (`InvalidBits`); the errors of the lookup and a wait
-generation at its limit refuse the operation as well, and `Timeout`,
-`Revoked` and `PeerClosed` are outcomes.
+and returns success; `wait` takes the handle and a deadline and returns the
+bits or an outcome ([notifications](waits/contract.md#notifications)). Bits
+of 0 are refused (`InvalidBits`); the errors of the lookup, and a wait that
+would block while the generation of the thread's waits is at its limit,
+refuse the operation as well, and `Timeout`, `Revoked` and `PeerClosed` are
+outcomes.
 
 **Prerequisites.** [Timeouts](#timeouts), [Wait sets](#wait-sets); the
 [waits contract](waits/contract.md#notifications); the
@@ -502,10 +505,11 @@ returns at once, with the positions of each kind in their order; otherwise
 it blocks until a source becomes ready or is removed, or another outcome
 ends it. A report consumes nothing: the thread takes the event with `wait`
 or `receive`, which may find it taken in the meantime. A thread that waits
-on a notification directly, and a receiver in `receive`, win against a
-wait set. A wait set is no object: it cannot be created, held or shared. A
-futex key can be a source of a wait set; when the region of the key is
-released, the source is removed.
+on a notification directly wins against a wait set; an endpoint has no such
+choice, since only its bound thread waits on it, in `receive` or in a wait
+set, and in one of them at a time. A wait set is no object: it cannot be
+created, held or shared. A futex key can be a source of a wait set; when the
+region of the key is released, the source is removed.
 
 **Design background.** Readiness that is a level, as the level-triggered
 mode of Linux `epoll`, lets a thread wait for several sources and lets a
@@ -524,8 +528,9 @@ a wait is its outcome with the ready and the removed positions
 ([wait sets](waits/contract.md#wait-sets)). Errors: a position out of
 range, the errors of the lookup, `NotReceiver` for an endpoint of which the
 caller is not the bound thread, a source that another position registers,
-an occupied or an empty position, a wait set without a registration and a
-wait generation at its limit.
+an occupied or an empty position, a wait set without a registration, and
+a wait that would block while the generation of the thread's waits is at
+its limit.
 
 **Prerequisites.** [Notifications](#notifications), [Calls](#calls),
 [Timeouts](#timeouts), [Futex-style waits](#futex-style-waits); the
