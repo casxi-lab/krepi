@@ -49,9 +49,9 @@ so the metadata lists none.
   [capabilities](../../objects-capabilities/capabilities/requirements.md)
   component; the references, write sets and errors of references are those
   of the [objects](../../objects-capabilities/objects/requirements.md)
-  component; the calls, receives, replies and the receiver that an endpoint
-  binds are those of the [IPC](../ipc/requirements.md) component; blocking
-  and readiness are those of the
+  component; the calls, receives, replies and the bound thread of an
+  endpoint are those of the [IPC](../ipc/requirements.md) component;
+  blocking and readiness are those of the
   [scheduler](../../scheduling/scheduler/requirements.md) component.
 
 ## Configurations
@@ -407,9 +407,9 @@ hold.
 
 - One CPU. Waits across CPUs, the division of the deadlines among the
   timers of several CPUs, the tokens and their locks are not covered.
-- The calls, receives and replies, their queues, the binding of the receiver
-  of an endpoint, the transfer of capabilities, the loans of budgets and the
-  settlement of calls are not covered; they are the
+- The calls, receives and replies, their queues, the binding of the receive
+  thread of an endpoint, the transfer of capabilities, the loans of budgets
+  and the settlement of calls are not covered; they are the
   [IPC requirements](../ipc/requirements.md), whose waits this component
   holds.
 - Joins and death notifications, the kill of a thread and the destruction

@@ -1,20 +1,19 @@
 # Waits contract
 
 This page governs the code of the `waits` component of the
-[IPC and waits](../README.md) domain: the wait record of each thread and
-its completion; notifications, with their signal and their consumption;
+[IPC and waits](../README.md) domain: the wait record of each thread and its
+completion; notifications, with their signal and their consumption;
 deadlines, timeouts and sleeps, with the deadline table; the wait sets of
-threads, with their registrations and reports; the single winner of an
-event among the threads that wait for it; the part of this page in the kill
-of a thread, which is the cancellation of its wait; and the settlement of
-waits when a revocation becomes pending and when the object that they wait
-on is released. Calls, receives and replies, the queues of endpoints, the
-receiver that an endpoint binds, badges, capability transfer, budget
-lending and the settlement of a call belong to the
-[IPC](../ipc/contract.md) component, the module `ipc` of the core
-(planned), which composes the entries of this page for the waits of calls
-and receives; readiness and the run queues belong to the
-[scheduler](../../scheduling/scheduler/contract.md) component; joins,
+threads, with their registrations and reports; the single winner of an event
+among the threads that wait for it; the part of this page in the kill of a
+thread, which is the cancellation of its wait; and the settlement of waits
+when a revocation becomes pending and when the object that they wait on is
+released. Calls, receives and replies, the queues of endpoints, the bound
+thread of an endpoint, badges, capability transfer, budget lending and the
+settlement of a call belong to the [IPC](../ipc/contract.md) component, the
+module `ipc` of the core (planned), which composes the entries of this page
+for the waits of calls and receives; readiness and the run queues belong to
+the [scheduler](../../scheduling/scheduler/contract.md) component; joins,
 death notifications, the kill of a thread and the destruction of a process
 belong to the lifecycle component (planned); the binding and the
 acknowledgement of interrupts belong to the device-authority rules of the
@@ -109,17 +108,17 @@ arguments and the results. The other entries are called by the composers.
 | Entry point | Kind | Called by | ABI operation | Rules |
 | --- | --- | --- | --- | --- |
 | `waits::signal` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `signal`, with a handle of the caller; the lifecycle component (planned), for the death notification of a process, and the composer of an interrupt that the device-authority rules bind to a notification (planned), each with the reference of the notification; each composer calls `scheduler::enqueue` for the thread that it gives | `signal` | [Notifications](#notifications), [Single winner](#single-winner) |
-| `waits::wait` (planned) | Write entry on the copies of a write set, host-testable | `dispatch`, for the operation `wait`, which composes `scheduler::block` when the wait blocks | `wait` | [Notifications](#notifications), [Deadlines and sleep](#deadlines-and-sleep), [Wait records](#wait-records) |
-| `waits::sleep` (planned) | Write entry on the copies of a write set, host-testable | `dispatch`, for the operation `sleep`, which composes `scheduler::block` when the sleep blocks | `sleep` | [Deadlines and sleep](#deadlines-and-sleep) |
-| `waits::check_source` and `waits::wait_set_add` (planned) | A read entry and a write entry on the copies of a write set, host-testable | `dispatch`, for the operation `wait_set_add`: `check_source`; for an endpoint, `ipc::check_receiver` of the IPC component, whether the caller is its bound thread; then `wait_set_add` | `wait_set_add` | [Wait sets](#wait-sets) |
-| `waits::wait_set_remove` (planned) | Write entry on the copies of a write set, host-testable | `dispatch`, for the operation `wait_set_remove` | `wait_set_remove` | [Wait sets](#wait-sets) |
-| `waits::sources` and `waits::wait_set_wait` (planned) | A read entry and a write entry on the copies of a write set, host-testable | `dispatch`, for the operation `wait_set_wait`: `sources`; for each endpoint that it gives, `ipc::has_call` of the IPC component, whether a call is queued on it; then `wait_set_wait` with the answers, and `scheduler::block` when the wait blocks | `wait_set_wait` | [Wait sets](#wait-sets), [Single winner](#single-winner) |
+| `waits::wait` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `wait`, which composes `scheduler::block` when the wait blocks | `wait` | [Notifications](#notifications), [Deadlines and sleep](#deadlines-and-sleep), [Wait records](#wait-records) |
+| `waits::sleep` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `sleep`, which composes `scheduler::block` when the sleep blocks | `sleep` | [Deadlines and sleep](#deadlines-and-sleep) |
+| `waits::check_source` and `waits::wait_set_add` (planned) | A read entry and a write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `wait_set_add`: `check_source`; for an endpoint, `ipc::check_receiver` of the IPC component, whether the caller is its bound thread; then `wait_set_add` | `wait_set_add` | [Wait sets](#wait-sets) |
+| `waits::wait_set_remove` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `wait_set_remove` | `wait_set_remove` | [Wait sets](#wait-sets) |
+| `waits::sources` and `waits::wait_set_wait` (planned) | A read entry and a write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `wait_set_wait`: `sources`; for each endpoint that it gives, `ipc::has_call` of the IPC component, whether a call is queued on it; then `wait_set_wait` with the answers, and `scheduler::block` when the wait blocks | `wait_set_wait` | [Wait sets](#wait-sets), [Single winner](#single-winner) |
 | `waits::begin` and `waits::deliver` (planned) | Write entries on the copies of a write set, host-testable | `ipc` (planned): `begin` for a `call` or a `receive` that blocks its caller; `deliver` for the delivery of a queued call, after which its wait no longer goes through the source of its transfer | None | [Wait records](#wait-records), [Deadlines and sleep](#deadlines-and-sleep) |
-| `waits::complete` (planned) | Write entry on the copies of a write set, host-testable | `ipc`, for the delivery of a call to a receiver that waits, for a reply, and in `ipc::settle`, `ipc::reply_deleted` and `ipc::drain_step` for the other ends of a call or a receive; `dispatch`, for the expiry of the waits of this page and for their settlement when a revocation becomes pending; each composer calls `scheduler::enqueue` for the thread that it gives | None | [Wait records](#wait-records), [Deadlines and sleep](#deadlines-and-sleep), [Revocation and release](#revocation-and-release) |
-| `waits::first_deadline` (planned) | Read entry, host-testable | `dispatch`, at the entry of every transition for the expiry of waits, and for the external deadline that it passes to `scheduler::choose` | None | [Deadlines and sleep](#deadlines-and-sleep) |
-| `waits::source_ready` and `waits::drain` (planned) | Write entries on the copies of a write set, host-testable | `source_ready`: `ipc`, when a call joins the call queue of an endpoint, with the bound thread of the endpoint; `drain`: the lifecycle component, in the destruction of the owner of a notification or an endpoint, in the transition of its release and before it, for an endpoint after `ipc::drain_step` has given `drained` with its bound thread; each composer calls `scheduler::enqueue` for the thread that it gives | None | [Single winner](#single-winner), [Revocation and release](#revocation-and-release) |
-| `waits::revoked` and `waits::unpause` (planned) | A read entry and a write entry on the copies of a write set, host-testable | `revoked`: `dispatch`, in the transition that makes a revocation pending; `unpause`: `dispatch`, in each step of a revocation, and the lifecycle component, in each step of a teardown that makes a step of a revocation, for each capability that the step removes, with `scheduler::enqueue` for the thread that it gives | None | [Revocation and release](#revocation-and-release) |
-| `waits::cancel` (planned) | Write entry on the copies of a write set, host-testable | The lifecycle component, in the destruction of a process, for its thread, in the transaction of `scheduler::remove`; for a wait of the IPC component it composes `ipc::settle` with `Cancelled` instead | None | [Cancellation](#cancellation) |
+| `waits::complete` (planned) | Write entry on the copies of a write set, host-testable | `ipc` (planned), for the delivery of a call to a receiver that waits, for a reply, and in `ipc::settle`, `ipc::reply_deleted` and `ipc::drain_step` for the other ends of a call or a receive; `dispatch` (planned), for the expiry of the waits of this page and for their settlement when a revocation becomes pending; each composer calls `scheduler::enqueue` for the thread that it gives | None | [Wait records](#wait-records), [Deadlines and sleep](#deadlines-and-sleep), [Revocation and release](#revocation-and-release) |
+| `waits::first_deadline` (planned) | Read entry, host-testable | `dispatch` (planned), at the entry of every transition for the expiry of waits, and for the external deadline that it passes to `scheduler::choose` | None | [Deadlines and sleep](#deadlines-and-sleep) |
+| `waits::source_ready` and `waits::drain` (planned) | Write entries on the copies of a write set, host-testable | `source_ready`: `ipc` (planned), when a call joins the call queue of an endpoint, with the bound thread of the endpoint; `drain`: the lifecycle component (planned), in the destruction of the owner of a notification or an endpoint, in the transition of its release and before it, for an endpoint after `ipc::drain_step` has given `drained` with its bound thread; each composer calls `scheduler::enqueue` for the thread that it gives | None | [Single winner](#single-winner), [Revocation and release](#revocation-and-release) |
+| `waits::revoked` and `waits::unpause` (planned) | A read entry and a write entry on the copies of a write set, host-testable | `revoked`: `dispatch` (planned), in the transition that makes a revocation pending; `unpause`: `dispatch`, in each step of a revocation, and the lifecycle component (planned), in each step of a teardown that makes a step of a revocation, for each capability that the step removes, with `scheduler::enqueue` for the thread that it gives | None | [Revocation and release](#revocation-and-release) |
+| `waits::cancel` (planned) | Write entry on the copies of a write set, host-testable | The lifecycle component (planned), in the destruction of a process, for its thread, in the transaction of `scheduler::remove`; for a wait of the IPC component it composes `ipc::settle` with `Cancelled` instead | None | [Cancellation](#cancellation) |
 
 ## Extractability
 
@@ -133,28 +132,27 @@ crate or a board crate
 ([provable core](../../../architecture.md#the-provable-core)).
 
 The module is in layer 5 of the
-[module order](../../../architecture.md#module-order-in-the-core). It
-refers to the modules `objects`, for references, resolution and write
-sets, `context`, for the result registers, and `address_space`, for the
-bounds of the EL0 window, all of layer 1; to `capabilities` of layer 4, for
-lookups and the entries of tables; and to the kernel root, which holds the
-deadline table and the slots. It refers to no module of its own layer,
-`vm` and `scheduler`, or above it: `ipc`, `lifecycle`, `creation` and
-`dispatch`. So the operations that make a thread blocked or ready are
-composed above both this module and the scheduler: an entry of this page
-gives the thread that a completion makes ready, in the order of
-[Determinism](#determinism), or the thread that blocks, and the composer
-calls `scheduler::enqueue` or `scheduler::block` for it in the same
-transaction. The state of the module `ipc` comes in as values: whether a
-call is queued on an endpoint source, which `dispatch` reads with
-`ipc::has_call` and passes to `wait_set_wait`; the bound thread of an
-endpoint, which `ipc` passes to `source_ready` and `ipc::drain_step` gives
-the lifecycle component for `drain`; and the binding check of an endpoint
-source,
-`ipc::check_receiver`, which `dispatch` composes between `check_source`
-and `wait_set_add`. The IPC component, above this module, uses the wait
-records of its calls and receives through `begin`, `deliver` and
-`complete`, and links its call queues through their `queue` fields.
+[module order](../../../architecture.md#module-order-in-the-core). It refers
+to the modules `objects`, for references, resolution and write sets,
+`context`, for the result registers, and `address_space`, for the bounds of
+the EL0 window, all of layer 1; to `capabilities` of layer 4, for lookups
+and the entries of tables; and to the kernel root, which holds the deadline
+table and the slots. It refers to no module of its own layer, `vm` and
+`scheduler`, or above it: `ipc`, `lifecycle`, `creation` and `dispatch`. So
+the operations that make a thread blocked or ready are composed above both
+this module and the scheduler: an entry of this page gives the thread that a
+completion makes ready, in the order of [Determinism](#determinism), or the
+thread that blocks, and the composer calls `scheduler::enqueue` or
+`scheduler::block` for it in the same transaction. The state of the module
+`ipc` comes in as values: whether a call is queued on an endpoint source,
+which `dispatch` reads with `ipc::has_call` and passes to `wait_set_wait`;
+the bound thread of an endpoint, which `ipc` passes to `source_ready` and
+`ipc::drain_step` gives the lifecycle component for `drain`; and the binding
+check of an endpoint source, `ipc::check_receiver`, which `dispatch`
+composes between `check_source` and `wait_set_add`. The IPC component, above
+this module, uses the wait records of its calls and receives through
+`begin`, `deliver` and `complete`, and links its call queues through their
+`queue` fields.
 
 The write entries receive the one kernel root by `&mut`
 ([rule 3](../../../conventions/provable-subset.md#3-flat-relations-and-one-kernel-root))
@@ -221,17 +219,17 @@ section lists no source paths; the change that adds the module writes its
   context, and no call of this page is executed again from the saved user
   registers ([execution model](../../../architecture.md#system-calls-and-the-abi)).
 - **Completion.** `complete(thread, generation, outcome)` resolves the
-  thread and finds its wait pending with that generation. In one
-  transaction it takes the thread out of the queues of this page and out of
-  the deadline table, writes the outcome into the saved context, sets the
-  kind to none and gives the thread to the composer to make ready. For
-  `Revoked`, with the entry that `revoked` gives, it records that entry as
-  the pause instead and gives no thread; for
-  `Cancelled`, which `ipc::settle` gives for the kill of a thread that waits
-  in a call or a receive, it writes no result and gives no thread, since
-  the thread never runs again. The IPC component, for a wait of the IPC
-  component, takes the thread out of its own queues in the same
-  transaction.
+  thread and finds its wait pending with that generation. In one transaction
+  it takes the thread out of the queues of this page and out of the deadline
+  table, writes the outcome into the saved context, sets the kind to none
+  and gives the thread to the composer to make ready. For `Revoked`, with
+  the entry and the positions that `revoked` gives, it reports those
+  positions of a wait set removed, records that entry as the pause instead
+  and gives no thread; for `Cancelled`, which `ipc::settle` gives for the
+  kill of a thread that waits in a call or a receive, it writes no result
+  and gives no thread, since the thread never runs again. The IPC component,
+  for a wait of the IPC component, takes the thread out of its own queues in
+  the same transaction.
 - **The first only.** Only the first completion of a wait takes effect. A
   completion of a thread whose wait has ended, or whose pending wait has
   another generation, has no effect and no error: `complete` gives none. The
@@ -326,14 +324,14 @@ section lists no source paths; the change that adds the module writes its
   runs, the composer `dispatch` settles every wait whose deadline has passed
   at `now`: it takes the first wait of the deadline table with
   `first_deadline` and, while its deadline has passed, settles it as
-  `Timeout` in a transaction of its own: a wait of this page with
-  `complete`, followed by `scheduler::enqueue` for the thread that it
-  gives, and a wait of the IPC component with `ipc::settle`, which makes
-  its thread ready itself
+  `Timeout`, or completes a sleep with `ok`, in a transaction of its own: a
+  wait of this page with `complete`, followed by `scheduler::enqueue` for
+  the thread that it gives, and a wait of the IPC component with
+  `ipc::settle`, which makes its thread ready itself
   ([settlement of a call](../ipc/contract.md#settlement-of-a-call)). So the
-  event of the operation finds no
-  such wait: a signal leaves its bits for the next wait, and a reply to a
-  call that timed out fails with `ReplyGone` of the IPC component.
+  event of the operation finds no such wait: a signal leaves its bits for
+  the next wait, and a reply to a call that timed out fails with `ReplyGone`
+  of the IPC component.
 - **Several deadlines.** All the waits whose deadlines have passed settle
   in that transition, the earliest deadline first and, for equal deadlines,
   in the order in which the waits joined the deadline table, which is the
@@ -377,17 +375,20 @@ section lists no source paths; the change that adds the module writes its
   through which it was made, and the links of the thread in the waiter queue
   of a notification source while the thread waits on its wait set.
 - **Add.** The operation `wait_set_add(position, handle)` checks, in this
-  order: the position is below `WAIT_SET_SOURCES` (`InvalidPosition`);
-  the handle names a notification with WAIT or an endpoint with RECEIVE,
-  with `check_source`, whose lookup refuses a capability of another kind
-  (`WrongType`); for an endpoint, the caller is its bound thread, which
+  order: the position is below `WAIT_SET_SOURCES` (`InvalidPosition`); the
+  handle names a notification with WAIT or an endpoint with RECEIVE, with
+  `check_source`, which makes one lookup, for a notification with WAIT when
+  the slot that the handle names holds a notification capability and
+  otherwise for an endpoint with RECEIVE, so a capability of another kind
+  fails with `WrongType` and one without the right with `PermissionDenied`;
+  for an endpoint, the caller is its bound thread, which
   `ipc::check_receiver` of the IPC component checks, with its error
   `NotReceiver` ([bound thread](../ipc/contract.md#bound-thread)); no other
   position registers the same object (`DuplicateSource`); and the position
   holds no registration (`PositionOccupied`). `wait_set_add` then writes the
-  registration. A registration is kept in the thread alone: it is not
-  linked to its source while the thread does not wait on its wait set, and
-  it stays across waits until it is removed or reported removed.
+  registration. A registration is kept in the thread alone: it is not linked
+  to its source while the thread does not wait on its wait set, and it stays
+  across waits until it is removed or reported removed.
 - **Remove.** The operation `wait_set_remove(position)` checks the position
   (`InvalidPosition`) and that it holds a registration (`PositionEmpty`),
   and clears it.
@@ -420,9 +421,9 @@ section lists no source paths; the change that adds the module writes its
   have, and an endpoint keeps no queue of wait-set waiters: when a call
   joins the call queue of an endpoint, the IPC component calls
   `source_ready` with the endpoint and its bound thread, which completes
-  the receiver when it waits on its wait set with that endpoint registered,
-  and does nothing otherwise. A call that finds the bound thread waiting
-  in a `receive` is delivered to it and joins no queue
+  that thread when it waits on its wait set with that endpoint registered,
+  and does nothing otherwise. A call that finds the bound thread waiting in
+  a `receive` is delivered to it and joins no queue
   ([endpoint queues](../ipc/contract.md#endpoint-queues)).
 - **The report of a completion.** A completion of a wait-set waiter by an
   event of one of its sources reports that position as ready or, for a
@@ -461,13 +462,13 @@ section lists no source paths; the change that adds the module writes its
   The receivers of an endpoint do not compete: the bound thread is its
   only receiver.
 - **Consumers first.** A direct waiter of a notification wins against its
-  wait-set waiters, and a receiver in `receive` against a wait set of the
-  same endpoint. The reason is that a report consumes nothing: if a signal
-  completed a wait-set waiter while a direct waiter waited, the word would
-  stay set while a thread blocked in `wait` for it, and a call reported to
-  a wait set while the receiver blocked in `receive` would stay queued
-  beside a waiting receiver. So a direct waiter never blocks while the word
-  is not 0, and a receiver never blocks beside a queued call.
+  wait-set waiters. The reason is that a report consumes nothing: if a
+  signal completed a wait-set waiter while a direct waiter waited, the word
+  would stay set while a thread blocked in `wait` for it. So a direct waiter
+  never blocks while the word is not 0. For an endpoint the choice does not
+  arise: its bound thread is both its only receiver and its only wait-set
+  waiter, and it waits in one of them at a time; a call that finds it in
+  `receive` is delivered, so a receiver never blocks beside a queued call.
 - **Leaving the queues.** The completed waiter leaves every queue of this
   page that it is in: both queues of its notification, or the waiter queue
   of each notification source of its wait set, and the deadline table.
@@ -518,21 +519,21 @@ section lists no source paths; the change that adds the module writes its
   thread with a pending wait, calls `revoked(thread, target)`, which gives
   the first entry of the wait, in the order of its entries and then of the
   positions of its registrations, that lies in the subtree of the
-  revocation, or none. An entry lies in the subtree when the entry reference
-  of the target is among the references of its path
+  revocation, and for a wait set the set of the positions whose entries lie
+  in it, or none. An entry lies in the subtree when the entry reference of
+  the target is among the references of its path
   ([derivation links](../../objects-capabilities/capabilities/contract.md#derivation-links)).
   For each thread that `revoked` names, `dispatch` settles its wait in a
-  transaction of its own, with the outcome `Revoked` and the entry that
-  `revoked` gives: a wait of this page with `complete`, and a wait of the
-  IPC component with `ipc::settle`, which composes `complete` and returns
-  the loans of the call
+  transaction of its own, with the outcome `Revoked` and what `revoked`
+  gives: a wait of this page with `complete`, and a wait of the IPC
+  component with `ipc::settle`, which composes `complete` and returns the
+  loans of the call
   ([settlement of a call](../ipc/contract.md#settlement-of-a-call)).
 - **The settlement.** The outcome of a wait on a notification is `Revoked`.
-  A wait set reports, with success, every position whose entry lies in the
-  subtree as removed, and clears those registrations, with the ready
-  positions of its report. The thread leaves the queues and the deadline
-  table, as for every completion, and its result is written into its saved
-  context.
+  A wait set reports, with success, the positions that `revoked` gives as
+  removed, and clears those registrations, with the ready positions of its
+  report. The thread leaves the queues and the deadline table, as for every
+  completion, and its result is written into its saved context.
 - **The pause.** The settled thread is not made ready: its record keeps the
   entry that `revoked` named as its `pause`, and the thread stays blocked
   in no run queue. In each step of the revocation, for each capability that
@@ -553,22 +554,27 @@ section lists no source paths; the change that adds the module writes its
   items, within the 27 items that $W$ = 64 leaves beside the largest write
   set of the capabilities component
   ([check and execute](../../objects-capabilities/capabilities/contract.md#check-and-execute)):
-  at most 11 of this page for a wait set and 7 for a wait on a
-  notification ([Check and execute](#check-and-execute)); for a call or a
-  receive, the write set of `ipc::settle` without `scheduler::enqueue`,
-  which a paused thread does not take, at most 15 for a delivered call with
-  the withdrawal of its chain of loans
+  at most 11 of this page for a wait set and 7 for a wait on a notification
+  ([Check and execute](#check-and-execute)); for a call or a receive, the
+  write set of `ipc::settle` without `scheduler::enqueue`, which a paused
+  thread does not take, at most 15 for a delivered call with the withdrawal
+  of its chain of loans
   ([lending](../../scheduling/budget-ledger/contract.md#check-and-execute)),
   as the [IPC contract](../ipc/contract.md#check-and-execute) counts it,
-  with the items of this page among them. The end of the pauses
-  adds at most 9 items to a step of the revocation: the slots of at most 4
-  threads, the last threads of their run queues and the scheduler record of
-  the CPU, so the largest step writes at most 41 items.
+  with the items of this page among them. The end of the pauses adds at most
+  9 items to a step of the revocation: the slots of at most 4 threads, the
+  last threads of their run queues and the scheduler record of the CPU. They
+  are part of the 27 items that the capabilities contract leaves beside its
+  largest write set for the parts of other components in the same operation;
+  the release of an endpoint or a notification at its last capability adds
+  no item of this page or of the IPC component, so the other parts of a
+  step, such as the drains of device grants, keep within the 18 items that
+  remain.
 - **Work.** The scan reads, for each thread with a pending wait, at most
-  2 + `WAIT_SET_SOURCES` entries and compares each with the
-  target in at most 16 references of its path; the number of threads and
-  of settlements is at most the thread capacity, in one transition without
-  a preemption point, like the expiry of deadlines that pass together
+  2 + `WAIT_SET_SOURCES` entries and compares each with the target in at
+  most 16 references of its path; the number of threads and of settlements
+  is at most the thread capacity, in one transition without a preemption
+  point, like the expiry of deadlines that pass together
   ([Work bounds](#work-bounds)).
 - **What is not scanned.** The registrations of a thread that does not wait
   are not on their sources: its next `wait_set_wait` reports them removed,
@@ -605,24 +611,23 @@ section lists no source paths; the change that adds the module writes its
   owner of a notification or an endpoint, before the transaction that
   releases it, the lifecycle component calls `drain` until it gives none,
   each call a transaction of its own, in the transition of that release and
-  without a preemption point between them, so no wait joins the queues of the
-  object in between and the release finds them empty. For a notification,
-  `drain` completes the first thread of its waiter queue: a direct waiter
-  with `PeerClosed`, and a wait-set waiter with success and the report of
-  that position as removed, whose registration it clears. For an endpoint,
-  the calls and the receiver are ended first by the drain steps of the IPC
-  component, `ipc::drain_step`, which the endpoint, no longer served, keeps
-  from new calls
+  without a preemption point between them, so no wait joins the queues of
+  the object in between and the release finds them empty. For a
+  notification, `drain` completes the first thread of its waiter queue: a
+  direct waiter with `PeerClosed`, and a wait-set waiter with success and
+  the report of that position as removed, whose registration it clears. For
+  an endpoint, the calls and the receiver are ended first by the drain steps
+  of the IPC component, `ipc::drain_step`, which the endpoint, no longer
+  served, keeps from new calls
   ([release and peer closure](../ipc/contract.md#release-and-peer-closure));
-  `drain` then completes the bound thread that `ipc::drain_step` gives
-  with `drained` when it waits on its wait set with that endpoint
-  registered, in the same way. Every call
-  on the endpoint began before that wait, since a call queued during it
-  would have completed it and one queued before it would have made it
-  return at once, so this is the order of registration. The calls of
-  `drain` for one object are at most the thread capacity; how many objects
-  one step of the destruction releases is the lifecycle contract's
-  (planned).
+  `drain` then completes the bound thread that `ipc::drain_step` gives with
+  `drained` when it waits on its wait set with that endpoint registered, in
+  the same way. Every call on the endpoint began before that wait, since a
+  call queued during it would have completed it and one queued before it
+  would have made it return at once, so this is the order of registration.
+  The calls of `drain` for one object are at most the thread capacity; how
+  many objects one step of the destruction releases is the lifecycle
+  contract's (planned).
 - **The word.** The release clears the word of a notification with its
   slot; a later lookup of a capability to it fails (`StaleReference`), so a
   released notification has no closed state.
@@ -673,12 +678,13 @@ section lists no source paths; the change that adds the module writes its
   `Cancelled` are outcomes of a wait, and a removed source is a fixed
   reason of a report: an operation that gives one has succeeded in the sense
   of this rule and writes its outcome into the result registers, also when
-  it returns at once ([shared conventions](../../README.md#shared-conventions)).
+  it returns at once, except `Cancelled`, whose thread never runs again and
+  gets no result ([shared conventions](../../README.md#shared-conventions)).
 - **Totality.** `InvalidState` and the errors of references answer calls
   that no composer makes: the composers pass live references and call
   `begin` and `deliver` only after their own checks. `complete`,
   `source_ready`, `drain`, `unpause` and `cancel` have no error beyond the
-  resolution of their references: a wait that is not pending, a receiver
+  resolution of their references: a wait that is not pending, a bound thread
   that does not wait on its wait set, a queue that is empty and a pause that
   names another entry are their result none.
 - **Names.** The names are those of this contract; the numeric values of
@@ -718,7 +724,7 @@ to this page. Here:
 | `waits::QuotaExceeded` | As `notifications::QuotaExceeded` |
 | `waits::TokenExhausted` | As `notifications::TokenExhausted`: `GenerationExhausted` |
 | `waits::ClockReversed` | As `notifications::ClockReversed` |
-| `waits::Deadlock` | Moved to the IPC component for its part between calls: a call to oneself and a call that closes a cycle of calls are refused there ([calls and receives](../ipc/contract.md#calls-and-receives)); a join forms no edge of that check, and joins are the lifecycle component's |
+| `waits::Deadlock` | Moved to the IPC component for its part between calls: a call to oneself and a call that closes a cycle of calls are refused there ([calls to oneself and cycles](../ipc/contract.md#calls-to-oneself-and-cycles)); a join forms no edge of that check, and joins are the lifecycle component's |
 | `WaitInProgress`, moved from the objects contract | Not applicable: a thread begins a wait only by its own call while it runs, so a blocked thread begins none, and there is no take of a result |
 | `StaleWait`, moved from the objects contract | Rewritten as a rule, not an error: a completion whose generation is not that of the pending wait has no effect |
 | `AlreadyCompleted`, moved from the objects contract | Rewritten as a rule, not an error: a completion of a wait that has ended has no effect; only the first completion takes effect |
@@ -754,8 +760,8 @@ expiry, revocation and release have no fault-injection point.
 | `deliver` | The reference; a pending call | 1: the slot of the caller |
 | `complete` | The reference; the wait pending with the generation; for a wait set, the words of its notification sources | At most 11 for a wait set: the slot of the thread, at most 2 neighbours for each notification source and 2 in the deadline table; at most 7 for a wait on a notification: the slot, at most 4 neighbours in its two queues, the notification slot among them, and 2 in the deadline table; at most 3 for a sleep and for a wait of the IPC component |
 | `first_deadline` | None | Nothing: a read entry |
-| `source_ready` | The reference of the receiver; its wait set with the endpoint registered | At most 9: the slot of the receiver, at most 2 neighbours for each of its at most 3 notification sources and 2 in the deadline table |
-| `drain` | The reference of the object, or of the receiver; the first thread of the waiter queue, or the wait of the receiver | At most 11, as `complete` |
+| `source_ready` | The reference of the bound thread; its wait set with the endpoint registered | At most 9: the slot of the bound thread, at most 2 neighbours for each of its at most 3 notification sources and 2 in the deadline table |
+| `drain` | The reference of the object, or of the bound thread; the first thread of the waiter queue, or the wait of the bound thread | At most 11, as `complete` |
 | `revoked` | The reference of the thread | Nothing: a read entry |
 | `unpause` | The reference; the pause naming the entry | 1: the slot of the thread |
 | `cancel` | The reference | At most 11, as `complete`; 1 for a paused thread; nothing for a wait of the IPC component |
@@ -791,7 +797,7 @@ expiry, revocation and release have no fault-injection point.
   capacity of waits; it writes at most 6 items.
 - `sleep` walks the deadline table, at most the thread capacity of waits,
   and writes at most 3 items.
-- `check_source` makes at most two lookups; `wait_set_add` compares the
+- `check_source` makes one lookup; `wait_set_add` compares the
   object with at most `WAIT_SET_SOURCES` - 1 registrations and writes 1
   item; `wait_set_remove` writes 1 item; `sources` reads
   `WAIT_SET_SOURCES` registrations.
@@ -851,9 +857,10 @@ expiry, revocation and release have no fault-injection point.
   threads whose pauses a step of a revocation ends, in the order in which
   the step removes their capabilities. A signal and `source_ready` wake at
   most one thread.
-- **Expiry first.** A wait whose deadline has passed settles as `Timeout`
-  before the operation of the transition, and a wait whose deadline has
-  passed when it is made times out at once, consuming nothing
+- **Expiry first.** A wait whose deadline has passed settles as `Timeout`,
+  and a sleep whose time has come completes with `ok`, before the operation
+  of the transition; a wait whose deadline has passed when it is made times
+  out at once, consuming nothing
   ([Deadlines and sleep](#deadlines-and-sleep)).
 - **Deadlines together.** Every wait whose deadline has passed settles in
   the same transition, in the loop that the thread capacity bounds.
@@ -863,7 +870,7 @@ expiry, revocation and release have no fault-injection point.
   ([Cancellation](#cancellation)). The IPC component states the same order
   for calls, whose event is the reply, with its rules for the order of the
   call queues, the badges of senders and the settlement of a loan as a
-  whole ([calls and receives](../ipc/contract.md#calls-and-receives)).
+  whole ([settlement of a call](../ipc/contract.md#settlement-of-a-call)).
 - **Reports.** A wait set reports every source that is ready, or removed,
   in the transition that ends its wait, as one ready set and one removed
   set in the order of the positions, which are the places of the
@@ -1055,25 +1062,24 @@ Entry column names no entry of this page has none.
 
 **Notation.** Times, bits and generations are decimal, or hexadecimal with
 `0x`. Threads are named by letters, notifications N and endpoints E, with
-the numbers of the fixtures. "N is signalled with $b$ at $t$" is `signal`
-of the bits $b$ in the transition at $t$, through a capability with SIGNAL
-of a thread of the row or by the kernel, through the reference of N. "T
-waits on N at $t$" is T's `wait` through its capability to N with WAIT,
-without a deadline unless the row gives one, and "T sleeps until $d$" is
-`sleep`. "T calls E", "T receives on E" and "T replies" are the `call`,
-`receive` and `reply` of the [IPC component](../ipc/contract.md), whose
-errors and rules hold for them. "The expiry at $t$" is the settlement of the
-waits whose deadlines have passed at the start of the transition at $t$.
-"The kill of T" is the destruction of T's process by the lifecycle
-component, which composes `cancel`, or `ipc::settle` with `Cancelled` for
-a call or a receive. "The release of N at $t$" is its
-release in the destruction of its owner, a process other than those of its
-waiters, which composes `drain`. The output of a call that returns is `ok`,
-`ok bits=<b>` for a wait, an outcome `timeout`, `peer-closed` or `revoked`,
-or `err=<error>`, with the error by its name on this page, on the objects
-or capabilities contract or on the contract that the row names; "blocks"
-is a call that blocks its thread; "its wait completes with" gives the
-outcome that the completion writes.
+the numbers of the fixtures. "N is signalled with $b$ at $t$" is `signal` of
+the bits $b$ in the transition at $t$, through a capability with SIGNAL of a
+thread of the row or by the kernel, through the reference of N. "T waits on
+N at $t$" is T's `wait` through its capability to N with WAIT, without a
+deadline unless the row gives one, and "T sleeps until $d$" is `sleep`. "T
+calls E", "T receives on E" and "T replies" are the `call`, `receive` and
+`reply` of the [IPC component](../ipc/contract.md), whose errors and rules
+hold for them. "The expiry at $t$" is the settlement of the waits whose
+deadlines have passed at the start of the transition at $t$. "The kill of T"
+is the destruction of T's process by the lifecycle component, which composes
+`cancel`, or `ipc::settle` with `Cancelled` for a call or a receive. "The
+release of N at $t$" is its release in the destruction of its owner, a
+process other than those of its waiters, which composes `drain`. The output
+of a call that returns is `ok`, `ok bits=<b>` for a wait, an outcome
+`timeout`, `peer-closed` or `revoked`, or `err=<error>`, with the error by
+its name on this page, on the objects or capabilities contract or on the
+contract that the row names; "blocks" is a call that blocks its thread; "its
+wait completes with" gives the outcome that the completion writes.
 
 **Fixtures.**
 
@@ -1081,7 +1087,7 @@ outcome that the completion writes.
   to 57): four processes, each with its thread T0 to T3; for each $i$, a
   notification N$i$ with a capability with SIGNAL and WAIT in the table of
   the process of T$i$, and an endpoint E$i$ that binds T$i$ as its
-  receiver, with a capability with RECEIVE in that table, both owned by
+  bound thread, with a capability with RECEIVE in that table, both owned by
   that process. T$i$ holds a capability with SEND to E$(i+1 \bmod 4)$, with
   the badge 9, so that "T$i$ calls" is a call to E$(i+1 \bmod 4)$ with the
   words 13 and 17; "T$i$ joins" is a join of T$(i+1 \bmod 4)$ of the
@@ -1168,7 +1174,7 @@ generation rule.
   exist; joins and exits belong to the lifecycle component, and only calls
   form the cycles that the IPC component refuses.
 - No counter of completions, wake-ups or references is kept.
-- The receiver that an endpoint binds and the refusal of a call to oneself
+- The bound thread of an endpoint and the refusal of a call to oneself
   and of a cycle of calls are rules of the IPC component that keep the
   prototype's; they are no change.
 
@@ -1181,7 +1187,7 @@ generation rule.
 | `waits-admission-1` | 3 | `sibling_quota_covers_all_wait_families_and_retained_completions` | Not applicable: the test asserts the prototype's wait ceiling, which the threads of one process shared and which completed waits held until their results were taken (`QuotaExceeded`), and its refused release of the admission of a process (`InvalidState`); a process has one thread, every thread has its wait record, no ceiling or admission exists and a result is written at the completion. Its joins, closures and reaps are the lifecycle component's | None |
 | `waits-admission-2` | 54 | `mixed_ordinary_saturation_preserves_every_control_wait_family` | T0 waits on N0 at 1 and T1 calls at 2, and both block. T2 then waits on N2 at 3 and blocks, where the prototype's two ordinary records were taken (`Capacity`); so do T2's call and its receive on E2 in their own cases, and every wait of T3. No class of waits exists: the prototype's control record of the process of T3 and its counts of records do not apply | `wait`; the IPC component's `call` and `receive` |
 | `waits-admission-3` | 87 | `native_rejection_rolls_back_the_extra_reference_and_identity` | N1 is signalled with 4 at 1: `ok`, and its word is 4. A wait of T0 at 2 through a handle of T0's table that holds no capability is `err=NoCapability`, and through a capability of T0 to N1 without WAIT `err=PermissionDenied`; each changes nothing: the word of N1 stays 4, and T0's record keeps the kind none and its generation. The prototype's refusal of a thread that was not the recipient of N1 is the lookup of the handle here | `signal`, `wait` |
-| `waits-admission-4` | 126 | `cross_family_dependencies_reject_cycles_but_ignore_completed_edges` | Its call: T0 joins T1, and T1 calls E0, whose bound thread is T0, through a capability with SEND to E0: the call is `ok`, it queues and T1 blocks, both while T0 waits in its join and after the join has ended. A join is no edge of the check of cycles of the IPC component, which only calls form ([calls and receives](../ipc/contract.md#calls-and-receives)), so the prototype's `Deadlock` across a join and a call does not apply; the join is the lifecycle component's | The IPC component's `call`; the lifecycle component, for the join |
+| `waits-admission-4` | 126 | `cross_family_dependencies_reject_cycles_but_ignore_completed_edges` | Its call: T0 joins T1, and T1 calls E0, whose bound thread is T0, through a capability with SEND to E0: the call blocks, queued, both while T0 waits in its join and after the join has ended. A join is no edge of the check of cycles of the IPC component, which only calls form ([calls to oneself and cycles](../ipc/contract.md#calls-to-oneself-and-cycles)), so the prototype's `Deadlock` across a join and a call does not apply; the join is the lifecycle component's | The IPC component's `call`; the lifecycle component, for the join |
 | `waits-admission-5` | 145 | `registry_identity_exhaustion_and_foreign_cancellation_are_atomic` | T0, whose next wait generation is $2^{64} - 1$, waits on N0 at 1 and blocks with that generation; N0 is signalled with 1 at 2, and the wait completes with `ok bits=1`. T0's next wait on N0 at 3, with the word 0, would block and is `err=GenerationExhausted`, and changes nothing. The prototype's cancellation through the identity of another registry (`NotFound`) does not apply: a wait has no identity | `wait`, `signal` |
 
 ### `src/waits/tests/budgets.rs`
@@ -1235,8 +1241,8 @@ generation rule.
 | --- | ---: | --- | --- | --- |
 | `waits-transfers-1` | 56 | `receive_data_and_capability_are_hidden_until_accounted_commit` | For a copy and a move, with T1 receiving on E1 before and after the call in turn: T0 calls E1 at 0 with the deadline 50 and the transfer of its capability to T2. Until the delivery T1 has no result. The delivery is one transaction that reserves and commits the capability with the message: T1's results are ok, a reply handle, the badge 17, the words 19 and 23 and the handle of the received capability, a capability of T1's table that resolves with OBSERVE and is `err=PermissionDenied` with CONTROL; T0's capability still resolves after a copy and is gone after a move. The expiry at 50 settles T0's call as `timeout`, and the received capability stays usable: a committed transfer is never withdrawn. The prototype's separate commit after the delivery, with its count, does not apply | The IPC component's `call` and `receive` with its capability transfer; `reserve` and `commit` of the capabilities component; `first_deadline` |
 | `waits-transfers-2` | 134 | `full_ordinary_wait_pool_rolls_back_move_while_control_wait_still_admits` | Not applicable: the test refuses a call that moves a capability because the prototype's pool of ordinary wait records was full (`Capacity`), and then admits a wait of its control class; every thread has its wait record and no class of waits exists. That a refused call leaves the source of its transfer as it was is the rule of no change on failure of the IPC component ([errors](../ipc/contract.md#errors)) | None |
-| `waits-transfers-3` | 165 | `every_precommit_terminal_path_drains_hidden_rights` | T0's capability S to T2, derived with every right from a root capability in the table of T2's process, is moved by T0's call to E1 at 0 with the deadline 20. Before the delivery, for each event in turn: the expiry at 20 gives T0 `timeout`; the kill of T0, which stands for the prototype's cancellation, the death of T0 and the teardown of the table of T0's process, ends the call; the destruction of T1's process, which owns E1 and kills T1, ends it with `peer-closed`, for both the death of the receiver and the closure of E1; and the revocation of the root by T2 settles it as `revoked`, with T0 paused until the step that removes S. No reservation exists before the delivery, so nothing is drained and T1's table stays as it was; S still resolves after the expiry and the destruction of T1's process, and not after the kill or the revocation, which remove it. After the delivery the transfer is committed, so T1 holds the capability whatever then ends the call: the expiry, the kill of T0 and the destruction of T1's process do not withdraw it, and the revocation of the root removes it from T1's table in its steps and leaves T0's call pending, since T0 no longer waits through a capability of the subtree. The prototype's settlement of these events before a commit that followed the delivery, with T1's `PeerClosed`, does not apply | The IPC component's `call`, `receive`, `ipc::settle` and `ipc::drain_step`, with `deliver` and `complete`; `revoked`, `unpause`; `revoke` and `teardown_step` of the capabilities component |
-| `waits-transfers-4` | 242 | `revocable_scalar_wait_cancels_after_endpoint_grant_revocation` | T0 calls E1 at 0 through a capability with SEND that it holds by derivation from a root capability to E1 with the badge 99 in the table of T2's process, and queues. At 1 T2 revokes the root: the transition that makes the revocation pending settles T0's call as `revoked`, written into T0's saved context, and pauses T0; the step of the revocation that removes T0's capability ends the pause and makes T0 ready, and T0 returns with `revoked`. The prototype's `Cancelled` for this settlement is `revoked` here | `revoked`, `complete`, `unpause`; `ipc::settle`; `revoke` of the capabilities component |
+| `waits-transfers-3` | 165 | `every_precommit_terminal_path_drains_hidden_rights` | T0's capability S to T2, derived with every right from a root capability in the table of T2's process, is moved by T0's call to E1 at 0 with the deadline 20. Before the delivery, for each event in turn: the expiry at 20 gives T0 `timeout`; the kill of T0, which stands for the prototype's cancellation, the death of T0 and the teardown of the table of T0's process, ends the call; the destruction of T1's process, which owns E1 and kills T1, ends it with `peer-closed`, for both the death of the receiver and the closure of E1; and the revocation of the root by T2 settles it as `revoked`, with T0 paused until the step that removes S. No reservation exists before the delivery, so nothing is drained and T1's table stays as it was; S still resolves after the expiry and the destruction of T1's process, and not after the kill or the revocation, which remove it. After the delivery the transfer is committed, and no end of the call undoes the commit: after the expiry and the kill of T0, T1 holds the capability; the destruction of T1's process removes it with T1's table and does not return it to T0; and the revocation of the root removes it from T1's table in its steps and leaves T0's call pending, since T0 no longer waits through a capability of the subtree. The prototype's settlement of these events before a commit that followed the delivery, with T1's `PeerClosed`, does not apply | The IPC component's `call`, `receive`, `ipc::settle` and `ipc::drain_step`, with `deliver` and `complete`; `revoked`, `unpause`; `revoke` and `teardown_step` of the capabilities component |
+| `waits-transfers-4` | 242 | `revocable_scalar_wait_cancels_after_endpoint_grant_revocation` | T0 calls E1 at 0 through a capability with SEND and the badge 99, which descends from a capability G to E1 in the table of T2's process, and queues. At 1 T2 revokes the descendants of G: the transition that makes the revocation pending settles T0's call as `revoked`, written into T0's saved context, and pauses T0; the step of the revocation that removes T0's capability ends the pause and makes T0 ready, and T0 returns with `revoked`. The prototype's `Cancelled` for this settlement is `revoked` here, and its root capability with the badge in the table of T2's process is G, since a capability that enters a table without a source carries no badge and the first capability of E1 is in the table of the process of T1, which owns it | `revoked`, `complete`, `unpause`; `ipc::settle`; `revoke` of the capabilities component |
 | `waits-transfers-5` | 275 | `transfer_abi_rejects_malformed_and_forged_authority_without_reservation` | A call of T0 to E1 that transfers its capability to T2, with the version 1, a reserved word 1, a mode argument of $2^{40}$ or of 0, an endpoint handle of $2^{64} - 1$ or a source handle of $2^{64} - 1$: each fails before any write, the version at the dispatch of the ABI, then the form of the arguments, then the lookups of the handles, in the order of errors; no wait begins, nothing is reserved and every table stays as it was. The encoding of the arguments belongs to the ABI inventory | The dispatch of the ABI; the IPC component's `call`; `lookup` of the capabilities component |
 
 ### `src/notifications/tests.rs`
@@ -1449,5 +1455,10 @@ These vectors are frozen on other pages and replayed here, and the count of
     blocking and completion, and the family rules of deadlines;
   - `docs/features/kernel/ipc.md`, lines 172 to 184: the composition of the
     waits of calls with the other waits, which the IPC component shares;
+  - `docs/kernel-state.md`, lines 43 to 76: the division into per-CPU,
+    per-thread, per-process and shared state, with the wait generation of
+    each thread, and one terminal outcome for each wait among completion,
+    cancellation, timeout and peer death; its resource managers and
+    registries are not taken;
   - `docs/kernel-state.md`, lines 110 to 131: the single owner of waits and
     loans, which no interrupt path borrows.
