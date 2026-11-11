@@ -181,7 +181,7 @@ defines:
 | Kind | Bit 0, value 1 | Bit 1, value 2 | Bit 2, value 4 | Bit 3, value 8 | Bit 4, value 16 |
 | --- | --- | --- | --- | --- | --- |
 | Process | OBSERVE: query its state, exit reason, exit code and CPU time, and subscribe to its death notification | CONTROL: kill it, and reap it as its owner | GRANT | REVOKE | CREATE: the creation right of the creation component |
-| Thread | OBSERVE: query its state | CONTROL: the operations of the lifecycle and scheduling components that change its execution, such as the interrupt of its wait | GRANT | REVOKE | - |
+| Thread | OBSERVE: query its state | CONTROL: the operations of the lifecycle and scheduling components that change its execution, such as the interrupt of its wait, and its binding as the receive thread of an endpoint at the creation of the endpoint | GRANT | REVOKE | - |
 | Endpoint | SEND: `call` | RECEIVE: `receive` | GRANT | REVOKE | - |
 | Reply | REPLY: the one reply | - | - | - | - |
 | Notification | SIGNAL: signal it | WAIT: wait on it | GRANT | REVOKE | - |
