@@ -542,10 +542,13 @@ system call, every class of [Exception classes](#exception-classes) but
 `Svc` and `Irq`, or a saved context that `validate` refuses at a return to
 EL0. `classify` gives the cause class of an exception, and the composer of
 the return that of a refused context; the cause classes partition the user
-faults: every user fault has exactly one. The cause class is the class
-that a later release passes to the fault handler of a thread with the
-exception class bits of `ESR_EL1` and the user virtual address of
-`FAR_EL1` ([fault handler](../../../architecture.md#futexes-and-upcalls)).
+faults: every user fault has exactly one. For an exception, the cause
+class is the class that a later release passes to the fault handler of a
+thread with the exception class bits of `ESR_EL1` and the user virtual
+address of `FAR_EL1`
+([fault handler](../../../architecture.md#futexes-and-upcalls)). A refused
+context has no bits of `EC` and no faulting instruction; how a later
+release gives it to a fault handler is for that release to write.
 The fault status code, `DFSC` of a Data Abort or `IFSC` of an Instruction
 Abort, is bits 0 to 5 of the `ISS`.
 
@@ -565,12 +568,12 @@ Abort, is bits 0 to 5 of the `ISS`.
   fault ends the process of the thread as faulted, with a fault record, by
   the rules of the component that terminates processes (planned); the
   thread does not return to EL0. The fault record holds the cause class,
-  the bits of `EC` of `ESR_EL1` and, for `DataTranslation`,
-  `DataPermission`, `InstructionTranslation`, `InstructionPermission` and
-  for `Alignment` from `EC` `0x24` or `0x22`, the user virtual address of
-  `FAR_EL1`. For the other causes the record holds no address, even where
-  `FAR_EL1` holds one, as for an access flag fault of `Other`. A user fault
-  never ends another process.
+  for an exception the bits of `EC` of `ESR_EL1`, and, for
+  `DataTranslation`, `DataPermission`, `InstructionTranslation`,
+  `InstructionPermission` and for `Alignment` from `EC` `0x24` or `0x22`,
+  the user virtual address of `FAR_EL1`. For the other causes the record
+  holds no address, even where `FAR_EL1` holds one, as for an access flag
+  fault of `Other`. A user fault never ends another process.
 - **The kernel sentinel.** The case of `DataPermission` writes, from EL0, a
   page that the lower kernel set maps writable at EL1, so the refused store
   shows the boundary between EL1 and EL0, not a read-only page.
@@ -789,10 +792,11 @@ channel.
 The virtual timer traps as well: it is not an output of EL0, and the kernel
 uses it for preemption
 ([interrupts](../../boot-platform/boot/contract.md#interrupts)), which a
-write of `CNTV_CTL_EL0` at EL0 would stop. The rules need
-`HCR_EL2.{E2H, TGE}` other than `{1, 1}` where EL2 exists: QEMU virt in its
-configuration has no EL2, and a board that enters at EL2 drops to EL1 with
-`HCR_EL2.TGE` 0.
+write of `CNTV_CTL_EL0` at EL0 would stop. The rules need, where EL2
+exists, `HCR_EL2.{E2H, TGE}` other than `{1, 1}` and `MDCR_EL2.TPM` 0,
+without which a read of `PMUSERENR_EL0` at EL0 traps to EL2: QEMU virt in
+its configuration has no EL2, and a board that enters at EL2 drops to EL1
+with `HCR_EL2.TGE` 0 and `MDCR_EL2.TPM` 0.
 
 `write_controls` writes the eight bits of `SCTLR_EL1` that govern EL0 by a
 read-modify-write that changes no other bit: it clears the bits of the mask
@@ -1060,6 +1064,11 @@ TLB entries that an invalidation removes in those of the
   case of each cause of [User faults](#user-faults). For each it checks
   the class, and for each user fault the cause, the fault record and that
   the process does not run again.
+- On QEMU virt, one of the three cases of a refused context of the
+  [context](../../boot-platform/context/contract.md#testing-obligations)
+  contract also checks the fault record of the process of its thread: the
+  cause `Other`, no bits of `EC` and no address
+  ([a refused context](#user-faults)).
 - On QEMU virt, a test image reads `CNTVCT_EL0` and `CNTFRQ_EL0` at EL0
   without a trap, and an access at EL0 to the physical timer, to a register
   of the performance monitors and to `DBGDTR_EL0` each traps with `EC`
@@ -1283,7 +1292,7 @@ limit `0x2000`.
   of asynchronous exceptions taken from EL0 by `PSTATE`; `SCTLR_EL1` with
   `UMA`, `SA0`, `E0E`, `UCT`, `DZE`, `UCI`, `nTWI` and `nTWE`;
   `CNTKCTL_EL1`, `PMUSERENR_EL0` and `MDSCR_EL1` with their traps of EL0;
-  and the effect of `HCR_EL2.{E2H, TGE}` on them.
+  and the effect of `HCR_EL2.{E2H, TGE}` and of `MDCR_EL2.TPM` on them.
 - Arm Limited, *Arm Cortex-A76 Core Technical Reference Manual*, revision
   r4p1, document 100798_0401_00_en, 2020,
   <https://documentation-service.arm.com/static/5f562083235b3560a01e03bc>:

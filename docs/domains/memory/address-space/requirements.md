@@ -228,7 +228,9 @@ class bits of `ESR_EL1`, and, for the causes of the contract that carry
 it, the user virtual address of `FAR_EL1`; the thread never runs again,
 and no other process ends. A kernel sentinel that EL0 writes stays
 unchanged. The criterion: on QEMU virt, the case of each of the nine causes
-gives that cause and its fault record, and the process does not run again.
+gives that cause and its fault record, a case of a refused context gives a
+fault record of `Other` with no exception class bits and no address, and
+the process does not run again.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `address_space::classify` (planned), with the end of a
@@ -237,10 +239,11 @@ gives that cause and its fault record, and the process does not run again.
 - **Contract.** [User faults](contract.md#user-faults).
 - **Specification.** None: the component has no specification.
 - **Proof path.** None: the component has no proof path.
-- **Evidence.** The QEMU cases of the nine causes and the host test of
-  `classify` of the [contract](contract.md#testing-obligations). They show
-  the causes on QEMU virt; the end of the process and its fault record are
-  shown by the component of the termination of processes.
+- **Evidence.** The QEMU cases of the nine causes, the case of a refused
+  context that checks its fault record, and the host test of `classify` of
+  the [contract](contract.md#testing-obligations). They show the causes on
+  QEMU virt; the end of the process and its fault record are shown by the
+  component of the termination of processes.
 
 ### ASP-R09
 
@@ -295,16 +298,17 @@ error of the earlier.
 
 **EL0 controls.** EL0 reads `CNTVCT_EL0` and `CNTFRQ_EL0` without a trap,
 and an access at EL0 to the physical counter, to the physical or virtual
-timer, to the performance monitors other than a read of `PMUSERENR_EL0`,
-or to the debug communications channel traps with the exception class
-`0x18`; EL0 cannot mask an interrupt, its
-stack pointer is checked for alignment, its data accesses are
-little-endian, it reads `CTR_EL0`, executes `DC ZVA`, cache maintenance by
-address and `WFE` without a trap, and a `WFI` that would wait traps. Every
-CPU has these controls before it first enters EL0. The criterion: on QEMU
-virt, the reads of `CNTVCT_EL0` and `CNTFRQ_EL0` succeed at EL0, and the
-three traps of the contract, the case of the class `SpAlignment` and the
-case of the cause `TrappedAccess`, a read of `PMCCNTR_EL0`, hold.
+timer, to the performance monitors or to the debug communications channel
+traps with the exception class `0x18`, except an access to `PMUSERENR_EL0`
+itself, of which a read does not trap and a write is undefined, with the
+exception class `0x00`; EL0 cannot mask an interrupt, its stack pointer is
+checked for alignment, its data accesses are little-endian, it reads
+`CTR_EL0`, executes `DC ZVA`, cache maintenance by address and `WFE`
+without a trap, and a `WFI` that would wait traps. Every CPU has these
+controls before it first enters EL0. The criterion: on QEMU virt, the reads
+of `CNTVCT_EL0` and `CNTFRQ_EL0` succeed at EL0, and the three traps of the
+contract, the case of the class `SpAlignment` and the case of the cause
+`TrappedAccess`, a read of `PMCCNTR_EL0`, hold.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `krepi_arch::el0::write_controls` (planned).
