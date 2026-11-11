@@ -797,10 +797,10 @@ expiry, revocation and release have no fault-injection point.
   capacity of waits; it writes at most 6 items.
 - `sleep` walks the deadline table, at most the thread capacity of waits,
   and writes at most 3 items.
-- `check_source` makes one lookup; `wait_set_add` compares the
-  object with at most `WAIT_SET_SOURCES` - 1 registrations and writes 1
-  item; `wait_set_remove` writes 1 item; `sources` reads
-  `WAIT_SET_SOURCES` registrations.
+- `check_source` makes one lookup; `wait_set_add` compares the object with
+  at most `WAIT_SET_SOURCES` - 1 registrations and writes 1 item;
+  `wait_set_remove` writes 1 item; `sources` reads `WAIT_SET_SOURCES`
+  registrations.
 - `wait_set_wait` makes at most `WAIT_SET_SOURCES` lookups and reads at
   most `WAIT_SET_SOURCES` words, and, when it blocks, joins at most
   `WAIT_SET_SOURCES` queues and walks the deadline table, at most the

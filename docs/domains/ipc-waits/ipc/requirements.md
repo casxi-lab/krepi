@@ -238,15 +238,14 @@ budget or the one that it borrows, to the receiver, which runs on it within
 the ceiling of its admission; nested calls lend the same context on, to a
 depth of at most eight. A context has one holder that runs, and no credit
 is copied. When a call ends, by any outcome, the context that it lent is
-withdrawn from its receiver and from every thread downstream of it that
-holds it, before the caller is made ready; the loans upstream stay, and so
-do the contexts that a thread downstream lent after it had lost that one. A
-server that serves a call does not receive again until the call ends
-(`ReplyPending`). The criterion: after the end of each kind of call, no
-thread downstream of the caller holds the context that the call lent and
-the caller is ready, a context that a thread downstream lent later stays
-with its borrower, and a ninth nested delivery is refused with
-`LoanDepth`.
+withdrawn from its receiver and from every thread further along the
+delivered calls that holds it, before the caller is made ready; the loans
+upstream stay, and so do the contexts that such a thread lent after it had
+lost that one. A server that serves a call does not receive again until the
+call ends (`ReplyPending`). The criterion: after the end of each kind of
+call, no thread holds the context that the call lent and the caller is
+ready, a context that such a thread lent later stays with its borrower, and
+a ninth nested delivery is refused with `LoanDepth`.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `ipc::call`, `ipc::receive`, `ipc::reply`,

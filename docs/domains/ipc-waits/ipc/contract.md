@@ -685,16 +685,18 @@ the same write-back.
   which stay, and the settlement withdraws nothing more and requeues no
   thread.
 - **Loans that stay.** The loans upstream of the receiver stay, and so do
-  those that a thread downstream made after it lost the context: when, in
+  those that a thread further along the calls made after it lost the
+  context: when, in
   a chain from A through B and C to D, the call of B to C ends, C and D
   return to their own records, and B keeps running on the context of A.
   When D, still serving the call of C, then calls E, its delivery lends D's
   own record to E; the later end of the call of C to D withdraws nothing,
   since D has no source, and E keeps the context of D while D waits for
   it.
-- **No re-lending.** A thread downstream that waits for the reply of its
-  own call stays blocked, with no context lent to it, until that call ends;
-  nothing lends it a context again.
+- **No re-lending.** A thread that a withdrawal returned to its own record
+  and that waits for the reply of its own call stays blocked, with no
+  context lent to it, until that call ends; nothing lends it a context
+  again.
 - **Full return.** Each outcome of a delivered call withdraws in this way,
   in the write set that ends the call: the reply in that of `reply`;
   `Timeout` in the settlement of the expiry; `Cancelled` in the settlement
@@ -1158,8 +1160,8 @@ kernel classify them; no lock order is stated here.
 - Lending: chains of every depth from 1 to 8 and a ninth delivery, refused
   at a call and ending a queued call at a receive; the end of a call in the
   middle of a chain, which leaves the loans upstream; each outcome, after
-  whose write-back the caller is ready and no thread downstream of the
-  caller holds the context that the call lent; the chain from A to E of
+  whose write-back the caller is ready and no thread holds the context
+  that the call lent; the chain from A to E of
   [Budget lending](#budget-lending), after which E keeps the context of D; a
   chain whose last thread, after the end of a call upstream, lends its own
   record along eight more deliveries, whose ends each withdraw at most eight
