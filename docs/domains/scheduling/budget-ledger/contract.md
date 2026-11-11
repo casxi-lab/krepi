@@ -8,9 +8,9 @@ of a stopped dispatch, with the debt of an overrun; the replenishment at
 period boundaries; the admission that carves the holdings of a new thread
 from those of its creator, class by class, and the release that returns
 them at the reap; and the loan of a caller's context to the service of its
-call and its withdrawal. The priority classes, the run queues, the
-selection of the thread that runs, its time slice, preemption and the
-admission checks of the class and the ceiling belong to the
+call and its withdrawal. The run queues of the classes, the selection of
+the thread that runs, its time slice, preemption and the admission checks
+of the class and the ceiling belong to the
 [scheduler](../scheduler/contract.md) component, the module `scheduler` of
 the core (planned), which reads the dispatch credit that this page gives;
 when a loan is made and withdrawn belongs to the module `ipc` (planned);
@@ -175,10 +175,10 @@ these fields:
   released: the IPC component withdraws every loan downstream of a thread
   when it settles the calls of that thread, before the reap of the
   thread's process, a premise of the composition that `release` does not
-  check ([Lending](#lending)). No dispatch outlives the record
-  of the owner of its context either: a withdrawal during a dispatch is
-  followed by the scheduler's `requeue`, which charges the dispatch up to
-  that time.
+  check ([Lending](#lending)). No dispatch outlives the record of the
+  owner of its context either: a withdrawal during a dispatch is followed
+  by the scheduler's `requeue`, which charges the dispatch up to that
+  time.
 
 ## Classes
 
@@ -215,9 +215,10 @@ whose context is of that class.
      (`InvalidConfiguration`);
   4. the caps and the margin, summed without overflow, do not exceed the
      period (`InvalidConfiguration`).
-- **A cap of 0.** The checks accept a cap of 0, whose class then admits
-  no thread, as the vectors of a class without capacity have it. The
-  root's thread runs on its holding of control
+- **A cap of 0.** The checks accept a cap of 0, as the vectors of a class
+  without capacity have it: the class then admits no thread, except that
+  the root's thread is still admitted in control, with the budget 0, when
+  the control cap is 0. The root's thread runs on its holding of control
   ([Admission and release](#admission-and-release)), so the values of a
   board, which the scheduler's table of platform parameters gives, have a
   `CONTROL_CAP` of at least 1 tick; this is a rule for those values, which

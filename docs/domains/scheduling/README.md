@@ -358,8 +358,8 @@ the kernel, the budget ledger lends a context and withdraws a loan
 an error of shared capacity. A loan back to the owner of a context is an
 error, which the IPC component avoids by refusing a call to oneself and a
 cycle of calls before delivery; a second loan to a borrower that already
-borrows is an error as well, which the rules of the IPC component for the
-delivery of a call to a receiver avoid.
+borrows is an error as well, and the IPC component states what such a
+delivery does.
 
 **Prerequisites.** [Budgets and replenishment](#budgets-and-replenishment),
 [Priority classes](#priority-classes), and [Admission](#admission) for the
@@ -497,14 +497,17 @@ of the kernel objects and capabilities domain.
 
 **Engineering notes.** An admission writes the thread slots of the
 creator, of the new thread and of the last thread of its run queue, and
-the scheduler record of the CPU, within the write set of the creation; the
-holdings of every class that move are fields of the two budget records, so
-the classes add no item. A process is reaped after its children, so
-holdings return up the tree in order. The budget records are per-CPU state
-classified in the [State fields](budget-ledger/contract.md#state-fields)
-of the budget-ledger contract, and the scheduling state of a thread is
-classified in the [State fields](scheduler/contract.md#state-fields) of
-the scheduler contract.
+the scheduler record of the CPU, within the write set of the creation;
+when the creator runs on its own context, the composer first calls
+`requeue` for it, whose charge of its dispatch writes the class ledger of
+its class as well. The holdings of every class that move are fields of the
+two budget records, so the classes add no item. A process is reaped after
+its children, so holdings return up the tree in order. The budget records
+are per-CPU state classified in the
+[State fields](budget-ledger/contract.md#state-fields) of the
+budget-ledger contract, and the scheduling state of a thread is classified
+in the [State fields](scheduler/contract.md#state-fields) of the scheduler
+contract.
 
 **Verification.** Invariants: for each class, the holdings of all live
 records and the part of the cap that the root has not taken add up to the

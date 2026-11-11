@@ -217,7 +217,12 @@ the change that adds the module writes its `paths` block here.
   read ([replenishment](../budget-ledger/contract.md#replenishment)), so
   moving every thread that a boundary resumes to the tail would need a
   loop over the throttled threads at each boundary and a write set with no
-  bound within $W$.
+  bound within $W$. The same rule has dispatch take "the first thread with
+  budget at the highest non-empty priority": this page reads the highest
+  non-empty priority as the highest class whose run queue holds a thread
+  with credit, so a class whose ready threads are all throttled is passed
+  over, as step 1 of
+  [Selection and time slices](#selection-and-time-slices) states.
 - **Several in one transition.** When one transition makes several threads
   ready, the composer calls `enqueue` in the order of
   [Determinism](#determinism), and each joins the tail in the order of the
@@ -577,12 +582,11 @@ the scheduler record of the CPU, one item keyed by its CPU. That kind of
 key is this component's, as the objects component leaves the items of the
 composing components to their contracts, like the queue links of other
 components; with more than one CPU, an entry stages only the scheduler
-record of the executing CPU. The composer
-completes the checks of every entry that it composes before its first
-write; afterwards only `WriteSetFull` of `stage`, which a write set within
-$W$ = 64 items never meets, and the fault-injection points of test builds
-can stop it, and either discards the buffer and leaves the state from
-before the operation.
+record of the executing CPU. The composer completes the checks of every
+entry that it composes before its first write; afterwards only
+`WriteSetFull` of `stage`, which a write set within $W$ = 64 items never
+meets, and the fault-injection points of test builds can stop it, and
+either discards the buffer and leaves the state from before the operation.
 
 | Entry | Checks before the first write | Write set of this page |
 | --- | --- | --- |

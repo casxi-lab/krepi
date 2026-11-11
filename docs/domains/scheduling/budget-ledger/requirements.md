@@ -37,7 +37,7 @@ the component, so the metadata lists none.
 - The thread references, the write sets and the errors of references that
   the entries use are those of the
   [objects](../../objects-capabilities/objects/requirements.md) component;
-  the classes, the run queues, the selection and the admission checks of
+  the run queues of the classes, the selection and the admission checks of
   the class and the ceiling are those of the
   [scheduler](../scheduler/requirements.md) component.
 
@@ -144,10 +144,10 @@ number of periods separates from its last update is brought up to date in
 a fixed number of steps. A record with debt $d$ and budget $b > 0$ that is
 not charged, and whose budget no admission or release changes, regains
 credit within $\lceil d/b \rceil$ boundaries, its debt falling at each of
-them; a record with budget 0 is never replenished. Waits and sleeps neither
-add nor remove credit. The criterion: the vectors of
-replenishment hold, among them a gap of $10^{10}$ periods and a debt of 25
-that a wait across one boundary leaves at 5.
+them; a record with budget 0 is never replenished. Waits and sleeps
+neither add nor remove credit. The criterion: the vectors of replenishment
+hold, among them a gap of $10^{10}$ periods and a debt of 25 that a wait
+across one boundary leaves at 5.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `ledger::replenish` and `ledger::available` (planned).
@@ -308,11 +308,10 @@ unchanged, and the frozen vectors of refused loans hold.
 - One CPU. The pending ticks of a record, which carry a charge from another
   CPU, stay 0; their protocol across CPUs, the migration of a record
   between ledgers, the tokens and their locks are not covered.
-- The priority classes and their order, the run queues, the selection of a
-  thread with its time slice and deadline, preemption, the admission checks
-  of the class and the ceiling, and the platform parameters of each board
-  are not covered; they are the
-  [scheduler requirements](../scheduler/requirements.md).
+- The run queues of the classes, the selection of a thread with its time
+  slice and deadline, preemption, the admission checks of the class and
+  the ceiling, and the platform parameters of each board are not covered;
+  they are the [scheduler requirements](../scheduler/requirements.md).
 - When a loan is made and withdrawn, the creation and reap calls that
   admit and release a thread, and the query of the CPU time of a process
   are not covered; the IPC, creation and lifecycle components compose the
