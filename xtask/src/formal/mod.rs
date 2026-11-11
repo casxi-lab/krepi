@@ -9,6 +9,7 @@
 pub mod base;
 pub mod canary;
 pub mod classify;
+pub mod externals;
 pub mod extract;
 #[cfg(test)]
 mod fixture;
@@ -52,6 +53,9 @@ pub struct Layout {
     pub extraction: &'static str,
     /// The Lake project, relative to the repository root.
     pub project: &'static str,
+    /// The Lake project whose Lean toolchain and Lake lock every stage takes,
+    /// with the proofs of the qualification cases: that of production.
+    pub root_project: &'static str,
     /// The directory of the reviewed external declarations, relative to
     /// the repository root.
     pub externals: &'static str,
@@ -98,6 +102,7 @@ impl Layout {
         cases: "verification/qualification/cases.json",
         extraction: "verification/extraction.toml",
         project: "verification",
+        root_project: "verification",
         externals: "verification/externals",
         namespace: "Krepi",
         generated: "KrepiGen",
@@ -113,13 +118,27 @@ impl Layout {
         image_pin: "verification/image-pin.json",
         tooling: "verification/tooling",
     };
+
+    /// The layout of the calibration target: its workspace, Lake project and
+    /// registries, with the qualification and the tools of production.
+    pub const CALIBRATION: Layout = Layout {
+        kernel: "verification/qualification/calibration",
+        package: "formal-calibration",
+        project: "verification/qualification/calibration",
+        statements: "verification/qualification/calibration/statements.json",
+        axioms: "verification/qualification/calibration/axioms.json",
+        tcb: "verification/qualification/calibration/tcb.json",
+        registry: "verification/qualification/calibration/targets.json",
+        models: "verification/qualification/calibration/models.json",
+        ..Layout::PRODUCTION
+    };
 }
 
 /// The subcommands of `cargo xtask formal`.
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "run",
-        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the base round and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the named targets",
+        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the named targets, and --calibration runs the calibration target",
         subcommands: &[],
     },
     Command {
@@ -164,14 +183,15 @@ fn cli() -> clap::Command {
         .bin_name("cargo xtask formal")
         .disable_help_subcommand(true)
         .subcommand(
-            clap::Command::new("run").about(about("run")).arg(
+            clap::Command::new("run").about(about("run")).args([
                 Arg::new("target")
                     .long("target")
                     .value_name("NAME")
                     .help("Run only this target; may be repeated")
                     .action(ArgAction::Append)
                     .value_parser(NonEmptyStringValueParser::new()),
-            ),
+                clap::arg!(--calibration "Run in the layout of the calibration target"),
+            ]),
         )
         .subcommand(guard::cli(about("guard")))
         .subcommand(
@@ -204,7 +224,11 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
             }
         };
     match matches.subcommand() {
-        Some(("run", matches)) => run::command(root, &Layout::PRODUCTION, targets(matches)),
+        Some(("run", matches)) => {
+            let calibration = matches.get_flag("calibration");
+            let layout = [&Layout::PRODUCTION, &Layout::CALIBRATION][usize::from(calibration)];
+            run::command(root, layout, targets(matches))
+        }
         Some(("guard", matches)) => guard::command(root, &Layout::PRODUCTION, matches),
         Some(("toolchain-check", matches)) => {
             let path = |name| matches.get_one::<PathBuf>(name).expect("a required option");
@@ -225,6 +249,7 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::manifests;
     use crate::repo::{self, Tree};
 
     fn read(args: &[&str]) -> Result<ArgMatches, clap::Error> {
@@ -240,6 +265,20 @@ mod tests {
             targets(matches)
         };
         assert_eq!(run_targets(&["run"]), BTreeSet::new());
+        for (args, calibration) in [(&["run"][..], false), (&["run", "--calibration"], true)] {
+            let matches = read(args).expect("a valid command line");
+            let (_, matches) = matches.subcommand().expect("a subcommand");
+            assert_eq!(matches.get_flag("calibration"), calibration);
+        }
+        let mut run = cli()
+            .find_subcommand("run")
+            .cloned()
+            .expect("the run command");
+        let help = run.render_help().to_string();
+        assert!(
+            help.contains("Run in the layout of the calibration target"),
+            "{help}"
+        );
         assert_eq!(
             run_targets(&["run", "--target", "b", "--target", "a", "--target", "b"]),
             BTreeSet::from(["a".to_string(), "b".to_string()])
@@ -384,6 +423,62 @@ mod tests {
                 "{path} is not in the Lake project"
             );
         }
+    }
+
+    #[test]
+    fn the_calibration_layout_names_its_own_tracked_files_and_shares_the_rest() {
+        let tree = Tree::load(&repo::root()).expect("the repository is readable");
+        let (layout, production) = (Layout::CALIBRATION, Layout::PRODUCTION);
+        let own = [
+            layout.statements,
+            layout.axioms,
+            layout.tcb,
+            layout.registry,
+            layout.models,
+        ];
+        let manifest = format!("{}/Cargo.toml", layout.kernel);
+        let lock = format!("{}/Cargo.lock", layout.kernel);
+        let lakefile = format!("{}/lakefile.toml", layout.project);
+        for path in own.into_iter().chain([manifest.as_str(), &lock, &lakefile]) {
+            assert!(tree.exists(path), "{path} is not tracked");
+            assert!(
+                path.starts_with(&format!("{}/", layout.qualification)),
+                "{path}"
+            );
+        }
+        // The stages of the project take the other project files from the
+        // production project.
+        for file in &lean::PROJECT_FILES[1..] {
+            assert!(
+                !tree.exists(&format!("{}/{file}", layout.project)),
+                "{file}"
+            );
+        }
+        let package = manifests::root_package(tree.text(&manifest).expect("the manifest"));
+        assert_eq!(package, Ok(Some(layout.package.to_string())));
+        assert_ne!(layout.package, production.package);
+        let shared = |layout: &Layout| {
+            let paths = [
+                layout.qualification,
+                layout.cases,
+                layout.extraction,
+                layout.externals,
+            ];
+            let names = [
+                layout.namespace,
+                layout.generated,
+                layout.proofs,
+                layout.triple,
+            ];
+            let tools = [
+                layout.root_project,
+                layout.toolchain,
+                layout.image_pin,
+                layout.tooling,
+            ];
+            [paths, names, tools, [layout.open; 4]]
+        };
+        assert_eq!(shared(&layout), shared(&production));
     }
 
     #[test]

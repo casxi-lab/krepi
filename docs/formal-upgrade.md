@@ -38,7 +38,12 @@ the Lake project files, which are on the statement side, and so does a
 repair of a proof below `verification/Krepi/Qualification/`. Such a pull
 request is a statement change: it needs the label `spec`, the fields that
 the guard checks for it and an approval of the new statement hash
-([guard](formal-verification.md#guard)).
+([guard](formal-verification.md#guard)). The Lake project of the
+[calibration target](formal-verification.md#calibration-target) keeps no
+`lean-toolchain` and no `lake-manifest.json` of its own and takes those of
+`verification/` in each stage, so the upgrade changes nothing there; a
+repair of its proofs is not a statement change, since that project is not
+on the statement side, and needs no label `spec`.
 
 ## Procedure
 

@@ -1,4 +1,4 @@
-//! The receipt of `cargo xtask formal run`, schema 2, as "Receipt" in
+//! The receipt of `cargo xtask formal run`, schema 3, as "Receipt" in
 //! `docs/formal-verification.md` documents it.
 
 use std::collections::BTreeMap;
@@ -10,8 +10,9 @@ use super::outcome::{Class, Site, Status};
 use super::paths::Snapshot;
 use super::process::LimitBy;
 use super::qualify::Expect;
+use super::registry::State;
 
-pub const SCHEMA: u32 = 2;
+pub const SCHEMA: u32 = 3;
 
 pub const COMMAND: &str = "cargo xtask formal run";
 
@@ -39,6 +40,7 @@ pub struct Receipt {
     pub units: BTreeMap<String, Unit>,
     pub qualification: Option<Qualification>,
     pub base: Option<super::base::Record>,
+    pub proof_targets: BTreeMap<String, Target>,
     pub guard: Option<super::guard::Record>,
     pub commands: Vec<Command>,
     pub failures: Vec<Failure>,
@@ -181,6 +183,27 @@ pub struct QualificationTheorem {
     pub case: String,
     pub unit: String,
     pub axioms: Option<Vec<String>>,
+}
+
+/// A target that the run extracted: its unit, or none for a target that
+/// only the base round needs, its state, budget and the seconds of its
+/// commands, what its extraction gave, the SHA-256 of each file that Aeneas
+/// wrote, the declarations of its templates that stay axioms, its proof
+/// modules, whether its generated definitions type-check, the seconds of
+/// each mutant and its problems.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Target {
+    pub unit: Option<String>,
+    pub state: State,
+    pub budget_seconds: u64,
+    pub seconds: f64,
+    pub observed: Observed,
+    pub generated: BTreeMap<String, String>,
+    pub declarations: Vec<String>,
+    pub proof_modules: Vec<String>,
+    pub typed: bool,
+    pub mutants: BTreeMap<String, f64>,
+    pub problems: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -360,6 +383,7 @@ mod tests {
                 .collect(),
             qualification: Some(qualification()),
             base: Some(base()),
+            proof_targets: BTreeMap::from([("t".to_string(), target())]),
             guard: Some(guard()),
             commands,
             failures: statuses
@@ -369,6 +393,26 @@ mod tests {
                     message: format!("{status:?}"),
                 })
                 .collect(),
+        }
+    }
+
+    /// The record of a target with a mutant.
+    fn target() -> Target {
+        Target {
+            unit: Some("target/t".to_string()),
+            state: crate::formal::registry::State::Formal,
+            budget_seconds: 3_000,
+            seconds: 12.5,
+            observed: Observed {
+                complete: true,
+                ..Observed::default()
+            },
+            generated: BTreeMap::from([("KrepiGen/T/Funs.lean".to_string(), "9".repeat(64))]),
+            declarations: vec!["T.f".to_string()],
+            proof_modules: vec!["Krepi.Proofs.T".to_string()],
+            typed: true,
+            mutants: BTreeMap::from([("m".to_string(), 3.25)]),
+            problems: vec!["Krepi.Proofs.T.t depends on sorryAx".to_string()],
         }
     }
 
@@ -635,6 +679,7 @@ mod tests {
             ]),
             qualification: None,
             base: None,
+            proof_targets: BTreeMap::new(),
             guard: None,
             commands: vec![Command {
                 sequence: 1,
@@ -667,7 +712,7 @@ mod tests {
         let e = "e".repeat(64);
         let expected = format!(
             r#"{{
-  "schema": 2,
+  "schema": 3,
   "command": "cargo xtask formal run",
   "status": "VERIFIED",
   "complete": true,
@@ -724,6 +769,7 @@ mod tests {
   }},
   "qualification": null,
   "base": null,
+  "proof_targets": {{}},
   "guard": null,
   "commands": [
     {{

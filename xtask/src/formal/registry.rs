@@ -44,7 +44,7 @@ pub struct Specification {
 /// Whether a target is registered for the gate or only planned: a planned
 /// target is only extracted and type-checked, and needs no obligation and
 /// no mutant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum State {
     #[default]
@@ -56,7 +56,10 @@ pub enum State {
 /// describes its fields.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "the target phase of the gate reads the rest")]
+#[expect(
+    dead_code,
+    reason = "the feature and the description are for the review"
+)]
 pub struct Target {
     pub name: String,
     #[serde(default)]
@@ -111,9 +114,9 @@ pub struct Opaque {
 /// An axiom beyond the allowlist that the theorems of a target may use.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "the target phase of the gate reads it")]
 pub struct TrustedAxiom {
     pub name: String,
+    #[expect(dead_code, reason = "review reads the reason, the gate the name")]
     pub reason: String,
 }
 
@@ -154,10 +157,12 @@ pub fn parse(text: &str) -> Result<Registry, String> {
 }
 
 /// The targets that the registry `text` registers, by name, with their
-/// states.
-pub fn states(text: &str) -> Result<BTreeMap<String, State>, String> {
+/// states and budgets.
+pub fn states(text: &str) -> Result<BTreeMap<String, (State, u64)>, String> {
     let targets = parse(text)?.targets.into_iter();
-    Ok(targets.map(|target| (target.name, target.state)).collect())
+    Ok(targets
+        .map(|target| (target.name, (target.state, target.budget)))
+        .collect())
 }
 
 /// Whether `text` is empty or only whitespace.
@@ -486,8 +491,8 @@ mod tests {
         assert_eq!(
             states(&valid().to_string()),
             Ok(BTreeMap::from([
-                ("slots".to_string(), State::Planned),
-                ("table".to_string(), State::Formal)
+                ("slots".to_string(), (State::Planned, BUDGET)),
+                ("table".to_string(), (State::Formal, 900))
             ]))
         );
         let committed = include_str!("../../../verification/targets.json");

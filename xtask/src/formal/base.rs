@@ -18,8 +18,8 @@ use super::lean::{self, Kind, Sources};
 use super::outcome::{Class, Site, Status};
 use super::process::Ran;
 use super::qualify::{self, conclusion, lake};
-use super::registry::declared_axioms;
-use super::run::{Gate, Phase, Request};
+use super::registry::{self, declared_axioms};
+use super::run::{self, Gate, Phase, Request};
 use super::toolchain::sha256;
 
 /// The name of the phase, and the first part of the name of its units.
@@ -176,8 +176,8 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     }
     record.statement_hash = Hash { recorded, computed };
     let (stage, export) = (work.join("stage"), source.join(layout.project));
-    let project = stage.join(layout.project);
-    lean::create_stage(&export, &stage, &installation.backend())?;
+    let pins = source.join(layout.root_project);
+    let project = lean::create_stage(&export, &pins, &stage, &installation.backend())?;
     let (mut files, mine) = (Vec::new(), format!("{}/", layout.namespace));
     for (path, entry) in tracked.iter().filter(|(path, _)| path.ends_with(".lean")) {
         let file = &path[layout.project.len() + 1..];
@@ -194,21 +194,27 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
             files.push(file.to_string());
         }
     }
+    gate.handwritten.clone_from(&files);
     // The generated modules of each proof case whose generated code built,
-    // and the declarations of the case by its proof and external modules.
+    // and the declarations of the case by its proof and external modules,
+    // when its proofs are in this project.
     let (mut cases, mut missing) = (BTreeMap::new(), Vec::new());
     let qualification = gate.receipt.qualification.clone().unwrap_or_default();
-    for case in qualify::load_cases(&input(layout.cases)?, &layout)? {
+    let here = layout.project == layout.root_project;
+    for case in qualify::load_cases(&input(layout.cases)?, &layout)?
+        .into_iter()
+        .filter(|_| here)
+    {
         let Some(proof) = &case.proof else { continue };
         let unit = qualify::unit(&case.name);
         let mut commands = (gate.receipt.commands.iter()).filter(|c| c.unit == Some(unit.clone()));
         let build = commands.find(|command| command.site == Site::QualificationBuild);
         let built = build.is_some_and(|build| build.class == Class::Passed);
         let Some(case_record) = qualification.cases.get(&case.name).filter(|_| built) else {
-            missing.push(unit);
+            missing.push((unit.clone(), format!("{unit} did not build its code")));
             continue;
         };
-        let from = qualify::case_stage(gate, &case.name).join(layout.project);
+        let from = qualify::case_stage(gate, &case.name).join(layout.root_project);
         // The templates were installed under the names of their reviewed files.
         for file in (case_record.generated.keys()).map(|file| file.replace("_Template", "")) {
             lean::copy_into(&from, &project, &file)?;
@@ -220,12 +226,46 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
         let modules = externals.map(external).chain([proof.module.clone()]);
         cases.extend(modules.map(|module| (module, case_record.declarations.clone())));
     }
+    // The generated modules of each target that the run extracted, whose
+    // definitions type-check, as its stage holds them, and what the theorems
+    // of its proof modules may use beyond the registry of library axioms:
+    // the declarations of its templates and its trusted axioms.
+    let mut targets = BTreeMap::new();
+    let mut registered = Vec::new();
+    if !gate.receipt.proof_targets.is_empty() {
+        let text = input(layout.registry)?;
+        let read = registry::parse(&text).map_err(|e| format!("{}: {e}", layout.registry))?;
+        registered = read.targets;
+    }
+    for (name, target) in gate.receipt.proof_targets.clone() {
+        let lacks = format!("the target {name} has no generated definitions that type-check");
+        if !target.typed {
+            missing.push((target.unit.unwrap_or(PHASE.to_string()), lacks));
+            continue;
+        }
+        let from = run::target_project(gate, &name);
+        for file in (target.generated.keys()).map(|file| file.replace("_Template", "")) {
+            lean::copy_into(&from, &project, &file)?;
+            (sources.declared).extend(declared_axioms(&read(&project.join(&file))?));
+            files.push(file);
+        }
+        let own = (registered.iter()).filter(|registered| registered.name == name);
+        let trusted = own.flat_map(|registered| &registered.trusted_axioms);
+        let mut allowed = target.declarations.clone();
+        allowed.extend(trusted.map(|axiom| axiom.name.clone()));
+        targets.extend((target.proof_modules.into_iter()).map(|m| (m, allowed.clone())));
+    }
     // A case whose commands force its conclusion forces the round's.
     let forced = |unit: &&String| {
         let mut commands = (gate.receipt.commands.iter()).filter(|c| c.unit.as_ref() == Some(unit));
         commands.any(|command| matches!(command.class, Class::ToolFailure | Class::Budget))
     };
-    let missing = missing.iter().find(forced).or(missing.first()).cloned();
+    let first = missing
+        .iter()
+        .find(|(unit, _)| forced(&unit))
+        .or(missing.first())
+        .cloned();
+    let missing = first.as_ref().map(|(unit, _)| unit.clone());
     // The modules of the stage, krepi's own and those of planned statements.
     let modules = (files.iter()).map(|file| file.trim_end_matches(".lean").replace('/', "."));
     let modules = BTreeSet::from_iter(modules);
@@ -243,8 +283,7 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     // A build that failed, or a kernel report of `leanchecker`, stops every
     // theorem from being checked.
     gate.own = own.clone();
-    let mut inherited =
-        Vec::from_iter((missing.iter()).map(|unit| format!("{unit} did not build its code")));
+    let mut inherited = Vec::from_iter(first.map(|(_, why)| why));
     let mut stop = inherited.first().cloned();
     let root = format!("+{}", layout.namespace);
     let unplanned = (modules.iter()).filter(|module| !planned.contains(module));
@@ -343,6 +382,9 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
             };
             let mut sources = sources.clone();
             sources.case = case.cloned().unwrap_or_default();
+            sources
+                .registry
+                .extend(targets.get(module).into_iter().flatten().cloned());
             let rejected = (axioms.iter()).filter(|a| !lean::allows(theorem.kind, a, &sources));
             theorem.problems = Vec::from_iter(rejected.map(|a| format!("{name} depends on {a}")));
             (theorem.module, theorem.axioms) = (module.clone(), Some(axioms.clone()));
@@ -507,6 +549,13 @@ mod tests {
     /// Commits what changed, with the statement hash of the commit in
     /// `statements.json`, and runs both phases.
     fn run(fixture: &mut Fixture) -> Done {
+        hashed(fixture);
+        gate(fixture, &[], phases(fixture))
+    }
+
+    /// Commits what changed, with the statement hash of the commit in
+    /// `statements.json`.
+    fn hashed(fixture: &mut Fixture) {
         if !Fixture::git(fixture, &["status", "--porcelain"]).is_empty() {
             fixture.commit_all();
         }
@@ -520,7 +569,6 @@ mod tests {
             fixture.write(LAYOUT.statements, &format!("{text}\n"));
             fixture.commit_all();
         }
-        gate(fixture, &[], phases(fixture))
     }
 
     /// The qualification and the base round of `fixture`.
@@ -1681,5 +1729,91 @@ mod tests {
         );
         assert_eq!(done.failures(), [stopped]);
         assert_eq!(status(&done, PHASE).0, Status::NotRun);
+    }
+
+    /// Writes the target registry `targets`, a JSON list, and an empty
+    /// registry of models.
+    fn targets(fixture: &Fixture, targets: &Value) {
+        let file = json!({"schema": 2, "specifications": [], "targets": targets});
+        fixture.write(LAYOUT.registry, &format!("{file}\n"));
+        fixture.write(LAYOUT.models, "{\"schema\": 1, \"models\": []}\n");
+    }
+
+    #[test]
+    fn a_whole_run_builds_no_planned_target_and_a_run_that_names_it_does() {
+        // The generated definitions of the planned target do not type-check,
+        // and its kernel workspace is still virtual.
+        let mut fixture = base("planned-target");
+        let planned =
+            json!({"name": "p", "state": "planned", "module": "P", "start_from": ["crate::f"]});
+        targets(&fixture, &json!([planned]));
+        let error = "error: KrepiGen/P/Funs.lean:3:8: type mismatch";
+        let script = fixture::failing("KrepiGen.P.Funs", &[error], 1);
+        lake_script(&fixture, "KrepiGen.P.Funs", &script);
+        hashed(&mut fixture);
+        let done = gate(&fixture, &[], run::tests::every_phase(fixture.root(), &[]));
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        assert!(done.receipt.complete && done.receipt.proof_targets.is_empty());
+        assert_eq!(status(&done, PHASE), (Status::Verified, None));
+        assert!(
+            (done.receipt.commands.iter())
+                .all(|c| c.site != Site::Charon || c.unit != Some(PHASE.to_string()))
+        );
+        // A run that names it, from a root package, builds nothing of `base`.
+        run::tests::root_package(&fixture, "krepi-kernel", "");
+        hashed(&mut fixture);
+        let done = gate(
+            &fixture,
+            &["p"],
+            run::tests::every_phase(fixture.root(), &["p"]),
+        );
+        let lacks = "the target p has no generated definitions that type-check";
+        assert_eq!(status(&done, PHASE), (Status::Rejected, Some(lacks)));
+        let reason =
+            format!("its generated definitions do not type-check: {error} | error: build failed");
+        assert_eq!(
+            status(&done, "target/p"),
+            (Status::Rejected, Some(reason.as_str()))
+        );
+    }
+
+    #[test]
+    fn the_base_round_admits_the_trusted_axioms_of_a_target_for_its_theorems() {
+        // The theorem of the target depends on an axiom that only the target
+        // trusts, in the audit of the base round and in that of the target.
+        let mut fixture = base("trusted");
+        run::tests::root_package(&fixture, "krepi-kernel", "");
+        let theorem = "Krepi.Proofs.Main.m";
+        axioms(&fixture, theorem, "Krepi.Extra.ax");
+        let mut target = json!({
+            "name": "t", "module": "T", "start_from": ["crate::f"],
+            "proof_modules": ["Krepi.Proofs.Main"],
+            "obligations": [{"id": "m", "theorems": [theorem]}],
+        });
+        targets(&fixture, &json!([target]));
+        hashed(&mut fixture);
+        let done = gate(&fixture, &[], run::tests::every_phase(fixture.root(), &[]));
+        let depends = format!("{theorem} depends on Krepi.Extra.ax");
+        assert_eq!(record(&done).theorems[theorem].problems, [depends.as_str()]);
+        assert_eq!(
+            status(&done, "target/t"),
+            (Status::Rejected, Some(depends.as_str()))
+        );
+        target["trusted_axioms"] = json!([{"name": "Krepi.Extra.ax", "reason": "Reviewed."}]);
+        targets(&fixture, &json!([target]));
+        hashed(&mut fixture);
+        let done = gate(&fixture, &[], run::tests::every_phase(fixture.root(), &[]));
+        assert_eq!(done.receipt.status, Status::Verified, "{:?}", done.receipt);
+        let audited = &record(&done).theorems[theorem];
+        assert_eq!(
+            (audited.kind, audited.status),
+            (Kind::Target, Status::Verified)
+        );
+        assert_eq!(status(&done, "target/t"), (Status::Verified, None));
     }
 }

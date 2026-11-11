@@ -1,0 +1,23 @@
+# The calibration target of the proof gate: a workspace in the shape of the
+# kernel workspace, a root package with one member, whose root package has
+# the code shapes of the first kernel targets. Nothing in krepi uses it, and
+# no image holds it; see "Calibration target" in
+# docs/formal-verification.md. It has its own `Cargo.lock` and depends on
+# no crate.
+[package]
+name = "formal-calibration"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The calibration target of the krepi proof gate"
+
+[workspace]
+resolver = "3"
+members = ["member"]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+overflow-checks = true

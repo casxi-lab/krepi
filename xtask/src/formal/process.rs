@@ -32,13 +32,14 @@ pub(crate) const PAUSE: Duration = Duration::from_millis(10);
 static STOP: AtomicUsize = AtomicUsize::new(0);
 
 /// What set the limit of a command: the cap of its call site, or the rest
-/// of the budget of its phase or of the gate.
+/// of the budget of its phase, of the gate or of the target of its unit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LimitBy {
     Cap,
     Phase,
     Gate,
+    Target,
 }
 
 /// The time that a command may run, and what set it.

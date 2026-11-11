@@ -8,10 +8,6 @@
 //! neither is one whose key cannot tell it from another function or a
 //! derived method of its file. The checks and the mapping are those of the
 //! CAS project.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the target phase of the gate is the first caller")
-)]
 
 use std::collections::{BTreeMap, BTreeSet};
 

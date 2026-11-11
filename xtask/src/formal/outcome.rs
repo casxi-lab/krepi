@@ -19,6 +19,7 @@ pub enum Site {
     IllTypedBuild,
     CaseAudit,
     BaseBuild,
+    TargetBuild,
     AxiomAudit,
     Leanchecker,
     Comparator,
@@ -33,6 +34,7 @@ impl Site {
             Site::Charon | Site::CaseAudit | Site::AxiomAudit => 1_800,
             Site::Aeneas => 3_600,
             Site::QualificationBuild | Site::IllTypedBuild | Site::BaseBuild => 7_200,
+            Site::TargetBuild => 7_200,
             Site::Leanchecker | Site::Comparator | Site::Git | Site::CargoMetadata => {
                 return None;
             }
@@ -98,6 +100,7 @@ pub fn classify(site: Site, ran: &Ran, own: usize, unread: Option<&str>) -> Verd
         | Site::IllTypedBuild
         | Site::CaseAudit
         | Site::BaseBuild
+        | Site::TargetBuild
         | Site::AxiomAudit => killed(ran),
         Site::Aeneas | Site::Leanchecker | Site::Comparator | Site::Git | Site::CargoMetadata => {
             stopped(ran)
@@ -137,6 +140,7 @@ pub fn classify(site: Site, ran: &Ran, own: usize, unread: Option<&str>) -> Verd
         | Site::QualificationBuild
         | Site::IllTypedBuild
         | Site::CaseAudit
+        | Site::TargetBuild
         | Site::AxiomAudit
         | Site::Leanchecker => (Class::ProofFailure, exited),
     };
@@ -156,6 +160,7 @@ fn stopped(ran: &Ran) -> Option<String> {
                 LimitBy::Cap => "",
                 LimitBy::Phase => ", the rest of the budget of its phase,",
                 LimitBy::Gate => ", the rest of the budget of the gate,",
+                LimitBy::Target => ", the rest of the budget of its target,",
             };
             Some(format!(
                 "{name} ran longer than its limit of {} s{set} and was stopped",
@@ -312,13 +317,14 @@ pub(crate) mod conventions {
     use crate::formal::process::{Ended, Limit, LimitBy};
 
     /// Every site.
-    pub const SITES: [Site; 11] = [
+    pub const SITES: [Site; 12] = [
         Site::Charon,
         Site::Aeneas,
         Site::QualificationBuild,
         Site::IllTypedBuild,
         Site::CaseAudit,
         Site::BaseBuild,
+        Site::TargetBuild,
         Site::AxiomAudit,
         Site::Leanchecker,
         Site::Comparator,
@@ -326,7 +332,7 @@ pub(crate) mod conventions {
         Site::CargoMetadata,
     ];
 
-    /// The sites that run tools on the code: Charon, Aeneas, the three
+    /// The sites that run tools on the code: Charon, Aeneas, the four
     /// builds, the two audits and `leanchecker`.
     pub const TOOLS: &[Site] = &[
         Site::Charon,
@@ -335,6 +341,7 @@ pub(crate) mod conventions {
         Site::IllTypedBuild,
         Site::CaseAudit,
         Site::BaseBuild,
+        Site::TargetBuild,
         Site::AxiomAudit,
         Site::Leanchecker,
     ];
@@ -344,6 +351,7 @@ pub(crate) mod conventions {
         Site::QualificationBuild,
         Site::IllTypedBuild,
         Site::BaseBuild,
+        Site::TargetBuild,
     ];
 
     /// The limit of a fake tool that hangs. It only decides that the tool is
@@ -1012,6 +1020,7 @@ mod tests {
             ("ill-typed-build", Some(7_200)),
             ("case-audit", Some(1_800)),
             ("base-build", Some(7_200)),
+            ("target-build", Some(7_200)),
             ("axiom-audit", Some(1_800)),
             ("leanchecker", None),
             ("comparator", None),
@@ -1040,6 +1049,7 @@ mod tests {
             (word(&LimitBy::Cap), "cap"),
             (word(&LimitBy::Phase), "phase"),
             (word(&LimitBy::Gate), "gate"),
+            (word(&LimitBy::Target), "target"),
         ];
         for (word, text) in words {
             assert_eq!(word, text);

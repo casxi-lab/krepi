@@ -164,11 +164,20 @@ pub fn load_statements(text: &str, layout: &Layout) -> Result<Statements, String
     file.ok_or(problems.join("; "))
 }
 
+/// Whether the repository path `path` lies in the calibration project inside
+/// the Lake project of `layout`: it is part of neither the statement side nor
+/// the Lean files of that project, but of those of its own layout.
+pub fn in_calibration(path: &str, layout: &Layout) -> bool {
+    let calibration = Layout::CALIBRATION.project;
+    layout.project != calibration && crate::repo::is_within(path, calibration)
+}
+
 /// Whether the repository path `path` lies on the statement side: a Lean
 /// file of the Lake project outside the proofs, the registry of library
 /// axioms, or a Lake project file.
 pub fn statement_side(path: &str, layout: &Layout) -> bool {
-    let Some(file) = path.strip_prefix(&format!("{}/", layout.project)) else {
+    let file = path.strip_prefix(&format!("{}/", layout.project));
+    let Some(file) = file.filter(|_| !in_calibration(path, layout)) else {
         return false;
     };
     let proofs = format!("{}/", layout.proofs.replace('.', "/"));
@@ -189,7 +198,8 @@ pub fn statement_hash(
     work: &Path,
 ) -> Result<(String, Files), String> {
     let listing = git.git(&["ls-tree", "-r", "-z", commit, "--", layout.project], None)?;
-    let files = tree_records(&listing)?;
+    let mut files = tree_records(&listing)?;
+    files.retain(|path, _| !in_calibration(path, layout));
     let mut trees = BTreeMap::from([(String::new(), String::new())]);
     for (path, entry) in &files {
         let (tree, name) = path.rsplit_once('/').unwrap_or_default();
@@ -671,6 +681,37 @@ mod tests {
         for (path, after) in hashes_after(&mut fixture, &paths) {
             assert_eq!(after, before, "{path}");
         }
+    }
+
+    #[test]
+    fn the_calibration_project_is_outside_the_statement_side_of_production() {
+        // Its Lean files and its Lake configuration are on the statement side
+        // of the calibration layout alone, so changing them keeps the
+        // statement hash of production and changes that of the calibration.
+        let mut fixture = project("calibration");
+        let calibration = Layout::CALIBRATION;
+        let paths = [
+            "verification/qualification/calibration/Krepi/Calibration/Statements.lean",
+            "verification/qualification/calibration/lakefile.toml",
+            "verification/qualification/calibration/axioms.json",
+        ];
+        let proof = "verification/qualification/calibration/Krepi/Proofs/Calibration.lean";
+        for path in paths.iter().chain([&proof]) {
+            assert!(!statement_side(path, &LAYOUT), "{path}");
+            assert!(in_calibration(path, &LAYOUT) && !in_calibration(path, &calibration));
+            assert_eq!(statement_side(path, &calibration), *path != proof, "{path}");
+        }
+        let production = hash(&mut fixture, &LAYOUT);
+        let mut before = hash(&mut fixture, &calibration);
+        for path in paths {
+            let (_, after) = hashes_after(&mut fixture, &[path]).remove(0);
+            let own = hash(&mut fixture, &calibration);
+            assert_eq!((after, own != before), (production.clone(), true), "{path}");
+            before = own;
+        }
+        let work = fixture.root().join("artifacts/guard");
+        let (_, listed) = statement_hash(&mut fixture, "HEAD", &LAYOUT, &work).expect("the files");
+        assert!(!listed.is_empty() && listed.keys().all(|path| !in_calibration(path, &LAYOUT)));
     }
 
     #[test]
