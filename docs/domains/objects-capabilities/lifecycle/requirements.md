@@ -152,20 +152,19 @@ another process runs on, and the frozen vectors of faults hold.
 
 ### LIFE-R04
 
-**Kill.** A holder of CONTROL on a process kills it: the kill makes an
-alive process dying with the reason Killed, ends the wait of its thread,
-which no thread observes, withdraws the loans of its context, which returns
-whole, and keeps EL0 from running in it again; it then advances the
-destruction, and gives
-its result once the process is dead. A kill of a dead process succeeds and
-changes nothing, and a kill without CONTROL is refused and changes nothing.
-The criterion: for each of the five states of a target, a busy loop, a
-receive, a call with its context lent, a wait on a notification or a wait
-set, and a sleep with a deadline, the kill stops EL0 in the target, as a
-sentinel page shows, returns the lent context whole and ends the wait with
-`Cancelled`; a second kill of the dead process gives the same result; a
-kill without CONTROL is `PermissionDenied`; and the frozen vectors of kills
-hold.
+**Kill.** A holder of CONTROL on a process kills it: the kill makes an alive
+process dying with the reason Killed, ends the wait of its thread, which no
+thread observes, withdraws the loans of its context, which returns whole,
+and keeps EL0 from running in it again; it then advances the destruction,
+and gives its result once the process is dead. A kill of a dead process
+succeeds and changes nothing, and a kill without CONTROL is refused and
+changes nothing. The criterion: for each of the five states of a target, a
+busy loop, a receive, a call with its context lent, a wait on a notification
+or a wait set, and a sleep with a deadline, the kill stops EL0 in the
+target, as a sentinel page shows, returns the lent context whole and ends
+the wait with `Cancelled`; a second kill of the dead process gives the same
+result; a kill without CONTROL is `PermissionDenied`; and the frozen vectors
+of kills hold.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `lifecycle::kill` and `lifecycle::destroy_step`
@@ -247,14 +246,15 @@ Exited; and a child that kills its owner ends its own call at its phase 0.
 and only once it is dead; the reap releases its process and thread, returns
 its limits and its holdings to the owner, and leaves every capability to it
 stale. No capability, reference or binding holds back the reap, and every
-object, page, slot and limit of the process has returned once it is dead.
-An owner that no longer holds CONTROL on a child cannot reap it, and that
-child is reclaimed only with the destruction of the owner. The criterion: a
-reap by a holder of CONTROL that is not the owner is `NotOwner`, a reap of
-a process that is alive or dying is `InvalidState`, each changing nothing;
-after a reap, the counts of pages, endpoints, notifications, capabilities
-and ASIDs and the quota records of the owner are those before the creation,
-over three rounds; and the frozen vectors of reaping hold.
+object, page, slot and limit of the process has returned once it is dead. An
+owner that no longer holds CONTROL on a child cannot reap it, and that child
+is reclaimed only with the destruction of the owner. The criterion: a reap
+by a holder without CONTROL is `PermissionDenied`, a reap by a holder of
+CONTROL that is not the owner is `NotOwner`, a reap of a process that is
+alive or dying is `InvalidState`, each changing nothing; after a reap, the
+counts of pages, endpoints, notifications, capabilities and ASIDs and the
+quota records of the owner are those before the creation, over three rounds;
+and the frozen vectors of reaping hold.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `lifecycle::reap` (planned).

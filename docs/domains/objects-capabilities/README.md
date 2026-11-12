@@ -441,15 +441,14 @@ through IPC by the same rules, or through the creation of a child, which
 puts initial capabilities into the child's table before the child first
 runs, in slots that the rules of creation fix or that the creator names.
 `close` removes one capability of the caller and leaves those derived from
-it in place. `revoke` withdraws, in
-two phases, everything derived from a capability, and the capability
-itself stays usable: once the revocation is pending, every operation that
-resolves to a capability of the revoked subtree fails, the subtree derives
-nothing more, and calls that wait through it settle as revoked; the
-subtree is then removed in post-order in bounded steps, mappings derived
-from it are removed and their TLB invalidation and CPU references drained,
-and only then is the revocation complete. A revocation reports
-completion, not a count.
+it in place. `revoke` withdraws, in two phases, everything derived from a
+capability, and the capability itself stays usable: once the revocation is
+pending, every operation that resolves to a capability of the revoked
+subtree fails, the subtree derives nothing more, and calls that wait through
+it settle as revoked; the subtree is then removed in post-order in bounded
+steps, mappings derived from it are removed and their TLB invalidation and
+CPU references drained, and only then is the revocation complete. A
+revocation reports completion, not a count.
 
 **Design background.** A derivation tree with revocation follows the
 capability derivation of seL4 (Klein et al. 2014); the two phases make the

@@ -97,7 +97,7 @@ observable behaviour that these rules serve, with its evidence, is in the
   of this page: `dispatch`, for the operations, the user faults and the
   acknowledgement of plans, and for whether an endpoint is served; and
   `creation`, for a new process and for the bound thread of a new endpoint
-  (planned).
+  ([creation](../creation/contract.md#entry-points)).
 - **Token.** What an access to state that is not per-CPU holds, as the
   [SMP design rules](../../../conventions/smp.md#s1-state-classes) state;
   with one CPU, the executing CPU holds every token.
@@ -116,8 +116,8 @@ constants.
 | Entry point | Kind | Called by | ABI operation | Rules |
 | --- | --- | --- | --- | --- |
 | `lifecycle::WATCH_SLOTS` and `SCAN_BATCH` (planned) | Constants, host-testable | The entries of this page | None | [Death notifications](#death-notifications), [Destruction](#destruction), [Work bounds](#work-bounds) |
-| `lifecycle::init` (planned) | Write entry on the copies of a write set, host-testable | The module `creation` (planned), in the write set of the commit of a child process, after `ObjectTable::occupy` of its process slot, and in the write set of the boot of the root | None | [States and exit reasons](#states-and-exit-reasons), [Children](#children) |
-| `lifecycle::is_alive` (planned) | Read entry, host-testable | `creation` (planned), for the process of the thread that a new endpoint binds; `dispatch` (planned), for whether an endpoint is served, which it passes to `ipc` as a value | None | [States and exit reasons](#states-and-exit-reasons) |
+| `lifecycle::init` (planned) | Write entry on the copies of a write set, host-testable | `creation::spawn_commit` (planned), in the write set of the commit of a child process, after `ObjectTable::occupy` of its process slot; `creation::boot_root` (planned), in the write set of the boot of the root | None | [States and exit reasons](#states-and-exit-reasons), [Children](#children) |
+| `lifecycle::is_alive` (planned) | Read entry, host-testable | `creation::create_endpoint` (planned), for the process of the thread that a new endpoint binds; `dispatch` (planned), for whether an endpoint is served, which it passes to `ipc` as a value | None | [States and exit reasons](#states-and-exit-reasons) |
 | `lifecycle::exit` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `exit` | `exit` | [Exit](#exit), [The root](#the-root) |
 | `lifecycle::fault` (planned), with the value type `lifecycle::FaultRecord` | Write entry on the copies of a write set, host-testable | `dispatch` (planned), at a user fault that `address_space::classify` gives and at a saved context that `validate` refuses at a return to EL0 | None | [Faults](#faults), [The root](#the-root) |
 | `lifecycle::kill` (planned), with the value type `lifecycle::Step` | Write entry on the copies of a write set, host-testable; one step of a long operation, which gives plans | `dispatch` (planned), for the operation `kill`, also when the call is executed again | `kill` | [Kill](#kill), [Destruction](#destruction), [The root](#the-root) |
@@ -215,7 +215,7 @@ writes them for the new process.
 | Alive | A user fault of its thread: `fault` | Dying, Faulted with the fault record | Phase 0, at most 5 items, and the death notifications |
 | Alive | `kill` by a holder of CONTROL on it | Dying, Killed | Phase 0, at most 16 items, and the death notifications |
 | Alive | A step of the destruction of its owner that reaches it | Dying, Killed | Phase 0, at most 16 items, and the death notifications |
-| Alive, the root | Any of the four rows above | The halt of the system, without a change | None |
+| Alive, the root | Its `exit`, a user fault of its thread, or a `kill` of it | The halt of the system, without a change | None |
 | Dying | A step of its destruction, which a kill makes | Dying, its progress advanced | The write set of the step, at most 54 items |
 | Dying, phases 1 to 7 done | The last step of its destruction | Dead | 1: the process slot |
 | Dying or Dead | A user fault, which only a host test reports for it; the destruction of its owner reaching it | No change of its reason, code or record | None |
@@ -299,10 +299,10 @@ writes them for the new process.
   only a host test makes, changes nothing.
 - **No handler.** Release 0.1 has no fault handler of a thread, so every
   user fault ends its process, and a user fault never ends another process.
-- **An abort.** The abort path of the Rust standard library executes `BRK`
-  on AArch64, so an aborted program ends by a user fault of the cause
-  `Breakpoint`, as faulted; the SDK of the runtime confirms the instruction
-  for its target (planned).
+- **An abort.** An aborted program ends by a user fault of the cause
+  `Breakpoint`, as faulted, while the abort path of its runtime executes
+  `BRK`, as that of the Rust standard library does on AArch64; the contract
+  of the runtime of EL0 fixes the instruction (planned).
 - **The cases.** The QEMU tests of [Testing obligations](#testing-obligations)
   end a process by each of these eleven faults, and each ends only that
   process, with this record, while the kernel sentinel stays unchanged and
@@ -770,11 +770,11 @@ of [Testing obligations](#testing-obligations):
   the first error. The places of the last column are those of the order of
   errors of the [security model](../../../security.md#internal-choices),
   after the operation number and version and the reserved and unused
-  registers, which the dispatch component checks (planned): the form of the
-  register arguments; handle resolution; rights; object state; shared
-  capacity. The operations take all their arguments in registers, so the
-  form of the exit code, of the selector and of the bits precedes handle
-  resolution. No error of this page is one of the caller's quota.
+  registers, which the dispatch of the ABI checks: the form of the register
+  arguments; handle resolution; rights; object state; shared capacity. The
+  operations take all their arguments in registers, so the form of the exit
+  code, of the selector and of the bits precedes handle resolution. No error
+  of this page is one of the caller's quota.
 - **No change on failure.** No error changes state: an entry that returns
   an error leaves every field of the kernel state as it was, the copies in
   its write set included, gives no plan, signals nothing and writes no
@@ -852,9 +852,14 @@ write phase of an entry allows only `WriteSetFull` of `stage`, which the
 write sets below never reach, and the fault-injection points of test
 builds (`InjectedFault`), each of which discards the buffer and leaves the
 state from before the transaction, with no plan given. The death
-notifications, the transactions of `waits::drain` and `acknowledge` have
-no fault-injection point, since they follow a transaction that has
-committed or a plan that has been executed.
+notifications, the transactions of `waits::drain`, the release of an
+endpoint or a notification in a step of phase 2 or 4, and `acknowledge`
+have no fault-injection point: the death notifications follow the
+committed phase 0; the transactions of `waits::drain` are settlements of
+a release, which have none in the
+[waits](../../ipc-waits/waits/contract.md#check-and-execute) contract;
+the release follows the drains of its step, which have committed; and
+`acknowledge` follows a plan that has been executed.
 
 | Entry | Checks before the first write | Write set | Writes after the write-back |
 | --- | --- | --- | --- |
@@ -875,10 +880,12 @@ committed or a plan that has been executed.
 - **Several transactions in a transition.** Phase 0 and each of its death
   notifications, each call of `waits::drain` and the release of a step of
   phase 2 or 4, and each step with the acknowledgements of its plans are
-  transactions of their own. A failure of one, at a fault-injection point,
-  rolls back only that one to the state before it; the transactions after
-  a committed phase 0 have no fault-injection point, so phase 0 is never
-  left without its death notifications.
+  transactions of their own. Of the transactions of a call, at most the
+  first has a fault-injection point, and a failure there rolls it back to
+  the state before it; the transactions after a committed phase 0, and the
+  drains and the release of a step of phase 2 or 4, have none. So phase 0
+  is never left without its death notifications, and a failed call leaves
+  the state from before it.
 - **Within W.** Every write set of this page, with those of the entries
   that it composes, is within $W$ = 64 of the objects contract; the largest
   is the 54 items of a step of phase 5.
@@ -1040,13 +1047,13 @@ component.
   their creation, with slots out of that order; a child that exited before
   keeps Exited; a child that holds CONTROL on its owner and kills it ends
   its own call at its phase 0.
-- Reaping: the counterexamples of the domain page, a reap by a holder of
-  CONTROL that is not the owner (`NotOwner`), a reap of a process that is
-  alive or dying (`InvalidState`), and an exit that competes with the
-  destruction of the owner; conservation of the quota records after every
-  reap, with the limits back in the owner; and an owner that closed its
-  last capability with CONTROL, whose child another holder kills but
-  cannot reap.
+- Reaping: the counterexamples of the domain page, a reap by a holder
+  without CONTROL (`PermissionDenied`), a reap by a holder of CONTROL that
+  is not the owner (`NotOwner`), a reap of a process that is alive or dying
+  (`InvalidState`), and an exit that competes with the destruction of the
+  owner; conservation of the quota records after every reap, with the limits
+  back in the owner; and an owner that closed its last capability with
+  CONTROL, whose child another holder kills but cannot reap.
 - Kill: one case for each of the five states of the target, a busy loop,
   a receive, a call with its context lent, a wait on a notification or a
   wait set, and a sleep with a deadline. Each checks with a sentinel page
@@ -1119,8 +1126,11 @@ halt by the fatal path of the boot contract.
 The vectors are host tests of the prototype tree at
 `prototype@ec8305c618a8f4e84e0707fa56beac5673f4675e`, 47 in all. Their
 expected outputs are those that the test bodies assert, written in the
-rules of this page. The vectors are not yet in a file of the repository,
-so the section holds no `vectors` block.
+rules of this page. In the table of each file, the column Prototype gives
+what the test body asserts of the prototype, and the column Expected output
+gives the cases here, through the entries that its calls name in the
+notation below. The vectors are not yet in a file of the repository, so
+the section holds no `vectors` block.
 
 | File | Vectors |
 | --- | ---: |
@@ -1139,16 +1149,16 @@ so the section holds no `vectors` block.
   directory `objects` where another directory follows it, without the
   directories and files named `tests` and without `.rs`, with a hyphen
   between the parts and in place of each underscore, and the position of
-  the test among the tests of its file, from 1. The seven tests of
-  `src/objects/tests.rs`, whose ids `objects-1` to `objects-13` the objects
-  contract gives to its other tests, are `objects-lifecycle-1` to
-  `objects-lifecycle-7`, in the order of the file.
+  the test among the tests of its file, from 1. The objects contract gives
+  the ids `objects-1` to `objects-13` to the other thirteen tests of
+  `src/objects/tests.rs`; the seven of this page are `objects-lifecycle-1`
+  to `objects-lifecycle-7`, in the order of the file.
 
 A vector of this page is one test function. The vector file is to hold one
 line for each case of a vector through an entry of this page, with the id
 `<vector>.<n>`, `n` counting those cases from 1 in the order of the test; a
 case that its row marks not applicable has no line, and a vector whose
-Entry column names no entry of this page has no line.
+Expected output has no case through an entry of this page has no line.
 
 **The prototype.** The execution manager of
 `src/execution/tests/lifecycle.rs` keeps one to three domains over a page
@@ -1215,12 +1225,12 @@ selector 0 through R's capability to it, and its results are written
 - The prototype's activation, quiescence, execution manager and backend,
   its several threads of a process, its joins with their cycles, and its
   time arguments, which could go backwards, have no counterpart: their
-  cases have no line, and the cases of several threads and of joins come
-  with the threads, waits, upcalls and user copies of release 0.2.
+  cases have no line, and several threads of a process and joins come in
+  release 0.2.
 
 ### `src/execution/tests/lifecycle.rs`
 
-| Vector | Line | Test | Expected output | Entry |
+| Vector | Line | Test | Prototype | Expected output |
 | --- | ---: | --- | --- | --- |
 | `execution-lifecycle-1` | 4 | `exit_and_fault_are_terminal_and_reclaim_owned_resources` | For an exit with 17 and for a fault: after `begin`, 1 domain is active, the thread is Running and the process holds 1 CPU obligation; after `finish`, 0 domains are active, the process is Dead with 0 CPU obligations and the reason `Exited(17)` or `Fault`, and the thread is Dead; a further `begin` and `finish` are each `err=InvalidState`; after `destroy`, the usage of the manager is that of the start, with 0 processes and 0 threads | For P exits with 17 and for a user fault of P: query of P with the selector 0 gives `ok state=Dying reason=Exited code=17`, or `ok state=Dying reason=Faulted code=0`, and P's thread is removed and runs no more; R kills P, `ok`, after which the query gives `state=Dead` with the same reason and code; R reaps P, `ok`; the usages of R's quota record, the counts of the pools, the free frames of the page pool and the free ASIDs are then those before the creation of P. The further `begin` and `finish` have no case: a removed thread makes no call |
 | `execution-lifecycle-2` | 55 | `active_domain_and_external_references_block_retirement_without_side_effects` | While the domain runs, `destroy` is `err=Busy`, with no change and no backend event; after `finish` with 0, `destroy` succeeds. With an external reference to the thread of a new domain, `destroy` is `err=ReferencesOutstanding`, with no change, the process Alive and no event; after the release of the reference, `destroy` succeeds | With a capability to P's thread in the table of Q, derived from R's: R kills P, `ok`, and R reaps P, `ok`; Q's capability then fails its lookups with `StaleReference`. The refusal of a running domain has no case: on one CPU the kill caller runs, so the thread of another process does not run during the kill, and a reference holds back no reap |
@@ -1232,11 +1242,11 @@ selector 0 through R's capability to it, and its results are written
 | `execution-lifecycle-8` | 263 | `active_execution_blocks_other_domain_mutations_without_backend_calls` | While the first of two domains runs, a creation and the `destroy` of the second are each `err=Busy`, with no change of the snapshot or of the usage, the threads Running and Ready, the second process Alive and no event; after `finish` of the first, both are destroyed and the usage is that of the start | No case: an entry runs to its end, and no state of a running execution holds back another operation |
 | `execution-lifecycle-9` | 304 | `a_fault_remains_distinct_from_later_termination_and_exit_requests` | After a fault, a termination of the process and an exit of its thread with 99, the reasons of the thread and of the process are `Fault`; `destroy` succeeds, and no domain remains | After a user fault of P, R kills P, `ok`, and the query gives `state=Dead reason=Faulted code=0`. The later exit has no case: P's thread was removed at the fault and makes no call |
 | `execution-lifecycle-10` | 326 | `late_faults_preserve_prior_requested_termination_or_normal_exit` | After an exit with 42 and after a termination, a fault of the process leaves the reasons of the thread and of the process as before | After P exits with 42, and after the phase 0 of R's kill of P: `fault` of P, which only a host test calls for a process that is not alive, changes nothing, and the query gives `reason=Exited code=42` and `reason=Killed code=0` |
-| `execution-lifecycle-11` | 349 | `process_fault_keeps_prior_thread_exit_and_waits_for_active_stack_quiescence` | In a process of three threads, of which the first has exited with 3, the second runs and the third waits: after a fault of the process, its reason is `Fault` and its state Dying; the first thread keeps `Exited(3)`; the second is Dying with `Fault`; the third has `Fault`, its wait is completed as `Terminated` and a later completion is `err=AlreadyCompleted`; after the quiescence of the second, the process is Dead | No case: a process has one thread in release 0.1, and several threads of a process come with the threads, waits, upcalls and user copies of release 0.2; for its one thread, the end of a wait by its kill is the waits component's cancellation |
+| `execution-lifecycle-11` | 349 | `process_fault_keeps_prior_thread_exit_and_waits_for_active_stack_quiescence` | In a process of three threads, of which the first has exited with 3, the second runs and the third waits: after a fault of the process, its reason is `Fault` and its state Dying; the first thread keeps `Exited(3)`; the second is Dying with `Fault`; the third has `Fault`, its wait is completed as `Terminated` and a later completion is `err=AlreadyCompleted`; after the quiescence of the second, the process is Dead | No case: a process has one thread in release 0.1, and several threads of a process come in release 0.2; for its one thread, the end of a wait by its kill is the waits component's cancellation |
 
 ### `src/objects/joins/tests.rs`
 
-| Vector | Line | Test | Expected output | Entry |
+| Vector | Line | Test | Prototype | Expected output |
 | --- | ---: | --- | --- | --- |
 | `joins-1` | 14 | `publication_reads_the_actual_first_exit_after_quiescence` | With a record of the target and a wait of the waiter: the observation is none; `publish` at 1 is `err=InvalidState`; after the target is activated, exits with 37 and is terminated, `publish` at 1 is `err=InvalidState` and the time of the registry is 0; after its quiescence, `publish` at 1 gives `Exited(37)`, a second `publish` at 2 is `err=AlreadyPublished`, and the take of the wait gives `Exited(Exited(37))` | R watches P with N, `ok`, and waits on N, which blocks; P exits with 37: R's wait ends with the bits 1; R kills P, `ok`, and the query gives `state=Dead reason=Exited code=37`; R's next wait on N, with a deadline later than the kill, times out at that deadline, since the death notification is made once |
 | `joins-2` | 42 | `exit_observation_and_late_join_survive_target_reap` | After the target exits with -9, the record is published at 2 and the target reaped: its handle is `err=StaleHandle`, the observation gives `Exited(-9)`, and a wait begun at 3 with the deadline 0 takes `Exited(Exited(-9))` at once; after the release of the record at 4, 0 records and 0 waits remain | P exits with `0xfffffff7`, the 32 bits of -9: the query gives `state=Dying reason=Exited code=0xfffffff7`; R kills and reaps P; then R's query and watch of P are each `err=StaleReference`. The record of an exit does not outlive the reap: the service that reaps a process reads it before |
@@ -1253,11 +1263,11 @@ selector 0 through R's capability to it, and its results are written
 | `joins-13` | 221 | `waiter_object_reuse_never_abandons_an_older_identity` | The waiter is terminated and reaped, and a replacement takes its thread slot; a wait of the replacement; the abandon of the old waiter; the result of the old wait is `err=StaleWait`, that of the new none | Q watches P with M; Q closes its last capability to M, which releases M, and a new notification M2 takes M's slot at the next generation; P exits, and its death signals nothing to M2 |
 | `joins-14` | 238 | `bounded_cleanup_reuses_slots_without_retaining_any_waits` | 64 rounds, each a registration, a wait, a release and a take that gives `PeerClosed`; after each, 0 records and 0 waits | 64 rounds, each: R creates P, watches P with N, P exits, R's wait on N ends with the bits 1, R kills and reaps P; after each round the usages of R, the counts of the pools, the free frames and the free ASIDs are those before the first |
 | `joins-15` | 252 | `earliest_deadline_tracks_only_pending_waits` | Two waits with the deadlines 20 and 10: the earliest deadline is 10; the advance to 10 completes 1; then 20; the second wait is `TimedOut`; after the cancellation of the first, there is no deadline | No case: the deadline table is the waits component's |
-| `joins-16` | 267 | `immediate_deadline_does_not_install_a_dependency_edge` | A join with an expired deadline is `TimedOut` at once; a join in the other direction then stays pending | No case: joins and their edges come with the threads, waits, upcalls and user copies of release 0.2 |
+| `joins-16` | 267 | `immediate_deadline_does_not_install_a_dependency_edge` | A join with an expired deadline is `TimedOut` at once; a join in the other direction then stays pending | No case: joins and their edges come in release 0.2 |
 
 ### `src/objects/joins/tests/failures.rs`
 
-| Vector | Line | Test | Expected output | Entry |
+| Vector | Line | Test | Prototype | Expected output |
 | --- | ---: | --- | --- | --- |
 | `joins-failures-1` | 4 | `configuration_rejects_zero_identity_or_capacity` | A registry with the identity 0, with no record and with no wait is each `err=InvalidConfiguration` | No case: there is no registry to configure |
 | `joins-failures-2` | 20 | `registration_validates_actual_object_authority_and_liveness` | The registration of the target restricted to observation and to control is each `err=Object(PermissionDenied)`; through another pool `err=Object(WrongPool)`; after the termination of the target `err=InvalidState`; after its reap `err=Object(StaleHandle)`; 0 records | Q, holding capabilities to P derived from R's: Q's watch of P with CONTROL alone is `err=PermissionDenied`, and with OBSERVE alone `ok`, where the prototype required every right; Q's watch with a capability to N with WAIT alone is `err=PermissionDenied`; after the phase 0 of R's kill of P, Q's watch signals N at once, `ok`, where the prototype refused it; after R reaps P, `err=StaleReference`. The refusals change nothing. Another pool has no case |
@@ -1265,8 +1275,8 @@ selector 0 through R's capability to it, and its results are written
 | `joins-failures-4` | 75 | `waiter_registration_and_abandon_require_control` | A wait of a waiter restricted to observation is `err=Object(PermissionDenied)`, and its `abandon` `err=PermissionDenied`; a wait of an active, a waiting or a terminated waiter is `err=InvalidState` | No case: the waiter of a wait is the calling thread itself |
 | `joins-failures-5` | 108 | `records_and_waits_reject_different_registry_identifiers` | On a second registry, the observation, release, cancellation and take of a record and wait of the first are each `err=WrongRegistry`; on the first, the result is none | No case: there is one table of processes |
 | `joins-failures-6` | 123 | `duplicate_target_and_waiter_rights_aliases_do_not_bypass_identity_checks` | A second registration of the target is `err=DuplicateTarget`; a wait through an alias of the waiter while its wait is pending, and after its cancellation before its take, is `err=WaitInProgress`; after the take, a wait succeeds | R watches P with N and the bits 1, and again with N and the bits 2: both `ok`, and the second takes no slot; P exits, and its death signals N once with the bits 3. The waits through aliases have no case |
-| `joins-failures-7` | 152 | `self_join_and_three_thread_cycles_are_rejected_atomically` | A self-join is `err=SelfJoin`; a cycle of three threads is `err=Cycle`, with no change | No case: joins come with the threads, waits, upcalls and user copies of release 0.2 |
-| `joins-failures-8` | 170 | `expired_and_completed_edges_do_not_form_cycles` | An edge that timed out or was cancelled closes no cycle: the join in the other direction succeeds, and the first result is `TimedOut` or `Cancelled` | No case: joins come with the threads, waits, upcalls and user copies of release 0.2 |
+| `joins-failures-7` | 152 | `self_join_and_three_thread_cycles_are_rejected_atomically` | A self-join is `err=SelfJoin`; a cycle of three threads is `err=Cycle`, with no change | No case: joins come in release 0.2 |
+| `joins-failures-8` | 170 | `expired_and_completed_edges_do_not_form_cycles` | An edge that timed out or was cancelled closes no cycle: the join in the other direction succeeds, and the first result is `TimedOut` or `Cancelled` | No case: joins come in release 0.2 |
 | `joins-failures-9` | 193 | `capacities_fail_without_advancing_clock_or_consuming_generations` | In a registry of 1 record and 1 wait: a second registration is `err=RecordCapacity`; a second wait is `err=WaitCapacity`, with the snapshot and the next generation of waits unchanged; the first wait stays pending | Three children of R other than P, each holding a capability to P with OBSERVE and owning a notification, watch P, filling slots 1 to 3: a fourth's watch is `err=WatchCapacity` and changes nothing; R, the owner, watches P in slot 0, `ok`. The capacity of waits has no case |
 | `joins-failures-10` | 211 | `clock_reversal_is_atomic_for_all_timed_mutations` | At the time 9 after 10, `publish`, `release`, `cancel`, `advance` and `begin` are each `err=ClockReversed`, with no change | No case: the time does not decrease within a boot, a premise |
 | `joins-failures-11` | 235 | `maximum_generation_is_used_once_and_never_wraps_to_old_receipts` | With the next record and wait generations at $2^{64} - 1$: one record and one wait take them; a further wait is `err=GenerationExhausted`; after the release, a further registration is `err=GenerationExhausted`; the old record is `err=StaleRecord` and the old ticket `err=StaleWait` | No case: registrations have no generation, and the generations of process slots are the objects component's |
@@ -1275,7 +1285,7 @@ selector 0 through R's capability to it, and its results are written
 
 ### `src/objects/tests.rs`
 
-| Vector | Line | Test | Expected output | Entry |
+| Vector | Line | Test | Prototype | Expected output |
 | --- | ---: | --- | --- | --- |
 | `objects-lifecycle-1` | 175 | `retained_dead_threads_still_count_against_process_quota` | In a process with a limit of 2 threads and two threads, after the first exits with 0, the process is Alive, a new thread is `err=QuotaExceeded`; after the reap of the first, a replacement takes its slot at a larger generation, the first's handle is `err=StaleHandle`, 2 threads are live, and the second is Ready | For processes: R, with a limit of 1 child process, creates P; P exits; R's creation of another child is `err=QuotaExceeded` of the objects component while P is dying or dead; R kills and reaps P; R's next child P2 takes P's process slot at a larger generation, and R's capability to P gives `err=StaleReference` for `query` |
 | `objects-lifecycle-2` | 195 | `last_active_thread_exit_closes_admission_before_stack_is_quiescent` | After the active thread exits with 23, it is Dying and the process Dying; a new thread, a resource and a thread reference are each `err=InvalidState`; the reaps of the thread and of the process are `err=Busy`; after the quiescence the thread is Dead and the reason `Exited(23)`, which a termination keeps; both are reaped and the usage is empty | P exits with 23: the query gives `state=Dying reason=Exited code=23`; R's reap of P is `err=InvalidState`; R kills P, `ok`, and the query gives `state=Dead reason=Exited code=23`; R reaps P, `ok`, and R's usages are those before the creation of P. The quiescence of a stack has no case: an entry runs to its end on the stack of its CPU |

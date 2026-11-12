@@ -15,14 +15,13 @@ feature document covers the component, so the metadata lists none.
 
 ## Sources
 
-- The checks of capacities and quotas before a process and its first
-  thread are published together, a failed creation that consumes no slot,
-  staging that owns no pages and whose every step and commit check the
-  authority again, the abort that stays possible after a revocation, and
-  the endpoint and notification pools take the rules of the prototype's
-  object pool and spawn controller, which the
-  [references](contract.md#references) of the contract list, with the
-  host tests of its endpoints and notifications as the frozen
+- The checks of capacities and quotas before a process and its first thread
+  are published together, a failed creation that consumes no slot, staging
+  that owns no pages and whose commit checks the authority again, the abort
+  that stays possible after a revocation, and the endpoint and notification
+  pools take the rules of the prototype's object pool and spawn controller,
+  which the [references](contract.md#references) of the contract list, with
+  the host tests of its endpoints and notifications as the frozen
   [vectors](contract.md#legacy-test-vectors).
 - The creation right on the caller's own process, the staging record of
   each process with its commit in one write set, the initial capabilities
@@ -51,7 +50,7 @@ feature document covers the component, so the metadata lists none.
   component; the admission of a thread that of the
   [scheduler](../../scheduling/scheduler/requirements.md) and the
   [budget ledger](../../scheduling/budget-ledger/requirements.md); the page
-  pool and the VM head those of the [vm](../../memory/vm/requirements.md)
+  pool and the VM head those of the [VM](../../memory/vm/requirements.md)
   component; the ASIDs, the table pool, the directory and the first process
   those of the [address-space](../../memory/address-space/requirements.md)
   component; and the states of processes those of the
@@ -80,20 +79,20 @@ feature document covers the component, so the metadata lists none.
 
 ### CREA-R01
 
-**The creation right.** A process creates endpoints, notifications and
-child processes only through a capability to its own process with CREATE,
-and every object that it creates is owned by it and charged to it. CREATE
-on a capability to another process is refused with `NotOwnProcess`, and a
+**The creation right.** A process creates endpoints, notifications and child
+processes only through a capability to its own process with CREATE, and
+every object that it creates is owned by it and charged to it. CREATE on a
+capability to another process is refused with `NotOwnProcess`, and a
 capability without CREATE with `PermissionDenied`; each refusal changes
 nothing. A child holds CREATE only when its creator gives it through the
-mask of its fixed slot, and the creator withdraws it by a revocation of
-the capability from which it was derived. The criterion: a creation
-through a capability to the caller's process with CREATE succeeds and
-records the caller as the owner; one
-through a capability to another process with CREATE and one through a
-capability without CREATE are refused with their errors and change
-nothing; a child without CREATE cannot create, and a child with it creates
-within its shares until its creator revokes the capability that it gave.
+mask of its fixed slot, and the creator withdraws it by a revocation of the
+capability from which it was derived. The criterion: a creation through a
+capability to the caller's process with CREATE succeeds and records the
+caller as the owner; one through a capability to another process with CREATE
+and one through a capability without CREATE are refused with their errors
+and change nothing; a child without CREATE cannot create, and a child with
+it creates within its shares until its creator revokes the capability that
+it gave.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `creation::create_endpoint`,

@@ -18,7 +18,7 @@ processes, their destruction and their reaping to the
 requests, with the loading part of the capacity record and the image
 window, to the dispatch component (planned), which the address-space and
 objects contracts call the loading component; and the page pool and the VM
-head of each process to the [vm](../../memory/vm/contract.md) component.
+head of each process to the [VM](../../memory/vm/contract.md) component.
 The observable behaviour that these rules serve, with its evidence, is in
 the [requirements](requirements.md), the other document of the component.
 
@@ -76,7 +76,7 @@ the [requirements](requirements.md), the other document of the component.
   execute: a write plan of the
   [page-tables](../../memory/page-tables/contract.md#write-plans-and-publication)
   component, or a frame plan of the
-  [vm](../../memory/vm/contract.md#acknowledgement-and-reclamation)
+  [VM](../../memory/vm/contract.md#acknowledgement-and-reclamation)
   component.
 - **Step.** `creation::Step` (planned): what `spawn_commit`, `boot_root`
   and `acknowledge` give: a plan, or the result of the creation.
@@ -164,7 +164,7 @@ free slot of a notification already holds its initial state
   executes, with `krepi_arch::mmu::apply` and `krepi_arch::frames::apply`,
   which are open obligations of the
   [page-tables](../../memory/page-tables/contract.md#open-obligations) and
-  [vm](../../memory/vm/contract.md#open-obligations) contracts, and a
+  [VM](../../memory/vm/contract.md#open-obligations) contracts, and a
   creation continues through `acknowledge` once a plan has been executed.
   The module has no adapter of its own.
 
@@ -377,8 +377,10 @@ fields, every other bit 0:
      `capability_slots` (`InvalidSlot`), so in a table of one slot only the
      mask of the process may be set;
   2. handle resolution and rights: the lookup of `create` for a process
-     with CREATE; then the image: `Directory::entry` of `image` gives an
-     entry of the kind Image (`NoImage`);
+     with CREATE, and the image: `Directory::entry` of `image` gives an
+     entry of the kind Image (`NoImage`), at the place of handle
+     resolution, so after the errors of handle resolution of the lookup and
+     before its `PermissionDenied` and its errors of object state;
   3. object state, after the errors of object state of the lookup: the
      process of `create` is the caller's (`NotOwnProcess`); the caller's
      staging record is empty (`Staged`); each of the two slots, the slot of
@@ -402,14 +404,14 @@ virtual address `address` with `memory_bytes` bytes in memory and the
 access `flags`.
 
 - **Checks.** `loader::validate(plan, step, limits)` (planned), a function
-  of the loading component that writes nothing, with the plan of the
-  staging record, none when the record is empty, the step of a segment and
-  the limits of the loading part of the capacity record. Its checks of the
-  form of the segment come first; a plan of none is refused with
-  `NotStaged` at the first place of object state; its other checks of
-  object state, the range within the image and no page shared with a
-  staged segment, and of the caller's quota, the number of segments and
-  the private pages of the image within their limits, follow
+  of the loading component that writes nothing, with the plan of the staging
+  record, none when the record is empty, the step of a segment and the
+  limits of the loading part of the capacity record. Its checks of the form
+  of the segment come first; a plan of none is refused with `NotStaged` at
+  the first place of object state; its other checks of object state, the
+  range within the image and no page shared with a staged segment, and of
+  the caller's quota, the number of segments and the private pages of the
+  image within their limits, follow, as the loading component fixes them
   (planned). The errors of `spawn_segment` are those of `validate` in its
   order, and `NotStaged`.
 - **Write.** 1 item: the caller's process slot, whose plan gains the
@@ -441,8 +443,8 @@ the child's first.
      names two classes (`InvalidClass`); the amount of the class is not 0,
      and every amount of a class above it is 0 (`InvalidConfiguration` of
      the budget-ledger component, the first check of `ledger::admit`);
-     `entry` is a multiple of 4 (the step of a commit of `validate`,
-     planned);
+     `entry` is a multiple of 4 (an error of the commit step of
+     `loader::validate`, planned);
   2. handle resolution and rights: the lookup of `create` for a process
      with CREATE; then the lookup of the source of each grant, in the order
      in which they were staged, for any kind with GRANT and the rights of
@@ -451,38 +453,43 @@ the child's first.
   3. object state, after the errors of object state of these lookups: the
      process of `create` is the caller's (`NotOwnProcess`); the staging
      record holds a creation (`NotStaged`); the plan holds at least one
-     segment and `entry` lies in an RX segment (the step of a commit of
-     `validate`, planned); each of the two slots of the creator's table,
-     the slot of the process first, holds no capability (`SlotOccupied`)
-     and has not retired (`GenerationExhausted`);
+     segment and `entry` lies in an RX segment (errors of the commit step of
+     `loader::validate`, planned); each of the two slots of the creator's
+     table, the slot of the process first, holds no capability
+     (`SlotOccupied`) and has not retired (`GenerationExhausted`);
   4. the caller's quota: the checks of the shares of `spawn_begin` against
      the quota record of the caller at the time of the commit
      (`QuotaExceeded`); the private pages of the image, the pages of the
-     memory of its RW segments and of its initial stack, within the limit
-     of the loading part (the step of a commit of `validate`, planned) and
-     at most the share of private pages (`ImageShare`); the class and the
-     ceiling not above the class of the caller's thread (`AdmissionRejected`
-     of the scheduler); each amount at most the holding of the caller's
-     thread of its class (`AdmissionRejected` of the budget-ledger
-     component);
+     memory of its RW segments and of its initial stack, within the limit of
+     the loading part (an error of the commit step of `loader::validate`,
+     planned) and at most the share of private pages (`ImageShare`); the
+     class and the ceiling not above the class of the caller's thread
+     (`AdmissionRejected` of the scheduler); each amount at most the holding
+     of the caller's thread of its class (`AdmissionRejected` of the
+     budget-ledger component);
   5. shared capacity: `ObjectTable::choose` of the process pool and then of
      the thread pool, in the ordinary class (`PoolExhausted`);
      `Asids::choose` (`Exhausted` or `GenerationExhausted` of the
      [address-space](../../memory/address-space/contract.md#address-spaces-and-asids)
      component); `Pool::free` at least the private pages of the image
-     (`OutOfPages` of the vm component); and the new path of each grant at
+     (`OutOfPages` of the VM component); and the new path of each grant at
      most `MAX_DEPTH` long (`DepthExceeded` of the capabilities component).
-- **Fixed by the checks.** The checks also fix every plan and every value
-  of the steps that follow the write-back. The initial context of the
-  thread passes `Context::validate` with the bounds of the EL0 window,
-  since `entry` lies in an RX segment and the top of the image window is a
-  multiple of 4096. The check of the loading part at boot leaves every
-  child the tables of its image window and at least the level 2 table and
-  one level 3 table of its VM window (planned), so no `map_page` of a
-  commit meets `OutOfTables`
+- **Fixed by the checks.** The checks also fix every plan and every value of
+  the steps that follow the write-back. The initial context of the thread
+  passes `Context::validate` with the bounds of the EL0 window, since
+  `entry` lies in an RX segment and the top of the image window is a
+  multiple of 4096. The check of the loading part at boot leaves every child
+  the tables of its image window and at least the level 2 table and one
+  level 3 table of its VM window (planned), so no `map_page` of a commit
+  meets `OutOfTables`
   ([tables](../../memory/vm/contract.md#tables-and-extents)); the segments
   share no page and lie below the guard of the stack, so none meets
-  `AlreadyMapped`.
+  `AlreadyMapped`. The checks of `Tables::reserve` for the fixed slots are
+  fixed in the same way: their sources are the two entries that `install`
+  writes in the same write set, with every right of their kinds, GRANT among
+  them, no badge and a path of one entry, and their slots are below
+  `capability_slots` by the checks of `spawn_begin` and free in a new table,
+  so these checks run on the copies of the write set and pass.
 - **Write.** In one write set, whose items
   [Check and execute](#check-and-execute) lists: `occupy` of the process
   slot and of the thread slot of the child, one pair, with the creator as
@@ -500,16 +507,19 @@ the child's first.
   ([admission and release](../../scheduling/budget-ledger/contract.md#admission-and-release));
   `lifecycle::init` (planned), which makes the child alive and links it
   last among the children of the creator
-  ([children](../lifecycle/contract.md#children)); `Regions::new()` into
-  the VM head of the region table of the child
+  ([children](../lifecycle/contract.md#children)); `Space::new` of the
+  token that `Asids::take` of the choice of the checks gives, the ASID of
+  the choice at its next generation, as the record of the address space of
+  the child in its process slot
+  ([ASIDs](../../memory/address-space/contract.md#address-spaces-and-asids));
+  `Regions::new()` into the VM head of the region table of the child
   ([the VM head](../../memory/vm/contract.md#vm-window-and-regions)); and
   the staging record becomes the cursor of the commit.
 - **After the write-back.** These writes and plans follow, in this order.
   None of them is an item of a write set, the checks fixed each of them,
   and none fails:
-  1. `Asids::take` of the choice of the checks, and `Space::new` of its
-     token, the record of the address space of the child
-     ([ASIDs](../../memory/address-space/contract.md#address-spaces-and-asids));
+  1. `Asids::take` of the choice of the checks, which gives the token that
+     the record of the address space of the child holds;
   2. `Tables::new` on the segment of the process slot of the child,
      `TablePool::segment`
      ([table pools](../../memory/address-space/contract.md#table-pools));
@@ -543,7 +553,7 @@ the child's first.
   one that the take of that page gave: the takes link the frames at the
   head of the committed chain of the child in the order of the pages, so
   the frame of each page is linked just before the frame of the page
-  before it, as for a commit of the vm component, and the cursor holds the
+  before it, as for a commit of the VM component, and the cursor holds the
   frame of the plan in flight.
 - **The round trip of plans.** `spawn_commit` gives its first plan as its
   step; the architecture crate executes it, and the dispatch of the core
@@ -552,7 +562,7 @@ the child's first.
   given, and no other entry runs on the lower tables of the child in
   between
   ([write plans](../../memory/page-tables/contract.md#write-plans-and-publication)).
-  The vm component continues only the plans of its own entries
+  The VM component continues only the plans of its own entries
   ([frame plans](../../memory/vm/contract.md#acknowledgement-and-reclamation)),
   so `acknowledge` of this page continues the frame plans of a commit as
   well. No plan fails, so a commit has no error after its first plan.
@@ -565,13 +575,15 @@ the child's first.
   first runs when the scheduler chooses its thread, which
   `scheduler::admit` has made ready.
 - **Rollback.** Every check, the rechecks of the staging record among them,
-  is made before the first write. The write phase can meet only
-  `WriteSetFull` of `stage`, which a write set of at most 31 items never
-  meets, and the fault-injection points of test builds
+  is made before the first write, and the checks of `reserve` for the fixed
+  slots, which read the entries that the write set installs, pass by those
+  checks. The write phase can meet only `WriteSetFull` of `stage`, which a
+  write set of at most 31 items never meets, and the fault-injection points
+  of test builds
   ([write-set transactions](../objects/contract.md#write-set-transactions)),
   which discard the buffer; then no write outside the write set has been
-  made and no plan given, the state is the state from before the commit,
-  and the staging record is kept, to be committed again or discarded.
+  made and no plan given, the state is the state from before the commit, and
+  the staging record is kept, to be committed again or discarded.
 - **Image authority.** The images of release 0.1 come only from the boot
   bundle, which is part of the kernel image and read only
   ([integrity policy](../../../security.md#integrity-policy)), so any
@@ -708,7 +720,7 @@ reservation and commit are in the same write set.
   ([object kinds](../objects/contract.md#object-kinds-and-pools)).
 - **Pages.** The committed VM pages of a child are limited by its share and
   by the cap of the capacity record, which its commits check
-  ([quotas of the vm component](../../memory/vm/contract.md#quotas)). Its
+  ([quotas of the VM component](../../memory/vm/contract.md#quotas)). Its
   private pages are charged to its own item, whose limit is its share, in
   the write set of the commit, and are frames of the page pool, which
   return with the credit of each page in the revocation at its destruction.
@@ -755,7 +767,7 @@ reservation and commit are in the same write set.
   set that occupies what it counts, so the
   [conservation](../objects/contract.md#metadata-quotas) of the objects
   component holds after every write-back; the private pages that a commit
-  has charged and not yet taken count as the vm component counts them
+  has charged and not yet taken count as the VM component counts them
   ([counting](../../memory/vm/contract.md#quotas)).
 
 ## Capabilities of new objects
@@ -805,13 +817,16 @@ boot CPU, the page pool and the kernel root.
   limit of private pages of loaded images; the root plan of
   `Directory::root_plan`; the base of the root's private allocation; the
   root entry of the header of the directory; and the time `now`.
-- **Check.** `capability_slots` is at least 2, so that the table of the
-  root holds its fixed slots (`RootSlots`). The objects component allows a
-  table of one slot, so the boot checks this before the first write and
-  stops at the error, without a fallback to the defaults. The other checks
-  of its entries hold at boot: the pools are empty, the first ASID is free,
-  the root flag of the ledger is clear, and the checks of the directory and
-  of the root plan have passed.
+- **Check.** `capability_slots` is at least 2, so that the table of the root
+  holds its fixed slots (`RootSlots`); when the device-authority rules give
+  the root's capability to the device directory a fixed slot of its own
+  (planned), they add that slot to this bound, which counts every fixed slot
+  of the root. The objects component allows a table of one slot, so the boot
+  checks this before the first write and stops at the error, without a
+  fallback to the defaults. The other checks of its entries hold at boot:
+  the pools are empty, the first ASID is free, the root flag of the ledger
+  is clear, and the checks of the directory and of the root plan have
+  passed.
 - **Write.** In one write set: `occupy` of the root's process slot and
   thread slot in the control class, owned by the kernel domain; `charge` of
   the pair to the control usage of the kernel domain's child processes;
@@ -828,17 +843,18 @@ boot CPU, the page pool and the kernel root.
   `ledger::admit` of the root; `scheduler::admit` of the root's thread in
   the class control with the ceiling control, the kernel domain as its
   creator; `lifecycle::init` of the root with the kernel domain as its
-  owner, which keeps no chain of children; `Regions::new()` into the root's
-  VM head; and the staging record of the root becomes the cursor of the
-  boot.
+  owner, which keeps no chain of children; `Space::new` of the token of
+  ASID 1 at generation 1, as the record of the root's address space in its
+  process slot; `Regions::new()` into the root's VM head; and the staging
+  record of the root becomes the cursor of the boot.
 - **After the write-back.** `Asids::choose` and `take`, which give ASID 1 of
-  generation 1, `Space::new` and `Tables::new` on the segment of the root's
-  process slot; then the write plan of `clone_kernel_from`; then the write
-  plans of `map_page` of the pages of the root plan, in the order and with
-  the kinds of step 5 of the first process, the frame of a page of the
-  private allocation being the base of the allocation and its offset in
-  it; after the acknowledgement of the last plan, the initial context
-  `Context::new(root_entry, ROOT_STACK_TOP)` of step 7, which passes
+  generation 1, the token of that record, and `Tables::new` on the segment
+  of the root's process slot; then the write plan of `clone_kernel_from`;
+  then the write plans of `map_page` of the pages of the root plan, in the
+  order and with the kinds of step 5 of the first process, the frame of a
+  page of the private allocation being the base of the allocation and its
+  offset in it; after the acknowledgement of the last plan, the initial
+  context `Context::new(root_entry, ROOT_STACK_TOP)` of step 7, which passes
   `validate`, written as the saved context of the root's thread and the
   cursor emptied, in one write set of 2 items; then the result.
 - **The round trip at boot.** The boot wiring executes each plan with
@@ -846,8 +862,12 @@ boot CPU, the page pool and the kernel root.
   next step. It makes step 4, which writes the root's private pages and the
   page of the boot information through the direct map, after it has
   executed the plan of `clone_kernel_from` and before it calls
-  `acknowledge` for that plan, so the steps keep their order; no plan of
-  steps 3 and 5 reads or writes those pages.
+  `acknowledge` for that plan; and step 6, which publishes the code of the
+  RX segments through the kernel's mapping of the image, after it has
+  executed the last plan of `map_page` and before it calls `acknowledge`
+  for that plan, which writes the initial context of step 7. So the steps
+  keep their order, and no plan of steps 3 and 5 reads or writes the pages
+  of steps 4 and 6.
 - **The root's private pages.** The pages of the memory of the root's RW
   segments and of its stack count in its item of private pages of loaded
   images, as the private pages of a child count in its own; the page of the
@@ -870,7 +890,7 @@ boot CPU, the page pool and the kernel root.
 
 | Error | Rule broken | Entries | Place in the order of errors |
 | --- | --- | --- | --- |
-| `RootSlots` | A `capability_slots` below 2, the fixed slots of the root | `boot_root` | At boot, before the root is created |
+| `RootSlots` | A `capability_slots` below the number of the root's fixed slots: the 2 of this page and any that the device-authority rules add | `boot_root` | At boot, before the root is created |
 | `ReservedBits` | A packed register with a bit outside its fields | `spawn_begin` | The form of the register arguments, first |
 | `InvalidSlot` of the capabilities component | A slot of the caller's table, the slot of a grant, or a fixed slot whose mask is not 0, not below `capability_slots` | `create_endpoint`, `create_notification`, `spawn_begin`, `spawn_grant` | The form of the register arguments |
 | `SameSlot` | The two slots of the creator's table of a `spawn_begin` are the same slot | `spawn_begin` | The form of the register arguments, after the `InvalidSlot` of those slots |
@@ -879,7 +899,7 @@ boot CPU, the page pool and the kernel root.
 | `InvalidConfiguration` of the budget-ledger component | An amount of the class of 0, or an amount above 0 for a class above it | `spawn_commit` | The form of the register arguments, after `InvalidClass` |
 | `InvalidHandle`, `NoCapability`, `StaleHandle`, `WrongType` of the capabilities component | A handle that does not name a usable capability of the kind in the caller's table | Every operation that takes a handle | Handle resolution: the range, the empty slot, the generation, the type |
 | `StaleReference` of the objects component | A capability whose object has been released | Every operation that takes a handle | Handle resolution: the liveness of the object |
-| `NoImage` | An index that names no entry of the directory, or an entry of another kind than Image | `spawn_begin` | Handle resolution, after the lookup of `create` |
+| `NoImage` | An index that names no entry of the directory, or an entry of another kind than Image | `spawn_begin` | Handle resolution, after the errors of handle resolution of the lookup of `create` |
 | `PermissionDenied` of the capabilities component | A capability without CREATE, a thread capability without CONTROL, or a source without GRANT or a requested right | Every operation that takes a handle | Rights |
 | `RevocationPending`, `TransferPending` of the capabilities component | A capability of the subtree of a pending revocation or its target, or the source of a pending move | Every operation that takes a handle | Object state, first |
 | `NotOwnProcess` | A capability with CREATE to another process than the caller's | `create_endpoint`, `create_notification`, `spawn_begin`, `spawn_commit` | Object state, after the errors of the lookups |
@@ -895,7 +915,7 @@ boot CPU, the page pool and the kernel root.
 | `GrantsFull` | A grant beyond `SPAWN_GRANTS` | `spawn_grant` | The caller's quota |
 | `PoolExhausted` of the objects component | No free slot of the ordinary class in the endpoint, notification, process or thread pool | `create_endpoint`, `create_notification`, `spawn_commit` | Shared capacity: the process pool, then the thread pool |
 | `Exhausted`, `GenerationExhausted` of the address-space component | No ASID that can be taken | `spawn_commit` | Shared capacity, after the pools |
-| `OutOfPages` of the vm component | Fewer free frames than the private pages of the image | `spawn_commit` | Shared capacity, after the ASIDs |
+| `OutOfPages` of the VM component | Fewer free frames than the private pages of the image | `spawn_commit` | Shared capacity, after the ASIDs |
 | `DepthExceeded` of the capabilities component | A grant whose copy would have a path longer than `MAX_DEPTH` | `spawn_grant`, `spawn_commit` | Shared capacity, last |
 | `InvalidState` | An `acknowledge` whose process has no cursor, a call that no composer makes | `acknowledge` | Object state |
 
@@ -914,7 +934,9 @@ the loading component (planned), at the places that its order gives, and
   handle resolution; rights; the range of user buffers and the form of
   argument structures, which no operation of this page has; object state;
   the caller's quota; shared capacity. `NoImage` takes a place in handle
-  resolution, since the index names an object of the boot bundle.
+  resolution, since the index names an object of the boot bundle, so a
+  `spawn_begin` whose `create` lacks CREATE and whose index names no image
+  is `NoImage`.
 - **No change on failure.** No error changes state: an entry that returns
   an error leaves every field of the kernel state as it was, the copies in
   its write set and the staging record included, gives no plan and writes
@@ -944,7 +966,7 @@ its spawn controller refused a request in nine ways. Here:
 | `InvalidLayout` | Moved to the dispatch component: the errors of `loader::validate` for a segment or a commit, and the limits of the loading part (planned) |
 | `Quota` | Rewritten: `QuotaExceeded` of the objects component, for the items of the five shares and of the child; `ImageShare`, for private pages beyond their share |
 | `GenerationExhausted` | Moved to the page-tables component: the generations of the owner identities of page allocations; a creation takes no page of the page ownership table at run time |
-| `Page(_)` | Rewritten: `OutOfPages` of the vm component, a page pool with fewer free frames than the private pages of the image; `OutOfMemory` and `MetadataExhausted` of the page ownership table stop the boot only |
+| `Page(_)` | Rewritten: `OutOfPages` of the VM component, a page pool with fewer free frames than the private pages of the image; `OutOfMemory` and `MetadataExhausted` of the page ownership table stop the boot only |
 | `Object(_)` | Not kept as a wrapper: the errors of the objects and capabilities components that this page meets are returned as they are |
 | `InvalidContext` | Moved to the context component: `context::Error`; the initial context of a creation passes `validate` by the checks of this page |
 | A missing right, `PERMISSION_DENIED` | Moved to the capabilities component: `PermissionDenied` of the lookup; CREATE on another process is `NotOwnProcess` |
@@ -964,16 +986,16 @@ then changes only the copies in the write set of its caller
 ([write-set transactions](../objects/contract.md#write-set-transactions)),
 and its writes outside write sets and its plans follow the write-back. The
 items of this page are the process slots, which hold the staging records,
-and the items of the entries that it composes. The ASID allocator, the
-record of an address space, the lower tables and the table pool, the page
-pool with the metadata of its frames, and the bytes of the frames are no
-items of a write set: the checks fix their writes, which follow the
-write-back in a fixed order and cannot fail. So the write phase of every
-entry can meet only `WriteSetFull` of `stage`, which the write sets below
-never reach, and the fault-injection points of test builds, each of which
-discards the buffer and leaves the state from before the entry, before any
-write outside the write set and any plan. `acknowledge` has no
-fault-injection point, since it follows a plan that has been executed.
+and the items of the entries that it composes. The ASID allocator, the lower
+tables and the table pool, the page pool with the metadata of its frames,
+and the bytes of the frames are no items of a write set: the checks fix
+their writes, which follow the write-back in a fixed order and cannot fail.
+So the write phase of every entry can meet only `WriteSetFull` of `stage`,
+which the write sets below never reach, and the fault-injection points of
+test builds, each of which discards the buffer and leaves the state from
+before the entry, before any write outside the write set and any plan.
+`acknowledge` has no fault-injection point, since it follows a plan that has
+been executed.
 
 | Entry | Checks before the first write | Write set | Writes after the write-back |
 | --- | --- | --- | --- |
@@ -983,9 +1005,9 @@ fault-injection point, since it follows a plan that has been executed.
 | `spawn_segment` | Those of `validate` for a segment, and the staging record | 1: the caller's process slot | None |
 | `spawn_grant` | The rights and the slot, the lookup of the source, the staging record, the slot of the child, the number of grants, the depth | 1: the caller's process slot | None |
 | `spawn_abort` | The staging record | 1: the caller's process slot | None |
-| `spawn_commit` | Those of [the commit](#child-processes), with those of `validate` for a commit, the rechecks of the staging record among them | At most 31, listed below | The take of the ASID, the record of the address space, the table set, the take of each private frame; then the first plan |
+| `spawn_commit` | Those of [the commit](#child-processes), with those of `validate` for a commit, the rechecks of the staging record among them | At most 31, listed below | The take of the ASID, the table set, the take of each private frame; then the first plan |
 | `acknowledge` | A cursor | 1: the process slot that holds the cursor; at the last step 2, with the thread slot of the new thread for its initial context | The next plan, with the table record that `map_page` writes, or nothing |
-| `boot_root` | `capability_slots` | 10, below, and the items of the capability to the device directory that the device-authority rules add (planned) | The take of ASID 1, the record of the address space, the table set; then the first plan |
+| `boot_root` | `capability_slots` | 10, below, and the items of the capability to the device directory that the device-authority rules add (planned) | The take of ASID 1, the table set; then the first plan |
 
 **The write set of a commit.** Its items, each counted once, by the items of
 the [objects](../objects/contract.md#write-set-transactions) and of the
@@ -994,22 +1016,22 @@ composed components:
 | Items | Item | Changed by |
 | ---: | --- | --- |
 | 1 | The process slot of the creator | The five splits and the charges of a child process and of two capability slots in its quota record; its staging record, which becomes the cursor; and its last child, with its first child when it has none, in the chain of its children |
-| 1 | The process slot of the child | Its quota record, from the starting state of `occupy` through the splits and the charges of its private pages and of its capability slots; and the state that `lifecycle::init` writes |
+| 1 | The process slot of the child | Its quota record, from the starting state of `occupy` through the splits and the charges of its private pages and of its capability slots; the state that `lifecycle::init` writes; and the record `Space` of its address space |
 | 1 | The thread slot of the child | `occupy`, with the budget record of `ledger::admit` and the scheduling state of `scheduler::admit` |
 | 2 | The counts of the process pool and of the thread pool | `occupy` |
 | 2 | The entries of the creator's table that receive the capabilities to the child and to its thread | `install`, whose object slots and process slot are the three slots above |
-| 2 | The entries `PROCESS_SLOT` and `THREAD_SLOT` of the child's table | `reserve` and `commit`, whose sources are the two entries above, without another child, whose object slots are the slots of the child and of its thread, and whose receiving process slot is that of the child |
-| 16 | For each of at most `SPAWN_GRANTS` = 4 grants: the new entry of the child's table, its source, the former last child of its source and the object slot of its object | `reserve` and `commit` of a copy, whose receiving process slot is that of the child ([check and execute](../capabilities/contract.md#check-and-execute)) |
+| 2 | The entries `PROCESS_SLOT` and `THREAD_SLOT` of the child's table | `reserve` and `commit`, whose sources, the two entries above, have no earlier derived entry to relink, whose object slots are the slots of the child and of its thread, and whose receiving process slot is that of the child |
+| 16 | For each of at most `SPAWN_GRANTS` = 4 grants: the new entry of the child's table, its source, the entry last derived from its source before it and the object slot of its object | `reserve` and `commit` of a copy, whose receiving process slot is that of the child ([check and execute](../capabilities/contract.md#check-and-execute)) |
 | 1 | The thread slot of the creator | `ledger::admit`, which lowers its holdings |
 | 1 | The slot of the last thread of the queue of the class of the new thread | `scheduler::admit`, which links the new thread after it |
 | 1 | The scheduler record of the executing CPU | `scheduler::admit` and `scheduler::requeue` |
 | 1 | The class ledger of the class of the context of the current dispatch | `scheduler::requeue`, whose other items are the thread slot of the creator and the scheduler record |
-| 1 | The process slot of the former last child of the creator | `lifecycle::init`, which makes the child its next sibling |
+| 1 | The process slot of the former last child process of the creator | `lifecycle::init`, which makes the child its next sibling |
 | 1 | The VM head of the region table of the child | `Regions::new()` |
 
 So a commit writes at most 31 items, within $W$ = 64 of the objects
-contract; a commit without a grant, a former last child or a `requeue`
-writes fewer.
+contract; a commit without a grant, a former last child process or a
+`requeue` writes fewer.
 
 **The write set of the boot of the root.** The root's process slot and
 thread slot, the counts of the process and of the thread pool, the record
@@ -1149,7 +1171,7 @@ components; the address space, its ASID and its lower tables of the
 component; the saved context of the
 [context](../../boot-platform/context/contract.md#state-fields) component;
 and the page pool, the frames and the VM head of the
-[vm](../../memory/vm/contract.md#state-fields) component.
+[VM](../../memory/vm/contract.md#state-fields) component.
 
 ## Testing obligations
 
@@ -1162,7 +1184,9 @@ and the page pool, the frames and the VM head of the
   compared field by field before and after, the staging record included,
   with no plan; for each pair of consecutive checks of an entry whose
   errors differ, a call that breaks both and gets the error of the
-  earlier, the errors of `validate` against those of this page among them.
+  earlier, the errors of `validate` against those of this page among them,
+  and a `spawn_begin` without CREATE and with an index that names no image,
+  which is `NoImage`.
 - For each of the three kinds of creation, endpoints, notifications and
   children: a creation that succeeds; one whose capability lacks its right;
   one whose quota is used up; and one that meets each fault-injection point
@@ -1193,10 +1217,10 @@ and the page pool, the frames and the VM head of the
   child's capability; a child without CREATE, whose creation is
   `PermissionDenied`, and one with CREATE, whose objects it owns and pays
   for within its shares.
-- Write sets: a commit with four grants, each with a former last child of
-  its own source, a former last child of the creator and a creator that
-  runs on its own context reaches 31 items, and every entry stays within
-  the item counts of [Check and execute](#check-and-execute).
+- Write sets: a commit with four grants, each with an entry derived earlier
+  from its own source, a former last child process of the creator and a
+  creator that runs on its own context reaches 31 items, and every entry
+  stays within the item counts of [Check and execute](#check-and-execute).
 - Quotas: a property test with fixed seeds drives creations, splits,
   charges and the reaping of the lifecycle component over a tree of
   processes and checks after every write-back, against an independent
@@ -1227,7 +1251,7 @@ does not describe are open obligations: the initialization of an endpoint
 by the IPC component and the reading of the state of a process of the
 lifecycle component in `create_endpoint`; the admission of the budget
 ledger and of the scheduler, the state of the lifecycle component, the VM
-head and the page pool of the vm component, the ASID, the address space
+head and the page pool of the VM component, the ASID, the address space
 and the lower tables of the address-space and page-tables components and
 the initial context of the context component, in `spawn_commit`, in
 `acknowledge` and in `boot_root`. They are carried by the proof of object
@@ -1235,7 +1259,7 @@ lifetimes, waits and sequential composition, by release 0.2. The plans
 that the entries give are executed by `krepi_arch::mmu::apply` and
 `krepi_arch::frames::apply`, rows of the
 [page-tables](../../memory/page-tables/contract.md#open-obligations) and
-[vm](../../memory/vm/contract.md#open-obligations) obligations, and the
+[VM](../../memory/vm/contract.md#open-obligations) obligations, and the
 entries use the write-set buffer that the adapter of the objects component
 lends, a row of the
 [objects obligations](../objects/contract.md#open-obligations).
@@ -1266,10 +1290,11 @@ so the section holds no `vectors` block.
   of its object pool; `src/objects/endpoints/tests.rs` and
   `src/objects/notifications/tests.rs` hold only fixtures and module
   declarations.
-- The id of a vector is the path of its file below `src/objects/`, without
-  the directories named `tests` and without `.rs`, with a hyphen between
-  the parts and in place of each underscore, and the position of the test
-  among the tests of its file, from 1.
+- The id of a vector is the path of its file below `src/`, without the
+  directory `objects` where another directory follows it, without the
+  directories and files named `tests` and without `.rs`, with a hyphen
+  between the parts and in place of each underscore, and the position of
+  the test among the tests of its file, from 1.
 
 A vector of this page is one test function. The vector file is to hold one
 line for each case of a vector through an entry of this page, with the id
@@ -1439,11 +1464,12 @@ controller, execution manager and object pool, which
   prototype tree at `prototype@ec8305c618a8f4e84e0707fa56beac5673f4675e`:
   - `docs/features/services/static-bootstrap.md`, lines 43 to 105: the
     interface and semantics of the prototype's staged spawning, its
-    operations to begin, add a segment, commit and abort, the checks of
-    the authority at each mutation and at the commit, the abort after a
-    revocation and staging that owns no pages, which this page keeps, and
-    the transaction identifier, the profiles of windows and the initial
-    argument, which it does not carry
+    operations to begin, add a segment, commit and abort, the check of the
+    authority again at the commit, the abort after a revocation and
+    staging that owns no pages, which this page keeps, and the transaction
+    identifier, the check of the authority at every mutation of the
+    staging, the profiles of windows and the initial argument, which it
+    does not carry
     ([Current deviations](#current-deviations));
   - `docs/features/kernel/foundations.md`, lines 113 to 131: a creation
     that checks capacities and quotas first and publishes a process
