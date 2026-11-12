@@ -22,9 +22,9 @@ mapping of loaded images to the
 [creation](../../objects-capabilities/creation/contract.md) component; and
 the destruction of a process, which composes the revocation of this page,
 to the [lifecycle](../../objects-capabilities/lifecycle/contract.md)
-component. The observable behaviour that these
-rules serve, with its evidence, is in the [requirements](requirements.md),
-the other document of the component.
+component. The observable behaviour that these rules serve, with its
+evidence, is in the [requirements](requirements.md), the other document of
+the component.
 
 ## Terms
 
@@ -109,7 +109,12 @@ their arguments and results and the numeric values of their errors belong
 to the inventory; this page names the arguments and the results. The other
 entries are called by the boot wiring and by the composers. The first row
 holds constants, and the last row is the adapter of the architecture
-crate.
+crate. Between them are the 13 entries of the core, which the
+specification and the proof of the component (planned) take in two groups:
+the five operations and `acknowledge`, 6 entries; and the configuration,
+the page pool and the revocation at the destruction of a process,
+`check_config`, `Pool::new`, `Pool::free`, `Pool::take`, `Pool::next`,
+`Regions::new` and `revoke_step`, 7 entries.
 
 | Entry point | Kind | Called by | ABI operation | Rules |
 | --- | --- | --- | --- | --- |
@@ -117,6 +122,7 @@ crate.
 | `vm::check_config` (planned), with the value type `vm::Config` | Function that writes nothing, host-testable | The boot wiring, once, after the last check of the capacity record of the objects and address-space components and before it carves any storage; the boot of the root, `creation::boot_root` (planned), reads the root's limit of committed VM pages from the `Config` that it gives | None | [Configuration and the page pool](#configuration-and-the-page-pool) |
 | `Pool::new` (planned), with the value type `vm::Pool` | Write entry, host-testable | The boot wiring, once, after it has carved the page pool and its metadata | None | [Configuration and the page pool](#configuration-and-the-page-pool) |
 | `Pool::free` and `Pool::take` (planned) | A read entry and a write entry outside write sets, host-testable | `creation::spawn_commit` (planned): `free` in its checks; `take` after its write-back, once for each private page of the image that it loads | None | [Configuration and the page pool](#configuration-and-the-page-pool), [Quotas](#quotas) |
+| `Pool::next` (planned) | Read entry outside write sets, host-testable, that writes nothing | `creation::spawn_commit` and its continuation by `creation::acknowledge` (planned), to name the frame of each private page in turn | None | [Configuration and the page pool](#configuration-and-the-page-pool) |
 | `Regions::new` (planned), with the value type `vm::Regions` | Function that writes nothing, host-testable | `creation::spawn_commit` and `creation::boot_root` (planned), for the write set of the creation of a process and of the boot of the root | None | [VM window and regions](#vm-window-and-regions) |
 | `vm::reserve` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `reserve` | `reserve` | [VM window and regions](#vm-window-and-regions) |
 | `vm::commit` (planned), with the value types `vm::Step` and `vm::FramePlan` | Write entry on the copies of a write set, host-testable; gives write plans | `dispatch` (planned), for the operation `commit` | `commit` | [Commit](#commit), [Quotas](#quotas), [Tables and extents](#tables-and-extents) |
@@ -346,9 +352,16 @@ page ownership table:
   calls it after its write-back and before its first plan, for each private
   page of the image that it loads, having checked `free` and charged the
   pages before its first write, so that no plan in flight needs a free
-  frame; `take` of an empty
-  pool is `OutOfPages` and changes nothing, a call that no composer makes.
-  A commit takes its frames as committed frames ([Commit](#commit)).
+  frame; `take` of an empty pool is `OutOfPages` and changes nothing, a
+  call that no composer makes. A commit takes its frames as committed
+  frames ([Commit](#commit)).
+- `Pool::next(frame)` gives the frame linked after `frame`, away from the
+  head, on the committed chain of the process that holds it, and none at
+  the end of the chain; for a free frame, a call that no composer makes, it
+  gives none as well. It writes nothing. The creation of a process calls it
+  to name the frame of each private page in turn, from the frame of the
+  first, which heads the chain of the child after the last take
+  ([private pages](../../objects-capabilities/creation/contract.md#child-processes)).
 - Every frame has exactly one holder at any time: the pool or one process,
   on whose committed chain it is with its kind. The page ownership table
   records the whole pool as one holder; which process holds a frame is the
@@ -760,9 +773,8 @@ of its holder.
   at boot, which the
   [boot of the root](../../objects-capabilities/creation/contract.md#the-boot-of-the-root)
   charges to the item and which are not frames of the pool. Every charge
-  and credit of
-  these items is in the write set that changes these counts, so both
-  statements of conservation hold after every write-back.
+  and credit of these items is in the write set that changes these
+  counts, so both statements of conservation hold after every write-back.
 
 ## Errors
 
@@ -870,6 +882,7 @@ follow plans that have been executed: the plans of an operation, and for
 | `Pool::new` | None; the boot wiring passes the carved range and its metadata | Not in a write set: at boot, before any token exists | Every entry of the metadata once |
 | `Pool::free` | None | Nothing: a read entry | Nothing |
 | `Pool::take` | A free frame | Nothing | The metadata of the frame, the top of the free stack and the head of the chain of the process |
+| `Pool::next` | None; it reads the metadata of the frame | Nothing: a read entry | Nothing |
 | `Regions::new` | None | Nothing: a value | Nothing |
 | `reserve` | The form, a plan in flight, the overlap or the free range in the window, a free row | At most 4: the new row, its neighbours in address order and the VM head | Nothing |
 | `commit` | The form, the region, its phase, a plan in flight and its pages, the item, the cap, the tables and the free frames | 3: the process slot, the row and the VM head | For each page, the take of its frame, with the metadata of the frame, the free stack and the head of the chain; then the write plan of the first page |
@@ -879,8 +892,8 @@ follow plans that have been executed: the plans of an operation, and for
 | `acknowledge` | A plan in flight | At most 5: the VM head, and with a returned frame the process slot, and for a decommit or a release the row and at the completion of a release its neighbours | With a returned frame, its metadata, the free stack and the chain; then the next plan |
 | `revoke_step` | No plan in flight; the chain | 1: the VM head, with the cursor, or with `Regions::new()` at the completion | The zero plan of the first frame of the step, if there is one |
 
-- `check_config`, `Pool::free` and `Regions::new` write nothing; the other
-  entries cannot fail after their checks.
+- `check_config`, `Pool::free`, `Pool::next` and `Regions::new` write
+  nothing; the other entries cannot fail after their checks.
 - The composed write sets stay within $W$ = 64 items: an operation of this
   page is composed by the dispatch of the core with the settlements of its
   transition, which are transactions of their own, and a revocation step by
@@ -895,9 +908,9 @@ follow plans that have been executed: the plans of an operation, and for
 - `check_config` reads the four fields once and makes a fixed number of
   checks. `Pool::new` writes each entry of the metadata once, at most
   `MAX_POOL_PAGES` frames and the heads of at most the process capacity,
-  at boot. `Pool::free`, `Pool::take` and `Regions::new` take a fixed
-  number of steps; `Regions::new` gives two bit sets, of `MAX_REGIONS` bits
-  and of 512 bits.
+  at boot. `Pool::free`, `Pool::take`, `Pool::next` and `Regions::new` take
+  a fixed number of steps; `Regions::new` gives two bit sets, of
+  `MAX_REGIONS` bits and of 512 bits.
 - `reserve` walks the rows in use once in address order, at most
   `vm_regions`, at most `MAX_REGIONS`, and the set of rows in use once for
   the lowest free row.
@@ -989,7 +1002,7 @@ The component leaves no other choice open.
 | The VM head of each process: its set of rows in use, its first row, its set of 2 MiB slots with a level 3 table and its cursor | Per-process | The token of the process; with one CPU, the executing CPU | The write-back of the write set that changes it | Under the token of the process |
 | The rows of the region table of each process | Per-process | The token of the process | The write-back of the write set that changes it | Under the token of the process |
 | The page pool: its base and its frames, its free stack with its count, and the metadata of its free frames | Shared | The token of the page pool, a field of the kernel root; with one CPU, the executing CPU | The end of the write of a frame that `Pool::take` or a commit takes, or that `acknowledge` returns | Under the token, by the release of the lock that provides it once CPUs share it |
-| The metadata of each frame that a process holds, and the head of its committed chain | Per-process | The token of its process, to which a frame passes when it is taken and from which it passes back to the pool token when it returns | As the page pool | At the handover: under the token of the page pool |
+| The metadata of each frame that a process holds, and the head of its committed chain | Per-process | The token of its process, to which a frame passes when it is taken and from which it passes back to the pool token when it returns; `Pool::next` reads it under that token, which the creation of the process holds | As the page pool | At the handover: under the token of the page pool |
 | The VM part of the capacity record, the `Config` | Shared, read-only after boot | The boot CPU, which checks it before the first entry from EL0 | The return of `check_config` | Once, before the secondary CPUs start; it never changes afterwards |
 
 The bytes of a frame are the memory of its holder, not a field of the
@@ -1021,7 +1034,10 @@ of a process, are fields of the
   table of the 8 GB Pi 5 after the other allocations at boot adds at most
   one extent each, with the metadata pages of the formula; a pool that
   finds no range stops the boot with the error of the page ownership
-  table; `Pool::new` gives the frames in address order from the top.
+  table; `Pool::new` gives the frames in address order from the top; after
+  several takes for one process, `Pool::next` from the head of its chain
+  gives its frames in the reverse of the order of their takes and then
+  none, and none for a free frame.
 - Operations: a property test with fixed seeds drives `reserve`, `commit`,
   `decommit`, `mprotect`, `release` and `revoke_step` with `acknowledge` of
   every plan on several processes and checks after every step, against an
