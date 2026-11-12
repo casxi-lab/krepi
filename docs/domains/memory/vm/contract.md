@@ -18,9 +18,11 @@ records are the
 component's. The validation of loading requests, with the loading part of
 the capacity record, belongs to the dispatch component (planned), which
 the address-space and objects contracts call the loading component; the
-mapping of loaded images to the creation component (planned); and the
-destruction of a process, which composes the revocation of this page, to
-the lifecycle component (planned). The observable behaviour that these
+mapping of loaded images to the
+[creation](../../objects-capabilities/creation/contract.md) component; and
+the destruction of a process, which composes the revocation of this page,
+to the [lifecycle](../../objects-capabilities/lifecycle/contract.md)
+component. The observable behaviour that these
 rules serve, with its evidence, is in the [requirements](requirements.md),
 the other document of the component.
 
@@ -112,17 +114,17 @@ crate.
 | Entry point | Kind | Called by | ABI operation | Rules |
 | --- | --- | --- | --- | --- |
 | `vm::VM_START`, `VM_END`, `MAX_REGIONS`, `MAX_CALL_PAGES`, `RELEASE_BATCH`, `MAX_POOL_PAGES`, `OWNER_PAGE_POOL` and `OWNER_PAGE_FRAMES` (planned) | Constants, host-testable | The entries of this page; the boot wiring; the objects component, for `MAX_REGIONS` in its check of the capacity record; the composers, for the layout of the EL0 window (planned) | None | [VM window and regions](#vm-window-and-regions), [Configuration and the page pool](#configuration-and-the-page-pool), [Work bounds](#work-bounds) |
-| `vm::check_config` (planned), with the value type `vm::Config` | Function that writes nothing, host-testable | The boot wiring, once, after the last check of the capacity record of the objects and address-space components and before it carves any storage; the boot of the root by the module `creation` (planned) reads the root's limit of committed VM pages from the `Config` that it gives | None | [Configuration and the page pool](#configuration-and-the-page-pool) |
+| `vm::check_config` (planned), with the value type `vm::Config` | Function that writes nothing, host-testable | The boot wiring, once, after the last check of the capacity record of the objects and address-space components and before it carves any storage; the boot of the root, `creation::boot_root` (planned), reads the root's limit of committed VM pages from the `Config` that it gives | None | [Configuration and the page pool](#configuration-and-the-page-pool) |
 | `Pool::new` (planned), with the value type `vm::Pool` | Write entry, host-testable | The boot wiring, once, after it has carved the page pool and its metadata | None | [Configuration and the page pool](#configuration-and-the-page-pool) |
-| `Pool::free` and `Pool::take` (planned) | A read entry and a write entry outside write sets, host-testable | The module `creation` (planned): `free` in its checks; `take` after the write-back of a creation, once for each private page of a loaded image | None | [Configuration and the page pool](#configuration-and-the-page-pool), [Quotas](#quotas) |
-| `Regions::new` (planned), with the value type `vm::Regions` | Function that writes nothing, host-testable | The module `creation` (planned), for the write set of the creation of a process and of the boot of the root | None | [VM window and regions](#vm-window-and-regions) |
+| `Pool::free` and `Pool::take` (planned) | A read entry and a write entry outside write sets, host-testable | `creation::spawn_commit` (planned): `free` in its checks; `take` after its write-back, once for each private page of the image that it loads | None | [Configuration and the page pool](#configuration-and-the-page-pool), [Quotas](#quotas) |
+| `Regions::new` (planned), with the value type `vm::Regions` | Function that writes nothing, host-testable | `creation::spawn_commit` and `creation::boot_root` (planned), for the write set of the creation of a process and of the boot of the root | None | [VM window and regions](#vm-window-and-regions) |
 | `vm::reserve` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `reserve` | `reserve` | [VM window and regions](#vm-window-and-regions) |
 | `vm::commit` (planned), with the value types `vm::Step` and `vm::FramePlan` | Write entry on the copies of a write set, host-testable; gives write plans | `dispatch` (planned), for the operation `commit` | `commit` | [Commit](#commit), [Quotas](#quotas), [Tables and extents](#tables-and-extents) |
 | `vm::decommit` (planned) | Write entry on the copies of a write set, host-testable; gives write plans and frame plans | `dispatch` (planned), for the operation `decommit` | `decommit` | [Decommit](#decommit), [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
 | `vm::mprotect` (planned) | Write entry on the copies of a write set, host-testable; gives write plans | `dispatch` (planned), for the operation `mprotect` | `mprotect` | [Protection and W^X](#protection-and-wx) |
 | `vm::release` (planned) | Write entry on the copies of a write set, host-testable; one step of a long operation, which gives write plans and frame plans | `dispatch` (planned), for the operation `release`, also when the call is executed again | `release` | [Two-phase release](#two-phase-release) |
-| `vm::acknowledge` (planned) | Write entry on the copies of a write set, host-testable; gives the next step | The dispatch of the core (planned), after the architecture crate has executed a plan that an entry of this page gave, through the module `lifecycle` for the plans of `revoke_step` | None | [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
-| `vm::revoke_step` (planned) | Write entry on the copies of a write set, host-testable; one step of a long operation, which gives frame plans | The module `lifecycle` (planned), in the destruction of a process, after the invalidation of its ASID and the reset of its lower tables | None | [Revocation at process destruction](#revocation-at-process-destruction) |
+| `vm::acknowledge` (planned) | Write entry on the copies of a write set, host-testable; gives the next step | The dispatch of the core (planned), after the architecture crate has executed a plan that an entry of this page gave, through `lifecycle::acknowledge` (planned) for the plans of `revoke_step` | None | [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
+| `vm::revoke_step` (planned) | Write entry on the copies of a write set, host-testable; one step of a long operation, which gives frame plans | `lifecycle::destroy_step` (planned), in the destruction of a process, after the invalidation of its ASID and the reset of its lower tables | None | [Revocation at process destruction](#revocation-at-process-destruction) |
 | `krepi_arch::frames::apply` (planned) | `unsafe` function | `el0_dispatch` of each kernel image, for a frame plan that the dispatch of the core returns (planned) | None | [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
 
 ## Extractability
@@ -227,11 +229,13 @@ the change that adds the module writes its `paths` block here.
   region leaves no name behind. Region generations come with futexes
   ([region generations](../../../architecture.md#futexes-and-upcalls)).
 - **The VM head.** `Regions::new()` gives the empty VM head: no row in use,
-  no level 3 table recorded and no operation in progress. The creation of a
-  process writes it into the VM head of the region table of its process
-  slot, one item of its write set, and the boot of the root does so for the
-  root (planned); the last step of the revocation at the destruction of a
-  process writes it back.
+  no level 3 table recorded and no operation in progress. The
+  [creation of a process](../../objects-capabilities/creation/contract.md#child-processes)
+  writes it into the VM head of the region table of its process slot, one
+  item of its write set, and the
+  [boot of the root](../../objects-capabilities/creation/contract.md#the-boot-of-the-root)
+  does so for the root; the last step of the revocation at the destruction
+  of a process writes it back.
 - **The record of the pages.** A page of a region is committed exactly when
   the lower tables of the process map it, and the kind of its leaf is its
   protection. A row records neither the protection nor which of its pages
@@ -337,10 +341,12 @@ page ownership table:
 - `Pool::free()` gives the number of free frames. `Pool::take(process)`
   takes the top frame as a loaded frame of the process, links it at the
   head of the committed chain of the process and gives its physical
-  address. The creation of a process calls it after its write-back and
-  before its first plan, for each private page of the image that it loads,
-  having checked `free` and charged the pages before its first write
-  (planned), so that no plan in flight needs a free frame; `take` of an empty
+  address. The
+  [creation of a process](../../objects-capabilities/creation/contract.md#child-processes)
+  calls it after its write-back and before its first plan, for each private
+  page of the image that it loads, having checked `free` and charged the
+  pages before its first write, so that no plan in flight needs a free
+  frame; `take` of an empty
   pool is `OutOfPages` and changes nothing, a call that no composer makes.
   A commit takes its frames as committed frames ([Commit](#commit)).
 - Every frame has exactly one holder at any time: the pool or one process,
@@ -463,8 +469,9 @@ value 3 `UserReadWrite`.
 - The entries of this page map a frame only with `UserReadWrite` or
   `UserReadOnly`, neither of them executable
   ([descriptors and attributes](../page-tables/contract.md#descriptors-and-attributes)),
-  and never with `UserReadExecute` or a device kind; the creation component
-  maps a loaded frame with `UserReadWrite` as well (planned).
+  and never with `UserReadExecute` or a device kind; the
+  [creation](../../objects-capabilities/creation/contract.md#child-processes)
+  component maps a loaded frame with `UserReadWrite` as well.
 - A frame has at most one mapping at EL0, of the process that holds it, and
   its alias in the direct map is read-write and execute-never at EL1 only.
   A frame returns to the pool only after the entry that maps it is gone, so
@@ -544,8 +551,9 @@ The destruction of a process is the second trigger of the same two phases,
 for all its regions and its loaded frames at once.
 
 - **Pending.** Once the process has left Alive, its thread is removed and
-  no operation of this page runs on its address space again (the lifecycle
-  component, planned); its regions stay as they are until the revocation.
+  no operation of this page runs on its address space again
+  ([destruction](../../objects-capabilities/lifecycle/contract.md#destruction));
+  its regions stay as they are until the revocation.
 - **Premises.** The lifecycle component calls `revoke_step(process)` only
   once the address space of the process is loaded on no CPU, its ASID has
   been invalidated by the execution of its release plan, whose
@@ -567,13 +575,16 @@ for all its regions and its loaded frames at once.
     progress is the chain itself.
 - After the completion the process holds no frame, and its usages of
   committed VM pages and of private pages of loaded images are 0, which the
-  reaping of the process requires (planned).
+  [reaping](../../objects-capabilities/lifecycle/contract.md#reaping) of
+  the process requires.
 - A frame returns to the pool only after the reset that removed the entry
   that mapped it, so a frame has at most one mapping, and every page one
   holder, during the destruction as well.
 - The order of these steps among the other steps of the destruction, after
   the invalidation and the reset and before the release of the ASID and of
-  the segment of the table pool, is the lifecycle component's (planned).
+  the segment of the table pool, is the
+  [lifecycle](../../objects-capabilities/lifecycle/contract.md#destruction)
+  component's.
 
 ## Acknowledgement and reclamation
 
@@ -616,10 +627,11 @@ for all its regions and its loaded frames at once.
 - `Copy(source, frame, bytes)`: copy `bytes` bytes, at most 4096, from the
   offset `source` of the boot bundle, read through the kernel's read-only
   mapping of the image, to the start of a frame, through the direct map.
-  The creation component gives it for the file bytes of the RW segments of
-  an image that it loads, and the creation component continues its own
-  operation after the plan (planned); `acknowledge` continues only the
-  plans of the entries of this page.
+  The
+  [creation](../../objects-capabilities/creation/contract.md#child-processes)
+  component gives it for the file bytes of the RW segments of an image that
+  it loads, and continues its own operation after the plan; `acknowledge`
+  continues only the plans of the entries of this page.
 
 **Acknowledgement.** `acknowledge(process)` records that the plan in
 flight of the cursor of the VM head of `process` has been executed and
@@ -727,11 +739,12 @@ of its holder.
   out of the frames: the limits and caps of all processes together may
   exceed the pool, and when the frames run out a commit fails for shared
   capacity, `OutOfPages`.
-- **Private pages of loaded images.** The creation component charges the
-  private pages of an image that it loads to the item of the child, before
-  its first write, and takes their frames with `Pool::take` (planned); each
-  returns, with the credit of one page of the item, in the revocation at the
-  destruction of the child.
+- **Private pages of loaded images.** The
+  [creation](../../objects-capabilities/creation/contract.md#quotas-and-admission)
+  component charges the private pages of an image that it loads to the item
+  of the child, before its first write, and takes their frames with
+  `Pool::take`; each returns, with the credit of one page of the item, in
+  the revocation at the destruction of the child.
 - **Rows.** The region table of a process has its fixed `vm_regions` rows,
   counted by no item; a `reserve` without a free row is refused with
   `RegionTableFull`, which depends only on the caller.
@@ -742,10 +755,12 @@ of its holder.
   pages that a commit of the process has charged at its write-back and not
   yet taken; and as its private pages of loaded images the loaded frames of
   its chain, together with the pages that the creation of the process in
-  progress has charged and not yet taken (planned), and, for the root, the
-  pages of the memory of its RW segments and of its stack in its private
-  allocation at boot, which the boot of the root charges to the item and
-  which are not frames of the pool (planned). Every charge and credit of
+  progress has charged and not yet taken, and, for the root, the pages of
+  the memory of its RW segments and of its stack in its private allocation
+  at boot, which the
+  [boot of the root](../../objects-capabilities/creation/contract.md#the-boot-of-the-root)
+  charges to the item and which are not frames of the pool. Every charge
+  and credit of
   these items is in the write set that changes these counts, so both
   statements of conservation hold after every write-back.
 
@@ -869,7 +884,9 @@ follow plans that have been executed: the plans of an operation, and for
 - The composed write sets stay within $W$ = 64 items: an operation of this
   page is composed by the dispatch of the core with the settlements of its
   transition, which are transactions of their own, and a revocation step by
-  the lifecycle component, whose contract counts its write set (planned).
+  the lifecycle component, whose
+  [contract](../../objects-capabilities/lifecycle/contract.md#destruction)
+  counts its write set.
 - A refused operation gives no plan and changes no table, no frame and no
   metadata.
 
@@ -1057,9 +1074,11 @@ The module `vm` has no `unsafe` code, no assembly and no MMIO, and its
 entries are to be covered by its targets. The composition of its entries
 into a transition by the dispatch of the core, with the round trip of
 plans, and into the destruction of a process by the lifecycle component
-are effects across components, open obligations of the contracts of those
-components (planned), carried by the proof of object lifetimes, waits and
-sequential composition, by release 0.2. The write plans that the entries
+are effects across components, open obligations of the contract of the
+dispatch component (planned) and of the
+[lifecycle](../../objects-capabilities/lifecycle/contract.md#open-obligations)
+contract, carried by the proof of object lifetimes, waits and sequential
+composition, by release 0.2. The write plans that the entries
 give are executed by `krepi_arch::mmu::apply` and the zeroing of a frame
 by `krepi_arch::mmu::zero_frames`, rows of the
 [page-tables obligations](../page-tables/contract.md#open-obligations); the
@@ -1155,8 +1174,8 @@ the events of a region become the plans of each of its pages.
 | Vector | Line | Test | Expected output | Entry |
 | --- | ---: | --- | --- | --- |
 | `vm-authority-1` | 3 | `capabilities_are_typed_live_and_bound_to_the_captured_owner` | A map through another owner's capability, through a capability to another process's grant in the caller's space, through a capability with only the right to observe, through a capability of another type and through a closed capability is each `err=Authority`, with no event | No case: no capability names a region or an address space, and the operations act only on the caller's own address space, so there is no authority to name, attenuate or close |
-| `vm-authority-2` | 45 | `closing_grant_drains_mappings_but_waits_for_outward_capability_references` | With 2 pages mapped and a capability to the grant in another process's space: after the owner's space is closed, the close of the grant is `err=ReferencesOutstanding`, its pages are 0 and its external references 2; a map through the other process's capability is `err=Authority`; after that capability is closed, the close of the grant and the destruction of the domain succeed | No case: there is no grant and no capability to one, and whether a process may be reclaimed is a gate of the lifecycle component (planned), which counts no references |
-| `vm-authority-3` | 74 | `supplemental_mapping_reference_is_independent_of_authority_retention` | After a map of 1 page the process holds 2 mapping obligations; with a DMA resource retained and the grant closed, it holds 1; its destruction is `err=ReferencesOutstanding` until the DMA resource is released, and then succeeds | No case: no DMA region is mapped at EL0 in release 0.1, and the gate of reclamation is the lifecycle component's (planned) |
+| `vm-authority-2` | 45 | `closing_grant_drains_mappings_but_waits_for_outward_capability_references` | With 2 pages mapped and a capability to the grant in another process's space: after the owner's space is closed, the close of the grant is `err=ReferencesOutstanding`, its pages are 0 and its external references 2; a map through the other process's capability is `err=Authority`; after that capability is closed, the close of the grant and the destruction of the domain succeed | No case: there is no grant and no capability to one, and whether a process may be reclaimed is a gate of the [lifecycle](../../objects-capabilities/lifecycle/contract.md#reaping) component, which counts no references |
+| `vm-authority-3` | 74 | `supplemental_mapping_reference_is_independent_of_authority_retention` | After a map of 1 page the process holds 2 mapping obligations; with a DMA resource retained and the grant closed, it holds 1; its destruction is `err=ReferencesOutstanding` until the DMA resource is released, and then succeeds | No case: no DMA region is mapped at EL0 in release 0.1, and the gate of reclamation is the [lifecycle](../../objects-capabilities/lifecycle/contract.md#reaping) component's |
 | `vm-authority-4` | 111 | `revoking_a_derived_grant_denies_new_work_but_preserves_existing_mappings` | A capability derived with CONTROL maps 1 page, filled with `0x76`; the revocation of the original's descendants counts 1; afterwards a map and an unmap through the derived capability are `err=Authority`, an unmap by another owner is `err=Stale`, the page keeps `0x76`, and the unmap through the original succeeds | No case: no capability names a region, so there is no derived capability to revoke |
 | `vm-authority-5` | 136 | `invalid_admission_bounds_and_request_overflow_create_no_ownership` | Admissions of a grant at the start, pages and quota (0, 1, 1), (`0x34000001`, 1, 1), (`0x34000000`, 0, 1), (`0x34000000`, 1, 0), (`0x34000000`, 1, 2), (`0x34000000`, `0xffffffffffffffff`, 1) and (`0x1000000000000`, 1, 1) are each `err=Argument`, and the external references of the thread are unchanged and the count of authorities is 0; then a map at `0xfffffffffffff000` is `err=Argument`, with no event | `reserve` of 1 page at `VM_START` + 1, `err=Alignment`; of 0 pages at `VM_START`, `err=Length`; of `0xffffffffffffffff` pages at `VM_START`, `err=Window`; of 1 page at `0x1000000000000` and at `0xfffffffffffff000`, `err=Window`; each changes no field. The start 0 is a placement by the kernel, so `reserve` of 1 page at 0 is `ok` with the start `VM_START`; the quota of a grant, 0 or larger than its pages, has no case, since the limit of committed VM pages is an item of the quota record |
 
@@ -1166,8 +1185,8 @@ the events of a region become the plans of each of its pages.
 | --- | ---: | --- | --- | --- |
 | `vm-failures-1` | 3 | `partial_mapping_failure_retires_the_prefix_and_releases_exact_charge` | A map of 2 pages whose backend maps a prefix and fails is `err=Backend`; the events are `zero`, `map`, `unmap`, `invalidate` and `scrub`; no mapping remains, and the charged pages, the free bytes and the regions are those from before | No case: a commit makes all its checks before its first write and none of its plans fails, so there is no partial map to retire |
 | `vm-failures-2` | 20 | `failed_map_retirement_is_retained_even_without_a_published_receipt` | A map of 2 pages whose backend fails to map and then to invalidate is `err=Retirement`: 2 pages and 1 retiring region remain, with 6 charged pages and 2 mapping obligations; a further map is `err=Busy`; nothing has been scrubbed; a retry with a working backend leaves no region | `release` of a region of 2 committed pages whose first unmap plan a host test holds without `acknowledge`: the region is pending, no zero plan has been given, the frames are off the pool and the usage of committed VM pages stays 2; the prototype's further map lies after the region: here a `reserve` there while the plan is held is `err=InvalidState`, and a `commit` in the region `err=Pending`; after the `acknowledge` of every plan and the calls that continue the release, the region is gone, `ok`, and the frames are in the pool. A failed retirement has no case: a held plan is one not yet acknowledged, and no plan fails |
-| `vm-failures-3` | 45 | `failed_unmap_or_invalidation_keeps_pages_and_prevents_process_reaping` | For a failing invalidation and then a failing unmap: the unmap of a region of 2 pages filled with `0xde` is `err=Retirement`, nothing is scrubbed, the pages keep `0xde` and 2 pages stay mapped, and the destruction of the domain is `err=ReferencesOutstanding`; with a working backend the unmap and the close succeed | `release` of a region of 2 pages filled with `0xde`, with its first unmap plan executed and held before its `acknowledge`, and then with it held before its execution: in both, no zero plan has been given, the frames keep `0xde` and stay off the pool, and the usage of committed VM pages stays 2; after the `acknowledge` of every plan the release completes, `ok`. That the process does not reach Dead before its frames return is a gate of the lifecycle component (planned) |
-| `vm-failures-4` | 70 | `owner_fault_closes_authority_but_keeps_retirement_and_peer_independent` | Domain a maps 2 pages and domain b 1 page, filled with `0xf3`; a's execution ends by a fault and its space is closed; with a failing invalidation, the close of a's grant is `err=Retirement`, the grant is no longer open, 3 pages are mapped and the destruction of a is `err=ReferencesOutstanding`; with a working backend, the close and the destruction succeed, and b's page keeps `0xf3` | After the fault of process a, whose destruction is the lifecycle component's (planned), `revoke_step` of a after the invalidation of its ASID and the reset of its tables, with its first zero plan held: a's 2 frames stay off the pool and its usage of committed VM pages stays 2; after the `acknowledge` of every plan, the revocation completes, a holds no frame, and b's frame keeps `0xf3`. The grant and its close have no case |
+| `vm-failures-3` | 45 | `failed_unmap_or_invalidation_keeps_pages_and_prevents_process_reaping` | For a failing invalidation and then a failing unmap: the unmap of a region of 2 pages filled with `0xde` is `err=Retirement`, nothing is scrubbed, the pages keep `0xde` and 2 pages stay mapped, and the destruction of the domain is `err=ReferencesOutstanding`; with a working backend the unmap and the close succeed | `release` of a region of 2 pages filled with `0xde`, with its first unmap plan executed and held before its `acknowledge`, and then with it held before its execution: in both, no zero plan has been given, the frames keep `0xde` and stay off the pool, and the usage of committed VM pages stays 2; after the `acknowledge` of every plan the release completes, `ok`. That the process does not reach Dead before its frames return is a gate of the [lifecycle](../../objects-capabilities/lifecycle/contract.md#reaping) component |
+| `vm-failures-4` | 70 | `owner_fault_closes_authority_but_keeps_retirement_and_peer_independent` | Domain a maps 2 pages and domain b 1 page, filled with `0xf3`; a's execution ends by a fault and its space is closed; with a failing invalidation, the close of a's grant is `err=Retirement`, the grant is no longer open, 3 pages are mapped and the destruction of a is `err=ReferencesOutstanding`; with a working backend, the close and the destruction succeed, and b's page keeps `0xf3` | After the fault of process a, whose destruction is the [lifecycle](../../objects-capabilities/lifecycle/contract.md#destruction) component's, `revoke_step` of a after the invalidation of its ASID and the reset of its tables, with its first zero plan held: a's 2 frames stay off the pool and its usage of committed VM pages stays 2; after the `acknowledge` of every plan, the revocation completes, a holds no frame, and b's frame keeps `0xf3`. The grant and its close have no case |
 | `vm-failures-5` | 102 | `active_cpu_blocks_mapping_and_closure_without_callback_or_state_change` | While domain a runs on the execution manager, a map and the close of the grant of domain b are each `err=Execution(Busy)`; b's grant stays open, the backend has no event and the registry is unchanged | No case: an operation acts only on the address space of the calling thread, the one thread of its process, and an entry runs to completion, so no operation meets another address space or one that runs |
 | `vm-failures-6` | 126 | `generation_exhaustion_never_reissues_a_region_identifier` | With the next region identifier at `0xffffffffffffffff`, a map gives that identifier and its unmap succeeds; the next map is `err=GenerationExhausted` | No case: a region has no identifier and no generation in release 0.1 ([VM window and regions](#vm-window-and-regions)) |
 
