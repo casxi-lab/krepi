@@ -286,8 +286,9 @@ fixed it, and none fails; a frame returns to the page pool only after the
 plan that zeroed it. A long operation, a revocation, a destruction or the
 release of a region, takes one bounded step in each transition, stores its
 progress in its object and is executed again from the saved user registers,
-at once unless an interrupt is pending or the step has made a thread of a
-higher class ready. The criterion: a commit of pages, a commit of a child
+at once unless an interrupt is pending or the step has set the reschedule
+flag, as making a thread of a higher class ready or a requeue of the
+current thread does. The criterion: a commit of pages, a commit of a child
 and the steps of a kill give their plans in order, one in flight at a time;
 each step of a kill and of a release ends with the address of the `SVC` in
 `elr` and continues from its progress when it is executed again; and no
@@ -428,7 +429,8 @@ values of a record changes neither the checks nor the bounds of the code.
   with the plans that its operation gives.
 - A long operation takes one step in each transition, and the composer
   returns to its thread at once unless an interrupt is pending or the step
-  has made a thread of a higher class ready, so an interrupt waits at most
+  has set the reschedule flag, as making a thread of a higher class ready
+  or a requeue of the current thread does, so an interrupt waits at most
   for one step.
 - `syscall` and `validate` take a number of steps that the hard limits
   bound, whatever the values of the capacity record.

@@ -533,7 +533,12 @@ entry that the transition composes takes it
   before that return or wait, as `irq::handle` of the
   [boot](../../boot-platform/boot/contract.md#interrupts) component does;
   it disables every interrupt that is neither the timer interrupt nor bound
-  to a notification by the device-authority rules (planned).
+  to a notification by the device-authority rules (planned). An
+  acknowledgement that gives a special ID is not ended: for an IRQ taken
+  from EL0 the architecture crate calls `entry` with the IRQ and no
+  interrupt, which is handled as an IRQ; at a return it returns as with no
+  interrupt pending; at a wake it calls `entry` with the wake and no
+  interrupt.
 
 ### Operations
 
@@ -973,8 +978,8 @@ fixed error:
 - **The root.** The root's private pages are those of
   [the first process](../../memory/address-space/contract.md#first-process-and-boot-information)
   without the page of the boot information: the pages of the memory of
-  each RW root's segment of the directory, rounded up to a page, and
-  `ROOT_STACK_PAGES`. The boot wiring counts them from the entries that
+  each root's segment of the directory with the access RW, rounded up to a
+  page, and `ROOT_STACK_PAGES`. The boot wiring counts them from the entries that
   `Directory::parse` has checked, so the step needs neither the carving
   nor `Directory::root_plan`, which runs later and gives the same pages
   and the page of the boot information. Check 5 keeps the charge of those
@@ -1200,8 +1205,8 @@ return then ends the process ([Results](#results)).
   [ND-01](../../../security.md#nd-01) of the register of
   [permitted nondeterminism](../../../security.md#permitted-nondeterminism).
 - **Interrupts.** Which interrupt is pending at an entry or at a return,
-  and so where a long operation meets a preemption point and which thread
-  runs next, is the arrival of interrupts of
+  and so whether the thread of a long operation executes its call again
+  at once and which thread runs next, is the arrival of interrupts of
   [ND-01](../../../security.md#nd-01), for the timer, and of
   [ND-02](../../../security.md#nd-02), for devices; for each, the rules of
   this page fix the result, and the result of a call does not depend on
@@ -1535,10 +1540,13 @@ loader, which [References](#references) lists:
   segment, the number of segments before the overlap, and, at the commit,
   the number of segments and the entry before every segment; here the
   checks of a segment and of a commit follow the
-  [order of errors](#order-of-errors): the form of the arguments, the
-  access and the range of the segment among them, first, then the range of
-  the file and the overlap, as object state, and then the number of
-  segments and the private pages, as the caller's quota.
+  [order of errors](#order-of-errors). At a segment: the form of the
+  arguments, the access and the range of the segment among them, first;
+  then the range of the file and the overlap, as object state; then the
+  number of segments and the private pages, as the caller's quota. At a
+  commit: the form of the entry first; then the plan, its segments and the
+  RX segment of the entry, as object state; then the private pages, as the
+  caller's quota.
 
 ## References
 
