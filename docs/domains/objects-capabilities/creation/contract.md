@@ -70,8 +70,9 @@ the [requirements](requirements.md), the other document of the component.
   it holds the cursor of the commit instead.
 - **Cursor.** The field of the staging record that holds, from the
   write-back of a commit or of the boot of the root to its result, the
-  child, the step of the creation in progress and the frame of the plan in
-  flight. It is empty between transitions.
+  child, the step of the creation in progress and, for a commit, the frame
+  of the private page whose plans are in flight or come next. It is empty
+  between transitions.
 - **Plan.** What an entry of this page gives the architecture crate to
   execute: a write plan of the
   [page-tables](../../memory/page-tables/contract.md#write-plans-and-publication)
@@ -507,27 +508,32 @@ the child's first.
   ([admission and release](../../scheduling/budget-ledger/contract.md#admission-and-release));
   `lifecycle::init` (planned), which makes the child alive and links it
   last among the children of the creator
-  ([children](../lifecycle/contract.md#children)); `Space::new` of the
-  token that `Asids::take` of the choice of the checks gives, the ASID of
-  the choice at its next generation, as the record of the address space of
-  the child in its process slot
-  ([ASIDs](../../memory/address-space/contract.md#address-spaces-and-asids));
-  `Regions::new()` into the VM head of the region table of the child
+  ([children](../lifecycle/contract.md#children)); `Regions::new()` into
+  the VM head of the region table of the child
   ([the VM head](../../memory/vm/contract.md#vm-window-and-regions)); and
   the staging record becomes the cursor of the commit.
 - **After the write-back.** These writes and plans follow, in this order.
-  None of them is an item of a write set, the checks fixed each of them,
-  and none fails:
-  1. `Asids::take` of the choice of the checks, which gives the token that
-     the record of the address space of the child holds;
+  The checks fixed each of them and none fails; only steps 1, 3 and 7
+  write items of a write set, each in a write set of its own:
+  1. `Asids::take` of the choice of the checks, which gives the token of
+     the ASID of the choice at its next generation; then `Space::new` of
+     that token, written as the record of the address space of the child
+     in its process slot
+     ([ASIDs](../../memory/address-space/contract.md#address-spaces-and-asids)),
+     in one write set of 1 item, the process slot of the child, without a
+     fault-injection point;
   2. `Tables::new` on the segment of the process slot of the child,
      `TablePool::segment`
      ([table pools](../../memory/address-space/contract.md#table-pools));
-  3. `Pool::take(child)` once for each private page, the pages of the RW
-     segments in the order of the plan and of their addresses and then the
-     pages of the initial stack from the lowest, before the first plan,
-     so that no plan in flight needs a free frame
+  3. `Pool::take(child)` once for each private page, in the reverse of the
+     order of their plans: the pages of the initial stack from the highest,
+     and then the pages of the RW segments from the last page of the last
+     RW segment of the plan to the first page of the first; all before the
+     first plan, so that no plan in flight needs a free frame
      ([the pool](../../memory/vm/contract.md#configuration-and-the-page-pool));
+     then the frame that the last take gives, that of the first private
+     page, written into the cursor, in one write set of 1 item, the
+     creator's process slot, without a fault-injection point;
   4. the write plan of `Tables::clone_kernel_from` from the lower kernel
      set
      ([copying](../../memory/page-tables/contract.md#copying-the-kernel-tables));
@@ -548,13 +554,17 @@ the child's first.
      component, `top` being the top of the image window, written as the
      saved context of the thread of the child, and the cursor emptied, in
      one write set of 2 items; then the result.
-<!-- STOP: no entry of the vm contract lets this component name, after the takes of step 3, the frame that a take gave for a private page: Pool::take gives the address at the take, the vm contract requires every take before the first plan, the frames are found later only through the committed chain, which only the vm entries read, and the vm entry table holds its 12 core entries; a read entry of the chain, or a change of the order of the takes, is needed -->
-- **The frame of a private page.** The frame of each private page is the
-  one that the take of that page gave: the takes link the frames at the
-  head of the committed chain of the child in the order of the pages, so
-  the frame of each page is linked just before the frame of the page
-  before it, as for a commit of the VM component, and the cursor holds the
-  frame of the plan in flight.
+- **The frame of a private page.** Each take links its frame at the head
+  of the committed chain of the child, which is empty before the first
+  take, so the frame that the last take gives is that of the first private
+  page and heads the chain, and the chain holds the frames in the order of
+  the plans of their pages. The frame of each next private page is
+  `Pool::next` of the frame of the page before it
+  ([the pool](../../memory/vm/contract.md#configuration-and-the-page-pool)),
+  which `acknowledge` reads, under the token of the child, after the plan
+  that maps the page before; the cursor holds the frame of the private page
+  whose plans are in flight or come next. No other entry changes the chain
+  of the child before the result, since the commit holds its token.
 - **The round trip of plans.** `spawn_commit` gives its first plan as its
   step; the architecture crate executes it, and the dispatch of the core
   (planned) calls `acknowledge` of the caller, whose staging record holds
@@ -583,7 +593,10 @@ the child's first.
   ([write-set transactions](../objects/contract.md#write-set-transactions)),
   which discard the buffer; then no write outside the write set has been
   made and no plan given, the state is the state from before the commit, and
-  the staging record is kept, to be committed again or discarded.
+  the staging record is kept, to be committed again or discarded. The write
+  sets of steps 1, 3 and 7, of 1, 1 and 2 items, follow the take of the
+  ASID, the takes of the frames and plans that have been executed, which a
+  discarded buffer would not undo, so they have no fault-injection point.
 - **Image authority.** The images of release 0.1 come only from the boot
   bundle, which is part of the kernel image and read only
   ([integrity policy](../../../security.md#integrity-policy)), so any
@@ -843,18 +856,20 @@ boot CPU, the page pool and the kernel root.
   `ledger::admit` of the root; `scheduler::admit` of the root's thread in
   the class control with the ceiling control, the kernel domain as its
   creator; `lifecycle::init` of the root with the kernel domain as its
-  owner, which keeps no chain of children; `Space::new` of the token of
-  ASID 1 at generation 1, as the record of the root's address space in its
-  process slot; `Regions::new()` into the root's VM head; and the staging
-  record of the root becomes the cursor of the boot.
-- **After the write-back.** `Asids::choose` and `take`, which give ASID 1 of
-  generation 1, the token of that record, and `Tables::new` on the segment
-  of the root's process slot; then the write plan of `clone_kernel_from`;
-  then the write plans of `map_page` of the pages of the root plan, in the
-  order and with the kinds of step 5 of the first process, the frame of a
-  page of the private allocation being the base of the allocation and its
-  offset in it; after the acknowledgement of the last plan, the initial
-  context `Context::new(root_entry, ROOT_STACK_TOP)` of step 7, which passes
+  owner, which keeps no chain of children; `Regions::new()` into the root's
+  VM head; and the staging record of the root becomes the cursor of the
+  boot.
+- **After the write-back.** `Asids::choose` and `take`, which give the token
+  of ASID 1 at generation 1; `Space::new` of that token, written as the
+  record of the root's address space in its process slot, in one write set
+  of 1 item without a fault-injection point, as for a commit; and
+  `Tables::new` on the segment of the root's process slot; then the write
+  plan of `clone_kernel_from`; then the write plans of `map_page` of the
+  pages of the root plan, in the order and with the kinds of step 5 of the
+  first process, the frame of a page of the private allocation being the
+  base of the allocation and its offset in it; after the acknowledgement of
+  the last plan, the initial context
+  `Context::new(root_entry, ROOT_STACK_TOP)` of step 7, which passes
   `validate`, written as the saved context of the root's thread and the
   cursor emptied, in one write set of 2 items; then the result.
 - **The round trip at boot.** The boot wiring executes each plan with
@@ -995,7 +1010,10 @@ which the write sets below never reach, and the fault-injection points of
 test builds, each of which discards the buffer and leaves the state from
 before the entry, before any write outside the write set and any plan.
 `acknowledge` has no fault-injection point, since it follows a plan that has
-been executed.
+been executed; nor have the write sets of 1 item that follow the take of
+an ASID or of frames, in which a commit and the boot of the root write the
+record of the address space and a commit the frame of its first private
+page into its cursor.
 
 | Entry | Checks before the first write | Write set | Writes after the write-back |
 | --- | --- | --- | --- |
@@ -1005,9 +1023,9 @@ been executed.
 | `spawn_segment` | Those of `validate` for a segment, and the staging record | 1: the caller's process slot | None |
 | `spawn_grant` | The rights and the slot, the lookup of the source, the staging record, the slot of the child, the number of grants, the depth | 1: the caller's process slot | None |
 | `spawn_abort` | The staging record | 1: the caller's process slot | None |
-| `spawn_commit` | Those of [the commit](#child-processes), with those of `validate` for a commit, the rechecks of the staging record among them | At most 31, listed below | The take of the ASID, the table set, the take of each private frame; then the first plan |
-| `acknowledge` | A cursor | 1: the process slot that holds the cursor; at the last step 2, with the thread slot of the new thread for its initial context | The next plan, with the table record that `map_page` writes, or nothing |
-| `boot_root` | `capability_slots` | 10, below, and the items of the capability to the device directory that the device-authority rules add (planned) | The take of ASID 1, the table set; then the first plan |
+| `spawn_commit` | Those of [the commit](#child-processes), with those of `validate` for a commit, the rechecks of the staging record among them | At most 31, listed below | The take of the ASID, then the record of the address space of the child in a write set of 1 item, its process slot; the table set; the take of each private frame, in the reverse of the order of their plans, and then the frame of the first private page in the cursor, in a write set of 1 item, the creator's process slot; then the first plan |
+| `acknowledge` | A cursor | 1: the process slot that holds the cursor, with, after the plan that maps a private page of a commit, the frame of the next one, `Pool::next` of the frame of that page; at the last step 2, with the thread slot of the new thread for its initial context | The next plan, with the table record that `map_page` writes, or nothing |
+| `boot_root` | `capability_slots` | 10, below, and the items of the capability to the device directory that the device-authority rules add (planned) | The take of ASID 1, then the record of the root's address space in a write set of 1 item, its process slot; the table set; then the first plan |
 
 **The write set of a commit.** Its items, each counted once, by the items of
 the [objects](../objects/contract.md#write-set-transactions) and of the
@@ -1016,7 +1034,7 @@ composed components:
 | Items | Item | Changed by |
 | ---: | --- | --- |
 | 1 | The process slot of the creator | The five splits and the charges of a child process and of two capability slots in its quota record; its staging record, which becomes the cursor; and its last child, with its first child when it has none, in the chain of its children |
-| 1 | The process slot of the child | Its quota record, from the starting state of `occupy` through the splits and the charges of its private pages and of its capability slots; the state that `lifecycle::init` writes; and the record `Space` of its address space |
+| 1 | The process slot of the child | Its quota record, from the starting state of `occupy` through the splits and the charges of its private pages and of its capability slots; and the state that `lifecycle::init` writes |
 | 1 | The thread slot of the child | `occupy`, with the budget record of `ledger::admit` and the scheduling state of `scheduler::admit` |
 | 2 | The counts of the process pool and of the thread pool | `occupy` |
 | 2 | The entries of the creator's table that receive the capabilities to the child and to its thread | `install`, whose object slots and process slot are the three slots above |
@@ -1041,8 +1059,8 @@ the scheduler record of the boot CPU, whose queue of control is empty, and
 the root's VM head: 10 items, beside those of the capability to the device
 directory.
 
-- The fault-injection points of a test build in the write phase of each
-  entry but `acknowledge` leave the state from before the entry: the
+- The fault-injection points of a test build in the first write phase of
+  each entry but `acknowledge` leave the state from before the entry: the
   staging record, the pools, the tables, the quota records and the records
   of the ledger and of the scheduler as they were, and no ASID, table,
   frame or plan taken.
@@ -1064,26 +1082,32 @@ directory.
   (planned); `spawn_grant` makes one lookup and forms a path of at most
   `MAX_DEPTH` references; `spawn_abort` makes a fixed number of steps. Each
   writes 1 item.
-- `spawn_commit` makes at most 1 + `SPAWN_GRANTS` = 5 lookups, the checks
-  of `validate` for a commit over at most 8 segments, two scans of
-  `choose`, at most the capacities of the process and the thread pool, and
+- `spawn_commit` makes at most 1 + `SPAWN_GRANTS` = 5 lookups, the checks of
+  `validate` for a commit over at most 8 segments, two scans of `choose`, at
+  most the capacities of the process and the thread pool, and
   `Asids::choose`, at most 255 ASIDs
   ([work bounds](../../memory/address-space/contract.md#work-bounds)); it
-  writes at most 31 items. After the write-back it takes one frame for each
-  private page, each in a fixed number of steps, at most the private pages
-  of an image that the loading part allows (planned), and gives the plan of
-  `clone_kernel_from` over at most the 32 tables of a set, one write plan
-  of at most seven steps for each page that it maps
-  ([work bounds](../../memory/page-tables/contract.md#work-bounds)), at
-  most the pages of the image window that the check of the loading part at
-  boot allows, and one frame plan of at most 4096 bytes for each page of
-  an RW segment that holds bytes of the file. No creation takes a page of
-  the page ownership table or adds an extent to it at run time: the private
-  pages of a child are frames of the page pool, and the root's private
-  allocation is the boot wiring's.
-- `acknowledge` writes 1 or 2 items and gives at most one plan.
-- `boot_root` writes 10 items and maps at most the pages of the root block
-  and of the bundle window, one `map_page` each, at boot
+  writes at most 31 items. After the write-back it writes 2 items, each in a
+  write set of 1, the record of the address space and the cursor with the
+  frame of the first private page, and takes one frame for each private
+  page, in the reverse of the order of their plans, each in a fixed number
+  of steps, at most the private pages of an image that the loading part
+  allows (planned), and gives the plan of `clone_kernel_from` over at most
+  the 32 tables of a set, one write plan of at most seven steps for each
+  page that it maps
+  ([work bounds](../../memory/page-tables/contract.md#work-bounds)), at most
+  the pages of the image window that the check of the loading part at boot
+  allows, and one frame plan of at most 4096 bytes for each page of an RW
+  segment that holds bytes of the file. No creation takes a page of the page
+  ownership table or adds an extent to it at run time: the private pages of
+  a child are frames of the page pool, and the root's private allocation is
+  the boot wiring's.
+- `acknowledge` writes 1 or 2 items, reads the frame of the next private
+  page with `Pool::next` in a fixed number of steps, and gives at most one
+  plan.
+- `boot_root` writes 10 items and, after the take of ASID 1, 1 more; it maps
+  at most the pages of the root block and of the bundle window, one
+  `map_page` each, at boot
   ([work bounds](../../memory/address-space/contract.md#work-bounds)).
 - **No long operation.** The component has no long operation: a commit and
   the boot of the root run to their result without a preemption point, and
@@ -1110,8 +1134,10 @@ directory.
 - **Slots of capabilities.** The caller names the slot of each first
   capability and of each grant; the fixed slots are 0 and 1. The kernel
   chooses no slot of a table.
-- **Frames.** The private pages of a child take the frames at the top of
-  the free stack of the page pool, in the order of the pages
+- **Frames.** The private pages of a child take the frames at the top of the
+  free stack of the page pool, in the reverse of the order of their plans,
+  the last private page first, and each next private page has the frame that
+  follows on the committed chain of the child
   ([determinism](../../memory/vm/contract.md#determinism)); the physical
   address of a frame is not an output.
 - **Order of steps.** The fixed slots come before the grants, and the grants
@@ -1171,7 +1197,9 @@ components; the address space, its ASID and its lower tables of the
 component; the saved context of the
 [context](../../boot-platform/context/contract.md#state-fields) component;
 and the page pool, the frames and the VM head of the
-[VM](../../memory/vm/contract.md#state-fields) component.
+[VM](../../memory/vm/contract.md#state-fields) component, under whose rules
+a commit reads the chain of the child with `Pool::next` under the token of
+the child.
 
 ## Testing obligations
 
@@ -1268,7 +1296,7 @@ lends, a row of the
 | --- | --- | --- | --- | --- |
 | `kernel/src/creation.rs#create_endpoint` (planned) | `code` | Reads and writes (composes `lifecycle::is_alive` and `ipc::init_endpoint` with the occupation, the charge and the installation of the new endpoint) | The proof of object lifetimes, waits and sequential composition | `0.2` |
 | `kernel/src/creation.rs#spawn_commit` (planned) | `code` | Reads and writes (composes `ledger::admit`, `scheduler::admit` and `scheduler::requeue`, `lifecycle::init`, `Regions::new`, `Pool::free` and `Pool::take`, `Asids::choose` and `Asids::take`, `Space::new`, `Tables::new` and the plans of the mapping of the image, with the occupation, the splits, the charges, the installations and the reservations of the creation) | The proof of object lifetimes, waits and sequential composition | `0.2` |
-| `kernel/src/creation.rs#acknowledge` (planned) | `code` | Reads and writes (gives the next plan of a commit or of the boot of the root, and writes the initial context of `Context::new` as the saved context of the new thread) | The proof of object lifetimes, waits and sequential composition | `0.2` |
+| `kernel/src/creation.rs#acknowledge` (planned) | `code` | Reads and writes (gives the next plan of a commit or of the boot of the root, with `Pool::next` for the frame of each next private page of a commit, and writes the initial context of `Context::new` as the saved context of the new thread) | The proof of object lifetimes, waits and sequential composition | `0.2` |
 | `kernel/src/creation.rs#boot_root` (planned) | `code` | Reads and writes (composes `QuotaRecord::start_root`, `ledger::admit`, `scheduler::admit`, `lifecycle::init`, `Regions::new`, `Asids::take`, `Space::new`, `Tables::new` and the plans of the mapping of the root, with the occupation, the charges and the installations of the root's first capabilities) | The proof of object lifetimes, waits and sequential composition | `0.2` |
 
 ## Legacy test vectors
