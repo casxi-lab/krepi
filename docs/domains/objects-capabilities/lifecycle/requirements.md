@@ -289,7 +289,9 @@ CONTROL alone is refused; and the frozen vectors of queries hold.
 - **Proof path.** None: the component has no proof path.
 - **Evidence.** The frozen vectors `joins-1`, `joins-2` and
   `joins-failures-3` as host tests, with the vectors `abi-lifecycle-1` and
-  `abi-lifecycle-3` of the dispatch component (planned), which the contract
+  `abi-lifecycle-3` of the
+  [dispatch](../../runtime-sdk/dispatch/contract.md#legacy-test-vectors)
+  component, which the contract
   replays, and the tests of faults and exit codes of the
   [contract](contract.md#testing-obligations), which read their results by
   `query` from EL0. They show the query of the CPU time from EL0 that the

@@ -84,9 +84,9 @@ observable behaviour that these rules serve, with its evidence, is in the
 - **Current thread.** The thread that a CPU runs, whose context an entry
   from EL0 on that CPU saves; the record of the CPU names it (planned).
 - **Composer of the return.** The module `dispatch` of the core (planned),
-  which handles the pending interrupts, chooses the thread that is to run,
-  has its saved context validated and gives the return plan; for the first
-  return of the root, the boot wiring.
+  which chooses the thread that is to run, has its saved context validated
+  and gives the return plan; for the first return of the root, the boot
+  wiring.
 - **Return plan.** The address of the saved context of the thread that is
   to run, which has passed `validate`, with the value of `TTBR0_EL1` for its
   address space and the top of the kernel stack of the CPU.
@@ -301,8 +301,10 @@ block here.
 - The first four rows lie in the first 2 MiB block of the EL0 window, the
   root block, and the bundle window starts at the 2 MiB block after it; all
   five lie in the first 1 GiB slot of the window.
-- **Other ranges.** The image windows of the loading component (planned)
-  and the [VM window](../vm/contract.md#vm-window-and-regions) of the VM
+- **Other ranges.** The
+  [image windows](../../runtime-sdk/dispatch/contract.md#the-image-window)
+  of the loading component and the
+  [VM window](../vm/contract.md#vm-window-and-regions) of the VM
   component, in which a process maps its segments, stacks and VM regions,
   lie in the EL0 window outside the boot ranges; their values and their
   checks belong to those components.
@@ -446,9 +448,7 @@ with D, A, I and F set in `PSTATE`, and takes vector 8 or 9 of the
 **The return.** The composer of the return:
 
 1. after the entry has released every lock and every borrowed object,
-   handles every interrupt that is pending, as for the class `Irq`, and
-   then chooses the thread that is to run, by the rules of scheduling
-   (planned);
+   chooses the thread that is to run, by the rules of scheduling (planned);
 2. runs `Context::validate` on the saved context of the thread with the
    bounds of the EL0 window; when it fails, the thread does not return to
    EL0, its process ends by a user fault
@@ -461,19 +461,30 @@ with D, A, I and F set in `PSTATE`, and takes vector 8 or 9 of the
    of the root of the address space, and the top of the kernel stack of the
    CPU.
 
-The composer handles the pending interrupts itself, with every exception
-masked, and does not leave them to be taken at EL0 after the `ERET`: when
-the first instruction there takes a synchronous exception, as an `SVC`
-does, the architecture leaves open whether a pending IRQ is taken first,
-and the [internal choices](../../../security.md#internal-choices) put the
+No thread returns to EL0 while an interrupt is pending, and the composer
+does not handle one itself: the core reads no interrupt controller, and the
+boot wiring composes the first return as the composer does:
+the caller of `__el0_return`, with every exception masked, enters the core
+again with the pending interrupt instead of returning, and the core
+handles it, as for the class `Irq`, in a transition of its own whose
+return chooses again
+([interrupts before the return](../../runtime-sdk/dispatch/contract.md#the-return)
+of the dispatch component). So no interrupt is left to be taken at EL0
+after the `ERET`: when the first instruction there takes a synchronous
+exception, as an `SVC` does, the architecture leaves open whether a
+pending IRQ is taken first, and the
+[internal choices](../../../security.md#internal-choices) put the
 synchronous exception first. A call that stopped at a preemption point is
 executed again only by its thread at EL0
 ([Kernel stacks and blocking](#kernel-stacks-and-blocking)), so its checks
 run with the thread's own address space loaded.
 
 `el0_dispatch`, or the boot wiring for the first return of the root, then
-calls `__el0_return` with the plan, and `__el0_return`, with every
-exception masked:
+calls `__el0_return` with the plan while no interrupt is pending; with one
+pending, it acknowledges it and enters the core with it, for the thread of
+the plan, instead
+([the round trip of plans](../../runtime-sdk/dispatch/contract.md#the-round-trip-of-plans)).
+`__el0_return`, with every exception masked:
 
 1. writes `TTBR0_EL1` with the value of the plan and executes `ISB`;
 2. calls `__fpsimd_restore` with the address of the saved context;
@@ -867,8 +878,8 @@ this section states how this component represents them.
   back by 4, from the address after the `SVC` to the `SVC` itself, while
   the executing CPU owns the saved context
   ([state fields](../../boot-platform/context/contract.md#state-fields));
-  every other field stays as the entry saved it. The composer of the return
-  handles the pending interrupt before it chooses a thread
+  every other field stays as the entry saved it. The pending interrupt is
+  handled in a transition of its own before any thread returns to EL0
   ([Entry and return](#entry-and-return)). When the thread next runs, it
   executes the `SVC` again at EL0, and the call repeats its checks and
   continues from the stored progress. The moved `elr` passes `validate`:
