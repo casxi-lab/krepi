@@ -89,8 +89,8 @@ them.
 | `Tables::close` (planned) | Write entry on the copies of a write set, host-testable | `dispatch`, for the operation `close` (planned); `ipc`, for a reply capability once its reply is sent | `close` | [Close](#close), [Capability counts](#capability-counts) |
 | `Tables::revoke` (planned) | Long write entry, one step for each write set, host-testable | `dispatch`, for the operation `revoke` (planned), which composes with each step the drains of [Revocation](#revocation) | `revoke` | [Revocation](#revocation) |
 | `Tables::install` (planned) | Write entry on the copies of a write set, host-testable | `creation`, for the first capability of a new object; the boot of the root by the kernel root, for the root's first capabilities; `ipc`, for the reply capability of a received call; and the creation of a device grant through the device directory, which the device-authority rules define (planned) | None | [Derivation and badges](#derivation-and-badges), [Capability counts](#capability-counts) |
-| `Tables::reserve` (planned) | Write entry on the copies of a write set, host-testable | `ipc`, for a capability that a message carries, before the message is sent (planned) | None | [Transfer](#transfer) |
-| `Tables::commit` and `Tables::abort` (planned) | Write entries on the copies of a write set, host-testable | `ipc`: `commit` at the commit point of the message, `abort` when the transfer ends without it (planned) | None | [Transfer](#transfer) |
+| `Tables::reserve` (planned) | Write entry on the copies of a write set, host-testable | `ipc`, for a capability that a message carries, before the message is sent; `creation`, for the initial capabilities of a child, in the write set of its commit (planned) | None | [Transfer](#transfer) |
+| `Tables::commit` and `Tables::abort` (planned) | Write entries on the copies of a write set, host-testable | `ipc`: `commit` at the commit point of the message, `abort` when the transfer ends without it; `creation`: `commit` of each initial capability of a child, in the write set of its `reserve`, which needs no `abort` (planned) | None | [Transfer](#transfer) |
 | `Tables::teardown_step` (planned) | Write entry, one step of a long operation, host-testable | `lifecycle`, in the steps of the destruction of a process (planned) | None | [Teardown of a table](#teardown-of-a-table) |
 | `Tables::count` (planned) | Read entry, host-testable | The write entries of this page, and the tests | None | [Capability counts](#capability-counts) |
 
@@ -115,10 +115,11 @@ and the write-set buffer of the executing CPU by an explicit `&mut`
 argument
 ([rule 8](../../../conventions/provable-subset.md#8-no-interior-mutability)).
 The module defines no callback: an operation whose effect spans other
-modules, such as the release of an endpoint, the settlement of a wait or
-the drain of a device grant, is composed by `dispatch`, `ipc` or
-`lifecycle`, and each entry of this page gives only the checks and the
-writes of its own part.
+modules, such as the release of an endpoint, the settlement of a wait,
+the drain of a device grant, the first capability of a new object or the
+initial capabilities of a child, is composed by `dispatch`, `ipc`,
+`lifecycle` or `creation`, and each entry of this page gives only the
+checks and the writes of its own part.
 
 The module has no adapter of its own. Its entries use the write-set buffer
 that the adapter of the objects component lends, and the storage of the
@@ -180,8 +181,8 @@ defines:
 
 | Kind | Bit 0, value 1 | Bit 1, value 2 | Bit 2, value 4 | Bit 3, value 8 | Bit 4, value 16 |
 | --- | --- | --- | --- | --- | --- |
-| Process | OBSERVE: query its state, exit reason, exit code and CPU time, and subscribe to its death notification | CONTROL: kill it, and reap it as its owner | GRANT | REVOKE | CREATE: the creation right of the creation component |
-| Thread | OBSERVE: query its state | CONTROL: the operations of the lifecycle and scheduling components that change its execution, such as the interrupt of its wait; and its binding as the receive thread of an endpoint at the creation of the endpoint | GRANT | REVOKE | - |
+| Process | OBSERVE: query its state, exit reason, exit code, CPU time and fault record, and subscribe to its death notification | CONTROL: kill it, and reap it as its owner | GRANT | REVOKE | CREATE: the creation right of the creation component |
+| Thread | OBSERVE: query its state, an operation of the threads, waits, upcalls and user copies of release 0.2 | CONTROL: the operations of the lifecycle and scheduling components that change its execution, such as the interrupt of its wait, which come with the threads, waits, upcalls and user copies of release 0.2; and its binding as the receive thread of an endpoint at the creation of the endpoint | GRANT | REVOKE | - |
 | Endpoint | SEND: `call` | RECEIVE: `receive` | GRANT | REVOKE | - |
 | Reply | REPLY: the one reply | - | - | - | - |
 | Notification | SIGNAL: signal it | WAIT: wait on it | GRANT | REVOKE | - |
@@ -216,12 +217,13 @@ defines:
 process authorizes the forced kill of the process, and its reaping by a
 caller whose process is the owner of the process; no other right
 authorizes either, and no right authorizes the reaping by another process.
-OBSERVE authorizes the queries of the state, the exit reason, the exit code
-and the CPU time of the process and the subscription to its death
-notification; it authorizes no change of the process. CREATE is the right
-that the creation component requires for the creation of processes,
-endpoints and notifications. The lifecycle and creation components define
-these operations and their states; this page fixes which right each needs.
+OBSERVE authorizes the queries of the state, the exit reason, the exit
+code, the CPU time and the fault record of the process and the
+subscription to its death notification; it authorizes no change of the
+process. CREATE is the right that the creation component requires for the
+creation of processes, endpoints and notifications. The lifecycle and
+creation components define these operations and their states; this page
+fixes which right each needs.
 
 ## Lookup
 
@@ -497,18 +499,23 @@ is one rule of it.
 The capability that a message carries moves through three entries, which
 the IPC component composes with its message: the data and the capability
 become visible together at its commit point, and a failure before it
-restores a moved source.
+restores a moved source. The creation component composes `reserve` and
+`commit` for the
+[initial capabilities](../creation/contract.md#initial-capabilities) of a
+child: it reserves and commits each, as a copy, in the write set of the
+commit that creates the child, before the child first runs.
 
 - **Reservation.** `reserve(root, buffer, sender, source, rights, mode,
   receiver, slot)` checks the source of the sender's table as a derivation
   does, with GRANT and the requested rights, and puts into the receive slot
   of the receiver's table, which the receiver named when it waited to
-  receive, a reserved entry: a child of the source with the requested
-  rights and the badge of the source, charged to the receiver and counted
-  for its object. The mode is copy or move, and the `state` of the reserved
-  entry records it; a move also records the reservation in the `moving`
-  field of the source, which hides the source from every lookup
-  (`TransferPending`). No lookup reaches a reserved entry
+  receive, or, for an initial capability of a child, which the rules of
+  creation fix or the creator names, a reserved entry: a child of the
+  source with the requested rights and the badge of the source, charged to
+  the receiver and counted for its object. The mode is copy or move, and
+  the `state` of the reserved entry records it; a move also records the
+  reservation in the `moving` field of the source, which hides the source
+  from every lookup (`TransferPending`). No lookup reaches a reserved entry
   (`NoCapability`), so the receiver does not see the capability before the
   commit, and the slot is not free for another capability
   (`SlotOccupied`).
@@ -548,7 +555,8 @@ restores a moved source.
   live.
 
 The reservation is named by its entry reference, which the IPC component
-keeps with its message; it is never a handle of EL0.
+keeps with its message, or which the creation component commits in the
+write set of its reservation; it is never a handle of EL0.
 
 ## Teardown of a table
 
