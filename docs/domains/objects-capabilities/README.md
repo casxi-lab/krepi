@@ -40,9 +40,10 @@ the root's grants and process creation on these objects. The
 identities and generations, the capacity record, the metadata quotas and
 the write-set transactions. The [capabilities](capabilities/requirements.md)
 component holds the capability tables with their handles and rights, and
-delegation and revocation. The creation and the lifecycle state machine of
-the core hold the creation of objects and the lifetimes of processes and
-threads.
+delegation and revocation. The [creation](creation/requirements.md)
+component holds the creation of objects, and the
+[lifecycle](lifecycle/requirements.md) component the lifetimes of
+processes and threads.
 
 ## Conventions
 
@@ -76,7 +77,7 @@ threads.
 | [Generations](#generations) | The generations of slots, their retirement, the references inside the kernel and the generations in handles | - | [objects](objects/requirements.md); [capabilities](capabilities/requirements.md), for handles |
 | [Metadata quotas](#metadata-quotas) | Calling domains and owners, the seven quota items, split and returned limits, and the conservation of usages | - | [objects](objects/requirements.md) |
 | [Write-set transactions](#write-set-transactions) | Check, then execute; the write set of an entry, its buffer, its write-back and its failure | - | [objects](objects/requirements.md) |
-| [Process and thread lifetimes](#process-and-thread-lifetimes) | Creation, the states alive, dying, dead and reaped, exit reasons, destruction in bounded steps and reaping | - | The creation and the lifecycle state machine of the core |
+| [Process and thread lifetimes](#process-and-thread-lifetimes) | Creation, the states alive, dying, dead and reaped, exit reasons, destruction in bounded steps and reaping | - | [creation](creation/requirements.md), for creation; [lifecycle](lifecycle/requirements.md), for the states, exit reasons, destruction and reaping |
 | [Capability tables](#capability-tables) | The capability table of each process, handles, rights and lookup | - | [capabilities](capabilities/requirements.md) |
 | [Delegation and revocation](#delegation-and-revocation) | Copy, derivation and transfer of capabilities, badges, close, and revocation in two phases | - | [capabilities](capabilities/requirements.md) |
 
@@ -359,9 +360,9 @@ every holder of a process capability that observes it.
 **Interface.** The operations that create processes, endpoints and
 notifications with the creation right; the exit of a process by its own
 thread; the forced kill and reaping with the control right; the queries of
-state, exit reason, exit code and CPU time with the observation right. The
-state of a process is a result, not an error; acting on a process in the
-wrong state is an error.
+state, exit reason, exit code, CPU time and fault record with the
+observation right. The state of a process is a result, not an error;
+acting on a process in the wrong state is an error.
 
 **Prerequisites.** [Object table](#object-table),
 [Metadata quotas](#metadata-quotas),
@@ -436,16 +437,18 @@ the grant right and put the new capability into a free slot that the
 caller names, as a child of its source in the derivation tree. The party
 that mints an endpoint send capability chooses its badge once, which the
 kernel stores and derivation keeps. A capability moves to another process
-through IPC by the same rules. `close` removes one capability of the
-caller and leaves those derived from it in place. `revoke` withdraws, in
-two phases, everything derived from a capability, and the capability
-itself stays usable: once the revocation is pending, every operation that
-resolves to a capability of the revoked subtree fails, the subtree derives
-nothing more, and calls that wait through it settle as revoked; the
-subtree is then removed in post-order in bounded steps, mappings derived
-from it are removed and their TLB invalidation and CPU references drained,
-and only then is the revocation complete. A revocation reports
-completion, not a count.
+through IPC by the same rules, or through the creation of a child, which
+puts initial capabilities into the child's table before the child first
+runs, in slots that the rules of creation fix or that the creator names.
+`close` removes one capability of the caller and leaves those derived from
+it in place. `revoke` withdraws, in two phases, everything derived from a
+capability, and the capability itself stays usable: once the revocation is
+pending, every operation that resolves to a capability of the revoked
+subtree fails, the subtree derives nothing more, and calls that wait through
+it settle as revoked; the subtree is then removed in post-order in bounded
+steps, mappings derived from it are removed and their TLB invalidation and
+CPU references drained, and only then is the revocation complete. A
+revocation reports completion, not a count.
 
 **Design background.** A derivation tree with revocation follows the
 capability derivation of seL4 (Klein et al. 2014); the two phases make the

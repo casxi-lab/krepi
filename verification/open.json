@@ -667,6 +667,94 @@
       "contract": "docs/domains/memory/address-space/contract.md"
     },
     {
+      "item": "kernel/src/creation.rs#acknowledge",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/creation/contract.md"
+    },
+    {
+      "item": "kernel/src/creation.rs#boot_root",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/creation/contract.md"
+    },
+    {
+      "item": "kernel/src/creation.rs#create_endpoint",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/creation/contract.md"
+    },
+    {
+      "item": "kernel/src/creation.rs#spawn_commit",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/creation/contract.md"
+    },
+    {
+      "item": "kernel/src/lifecycle.rs#acknowledge",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/lifecycle/contract.md"
+    },
+    {
+      "item": "kernel/src/lifecycle.rs#destroy_step",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/lifecycle/contract.md"
+    },
+    {
+      "item": "kernel/src/lifecycle.rs#exit",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/lifecycle/contract.md"
+    },
+    {
+      "item": "kernel/src/lifecycle.rs#fault",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/lifecycle/contract.md"
+    },
+    {
+      "item": "kernel/src/lifecycle.rs#kill",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/lifecycle/contract.md"
+    },
+    {
+      "item": "kernel/src/lifecycle.rs#reap",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/lifecycle/contract.md"
+    },
+    {
+      "item": "kernel/src/lifecycle.rs#watch",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/objects-capabilities/lifecycle/contract.md"
+    },
+    {
       "item": "kernel/src/scheduler.rs#RunQueues::new",
       "kind": "code",
       "verified_state": null,

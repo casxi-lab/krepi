@@ -204,7 +204,10 @@ occur in one transition.
   is not exhausted; ASID 0 is the kernel's. A capability that an operation
   creates, copies, derives or receives goes to the slot of the caller's own
   table that the caller names, and the kernel only checks that the slot is
-  free.
+  free; an initial capability of a child, which the creation of the child
+  puts into the child's table before the child first runs, goes to a slot
+  that the rules of creation fix or that its creator names, and the kernel
+  likewise only checks that the slot is free.
 - **Identifiers.** An identifier that the kernel assigns and returns to EL0
   depends only on the caller's own state: a handle, also one that carries a
   reply right, names a slot of the caller's own table
