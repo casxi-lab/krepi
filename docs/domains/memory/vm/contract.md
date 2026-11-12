@@ -16,7 +16,8 @@ each process, with its ASID and its table pool, is the
 records are the
 [objects](../../objects-capabilities/objects/contract.md#metadata-quotas)
 component's. The validation of loading requests, with the loading part of
-the capacity record, belongs to the dispatch component (planned), which
+the capacity record, belongs to the
+[dispatch](../../runtime-sdk/dispatch/contract.md) component, which
 the address-space and objects contracts call the loading component; the
 mapping of loaded images to the
 [creation](../../objects-capabilities/creation/contract.md) component; and
@@ -124,14 +125,14 @@ the page pool and the revocation at the destruction of a process,
 | `Pool::free` and `Pool::take` (planned) | A read entry and a write entry outside write sets, host-testable | `creation::spawn_commit` (planned): `free` in its checks; `take` after its write-back, once for each private page of the image that it loads | None | [Configuration and the page pool](#configuration-and-the-page-pool), [Quotas](#quotas) |
 | `Pool::next` (planned) | Read entry outside write sets, host-testable, that writes nothing | `creation::acknowledge` (planned), in the continuation of a commit of `creation::spawn_commit`, to name the frame of each next private page in turn | None | [Configuration and the page pool](#configuration-and-the-page-pool) |
 | `Regions::new` (planned), with the value type `vm::Regions` | Function that writes nothing, host-testable | `creation::spawn_commit` and `creation::boot_root` (planned), for the write set of the creation of a process and of the boot of the root | None | [VM window and regions](#vm-window-and-regions) |
-| `vm::reserve` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `reserve` | `reserve` | [VM window and regions](#vm-window-and-regions) |
-| `vm::commit` (planned), with the value types `vm::Step` and `vm::FramePlan` | Write entry on the copies of a write set, host-testable; gives write plans | `dispatch` (planned), for the operation `commit` | `commit` | [Commit](#commit), [Quotas](#quotas), [Tables and extents](#tables-and-extents) |
-| `vm::decommit` (planned) | Write entry on the copies of a write set, host-testable; gives write plans and frame plans | `dispatch` (planned), for the operation `decommit` | `decommit` | [Decommit](#decommit), [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
-| `vm::mprotect` (planned) | Write entry on the copies of a write set, host-testable; gives write plans | `dispatch` (planned), for the operation `mprotect` | `mprotect` | [Protection and W^X](#protection-and-wx) |
-| `vm::release` (planned) | Write entry on the copies of a write set, host-testable; one step of a long operation, which gives write plans and frame plans | `dispatch` (planned), for the operation `release`, also when the call is executed again | `release` | [Two-phase release](#two-phase-release) |
-| `vm::acknowledge` (planned) | Write entry on the copies of a write set, host-testable; gives the next step | The dispatch of the core (planned), after the architecture crate has executed a plan that an entry of this page gave, through `lifecycle::acknowledge` (planned) for the plans of `revoke_step` | None | [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
+| `vm::reserve` (planned) | Write entry on the copies of a write set, host-testable | `dispatch::entry` (planned), for the operation `reserve` | `reserve` | [VM window and regions](#vm-window-and-regions) |
+| `vm::commit` (planned), with the value types `vm::Step` and `vm::FramePlan` | Write entry on the copies of a write set, host-testable; gives write plans | `dispatch::entry` (planned), for the operation `commit` | `commit` | [Commit](#commit), [Quotas](#quotas), [Tables and extents](#tables-and-extents) |
+| `vm::decommit` (planned) | Write entry on the copies of a write set, host-testable; gives write plans and frame plans | `dispatch::entry` (planned), for the operation `decommit` | `decommit` | [Decommit](#decommit), [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
+| `vm::mprotect` (planned) | Write entry on the copies of a write set, host-testable; gives write plans | `dispatch::entry` (planned), for the operation `mprotect` | `mprotect` | [Protection and W^X](#protection-and-wx) |
+| `vm::release` (planned) | Write entry on the copies of a write set, host-testable; one step of a long operation, which gives write plans and frame plans | `dispatch::entry` (planned), for the operation `release`, also when the call is executed again | `release` | [Two-phase release](#two-phase-release) |
+| `vm::acknowledge` (planned) | Write entry on the copies of a write set, host-testable; gives the next step | `dispatch::resume` (planned), after the architecture crate has executed a plan that an entry of this page gave, through `lifecycle::acknowledge` (planned) for the plans of `revoke_step` | None | [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
 | `vm::revoke_step` (planned) | Write entry on the copies of a write set, host-testable; one step of a long operation, which gives frame plans | `lifecycle::destroy_step` (planned), in the destruction of a process, after the invalidation of its ASID and the reset of its lower tables | None | [Revocation at process destruction](#revocation-at-process-destruction) |
-| `krepi_arch::frames::apply` (planned) | `unsafe` function | `el0_dispatch` of each kernel image, for a frame plan that the dispatch of the core returns (planned) | None | [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
+| `krepi_arch::frames::apply` (planned) | `unsafe` function | `el0_dispatch` of each kernel image, for a frame plan that `dispatch::entry` or `dispatch::resume` returns (planned) | None | [Acknowledgement and reclamation](#acknowledgement-and-reclamation) |
 
 ## Extractability
 
@@ -191,7 +192,9 @@ the change that adds the module writes its `paths` block here.
   pages under one level 2 table. Every region of every process lies in it,
   and so does every page that an entry of this page maps.
 - **Its neighbours.** The boot ranges of the root, from `0x4000000000` to
-  `0x4020000000`, and the image window of the dispatch component (planned),
+  `0x4020000000`, and the
+  [image window](../../runtime-sdk/dispatch/contract.md#the-image-window)
+  of the dispatch component,
   which ends at or below `VM_START`, lie in the first 1 GiB slot of the EL0
   window; the windows of device grants, which the device-authority rules of
   the devices and DMA domain place, lie above `VM_END`. So the VM window
@@ -255,8 +258,10 @@ The VM part of the capacity record is bytes 48 to 63, after the object part
 of the
 [objects](../../objects-capabilities/objects/contract.md#capacity-record)
 component: four unsigned 32-bit fields, little-endian, without padding, in
-this order. The loading part follows from byte 64 and belongs to the
-dispatch component (planned); its fields are not part of this page.
+this order. The
+[loading part](../../runtime-sdk/dispatch/contract.md#loading-configuration)
+follows from byte 64 and belongs to the dispatch component; its fields are
+not part of this page.
 
 | Offset | Field | Unit | Content |
 | ---: | --- | --- | --- |
@@ -281,8 +286,9 @@ record, as untrusted input, in this order, and returns the first error:
 - The boot wiring runs it once, after the last check of the capacity
   record, the process capacity against the ASIDs of the
   [address-space](../address-space/contract.md#address-spaces-and-asids)
-  component, and before the check of the loading part (planned) and before
-  it carves any storage; it stops the boot at the error, without a
+  component, and before the
+  [check of the loading part](../../runtime-sdk/dispatch/contract.md#loading-configuration)
+  and before it carves any storage; it stops the boot at the error, without a
   fallback to the defaults. The three checks share one error, so their
   order is not observable.
 - The fields count pages, and no loop of the core is bounded by them at
@@ -527,8 +533,9 @@ committed page of it, in two phases, and gives no result value.
     end or its count is 0: the row leaves the region table and the result
     of the call is `ok`;
   - otherwise with `Again`, at a preemption point: the progress stays in
-    the row, the call writes no result, and the dispatch of the core
-    (planned) executes the call again from the saved user registers, at
+    the row, the call writes no result, and the
+    [dispatch of the core](../../runtime-sdk/dispatch/contract.md#execution-again)
+    executes the call again from the saved user registers, at
     once or, when an interrupt is pending, once the thread runs again
     ([execution again](../address-space/contract.md#kernel-stacks-and-blocking)),
     and the call continues from the progress.
@@ -611,12 +618,14 @@ for all its regions and its loaded frames at once.
   plan fails ([write plans](../page-tables/contract.md#write-plans-and-publication)),
   so an operation has no error after its first plan.
 - The core sets no callback and never writes a frame. An entry gives a
-  step; the dispatch of the core (planned) hands a plan to `el0_dispatch`
+  step; the
+  [dispatch of the core](../../runtime-sdk/dispatch/contract.md#the-round-trip-of-plans)
+  hands a plan to `el0_dispatch`
   as one of the results of a transition: the return to EL0, a write plan,
   the release plan of an ASID, a frame plan or the halt of the system.
   `el0_dispatch` executes a write plan with `krepi_arch::mmu::apply` and a
   frame plan with `krepi_arch::frames::apply`, and then enters the dispatch
-  of the core again (planned), which calls `acknowledge` of the process
+  of the core again, which calls `acknowledge` of the process
   whose VM head holds the cursor.
 - One plan is executed before the next is given, and no other entry runs
   on the lower tables or the VM head of the process in between
@@ -699,7 +708,8 @@ of its holder.
 - **The bound.** With $t$ tables of its segment free before its first
   commit, a process commits pages in at most $t - 1$ slots of 2 MiB of its
   VM window, $2\,(t - 1)$ MiB, and no entry of this page uses a block. The
-  check of the loading part at boot (planned) leaves a child at least the
+  [check of the loading part](../../runtime-sdk/dispatch/contract.md#loading-configuration)
+  at boot leaves a child at least the
   level 2 table and one level 3 table of the VM window. The root takes the
   tables of its boot ranges first, and with the largest boot bundle that
   the address-space component admits none is left for its VM window, so
@@ -896,7 +906,9 @@ follow plans that have been executed: the plans of an operation, and for
 - `check_config`, `Pool::free`, `Pool::next` and `Regions::new` write
   nothing; the other entries cannot fail after their checks.
 - The composed write sets stay within $W$ = 64 items: an operation of this
-  page is composed by the dispatch of the core with the settlements of its
+  page is composed by the
+  [dispatch of the core](../../runtime-sdk/dispatch/contract.md#operations)
+  with the settlements of its
   transition, which are transactions of their own, and a revocation step by
   the lifecycle component, whose
   [contract](../../objects-capabilities/lifecycle/contract.md#destruction)
@@ -1093,8 +1105,8 @@ entries are to be covered by its targets. The composition of its entries
 into a transition by the dispatch of the core, with the round trip of
 plans, into the creation of a process by the creation component, and into
 the destruction of a process by the lifecycle component are effects across
-components, open obligations of the contract of the dispatch component
-(planned) and of the
+components, open obligations of the
+[dispatch](../../runtime-sdk/dispatch/contract.md#open-obligations),
 [creation](../../objects-capabilities/creation/contract.md#open-obligations)
 and [lifecycle](../../objects-capabilities/lifecycle/contract.md#open-obligations)
 contracts, carried by the proof of object lifetimes, waits and sequential

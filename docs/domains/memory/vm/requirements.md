@@ -337,7 +337,8 @@ gets the error of the earlier; and the frozen vectors of refusals hold.
 - The user copies of the kernel and Privileged Access Never are not
   covered; they belong to a later release.
 - The validation of loading requests and the loading part of the capacity
-  record belong to the dispatch component (planned); the mapping of loaded
+  record belong to the [dispatch](../../runtime-sdk/dispatch/requirements.md)
+  component; the mapping of loaded
   images, the copy of their file bytes and the charge of their private
   pages to the creation component (planned); the order of the steps of a
   destruction and the gates of reaping to the lifecycle component
