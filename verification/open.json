@@ -699,6 +699,30 @@
       "contract": "docs/domains/objects-capabilities/creation/contract.md"
     },
     {
+      "item": "kernel/src/dispatch.rs#compose_return",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/runtime-sdk/dispatch/contract.md"
+    },
+    {
+      "item": "kernel/src/dispatch.rs#entry",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/runtime-sdk/dispatch/contract.md"
+    },
+    {
+      "item": "kernel/src/dispatch.rs#resume",
+      "kind": "code",
+      "verified_state": "reads and writes",
+      "carrier": "The proof of object lifetimes, waits and sequential composition",
+      "stage": "0.2",
+      "contract": "docs/domains/runtime-sdk/dispatch/contract.md"
+    },
+    {
       "item": "kernel/src/lifecycle.rs#acknowledge",
       "kind": "code",
       "verified_state": "reads and writes",
