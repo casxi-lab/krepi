@@ -398,8 +398,9 @@ virt and on the 8 GB Pi 5.
   other ways of putting a capability into another process belong to later
   releases; a process has one thread.
 - The validation of the segments of an image, the loading part of the
-  capacity record and the image window belong to the dispatch component
-  (planned); the parsing of ELF files and the start of a program at EL0 to
+  capacity record and the image window belong to the
+  [dispatch](../../runtime-sdk/dispatch/requirements.md) component; the
+  parsing of ELF files and the start of a program at EL0 to
   the runtime of EL0.
 - The destruction of a child, its reaping with the return of its limits,
   its exit, its kill and the notifications of its death belong to the

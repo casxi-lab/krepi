@@ -16,7 +16,8 @@ reservation and commit through which a capability enters a table, to the
 processes, their destruction and their reaping to the
 [lifecycle](../lifecycle/contract.md) component; the validation of loading
 requests, with the loading part of the capacity record and the image
-window, to the dispatch component (planned), which the address-space and
+window, to the [dispatch](../../runtime-sdk/dispatch/contract.md)
+component, which the address-space and
 objects contracts call the loading component; and the page pool and the VM
 head of each process to the [VM](../../memory/vm/contract.md) component.
 The observable behaviour that these rules serve, with its evidence, is in
@@ -38,7 +39,8 @@ the [requirements](requirements.md), the other document of the component.
   named by its index in the directory.
 - **Segment.** A range of bytes of an image, with the virtual address, the
   size in memory and the access, R, RX or RW, at which a child maps it, as
-  the loading component accepts it (planned).
+  the [loading component](../../runtime-sdk/dispatch/contract.md#segments)
+  accepts it.
 - **Plan of an image.** `loader::Plan` (planned), the value of the loading
   component that names an image and holds the segments that
   `loader::validate` (planned) has accepted for it.
@@ -83,7 +85,9 @@ the [requirements](requirements.md), the other document of the component.
   and `acknowledge` give: a plan, or the result of the creation.
 - **Composer.** `dispatch` (planned), the module of the core above this one
   that composes the operations of this page into transitions and
-  acknowledges their plans; and the boot wiring, for the boot of the root.
+  acknowledges their plans
+  ([dispatch](../../runtime-sdk/dispatch/contract.md#composition-of-a-transition));
+  and the boot wiring, for the boot of the root.
 - **Boot wiring.** The code of a board crate that runs on the boot CPU
   before the first entry from EL0, as in the
   [objects](../objects/contract.md#terms) and
@@ -109,14 +113,14 @@ The first row holds constants.
 | Entry point | Kind | Called by | ABI operation | Rules |
 | --- | --- | --- | --- | --- |
 | `creation::SPAWN_GRANTS`, `PROCESS_SLOT` and `THREAD_SLOT` (planned) | Constants, host-testable | The entries of this page; the boot wiring, for the handles of the root's first capabilities in the boot information; the ABI inventory, which gives the fixed slots to EL0 (planned) | None | [Initial capabilities](#initial-capabilities), [The boot of the root](#the-boot-of-the-root) |
-| `creation::create_endpoint` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `create_endpoint` | `create_endpoint` | [Rights](#rights), [Endpoints](#endpoints), [Quotas and admission](#quotas-and-admission), [Capabilities of new objects](#capabilities-of-new-objects) |
-| `creation::create_notification` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `create_notification` | `create_notification` | [Rights](#rights), [Notifications](#notifications), [Quotas and admission](#quotas-and-admission), [Capabilities of new objects](#capabilities-of-new-objects) |
-| `creation::spawn_begin` (planned), with the value type `creation::Staging` | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `spawn_begin` | `spawn_begin` | [Rights](#rights), [Child processes](#child-processes), [Quotas and admission](#quotas-and-admission) |
-| `creation::spawn_segment` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `spawn_segment` | `spawn_segment` | [Child processes](#child-processes) |
-| `creation::spawn_grant` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `spawn_grant` | `spawn_grant` | [Initial capabilities](#initial-capabilities) |
-| `creation::spawn_commit` (planned), with the value type `creation::Step` | Write entry on the copies of a write set, host-testable; gives plans | `dispatch` (planned), for the operation `spawn_commit` | `spawn_commit` | [Rights](#rights), [Child processes](#child-processes), [Initial capabilities](#initial-capabilities), [Quotas and admission](#quotas-and-admission), [Capabilities of new objects](#capabilities-of-new-objects) |
-| `creation::spawn_abort` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `spawn_abort` | `spawn_abort` | [Child processes](#child-processes) |
-| `creation::acknowledge` (planned) | Write entry on the copies of a write set, host-testable; gives the next step | The dispatch of the core (planned), after the architecture crate has executed a plan that a commit gave, for the caller whose staging record holds the cursor; the boot wiring, after it has executed a plan of the boot of the root | None | [Child processes](#child-processes), [The boot of the root](#the-boot-of-the-root) |
+| `creation::create_endpoint` (planned) | Write entry on the copies of a write set, host-testable | `dispatch::entry` (planned), for the operation `create_endpoint` | `create_endpoint` | [Rights](#rights), [Endpoints](#endpoints), [Quotas and admission](#quotas-and-admission), [Capabilities of new objects](#capabilities-of-new-objects) |
+| `creation::create_notification` (planned) | Write entry on the copies of a write set, host-testable | `dispatch::entry` (planned), for the operation `create_notification` | `create_notification` | [Rights](#rights), [Notifications](#notifications), [Quotas and admission](#quotas-and-admission), [Capabilities of new objects](#capabilities-of-new-objects) |
+| `creation::spawn_begin` (planned), with the value type `creation::Staging` | Write entry on the copies of a write set, host-testable | `dispatch::entry` (planned), for the operation `spawn_begin` | `spawn_begin` | [Rights](#rights), [Child processes](#child-processes), [Quotas and admission](#quotas-and-admission) |
+| `creation::spawn_segment` (planned) | Write entry on the copies of a write set, host-testable | `dispatch::entry` (planned), for the operation `spawn_segment` | `spawn_segment` | [Child processes](#child-processes) |
+| `creation::spawn_grant` (planned) | Write entry on the copies of a write set, host-testable | `dispatch::entry` (planned), for the operation `spawn_grant` | `spawn_grant` | [Initial capabilities](#initial-capabilities) |
+| `creation::spawn_commit` (planned), with the value type `creation::Step` | Write entry on the copies of a write set, host-testable; gives plans | `dispatch::entry` (planned), for the operation `spawn_commit` | `spawn_commit` | [Rights](#rights), [Child processes](#child-processes), [Initial capabilities](#initial-capabilities), [Quotas and admission](#quotas-and-admission), [Capabilities of new objects](#capabilities-of-new-objects) |
+| `creation::spawn_abort` (planned) | Write entry on the copies of a write set, host-testable | `dispatch::entry` (planned), for the operation `spawn_abort` | `spawn_abort` | [Child processes](#child-processes) |
+| `creation::acknowledge` (planned) | Write entry on the copies of a write set, host-testable; gives the next step | `dispatch::resume` (planned), after the architecture crate has executed a plan that a commit gave, for the caller whose staging record holds the cursor; the boot wiring, after it has executed a plan of the boot of the root | None | [Child processes](#child-processes), [The boot of the root](#the-boot-of-the-root) |
 | `creation::boot_root` (planned) | Write entry on the copies of a write set, host-testable; gives plans | The boot wiring, once, after it has built the kernel root with the page pool and before the first return of the root | None | [The boot of the root](#the-boot-of-the-root) |
 
 ## Extractability
@@ -342,8 +346,9 @@ registers.
   other fields of the process, so a new process finds it empty.
 - It holds values only: the two slots of the creator's table, the two
   masks, the five shares, the image, the plan of the image with at most as
-  many segments as the hard limit of the loading component allows, 8
-  (planned), and at most `SPAWN_GRANTS` grants, each the handle of its
+  many segments as the hard limit of the
+  [loading component](../../runtime-sdk/dispatch/contract.md#load-validation)
+  allows, 8, and at most `SPAWN_GRANTS` grants, each the handle of its
   source in the creator's table, its rights and its slot in the child's
   table. A handle names an entry of the caller's own table with the
   generation of its slot, so a grant whose source has been deleted goes
@@ -412,8 +417,9 @@ access `flags`.
   the first place of object state; its other checks of object state, the
   range within the image and no page shared with a staged segment, and of
   the caller's quota, the number of segments and the private pages of the
-  image within their limits, follow, as the loading component fixes them
-  (planned). The errors of `spawn_segment` are those of `validate` in its
+  image within their limits, follow, as the
+  [loading component](../../runtime-sdk/dispatch/contract.md#segments)
+  fixes them. The errors of `spawn_segment` are those of `validate` in its
   order, and `NotStaged`.
 - **Write.** 1 item: the caller's process slot, whose plan gains the
   segment. The result is `ok`.
@@ -479,9 +485,11 @@ the child's first.
   the steps that follow the write-back. The initial context of the thread
   passes `Context::validate` with the bounds of the EL0 window, since
   `entry` lies in an RX segment and the top of the image window is a
-  multiple of 4096. The check of the loading part at boot leaves every child
+  multiple of 4096. The
+  [check of the loading part](../../runtime-sdk/dispatch/contract.md#loading-configuration)
+  at boot leaves every child
   the tables of its image window and at least the level 2 table and one
-  level 3 table of its VM window (planned), so no `map_page` of a commit
+  level 3 table of its VM window, so no `map_page` of a commit
   meets `OutOfTables`
   ([tables](../../memory/vm/contract.md#tables-and-extents)); the segments
   share no page and lie below the guard of the stack, so none meets
@@ -568,8 +576,9 @@ the child's first.
   whose plans are in flight or come next. No other entry changes the chain
   of the child before the result, since the commit holds its token.
 - **The round trip of plans.** `spawn_commit` gives its first plan as its
-  step; the architecture crate executes it, and the dispatch of the core
-  (planned) calls `acknowledge` of the caller, whose staging record holds
+  step; the architecture crate executes it, and the
+  [dispatch of the core](../../runtime-sdk/dispatch/contract.md#the-round-trip-of-plans)
+  calls `acknowledge` of the caller, whose staging record holds
   the cursor, for the next step. One plan is executed before the next is
   given, and no other entry runs on the lower tables of the child in
   between
@@ -605,8 +614,10 @@ the child's first.
   ([integrity policy](../../../security.md#integrity-policy)), so any
   holder of CREATE on its own process may load any entry of the kind Image
   by its index.
-- **W^X.** The loading component accepts only R, RX and RW segments
-  (planned). The pages of RX and R segments are pages of the boot bundle,
+- **W^X.** The
+  [loading component](../../runtime-sdk/dispatch/contract.md#commit)
+  accepts only R, RX and RW segments. The pages of RX and R segments are
+  pages of the boot bundle,
   which no mapping makes writable; the pages of RW segments and of the
   stack are frames of the page pool, which no mapping makes executable. So
   no page of a child is writable and executable, by the same argument as
@@ -829,7 +840,9 @@ boot CPU, the page pool and the kernel root.
 - **Arguments.** The capacities of the objects component; the `Config` of
   the VM part, from which it reads `root_vm_pages`
   ([configuration](../../memory/vm/contract.md#configuration-and-the-page-pool));
-  the limits of the loading part (planned), from which it reads the root's
+  the limits of the
+  [loading part](../../runtime-sdk/dispatch/contract.md#loading-configuration),
+  from which it reads the root's
   limit of private pages of loaded images; the root plan of
   `Directory::root_plan`; the base of the root's private allocation; the
   root entry of the header of the directory; and the time `now`.
@@ -891,8 +904,10 @@ boot CPU, the page pool and the kernel root.
   images, as the private pages of a child count in its own; the page of the
   boot information, like the pages of the boot bundle, counts in no item.
   The root's starting limit of the item is the root's limit of the loading
-  part, which the check of the loading part at boot keeps at least these
-  pages (planned), so the charge cannot fail. The pages stay with the
+  part, which the
+  [check of the loading part](../../runtime-sdk/dispatch/contract.md#loading-configuration)
+  at boot keeps at least these
+  pages, so the charge cannot fail. The pages stay with the
   owner identity `OWNER_ROOT_PAGES` for the whole boot, since the root is
   never destroyed ([the root](../lifecycle/contract.md#the-root)).
 - **The root's capabilities.** Their slots are fixed: the root's process at
@@ -938,7 +953,8 @@ boot CPU, the page pool and the kernel root.
 | `InvalidState` | An `acknowledge` whose process has no cursor, a call that no composer makes | `acknowledge` | Object state |
 
 The errors of `loader::validate` for a segment and a commit are those of
-the loading component (planned), at the places that its order gives, and
+the [loading component](../../runtime-sdk/dispatch/contract.md#errors),
+at the places that its order gives, and
 `spawn_segment` and `spawn_commit` return them as they are.
 
 - **Order.** Each entry checks in the order of its rule section and
@@ -981,7 +997,7 @@ its spawn controller refused a request in nine ways. Here:
 
 | Prototype error or refusal | Here |
 | --- | --- |
-| `InvalidLayout` | Moved to the dispatch component: the errors of `loader::validate` for a segment or a commit, and the limits of the loading part (planned) |
+| `InvalidLayout` | Moved to the [dispatch](../../runtime-sdk/dispatch/contract.md#errors) component: the errors of `loader::validate` for a segment or a commit, and the limits of the [loading part](../../runtime-sdk/dispatch/contract.md#loading-configuration) |
 | `Quota` | Rewritten: `QuotaExceeded` of the objects component, for the items of the five shares and of the child; `ImageShare`, for private pages beyond their share |
 | `GenerationExhausted` | Moved to the page-tables component: the generations of the owner identities of page allocations; a creation takes no page of the page ownership table at run time |
 | `Page(_)` | Rewritten: `OutOfPages` of the VM component, a page pool with fewer free frames than the private pages of the image; `OutOfMemory` and `MetadataExhausted` of the page ownership table stop the boot only |
@@ -990,9 +1006,9 @@ its spawn controller refused a request in nine ways. Here:
 | A missing right, `PERMISSION_DENIED` | Moved to the capabilities component: `PermissionDenied` of the lookup; CREATE on another process is `NotOwnProcess` |
 | An invalid handle or transaction, `INVALID_HANDLE` | Moved to the capabilities component: the errors of the lookup; a creation that is not staged is `NotStaged` |
 | An authority that no longer exists, `OBJECT_GONE` | Moved to the objects component: `StaleReference`, a capability whose process has been reaped |
-| A version that differs, `UNSUPPORTED_VERSION` | Moved to the dispatch component: its check of the version |
-| An unused argument register that is not 0, `INVALID_ARGUMENT` | Moved to the dispatch component: its check of the unused registers |
-| An unknown operation of spawning, `UNSUPPORTED_OPERATION` | Moved to the dispatch component: its check of the operation number |
+| A version that differs, `UNSUPPORTED_VERSION` | Moved to the [dispatch](../../runtime-sdk/dispatch/contract.md#rejection) component: its check of the version |
+| An unused argument register that is not 0, `INVALID_ARGUMENT` | Moved to the [dispatch](../../runtime-sdk/dispatch/contract.md#rejection) component: its check of the unused registers |
+| An unknown operation of spawning, `UNSUPPORTED_OPERATION` | Moved to the [dispatch](../../runtime-sdk/dispatch/contract.md#rejection) component: its check of the operation number |
 | A transaction already pending, `INVALID_STATE` | Kept and rewritten: `Staged`, a `spawn_begin` whose caller has a creation staged, and `NotStaged`, the other calls of a child whose caller has none |
 | The exhaustion of transaction identifiers, `OVERFLOW` | Not applicable: no transaction identifier exists, since a staging record is named by its process |
 | A lack of capacity, `NO_CAPACITY` | Rewritten: the shared capacity of a commit, `PoolExhausted` of the process and the thread pool, `Exhausted` and `GenerationExhausted` of the ASIDs and `OutOfPages` of the page pool |
@@ -1095,8 +1111,9 @@ directory.
   child has a private page, the cursor with the frame of the first private
   page, and takes one frame for each private page, in the reverse of the
   order of their plans, each in a fixed number of steps, at most the
-  private pages of an image that the loading part
-  allows (planned), and gives the plan of `clone_kernel_from` over at most
+  private pages of an image that the
+  [loading part](../../runtime-sdk/dispatch/contract.md#loading-configuration)
+  allows, and gives the plan of `clone_kernel_from` over at most
   the 32 tables of a set, one write plan of at most seven steps for each
   page that it maps
   ([work bounds](../../memory/page-tables/contract.md#work-bounds)), at most
@@ -1450,7 +1467,9 @@ controller, execution manager and object pool, which
 - **The image.** The prototype took segments by their offset in the whole
   boot bundle and fixed two profiles of windows; here a segment is a range
   of one image, which the creator names by its index in the directory, in
-  the one image window of the loading component (planned).
+  the one
+  [image window](../../runtime-sdk/dispatch/contract.md#the-image-window)
+  of the loading component.
 - **The first capabilities of a child.** The prototype passed one argument
   register to the child and returned its thread capability; here the
   creator receives the capabilities to the child and to its thread in the
