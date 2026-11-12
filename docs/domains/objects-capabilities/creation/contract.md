@@ -513,8 +513,9 @@ the child's first.
   ([the VM head](../../memory/vm/contract.md#vm-window-and-regions)); and
   the staging record becomes the cursor of the commit.
 - **After the write-back.** These writes and plans follow, in this order.
-  The checks fixed each of them and none fails; only steps 1, 3 and 7
-  write items of a write set, each in a write set of its own:
+  The checks fixed each of them and none fails; steps 1 and 3, the
+  acknowledgement of each plan, which advances the cursor, and step 7 write
+  items of a write set, each in a write set of its own:
   1. `Asids::take` of the choice of the checks, which gives the token of
      the ASID of the choice at its next generation; then `Space::new` of
      that token, written as the record of the address space of the child
@@ -531,9 +532,10 @@ the child's first.
      RW segment of the plan to the first page of the first; all before the
      first plan, so that no plan in flight needs a free frame
      ([the pool](../../memory/vm/contract.md#configuration-and-the-page-pool));
-     then the frame that the last take gives, that of the first private
-     page, written into the cursor, in one write set of 1 item, the
-     creator's process slot, without a fault-injection point;
+     then, when the child has a private page, the frame that the last
+     take gives, that of the first private page, written into the cursor,
+     in one write set of 1 item, the creator's process slot, without a
+     fault-injection point;
   4. the write plan of `Tables::clone_kernel_from` from the lower kernel
      set
      ([copying](../../memory/page-tables/contract.md#copying-the-kernel-tables));
@@ -594,9 +596,10 @@ the child's first.
   which discard the buffer; then no write outside the write set has been
   made and no plan given, the state is the state from before the commit, and
   the staging record is kept, to be committed again or discarded. The write
-  sets of steps 1, 3 and 7, of 1, 1 and 2 items, follow the take of the
-  ASID, the takes of the frames and plans that have been executed, which a
-  discarded buffer would not undo, so they have no fault-injection point.
+  sets of steps 1 and 3, of 1 item each, those of the acknowledgement of
+  each plan, of 1 item, and that of step 7, of 2 items, follow the take of
+  the ASID, the takes of the frames and plans that have been executed, which
+  a discarded buffer would not undo, so they have no fault-injection point.
 - **Image authority.** The images of release 0.1 come only from the boot
   bundle, which is part of the kernel image and read only
   ([integrity policy](../../../security.md#integrity-policy)), so any
@@ -1087,11 +1090,12 @@ directory.
   most the capacities of the process and the thread pool, and
   `Asids::choose`, at most 255 ASIDs
   ([work bounds](../../memory/address-space/contract.md#work-bounds)); it
-  writes at most 31 items. After the write-back it writes 2 items, each in a
-  write set of 1, the record of the address space and the cursor with the
-  frame of the first private page, and takes one frame for each private
-  page, in the reverse of the order of their plans, each in a fixed number
-  of steps, at most the private pages of an image that the loading part
+  writes at most 31 items. After the write-back it writes at most 2 items,
+  each in a write set of 1, the record of the address space and, when the
+  child has a private page, the cursor with the frame of the first private
+  page, and takes one frame for each private page, in the reverse of the
+  order of their plans, each in a fixed number of steps, at most the
+  private pages of an image that the loading part
   allows (planned), and gives the plan of `clone_kernel_from` over at most
   the 32 tables of a set, one write plan of at most seven steps for each
   page that it maps

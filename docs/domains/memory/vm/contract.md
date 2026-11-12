@@ -122,7 +122,7 @@ the page pool and the revocation at the destruction of a process,
 | `vm::check_config` (planned), with the value type `vm::Config` | Function that writes nothing, host-testable | The boot wiring, once, after the last check of the capacity record of the objects and address-space components and before it carves any storage; the boot of the root, `creation::boot_root` (planned), reads the root's limit of committed VM pages from the `Config` that it gives | None | [Configuration and the page pool](#configuration-and-the-page-pool) |
 | `Pool::new` (planned), with the value type `vm::Pool` | Write entry, host-testable | The boot wiring, once, after it has carved the page pool and its metadata | None | [Configuration and the page pool](#configuration-and-the-page-pool) |
 | `Pool::free` and `Pool::take` (planned) | A read entry and a write entry outside write sets, host-testable | `creation::spawn_commit` (planned): `free` in its checks; `take` after its write-back, once for each private page of the image that it loads | None | [Configuration and the page pool](#configuration-and-the-page-pool), [Quotas](#quotas) |
-| `Pool::next` (planned) | Read entry outside write sets, host-testable, that writes nothing | `creation::spawn_commit` and its continuation by `creation::acknowledge` (planned), to name the frame of each private page in turn | None | [Configuration and the page pool](#configuration-and-the-page-pool) |
+| `Pool::next` (planned) | Read entry outside write sets, host-testable, that writes nothing | `creation::acknowledge` (planned), in the continuation of a commit of `creation::spawn_commit`, to name the frame of each next private page in turn | None | [Configuration and the page pool](#configuration-and-the-page-pool) |
 | `Regions::new` (planned), with the value type `vm::Regions` | Function that writes nothing, host-testable | `creation::spawn_commit` and `creation::boot_root` (planned), for the write set of the creation of a process and of the boot of the root | None | [VM window and regions](#vm-window-and-regions) |
 | `vm::reserve` (planned) | Write entry on the copies of a write set, host-testable | `dispatch` (planned), for the operation `reserve` | `reserve` | [VM window and regions](#vm-window-and-regions) |
 | `vm::commit` (planned), with the value types `vm::Step` and `vm::FramePlan` | Write entry on the copies of a write set, host-testable; gives write plans | `dispatch` (planned), for the operation `commit` | `commit` | [Commit](#commit), [Quotas](#quotas), [Tables and extents](#tables-and-extents) |
@@ -358,9 +358,10 @@ page ownership table:
 - `Pool::next(frame)` gives the frame linked after `frame`, away from the
   head, on the committed chain of the process that holds it, and none at
   the end of the chain; for a free frame, a call that no composer makes, it
-  gives none as well. It writes nothing. The creation of a process calls it
-  to name the frame of each private page in turn, from the frame of the
-  first, which heads the chain of the child after the last take
+  gives none as well. It writes nothing. The acknowledgement of a commit of
+  the creation of a process calls it to name the frame of each next private
+  page in turn, from the frame of the first, which heads the chain of the
+  child after the last take
   ([private pages](../../objects-capabilities/creation/contract.md#child-processes)).
 - Every frame has exactly one holder at any time: the pool or one process,
   on whose committed chain it is with its kind. The page ownership table
