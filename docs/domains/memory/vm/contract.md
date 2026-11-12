@@ -932,8 +932,9 @@ follow plans that have been executed: the plans of an operation, and for
   destruction of a process are the long operations of this page. A step
   ends at a preemption point; the progress of a release is in its row, and
   that of a revocation is the committed chain of the process, whose
-  destruction stores its own progress in the process slot (planned). The
-  other entries run to their end, and no progress of theirs is stored
+  destruction stores its own progress in the process slot
+  ([destruction](../../objects-capabilities/lifecycle/contract.md#destruction)).
+  The other entries run to their end, and no progress of theirs is stored
   between two transitions.
 - **Without a preemption point.** A commit, a decommit and an `mprotect`
   run in one transition, with at most `MAX_CALL_PAGES` plans and, for a
@@ -1073,11 +1074,13 @@ of a process, are fields of the
 The module `vm` has no `unsafe` code, no assembly and no MMIO, and its
 entries are to be covered by its targets. The composition of its entries
 into a transition by the dispatch of the core, with the round trip of
-plans, and into the destruction of a process by the lifecycle component
-are effects across components, open obligations of the contract of the
-dispatch component (planned) and of the
-[lifecycle](../../objects-capabilities/lifecycle/contract.md#open-obligations)
-contract, carried by the proof of object lifetimes, waits and sequential
+plans, into the creation of a process by the creation component, and into
+the destruction of a process by the lifecycle component are effects across
+components, open obligations of the contract of the dispatch component
+(planned) and of the
+[creation](../../objects-capabilities/creation/contract.md#open-obligations)
+and [lifecycle](../../objects-capabilities/lifecycle/contract.md#open-obligations)
+contracts, carried by the proof of object lifetimes, waits and sequential
 composition, by release 0.2. The write plans that the entries
 give are executed by `krepi_arch::mmu::apply` and the zeroing of a frame
 by `krepi_arch::mmu::zero_frames`, rows of the
