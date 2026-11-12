@@ -136,7 +136,7 @@ are listed in [Rights](#rights). The first row holds constants.
 | Entry point | Kind | Called by | ABI operation | Rules |
 | --- | --- | --- | --- | --- |
 | `dispatch::VERSION`, `loader::IMAGE_BASE`, `IMAGE_END`, `MAX_WINDOW_PAGES`, `MAX_SEGMENTS` and `MAX_BUNDLE_PAGES` (planned) | Constants, host-testable | The entries of this page; the module `creation` (planned), for the image window and the segments of a plan; the ABI inventory, which gives the version and `IMAGE_BASE` to EL0 (planned) | None | [Operation numbers and versions](#operation-numbers-and-versions), [The image window](#the-image-window), [Loading configuration](#loading-configuration) |
-| `dispatch::entry` (planned), with the value types `dispatch::Event`, `dispatch::Transition` and `dispatch::Pending` | Write entry, host-testable; composes the entries of other components and gives plans | `el0_dispatch` of each kernel image (planned): at each exception taken from EL0, at an interrupt that is pending before a return, and at the wake of an idle CPU | None | [Composition of a transition](#composition-of-a-transition), [Results](#results) |
+| `dispatch::entry` (planned), with the value types `dispatch::Event`, `dispatch::Transition` and `dispatch::Pending` | Write entry, host-testable; composes the entries of other components and gives plans | `el0_dispatch` of each kernel image (planned): at each exception taken from EL0, at an interrupt that is pending before a return, and at the wake of an idle CPU; the boot wiring, at an interrupt that is pending before the first return of the root | None | [Composition of a transition](#composition-of-a-transition), [Results](#results) |
 | `dispatch::syscall` (planned), with the value type `dispatch::Call` | Function that writes nothing, host-testable | `dispatch::entry`, at each system call | None of its own: it decodes every operation of the table | [Operation numbers and versions](#operation-numbers-and-versions), [Rejection](#rejection), [Order of errors](#order-of-errors), [Rights](#rights) |
 | `dispatch::resume` (planned) | Write entry, host-testable; gives the next plan or the end of the transition | `el0_dispatch` (planned), after it has executed a plan that `entry` or `resume` gave, with the pending value of that plan | None | [The round trip of plans](#the-round-trip-of-plans) |
 | `dispatch::compose_return` (planned) | Write entry, host-testable; gives the return plan, the wait or, for a refused context of the root, the halt | `dispatch::entry` and `dispatch::resume`, at the end of every transition whose event or operation has not halted the system | None | [The return](#the-return) |
@@ -707,11 +707,6 @@ the wait of the CPU or, for a refused context of the root, the halt:
   interrupt is handled, as the class `Irq`, in a transition of its own
   before the thread returns, and is never left to be taken at EL0 after
   the `ERET`, where an `SVC` of the first instruction could come before it.
-  This differs from step 1 of the address-space component, whose composer
-  handles the pending interrupts in the same transition before it chooses:
-  the core cannot learn of them, so it handles them after the choice, in
-  the next transition, with the time of that transition, whose return
-  chooses again.
 - **The timer.** The scheduler record holds the timer deadline that the
   choice gives, and the architecture crate arms the timer for it before it
   returns or waits
