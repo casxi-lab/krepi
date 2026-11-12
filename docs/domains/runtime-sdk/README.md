@@ -58,9 +58,10 @@ decoding of every native system call and its rejection, the checks that come
 before those of an operation, the rule for the rights of an operation, the
 results of a refused call, and the composition of every entry from EL0 into
 one transition with the round trip of its plans through the architecture
-crate; in its module `loader`, which other contracts call the loading
-component, it holds the revalidation of the segments and of the commit of an
-image, the loading part of the capacity record and the image window.
+crate; in its module `loader`, for which other contracts call the component
+the loading component, it holds the revalidation of the segments and of the
+commit of an image, the loading part of the capacity record and the image
+window.
 
 ## Conventions
 
@@ -126,27 +127,27 @@ kernel does not serve returns `UNSUPPORTED_VERSION`; a reserved or unused
 register that is not 0 returns `INVALID_ARGUMENT`. None of these is a fault,
 and no refusal ends the process of the caller. A refused call writes its
 status into `x0` and 0 into `x1` to `x5`, keeps every other register and
-changes no other state. Dispatch reads no right from EL0: the rights that an
-operation needs are constants of its contract, which the lookup of its
-handles checks. Loading fixes for each process an ABI attribute, native or
-Linux; in a Linux process only an `SVC` from the code range of its
-compatibility runtime takes native dispatch, and every other takes the Linux
-path whatever its immediate. Every entry from EL0, a call, a user fault or
-an interrupt, is one transition that dispatch composes: the time is read
-once at the entry, the waits whose deadlines have passed settle, the entry
-is handled by its class, a call by its operation and a user fault by the end
-of its process, and the return handles the pending interrupts, chooses the
-thread that runs next and checks its saved context. With dispatch, the
-loading component checks again every parameter of the calls that load the
-image of a child, the loading request calls: the form of each segment, its
-access, R, RX or RW, its place in the image window below the guard of the
-initial stack, its bytes within the image in the boot-bundle directory, no
-page shared with a segment staged before it, and the number of segments and
-the private pages of the image within the limits of the boot configuration;
-and, at the commit, an entry point aligned to 4 in an RX segment. A refused
-segment or commit changes nothing. Dispatch parses no ELF file, maps and
-copies no page of an image, and keeps no state of its own from one
-transition to the next.
+changes no other state. Dispatch reads no right that authorizes a call from
+EL0: the rights that an operation needs are constants of its contract, which
+the lookup of its handles checks. Loading fixes for each process an ABI
+attribute, native or Linux; in a Linux process only an `SVC` from the code
+range of its compatibility runtime takes native dispatch, and every other
+takes the Linux path whatever its immediate. Every entry from EL0, a call, a
+user fault or an interrupt, is one transition that dispatch composes: the
+time is read once at the entry, the waits whose deadlines have passed
+settle, the entry is handled by its class, a call by its operation and a
+user fault by the end of its process, and the return chooses the thread that
+runs next, checks its saved context and lets no thread return while an
+interrupt is pending. With dispatch, the loading component checks again
+every parameter of the calls that load the image of a child, the loading
+request calls: the form of each segment, its access, R, RX or RW, its place
+in the image window below the guard of the initial stack, its bytes within
+the image in the boot-bundle directory, no page shared with a segment staged
+before it, and the number of segments and the private pages of the image
+within the limits of the boot configuration; and, at the commit, an entry
+point aligned to 4 in an RX segment. A refused segment or commit changes
+nothing. Dispatch parses no ELF file, maps and copies no page of an image,
+and keeps no state of its own from one transition to the next.
 
 **Design background.** One table keyed by the major version and the
 operation number lets the kernel serve two major versions side by side
@@ -180,8 +181,8 @@ of a refused call are fixed ([results](dispatch/contract.md#results)), and
 the outcomes that an accepted call reports, such as a timeout, are states
 that its operation writes. The checks of the loading component are those of
 `loader::validate`, whose errors `spawn_segment` and `spawn_commit` of the
-[creation](../objects-capabilities/creation/contract.md#child-processes) of
-objects return in their order of errors
+[creation](../objects-capabilities/creation/contract.md#child-processes)
+component return in their order of errors
 ([load validation](dispatch/contract.md#load-validation)). The numbers of
 the operations and the numeric values of the statuses belong to the
 [operation inventory](#the-operation-inventory).
@@ -231,9 +232,10 @@ capacity record lies in the bundle: it requires that the tables of a child
 leave room for the tables of its image window and for the first tables of
 its VM window, which bounds the image window of each boot, and it stops on a
 field that it refuses rather than taking a default. A transition ends in a
-return to EL0, in a plan for the architecture crate, or, when the root
-leaves alive, in the halt of the system. Dispatch keeps no state between
-transitions; the state that a transition reaches is classified in the
+return to EL0, in the wait of an idle CPU or, when the root leaves the state
+Alive, in the halt of the system; on the way it hands plans to the
+architecture crate. Dispatch keeps no state between transitions; the state
+that a transition reaches is classified in the
 [State fields](dispatch/contract.md#state-fields) of the dispatch contract
 and of the components that own it.
 
@@ -308,7 +310,7 @@ and the [rights](dispatch/contract.md#rights) of the dispatch contract.
 
 **Engineering notes.** The rights of an operation in the inventory are the
 constants of its contract, and its errors keep the order of that contract.
-The default image of a board serves every product function and holds no
+The default image of a board serves every production operation and holds no
 diagnostic operation, so its dispatch table has no entry in the diagnostic
 range. The check of the repository fails when the dispatch table or the ABI
 crate differs from the inventory, so a drift on either side stops the change
@@ -368,7 +370,8 @@ compatibility runtime that loading places in a Linux process.
 [initial context](../boot-platform/context/contract.md#initial-context) of a
 thread; the
 [initial capabilities](../objects-capabilities/creation/contract.md#initial-capabilities)
-of a child, whose fixed slots it names by the handles `0@1` and `1@1`; the
+of a child, whose fixed slots 0 and 1 it names by their handles of
+generation 1; the
 [boot information](../memory/address-space/contract.md#first-process-and-boot-information)
 of the root; the start message, a protocol of calls between the runtime of
 the child and its creator, whose outcomes are those of

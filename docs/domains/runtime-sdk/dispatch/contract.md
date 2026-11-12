@@ -24,31 +24,31 @@ the boot-bundle directory belong to the
 saved context of a thread and the writing of its results to the
 [context](../../boot-platform/context/contract.md) component; the mapping
 of a loaded image to the creation component; the parsing of ELF files to
-the runtime of EL0 (planned); and the operation numbers, the registers of
-arguments and results and the numeric codes of errors to the ABI inventory
-(planned). The observable behaviour that these rules serve, with its
-evidence, is in the [requirements](requirements.md), the other document of
-the component.
+the loader of the runtime of EL0
+([Application entry and CRT](../README.md#application-entry-and-crt));
+and the operation numbers, the registers of arguments and results and the
+numeric codes of errors to the ABI inventory (planned). The observable
+behaviour that these rules serve, with its evidence, is in the
+[requirements](requirements.md), the other document of the component.
 
 ## Terms
 
 - **The component.** One component with two modules, `dispatch` and
-  `loader`. The [IPC](../../ipc-waits/ipc/contract.md#errors) and
-  [waits](../../ipc-waits/waits/contract.md#errors) contracts call it the
-  dispatch component and the dispatch of the ABI; the creation, lifecycle
-  and VM contracts call its module `dispatch` the dispatch of the core; the
-  address-space contract calls that module the
+  `loader`. Other contracts call it the dispatch component or the dispatch
+  of the ABI, and its module `dispatch` the dispatch of the core, or, in
+  the address-space and scheduler contracts, the
   [composer of the return](../../memory/address-space/contract.md#terms);
-  and the address-space and objects contracts call the component, for the
-  validation of loading requests and the loading part of the capacity
-  record, the loading component.
+  for the validation of loading requests and the loading part of the
+  capacity record, they call the component the loading component.
 - **ABI inventory.** The committed inventory of the native operations
   (planned): for each operation its number, the major version that added
   it, the registers of its arguments and results and the codes of its
   errors and outcomes
   ([system calls](../../../architecture.md#system-calls-and-the-abi)),
   which the dispatch table of the core and the ABI crate `krepi-abi` each
-  hold. This page names the operations and fixes the rules of their
+  hold: the
+  [operation inventory](../README.md#the-operation-inventory) of the
+  domain page. This page names the operations and fixes the rules of their
   dispatch.
 - **System call.** An entry from EL0 of the class `Svc` of the
   [exception classes](../../memory/address-space/contract.md#exception-classes):
@@ -72,10 +72,14 @@ the component.
   CPU names, as the
   [address-space](../../memory/address-space/contract.md#terms) component
   states; an idle CPU has none.
-- **Transition.** What a CPU does from an exception taken from EL0, or
-  from the wake of an idle CPU, to its return to EL0, its wait or the halt
-  of the system, with every exception masked. The architecture crate reads
-  the time `now` once at its start
+- **Scheduler dispatch.** The interval in which a CPU runs one thread, from
+  the `choose` that selects it to its stop, with its start and its
+  deadline: a [dispatch](../../scheduling/scheduler/contract.md#terms) of
+  the scheduler, not this component.
+- **Transition.** What a CPU does from an exception taken from EL0, an
+  interrupt pending at a return or the wake of an idle CPU, to its return
+  to EL0, its wait or the halt of the system, with every exception masked.
+  The architecture crate reads the time `now` once at its start
   ([ND-01](../../../security.md#nd-01)).
 - **Plan.** What an entry of another component gives for the architecture
   crate to execute: a write plan of the
@@ -135,7 +139,7 @@ are listed in [Rights](#rights). The first row holds constants.
 | `dispatch::entry` (planned), with the value types `dispatch::Event`, `dispatch::Transition` and `dispatch::Pending` | Write entry, host-testable; composes the entries of other components and gives plans | `el0_dispatch` of each kernel image (planned): at each exception taken from EL0, at an interrupt that is pending before a return, and at the wake of an idle CPU | None | [Composition of a transition](#composition-of-a-transition), [Results](#results) |
 | `dispatch::syscall` (planned), with the value type `dispatch::Call` | Function that writes nothing, host-testable | `dispatch::entry`, at each system call | None of its own: it decodes every operation of the table | [Operation numbers and versions](#operation-numbers-and-versions), [Rejection](#rejection), [Order of errors](#order-of-errors), [Rights](#rights) |
 | `dispatch::resume` (planned) | Write entry, host-testable; gives the next plan or the end of the transition | `el0_dispatch` (planned), after it has executed a plan that `entry` or `resume` gave, with the pending value of that plan | None | [The round trip of plans](#the-round-trip-of-plans) |
-| `dispatch::compose_return` (planned) | Write entry, host-testable | `dispatch::entry` and `dispatch::resume`, at the end of every transition that does not halt | None | [The return](#the-return) |
+| `dispatch::compose_return` (planned) | Write entry, host-testable; gives the return plan, the wait or, for a refused context of the root, the halt | `dispatch::entry` and `dispatch::resume`, at the end of every transition whose event or operation has not halted the system | None | [The return](#the-return) |
 | `loader::validate` (planned), with `Plan::new` and the value types `loader::Plan`, `Segment`, `Step`, `Boot`, `Limits`, `Accepted` and `loader::Error` | Function that writes nothing, host-testable | `creation::spawn_segment` and `creation::spawn_commit` (planned), for a segment and a commit, and `creation::spawn_begin` (planned), with `Plan::new`, for the plan of an image; the boot wiring, once, for the step `Limits`, after `vm::check_config` and before it carves any storage | None | [Load validation](#load-validation), [Loading configuration](#loading-configuration) |
 
 ## Extractability
@@ -205,13 +209,16 @@ checked by a host test
   `el0_dispatch`, code of the board crate of each image, executes it with
   the adapter that its component names and enters the core again
   ([The round trip of plans](#the-round-trip-of-plans)).
-- **Forms to rewrite.** The prototype's `Segment::validate` and `validate`
-  in `src/loader/segments.rs`, lines 41 to 111, and its `Plan` in
-  `src/loader/plan.rs`, lines 1 to 38, are the sources of the checks of
-  [Load validation](#load-validation); their code is rewritten, not
-  carried. Its forms are written here as follows: the walk with
-  `iter().enumerate()` (segments.rs, line 91) as an index loop, in the
-  loop shapes of the
+- **Forms to rewrite.** In the prototype tree at
+  `prototype@ec8305c618a8f4e84e0707fa56beac5673f4675e`, `Segment::validate`
+  and `validate` in `src/loader/segments.rs`, lines 41 to 111, and `Plan`
+  in `src/loader/plan.rs`, lines 1 to 38, are the sources of the checks of
+  [Load validation](#load-validation), and `image_window` in
+  `src/loader/segments.rs`, lines 23 to 31, that of its two profiles,
+  which [The image window](#the-image-window) replaces; their code is
+  rewritten, not carried. Their forms are written here as follows: the
+  walk with `iter().enumerate()` (segments.rs, line 91) as an index loop,
+  in the loop shapes of the
   [subset](../../../conventions/provable-subset.md#constructs-and-alternatives);
   each `.any` with a closure (segments.rs, lines 104 to 107; plan.rs, lines
   25 to 28) as an index loop in a helper function, the alternatives of
@@ -371,7 +378,7 @@ operation. Its places, in order:
   [scheduler](../../scheduling/scheduler/contract.md#errors) and
   [budget-ledger](../../scheduling/budget-ledger/contract.md#errors)
   contracts already place the form of the arguments of admission by this
-  rule. A contract cites this rule for the place of each argument.
+  rule. The place of each argument of every operation follows this rule.
 - **Composed checks.** An operation that composes the checks of several
   entries, as a commit composes those of `loader::validate`, returns the
   error of the earlier place, and at one place the error that the order of
@@ -402,7 +409,7 @@ operation. Its places, in order:
 | --- | --- | --- |
 | `copy` | [Capabilities](../../objects-capabilities/capabilities/contract.md#derivation-and-badges) | `source`: GRANT |
 | `derive` | [Capabilities](../../objects-capabilities/capabilities/contract.md#derivation-and-badges) | `source`: GRANT and every requested right |
-| `close` | [Capabilities](../../objects-capabilities/capabilities/contract.md#close) | `handle`: none |
+| `close` | [Capabilities](../../objects-capabilities/capabilities/contract.md#close) | `handle`: None |
 | `revoke` | [Capabilities](../../objects-capabilities/capabilities/contract.md#revocation) | `handle`: REVOKE |
 | `call` | [IPC](../../ipc-waits/ipc/contract.md#calls-and-receives) | `endpoint`: SEND; the source of a transfer: GRANT and the requested rights |
 | `receive` | [IPC](../../ipc-waits/ipc/contract.md#calls-and-receives) | `endpoint`: RECEIVE, for its bound thread |
@@ -452,9 +459,10 @@ component and the bounds of the
   in each of `x1` to `x5` that its operation does not use.
 - **Failure.** A call that is refused, by this page or by the entry of its
   operation, gets the status of its error in `x0` and 0 in `x1` to `x5`.
-- **Kept.** Every other field of the saved context keeps its value: `x6`
-  to `x30`, `sp`, `elr`, `spsr`, the TLS registers, the vector registers,
-  FPCR and FPSR.
+- **Kept.** After a success or a failure, every other field of the saved
+  context keeps its value: `x6` to `x30`, `sp`, `elr`, `spsr`, the TLS
+  registers, the vector registers, FPCR and FPSR; only execution again
+  moves `elr`.
 - **A blocked call.** A call that blocks gets no result in its transition;
   the completer of its wait writes it later, in its own transaction, in
   `x0` and `x1` or in `x0` to `x5`, as the contract of the call states
@@ -483,12 +491,16 @@ other components into it; their rules are in their contracts.
 
 ### The entry
 
-`entry(root, cpu, event, now)` starts a transition. `event` is an
-exception taken from EL0, with its vector, `ESR_EL1` and `FAR_EL1`, and,
-for an IRQ, the interrupt that the architecture crate has acknowledged; or
-the wake of an idle CPU, with the interrupt that woke it. `now` is the time
-that the architecture crate read once at the start of the transition, and
-every entry that the transition composes takes it
+`entry(root, cpu, event, now)` starts a transition. `event` is one of
+three: an exception taken from EL0, with its vector, `ESR_EL1` and
+`FAR_EL1`, and, for an IRQ, the interrupt that the architecture crate has
+acknowledged; an interrupt that the architecture crate found pending at a
+return, with the interrupt that it acknowledged, for the thread of the
+return plan, whose saved context is complete
+([The round trip of plans](#the-round-trip-of-plans)); or the wake of an
+idle CPU, with the interrupt that woke it. `now` is the time that the
+architecture crate read once at the start of the transition, and every
+entry that the transition composes takes it
 ([Platform parameters and time](../../scheduling/scheduler/contract.md#platform-parameters-and-time)).
 
 1. **Expiry first.** The dispatch settles every wait whose deadline is not
@@ -505,12 +517,23 @@ every entry that the transition composes takes it
      component gives
      ([faults](../../objects-capabilities/lifecycle/contract.md#faults));
    - `Irq`: the interrupt. The timer interrupt needs no rule of its own:
-     the return compares `now` with the deadline of the dispatch. An
-     interrupt that the device-authority rules of the devices and DMA
-     domain bind to a notification is signalled by their rules (planned).
-   - The wake of an idle CPU is handled as `Irq`, with no current thread.
+     the return compares `now` with the deadline of the scheduler
+     dispatch. An interrupt that the device-authority rules of the devices
+     and DMA domain bind to a notification is signalled by their rules
+     (planned).
+   - An interrupt pending at a return is handled as `Irq`, without
+     `classify`, with the thread of that return as the current thread; the
+     wake of an idle CPU is handled as `Irq`, with no current thread.
 3. **The return.** `compose_return`, unless the event has halted the system
    ([The return](#the-return), [The halt](#the-halt)).
+
+- **The end of an interrupt.** The architecture crate passes no special ID,
+  1020 to 1023, to `entry`, and ends each interrupt that it acknowledged
+  once, after it has armed the timer for the next return or wait and
+  before that return or wait, as `irq::handle` of the
+  [boot](../../boot-platform/boot/contract.md#interrupts) component does;
+  it disables every interrupt that is neither the timer interrupt nor bound
+  to a notification by the device-authority rules (planned).
 
 ### Operations
 
@@ -626,57 +649,64 @@ writes no result and moves the saved `elr` of the thread back by 4, from
 the address after the `SVC` to the `SVC`, as the
 [address-space](../../memory/address-space/contract.md#kernel-stacks-and-blocking)
 component states, and composes the return. The composer continues the
-dispatch of the thread unless its deadline has passed or the reschedule
-flag is set, and the architecture crate returns to EL0 only while no
-interrupt is pending; so the thread executes the call again at once when
-no interrupt is pending, and once it runs again otherwise. The call
-repeats its checks and continues from the stored progress, so every step
-of a long operation runs in a transition of its own, between two
-preemption points, as the
+scheduler dispatch of the thread unless its deadline has passed or the
+reschedule flag is set, and the architecture crate returns to EL0 only
+while no interrupt is pending; so the thread executes the call again at
+once unless one of these holds, and once it runs again otherwise. The call
+repeats its checks and continues from the stored progress.
+
+Every step of a long operation ends the call with `Again`, whether an
+interrupt is pending or not, since the core reads no interrupt controller:
+this is how the dispatch reads the preemption points of the
 [long operations](../../../architecture.md#system-calls-and-the-abi) of
-the execution model state.
+the execution model, as the
+[lifecycle](../../objects-capabilities/lifecycle/contract.md#kill) and
+[VM](../../memory/vm/contract.md#two-phase-release) contracts do. So every
+step runs in a transition of its own, between two preemption points.
 
 ### The return
 
-`compose_return(root, cpu, now)` ends every transition that does not halt,
-with the steps of the
+`compose_return(root, cpu, now)` ends every transition whose event or
+operation has not halted the system. It takes the four steps of the
 [return](../../memory/address-space/contract.md#entry-and-return) of the
-address-space component:
+address-space component with the entries below, and gives the return plan,
+the wait of the CPU or, for a refused context of the root, the halt:
 
-1. **The dispatch of the current thread.** When the current thread has a
-   dispatch whose deadline is not later than `now`, or the reschedule flag
-   of the scheduler record is set, the composer calls `scheduler::preempt`
-   ([preemption](../../scheduling/scheduler/contract.md#preemption)).
-   Otherwise a dispatch that no stop has ended continues, and its thread
-   returns without a `choose`.
-2. **The choice.** With no dispatch, it calls `scheduler::choose` with
-   `now` and the external deadline that `waits::first_deadline` gives
-   ([selection](../../scheduling/scheduler/contract.md#selection-and-time-slices)).
-   When `choose` takes no thread, the result of the transition is the wait
-   of the CPU.
-3. **Validation.** It runs `Context::validate` on the saved context of the
-   thread with the bounds of the EL0 window. When it fails, the thread does
-   not return, its process ends by `lifecycle::fault` with the cause
-   `Other`
-   ([a refused context](../../memory/address-space/contract.md#user-faults)),
-   and the composer starts again at step 1. Each refusal removes one thread
-   for good, so the composer starts again at most the thread capacity
-   times; a refused context of the root halts the system.
-4. **The address space.** It calls `Space::join` with the executing CPU
-   when the CPU record of the address space of the thread's process lacks
-   it, and records the thread as the current thread of the CPU.
-5. **The plan.** It gives the return plan: the address of the saved
-   context, `Space::ttbr0` of the address space, and the top of the kernel
-   stack of the CPU.
-
-- **Interrupts before the return.** The composer handles every interrupt
-  that is pending before it returns, as the address-space component
-  requires, and the architecture crate, which alone reads the interrupt
-  controller, enters the core with an interrupt that is pending at the
-  return instead of returning
-  ([The round trip of plans](#the-round-trip-of-plans)).
-  So a pending interrupt is never left to be taken at EL0 after the `ERET`,
-  where an `SVC` of the first instruction could come before it.
+- **The choice, step 1.** When the current thread has a scheduler dispatch
+  whose deadline is not later than `now`, or the reschedule flag of the
+  scheduler record is set, the composer calls `scheduler::preempt`
+  ([preemption](../../scheduling/scheduler/contract.md#preemption));
+  otherwise a scheduler dispatch that no stop has ended continues, and its
+  thread returns without a `choose`. With no scheduler dispatch, it calls
+  `scheduler::choose` with `now` and the external deadline that
+  `waits::first_deadline` gives
+  ([selection](../../scheduling/scheduler/contract.md#selection-and-time-slices));
+  when `choose` takes no thread, the result of the transition is the wait
+  of the CPU.
+- **Validation, step 2.** `Context::validate` with the bounds of the EL0
+  window, and, for a refused context, `lifecycle::fault` of the process of
+  the thread with the cause `Other`
+  ([a refused context](../../memory/address-space/contract.md#user-faults)),
+  after which the composer starts again at step 1. Each refusal removes one
+  thread for good, so the composer starts again at most the thread capacity
+  times; a refused context of the root gives the halt
+  ([The halt](#the-halt)).
+- **The address space and the plan, steps 3 and 4.** `Space::join` when
+  the CPU record of the address space lacks the executing CPU, the thread
+  as the current thread of the CPU, and the return plan with `Space::ttbr0`
+  of the address space.
+- **Interrupts before the return.** No thread returns to EL0 while an
+  interrupt is pending: the architecture crate, which alone reads the
+  interrupt controller, enters the core with that interrupt instead of
+  returning ([The round trip of plans](#the-round-trip-of-plans)), so the
+  interrupt is handled, as the class `Irq`, in a transition of its own
+  before the thread returns, and is never left to be taken at EL0 after
+  the `ERET`, where an `SVC` of the first instruction could come before it.
+  This differs from step 1 of the address-space component, whose composer
+  handles the pending interrupts in the same transition before it chooses:
+  the core cannot learn of them, so it handles them after the choice, in
+  the next transition, with the time of that transition, whose return
+  chooses again.
 - **The timer.** The scheduler record holds the timer deadline that the
   choice gives, and the architecture crate arms the timer for it before it
   returns or waits
@@ -888,10 +918,11 @@ limits)` once. `limits` holds the seven fields as the boot wiring reads
 them from the record, a field beyond the end of the record being 0;
 `loader::Boot` (planned) holds the length of the record in bytes, the
 tables that the copy of the lower kernel set leaves to EL0, $N - K$
-([table pools](../../memory/address-space/contract.md#table-pools)), the
-root's private pages, and the pages of the boot bundle with the entries of
-its directory, which `Directory::parse` has checked. Its checks, in this
-order, each with its fixed error:
+([table pools](../../memory/address-space/contract.md#table-pools)), and
+the root's private pages, the pages of the boot bundle and the entries of
+its directory, which the boot wiring counts from the directory that
+`Directory::parse` has checked. Its checks, in this order, each with its
+fixed error:
 
 1. the record holds the 92 bytes up to the end of its loading part
    (`InvalidConfiguration`);
@@ -941,10 +972,14 @@ order, each with its fixed error:
   `OutOfTables`.
 - **The root.** The root's private pages are those of
   [the first process](../../memory/address-space/contract.md#first-process-and-boot-information)
-  without the page of the boot information, which the root plan of the
-  directory gives the boot wiring. Check 5 keeps the charge of those pages
-  to the root's item of private pages of loaded images within its starting
-  limit, so the
+  without the page of the boot information: the pages of the memory of
+  each RW root's segment of the directory, rounded up to a page, and
+  `ROOT_STACK_PAGES`. The boot wiring counts them from the entries that
+  `Directory::parse` has checked, so the step needs neither the carving
+  nor `Directory::root_plan`, which runs later and gives the same pages
+  and the page of the boot information. Check 5 keeps the charge of those
+  pages to the root's item of private pages of loaded images within its
+  starting limit, so the
   [boot of the root](../../objects-capabilities/creation/contract.md#the-boot-of-the-root)
   cannot fail at it.
 - **The bundle.** The capacity record is an entry of the boot bundle that
@@ -1059,11 +1094,12 @@ the IPC and waits contracts map, and its loader nine errors. Here:
 
 The [creation](../../objects-capabilities/creation/contract.md#errors)
 contract moves four rows of the prototype's execution manager and spawn
-controller here: `InvalidLayout`, which is the errors of `validate` for a
-segment and a commit and the checks of the step `Limits`; and the refusals
-of a version that differs, of an unused argument register that is not 0
-and of an unknown operation of spawning, which are `UNSUPPORTED_VERSION`,
-`INVALID_ARGUMENT` and `UNSUPPORTED_OPERATION` of `syscall`.
+controller here: `InvalidLayout`, whose counterparts are the errors of
+`validate` for a segment and a commit and the checks of the step `Limits`;
+and the refusals of a version that differs, of an unused argument register
+that is not 0 and of an unknown operation of spawning, which are
+`UNSUPPORTED_VERSION`, `INVALID_ARGUMENT` and `UNSUPPORTED_OPERATION` of
+`syscall`.
 
 ## Check and execute
 
@@ -1077,7 +1113,9 @@ only the failures that its contract lists. The dispatch writes outside
 write sets only fields that the executing CPU owns: the result registers
 and the saved `elr` of the saved context of the current thread, and the
 current thread in the record of the CPU, each after the write-back of the
-transaction that decides it, and none of them fails.
+transaction that decides it, and none of them changes anything else: a
+refused saved context makes `set_return_registers` write nothing, and the
+return then ends the process ([Results](#results)).
 
 | Entry | Checks before the first write | Write set | Writes after the write-back |
 | --- | --- | --- | --- |
@@ -1085,7 +1123,7 @@ transaction that decides it, and none of them fails.
 | `validate` | Those of its step | Nothing: a function | Nothing |
 | `entry` | The class of the event; for a system call, those of `syscall` and then those of the entry of the operation | None of its own: the settlements of expired waits, each a transaction of its own, and then the transactions of the operation, each with the write set of its contract | The result registers, or the `elr` moved back by 4; the first plan of the operation, if there is one; then those of `compose_return` |
 | `resume` | The pending value | None of its own: that of the acknowledgement that it calls | The next plan, if there is one; the result registers or the `elr`; then those of `compose_return` |
-| `compose_return` | The deadline and the reschedule flag of the dispatch; the saved context of the chosen thread | None of its own: those of `scheduler::preempt`, `scheduler::choose`, `lifecycle::fault` of a refused context and `Space::join` | The current thread of the CPU; the return plan or the wait |
+| `compose_return` | The deadline of the scheduler dispatch and the reschedule flag; the saved context of the chosen thread | None of its own: those of `scheduler::preempt`, `scheduler::choose`, `lifecycle::fault` of a refused context and `Space::join` | The current thread of the CPU; the return plan, the wait or the halt |
 
 - **Failures of a composed transaction.** A failure in the write phase of a
   composed entry, `WriteSetFull` or a fault-injection point of a test build
@@ -1105,9 +1143,10 @@ transaction that decides it, and none of them fails.
 - `syscall` takes a fixed number of steps: the immediate, the version, the
   number, the `match` of the table, `x6` and at most six argument
   registers.
-- `validate` compares a segment with at most the `MAX_SEGMENTS` - 1 = 7
-  segments of the plan and sums at most 8 segments; a commit step reads at
-  most 8 segments; the step `Limits` makes a fixed number of checks.
+- `validate` compares a segment with at most the `MAX_SEGMENTS` = 8
+  segments of the plan, since the check of overlap comes before that of
+  their number, and sums at most 8 segments; a commit step reads at most 8
+  segments; the step `Limits` makes a fixed number of checks.
 - `entry` settles at most the thread capacity of expired waits, the loop
   that the [waits](../../ipc-waits/waits/contract.md#work-bounds) contract
   bounds; for a system call it adds `syscall` and the operation, within the
@@ -1115,11 +1154,13 @@ transaction that decides it, and none of them fails.
   calls of `is_alive`.
 - `resume` makes one acknowledgement, within the bounds of its contract,
   and then ends the transition as `entry` does.
-- `compose_return` makes at most one `preempt` and one `choose`, which walk
-  at most the run queues of the CPU
-  ([work bounds](../../scheduling/scheduler/contract.md#work-bounds)), and
-  starts again at most the thread capacity times, each after a refused
-  context that ends a process.
+- `compose_return` makes at most one `preempt`, and for each start one
+  `choose`, which walk at most the run queues of the CPU
+  ([work bounds](../../scheduling/scheduler/contract.md#work-bounds)), and,
+  after a refused context, one `lifecycle::fault`, within the
+  [work bounds](../../objects-capabilities/lifecycle/contract.md#work-bounds)
+  of the lifecycle component; it starts again at most the thread capacity
+  times, each after a refused context that ends a process.
 - **Plans of a transition.** A transition gives at most the plans that the
   operation of its call allows, one round trip each: for a commit and a
   decommit at most `MAX_CALL_PAGES` = 512 pages, with a zero plan for each
@@ -1179,7 +1220,7 @@ The component leaves no other choice open.
 
 | Field | Class | Lock or owner | Linearization point | Publication |
 | --- | --- | --- | --- | --- |
-| The limits of the loading part, `loader::Limits` in the kernel root | Shared | None: read-only after the step `Limits` at boot | The acceptance of the step `Limits` at boot, before the first entry from EL0 | Once, at boot, before the first entry from EL0 and before any other CPU starts; the field does not change afterwards |
+| The limits of the loading part, `loader::Limits` in the kernel root | Shared, read-only after boot | The boot CPU, which checks them with the step `Limits` before the first entry from EL0 | The acceptance of the step `Limits` at boot, before the first entry from EL0 | Once, at boot, before the first entry from EL0 and before any other CPU starts; the field does not change afterwards |
 
 The dispatch keeps no field of its own across a transition: the dispatch
 table is code, and a pending value lives in the frame of `el0_dispatch` on
@@ -1266,13 +1307,16 @@ The modules `dispatch` and `loader` have no `unsafe` code, no assembly and
 no MMIO. Their targets are to be two: the dispatch function `syscall`,
 whose obligations are the six rules of the dispatch function of
 [Rejection](#rejection), over every row of the table, and `validate`,
-with its three steps. The entries that compose the entries of other
-components, `entry`, `resume` and `compose_return`, have effects on the
-state of those components that the specification of this component does
-not describe: the expiry of waits, the operations of the table with their
-compositions, the faults of processes, the round trip of plans with the
-acknowledgements of the VM, creation and lifecycle components, and the
-return with the scheduler, the context and the address space. Each
+with its three steps. The value types of the rows of `syscall` and
+`validate`, `Plan::new`, which forms the input of `validate`, and the
+constants of the first row belong to these two targets. The entries that
+compose the entries of other components, `entry`, `resume` and
+`compose_return`, have effects on the state of those components that the
+specification of this component does not describe: the expiry of waits,
+the operations of the table with their compositions, the faults of
+processes, the round trip of plans with the acknowledgements of the VM,
+creation and lifecycle components, and the return with the scheduler, the
+context and the address space. Each
 composed entry is covered by the targets of its own component, and the
 composition by none; the rows below record it, carried by the proof of
 object lifetimes, waits and sequential composition, by release 0.2. The
@@ -1400,7 +1444,7 @@ of the kernel state is as before, the result registers aside.
 | `loader-4` | 74 | `failed_mapping_does_not_change_plan` | validate of S into `plan(I, 8192), S`: `err=Overlap`; validate of `seg(4096, 4096, B, 4096, 7)` into it: `err=Permissions`; `validate` writes nothing, so the plan of the staging record stays `plan(I, 8192), S` after each; the commit of that plan at B: `ok`, with 4 private pages, those of the stack | `validate` |
 | `loader-5` | 90 | `private_data_may_have_zero_tail_but_immutable_pages_may_not` | validate of `seg(8192, 0, B + 0x1000, 4096, 6)`, an RW segment of no byte of the file, into `plan(I, 8192)`: `ok`; validate of `seg(8192, 0, B, 4096, 5)`, an RX segment with fewer bytes of the file than of memory: `err=Bounds` | `validate` |
 | `loader-6` | 110 | `virtual_and_source_overflow_fail_closed` | validate of `seg(4096, 4096, M, 4096, 5)` into `plan(I, 8192)`: `err=Overflow`, before the check of the window; of `seg(M, 4096, B, 4096, 5)`: `err=Overflow` | `validate` |
-| `loader-7` | 134 | `native_profiles_reject_mixed_code_data_and_reserved_gaps` | With T = `seg(4096, 4096, G - 4096, 4096, 5)`, the last page of the segment range, and W = `seg(8192, 0, B, 65536, 6)`, 16 private pages: validate of T and then of W into `plan(I, 8192)`, `ok`, and the commit of the plan at `G - 4096`, `ok`, with 20 private pages. Into `plan(I, 8192), T`: W at `B - 0x10000`, below the window, and at `G`, on the guard, each `err=Bounds`, while W at `B + 0x100000` is `ok`, since the private data of an image has no fixed base; and W with the flags 7, `err=Permissions`. Into `plan(I, 8192)`: `seg(4096, 8192, G - 4096, 8192, 5)`, into the guard, `err=Bounds`. the commit of T and W at B, an entry in the RW segment, `err=Entry`. The prototype's window of each profile and its plans that mix the two have no case: there is one window | `validate` |
+| `loader-7` | 134 | `native_profiles_reject_mixed_code_data_and_reserved_gaps` | With U = `seg(4096, 4096, G - 4096, 4096, 5)`, the last page of the segment range, and V = `seg(8192, 0, B, 65536, 6)`, 16 private pages: validate of U and then of V into `plan(I, 8192)`, `ok`, and the commit of the plan at `G - 4096`, `ok`, with 20 private pages. Into `plan(I, 8192), U`: V at `B - 0x10000`, below the window, and at `G`, on the guard, each `err=Bounds`, while V at `B + 0x100000` is `ok`, since the private data of an image has no fixed base; and V with the flags 7, `err=Permissions`. Into `plan(I, 8192)`: `seg(4096, 8192, G - 4096, 8192, 5)`, into the guard, `err=Bounds`. The commit of U and V at B, an entry in the RW segment, `err=Entry`. The prototype's window of each profile and its plans that mix the two have no case: there is one window | `validate` |
 | `loader-8` | 219 | `native_elf_entry_and_loaded_extents_must_select_the_same_profile` | No case: there is one image window, and that the entry of an ELF file and its program headers agree is checked by the parser of the runtime of EL0 | None |
 | `loader-9` | 236 | `initial_stack_charge_is_profile_bound` | The initial stack is `image_stack_pages` of the limits for every image: the commit of `plan(I, 8192), S` at B gives 4 private pages, those of the stack, and at `B + 4092`, the last instruction of S, the same. The commit of that plan at `B + 0x200000`, the top of the window, at `G`, at 0 and at $2^{64} - 1$, entries in no RX segment or not a multiple of 4, is each `err=Entry`. The prototype's stack of 4096 bytes and of 16 KiB by profile does not apply | `validate` |
 
@@ -1428,7 +1472,7 @@ of the kernel state is as before, the result registers aside.
 | --- | ---: | --- | --- | --- |
 | `abi-lifecycle-1` | 5 | `query_reports_actual_object_states_and_preserves_a_retained_exit` | C's `query` of `2@1` with the selector 0 reaches `query` of the lifecycle component through the dispatch: `ok state=Alive` while T is ready, blocked or running; after P exits with 31, `ok state=Dying reason=Exited code=31`; after R kills P, `ok state=Dead reason=Exited code=31`; after R reaps P, `err=StaleReference`. The states of a thread and the take of the result of a wait have no counterpart, as the lifecycle contract states for this vector | `syscall`; `query`, `exit`, `kill` and `reap` of the lifecycle component |
 | `abi-lifecycle-2` | 57 | `close_preserves_descendants_and_revoke_counts_closed_ancestry` | C's `derive` from `2@1` with every right into slot 4: `ok 4@1`; from `4@1` with OBSERVE into slot 5: `ok 5@1`. C's `close` of `4@1`: `ok`; C's `query` of `4@1`: `err=NoCapability`; of `5@1`: `ok state=Alive`, since the descendant stays. C's `revoke` of `2@1`: `ok`, once complete; C's `query` of `5@1`: `err=NoCapability`; of `2@1`: `ok state=Alive`. C's `derive` from `2@1` with OBSERVE into slot 4: `ok 4@2`, the next generation of the slot; C's `close` of `5@1`: `err=NoCapability`; C's `query` of `4@2`: `ok state=Alive`. The prototype's count of closed entries and of removed nodes has no counterpart | `syscall`; `derive`, `close` and `revoke` of the capabilities component; `query` of the lifecycle component |
-| `abi-lifecycle-3` | 99 | `control_without_observation_can_stop_but_not_inspect_a_peer` | C's `derive` from `2@1` with CONTROL into slot 4: `ok 4@1`; C's `query` of `4@1`: `err=PermissionDenied`; C kills P through `4@1`: `ok`; C's `query` of `2@1`: `ok state=Dead reason=Killed code=0`; C's `close` of `4@1` and of `2@1`: each `ok`. These are the cases of the lifecycle contract for this vector, through the dispatch | `syscall`; `derive` and `close` of the capabilities component; `query` and `kill` of the lifecycle component |
+| `abi-lifecycle-3` | 99 | `control_without_observation_can_stop_but_not_inspect_a_peer` | C's `derive` from `2@1` with CONTROL into slot 4: `ok 4@1`; C's `query` of `4@1`: `err=PermissionDenied`; C kills P through `4@1`: `ok`; C's `query` of `2@1`: `ok state=Dead reason=Killed code=0`; C's `close` of `4@1` and of `2@1`: each `ok`. These are the cases of the lifecycle contract for this vector, through the dispatch, with C as its Q and C's query of `2@1` in place of R's query of P, which gives the same result | `syscall`; `derive` and `close` of the capabilities component; `query` and `kill` of the lifecycle component |
 
 ### Vectors of other pages
 
@@ -1464,8 +1508,12 @@ loader, which [References](#references) lists:
   native operation.
 - **Results.** The prototype's scalar calls replaced `x0` and `x1`, with
   the status and one value, and its IPC calls `x0` to `x5`; here every call
-  writes `x0` to `x5`, with 0 in each unused result register and in `x1` to
-  `x5` of a failure.
+  that completes or is refused in its transition writes `x0` to `x5`, with 0
+  in each unused result register and in `x1` to `x5` of a failure, and the
+  completer of a blocked call writes the form, `x0` and `x1` or `x0` to
+  `x5`, that the
+  [waits](../../ipc-waits/waits/contract.md#wait-records) contract records
+  for its operation.
 - **Statuses.** The prototype's dispatcher mapped the errors of its
   components to fifteen statuses; here the errors keep the names of their
   contracts, and the ABI inventory maps them to statuses.
@@ -1482,6 +1530,15 @@ loader, which [References](#references) lists:
   staged and every segment again with the entry at the commit; here each
   segment is checked once, against those before it, and the commit checks
   only the entry, the number of segments and the private pages.
+- **The order of the checks of loading.** The prototype checked the range
+  of the file against the bundle before the access and the range of a
+  segment, the number of segments before the overlap, and, at the commit,
+  the number of segments and the entry before every segment; here the
+  checks of a segment and of a commit follow the
+  [order of errors](#order-of-errors): the form of the arguments, the
+  access and the range of the segment among them, first, then the range of
+  the file and the overlap, as object state, and then the number of
+  segments and the private pages, as the caller's quota.
 
 ## References
 

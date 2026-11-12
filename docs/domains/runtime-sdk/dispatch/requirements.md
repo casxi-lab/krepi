@@ -96,7 +96,8 @@ the default image has no diagnostic row, and a number is never reused. The
 criterion: every operation of the ABI inventory is reached through its
 number with the version 1; the version 0, of the prototype, and every
 other version are refused; and every diagnostic number is refused in the
-default image and reaches its operation in a test build.
+default image, and a diagnostic number with a row of the test build
+reaches its operation there.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `dispatch::syscall` (planned), with the constant
@@ -200,9 +201,10 @@ no capability gets the error of the mask.
 **Rights of the operations.** The rights that an operation needs are
 constants of the operation, which the lookups of its handles check; no
 value that EL0 passes selects them, and the dispatch adds no right. A
-handle names a slot of the caller's own table only. The criterion: a
-capability with fewer rights than its operation needs is refused with
-`PermissionDenied` and changes nothing, whatever the other registers hold;
+handle names a slot of the caller's own table only. The criterion: a call
+that passes the checks before the rights, through a capability with fewer
+rights than its operation needs, is refused with `PermissionDenied` and
+changes nothing, and no value of another register supplies the right;
 a capability derived with OBSERVE alone queries a process and neither
 kills nor revokes it; one with CONTROL alone kills a process and does not
 query it; GRANT and REVOKE imply no other right; and the same value of a
@@ -224,15 +226,15 @@ handle in another process names a slot of that process's table.
 **Results and no change on failure.** A call that completes in its
 transition gets `OK` in `x0` and its results in `x1` to `x5`, 0 in the
 result registers that its operation does not use; a refused call gets the
-status of its error in `x0` and 0 in `x1` to `x5`. Every other register and
-field of the saved context keeps its value. A refused call, by the
-dispatch or by its operation, changes no field of the kernel state; the
-settlements of expired waits before it in its transition stay. The
-criterion: after a success and after each kind of failure, the result
+status of its error in `x0` and 0 in `x1` to `x5`. After either, every
+other register and field of the saved context keeps its value. A refused
+call, by the dispatch or by its operation, changes no field of the kernel
+state; the settlements of expired waits before it in its transition stay.
+The criterion: after a success and after each kind of failure, the result
 registers hold what the contract states and every other field of the saved
-context and of the kernel state is unchanged; a call whose capability
-table is full is refused by the slot that it names and keeps every
-capability that it held.
+context and of the kernel state is unchanged; a call whose capability table
+is full is refused by the slot that it names and keeps every capability
+that it held.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `dispatch::entry` (planned).
@@ -252,15 +254,16 @@ which reads the time once: it first settles every wait whose deadline has
 passed, then handles its event, a system call by its operation, a user
 fault by the end of the process of the thread, an interrupt, and then
 composes the return to the thread that the scheduler chooses, whose saved
-context is validated; a refused context ends its process, and the return
-is composed again. A pending interrupt is handled before the return. A CPU
-with no thread to run waits for an interrupt. The end of the root halts
-the system on the fatal path. The criterion: with a host double of the
-architecture crate, the expiry of a wait settles before the operation of
-its transition; a user fault and a refused context end only their process;
-an interrupt pending at the return is handled first; a CPU with no ready
-thread waits and chooses again at its wake; and the exit of the root ends
-on the fatal path with `CASXI_HALTED`.
+context is validated; a refused context ends its process, and the return is
+composed again. An interrupt pending at the return is handled, in a
+transition of its own, before the thread returns. A CPU with no thread to
+run waits for an interrupt. The end of the root halts the system on the
+fatal path. The criterion: with a host double of the architecture crate,
+the expiry of a wait settles before the operation of its transition; a user
+fault and a refused context end only their process; an interrupt pending at
+the return is handled before the thread returns; a CPU with no ready thread
+waits and chooses again at its wake; and the exit of the root ends on the
+fatal path with `CASXI_HALTED`.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `dispatch::entry` and `dispatch::compose_return`
@@ -282,13 +285,13 @@ executes one at a time, each after the write-back of the operation that
 fixed it, and none fails; a frame returns to the page pool only after the
 plan that zeroed it. A long operation, a revocation, a destruction or the
 release of a region, takes one bounded step in each transition, stores its
-progress in its object and is executed again from the saved user
-registers, at once when no interrupt is pending. The criterion: a commit of
-pages, a commit of a child and the steps of a kill give their plans in
-order, one in flight at a time; each step of a kill and of a release ends
-with the address of the `SVC` in `elr` and continues from its progress
-when it is executed again; and no frame of the pool is reused before its
-zero plan has been executed.
+progress in its object and is executed again from the saved user registers,
+at once unless an interrupt is pending or the step has made a thread of a
+higher class ready. The criterion: a commit of pages, a commit of a child
+and the steps of a kill give their plans in order, one in flight at a time;
+each step of a kill and of a release ends with the address of the `SVC` in
+`elr` and continues from its progress when it is executed again; and no
+frame of the pool is reused before its zero plan has been executed.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `dispatch::entry` and `dispatch::resume` (planned).
@@ -394,15 +397,15 @@ image, the private pages of an image, the pages of the initial stack, the
 root's limit of private pages of loaded images, and the pages and entries
 of the boot bundle; the default record of each board gives them when the
 directory holds no record. The boot checks them once, before it carves any
-storage: each at least 1 and within its hard limit, the stack within the
-window and the private pages, the tables of a child within its table pool,
-the root's limit at least the root's own private pages, and the bundle
-within its limits. A record that breaks a check stops the boot with its
-error, without a fallback to the defaults. The criterion: a record that
-breaks each check stops the boot with its error; the largest window that
-the tables admit is accepted and one page more refused; the default record
-of each board passes; and a change of the values of a record changes
-neither the checks nor the bounds of the code.
+storage: each at least 1, and each but the root's limit within its hard
+limit, the stack within the window and the private pages, the tables of a
+child within its table pool, the root's limit at least the root's own
+private pages, and the bundle within its limits. A record that breaks a
+check stops the boot with its error, without a fallback to the defaults.
+The criterion: a record that breaks each check stops the boot with its
+error; the largest window that the tables admit is accepted and one page
+more refused; the default record of each board passes; and a change of the
+values of a record changes neither the checks nor the bounds of the code.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `loader::validate` (planned), its step `Limits`, with
@@ -424,8 +427,9 @@ neither the checks nor the bounds of the code.
   with the expired waits that it settles, at most the thread capacity, and
   with the plans that its operation gives.
 - A long operation takes one step in each transition, and the composer
-  returns to its thread at once when no interrupt is pending, so an
-  interrupt waits at most for one step.
+  returns to its thread at once unless an interrupt is pending or the step
+  has made a thread of a higher class ready, so an interrupt waits at most
+  for one step.
 - `syscall` and `validate` take a number of steps that the hard limits
   bound, whatever the values of the capacity record.
 - No requirement bounds the time of a transition.
@@ -441,7 +445,8 @@ neither the checks nor the bounds of the code.
 - The operations that the table reaches belong to their components; the
   creation of a child, with the mapping of its image and the copy of its
   file bytes, to the creation component; the parsing of ELF files and the
-  start of a program to the runtime of EL0 (planned).
+  start of a program to the runtime of EL0
+  ([Application entry and CRT](../README.md#application-entry-and-crt)).
 - The binding of interrupts to notifications and the windows of device
   grants belong to the devices and DMA domain; the Linux path of an `SVC`
   to Linux compatibility; user buffers and argument structures copied in
