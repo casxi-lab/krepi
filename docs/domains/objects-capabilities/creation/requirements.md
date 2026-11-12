@@ -357,12 +357,14 @@ CREATE, into slot 0 and its capability to its thread into slot 1, which the
 boot information names; charges the pages of its RW segments and its stack
 to its item of private pages of loaded images; admits its thread in the
 class control; and maps its image, its stack, the boot information and the
-boot bundle. A capacity record whose table of capabilities has fewer than
-2 slots stops the boot. The criterion: after the boot, the record of the
-kernel domain counts the root's pair, the root's limits and usages are
-those of the rules for records of several values, its first capabilities
-are `0@1` and `1@1` with their rights, and a record with one slot stops
-the boot with `RootSlots`; the root runs on QEMU virt and on the 8 GB Pi 5.
+boot bundle. A capacity record whose table of capabilities has fewer slots
+than the root's fixed slots, the two of this page and any that the
+device-authority rules add (planned), stops the boot. The criterion: after
+the boot, the record of the kernel domain counts the root's pair, the
+root's limits and usages are those of the rules for records of several
+values, its first capabilities are `0@1` and `1@1` with their rights, and a
+record with one slot stops the boot with `RootSlots`; the root runs on QEMU
+virt and on the 8 GB Pi 5.
 
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `creation::boot_root` and `creation::acknowledge`

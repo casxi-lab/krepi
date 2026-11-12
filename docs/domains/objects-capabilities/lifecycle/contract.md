@@ -94,10 +94,10 @@ observable behaviour that these rules serve, with its evidence, is in the
 - **Death notification.** The signal of the notification of each
   registration of a process, with its bits, when the process leaves Alive.
 - **Composer.** The module of the core above this one that calls an entry
-  of this page: `dispatch`, for the operations, the user faults and the
-  acknowledgement of plans, and for whether an endpoint is served; and
-  `creation`, for a new process and for the bound thread of a new endpoint
-  ([creation](../creation/contract.md#entry-points)).
+  of this page: `dispatch` (planned), for the operations, the user faults
+  and the acknowledgement of plans, and for whether an endpoint is served;
+  and `creation` (planned), for a new process and for the bound thread of a
+  new endpoint ([creation](../creation/contract.md#entry-points)).
 - **Token.** What an access to state that is not per-CPU holds, as the
   [SMP design rules](../../../conventions/smp.md#s1-state-classes) state;
   with one CPU, the executing CPU holds every token.
