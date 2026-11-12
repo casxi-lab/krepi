@@ -427,11 +427,12 @@ values of a record changes neither the checks nor the bounds of the code.
   the bounds of the [contract](contract.md#work-bounds); its time grows
   with the expired waits that it settles, at most the thread capacity, and
   with the plans that its operation gives.
-- A long operation takes one step in each transition, and the composer
-  returns to its thread at once unless an interrupt is pending or the step
-  has set the reschedule flag, as making a thread of a higher class ready
-  or a requeue of the current thread does, so an interrupt waits at most
-  for one step.
+- A long operation takes one step in each transition: the composer
+  continues the dispatch of its thread unless its deadline has passed or
+  the step has set the reschedule flag, as making a thread of a higher
+  class ready or a requeue of the current thread does, and the thread
+  executes the call again at once unless an interrupt is pending, so an
+  interrupt waits at most for one step.
 - `syscall` and `validate` take a number of steps that the hard limits
   bound, whatever the values of the capacity record.
 - No requirement bounds the time of a transition.

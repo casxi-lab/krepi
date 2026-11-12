@@ -607,6 +607,13 @@ The core sets no callback for a hardware action and writes no frame, so
 | A frame plan, with a pending value: the zeroing of a frame or the copy of bytes of the boot bundle into a frame | `krepi_arch::frames::apply`, then `resume` with the pending value |
 | The halt of the system | The fatal path of the [boot](../../boot-platform/boot/contract.md#records) component ([The halt](#the-halt)) |
 
+- **The first return of the root.** Before the first return of the root,
+  the boot wiring does with the return plan that the boot of the root gives
+  what `el0_dispatch` does with a return plan: while no interrupt is
+  pending it calls `__el0_return`; with one pending, it acknowledges it and
+  calls `entry` with that IRQ for the root's thread, and from then on it
+  handles each result of a transition as `el0_dispatch` does, in the table
+  above.
 - **Resume.** `resume(root, cpu, pending)` calls the acknowledgement of the
   component that the pending value names, for its process: `vm::acknowledge`
   of the caller, whose VM head holds the cursor of an operation of the VM

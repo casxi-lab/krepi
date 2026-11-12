@@ -462,7 +462,8 @@ with D, A, I and F set in `PSTATE`, and takes vector 8 or 9 of the
    CPU.
 
 No thread returns to EL0 while an interrupt is pending, and the composer
-does not handle one itself, since the core reads no interrupt controller:
+does not handle one itself: the core reads no interrupt controller, and the
+boot wiring composes the first return as the composer does:
 the caller of `__el0_return`, with every exception masked, enters the core
 again with the pending interrupt instead of returning, and the core
 handles it, as for the class `Irq`, in a transition of its own whose
