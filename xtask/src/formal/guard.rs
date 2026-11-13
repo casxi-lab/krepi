@@ -674,6 +674,7 @@ mod tests {
             "verification/Krepi/Proofs/New/Deep.lean",
             "verification/statements.json",
             "verification/targets.json",
+            "verification/shards.json",
             "verification/tcb.json",
             "verification/qualification/cases.json",
             "kernel/abi/src/lib.rs",

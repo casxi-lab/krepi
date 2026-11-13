@@ -604,9 +604,10 @@ jobs:
             echo "prepare_ended=$(date +%s.%N)" | tee -a "$RUNNER_TEMP/epochs.txt"
           } 2>&1 | tee -a artifacts/formal/job.txt
 
-      # As in the job `formal run`. The verdict does not matter here, so the
-      # step passes when the gate exits with 0 or 1 and fails on any other
-      # status, which is an error of the run or of Docker. Its 75 minutes
+      # As in the job `formal run`, with `--keep`, so that the steps below
+      # find the stage of the base round. The verdict does not matter here,
+      # so the step passes when the gate exits with 0 or 1 and fails on any
+      # other status, which is an error of the run or of Docker. Its 75 minutes
       # hold a qualification that uses its whole budget of 3,600 s and a base
       # round of the expected length; the rest of the job's 120 minutes is
       # left to `leanchecker`.
@@ -622,7 +623,7 @@ jobs:
             --env GITHUB_EVENT_NAME --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
             --env GITHUB_EVENT_PATH="$GITHUB_WORKSPACE/artifacts/formal/event.json" \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run || status=$?
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --keep || status=$?
           echo "gate_ended=$(date +%s.%N)" >> "$RUNNER_TEMP/epochs.txt"
           echo "== gate ended $(date -u +%FT%TZ) with exit status $status" \
             | tee -a artifacts/formal/job.txt

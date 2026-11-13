@@ -110,6 +110,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/Krepi/Qualification/Models/` | Definitions that the reviewed external declarations of three qualification cases use; they are not models ([qualification](#qualification)) | Present |
 | `verification/externals/<Module>/` | Reviewed external declarations of a target or a qualification case (`FunsExternal.lean`, `TypesExternal.lean`), named by its `models` field | Present for qualification cases |
 | `verification/targets.json` | The proof target registry | Present, empty |
+| `verification/shards.json` | The shard plan: for the qualification and for each target, the disk peak, the seconds and the cgroup memory peak that a run of CI measured, with the run and its commit; the disk guard of a run reads it ([shard plan and disk guard](#shard-plan-and-disk-guard)) | Present, empty |
 | `verification/models.json` | The model registry ([models](#models)); `cargo xtask formal check` refuses a registered model | Present, empty |
 | `verification/statements.json` | The statement hash, and each statement with its theorem and state ([statements and proofs](#statements-and-proofs)) | Present, empty |
 | `verification/axioms.json` | The axioms of the Aeneas Lean library that target theorems may use, each with its source and reason ([base round](#base-round)) | Present, empty |
@@ -117,7 +118,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/legacy.json` | Kept empty: production functions without a proof are listed in `open.json` ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty by design |
 | `verification/open.json` | The open obligations of the production code, generated from the `Open obligations` tables of the contracts of the components ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
-| `verification/qualification/calibration/` | The [calibration target](#calibration-target): a workspace with a root package and a member, its Lake project with its statements and proofs, its registries, and the lists of survivors of its source mutants in `mutants/` | Present |
+| `verification/qualification/calibration/` | The [calibration target](#calibration-target): a workspace with a root package and a member, its Lake project with its statements and proofs, its registries and shard plan, and the lists of survivors of its source mutants in `mutants/` | Present |
 | `verification/mutants/` | The list of survivors of the source mutants of each target that has one, `<target>.json` ([source mutants and survivors](#source-mutants-and-survivors)) | Absent until a list is written |
 | `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `mutants`, `vectors` and `canary` present, the others planned |
 
@@ -141,8 +142,23 @@ file `Audit.lean` and its heartbeat copies in `.heartbeats/`, and
 `git mktree` for the statement hash of the round; and `mktree`, the same
 input for the guard phase. The
 root module is written only there, never in the checkout. Generated
-definitions are never edited. A comparison of `cargo xtask formal vectors`
-has a run directory too, without a receipt: `logs/`, and in `work/` the
+definitions are never edited.
+
+At its end, after the second snapshot, a run of `cargo xtask formal run` or
+`cargo xtask formal mutants` removes `work/`, so that its directory keeps
+`receipt.json` and `logs/`; with `--keep` it keeps `work/`, as
+[editing proofs](#editing-proofs) needs. A work directory that cannot be
+removed, or whose removal ends after the deadline of the closing steps, is
+a tool failure of the run. A stop signal ends a run without a receipt and
+with its work directory, unless the signal arrives once the run has
+started to remove it. During a run, the Cargo target directory of each
+extraction is removed when the extraction ends, and the LLBC file and the
+output of Aeneas of a qualification case, also those of each of its
+parts, once the case is concluded, unless the run keeps its work
+directory.
+
+A comparison of `cargo xtask formal vectors` has a run directory too,
+without a receipt, and keeps all of it: `logs/`, and in `work/` the
 home and temporary directories, its stage, the vector file `vectors` and
 the result file `results` of the replay; the host tests write their result
 files below `artifacts/formal/vectors/` ([test vectors](#test-vectors)).
@@ -587,7 +603,7 @@ commit of `main` in its detail; the job passes only on `PASSED`:
 | `PASSED` | Every step passed, and the gate exited with 0 and left one complete `VERIFIED` receipt |
 | `BROKEN` | The patch does not apply; Aeneas main has a form that the committed checks refuse too; the build failed in a stage of the tools, `aeneas-source`, `lean`, `rust-toolchain`, `charon-build`, `aeneas-build` or `backend`; or the gate exited with 1 and left one receipt that is `REJECTED`, `TOOL_FAILURE`, `BUDGET` or `STALE`; each without a text of the two rows below |
 | `DEFECT` | The tool checks fail on the derived manifest; a field cannot be derived; or the error or the output of the step that the failure block of the build log shows, or a failure or the reason of a unit that is not `VERIFIED` in the receipt, holds a check of what was installed against a pin, such as `lean reports` or `the switch export has SHA-256` of the recipe, a failure of the gate that starts with `image:`, or a statement hash that the snapshot does not have |
-| `FAILED` | A step was cancelled or skipped, has no outcome, or succeeded without a record that passed; any other step failed; the build reached its limit, or the runner ended it, or it failed in another stage or without a BuildKit failure block after its first error; the text holds a full disk, a network error or a cancelled build, or a check of the gate's own inputs; or the gate wrote no exit status, left no single receipt that can be read, or exited with another status, which is an error of the run and not a verdict |
+| `FAILED` | A step was cancelled or skipped, has no outcome, or succeeded without a record that passed; any other step failed; the build reached its limit, or the runner ended it, or it failed in another stage or without a BuildKit failure block after its first error; the text holds a full disk, a network error or a cancelled build, or a check of the gate's own inputs; or the gate wrote no exit status, left no single receipt that can be read, exited with 1 and left a receipt that is `NOT_RUN`, which the [disk guard](#shard-plan-and-disk-guard) refused, or exited with another status, which is an error of the run and not a verdict |
 
 A text of an unknown shape is never a breakage: a breakage needs a failed
 stage of the tools without the text of a defect or a failure, or a verdict
@@ -630,13 +646,13 @@ The commands of `cargo xtask formal` follow the design of the gate.
 | Command | Purpose |
 | --- | --- |
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
-| `cargo xtask formal run [--target NAME]... [--calibration]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets, and `--calibration` runs in the layout of the [calibration target](#calibration-target). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run has |
+| `cargo xtask formal run [--target NAME]... [--calibration] [--keep]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets, `--calibration` runs in the layout of the [calibration target](#calibration-target), and `--keep` keeps the work directory of the run ([layout](#layout)). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run has |
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs and sources ([guard](#guard)) |
-| `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
+| `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
 | `cargo xtask formal receipt [--require-fresh]` (planned) | Says whether a receipt is current for the checkout: the same gate inputs and image, one conclusion for each unit, complete and `VERIFIED`; `--require-fresh` also requires a run of the whole gate from a clean checkout without planned statements |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its job fetched and built: `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from the outcomes of the steps of the job ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
-| `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration |
+| `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration, and `--keep` keeps the work directory of the run, as for `run` |
 | `cargo xtask formal impact --base REV` (planned) | Lists the targets that a change since `REV` affects |
 | `cargo xtask formal merge` (planned) | Combines the receipts of the shards of a run and of its qualification into the conclusion of the whole gate |
 
@@ -658,8 +674,9 @@ statuses in `outcome.rs`, the receipt in `receipt.rs`, the extraction in
 the statement side and the guard in `guard.rs`, the registry and its rules
 in `registry.rs`, the check of a target's registration against its
 extraction in `classify.rs`, the installation of its generated files and
-reviewed external declarations in `externals.rs`, and the run, with the
-phases of the targets, in `run.rs`.
+reviewed external declarations in `externals.rs`, the shard plan, the
+disk guard and the removals in `storage.rs`, the shard limit in
+`merge.rs`, and the run, with the phases of the targets, in `run.rs`.
 
 ### Gate inputs and snapshot
 
@@ -720,7 +737,12 @@ in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
    extracts none, and the workspace may then have no root package. When
    the run selects targets, it takes the inventory of the exported
    workspace for their registration checks
-   ([legacy inventory and admission](#legacy-inventory-and-admission)).
+   ([legacy inventory and admission](#legacy-inventory-and-admission));
+7. when no earlier step has failed or rejected the run, refuses it unless
+   its file system had 1.5 times the disk peak of its parts free at its
+   start ([shard plan and disk guard](#shard-plan-and-disk-guard)), and
+   then lists the Aeneas Lean library of the installation and Lean as the
+   [base round](#base-round) does, before the first phase.
 
 A tool failure in one of these steps ends them: the later steps do not run.
 A rule that rejects the run in step 4 does not. Every later step reads the
@@ -729,7 +751,12 @@ the run takes the objects of the gate inputs again at the end, at the
 commit checked out then, and runs `git status` again: when an object
 differs, or the gate inputs are not clean at the end, the run is `STALE`,
 with one failure that names the gate inputs whose objects differ and the
-records of `git status`.
+records of `git status`. Before that, after the last phase, also when a
+phase stopped, the run lists the installation again; a difference is a
+tool failure of the run that names up to 20 paths, so that a command of
+the extraction, of a target or of a mutant that writes the installation
+fails the run as one of the qualification or the base round does, and so
+is a listing that cannot be taken then.
 
 ### Cargo configuration
 
@@ -774,15 +801,16 @@ command wrote is kept. Its limit is the smallest of:
   target: the budget less the seconds of the earlier commands of the unit,
   whichever phase ran them.
 
-The steps after the phases, the second snapshot and the receipt, have 300 s
-beyond the gate's budget. A command whose limit is used up, 0 s as the
-receipt writes it, does not start and is `NOT_RUN`. When a command reaches
-its limit, or ends by itself, the run kills its process group, collects the
-command and waits up to 60 s, beyond the command's limit, until no process
-of the group is left; a process that is still there makes the command a
-tool failure. The run restores the default disposition of `SIGCHLD` when it
-starts, without which the system could collect an ended command before the
-kill. Each command is printed when it ends.
+The steps after the phases, the second snapshot, the removal of the work
+directory and the receipt, have 300 s beyond the gate's budget. A command
+whose limit is used up, 0 s as the receipt writes it, does not start and is
+`NOT_RUN`. When a command reaches its limit, or ends by itself, the run
+kills its process group, collects the command and waits up to 60 s, beyond
+the command's limit, until no process of the group is left; a process that
+is still there makes the command a tool failure. The run restores the
+default disposition of `SIGCHLD` when it starts, without which the system
+could collect an ended command before the kill. Each command is printed
+when it ends.
 
 A signal from the terminal does not reach a running tool, whose group is
 its own. SIGINT and SIGTERM stop the run instead, also when they were
@@ -792,6 +820,78 @@ collects the command, waits for its group as above, and ends by the same
 signal, without a receipt. A signal that comes
 between two commands takes effect before the next command starts or before
 the receipt is written.
+
+### Shard plan and disk guard
+
+The shard plan is `verification/shards.json`, and
+`verification/qualification/calibration/shards.json` for the
+[calibration target](#calibration-target). It has schema 1 and `parts`, an
+array with one entry for each part of the gate that a run of CI has
+measured: `qualification`, or `target/<name>` for a registered target,
+each named by its unit. It is written by hand from the receipts of runs on
+a standard `ubuntu-24.04-arm` runner, never by a run, and both files are
+present and empty. Each entry has these fields:
+
+| Field | Content |
+| --- | --- |
+| `part` | `qualification` or `target/<name>` |
+| `disk_peak` | The disk peak of the part in bytes: `disk_available_at_start` less `disk_least_available` of the measuring receipt ([receipt](#receipt)) |
+| `seconds` | The `seconds` of the measuring receipt |
+| `cgroup_memory_peak` | The `cgroup_memory_peak` of the measuring receipt, in bytes |
+| `run_id` | The identifier of the workflow run that measured it |
+| `commit` | The commit that it ran on |
+
+For example, with values that are only an illustration:
+
+```json
+{
+  "schema": 1,
+  "parts": [
+    {
+      "part": "qualification",
+      "disk_peak": 600000000,
+      "seconds": 1100.0,
+      "cgroup_memory_peak": 10000000000,
+      "run_id": "1234567890",
+      "commit": "0123456789abcdef0123456789abcdef01234567"
+    }
+  ]
+}
+```
+
+`cargo xtask formal check` refuses a plan that does not parse, of another
+schema or with a field that it does not know, a part listed twice, and a
+part that is neither `qualification` nor the unit of a registered target;
+it lists the formal targets that the plan has no entry for, which is not a
+problem, as a target is measured once it is registered.
+
+Every formal target is a shard of its own, named by its unit; a planned
+target is no shard. The shard limit is 3,300 s: the wall-clock limit of the
+gate, 3,600 s, less the time of the merge, 300 s. `cargo xtask formal check`
+refuses a shard whose registered budget, divided by the workers of a shard,
+one, and rounded up, is more than the shard limit, in either layout
+([proof targets](#proof-targets)).
+
+The disk guard of a run, after the steps of the gate inputs and before the
+first phase, reads the plan of the export. The parts of a run are
+`qualification` and the unit of each target that it selects: a whole run
+sums the qualification and every formal target, and a run with `--target`
+or of `formal mutants` the qualification and the named targets. A part
+without an entry counts 8 GiB, 8,589,934,592 bytes, and a part listed
+twice its largest peak. When the bytes available on the file system of the
+run directory at the start are less than 1.5 times the sum of the disk
+peaks of its parts, the guard refuses the run: no phase runs, the run has
+one failure `NOT_RUN` that gives both numbers, every registered unit is
+`NOT_RUN`, and the run is `NOT_RUN` and not complete, and exits with 1. A
+reading of the free space at the start that cannot be taken, or a plan
+that cannot be read, is a tool failure of the run before its phases.
+
+From its start until its phases and its second snapshot have ended, a
+thread of the run reads the bytes available on the file system of the run
+directory every second and skips a reading that cannot be taken;
+`disk_least_available` of the receipt is the least of these readings and
+the one at the start. A thread that cannot be started, or whose reading
+panics, is a tool failure of the run.
 
 ### Extraction
 
@@ -918,7 +1018,10 @@ Each case runs in a new directory of the run, `work/cases/<case>/`:
 1. The [extraction](#extraction) of the case in that directory, or of each
    of its parts in `parts/<n>/`, from the crate of the export. Each
    extraction's Cargo target directory is removed when it ends; its LLBC
-   file and the output of Aeneas stay with the run directory.
+   file and the output of Aeneas, also those of each part, are removed
+   once the case is concluded, which for a case with a stage is after its
+   generated files are installed there, unless the run keeps its work
+   directory ([layout](#layout)).
 2. The comparison of the extraction with the case: whether it is complete,
    with a complete translation expected for `translated` and `ill-typed`
    and a rejection for `rejected`, and the sets of diagnostics, external
@@ -1180,7 +1283,10 @@ toolchain, at their start and at their end, without following symbolic
 links below them: the path, mode, size, modification and change times and
 link target of each entry. Any difference stops the phase as a tool
 failure that names up to 20 paths, so that a tool that writes to the
-installation is a tool failure of the run. In the image, the installation
+installation is a tool failure of the run. The run lists them as well
+before its first phase and after its last, also when a phase stopped, so
+that a command of the extraction, of a target or of a mutant that writes
+them is a tool failure of the run too. In the image, the installation
 belongs to root, every user can read it and none but root can write it. CI
 runs the gate there as the runner's user, on a read-only root file system
 ([CI job](#ci-job)), and the gate refuses to run as root or as the owner of
@@ -1403,15 +1509,22 @@ with a command that was a tool failure is concluded `TOOL_FAILURE`, and one
 with a command that met a budget, or did not start because its limit was
 used up, `BUDGET`, whatever its phase concludes.
 
-The status of a run is the first of these that applies: `TOOL_FAILURE`,
-`BUDGET`, `STALE`, `REJECTED`, from its failures and the conclusions of its
-units; `TOOL_FAILURE` when a unit was `NOT_RUN` without another failure;
-`SCOPED` for a run of named targets; and `VERIFIED`. The run is a tool
-failure, and not complete, after an internal error, such as a host other
-than `linux-aarch64` or `darwin-arm64`, a tool manifest or a target
-registry that cannot be read, a tool manifest that is not the snapshot's,
-a failed Git command, a failed export, a phase that returns an error or
-panics, or a panic of the run itself. After an error of the export or of
+The status of a run that the [disk guard](#shard-plan-and-disk-guard)
+refused is `NOT_RUN`; otherwise it is the first of these that applies:
+`TOOL_FAILURE`, `BUDGET`, `STALE`, `REJECTED`, from its failures and the
+conclusions of its units; `TOOL_FAILURE` when a unit was `NOT_RUN`
+without another failure; `SCOPED` for a run of named targets; and
+`VERIFIED`. The run is a tool failure, and not complete, after an
+internal error, such as a host other than `linux-aarch64` or
+`darwin-arm64`, a tool manifest or a target registry that cannot be read,
+a tool manifest that is not the snapshot's, a failed Git command, a failed
+export, a shard plan or a reading of the free space at the start that
+cannot be read, a reading of the free space during the run that cannot be
+started or panics, a listing of the installation that cannot be taken
+before the first phase or after the last or that differs after the last, a
+phase that returns an error or panics, a work directory that cannot be
+removed or whose removal ends after the deadline of the closing steps, or
+a panic of the run itself. After an error of the export or of
 its checks, or of a phase, the closing steps still run; an error of the
 start ends the run without the second snapshot, and a panic of the run
 outside a phase ends it without any later command. The receipt is written in every case. It
@@ -1419,29 +1532,32 @@ is a tool failure as well when the gate inputs are not clean at the start,
 when a name given with `--target` is not in `verification/targets.json`,
 and when a registered unit has no conclusion or more than one, or a
 conclusion is given for a unit that is not registered. After any failure
-before the phases, no phase runs, and after a phase stops no later phase
-runs; every registered unit without a conclusion is then `NOT_RUN`. A run
-of named targets is `SCOPED` and is never complete. A run of the whole
-gate is complete when its only failures are `STALE` and no unit is
-`NOT_RUN` or `BUDGET`.
+before the phases, the refusal of the disk guard included, no phase
+runs, and after a phase stops no later phase runs; every registered unit
+without a conclusion is then `NOT_RUN`. A run of named targets is
+`SCOPED` and is never complete. A run of the whole gate is complete when
+its only failures are `STALE` and no unit is `NOT_RUN` or `BUDGET`, so a
+run that the disk guard refused is not complete.
 
 The command exits with 0 for `VERIFIED` and `SCOPED` and 1 for any other
-status, and prints each failure on standard error. It exits with 2 on a
-usage error, and by the signal after a stop signal, without a receipt in
-both cases. When the run directory or the receipt cannot be written, it
+status, `NOT_RUN` included, and prints each failure on standard error. It
+exits with 2 on a usage error, and by the signal after a stop signal,
+without a receipt in both cases; a run that a stop signal ends keeps its
+work directory unless the signal arrives once the run has started to
+remove it. When the run directory or the receipt cannot be written, it
 writes the receipt to standard error and exits with 120.
 
 ### Receipt
 
-`receipt.json` has schema 3. It is the pretty form of `serde_json`, with
+`receipt.json` has schema 4. It is the pretty form of `serde_json`, with
 the fields in the order of the tables below and every map sorted by its
 keys; times are seconds, rounded to milliseconds.
 
 | Field | Content |
 | --- | --- |
-| `schema` | `3` |
+| `schema` | `4` |
 | `command` | `cargo xtask formal run` |
-| `status` | `VERIFIED`, `REJECTED`, `STALE`, `TOOL_FAILURE`, `BUDGET` or `SCOPED` |
+| `status` | `VERIFIED`, `REJECTED`, `STALE`, `TOOL_FAILURE`, `BUDGET`, `NOT_RUN` or `SCOPED` |
 | `complete` | Whether the run is complete, as defined above |
 | `trigger` | `mode`, `MANUAL` for a run of the whole gate and `SCOPED` for a run of named targets, with `REQUIRED`, `FORCED_FULL` and `WEEKLY` kept for the jobs of CI; `event`, `ref`, `run_id` and `attempt`, from `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`, or `null` |
 | `targets` | The names given with `--target`, sorted; empty for a run of the whole gate |
@@ -1483,7 +1599,7 @@ report it:
 | Field | Content |
 | --- | --- |
 | `disk_available_at_start` | The bytes available to users other than root on the file system of the run directory when the run started |
-| `disk_least_available` | The least of those bytes at the start and after each command |
+| `disk_least_available` | The least of those bytes during the run: the run reads them at its start and then every second until its phases and its second snapshot have ended; `disk_available_at_start` less this is the disk peak of the run ([shard plan and disk guard](#shard-plan-and-disk-guard)) |
 | `largest_process_max_rss` | The largest maximum resident set of a single process that the run collected, or that such a process collected, in bytes: the largest one process, not the sum of processes that ran side by side |
 | `cgroup_memory_peak` | `memory.peak` of the run's cgroup under cgroup version 2, in bytes: in CI the container's. It counts the page cache too, such as the build outputs of Mathlib that Lean maps, so it bounds from above what the container held and does not say what the processes needed |
 
@@ -1704,8 +1820,8 @@ or commit instead of cancelling it.
 
 - `leanchecker fresh` and `leanchecker prefix`, 120 minutes each, prepare
   and run the gate as `formal run` does, without the probe and the guard
-  step; a gate that exits with 1 passes there, and any other status but 0
-  fails. The gate's step has 75 minutes there, which hold a qualification
+  step and with `--keep`, which keeps the stage of the base round; a gate
+  that exits with 1 passes there, and any other status but 0 fails. The gate's step has 75 minutes there, which hold a qualification
   that uses its whole budget and a base round of the expected length. Then
   they drop the page cache of the runner and run, in the stage of the base
   round, in a container with the flags of the gate,
@@ -1778,6 +1894,7 @@ a tool, and each broken rule is a problem:
 - no two targets have the same name or module, and no theorem is registered
   twice, by the obligations of one target or of two, or by a target and a
   specification;
+- a target with a `module` has at least one root in `start_from`;
 - a formal target has at least one obligation and at least one mutant, and
   every obligation has at least one theorem; a planned target needs neither
   an obligation nor a mutant;
@@ -1791,7 +1908,13 @@ a tool, and each broken rule is a problem:
   [inventory](#legacy-inventory-and-admission), and every entry of
   `derived` is a key `file#Type::method` of a method that a
   `#[derive(..)]` of a production type in the file defines, not a
-  production function.
+  production function;
+- the registered budget of each shard, divided by the workers of a shard,
+  one, and rounded up, is at most the shard limit of 3,300 s
+  ([shard plan and disk guard](#shard-plan-and-disk-guard)).
+
+`cargo xtask formal check` also checks the shard plan
+([shard plan and disk guard](#shard-plan-and-disk-guard)).
 
 A target name is made of lowercase letters, digits and hyphens and starts
 with a letter or a digit. `cargo xtask formal check` does not check it: the
@@ -1860,8 +1983,9 @@ count. A command that meets that limit concludes its own unit `BUDGET`:
 the unit of the target while the target is extracted, built and checked,
 or that of a mutant, which leaves the target as it was concluded; the run
 is `BUDGET` either way. The calibration target registers a
-budget of 3,000 s ([calibration target](#calibration-target)); a target
-of the kernel keeps the default.
+budget of 3,000 s, within the shard limit
+([calibration target](#calibration-target)); a target of the kernel keeps
+the default.
 
 The checks of the registration: every reached local function is
 in `proves`, `unclosed` or `derived`, every cut local item in `unclosed`,
@@ -2002,8 +2126,8 @@ and accepted otherwise. The ranges make no table when
 
 ### Source mutants and survivors
 
-`cargo xtask formal mutants TARGET [--operator NAME]... [--calibration]` is
-a run of the gate with `--target TARGET`, `SCOPED` and never complete as
+`cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]`
+is a run of the gate with `--target TARGET`, `SCOPED` and never complete as
 any run of named targets, with a budget of 14,400 s in place of the gate's
 7,200 s and those of its targets. Once the phase `targets` has verified the
 target, the run generates its source mutants from the export instead of
@@ -2103,7 +2227,9 @@ no image holds:
   project, so the two projects pin the same Lean and the same packages,
   and a change of the tools changes the files of `verification/` alone;
 - its registries: `targets.json`, `statements.json`, and `models.json`,
-  `axioms.json` and `tcb.json`, which are empty.
+  `axioms.json` and `tcb.json`, which are empty; and its shard plan
+  `shards.json`, empty as well
+  ([shard plan and disk guard](#shard-plan-and-disk-guard)).
 
 `targets.json` registers two targets. `calibration` is formal: twelve
 roots in `start_from`, one obligation with one theorem for each, thirty
@@ -2691,9 +2817,10 @@ when reached.
 
 ## Editing proofs
 
-A run keeps its directory. A proof is edited in the stage of the base round
-of a run, `artifacts/formal/runs/<id>/work/base/stage/verification`, or in
-the stage of a qualification case, with the Lean 4 extension: a stage holds
+A run removes its work directory at its end, so a proof is edited after a
+run with `--keep`: in the stage of the base round of the run,
+`artifacts/formal/runs/<id>/work/base/stage/verification`, or in the
+stage of a qualification case, with the Lean 4 extension: a stage holds
 the generated modules and the links to the installation that a checkout
 lacks, and a change is then copied back to the checkout. Builds there and
 in a checkout are not evidence; only a run of the gate produces receipts.

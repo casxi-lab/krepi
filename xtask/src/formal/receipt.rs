@@ -1,4 +1,4 @@
-//! The receipt of `cargo xtask formal run`, schema 3, as "Receipt" in
+//! The receipt of `cargo xtask formal run`, schema 4, as "Receipt" in
 //! `docs/formal-verification.md` documents it.
 
 use std::collections::BTreeMap;
@@ -12,7 +12,7 @@ use super::process::LimitBy;
 use super::qualify::Expect;
 use super::registry::State;
 
-pub const SCHEMA: u32 = 3;
+pub const SCHEMA: u32 = 4;
 
 pub const COMMAND: &str = "cargo xtask formal run";
 
@@ -94,9 +94,10 @@ pub struct Budgets {
 }
 
 /// The bytes available on the file system of the run directory at the
-/// start and the least after any command, the largest maximum resident set
-/// of one collected process, and the `memory.peak` of the gate's cgroup,
-/// page cache included; each `None` when the host does not report it.
+/// start and the least that the run read, every second, until its second
+/// snapshot, the largest maximum resident set of one collected process, and
+/// the `memory.peak` of the gate's cgroup, page cache included; each `None`
+/// when the host does not report it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Resources {
     pub disk_available_at_start: Option<u64>,
@@ -712,7 +713,7 @@ mod tests {
         let e = "e".repeat(64);
         let expected = format!(
             r#"{{
-  "schema": 3,
+  "schema": 4,
   "command": "cargo xtask formal run",
   "status": "VERIFIED",
   "complete": true,

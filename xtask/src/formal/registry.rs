@@ -170,11 +170,11 @@ fn blank(text: &Option<String>) -> bool {
 }
 
 /// The static rules of the registry: names, modules and theorems are
-/// unique; a formal target has an obligation and a mutant, every
-/// obligation a theorem, every mutant a theorem of its target that is to
-/// fail; `proves`, `unclosed` and `derived` are disjoint; a cut point
-/// gives its source and reason; and no target registers more than
-/// [`MUTANTS`] mutants.
+/// unique; a target with a module has a root in `start_from`; a formal
+/// target has an obligation and a mutant, every obligation a theorem, every
+/// mutant a theorem of its target that is to fail; `proves`, `unclosed` and
+/// `derived` are disjoint; a cut point gives its source and reason; and no
+/// target registers more than [`MUTANTS`] mutants.
 pub fn rules(registry: &Registry) -> Vec<String> {
     let mut problems = Vec::new();
     let (mut names, mut modules, mut theorems) =
@@ -202,6 +202,13 @@ pub fn rules(registry: &Registry) -> Vec<String> {
         {
             problems.push(format!(
                 "target {name}: module {module} is that of target {first} too"
+            ));
+        }
+        if let Some(module) = &target.module
+            && target.start_from.is_empty()
+        {
+            problems.push(format!(
+                "target {name}: module {module} has no root in start_from"
             ));
         }
         let formal = target.state == State::Formal;
@@ -311,8 +318,8 @@ pub fn axiom_rules(text: &str) -> Result<Vec<String>, String> {
 }
 
 /// The registry `targets`, and the problems of it and of the model
-/// registry `models`: the static rules and what the gate does not support
-/// yet.
+/// registry `models`: the static rules, the shard limit ([`super::merge`])
+/// and what the gate does not support yet.
 pub fn check(targets: &str, models: &str) -> Result<(Registry, Vec<String>), String> {
     let json: Value = serde_json::from_str(models).unwrap_or_default();
     let schema = json["schema"] == 1;
@@ -330,6 +337,7 @@ pub fn check(targets: &str, models: &str) -> Result<(Registry, Vec<String>), Str
             problems.push(format!("target {name}: exclude is not supported yet"));
         }
     }
+    problems.extend(super::merge::budget_problems(&registry.targets));
     problems.extend(rules(&registry));
     Ok((registry, problems))
 }
@@ -557,6 +565,27 @@ mod tests {
             problems,
             ["target slots: module Table is that of target table too"]
         );
+    }
+
+    #[test]
+    fn a_target_with_a_module_and_no_root_fails() {
+        let problems = broken(|registry| table(registry)["start_from"] = json!([]));
+        assert_eq!(
+            problems,
+            ["target table: module Table has no root in start_from"]
+        );
+        let problems = broken(|registry| registry["targets"][1]["start_from"] = json!([]));
+        assert_eq!(
+            problems,
+            ["target slots: module Slots has no root in start_from"]
+        );
+        // A target without a module needs no root.
+        let problems = broken(|registry| {
+            let slots = registry["targets"][1].as_object_mut().expect("a target");
+            slots.remove("module");
+            slots.remove("start_from");
+        });
+        assert_eq!(problems, Vec::<String>::new());
     }
 
     #[test]

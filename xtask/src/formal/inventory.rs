@@ -15,7 +15,7 @@ use syn::punctuated::Punctuated;
 use syn::visit::{self, Visit};
 use syn::{Attribute, Expr, Ident, Lit, Token, Type};
 
-use super::{Layout, classify, mutants, registry};
+use super::{Layout, classify, mutants, registry, storage};
 use crate::manifests;
 use crate::repo::{self, Tree};
 
@@ -367,7 +367,8 @@ pub fn open_json(obligations: &[Json]) -> String {
     serde_json::to_string_pretty(&open).expect("JSON") + "\n"
 }
 
-/// Checks the tracked files of `tree` with the `roots` of the kernel targets.
+/// Checks the tracked files of `tree` with the `roots` of the kernel targets,
+/// with the shard plan and the budget of each shard.
 pub fn check(tree: &Tree, roots: &[(String, bool)], layout: &Layout) -> (String, Problems) {
     let (inventory, mut problems) = inventory(tree, roots, layout.kernel);
     let text = |path: &str| tree.text(path).ok_or(format!("{path} is not tracked"));
@@ -376,6 +377,11 @@ pub fn check(tree: &Tree, roots: &[(String, bool)], layout: &Layout) -> (String,
         Ok((registry, refused)) => (registry.targets, refused),
         Err(problem) => (Vec::new(), vec![problem]),
     };
+    let (plan_problems, missing) = match text(layout.shards) {
+        Ok(plan) => storage::check(layout.shards, plan, &targets),
+        Err(problem) => (vec![problem], Vec::new()),
+    };
+    problems.extend(plan_problems);
     let axioms = text(layout.axioms).and_then(registry::axiom_rules);
     let axioms = axioms.unwrap_or_else(|problem| vec![problem]);
     problems.extend(
@@ -436,6 +442,10 @@ pub fn check(tree: &Tree, roots: &[(String, bool)], layout: &Layout) -> (String,
             "; survivors that no theorem covers in {uncovered}"
         ));
     }
+    if !missing.is_empty() {
+        let missing = missing.join(", ");
+        read.push_str(&format!("; the shard plan has no entry for {missing}"));
+    }
     (read, problems)
 }
 
@@ -450,7 +460,9 @@ pub fn cli(about: &'static str) -> clap::Command {
 }
 
 /// `cargo xtask formal check` in `root`; with `write`, it first writes
-/// `open.json` unless a table is malformed. It exits with 1 on any problem.
+/// `open.json` unless a table is malformed. It exits with 1 on any problem,
+/// and lists the formal targets that the shard plan has no entry for, which
+/// are no problem.
 pub fn command(root: &Path, layout: &Layout, write: bool) -> ExitCode {
     let checked = || -> Result<_, String> {
         let (mut tree, open) = (Tree::load(root)?, root.join(layout.open));
@@ -493,6 +505,8 @@ mod tests {
     const NO_AXIOMS: &str = "{\"schema\": 1, \"axioms\": []}\n";
 
     const NO_MODELS: &str = "{\"schema\": 1, \"models\": []}\n";
+
+    const NO_PARTS: &str = "{\"schema\": 1, \"parts\": []}\n";
 
     /// The input of the test `functions_are_found_with_owners` of the
     /// inventory of the CAS project, unchanged.
@@ -569,11 +583,15 @@ let s = "#[derive(Clone)] struct InString;";
         (inventory, problems.into_iter().collect())
     }
 
-    /// A tree of `files` with empty registries and, unless `files` holds
-    /// one, the `verification/open.json` that its contracts give.
+    /// A tree of `files` with empty registries and shard plan and, unless
+    /// `files` holds one, the `verification/open.json` that its contracts
+    /// give.
     fn tree(files: &[(&str, &str)]) -> Tree {
-        let mut tree =
-            Tree::from_files(&[(LAYOUT.registry, NO_TARGETS), (LAYOUT.models, NO_MODELS)]);
+        let mut tree = Tree::from_files(&[
+            (LAYOUT.registry, NO_TARGETS),
+            (LAYOUT.models, NO_MODELS),
+            (LAYOUT.shards, NO_PARTS),
+        ]);
         tree.insert(
             LAYOUT.axioms,
             repo::Entry::File(NO_AXIOMS.as_bytes().to_vec()),
@@ -1172,6 +1190,81 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
             error.contains(&"schema 1 where 2 is expected".to_string()),
             "{error:?}"
         );
+    }
+
+    /// A registry with the formal target `a`, of `budget`, which proves `f`
+    /// of [`LIB`], and the planned target `b`, of 7,200 s.
+    fn shard_of(budget: u64) -> String {
+        format!(
+            r#"{{"schema": 2, "targets": [{{"name": "a", "budget": {budget},
+            "proves": ["kernel/demo/src/lib.rs#f"],
+            "obligations": [{{"id": "o", "theorems": ["T.t"]}}],
+            "mutants": [{{"name": "m", "file": "kernel/demo/src/lib.rs", "find": "f", "replace": "f", "fails": ["T.t"]}}]}},
+            {{"name": "b", "state": "planned", "budget": 7200}}]}}"#
+        )
+    }
+
+    /// The problem of a shard of 3,301 s.
+    const OVER: &str = "shard target/a: its registered budget of 3301 s is 3301 s per worker, more than the shard limit of 3300 s";
+
+    #[test]
+    fn a_shard_whose_registered_budget_exceeds_the_shard_limit_fails_the_check() {
+        let lib = (LIB, "pub fn f() {}\n");
+        // The planned target is no shard.
+        let within = problems(&[lib, (LAYOUT.registry, &shard_of(3_300))]);
+        assert_eq!(within, Vec::<String>::new());
+        let over = problems(&[lib, (LAYOUT.registry, &shard_of(3_301))]);
+        assert_eq!(over, [OVER]);
+    }
+
+    #[test]
+    fn the_shard_limit_applies_in_the_calibration_layout() {
+        let layout = Layout::CALIBRATION;
+        let tree = Tree::from_files(&[
+            (layout.registry, &shard_of(3_301)),
+            (layout.models, NO_MODELS),
+            (layout.axioms, NO_AXIOMS),
+            (layout.shards, NO_PARTS),
+        ]);
+        // The tree has no kernel sources for the inventory.
+        let problems = check(&tree, &roots(&[]), &layout).1;
+        assert!(problems.contains(OVER), "{problems:?}");
+    }
+
+    #[test]
+    fn the_shard_plan_is_checked_and_formal_targets_without_an_entry_are_listed() {
+        let lib = (LIB, "pub fn f() {}\n");
+        let registry = shard_of(1_800);
+        let checked = |plan: &str| {
+            let tree = tree(&[lib, (LAYOUT.registry, &registry), (LAYOUT.shards, plan)]);
+            check(&tree, &roots(&[]), &LAYOUT)
+        };
+        let (read, problems) = checked(NO_PARTS);
+        assert_eq!(problems, Problems::new());
+        assert!(
+            read.ends_with("; the shard plan has no entry for target/a"),
+            "{read}"
+        );
+        let entry = |part: &str| {
+            let entry = json!({"part": part, "disk_peak": 1, "seconds": 1.0,
+                "cgroup_memory_peak": 1, "run_id": "1", "commit": "c"});
+            json!({"schema": 1, "parts": [entry]}).to_string()
+        };
+        let (read, problems) = checked(&entry("target/a"));
+        assert_eq!(problems, Problems::new());
+        assert!(!read.contains("shard plan"), "{read}");
+        let problems = Vec::from_iter(checked(&entry("target/x")).1);
+        assert_eq!(
+            problems,
+            [
+                "verification/shards.json: part target/x is neither the qualification nor a registered target"
+            ]
+        );
+        // A plan that is not a tracked file.
+        let mut tree = tree(&[lib, (LAYOUT.registry, &registry)]);
+        tree.insert(LAYOUT.shards, repo::Entry::Submodule);
+        let problems = Vec::from_iter(check(&tree, &roots(&[]), &LAYOUT).1);
+        assert_eq!(problems, ["verification/shards.json is not tracked"]);
     }
 
     #[test]

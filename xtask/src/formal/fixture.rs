@@ -1,11 +1,13 @@
 //! A Git repository that holds the gate inputs in a minimal form, for the
 //! tests of `cargo xtask formal run`: a kernel workspace with one crate and
-//! its `Cargo.lock`, a target registry without targets, the committed
-//! tool manifest with the installation at `artifacts/formal/tools`, which
-//! holds only scripts that start the Cargo and `rustc` of the build, the
-//! fake tools that a test installs and the version manifest of the pinned
-//! image, which a run on the CI host compares with the tool manifest, and a
-//! file for each other gate input.
+//! its `Cargo.lock`, a target registry without targets, an empty shard
+//! plan, a file for each other gate input, and the committed tool manifest
+//! with the installation at `artifacts/formal/tools`, which holds only
+//! scripts that start the Cargo and `rustc` of the build, the fake tools
+//! that a test installs, the version manifest of the pinned image, which a
+//! run on the CI host compares with the tool manifest, and the directories
+//! of the Aeneas Lean library and of Lean, which a run lists before its
+//! first phase and after its last.
 //! Commits have a fixed identity and date, and Git reads no system or global
 //! configuration.
 //!
@@ -72,6 +74,10 @@ impl Fixture {
             "verification/targets.json",
             "{\"schema\": 2, \"specifications\": [], \"targets\": []}\n",
         );
+        fixture.write(
+            "verification/shards.json",
+            "{\"schema\": 1, \"parts\": []}\n",
+        );
         let local = MANIFEST.replace(
             "\"prefix\": \"/opt/krepi-formal\"",
             "\"prefix\": \"artifacts/formal/tools\"",
@@ -94,8 +100,12 @@ impl Fixture {
             fixture.chmod(path, 0o755);
         }
         // Whatever the umask, the installation has no write bit for the
-        // group or others, which a run on the CI host refuses.
+        // group or others, which a run on the CI host refuses. A run lists
+        // the Aeneas Lean library and Lean before its first phase and after
+        // its last.
         fixture.write("artifacts/formal/tools/versions.json", VERSIONS);
+        fixture.write("artifacts/formal/tools/backend/.lake/packages/README", "");
+        fixture.write("artifacts/formal/tools/lean/bin/README", "");
         fixture.chmod("artifacts/formal/tools", 0o755);
         fixture.commit_all();
         fixture
@@ -398,9 +408,8 @@ pub fn failing(module: &str, lines: &[&str], status: i32) -> String {
 
 /// A fixture with the qualification `cases`, not committed: the
 /// qualification crate, the Lake project files, the extraction
-/// configuration, the proof module of `arithmetic`, the Aeneas Lean
-/// library of the installation, the stand-ins, and the shapes and Lake
-/// scripts of the cases above.
+/// configuration, the proof module of `arithmetic`, the stand-ins, and the
+/// shapes and Lake scripts of the cases above.
 pub fn qualification(label: &str, cases: &Value) -> Fixture {
     let fixture = Fixture::new(label);
     let root = fixture.root().to_str().expect("a UTF-8 path").to_string();
@@ -420,8 +429,6 @@ pub fn qualification(label: &str, cases: &Value) -> Fixture {
         "verification/Krepi/Qualification/Arithmetic.lean",
         "module\n",
     );
-    fixture.write("artifacts/formal/tools/backend/.lake/packages/README", "");
-    fixture.write("artifacts/formal/tools/lean/bin/README", "");
     fixture.write(
         "artifacts/formal/tools/lean/bin/leanchecker",
         "leanchecker\n",

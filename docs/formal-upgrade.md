@@ -88,8 +88,8 @@ on the statement side, and needs no label `spec`.
    `VERIFIED`, the `failures` and the logs in `logs/` of the run from the
    receipt ([receipt](formal-verification.md#receipt),
    [results](formal-verification.md#results)), and repair one proof file
-   or one theorem at a time in the stage of the run, as [repairing a
-   proof](#repairing-a-proof) describes.
+   or one theorem at a time in the stage of a local run with `--keep`, as
+   [repairing a proof](#repairing-a-proof) describes.
 7. **Record the cost** of each repair ([repair cost](#repair-cost)).
 
 The upgrade is complete when the gate is `VERIFIED` on the head that
@@ -98,9 +98,10 @@ its cause, and every repair has its cost record.
 
 ## Repairing a proof
 
-- Reproduce the failure in the stage of the run, as [editing
-  proofs](formal-verification.md#editing-proofs) describes, and copy the
-  repair back to the checkout. Only a run of the gate in CI is evidence.
+- Reproduce the failure in the stage of a local run with `--keep`, as
+  [editing proofs](formal-verification.md#editing-proofs) describes, and
+  copy the repair back to the checkout. Only a run of the gate in CI is
+  evidence.
 - Change the proof, not the statement. Never edit generated Lean, weaken a
   statement, add an axiom or register a trusted item without review. A
   repair that needs another statement is a statement change, in a pull
