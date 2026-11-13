@@ -14,8 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use super::Layout;
 use super::guard::{self, State, Statement, Statements};
-use super::lean::{self, Kind, Sources};
+use super::lean::{self, Item, Kind, Sources};
 use super::outcome::{Class, Site, Status};
+use super::paths::Files;
 use super::process::Ran;
 use super::qualify::{self, conclusion, lake};
 use super::registry::{self, declared_axioms};
@@ -116,6 +117,37 @@ fn write(path: &Path, text: &str) -> Result<(), String> {
     fs::write(path, text).map_err(at)
 }
 
+/// The hand-written module files of the Lake project among `tracked`, the
+/// Lean files of the snapshot, as the export `source` holds them, by their
+/// paths in the project: each one below the namespace that is no symbolic
+/// link, names a Lean module and starts with `module`, which the stages of
+/// the base round and of the targets hold. With the problems of the other
+/// Lean files and those of the source rules with the trusted base `tcb`.
+pub fn handwritten(
+    layout: &Layout,
+    source: &Path,
+    tracked: &Files,
+    tcb: &[Item],
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let (mut files, mut problems) = (Vec::new(), Vec::new());
+    let mine = format!("{}/", layout.namespace);
+    for (path, entry) in tracked.iter().filter(|(path, _)| path.ends_with(".lean")) {
+        let file = &path[layout.project.len() + 1..];
+        if entry.mode == "120000" {
+            problems.push(format!("{path} is a symbolic link"));
+            continue;
+        }
+        let text = read(&source.join(path))?;
+        problems.extend(lean::source_problems(path, &text, tcb, layout));
+        let named = qualify::is_module(&file.trim_end_matches(".lean").replace('/', "."));
+        problems.extend((!named).then(|| format!("{path} does not name a Lean module")));
+        if named && guard::header_imports(&lean::tokens(&text)).0 && file.starts_with(&mine) {
+            files.push(file.to_string());
+        }
+    }
+    Ok((files, problems))
+}
+
 /// Runs `request` as a command of `base` whose files `read` reads, unless
 /// `stop` says why it does not start; a command that did not end by itself
 /// stops the later ones.
@@ -178,21 +210,10 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     let (stage, export) = (work.join("stage"), source.join(layout.project));
     let pins = source.join(layout.root_project);
     let project = lean::create_stage(&export, &pins, &stage, &installation.backend())?;
-    let (mut files, mine) = (Vec::new(), format!("{}/", layout.namespace));
-    for (path, entry) in tracked.iter().filter(|(path, _)| path.ends_with(".lean")) {
-        let file = &path[layout.project.len() + 1..];
-        if entry.mode == "120000" {
-            problems.push(format!("{path} is a symbolic link"));
-            continue;
-        }
-        let text = input(path)?;
-        problems.extend(lean::source_problems(path, &text, &sources.tcb, &layout));
-        let named = qualify::is_module(&file.trim_end_matches(".lean").replace('/', "."));
-        problems.extend((!named).then(|| format!("{path} does not name a Lean module")));
-        if named && guard::header_imports(&lean::tokens(&text)).0 && file.starts_with(&mine) {
-            lean::copy_into(&export, &project, file)?;
-            files.push(file.to_string());
-        }
+    let (mut files, found) = handwritten(&layout, &source, &tracked, &sources.tcb)?;
+    problems.extend(found);
+    for file in &files {
+        lean::copy_into(&export, &project, file)?;
     }
     gate.handwritten.clone_from(&files);
     // The generated modules of each proof case whose generated code built,
@@ -461,6 +482,7 @@ mod tests {
     use crate::formal::outcome::{conventions, word};
     use crate::formal::process::LimitBy;
     use crate::formal::run::tests::{Done, gate};
+    use crate::formal::{merge, receipt};
 
     const LAYOUT: Layout = Layout::PRODUCTION;
 
@@ -1821,5 +1843,84 @@ mod tests {
             (Kind::Target, Status::Verified)
         );
         assert_eq!(status(&done, "target/t"), (Status::Verified, None));
+    }
+
+    /// The files below `dir`, by their paths in it, with their contents.
+    fn files(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+        let entries = walkdir::WalkDir::new(dir).sort_by_file_name().into_iter();
+        let entries = entries.map(|entry| entry.expect("an entry of the stage"));
+        let files = entries.filter(|entry| entry.file_type().is_file());
+        let file = |path: &Path| {
+            let bytes = fs::read(path).expect("a file of the stage");
+            (
+                path.strip_prefix(dir)
+                    .expect("below the stage")
+                    .to_path_buf(),
+                bytes,
+            )
+        };
+        files.map(|entry| file(entry.path())).collect()
+    }
+
+    #[test]
+    fn the_shards_list_the_hand_written_modules_as_the_base_round_and_merge_into_the_units_of_a_whole_run()
+     {
+        // A statement proved in the base round, and a formal target whose
+        // theorem depends on an axiom that it trusts.
+        let mut fixture = base("shards");
+        run::tests::root_package(&fixture, "krepi-kernel", "");
+        let theorem = "Krepi.Proofs.Main.m";
+        axioms(&fixture, theorem, "Krepi.Extra.ax");
+        let target = json!({
+            "name": "t", "module": "T", "start_from": ["crate::f"],
+            "proof_modules": ["Krepi.Proofs.Main"],
+            "obligations": [{"id": "m", "theorems": [theorem]}],
+            "trusted_axioms": [{"name": "Krepi.Extra.ax", "reason": "Reviewed."}],
+        });
+        targets(&fixture, &json!([target]));
+        hashed(&mut fixture);
+        let root = fixture.root();
+        let whole = gate(&fixture, &[], run::tests::every_phase(root, &[]));
+        let job = run::tests::shard_phases(root, "qualification");
+        let job = run::tests::gate_shard(&fixture, "qualification", job, run::tests::plenty);
+        let shard = run::tests::shard_phases(root, "target/t");
+        let shard = run::tests::gate_shard(&fixture, "target/t", shard, run::tests::plenty);
+        for done in [&whole, &job, &shard] {
+            let receipt = done.written();
+            let conclusion = (receipt.status, receipt.complete);
+            assert_eq!(
+                conclusion,
+                (Status::Verified, true),
+                "{:?}",
+                done.failures()
+            );
+        }
+        assert!(whole.receipt.units.contains_key(&unit(T)));
+        // The stage of the target holds the same hand-written module files.
+        let stage = |done: &Done| {
+            files(
+                &done
+                    .run
+                    .path
+                    .join("work/targets/t/stage/verification/Krepi"),
+            )
+        };
+        assert!(stage(&shard).contains_key(Path::new("Proofs/Main.lean")));
+        assert_eq!(stage(&shard), stage(&whole));
+        // The receipts of the parts, with the image of a run in CI, merge
+        // into the units of the whole run.
+        let part = |name: &str, done: &Done| {
+            let mut receipt = done.written();
+            let image = format!("ghcr.io/casxi-lab/krepi-formal@sha256:{}", "a".repeat(64));
+            receipt.image.get_or_insert_default().reference = Some(image);
+            let path = format!("artifacts/parts/{name}.json");
+            fixture.write(&path, &receipt::render(&receipt));
+            root.join(path)
+        };
+        let parts = [part("q", &job), part("t", &shard)];
+        let merged = merge::merge(root, &LAYOUT, &parts, Some(Duration::ZERO));
+        assert_eq!(merged.problems, Vec::<String>::new());
+        assert_eq!((merged.status, merged.complete), (Status::Verified, true));
+        assert_eq!(merged.units, whole.receipt.units);
     }
 }
