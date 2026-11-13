@@ -1699,12 +1699,18 @@ mod tests {
         assert_eq!(receipt.status, Status::ToolFailure);
         assert!(!receipt.complete);
         let changed = [fs::canonicalize(fixture.root().join(library)).expect("the library")];
+        // The run finds the change after its last phase too.
         assert_eq!(
             done.failures(),
-            [format!(
-                "the phase base stopped: \
-                 the tool installation changed during the phase; changed paths (1): {changed:?}"
-            )]
+            [
+                format!(
+                    "the phase base stopped: \
+                     the tool installation changed during the phase; changed paths (1): {changed:?}"
+                ),
+                format!(
+                    "the tool installation changed during the run; changed paths (1): {changed:?}"
+                )
+            ]
         );
         assert!(receipt.base.is_some());
     }

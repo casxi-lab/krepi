@@ -1620,7 +1620,12 @@ mod tests {
         let unclean = "the gate inputs are not clean at the start of the run: verification";
         let unclean = receipt(ToolFailure, false, &[], &[(ToolFailure, unclean)]);
         let unverified = receipt(Verified, false, &[], &[]);
+        // A run that the disk guard refused is no verdict on the tools.
+        let refused = "the file system of the run directory had 1 bytes available at the start, less than 1.5 times the disk peak of the parts of the run, 8589934592 bytes";
+        let (refused, units) = ([(Status::NotRun, refused)], [("base", Status::NotRun, "")]);
+        let refused = receipt(Status::NotRun, false, &units, &refused);
         let failed = [
+            gated(Some("1"), &[&refused]),
             gated(Some("1"), &[&unclean]),
             gated(Some("125"), &[&rejected]),
             gated(Some("0"), &[&rejected]),

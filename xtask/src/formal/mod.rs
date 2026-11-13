@@ -16,6 +16,7 @@ mod fixture;
 pub mod guard;
 pub mod inventory;
 pub mod lean;
+pub mod merge;
 pub mod mutants;
 pub mod outcome;
 pub mod paths;
@@ -24,6 +25,7 @@ pub mod qualify;
 pub mod receipt;
 pub mod registry;
 pub mod run;
+pub mod storage;
 pub mod toolchain;
 pub mod vectors;
 
@@ -86,6 +88,8 @@ pub struct Layout {
     pub open: &'static str,
     /// The directory of the lists of survivors of the source mutants.
     pub mutants: &'static str,
+    /// The shard plan, relative to the repository root.
+    pub shards: &'static str,
     /// The tool manifest, relative to the repository root.
     pub toolchain: &'static str,
     /// The pin of the image that the CI jobs run, relative to the
@@ -118,6 +122,7 @@ impl Layout {
         models: "verification/models.json",
         open: "verification/open.json",
         mutants: "verification/mutants",
+        shards: "verification/shards.json",
         toolchain: "verification/toolchain.json",
         image_pin: "verification/image-pin.json",
         tooling: "verification/tooling",
@@ -136,6 +141,7 @@ impl Layout {
         models: "verification/qualification/calibration/models.json",
         open: "",
         mutants: "verification/qualification/calibration/mutants",
+        shards: "verification/qualification/calibration/shards.json",
         ..Layout::PRODUCTION
     };
 }
@@ -144,7 +150,7 @@ impl Layout {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "run",
-        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the named targets, and --calibration runs the calibration target",
+        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the named targets, --calibration runs the calibration target, and --keep keeps the work directory of the run",
         subcommands: &[],
     },
     Command {
@@ -159,12 +165,12 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "check",
-        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, that the target registry and verification/axioms.json keep their rules, with every key of a target in the inventory, that the registries hold nothing that the gate does not support, and that every survivor of the lists of survivors has a class; --write first writes the file, and --calibration checks the calibration target",
+        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, that the target registry and verification/axioms.json keep their rules, with every key of a target in the inventory, that the registries hold nothing that the gate does not support, that every survivor of the lists of survivors has a class, and that the shard plan and the budget of each shard keep their rules; --write first writes the file, and --calibration checks the calibration target",
         subcommands: &[],
     },
     Command {
         name: "mutants",
-        about: "Generate the source mutants of TARGET with every operator, or those that --operator names, run each through the proof gate with the theorems of the target, and write the survivors to the list of survivors of the target; --calibration takes a target of the calibration",
+        about: "Generate the source mutants of TARGET with every operator, or those that --operator names, run each through the proof gate with the theorems of the target, and write the survivors to the list of survivors of the target; --calibration takes a target of the calibration, and --keep keeps the work directory of the run",
         subcommands: &[],
     },
     Command {
@@ -202,6 +208,7 @@ fn cli() -> clap::Command {
                     .action(ArgAction::Append)
                     .value_parser(NonEmptyStringValueParser::new()),
                 clap::arg!(--calibration "Run in the layout of the calibration target"),
+                keep(),
             ]),
         )
         .subcommand(guard::cli(about("guard")))
@@ -212,9 +219,15 @@ fn cli() -> clap::Command {
                 .arg(path("charon")),
         )
         .subcommand(inventory::cli(about("check")))
-        .subcommand(mutants::cli(about("mutants")))
+        .subcommand(mutants::cli(about("mutants")).arg(keep()))
         .subcommand(vectors::cli(about("vectors")))
         .subcommand(canary::cli(about("canary")))
+}
+
+/// The flag of the commands that run the gate, which keeps the work
+/// directory of the run.
+fn keep() -> Arg {
+    clap::arg!(--keep "Keep the work directory of the run, with its export, stages and extractions")
 }
 
 /// The layout that `--calibration` selects.
@@ -241,7 +254,10 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
             }
         };
     match matches.subcommand() {
-        Some(("run", matches)) => run::command(root, layout(matches), targets(matches), None),
+        Some(("run", matches)) => {
+            let keep = matches.get_flag("keep");
+            run::command(root, layout(matches), targets(matches), None, keep)
+        }
         Some(("mutants", matches)) => {
             let target = matches.get_one::<String>("target").cloned().into_iter();
             let operators = Some(mutants::operators(matches));
@@ -250,6 +266,7 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
                 layout(matches),
                 BTreeSet::from_iter(target),
                 operators,
+                matches.get_flag("keep"),
             )
         }
         Some(("guard", matches)) => guard::command(root, &Layout::PRODUCTION, matches),
@@ -292,6 +309,16 @@ mod tests {
             let matches = read(args).expect("a valid command line");
             let (_, matches) = matches.subcommand().expect("a subcommand");
             assert_eq!(matches.get_flag("calibration"), calibration);
+        }
+        for (args, keep) in [
+            (&["run"][..], false),
+            (&["run", "--keep"], true),
+            (&["mutants", "t"], false),
+            (&["mutants", "t", "--keep"], true),
+        ] {
+            let matches = read(args).expect("a valid command line");
+            let (_, matches) = matches.subcommand().expect("a subcommand");
+            assert_eq!(matches.get_flag("keep"), keep, "{args:?}");
         }
         let mut run = cli()
             .find_subcommand("run")
@@ -382,12 +409,13 @@ mod tests {
             &["guard", "a"],
             &["run", "--target"],
             &["run", "--target", ""],
-            &["run", "--keep"],
             &["run", "--targets", "a"],
             &["run", "a"],
             &["toolchain-check", "--aeneas", "a"],
             &["check", "a"],
             &["check", "--frobnicate"],
+            &["check", "--keep"],
+            &["vectors", "--keep"],
             &["vectors", "a", "b"],
             &["mutants"],
             &["mutants", "t", "--operator", "loops"],
@@ -405,6 +433,7 @@ mod tests {
         let help = read(&["run", "--help"]).expect_err("the help");
         assert_eq!(help.exit_code(), 0);
         assert!(help.to_string().contains("--target <NAME>"), "{help}");
+        assert!(help.to_string().contains("--keep"), "{help}");
         let help = read(&["guard", "--help"]).expect_err("the help");
         assert!(help.to_string().contains("--event <PATH>"), "{help}");
         let help = read(&["vectors", "--help"]).expect_err("the help");
@@ -458,6 +487,7 @@ mod tests {
             layout.statements.to_string(),
             layout.axioms.to_string(),
             layout.tcb.to_string(),
+            layout.shards.to_string(),
             format!("{}/LICENSE-Apache-2.0", layout.tooling),
         ]
         .into_iter()
@@ -494,6 +524,7 @@ mod tests {
             layout.tcb,
             layout.registry,
             layout.models,
+            layout.shards,
         ];
         let manifest = format!("{}/Cargo.toml", layout.kernel);
         let lock = format!("{}/Cargo.lock", layout.kernel);

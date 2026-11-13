@@ -57,7 +57,7 @@ const MUTANT: &str = "/mutant/";
 
 /// The file of the list of survivors that a run of `formal mutants` writes
 /// in its work directory, before the receipt is written.
-const DRAFT: &str = "mutants.json";
+pub const DRAFT: &str = "mutants.json";
 
 /// The unit of the registered mutant `mutant` of the target `target`.
 pub fn unit(target: &str, mutant: &str) -> String {
@@ -869,22 +869,22 @@ fn generated(
 }
 
 /// After a run of `formal mutants` of `target` that ended with `code`,
-/// writes its list of survivors from the draft of the run `run`, with the
-/// commit and the receipt summary, as `<mutants>/<target>.json` of `root`,
-/// and prints its counts; a run that is not `SCOPED` or left no draft
-/// writes no list.
+/// writes its list of survivors from `draft`, the draft that the run `run`
+/// read before it removed its work directory, with the commit and the
+/// receipt summary, as `<mutants>/<target>.json` of `root`, and prints its
+/// counts; a run that is not `SCOPED` or left no draft writes no list.
 pub fn write_list(
     root: &Path,
     layout: &Layout,
     target: &str,
+    draft: Option<&str>,
     run: &RunDir,
     receipt: &Receipt,
     code: ExitCode,
 ) -> ExitCode {
-    let draft = fs::read_to_string(run.path.join("work").join(DRAFT));
-    let (true, Ok(Ok(mut list)), Ok(bytes)) = (
+    let (true, Some(Ok(mut list)), Ok(bytes)) = (
         receipt.status == Status::Scoped,
-        draft.map(|t| serde_json::from_str::<List>(&t)),
+        draft.map(serde_json::from_str::<List>),
         fs::read(run.receipt()),
     ) else {
         println!("formal mutants: no list of survivors");
@@ -1008,7 +1008,8 @@ mod tests {
     use crate::formal::fixture::{self, Fixture};
     use crate::formal::process::{Ended, Limit, LimitBy};
     use crate::formal::run::tests::{
-        Done, gate, generating_run, register, target_run, two_targets, with_targets,
+        Done, gate, gate_as, generating_run, plenty, register, target_run, two_targets,
+        with_targets,
     };
 
     const FAILED: &str = include_str!("fixtures/mutants/failed.txt");
@@ -1287,10 +1288,14 @@ mod tests {
     fn a_run_of_source_mutants_writes_the_list_of_its_target() {
         let fixture = with_targets("generated", &two_targets(1_800, 1));
         let operators = Vec::from_iter(OPERATORS.split(' ').map(str::to_string));
-        let done = gate(
+        // The run removes its work directory, as the command does without
+        // `--keep`, after it has read the draft.
+        let done = gate_as(
             &fixture,
             &["t"],
             generating_run(&fixture, &["t"], Some(operators.clone())),
+            false,
+            plenty,
         );
         assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.failures());
         assert_eq!(
@@ -1298,10 +1303,13 @@ mod tests {
             (Status::Verified, None)
         );
         assert!(!done.receipt.units.contains_key("target/t/mutant/m0"));
+        assert!(!done.run.path.join("work").exists());
+        assert!(done.draft.is_some());
         let code = write_list(
             fixture.root(),
             &Layout::PRODUCTION,
             "t",
+            done.draft.as_deref(),
             &done.run,
             &done.receipt,
             done.code,
@@ -1336,6 +1344,7 @@ mod tests {
             fixture.root(),
             &Layout::PRODUCTION,
             "t",
+            done.draft.as_deref(),
             &done.run,
             &done.receipt,
             done.code,
@@ -1356,7 +1365,16 @@ mod tests {
         let path = fixture.root().join(list_path(&Layout::PRODUCTION, "t"));
         let write = |done: &Done, receipt: &Receipt| {
             let (root, layout) = (fixture.root(), &Layout::PRODUCTION);
-            write_list(root, layout, "t", &done.run, receipt, ExitCode::FAILURE)
+            let draft = done.draft.as_deref();
+            write_list(
+                root,
+                layout,
+                "t",
+                draft,
+                &done.run,
+                receipt,
+                ExitCode::FAILURE,
+            )
         };
         // The draft of a verified unit of mutants, in a run that another
         // unit failed.

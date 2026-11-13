@@ -25,6 +25,7 @@ use super::process::Ran;
 use super::receipt::{self, Observed, QualificationCase, QualificationTheorem};
 use super::registry::declared_axioms;
 use super::run::{self, Gate, Phase};
+use super::storage;
 use super::toolchain::environment::Tool;
 use super::toolchain::sha256;
 
@@ -664,6 +665,13 @@ fn qualify_case(gate: &mut Gate, backend: &Path, case: &Case) -> Result<(), Stri
         prove(gate, case, proof, &record, built, &project)?;
     }
     gate.conclude(&unit, conclusion(&record.differences));
+    // What the tools wrote is no longer needed once the case is concluded.
+    if !gate.keep {
+        let written = roots
+            .iter()
+            .flat_map(|(.., dir)| [dir.join("extract.llbc"), dir.join("aeneas")]);
+        storage::remove(&Vec::from_iter(written))?;
+    }
     Ok(())
 }
 
@@ -799,6 +807,7 @@ mod tests {
     //! The fixtures and the stand-ins for the tools are those of
     //! `fixture.rs`.
 
+    use std::cell::RefCell;
     use std::collections::BTreeMap;
     use std::process::ExitCode;
 
@@ -812,7 +821,7 @@ mod tests {
     };
     use crate::formal::outcome::{conventions, word};
     use crate::formal::receipt::Command;
-    use crate::formal::run::tests::{Done, gate};
+    use crate::formal::run::tests::{Done, LONG, gate, gate_as, plenty};
 
     /// Commits what changed in `fixture` and runs its qualification.
     fn run(fixture: &Fixture) -> Done {
@@ -1035,8 +1044,8 @@ mod tests {
                 .is_file()
         );
         assert!(!stage("nested-loop").exists());
-        // Each extraction's Cargo target directory is removed after it, and
-        // what the tools wrote stays.
+        // Each extraction's Cargo target directory is removed after it, and,
+        // as the run keeps its work directory, what the tools wrote stays.
         for case in ["arithmetic", "ill", "nested-loop", "shared-pointers"] {
             assert!(!work.join(case).join("target").exists(), "{case}");
             assert!(work.join(case).join("extract.llbc").is_file(), "{case}");
@@ -1573,12 +1582,18 @@ mod tests {
         )
         .expect("the packages");
         let changed = [packages.join("README")];
+        // The run finds the change after its last phase too.
         assert_eq!(
             done.failures(),
-            [format!(
-                "the phase qualification stopped: \
-                 the tool installation changed during the phase; changed paths (1): {changed:?}"
-            )]
+            [
+                format!(
+                    "the phase qualification stopped: \
+                     the tool installation changed during the phase; changed paths (1): {changed:?}"
+                ),
+                format!(
+                    "the tool installation changed during the run; changed paths (1): {changed:?}"
+                )
+            ]
         );
     }
 
@@ -1987,9 +2002,10 @@ mod tests {
         assert_eq!(done.receipt.inputs.clean_after, Some(true));
     }
 
-    #[test]
-    fn the_parts_of_a_case_are_imported_together() {
-        let parts = json!({
+    /// The case `parts`, of two parts that the module of the case imports
+    /// together, which is ill-typed.
+    fn parts() -> Value {
+        json!({
             "name": "parts", "module": "Qual.Parts", "start_from": [],
             "parts": [
                 {"module": "Qual.Parts.A", "start_from": ["crate::parts::a"]},
@@ -1997,16 +2013,26 @@ mod tests {
             ],
             "expect": "ill-typed", "type_errors_in": "Check.lean",
             "diagnostics": [], "external_functions": [], "external_types": [],
-        });
-        let fixture = qualification("parts", &json!([parts]));
+        })
+    }
+
+    /// Makes the build of the module of [`parts`] in `fixture` fail as the
+    /// pinned Lean fails on two parts that declare the same instance.
+    fn parts_fail(fixture: &Fixture) {
         let error = "error: KrepiGen/Qual/Parts/Check.lean:1:0: import KrepiGen.Qual.Parts.B.Types \
             failed, environment already contains 'instDiscriminantErrorIsize' from \
             KrepiGen.Qual.Parts.A.Types";
         lake_script(
-            &fixture,
+            fixture,
             "KrepiGen.Qual.Parts.Check",
             &failing("KrepiGen.Qual.Parts.Check", &[error], 1),
         );
+    }
+
+    #[test]
+    fn the_parts_of_a_case_are_imported_together() {
+        let fixture = qualification("parts", &json!([parts()]));
+        parts_fail(&fixture);
         let done = run(&fixture);
         assert_eq!(
             status(&done, "qualification/parts"),
@@ -2028,6 +2054,8 @@ mod tests {
             build.argv.last().map(String::as_str),
             Some("KrepiGen.Qual.Parts.Check")
         );
+        // The run keeps its work directory, so the LLBC file of each part
+        // stays.
         let work = done.run.path.join("work/cases/parts");
         for part in ["0", "1"] {
             assert!(
@@ -2061,6 +2089,56 @@ mod tests {
                 in_file: 1,
             })
         );
+    }
+
+    #[test]
+    fn a_case_extraction_is_removed_once_its_case_is_concluded_unless_the_run_keeps_it() {
+        let cases = json!([arithmetic(), nested_loop(), ill(), parts()]);
+        let fixture = qualification("case-removed", &cases);
+        parts_fail(&fixture);
+        fixture.commit_all();
+        for keep in [false, true] {
+            // A phase after the qualification looks at what the cases left.
+            let seen = RefCell::new(Vec::new());
+            let look = run::tests::phase("look", LONG, &[], |gate| {
+                *seen.borrow_mut() = files_below(&gate.work().join("cases"));
+                Ok(())
+            });
+            let phases = vec![phase(fixture.root(), &Layout::PRODUCTION), look];
+            let done = gate_as(&fixture, &[], phases, keep, plenty);
+            assert_eq!(
+                done.receipt.status,
+                Status::Verified,
+                "{:?}",
+                done.failures()
+            );
+            let seen = seen.into_inner();
+            for case in ["arithmetic", "ill", "parts"] {
+                let stage = format!("{case}/stage/verification/");
+                assert!(seen.iter().any(|file| file.starts_with(&stage)), "{seen:?}");
+            }
+            let work = done.run.path.join("work");
+            if !keep {
+                // Only the stages stay until the end of the run, the parts
+                // of a case included.
+                let outside = Vec::from_iter(seen.iter().filter(|f| !f.contains("/stage/")));
+                assert_eq!(outside, Vec::<&String>::new());
+                assert!(!work.exists());
+                continue;
+            }
+            for file in [
+                "arithmetic/extract.llbc",
+                "nested-loop/extract.llbc",
+                "nested-loop/aeneas/translation.json",
+                "parts/parts/0/extract.llbc",
+                "parts/parts/1/extract.llbc",
+            ] {
+                assert!(seen.iter().any(|seen| seen == file), "{file}: {seen:?}");
+                assert!(work.join("cases").join(file).is_file(), "{file}");
+            }
+            let aeneas = |file: &String| file.starts_with("parts/parts/0/aeneas/");
+            assert!(seen.iter().any(aeneas), "{seen:?}");
+        }
     }
 
     #[test]

@@ -11,6 +11,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::Layout;
@@ -23,7 +24,7 @@ use super::receipt::{self, Budgets, Failure, Mode, Receipt, Trigger};
 use super::registry::{self, State, Target};
 use super::toolchain::environment::{self, Installation, RunDirs, Tool};
 use super::toolchain::{self, Manifest};
-use super::{base, classify, externals, extract, guard, mutants, qualify};
+use super::{base, classify, externals, extract, guard, mutants, qualify, storage};
 use crate::manifests;
 use crate::repo::{self, Entry, Tree};
 
@@ -126,6 +127,12 @@ pub(crate) struct Context<'a> {
     pub var: &'a dyn Fn(&str) -> Option<String>,
     /// The budget of the run when it does not grow by those of its targets.
     pub budget: Option<Duration>,
+    /// Whether the run keeps its work directory, which it otherwise removes
+    /// at its end.
+    pub keep: bool,
+    /// Reads the bytes available on the file system of a path:
+    /// [`process::disk_available`], or a reading that a test gives.
+    pub free: fn(&Path) -> Option<u64>,
 }
 
 /// A command, with the environment of `tool` and its input from `stdin`.
@@ -164,6 +171,8 @@ pub struct Gate {
     /// The hand-written module files of the Lake project, which the base
     /// round finds and the stages of the targets hold too.
     pub(super) handwritten: Vec<String>,
+    /// Whether the run keeps its work directory and what it extracted.
+    pub(super) keep: bool,
     progress: Box<dyn Write>,
     /// The site, limit and program that a test gives the commands there.
     #[cfg(test)]
@@ -250,9 +259,6 @@ impl Gate {
                 reason: Some(reason.clone()),
             },
         };
-        let disk = process::disk_available(&self.run.path);
-        let least = &mut self.receipt.resources.disk_least_available;
-        *least = disk.into_iter().chain(*least).min();
         let ran = ran.ok();
         let done = ran.as_ref();
         let mut argv = vec![request.program.to_string()];
@@ -444,14 +450,16 @@ fn caught<T>(f: impl FnOnce() -> T) -> Result<T, String> {
 
 /// Runs the gate on `context.root` into `run` for `targets`, or the whole
 /// gate when there are none, and returns its receipt, which holds every
-/// failure. A panic in a step of the gate ends the run as a tool failure.
+/// failure, and the draft of the list of survivors of a run of `formal
+/// mutants`, read before the work directory is removed. A panic in a step
+/// of the gate ends the run as a tool failure.
 pub(crate) fn execute(
     context: &Context,
     run: &RunDir,
     targets: &BTreeSet<String>,
     phases: Vec<Phase<'_>>,
     progress: Box<dyn Write>,
-) -> Receipt {
+) -> (Receipt, Option<String>) {
     let start = Instant::now();
     let directory = relative(context.root, &run.path);
     let mut gate = Gate {
@@ -468,13 +476,21 @@ pub(crate) fn execute(
         budgets: BTreeMap::new(),
         inventory: None,
         handwritten: Vec::new(),
+        keep: context.keep,
         progress,
         #[cfg(test)]
         overrides: None,
     };
     let resources = &mut gate.receipt.resources;
-    resources.disk_available_at_start = process::disk_available(&run.path);
+    resources.disk_available_at_start = (context.free)(&run.path);
     resources.disk_least_available = resources.disk_available_at_start;
+    // A thread reads the free space until the second snapshot is taken.
+    let (stop, stopped) = mpsc::channel::<()>();
+    let sampler = storage::sample(run.path.clone(), context.free, storage::SAMPLE, stopped);
+    if let Err(error) = &sampler {
+        let error = format!("cannot start the reading of the free space: {error}");
+        gate.fail(Status::ToolFailure, error);
+    }
     let inputs = paths::gate_inputs(context.layout);
     let mut phases = Some(phases);
     let steps = caught(|| {
@@ -485,7 +501,28 @@ pub(crate) fn execute(
         if let Err(error) = checked {
             gate.fail(Status::ToolFailure, error);
         }
+        if gate.receipt.failures.is_empty()
+            && let Err(error) = disk_guard(&mut gate)
+        {
+            gate.fail(Status::ToolFailure, error);
+        }
+        // No command may write the library or Lean, from the first phase to the last.
+        let listing = (gate.receipt.failures.is_empty()).then(|| backend_listing(&gate, None));
+        if let Some(Err(error)) = &listing {
+            let error = format!("cannot list the installation before the first phase: {error}");
+            gate.fail(Status::ToolFailure, error);
+        }
         run_phases(&mut gate, phases.take().unwrap_or_default());
+        if let Some(Ok(before)) = &listing
+            && let Err(error) = backend_listing(&gate, Some(before))
+        {
+            let changed = "the tool installation changed during the ";
+            let error = match error.strip_prefix(&format!("{changed}phase")) {
+                Some(rest) => format!("{changed}run{rest}"),
+                None => format!("cannot list the installation after the last phase: {error}"),
+            };
+            gate.fail(Status::ToolFailure, error);
+        }
         // The closing steps have the margin beyond the gate's budget.
         gate.deadline += RECEIPT_MARGIN;
         if let Ok((_, before)) = started
@@ -501,6 +538,30 @@ pub(crate) fn execute(
             run_phases(&mut gate, phases);
         }
     }
+    drop(stop);
+    let joined = sampler.map(|thread| thread.join());
+    if let Ok(Err(_)) = &joined {
+        let panicked = "the reading of the free space panicked";
+        gate.fail(Status::ToolFailure, panicked.to_string());
+    }
+    let least = joined.ok().and_then(Result::ok).flatten();
+    let resources = &mut gate.receipt.resources;
+    resources.disk_least_available = least
+        .into_iter()
+        .chain(resources.disk_least_available)
+        .min();
+    let draft = fs::read_to_string(gate.work().join(mutants::DRAFT)).ok();
+    // A stop signal before the removal ends the run with its work directory.
+    process::stop_if_asked();
+    if !context.keep {
+        if let Err(error) = storage::remove(&[gate.work()]) {
+            gate.fail(Status::ToolFailure, error);
+        } else if Instant::now() > gate.deadline {
+            let late =
+                "the removal of the work directory ended after the deadline of the closing steps";
+            gate.fail(Status::ToolFailure, late.to_string());
+        }
+    }
     let mut receipt = gate.receipt;
     mutants::seconds(&mut receipt);
     receipt.resources.largest_process_max_rss = process::largest_child_rss();
@@ -512,10 +573,14 @@ pub(crate) fn execute(
     let complete = !scoped
         && failures.clone().all(|status| status == Status::Stale)
         && (units.clone()).all(|status| !matches!(status, Status::NotRun | Status::Budget));
-    let status = outcome::run_status(&failures.chain(units).collect::<Vec<_>>(), scoped);
+    // A run that the disk guard refused is NOT_RUN, whatever else it found.
+    let status = match failures.clone().any(|status| status == Status::NotRun) {
+        true => Status::NotRun,
+        false => outcome::run_status(&failures.chain(units).collect::<Vec<_>>(), scoped),
+    };
     (receipt.complete, receipt.status) = (complete, status);
     receipt.seconds = receipt::seconds(start.elapsed());
-    receipt
+    (receipt, draft)
 }
 
 /// Checks the host, reads the tool manifest and takes the snapshot of the
@@ -603,6 +668,37 @@ fn export_and_check(
         gate.fail(Status::Rejected, problem);
     }
     check_kernel(gate, &source, &files, extracts)
+}
+
+/// Refuses the run, with a failure `NOT_RUN`, when the file system of its
+/// directory had less free at its start than 1.5 times the disk peak that
+/// the shard plan of the export gives its parts: the qualification and the
+/// unit of each target that it selects.
+fn disk_guard(gate: &mut Gate) -> Result<(), String> {
+    let path = gate.layout.shards;
+    let plan = fs::read_to_string(gate.source().join(path))
+        .map_err(|error| error.to_string())
+        .and_then(|text| storage::parse(&text))
+        .map_err(|error| format!("cannot read {path}: {error}"))?;
+    let free = (gate.receipt.resources.disk_available_at_start)
+        .ok_or("the bytes available on the file system of the run directory cannot be read")?;
+    let parts = [qualify::PHASE.to_string()].into_iter();
+    let parts = Vec::from_iter(parts.chain(gate.budgets.keys().cloned()));
+    if let Some(refusal) = storage::refusal(&plan, &parts, free) {
+        gate.fail(Status::NotRun, refusal);
+    }
+    Ok(())
+}
+
+/// The listing of the Aeneas Lean library of the installation, with its
+/// packages, and of Lean, which no command may write; with `before`, it
+/// fails when they differ.
+fn backend_listing(gate: &Gate, before: Option<&lean::Listing>) -> Result<lean::Listing, String> {
+    let installation = gate.installation()?;
+    lean::listing(
+        &[installation.backend(), installation.lean_bin().join("..")],
+        before,
+    )
 }
 
 /// The targets that a run of `named` targets selects: those, or every
@@ -1047,12 +1143,14 @@ pub(crate) fn finish(
 }
 
 /// Entry point of `cargo xtask formal run`, and of `cargo xtask formal
-/// mutants` for the source mutants of `generate`.
+/// mutants` for the source mutants of `generate`; `keep` keeps the work
+/// directory of the run.
 pub fn command(
     root: &Path,
     layout: &Layout,
     targets: BTreeSet<String>,
     generate: Option<Vec<String>>,
+    keep: bool,
 ) -> ExitCode {
     process::init();
     let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
@@ -1063,10 +1161,12 @@ pub fn command(
         uid: process::effective_uid(),
         var: &var,
         budget: generate.as_ref().map(|_| mutants::RUN_BUDGET),
+        keep,
+        free: process::disk_available,
     };
     let lists = generate.as_ref().and_then(|_| targets.first().cloned());
     let run = RunDir::create(root);
-    let receipt = match &run {
+    let (receipt, draft) = match &run {
         Ok(run) => {
             let mut phases = Vec::from_iter(guard::phase(&var));
             let [extraction, finish] = target_phases(root, layout, &targets, generate);
@@ -1079,7 +1179,7 @@ pub fn command(
             let message = format!("cannot create a run directory below {RUNS}: {error}");
             let status = Status::ToolFailure;
             receipt.failures.push(Failure { status, message });
-            receipt
+            (receipt, None)
         }
     };
     // A stop signal after the last command ends the run without a receipt.
@@ -1087,15 +1187,25 @@ pub fn command(
     let (stdout, stderr) = (&mut io::stdout(), &mut io::stderr());
     let code = finish(&receipt, run.as_ref().ok(), stdout, stderr);
     match (lists, run) {
-        (Some(target), Ok(run)) => mutants::write_list(root, layout, &target, &run, &receipt, code),
+        (Some(target), Ok(run)) => mutants::write_list(
+            root,
+            layout,
+            &target,
+            draft.as_deref(),
+            &run,
+            &receipt,
+            code,
+        ),
         _ => code,
     }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::ExitStatusExt;
     use std::process::{Command, Stdio};
+    use std::sync::atomic::AtomicU64;
 
     use super::*;
     use crate::formal::fixture::{self, Fixture};
@@ -1134,6 +1244,9 @@ pub(crate) mod tests {
         pub(crate) receipt: Receipt,
         pub(crate) code: ExitCode,
         pub(crate) run: RunDir,
+        /// The draft of the list of survivors that the run read before it
+        /// removed its work directory.
+        pub(crate) draft: Option<String>,
         stdout: String,
         stderr: String,
     }
@@ -1169,18 +1282,11 @@ pub(crate) mod tests {
         }
     }
 
-    /// Runs the gate on `fixture` into a new run directory, for `targets`.
+    /// Runs the gate on `fixture` into a new run directory, for `targets`,
+    /// keeping its work directory, which the tests read, with [`plenty`]
+    /// free.
     pub(crate) fn gate(fixture: &Fixture, targets: &[&str], phases: Vec<Phase<'_>>) -> Done {
-        let run = RunDir::create(fixture.root()).expect("create the run directory");
-        let targets = targets.iter().map(|name| name.to_string()).collect();
-        gate_in(
-            fixture.root(),
-            run,
-            &targets,
-            phases,
-            test_host(),
-            Box::new(io::sink()),
-        )
+        gate_as(fixture, targets, phases, true, plenty)
     }
 
     /// The host of the run: this one, or one of the manifest elsewhere.
@@ -1188,8 +1294,39 @@ pub(crate) mod tests {
         host().or(Some("linux-aarch64"))
     }
 
+    /// Runs the gate on `fixture` into a new run directory, for `targets`,
+    /// with the free-space reading `free`, keeping its work directory only
+    /// when `keep`, as the command does with and without `--keep`.
+    pub(crate) fn gate_as(
+        fixture: &Fixture,
+        targets: &[&str],
+        phases: Vec<Phase<'_>>,
+        keep: bool,
+        free: fn(&Path) -> Option<u64>,
+    ) -> Done {
+        let run = RunDir::create(fixture.root()).expect("create the run directory");
+        let targets = targets.iter().map(|name| name.to_string()).collect();
+        let context = Context {
+            root: fixture.root(),
+            layout: &Layout::PRODUCTION,
+            host: test_host(),
+            uid: other_uid(),
+            var: &|_| None,
+            budget: None,
+            keep,
+            free,
+        };
+        gate_with(&context, run, &targets, phases, Box::new(io::sink()))
+    }
+
+    /// A reading of the free space that the disk guard of no test refuses.
+    pub(crate) fn plenty(_: &Path) -> Option<u64> {
+        Some(1 << 50)
+    }
+
     /// Runs the gate on the fixture at `root` into `run` on `host`, without
-    /// printing its commands, and writes its receipt.
+    /// printing its commands, and writes its receipt, keeping its work
+    /// directory, which the tests read, and with [`plenty`] free.
     pub(crate) fn gate_in(
         root: &Path,
         run: RunDir,
@@ -1205,6 +1342,8 @@ pub(crate) mod tests {
             uid: other_uid(),
             var: &|_| None,
             budget: None,
+            keep: true,
+            free: plenty,
         };
         gate_with(&context, run, targets, phases, progress)
     }
@@ -1223,13 +1362,14 @@ pub(crate) mod tests {
         phases: Vec<Phase<'_>>,
         progress: Box<dyn Write>,
     ) -> Done {
-        let receipt = execute(context, &run, targets, phases, progress);
+        let (receipt, draft) = execute(context, &run, targets, phases, progress);
         let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
         let code = finish(&receipt, Some(&run), &mut stdout, &mut stderr);
         Done {
             receipt,
             code,
             run,
+            draft,
             stdout: String::from_utf8(stdout).expect("UTF-8"),
             stderr: String::from_utf8(stderr).expect("UTF-8"),
         }
@@ -1608,6 +1748,9 @@ pub(crate) mod tests {
         assert!(formal.typed && formal.problems.is_empty());
         assert_eq!(done.receipt.budgets.gate_seconds, 7_200 + 1_800);
         assert_eq!(done.receipt.phases["extraction"].budget_seconds, 1_800);
+        // The Cargo target directory of the extraction is removed after it.
+        assert!(done.run.path.join("work/targets/t/extract").is_dir());
+        assert!(!done.run.path.join("work/targets/t/extract/target").exists());
         // A run of the planned target concludes it as scoped, and extracts
         // the formal one for the base round alone, as commands of `base`.
         let done = gate(&fixture, &["p"], target_run(&fixture, &["p"]));
@@ -1627,6 +1770,52 @@ pub(crate) mod tests {
         assert_eq!(base, [Site::Charon, Site::Aeneas, Site::TargetBuild]);
         assert_eq!(done.receipt.budgets.gate_seconds, 7_200 + 1_800);
         assert_eq!(done.receipt.phases["extraction"].budget_seconds, 2 * 1_800);
+    }
+
+    #[test]
+    fn a_mutant_stage_holds_nothing_that_its_target_stage_wrote_and_the_backend_is_unchanged() {
+        let fixture = with_targets("isolation", &two_targets(1_800, 1));
+        // The build of the proofs writes a file into the stage of the
+        // target, and records it when it finds one in the stage of a mutant,
+        // where it then fails in the theorem that the mutant names.
+        let failed = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
+        let failing = fixture::failing("Krepi.Proofs.T", &[failed], 1);
+        let script = format!(
+            "case $PWD in\n  */mutants/*) if [ -e leaked ]; then : > \"$lake/leaked\"; fi\n\
+             {failing};;\n  *) echo target > leaked ;;\nesac\n"
+        );
+        fixture::lake_script(&fixture, "+Krepi", &script);
+        let tools = fixture.root().join("artifacts/formal/tools");
+        let roots = [tools.join("backend"), tools.join("lean")];
+        let before = lean::listing(&roots, None).expect("a listing");
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        assert_eq!(fixture::status(&done, "target/t"), (Status::Verified, None));
+        let mutant = (Status::Verified, None);
+        assert_eq!(fixture::status(&done, "target/t/mutant/m0"), mutant);
+        // The proofs of the target are built before its mutant.
+        let target = fixture::commands(&done, "target/t").into_iter();
+        let target = target
+            .filter(|c| c.site == Site::TargetBuild)
+            .map(|c| c.sequence);
+        let mutant = fixture::commands(&done, "target/t/mutant/m0").into_iter();
+        let (target, mutant) = (target.max(), mutant.map(|c| c.sequence).min());
+        assert!(target.is_some() && target < mutant, "{target:?} {mutant:?}");
+        // The file is in the stage of the target and was not in that of
+        // the mutant.
+        let work = done.run.path.join("work/targets/t");
+        assert!(work.join("stage/verification/leaked").is_file());
+        assert!(work.join("mutants/m0/stage/verification").is_dir());
+        assert!(!fixture.root().join("artifacts/lake/leaked").exists());
+        // The listing of the backend and Lean is unchanged, after each
+        // phase and over the run.
+        assert_eq!(done.receipt.failures, []);
+        assert_eq!(lean::listing(&roots, Some(&before)), Ok(before.clone()));
     }
 
     #[test]
@@ -2573,6 +2762,294 @@ pub(crate) mod tests {
         assert!(!done.run.source().join("README.md").exists());
     }
 
+    /// The refusal of the disk guard of a run that had `free` bytes and
+    /// needed 1.5 times `peak`.
+    fn refusal(free: u64, peak: u64) -> String {
+        format!(
+            "the file system of the run directory had {free} bytes available at the start, less than 1.5 times the disk peak of the parts of the run, {peak} bytes"
+        )
+    }
+
+    /// An entry of a shard plan for `part`, with `peak`.
+    fn shard_entry(part: &str, peak: u64) -> serde_json::Value {
+        serde_json::json!({"part": part, "disk_peak": peak, "seconds": 1.0,
+            "cgroup_memory_peak": 1, "run_id": "1", "commit": "c"})
+    }
+
+    #[test]
+    fn free_space_below_one_and_a_half_times_the_disk_peak_runs_no_phase_and_is_not_run() {
+        let fixture = Fixture::new("disk-guard");
+        let plan =
+            |parts: serde_json::Value| serde_json::json!({"schema": 1, "parts": parts}).to_string();
+        let entry = shard_entry("qualification", 1_000);
+        fixture.write(
+            "verification/shards.json",
+            &plan(serde_json::json!([entry])),
+        );
+        fixture.commit_all();
+        let phases = || {
+            let concludes = |name: &str, unit: &'static str| {
+                phase(name, LONG, &[unit], move |run| {
+                    run.conclude(unit, (Status::Verified, None));
+                    Ok(())
+                })
+            };
+            vec![concludes("first", "u1"), concludes("second", "u2")]
+        };
+        let done = gate_as(&fixture, &[], phases(), true, |_| Some(1_499));
+        assert_eq!(done.code, ExitCode::FAILURE);
+        let receipt = done.written();
+        assert_eq!(receipt, done.receipt);
+        assert_eq!(receipt.status, Status::NotRun);
+        assert!(!receipt.complete);
+        assert_eq!(done.failures(), [refusal(1_499, 1_000)]);
+        assert_eq!(receipt.failures[0].status, Status::NotRun);
+        assert!(
+            done.stderr.starts_with("NOT_RUN: the file system"),
+            "{}",
+            done.stderr
+        );
+        // No phase runs, and every unit is NOT_RUN.
+        assert_eq!(Vec::from_iter(receipt.phases.keys()), ["first", "second"]);
+        assert!(receipt.phases.values().all(|phase| !phase.ran));
+        assert_eq!(Vec::from_iter(receipt.units.keys()), ["u1", "u2"]);
+        assert!(receipt.units.values().all(|u| u.status == Status::NotRun));
+        let sites = done.sites();
+        assert!(
+            sites
+                .iter()
+                .all(|s| matches!(s, Site::Git | Site::CargoMetadata))
+        );
+        // With 1.5 times the peak free, the run starts.
+        let done = gate_as(&fixture, &[], phases(), true, |_| Some(1_500));
+        assert_eq!(
+            done.written().status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        assert!(done.receipt.complete);
+        // A part without an entry counts 8 GiB, which needs 12 GiB free.
+        fixture.write("verification/shards.json", &plan(serde_json::json!([])));
+        fixture.commit_all();
+        let done = gate_as(&fixture, &[], phases(), true, |_| Some((12 << 30) - 1));
+        assert_eq!(done.written().status, Status::NotRun);
+        assert_eq!(done.failures(), [refusal((12 << 30) - 1, 8 << 30)]);
+        let done = gate_as(&fixture, &[], phases(), true, |_| Some(12 << 30));
+        assert_eq!(
+            done.written().status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+    }
+
+    #[test]
+    fn the_disk_guard_counts_the_qualification_and_each_target_that_the_run_selects() {
+        let fixture = with_targets("disk-guard-targets", &two_targets(1_800, 1));
+        let parts = [
+            shard_entry("qualification", 1_000),
+            shard_entry("target/t", 2_000),
+            shard_entry("target/p", 1 << 40),
+        ];
+        let plan = serde_json::json!({"schema": 1, "parts": parts}).to_string();
+        fixture.write("verification/shards.json", &plan);
+        fixture.commit_all();
+        // A whole run selects the formal target, not the planned one.
+        let whole = target_run(&fixture, &[]);
+        let done = gate_as(&fixture, &[], whole, true, |_| Some(4_499));
+        assert_eq!(done.written().status, Status::NotRun);
+        assert_eq!(done.failures(), [refusal(4_499, 3_000)]);
+        assert!(done.receipt.phases.values().all(|phase| !phase.ran));
+        let units = done.receipt.units.iter();
+        assert!(units.clone().any(|(unit, _)| unit == "target/t"));
+        assert!(units.clone().all(|(_, unit)| unit.status == Status::NotRun));
+        // A run of the planned target counts it.
+        let named = target_run(&fixture, &["p"]);
+        let done = gate_as(&fixture, &["p"], named, true, |_| Some(4_499));
+        assert_eq!(done.written().status, Status::NotRun);
+        assert_eq!(done.failures(), [refusal(4_499, 1_000 + (1 << 40))]);
+        assert!(done.receipt.phases.values().all(|phase| !phase.ran));
+    }
+
+    #[test]
+    fn the_receipt_keeps_the_least_reading_of_the_free_space_during_the_run() {
+        // The reading of the start is the first; the thread reads less.
+        fn falling(_: &Path) -> Option<u64> {
+            static READS: AtomicU64 = AtomicU64::new(0);
+            match READS.fetch_add(1, Ordering::SeqCst) {
+                0 => Some(1 << 50),
+                _ => Some(1 << 49),
+            }
+        }
+        fn panicking(_: &Path) -> Option<u64> {
+            static READS: AtomicU64 = AtomicU64::new(0);
+            match READS.fetch_add(1, Ordering::SeqCst) {
+                0 => Some(1 << 50),
+                _ => panic!("a reading of the free space that panics"),
+            }
+        }
+        let fixture = Fixture::new("sampled");
+        let done = gate_as(&fixture, &[], verified(), true, falling);
+        assert_eq!(
+            done.written().status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        let resources = &done.receipt.resources;
+        assert_eq!(resources.disk_available_at_start, Some(1 << 50));
+        assert_eq!(resources.disk_least_available, Some(1 << 49));
+        // A thread whose reading panics fails the run, which keeps the
+        // reading of the start.
+        let done = gate_as(&fixture, &[], verified(), true, panicking);
+        assert_eq!(done.written().status, Status::ToolFailure);
+        assert_eq!(done.failures(), ["the reading of the free space panicked"]);
+        assert_eq!(done.receipt.resources.disk_least_available, Some(1 << 50));
+        assert_eq!(fixture::status(&done, "base"), (Status::Verified, None));
+    }
+
+    #[test]
+    fn an_unreadable_free_space_or_shard_plan_is_a_tool_failure_before_the_phases() {
+        let fixture = Fixture::new("unreadable");
+        let done = gate_as(&fixture, &[], verified(), true, |_| None);
+        assert_eq!(done.written().status, Status::ToolFailure);
+        assert_eq!(
+            done.failures(),
+            ["the bytes available on the file system of the run directory cannot be read"]
+        );
+        assert!(!done.receipt.phases["base"].ran);
+        assert_eq!(done.receipt.resources.disk_least_available, None);
+        fixture.write("verification/shards.json", "{");
+        fixture.commit_all();
+        let done = gate_as(&fixture, &[], verified(), true, plenty);
+        assert_eq!(done.written().status, Status::ToolFailure);
+        assert_eq!(done.failures().len(), 1);
+        let start = "cannot read verification/shards.json: not a shard plan: ";
+        assert!(
+            done.has_failure(Status::ToolFailure, start),
+            "{:?}",
+            done.failures()
+        );
+        assert!(!done.receipt.phases["base"].ran);
+    }
+
+    #[test]
+    fn the_work_directory_is_removed_at_the_end_unless_the_run_keeps_it() {
+        let fixture = Fixture::new("removed");
+        let backend = fixture.root().join("artifacts/formal/tools/backend");
+        let at = |error: io::Error| error.to_string();
+        for keep in [false, true] {
+            // The phase writes a file and links to the backend in `work/`.
+            let link = backend.clone();
+            let phases = vec![phase("base", LONG, &["base"], move |run| {
+                fs::write(run.work().join("made"), "made").map_err(at)?;
+                std::os::unix::fs::symlink(&link, run.work().join("backend")).map_err(at)?;
+                run.conclude("base", (Status::Verified, None));
+                Ok(())
+            })];
+            let done = gate_as(&fixture, &[], phases, keep, plenty);
+            assert_eq!(
+                done.written().status,
+                Status::Verified,
+                "{:?}",
+                done.failures()
+            );
+            assert!(done.receipt.complete);
+            assert!(done.run.path.join("logs").is_dir());
+            assert_eq!(done.run.path.join("work/made").is_file(), keep, "{keep}");
+            assert_eq!(done.run.path.join("work").exists(), keep, "{keep}");
+            // The link was removed, not followed.
+            assert!(backend.join(".lake/packages/README").is_file());
+        }
+        // A work directory that cannot be removed fails the run.
+        let phases = vec![phase("base", LONG, &["base"], |run| {
+            let locked = run.work().join("locked");
+            fs::create_dir(&locked).map_err(at)?;
+            fs::write(locked.join("file"), "file").map_err(at)?;
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o500)).map_err(at)?;
+            run.conclude("base", (Status::Verified, None));
+            Ok(())
+        })];
+        let done = gate_as(&fixture, &[], phases, false, plenty);
+        let work = done.run.path.join("work");
+        fs::set_permissions(work.join("locked"), fs::Permissions::from_mode(0o755))
+            .expect("let the fixture be removed");
+        let receipt = done.written();
+        assert_eq!(receipt.status, Status::ToolFailure);
+        assert!(!receipt.complete);
+        assert_eq!(done.failures().len(), 1, "{:?}", done.failures());
+        let start = format!("cannot remove {}: ", work.display());
+        assert!(
+            done.has_failure(Status::ToolFailure, &start),
+            "{:?}",
+            done.failures()
+        );
+        // So does a removal that ends after the deadline of the closing
+        // steps, which the second snapshot, with no time left, misses too.
+        let phases = vec![phase("base", LONG, &["base"], |run| {
+            let now = Instant::now();
+            run.deadline = now
+                .checked_sub(RECEIPT_MARGIN)
+                .expect("a time before the margin");
+            run.conclude("base", (Status::Verified, None));
+            Ok(())
+        })];
+        let done = gate_as(&fixture, &[], phases, false, plenty);
+        assert_eq!(done.written().status, Status::ToolFailure);
+        let late =
+            "the removal of the work directory ended after the deadline of the closing steps";
+        let failures = done.failures();
+        assert_eq!(failures.len(), 2, "{failures:?}");
+        let snapshot = "cannot take the snapshot of the gate inputs at the end: ";
+        assert!(failures[0].starts_with(snapshot), "{failures:?}");
+        assert_eq!(failures[1], late);
+        assert!(!done.run.path.join("work").exists());
+    }
+
+    #[test]
+    fn a_tool_that_writes_the_installation_in_the_phases_of_the_targets_fails_the_run() {
+        let fixture = with_targets("backend-run", &two_targets(1_800, 1));
+        // The type check of the generated definitions of the target writes
+        // through the link of its stage.
+        let write = "echo written >> ../artifacts/formal/lake/aeneas/.lake/packages/README";
+        fixture::lake_script(&fixture, "KrepiGen.T.Funs", write);
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(done.written().status, Status::ToolFailure);
+        assert!(!done.receipt.complete);
+        let packages = fixture
+            .root()
+            .join("artifacts/formal/tools/backend/.lake/packages");
+        let changed = [fs::canonicalize(packages)
+            .expect("the packages")
+            .join("README")];
+        assert_eq!(
+            done.failures(),
+            [format!(
+                "the tool installation changed during the run; changed paths (1): {changed:?}"
+            )]
+        );
+        // The phases of the targets have no listing of their own.
+        assert_eq!(fixture::status(&done, "target/t"), (Status::Verified, None));
+        // A listing that cannot be taken after the last phase fails the run.
+        let fixture = Fixture::new("backend-gone");
+        let backend = fixture.root().join("artifacts/formal/tools/backend");
+        let phases = vec![phase("base", LONG, &["base"], move |run| {
+            fs::remove_dir_all(&backend).map_err(|error| error.to_string())?;
+            run.conclude("base", (Status::Verified, None));
+            Ok(())
+        })];
+        let done = gate(&fixture, &[], phases);
+        assert_eq!(done.written().status, Status::ToolFailure);
+        assert_eq!(done.failures().len(), 1, "{:?}", done.failures());
+        let start = "cannot list the installation after the last phase: ";
+        assert!(
+            done.has_failure(Status::ToolFailure, start),
+            "{:?}",
+            done.failures()
+        );
+    }
+
     #[test]
     fn a_dirty_checkout_stops_the_run_with_a_receipt() {
         let fixture = Fixture::new("dirty");
@@ -2640,6 +3117,8 @@ pub(crate) mod tests {
             uid,
             var: &var,
             budget: None,
+            keep: true,
+            free: plenty,
         };
         let run = RunDir::create(fixture.root()).expect("create the run directory");
         let phases = vec![phase("checks", LONG, &["u1"], |run| {
