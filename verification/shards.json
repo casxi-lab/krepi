@@ -1,4 +1,13 @@
 {
   "schema": 1,
-  "parts": []
+  "parts": [
+    {
+      "part": "qualification",
+      "disk_peak": 458510336,
+      "seconds": 1078.872,
+      "cgroup_memory_peak": 10429386752,
+      "run_id": "43479078171",
+      "commit": "7e291ff0e7e67d36b71c5a37d15f482f8bbe5602"
+    }
+  ]
 }
