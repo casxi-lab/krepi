@@ -513,6 +513,14 @@ fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
             assert_eq!(job_limit(&limits, name), limit, "{name}");
         }
     }
+    // The committed file runs the gate as parts: the shards take their
+    // limits from the matrix, and the merge has a limit of its own.
+    let committed = limits(&committed).expect("the workflow reads");
+    let shard = ("formal shard ${{ matrix.name }}".to_string(), None);
+    assert!(committed.contains(&shard));
+    for (name, limit) in [("formal shard t", None), ("formal merge", Some(15))] {
+        assert_eq!(job_limit(&committed, name), limit, "{name}");
+    }
     let limit = |limits: &[(&str, Option<u64>)], name: &str| {
         let limits: Vec<(String, Option<u64>)> = (limits.iter())
             .map(|(display, limit)| (display.to_string(), *limit))

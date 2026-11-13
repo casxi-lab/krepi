@@ -202,8 +202,9 @@ so a fresh clone and a working copy with build output give the same result;
 Cargo, in the command steps and in the resolutions of `manifests` and
 `subset`, reads the working copy, and in the builds of the compile-fail
 cases a copy of its tracked files. The check does not run the proof gate,
-`cargo xtask formal run`, which needs the pinned tools; CI runs the gate in
-the job `formal run` of `.github/workflows/formal.yml`, described below.
+`cargo xtask formal run`, which needs the pinned tools; CI runs the gate as
+its parts and their merge in the jobs of `.github/workflows/formal.yml`,
+described below.
 The `fmt` step formats every module, and the `clippy` step lints the
 kernel workspace for the bare-metal target `aarch64-unknown-none-softfloat`
 as well as for the host, so it also lints the modules that are compiled only
@@ -308,7 +309,12 @@ of workflows that the record workflow follows, to a retention by the rule
 below for every upload step of every workflow, against a table of those
 steps, to downloads that take the name of their
 artifact from an output of the job that uploaded it, so that a rerun of
-the downloading job alone still finds the artifact, and to main commands
+the downloading job alone still finds the artifact, to uploads of
+receipts, summaries, records of the run and the logs packed into
+`logs.tar.gz` in the jobs of the gate of the two formal workflows, to a
+download of the parts of their run by the pattern of their names in their
+merge jobs, to the steps of those of `formal` in the shard and merge jobs
+of the calibration, and to main commands
 that run under that script as the last command of their step, at a
 deadline one or two minutes before the limit of their job. Where GNU `env`
 and GNU `timeout` are on the path, as on the runners, a unit test also
@@ -324,7 +330,10 @@ and the publication of the proof-tool image, may write 90; a workflow that
 runs on pull requests only, such as the build of that image, may write 30;
 and the record workflow keeps a record as long as the run that it records.
 The artifacts hold receipts, records, summaries and logs, which the zip of
-the artifact compresses, and the images that the QEMU suites boot.
+the artifact compresses, and the images that the QEMU suites boot. The
+jobs of the gate of the two formal workflows pack the logs of a run into
+`logs.tar.gz` and upload none uncompressed; the measurement jobs of the
+formal workflow and the formal canary upload theirs as they are.
 
 The lines use two caches, which only the workflow `cache` (`cache.yml`)
 saves, from `main`. The cargo cache holds `~/.cargo/registry/index/`,
@@ -826,7 +835,8 @@ Charon trees that they write as Git repositories, with stand-ins for the
 downloads, hand-written build logs in the plain form of BuildKit and
 receipts of the gate; one reads the workflow and keeps its steps copied
 from the image workflows and from the job of the gate equal to their
-sources.
+sources, but for the command line of the gate, which runs the whole gate
+there and the qualification part in `formal`.
 
 `cargo xtask formal run` runs the proof gate on a snapshot of the gate
 inputs and writes a receipt of the run below `artifacts/formal/runs/`
@@ -837,15 +847,20 @@ the guard on a pull request; with `--calibration`, the same phases on the
 calibration target; with `--shard`, only the qualification job or the
 shard of one formal target
 ([shards and merge](../formal-verification.md#shards-and-merge)). It is not
-part of the check: CI runs it in the pinned proof-tool image as the job
-`formal run` of `.github/workflows/formal.yml`, on a
-GitHub-hosted `ubuntu-24.04-arm` runner, on every push to `main` and on
-every pull request to `main`, also when its labels or description change.
-The job is not required, and it uploads the receipt and the logs of the run
-as the artifact `formal-receipt-<commit>-<attempt>`. Beside it, the job
-`formal planned` runs the command with `--target` on the planned targets of
-the registry, and the job `formal limits` before both computes their limits
-from the registered budgets. The same workflow has
+part of the check: CI runs it in the pinned proof-tool image with
+`--shard qualification` as the job `formal run` of
+`.github/workflows/formal.yml`, and with `--shard target/<name>` as a job
+`formal shard <name>` for each formal target, on a GitHub-hosted
+`ubuntu-24.04-arm` runner, on every push to `main` and on every pull
+request to `main`, also when its labels or description change. The jobs
+are not required; each uploads its receipt, its summary and its logs
+packed into `logs.tar.gz` as the artifact
+`formal-part-qualification-<commit>-<attempt>` or
+`formal-part-target-<name>-<commit>-<attempt>`, and the job `formal merge`
+merges them. Beside them, the job `formal planned` runs the command with
+`--target` on the planned targets of the registry, and the job
+`formal limits` before them computes their limits and the shards from the
+registered budgets. The same workflow has
 measurement jobs, `leanchecker` in two modes and `lake comparator`, which
 run on a manual run of the workflow and on a pull request with the label
 `formal-measure` ([CI job](../formal-verification.md#ci-job)). Its unit
@@ -933,7 +948,10 @@ of the qualification job and of the shard of each formal target of the
 commit checked out into the conclusion of the whole gate, and writes its
 record and summary below `artifacts/formal/merge/`
 ([shards and merge](../formal-verification.md#shards-and-merge)). It runs
-no proof tool, is not part of the check, and no workflow runs it yet. Its
+no proof tool and is not part of the check: the job `formal merge` of
+`.github/workflows/formal.yml` and the job `calibration merge` of the
+workflow `formal calibration` run it on the runner with the receipts of
+the parts of their run. Its
 unit tests run in the `test` step above, on the Git repositories of the
 tests of `cargo xtask formal run` with receipts that the tests write, and
 on the receipts of runs of the qualification job and of the shard of a
@@ -943,12 +961,18 @@ The workflow `formal calibration`, `.github/workflows/formal-calibration.yml`,
 runs the gate on the calibration target in the pinned proof-tool image
 once a week, on a manual run and on a pull request with the label
 `formal-calibration`: `cargo xtask formal check --calibration` and
-`cargo xtask formal run --calibration`, the planned target of the
-calibration alone, and, on a manual run that asks for it and on a pull
-request with the label, `cargo xtask formal mutants calibration
---calibration` ([calibration target](../formal-verification.md#calibration-target)).
+`cargo xtask formal run --calibration --shard qualification` in the job
+`calibration run`, the shard of each formal target of the calibration with
+`--shard target/<name>` in a job `calibration shard <name>`, their merge
+with `cargo xtask formal merge --calibration` in the job
+`calibration merge`, the planned target of the calibration alone, and, on
+a manual run that asks for it and on a pull request with the label,
+`cargo xtask formal mutants calibration --calibration`
+([calibration target](../formal-verification.md#calibration-target)).
 It is not required. A unit test keeps its limits equal to the deadlines
-of its gates and receipts.
+of its gates and receipts, its shards equal to the formal targets of the
+calibration registry, and the steps of its shard and merge jobs equal to
+those of `formal`.
 
 `cargo xtask formal vectors [DOMAIN/COMPONENT]` replays the frozen test
 vectors of a component through its specification with the pinned Lean and
@@ -1173,7 +1197,7 @@ to an exact version in the manifest of the crate that uses it:
 | `xtask/Cargo.toml` | `tar` without default features | MIT OR Apache-2.0 | Unpacking the tar archive of the gate inputs that `git archive` writes for `cargo xtask formal run` and `cargo xtask formal mutants` |
 | `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `suites.toml`, `toolchains.toml`, `rust-toolchain.toml`, Charon's `rust-toolchain`, `verification/extraction.toml`, the compile-fail cases of the `subset` step, the `vectors` blocks of the contracts, and Charon's `charon/Cargo.toml` and the channel manifest of a nightly that `cargo xtask formal canary` reads |
 | `xtask/Cargo.toml` | `walkdir` | MIT OR Unlicense | The listing of the tool installation that `cargo xtask formal run` takes at the start and at the end of a phase and of the run, without following symbolic links, and the copy of the package of a target for each of its mutants |
-| `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step, and the YAML loader with which that step reads the actions that the steps of a workflow use, `cargo xtask run-record` reads the limits of the jobs of a workflow and the unit tests of the check read the committed workflows |
+| `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step, and the YAML loader with which that step reads the actions that the steps of a workflow use, `cargo xtask run-record` reads the limits of the jobs of a workflow and the unit tests of the check read the committed workflows, and the YAML emitter with which a unit test of the check compares the steps of the shard and merge jobs of the two formal workflows |
 
 No test has a development dependency yet. Development dependencies are added
 only when a test category needs them, are pinned to an exact version and are

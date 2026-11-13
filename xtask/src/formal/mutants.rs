@@ -1660,32 +1660,108 @@ mod tests { fn t() { let _ = 1 + 1; } }
 
     #[test]
     fn the_limits_of_the_workflows_cover_the_deadlines_of_their_gates_and_receipts() {
-        use crate::formal::run::{GATE_BUDGET, RECEIPT_MARGIN};
-        use yaml_rust2::YamlLoader;
+        use crate::formal::merge::{self, EXTRACTION_MARGIN, SHARD_LIMIT, SHARD_MARGIN, WORKERS};
+        use crate::formal::run::{GATE_BUDGET, RECEIPT_MARGIN, target_unit};
+        use yaml_rust2::{Yaml, YamlLoader};
         let minutes = |seconds: u64| seconds.div_ceil(60);
         let (gate, margin) = (GATE_BUDGET.as_secs(), RECEIPT_MARGIN.as_secs());
-        // `formal.yml` computes them from these two numbers.
+        let (extraction, shard_margin) = (EXTRACTION_MARGIN.as_secs(), SHARD_MARGIN.as_secs());
+        // `formal.yml` computes them from these numbers, which are those of
+        // xtask.
         let formal = include_str!("../../../.github/workflows/formal.yml");
-        assert!(
-            formal.contains(&format!("gate_budget={gate}\n"))
-                && formal.contains(&format!("receipt_margin={margin}\n"))
+        for (name, value) in [
+            ("gate_budget", gate),
+            ("extraction_margin", extraction),
+            ("shard_margin", shard_margin),
+            ("receipt_margin", margin),
+            ("shard_limit", SHARD_LIMIT.as_secs()),
+            ("workers", WORKERS),
+        ] {
+            let line = format!("{name}={value}\n");
+            assert!(formal.contains(&line), "{line}");
+        }
+        // With these lines, which give the qualification job 136 and 205
+        // minutes whatever the registry, and a shard the minutes of its
+        // budget and margins, as `merge::shards` and `merge::budget_problems`
+        // group and check them.
+        let default = format!(
+            "[.targets[] | select((.state // \"formal\") == \"formal\") | {{name, budget: (.budget // {})}}]",
+            registry::BUDGET
         );
-        // With these lines, which give 126 and 195 minutes without a formal
-        // target, and room for 9,900 s of formal budgets in a job of 360.
         for line in [
             r#"jq -e 'all(.targets[]; .name | test("^[a-z0-9][a-z0-9-]*$"))' "$registry" > /dev/null"#,
             "minutes() { echo $(( (gate_budget + $1 + receipt_margin + 59) / 60 )); }",
+            r#"gate=$(minutes "$extraction_margin")"#,
+            r#"planned=$(minutes "$(budgets planned)")"#,
+            r#"shards=$(jq -c --argjson margin "$((shard_margin + receipt_margin))" '"#,
+            default.as_str(),
+            "| group_by(.name) | map({name: .[0].name, budget: (map(.budget) | add)})",
+            r"| map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 3)' \",
+            r#"over=$(jq -r --argjson limit "$shard_limit" --argjson workers "$workers" \"#,
+            r#"'[.[] | select((.budget + $workers - 1) / $workers | floor > $limit) | .name] | join(" ")' <<< "$shards")"#,
             r#"echo "gate=$((gate + 1))""#,
             r#"echo "job=$((15 + 55 + gate))""#,
+            r#"echo "shards=$shards""#,
             r#"echo "planned-gate=$((planned + 2))""#,
             r#"echo "planned-job=$((15 + planned + 2 + 3))""#,
             "if [ $((15 + 55 + gate)) -gt 360 ] || [ $((15 + planned + 2 + 3)) -gt 360 ]; then",
         ] {
-            assert!(formal.contains(&format!("{line}\n")), "{line}");
+            assert!(formal.lines().any(|l| l.trim_start() == line), "{line}");
         }
-        let job = |budgets: u64| 15 + 55 + minutes(gate + budgets + margin);
-        assert_eq!((minutes(gate + margin) + 1, job(0)), (126, 195));
-        assert!(job(9_900) <= 360 && job(9_901) > 360);
+        let qualification = minutes(gate + extraction + margin);
+        assert_eq!((qualification + 1, 15 + 55 + qualification), (136, 205));
+        let shard = |budget: u64| {
+            let step = minutes(shard_margin + budget + margin) + 2;
+            (step, 15 + step + 3)
+        };
+        assert_eq!(shard(SHARD_LIMIT.as_secs()), (67, 85));
+        assert_eq!(shard(1_800), (42, 60));
+        // The shard limit keeps every shard within a job of the hosted
+        // runners.
+        assert!(shard(SHARD_LIMIT.as_secs()).1 <= 360);
+        // The jobs take these limits from the job `formal limits`.
+        let document = YamlLoader::load_from_str(formal).expect("YAML").remove(0);
+        let jobs = &document["jobs"];
+        let find_step = |job: &Yaml, key: &str, value: &str| {
+            let steps = job["steps"].as_vec().expect("steps");
+            let found = steps.iter().find(|s| s[key].as_str() == Some(value));
+            found.cloned().expect(value)
+        };
+        let gate_job = &jobs["gate"];
+        assert_eq!(
+            gate_job["timeout-minutes"].as_str(),
+            Some("${{ fromJSON(needs.limits.outputs.job) }}")
+        );
+        assert_eq!(
+            find_step(gate_job, "name", "Run the gate in the image")["timeout-minutes"].as_str(),
+            Some("${{ fromJSON(needs.limits.outputs.gate) }}")
+        );
+        assert_eq!(
+            jobs["limits"]["outputs"]["shards"].as_str(),
+            Some("${{ steps.limits.outputs.shards }}")
+        );
+        let shard_job = &jobs["shard"];
+        assert_eq!(
+            shard_job["if"].as_str(),
+            Some("needs.limits.outputs.shards != '[]'")
+        );
+        assert_eq!(
+            shard_job["strategy"]["matrix"]["include"].as_str(),
+            Some("${{ fromJSON(needs.limits.outputs.shards) }}")
+        );
+        assert_eq!(shard_job["strategy"]["fail-fast"].as_bool(), Some(false));
+        assert_eq!(
+            shard_job["timeout-minutes"].as_str(),
+            Some("${{ matrix.job }}")
+        );
+        let run = find_step(shard_job, "id", "shard");
+        assert_eq!(run["timeout-minutes"].as_str(), Some("${{ matrix.step }}"));
+        let script = run["run"].as_str().expect("the script");
+        assert!(script.contains("limit=$(( (STEP - 2) * 60 ))s"), "{script}");
+        assert!(
+            script.contains(r#"deadline.sh --stop-commands "$limit" 1m"#),
+            "{script}"
+        );
         // `formal-calibration.yml` writes them for the registry of the
         // calibration.
         let text = include_str!("../../../.github/workflows/formal-calibration.yml");
@@ -1704,11 +1780,18 @@ mod tests { fn t() { let _ = 1 + 1; } }
             .as_vec()
             .expect("the matrix")
             .clone();
-        for (row, budget) in rows.iter().zip([
-            budget(registry::State::Formal),
-            budget(registry::State::Planned),
-        ]) {
-            let deadline = minutes(gate + budget + margin);
+        let keys = Vec::from_iter(rows.iter().map(|row| row["key"].as_str()));
+        assert_eq!(keys, [Some("run"), Some("planned")]);
+        assert_eq!(rows[0]["args"].as_str(), Some("--shard qualification"));
+        assert_eq!(
+            rows[1]["args"].as_str(),
+            Some("--target calibration-planned")
+        );
+        for (row, seconds) in rows
+            .iter()
+            .zip([gate + extraction, gate + budget(registry::State::Planned)])
+        {
+            let deadline = minutes(seconds + margin);
             assert_eq!(
                 row["deadline"].as_str(),
                 Some(format!("{deadline}m").as_str())
@@ -1720,6 +1803,28 @@ mod tests { fn t() { let _ = 1 + 1; } }
                     .is_some_and(|job| job >= deadline as i64 + 2 + 20)
             );
         }
+        // One shard for each formal target of the calibration, with its
+        // budget and the limits that `formal limits` would give it.
+        let shards = document["jobs"]["shard"]["strategy"]["matrix"]["include"]
+            .as_vec()
+            .expect("the shards");
+        let row_budget = |row: &Yaml| row["budget"].as_i64().and_then(|b| u64::try_from(b).ok());
+        let written = BTreeMap::from_iter(shards.iter().map(|row| {
+            let name = row["name"].as_str().expect("a name");
+            (target_unit(name), row_budget(row).expect("a budget"))
+        }));
+        assert_eq!(written, merge::shards(&registry.targets));
+        assert_eq!(Vec::from_iter(written.keys()), ["target/calibration"]);
+        for row in shards {
+            let (step, job) = shard(row_budget(row).expect("a budget"));
+            let limits = (row["step"].as_i64(), row["job"].as_i64());
+            assert_eq!(limits, (Some(step as i64), Some(job as i64)), "{row:?}");
+        }
+        assert_eq!(shard(written["target/calibration"]), (62, 80));
+        assert_eq!(
+            merge::budget_problems(&registry.targets),
+            Vec::<String>::new()
+        );
         let deadline = minutes(RUN_BUDGET.as_secs() + margin);
         assert!(text.contains(&format!("deadline.sh --stop-commands {deadline}m 1m")));
         let job = &document["jobs"]["mutants"];

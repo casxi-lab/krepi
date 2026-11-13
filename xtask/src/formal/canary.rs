@@ -1866,9 +1866,23 @@ mod tests {
         let tee = ["2>&1 | tee artifacts/canary/toolchain-check.txt"];
         assert_eq!(step(CANARY, check, &tee), step(BUILD, check, &[]));
         let gate = "Run the gate in the image";
-        let status = ["echo \"$status\" > artifacts/canary/gate-status"];
-        let image = ["--env KREPI_FORMAL_IMAGE=\"$IMAGE\" \\"];
-        assert_eq!(step(CANARY, gate, &status), step(FORMAL, gate, &image));
+        let status = "echo \"$status\" > artifacts/canary/gate-status";
+        let image = "--env KREPI_FORMAL_IMAGE=\"$IMAGE\" \\";
+        // The command line alone differs: the canary runs the whole gate,
+        // the job of `formal` the qualification part.
+        let xtask = "\"$IMAGE\" \"$GITHUB_WORKSPACE/xtask/target/debug/xtask\" formal run";
+        let (whole, part) = (
+            format!("{xtask} || status=$?"),
+            format!("{xtask} --shard qualification || status=$?"),
+        );
+        let has = |workflow, line: &str| {
+            let lines = step(workflow, gate, &[]);
+            lines.iter().any(|l| l.trim_start() == line)
+        };
+        assert!(has(CANARY, &whole) && has(FORMAL, &part));
+        let formal = step(FORMAL, gate, &[image]).into_iter();
+        let formal = Vec::from_iter(formal.map(|line| line.replace(&part, &whole)));
+        assert_eq!(step(CANARY, gate, &[status]), formal);
         let build = |workflow: &'static str| {
             let start = workflow
                 .find("docker build --progress=plain")
