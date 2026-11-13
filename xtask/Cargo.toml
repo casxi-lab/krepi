@@ -21,8 +21,9 @@ krepi-tools = { path = "../tools" }
 # `cargo xtask suite`, `cargo xtask run-record`,
 # `cargo xtask release-assets`, `cargo xtask usage`, `cargo xtask formal run`,
 # `cargo xtask formal guard`, `cargo xtask formal toolchain-check`,
-# `cargo xtask formal check`, `cargo xtask formal vectors` and
-# `cargo xtask formal canary`, with their help, usage and error texts, as
+# `cargo xtask formal check`, `cargo xtask formal vectors`,
+# `cargo xtask formal canary` and `cargo xtask formal merge`, with their
+# help, usage and error texts, as
 # the host tooling crate reads its command lines. They are defined with the
 # builder, so the derive macros are left out. Their texts are plain and do
 # not depend on the terminal, so colour and wrapping to the terminal width
@@ -50,7 +51,8 @@ libc = { version = "=0.2.191", default-features = false }
 # receipt, `cargo xtask usage` reads the data of a month and writes its
 # summary,
 # the receipt of `cargo xtask formal run` is written, and
-# read back by its tests, through the derive macros of `serde`, the
+# read back by its tests and by `cargo xtask formal merge`, which writes its
+# record, through the derive macros of `serde`, the
 # manifests and subset steps, `cargo xtask formal run` and
 # `cargo xtask formal check` read the output of `cargo metadata`, the
 # qualification cases, the statement, axiom, trusted-base and model
@@ -73,12 +75,12 @@ serde_json = { version = "=1.0.154", default-features = false, features = ["pres
 # are read into types that derive `Deserialize`, the records of the steps of
 # `cargo xtask formal canary` are written and read through such types, and
 # the receipt of `cargo xtask formal run`, whose paths are strings, is
-# written through types that derive `Serialize` and, for its tests and for
-# the canary, `Deserialize`, and so is the record of the images of
-# `cargo xtask image`; `cargo xtask suite` reads `suites.toml` and
-# `cargo xtask run-record` a run with its jobs and
-# `cargo xtask release-assets` a run and `cargo xtask usage` the data of a
-# month into such types. So only the
+# written through types that derive `Serialize` and, for its tests, the
+# canary and `cargo xtask formal merge`, `Deserialize`, and so are the
+# record of a merge and the record of the images of `cargo xtask image`;
+# `cargo xtask suite` reads `suites.toml` and `cargo xtask run-record` a run
+# with its jobs and `cargo xtask release-assets` a run and
+# `cargo xtask usage` the data of a month into such types. So only the
 # derive macros and the allocation support for strings, vectors and maps
 # are needed.
 serde = { version = "=1.0.229", default-features = false, features = ["alloc", "derive"] }
@@ -108,8 +110,9 @@ proc-macro2 = { version = "=1.0.107", default-features = false, features = ["spa
 signal-hook = { version = "=0.4.6", default-features = false }
 # The SHA-256 of files that `cargo xtask image`,
 # `cargo xtask formal toolchain-check`, `cargo xtask formal run`,
-# `cargo xtask formal vectors` and `cargo xtask formal canary` read into
-# memory, among them the images of the first, which `cargo xtask suite`
+# `cargo xtask formal vectors`, `cargo xtask formal canary` and
+# `cargo xtask formal merge` read into memory, among them the images of the
+# first, which `cargo xtask suite`
 # checks before it boots them and `cargo xtask release-assets` before it
 # writes their digests into `SHA256SUMS`, the output files of their
 # commands, the Lean files that Aeneas writes, the `versions.json`

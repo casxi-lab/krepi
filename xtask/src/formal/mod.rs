@@ -150,7 +150,7 @@ impl Layout {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "run",
-        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the named targets, --calibration runs the calibration target, and --keep keeps the work directory of the run",
+        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the named targets, --shard NAME only the qualification job, qualification, or the shard of a formal target, target/<name>, --calibration runs the calibration target, and --keep keeps the work directory of the run",
         subcommands: &[],
     },
     Command {
@@ -171,6 +171,11 @@ pub const COMMANDS: &[Command] = &[
     Command {
         name: "mutants",
         about: "Generate the source mutants of TARGET with every operator, or those that --operator names, run each through the proof gate with the theorems of the target, and write the survivors to the list of survivors of the target; --calibration takes a target of the calibration, and --keep keeps the work directory of the run",
+        subcommands: &[],
+    },
+    Command {
+        name: "merge",
+        about: "Merge RECEIPT..., the receipts of the qualification job and of the shard of each formal target of the commit checked out, into the conclusion of the whole gate, and write its record and summary; --calibration merges those of the calibration target",
         subcommands: &[],
     },
     Command {
@@ -207,6 +212,12 @@ fn cli() -> clap::Command {
                     .help("Run only this target; may be repeated")
                     .action(ArgAction::Append)
                     .value_parser(NonEmptyStringValueParser::new()),
+                Arg::new("shard")
+                    .long("shard")
+                    .value_name("NAME")
+                    .help("Run only the qualification job, qualification, or the shard of a formal target, target/<name>")
+                    .conflicts_with("target")
+                    .value_parser(merge::shard),
                 clap::arg!(--calibration "Run in the layout of the calibration target"),
                 keep(),
             ]),
@@ -220,6 +231,7 @@ fn cli() -> clap::Command {
         )
         .subcommand(inventory::cli(about("check")))
         .subcommand(mutants::cli(about("mutants")).arg(keep()))
+        .subcommand(merge::cli(about("merge")))
         .subcommand(vectors::cli(about("vectors")))
         .subcommand(canary::cli(about("canary")))
 }
@@ -235,10 +247,12 @@ fn layout(matches: &ArgMatches) -> &'static Layout {
     [&Layout::PRODUCTION, &Layout::CALIBRATION][usize::from(matches.get_flag("calibration"))]
 }
 
-/// The targets that `cargo xtask formal run` was given.
+/// The targets that `cargo xtask formal run` was given, or that of its shard.
 fn targets(matches: &ArgMatches) -> BTreeSet<String> {
     let targets = matches.get_many::<String>("target").into_iter().flatten();
-    targets.cloned().collect()
+    let shard = matches.get_one::<String>("shard");
+    let shard = shard.and_then(|shard| merge::target(shard));
+    targets.cloned().chain(shard.map(String::from)).collect()
 }
 
 /// Entry point of `cargo xtask formal`, with the arguments that follow
@@ -255,8 +269,9 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
         };
     match matches.subcommand() {
         Some(("run", matches)) => {
-            let keep = matches.get_flag("keep");
-            run::command(root, layout(matches), targets(matches), None, keep)
+            let (keep, shard) = (matches.get_flag("keep"), matches.get_one::<String>("shard"));
+            let shard = shard.map(String::as_str);
+            run::command(root, layout(matches), targets(matches), None, keep, shard)
         }
         Some(("mutants", matches)) => {
             let target = matches.get_one::<String>("target").cloned().into_iter();
@@ -267,8 +282,10 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
                 BTreeSet::from_iter(target),
                 operators,
                 matches.get_flag("keep"),
+                None,
             )
         }
+        Some(("merge", matches)) => merge::command(root, layout(matches), matches),
         Some(("guard", matches)) => guard::command(root, &Layout::PRODUCTION, matches),
         Some(("toolchain-check", matches)) => {
             let path = |name| matches.get_one::<PathBuf>(name).expect("a required option");
@@ -402,6 +419,50 @@ mod tests {
             (name, text("step"), text("outcomes")),
             ("canary", Some("verdict"), Some("runner=success"))
         );
+        // A shard names its targets: none for the qualification job.
+        let shard = |args: &[&str]| {
+            let matches = read(args).expect("a valid command line");
+            let (_, matches) = matches.subcommand().expect("a subcommand");
+            let shard = matches.get_one::<String>("shard").cloned();
+            (shard, targets(matches), matches.get_flag("keep"))
+        };
+        let qualification = Some("qualification".to_string());
+        assert_eq!(
+            shard(&["run", "--shard", "qualification"]),
+            (qualification, BTreeSet::new(), false)
+        );
+        let args = ["run", "--shard", "target/t", "--calibration", "--keep"];
+        let t = BTreeSet::from(["t".to_string()]);
+        assert_eq!(shard(&args), (Some("target/t".to_string()), t, true));
+        let matches = read(&["merge", "a.json", "b.json", "--calibration"]);
+        let matches = matches.expect("a valid command line");
+        let (name, matches) = matches.subcommand().expect("a subcommand");
+        let receipts = matches
+            .get_many::<PathBuf>("RECEIPT")
+            .expect("the receipts");
+        let receipts = Vec::from_iter(receipts.cloned());
+        assert_eq!(name, "merge");
+        assert_eq!(receipts, [PathBuf::from("a.json"), PathBuf::from("b.json")]);
+        assert!(matches.get_flag("calibration"));
+        for args in [
+            &["run", "--shard"][..],
+            &["run", "--shard", "base"],
+            &["run", "--shard", "target/"],
+            &["run", "--shard", "targets/t"],
+            &["run", "--shard", "qualification", "--target", "t"],
+            &["run", "--target", "t", "--shard", "target/t"],
+            &["run", "--shard", "qualification", "--shard", "target/t"],
+            &["merge"],
+            &["merge", "--keep"],
+            &["merge", "--frobnicate"],
+        ] {
+            let error = read(args).expect_err("a usage error");
+            assert_eq!(error.exit_code(), 2, "{args:?}: {error}");
+        }
+        let help = read(&["merge", "--help"]).expect_err("the help");
+        assert!(help.to_string().contains("<RECEIPT>..."), "{help}");
+        let help = read(&["run", "--help"]).expect_err("the help");
+        assert!(help.to_string().contains("--shard <NAME>"), "{help}");
         for args in [
             &["guard"][..],
             &["guard", "--event"],

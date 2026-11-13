@@ -1,5 +1,6 @@
-//! The receipt of `cargo xtask formal run`, schema 4, as "Receipt" in
-//! `docs/formal-verification.md` documents it.
+//! The receipt of `cargo xtask formal run`, schema 5, and the record of
+//! `cargo xtask formal merge`, as "Receipt" and "Shards and merge" in
+//! `docs/formal-verification.md` document them.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -12,7 +13,7 @@ use super::process::LimitBy;
 use super::qualify::Expect;
 use super::registry::State;
 
-pub const SCHEMA: u32 = 4;
+pub const SCHEMA: u32 = 5;
 
 pub const COMMAND: &str = "cargo xtask formal run";
 
@@ -25,6 +26,7 @@ pub struct Receipt {
     pub complete: bool,
     pub trigger: Trigger,
     pub targets: Vec<String>,
+    pub shard: Option<String>,
     pub host: Option<String>,
     pub image: Option<Image>,
     pub run: String,
@@ -220,14 +222,52 @@ pub struct Failure {
     pub message: String,
 }
 
+/// The schema of the record of `cargo xtask formal merge`.
+pub const MERGE_SCHEMA: u32 = 1;
+
+/// The record of a merge; its fields are written in this order.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Merge {
+    pub schema: u32,
+    pub status: Status,
+    pub complete: bool,
+    pub commit: Option<String>,
+    pub tree: Option<String>,
+    pub image: Option<String>,
+    pub parts: Vec<Part>,
+    pub units: BTreeMap<String, Unit>,
+    pub slowest_part_seconds: f64,
+    pub merge_seconds: f64,
+    pub merge_from: String,
+    pub wall_clock_seconds: f64,
+    pub over_80_percent: bool,
+    pub problems: Vec<String>,
+}
+
+/// A receipt that a merge was given, by its path: the SHA-256 of the file
+/// and, when it parses, its shard, the run and attempt of its job, whether a
+/// later attempt supersedes it, its status, completeness and seconds.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Part {
+    pub receipt: String,
+    pub sha256: Option<String>,
+    pub shard: Option<String>,
+    pub run_id: Option<String>,
+    pub attempt: Option<String>,
+    pub superseded: bool,
+    pub status: Option<Status>,
+    pub complete: bool,
+    pub seconds: f64,
+}
+
 /// `duration` in seconds, rounded to milliseconds, as the receipt writes
 /// times so that it reads back as it was written.
 pub fn seconds(duration: Duration) -> f64 {
     (duration.as_secs_f64() * 1_000.0).round() / 1_000.0
 }
 
-/// The text of `receipt`, with a final line break.
-pub fn render(receipt: &Receipt) -> String {
+/// The text of `receipt` or of a merge record, with a final line break.
+pub fn render<T: Serialize>(receipt: &T) -> String {
     let text = serde_json::to_string_pretty(receipt);
     text.expect("a receipt has string keys and finite numbers") + "\n"
 }
@@ -331,6 +371,7 @@ mod tests {
                 attempt: Some("2".to_string()),
             },
             targets: vec!["alpha".to_string(), "demo".to_string()],
+            shard: Some("target/demo".to_string()),
             host: Some("linux-aarch64".to_string()),
             image: Some(Image {
                 reference: Some(format!("ghcr.io/o/r@sha256:{}", "9".repeat(64))),
@@ -609,6 +650,7 @@ mod tests {
             "\"writable\": true",
             "\"versions\": \"{\\n  \\\"schema\\\": 1\\n}\\n\"",
             "\"cgroup_memory_peak\": 9000000000",
+            "\"shard\": \"target/demo\"",
         ] {
             assert!(text.contains(word), "{word} is not in {text}");
         }
@@ -632,6 +674,7 @@ mod tests {
                 attempt: None,
             },
             targets: Vec::new(),
+            shard: None,
             host: Some("darwin-arm64".to_string()),
             image: None,
             run: "1700000000-42".to_string(),
@@ -713,7 +756,7 @@ mod tests {
         let e = "e".repeat(64);
         let expected = format!(
             r#"{{
-  "schema": 4,
+  "schema": 5,
   "command": "cargo xtask formal run",
   "status": "VERIFIED",
   "complete": true,
@@ -725,6 +768,7 @@ mod tests {
     "attempt": null
   }},
   "targets": [],
+  "shard": null,
   "host": "darwin-arm64",
   "image": null,
   "run": "1700000000-42",
@@ -805,6 +849,90 @@ mod tests {
 "#
         );
         assert_eq!(render(&receipt), expected);
+    }
+
+    #[test]
+    fn a_merge_record_has_the_documented_layout() {
+        // The example of "Shards and merge" in docs/formal-verification.md.
+        let merged = Merge {
+            schema: MERGE_SCHEMA,
+            status: Status::Verified,
+            complete: true,
+            commit: Some("c".repeat(40)),
+            tree: Some("d".repeat(40)),
+            image: Some(format!("ghcr.io/o/r@sha256:{}", "9".repeat(64))),
+            parts: vec![Part {
+                receipt: "artifacts/parts/qualification/receipt.json".to_string(),
+                sha256: Some("e".repeat(64)),
+                shard: Some("qualification".to_string()),
+                run_id: Some("123".to_string()),
+                attempt: Some("1".to_string()),
+                superseded: false,
+                status: Some(Status::Verified),
+                complete: true,
+                seconds: 1_095.7,
+            }],
+            units: BTreeMap::from([(
+                "base".to_string(),
+                Unit {
+                    phase: "base".to_string(),
+                    status: Status::Verified,
+                    reason: None,
+                },
+            )]),
+            slowest_part_seconds: 1_095.7,
+            merge_seconds: 62.0,
+            merge_from: "job".to_string(),
+            wall_clock_seconds: 1_157.7,
+            over_80_percent: false,
+            problems: Vec::new(),
+        };
+        let (c, d, e, nine) = (
+            "c".repeat(40),
+            "d".repeat(40),
+            "e".repeat(64),
+            "9".repeat(64),
+        );
+        let expected = format!(
+            r#"{{
+  "schema": 1,
+  "status": "VERIFIED",
+  "complete": true,
+  "commit": "{c}",
+  "tree": "{d}",
+  "image": "ghcr.io/o/r@sha256:{nine}",
+  "parts": [
+    {{
+      "receipt": "artifacts/parts/qualification/receipt.json",
+      "sha256": "{e}",
+      "shard": "qualification",
+      "run_id": "123",
+      "attempt": "1",
+      "superseded": false,
+      "status": "VERIFIED",
+      "complete": true,
+      "seconds": 1095.7
+    }}
+  ],
+  "units": {{
+    "base": {{
+      "phase": "base",
+      "status": "VERIFIED",
+      "reason": null
+    }}
+  }},
+  "slowest_part_seconds": 1095.7,
+  "merge_seconds": 62.0,
+  "merge_from": "job",
+  "wall_clock_seconds": 1157.7,
+  "over_80_percent": false,
+  "problems": []
+}}
+"#
+        );
+        assert_eq!(render(&merged), expected);
+        let back: Merge = serde_json::from_str(&expected).expect("the record reads back");
+        assert_eq!(back, merged);
     }
 
     #[test]
