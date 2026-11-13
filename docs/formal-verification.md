@@ -117,7 +117,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/Krepi/Qualification/Models/` | Definitions that the reviewed external declarations of three qualification cases use; they are not models ([qualification](#qualification)) | Present |
 | `verification/externals/<Module>/` | Reviewed external declarations of a target or a qualification case (`FunsExternal.lean`, `TypesExternal.lean`), named by its `models` field | Present for qualification cases |
 | `verification/targets.json` | The proof target registry | Present, empty |
-| `verification/shards.json` | The shard plan: for the qualification and for each target, the disk peak, the seconds and the cgroup memory peak that a run of CI measured, with the run and its commit; the disk guard of a run reads it ([shard plan and disk guard](#shard-plan-and-disk-guard)) | Present, empty |
+| `verification/shards.json` | The shard plan: for the qualification and for each target, the disk peak, the seconds and the cgroup memory peak that a run of CI measured, with the run and its commit; the disk guard of a run reads it ([shard plan and disk guard](#shard-plan-and-disk-guard)) | Present |
 | `verification/models.json` | The model registry ([models](#models)); `cargo xtask formal check` refuses a registered model | Present, empty |
 | `verification/statements.json` | The statement hash, and each statement with its theorem and state ([statements and proofs](#statements-and-proofs)) | Present, empty |
 | `verification/axioms.json` | The axioms of the Aeneas Lean library that target theorems may use, each with its source and reason ([base round](#base-round)) | Present, empty |
@@ -898,7 +898,8 @@ one, and rounded up, is more than the shard limit, in either layout
 ([proof targets](#proof-targets)). A shard has one worker, which builds the
 mutants of its target one after another, each in a stage of its own: on a
 standard `ubuntu-24.04-arm` runner the shard of the calibration target, with
-its 30 mutants, took about 400 s of its budget of 3,000 s, and the parts of
+its 30 mutants, took about 400 s, against the registered budget of its
+target of 3,000 s, and the parts of
 the gate stayed well within the wall-clock limit, the memory and the disk of
 the runner.
 
@@ -941,7 +942,8 @@ the workflow `formal` run these parts and their merge, and the workflow
 `formal calibration` runs those of the calibration
 ([CI job](#ci-job), [calibration target](#calibration-target)). These parts
 and their merge are the default way of running the gate in CI, and the
-merge is the check that the required gate is to use (planned).
+job `formal merge` of the workflow `formal` is the check that the required
+gate (planned) is to use.
 
 - **The qualification job** has the [guard](#guard) on a pull request, the
   [qualification](#qualification), the extraction of every formal target,
@@ -2486,7 +2488,7 @@ no image holds:
   and a change of the tools changes the files of `verification/` alone;
 - its registries: `targets.json`, `statements.json`, and `models.json`,
   `axioms.json` and `tcb.json`, which are empty; and its shard plan
-  `shards.json`, empty as well
+  `shards.json`, with the entries `qualification` and `target/calibration`
   ([shard plan and disk guard](#shard-plan-and-disk-guard)).
 
 `targets.json` registers two targets. `calibration` is formal: twelve
