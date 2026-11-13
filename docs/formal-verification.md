@@ -44,7 +44,8 @@ On a pull request, a first phase records the
 qualification job or the shard of one formal target, and
 `cargo xtask formal merge` combines the receipts of the parts of a commit
 into the conclusion of the whole gate
-([shards and merge](#shards-and-merge)); no workflow runs them yet. The
+([shards and merge](#shards-and-merge)); CI runs the gate as these parts
+and merges them ([CI job](#ci-job)). The
 [calibration target](#calibration-target), a crate with the shapes of the
 first kernel targets and its proofs, runs through the same phases with
 `cargo xtask formal run --calibration`, in the workflow
@@ -65,8 +66,9 @@ about the kernel. The cases taken from the CAS project expect what the
 pinned tools give; for 27 of them this differs from the expectation
 recorded with the earlier Charon and Aeneas, and each such change is
 explained ([qualification](#qualification)). CI runs the gate in the
-pinned image on every pull request to `main` and every push to `main`, in
-a job that is not required ([CI job](#ci-job)). Everything else
+pinned image on every pull request to `main` and every push to `main`, as
+the qualification job, a shard for each formal target and their merge, in
+jobs that are not required ([CI job](#ci-job)). Everything else
 on this page is planned: specifications, statements and targets of the
 kernel, the required gate and the other commands of `cargo xtask formal`.
 They are set up by porting the tooling of the CAS project and the
@@ -171,7 +173,11 @@ The job of the toolchain canary keeps its trees, downloads and records
 below `artifacts/canary/`, and its image build, as the image workflows do,
 below `artifacts/image/` ([toolchain canary](#toolchain-canary)).
 `cargo xtask formal merge` writes its record and summary to
-`artifacts/formal/merge/` ([shards and merge](#shards-and-merge)).
+`artifacts/formal/merge/` ([shards and merge](#shards-and-merge)). In CI,
+the jobs of the gate pack the `logs/` of their runs into
+`artifacts/formal/logs.tar.gz`, and the merge job downloads the artifacts
+of the parts below `artifacts/formal/parts/`: a single artifact into that
+directory itself, several each into a directory of its own.
 
 ## Tools
 
@@ -566,9 +572,10 @@ These steps end the job at the first that fails, each by its id:
    writes the statement hash of that commit into
    `verification/statements.json` where it differs, and a second commit
    holds both. The commits are local and never pushed;
-8. `probe` and `gate`: probe a container of the image and run
-   `cargo xtask formal run` in it as the [CI job](#ci-job) does, with its
-   flags and variables but without `KREPI_FORMAL_IMAGE`.
+8. `probe` and `gate`: probe a container of the image and run the whole
+   gate, `cargo xtask formal run` without `--shard`, in it as the job
+   `formal run` of the [CI job](#ci-job) runs its part, with its flags and
+   variables but without `KREPI_FORMAL_IMAGE`.
 
 The derived fields, each of the manifest of the build:
 
@@ -665,10 +672,11 @@ others are planned.
 | `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
 
 `cargo xtask check` does not run the gate, which needs the pinned tools.
-CI runs the gate in a job of its own on every pull request to `main` and
-every push to `main` ([CI job](#ci-job)). That job is not required: a
-change is to merge only when a required gate passes on its head or a
-committed waiver record covers the failure, and both are planned.
+CI runs the gate as its parts and their merge on every pull request to
+`main` and every push to `main` ([CI job](#ci-job)). None of these jobs is
+required: a change is to merge only when a required gate passes on its
+head or a committed waiver record covers the failure, and both are
+planned.
 
 ## Gate run
 
@@ -916,11 +924,14 @@ The gate runs as parts of one commit: the qualification job,
 formal target of the registry, `cargo xtask formal run --shard
 target/<name>`, which `cargo xtask formal merge` combines into the
 conclusion of the whole gate. A run without `--shard` has every phase in
-one process; local runs, the jobs of CI, the measurement jobs such as
-`leanchecker fresh` among them ([CI job](#ci-job)), the
+one process; local runs, the measurement jobs such as
+`leanchecker fresh` ([CI job](#ci-job)), the
 [toolchain canary](#toolchain-canary) and `formal mutants` use it, and its
 receipt is no part of a merge. `--shard` cannot be given with `--target`.
-CI still runs the whole gate in one job.
+In CI the jobs `formal run`, `formal shard <name>` and `formal merge` of
+the workflow `formal` run these parts and their merge, and the workflow
+`formal calibration` runs those of the calibration
+([CI job](#ci-job), [calibration target](#calibration-target)).
 
 - **The qualification job** has the [guard](#guard) on a pull request, the
   [qualification](#qualification), the extraction of every formal target,
@@ -978,7 +989,9 @@ with the pin.
 
 The synthetic wall clock is the `seconds` of the slowest part and the
 seconds of the merge, from the start of its job, which the job gives in
-`KREPI_FORMAL_MERGE_STARTED` as Unix seconds, to the end of the command; it
+`KREPI_FORMAL_MERGE_STARTED` as Unix seconds (the merge jobs of CI take
+the start of the runner's worker process, else that of their first step),
+to the end of the command; it
 is the command's own seconds without that variable or with one that is not
 a Unix time before the command. The `seconds` of a part do not count the
 pull of the image and the build of xtask in its job. The gate's wall-clock
@@ -1841,16 +1854,21 @@ of CI runs are evidence.
 
 ### CI job
 
-The workflow `formal`, `.github/workflows/formal.yml`, runs the gate in CI.
-Its job `formal run`, after the job `formal limits`, runs on every push to
+The workflow `formal`, `.github/workflows/formal.yml`, runs the gate in CI
+as its parts ([shards and merge](#shards-and-merge)). Its job `formal run`,
+the qualification job, after the job `formal limits`, runs on every push to
 `main` and on every pull request to `main` when it is opened, reopened or
 updated, when a label is added or removed, and when its description is
-edited, since the guard reads the labels and the description. It is not a
-required check. A newer event of the same pull request cancels a run of
-the job that has not ended. The job
-runs on a GitHub-hosted `ubuntu-24.04-arm` runner, may only read the
-repository's contents, uses no stored credentials, and runs actions pinned
-to full commit SHAs. Its steps:
+edited, since the guard reads the labels and the description. Beside it,
+the job `formal shard <name>` runs for each formal target of the head's
+registry, and after both, the job `formal merge` runs unless the run was
+cancelled. None of them is a required check. A newer event of the same
+pull request cancels a run of `formal run` or of a shard that has not
+ended; the merge of an older run whose parts it cancelled still runs and
+fails, and only the latest run of a pull request counts. The jobs run on a
+GitHub-hosted `ubuntu-24.04-arm` runner, may only read the repository's
+contents, use no stored credentials, and run actions pinned to full commit
+SHAs. The steps of the job `formal run`:
 
 1. check out the head of the pull request, or the pushed commit, with its
    whole history, which the guard needs for the merge base;
@@ -1870,7 +1888,13 @@ to full commit SHAs. Its steps:
    installation fails, and xtask starts in the image;
 5. on a pull request, run `cargo xtask formal guard` with the copied event,
    as the binary of step 3 on the runner; its failure fails the job, and the
-   gate still runs;
+   gate still runs. The step records the bytes available on `/` before and
+   after the guard and, where the runner has `/usr/bin/time`, its record,
+   else a line that it has none, in `job.txt`, and then starts a process
+   that writes, every second until the vectors step has ended or the gate
+   has started, the time, the bytes available on `/` and the memory in use
+   on the runner, `MemTotal` less `MemAvailable`, in KiB, into
+   `samples.tsv`;
 6. on a pull request that changes `kernel/`, `user/`, `verification/`,
    `docs/domains/`, `xtask/` or `.github/workflows/formal.yml` since the
    merge base, compare the test vectors ([vectors in CI](#vectors-in-ci)):
@@ -1884,8 +1908,8 @@ to full commit SHAs. Its steps:
    comparison 31, and each container a minute more for its kill, so that
    none outlives the step's 55 minutes. Its failure fails the job, and the
    gate still runs;
-7. run `cargo xtask formal run`, as the same binary, in a container of the
-   image, as the runner's user and group, with
+7. run `cargo xtask formal run --shard qualification`, as the same binary,
+   in a container of the image, as the runner's user and group, with
    `--pull never --init --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --network none`,
    the checkout mounted at its own path as the working directory, and the
    variables `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and
@@ -1897,11 +1921,16 @@ to full commit SHAs. Its steps:
    phase, the number of units of each status, the image, the resources, the
    rules of the guard, every unit that is not `VERIFIED` and every failure.
    The step fails when the gate's step ran and left no receipt;
-10. always, upload `job.txt`, the record of steps 2 to 4 and of the start
-    and end of the gate, the output of the guard, the output of the vectors
-    step with that of the fixture replay, the path of its test executable
-    and the host results, the event, and the receipt and the logs of the run
-    as the artifact `formal-receipt-<commit>-<attempt>`.
+10. always, stop that process if it still runs, write `summary.md` (the
+    status, phases, units, resources and failures of the receipt, with its
+    SHA-256), and pack the `logs/` of the run into `logs.tar.gz`;
+11. always, upload the summary, the archive, `job.txt`, the record of steps
+    2 to 5 and of the start and end of the gate, the output of the guard,
+    the output of the vectors step with that of the fixture replay, the path
+    of its test executable and the host results, the event, `samples.tsv`
+    and the receipt of the run as the artifact
+    `formal-part-qualification-<commit>-<attempt>`. The logs of the run are
+    uploaded only in the archive.
 
 xtask finds the repository through the path at which it was compiled, so
 the checkout is mounted at that path; the runner and the image are the same
@@ -1917,10 +1946,10 @@ instead of a pull.
 The job may take the time that the job `formal limits` computes, below:
 15 minutes for the steps before the vectors step (2 to check out, 8 to
 record the runner and pull, 3 to build xtask, 1 for the probe and 1 for the
-guard), the 55 of the vectors step, and the minutes of the gate's deadline
-with the 300 s of its receipt, 195 in all while the registry has no formal
-target. The gate's step has a backstop one minute after the gate's own
-end, 126 minutes while the registry has no formal target. When the steps
+guard), the 55 of the vectors step, and the minutes of the deadline of
+the qualification job, 7,200 s and 600 s, with the 300 s of its receipt,
+205 in all whatever the registry. The gate's step has a backstop one
+minute after the gate's own end, 136 minutes. When the steps
 before the gate and the gate use all their time, the steps after it have
 almost none, and the limit of the job may cut the upload; the receipt is
 still written in the checkout. When the gate's
@@ -1931,24 +1960,79 @@ The gate's step fails whenever the gate does not exit with 0, `REJECTED`
 included, and nothing marks a failure as expected.
 
 The job `formal limits`, before the job `formal run`, checks out the head
-and computes the limits of the gates of the workflow from the head's
-`verification/targets.json`, with the gate's 7,200 s and the 300 s of the
-receipt: the deadline of a whole run is the 7,200 s and the budgets of the
-formal targets, 1,800 s each unless the registry gives another, and that
-of a run of the planned targets the 7,200 s and their budgets. The gate's
-step then has the minutes of its deadline and its receipt, rounded up, and
-one more as a backstop, 126 with no formal target. So the receipt of a
-whole run is written before its step ends, however many formal targets the
-registry has. The job `formal run` then has the 15 minutes before the
-vectors step, the 55 of that step and the minutes of the deadline and the
-receipt, 195 with no formal target, and the job `formal planned` 15
-minutes before its gate, the step of the gate and 3 minutes after it. The
-records of the runs of the workflow name no limit for these two jobs,
-whose limits are expressions. A job of a hosted runner ends after 360
-minutes, so the formal targets may register 9,900 s of budgets in all,
-five targets of the default budget but not six; when the budgets need a
-longer job, or a target name is not of lowercase letters, digits and
-hyphens, the job `formal limits` fails, and the jobs after it do not run.
+and computes the limits of the jobs of the gate and its shards from the
+head's `verification/targets.json`, with the gate's 7,200 s and the 300 s
+of the receipt: the deadline of the qualification job is the 7,200 s and
+600 s for the extraction of every formal target, that of the shard of a
+target 300 s and the budget of the target, 1,800 s unless the registry
+gives another, and that of a run of the planned targets the 7,200 s and
+their budgets; each has the 300 s of its receipt. The gate's step of the
+qualification job then has the minutes of its deadline and its receipt,
+rounded up, and one more as a backstop, 136; the step of a shard or of the
+planned targets has two more, as `deadline.sh` kills its command a minute
+after its deadline. So the receipt of each part is written before its step
+ends, however many formal targets the registry has. The job `formal run`
+then has the 15 minutes before the vectors step, the 55 of that step and
+the minutes of the deadline and the receipt, 205; a shard job and the job
+`formal planned` have 15 minutes before their step, the step and 3 minutes
+after it. The shards form a matrix with one entry for each formal target,
+by its name, with its registered budget and the minutes of its step and
+job. A shard whose registered budget per worker is more than the shard
+limit of 3,300 s fails the job, as `cargo xtask formal check` refuses it
+([shards and merge](#shards-and-merge)), so a shard job has at most 85
+minutes. The qualification job, the shard jobs and the job of the planned
+targets have limits that are expressions, so the records of the runs of
+the workflow name no limit for them; the merge job has 15 minutes. A job of
+a hosted runner ends after 360 minutes; when the budgets of the planned
+targets need a longer job, or a target name is not of lowercase letters,
+digits and hyphens, the job `formal limits` fails, the jobs of the parts
+and `formal planned` do not run, and the merge fails without a receipt.
+
+Each job `formal shard <name>`, beside `formal run`, runs the shard of one
+formal target. It is prepared as `formal run` is, with the shorter probe
+of `formal planned`, and without the guard, the vectors and the event. Its
+main command, `cargo xtask formal run --shard target/<name>` in a container
+of the image with the flags of the gate and the variables `GITHUB_REF`,
+`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and `KREPI_FORMAL_IMAGE`, runs under
+`.github/scripts/deadline.sh --stop-commands` with the minutes of its
+deadline and receipt and a minute for its kill. The job summarizes the
+receipt with workflow commands turned off, writes `summary.md` and
+`logs.tar.gz`, and uploads them with `job.txt` and the receipt as
+`formal-part-target-<name>-<commit>-<attempt>`. The failure of one shard
+cancels no other, the concurrency group of each holds its name, and
+without a formal target in the registry the job does not run.
+
+The job `formal merge` runs after `formal run` and the shards unless the
+run was cancelled, also when a part failed or did not run, and not on a
+manual run. It runs on the runner without the image, and its steps:
+
+1. record the start of the job, that of the runner's worker process or
+   else that of the step, in `KREPI_FORMAL_MERGE_STARTED`;
+2. check out the head;
+3. build xtask on the runner, and record the disk and memory in `job.txt`;
+4. download every artifact `formal-part-*-<commit>-*` of the run, of any
+   attempt, below `artifacts/formal/parts/`: a single artifact into that
+   directory itself, several each into a directory of its own;
+5. run `cargo xtask formal merge` with every receipt found there, at any
+   depth, under `.github/scripts/deadline.sh --stop-commands` with 2
+   minutes and 30 s for its kill and, where the runner has
+   `/usr/bin/time`, under `/usr/bin/time -v`, whose record goes to
+   `job.txt`, else a line there says that it has none. With `time` in
+   front, a SIGTERM, at the deadline or from the runner on a cancellation,
+   can end the step before the command has ended, and no SIGKILL follows,
+   since `time` ends on it and `timeout` waits for `time` alone;
+6. always, record the disk and memory again, and write the summary of the
+   merge with workflow commands turned off;
+7. always, upload `record.json`, `summary.md` and `job.txt` as
+   `formal-merge-<commit>-<attempt>`.
+
+Its concurrency group is its own. The merge of an older run whose parts a
+newer event cancelled still runs and fails; only the latest run of a pull
+request counts. A part without a receipt (cancelled, stopped, or whose
+upload failed) makes the merge `TOOL_FAILURE`; a part's own conclusion
+carries into the merge as in a run of the whole gate
+([shards and merge](#shards-and-merge)). With no receipt at all, the step
+fails before the command.
 
 The job `formal planned`, beside `formal run`, runs the gate on the planned
 targets of the head's registry, which a whole run does not select: with the
@@ -1962,7 +2046,8 @@ than that deadline. Its steps
 are those of `formal run`, without the guard and the vectors, and with a
 shorter probe; without a planned target it checks out the head, says that
 there are none and passes. It summarizes the receipt, with workflow
-commands turned off, and uploads it with the logs as
+commands turned off, and uploads the receipt, the summary and the logs
+packed into `logs.tar.gz` with `job.txt` as
 `formal-planned-<commit>-<attempt>`. Until a planned target is
 registered in `verification/targets.json`, it runs nothing.
 
@@ -1971,13 +2056,14 @@ The measurement jobs `leanchecker fresh`, `leanchecker prefix` and
 which runs the workflow of the branch it is started on) and on a pull
 request that has the label `formal-measure`, when it is opened, reopened or
 updated and when that label is added, but not when its description is
-edited or another label changes; the job `formal run` does not run on a
-manual run. Each waits for an earlier run of itself on the same pull request
+edited or another label changes; the jobs of the gate (`formal limits`,
+`formal run`, `formal shard`, `formal merge` and `formal planned`) do not
+run on a manual run. Each waits for an earlier run of itself on the same pull request
 or commit instead of cancelling it.
 
 - `leanchecker fresh` and `leanchecker prefix`, 120 minutes each, prepare
-  and run the gate as `formal run` does, without the probe and the guard
-  step and with `--keep`, which keeps the stage of the base round; a gate
+  as the job `formal run` does and run the whole gate, without `--shard`,
+  without the probe and the guard step and with `--keep`, which keeps the stage of the base round; a gate
   that exits with 1 passes there, and any other status but 0 fails. The gate's step has 75 minutes there, which hold a qualification
   that uses its whole budget and a base round of the expected length. Then
   they drop the page cache of the runner and run, in the stage of the base
@@ -2076,7 +2162,8 @@ a tool, and each broken rule is a problem:
 A target name is made of lowercase letters, digits and hyphens and starts
 with a letter or a digit. `cargo xtask formal check` does not check it: the
 job `formal limits` of the workflow `formal` ([CI job](#ci-job)) fails on
-another name before the names reach a gate.
+another name before the names reach a gate, and on a shard whose
+registered budget per worker is more than the shard limit.
 
 The targets of the registry run in two phases of the gate. The phase
 `extraction`, before the base round, extracts the targets that the run
@@ -2430,39 +2517,70 @@ the required gate. Its jobs run on GitHub-hosted `ubuntu-24.04-arm`
 runners, may only read the repository's contents, use no stored
 credentials and run actions pinned to full commit SHAs:
 
-- `calibration run` checks out the head, pulls the image, builds xtask,
-  probes a container of the gate, runs `cargo xtask formal check
-  --calibration` on the runner and `cargo xtask formal run --calibration`
-  in a container of the image, with the flags, the user and the mounted
+- `calibration run`, the qualification job of the calibration, checks out
+  the head, pulls the image, builds xtask, probes a container of the gate,
+  runs `cargo xtask formal check --calibration` on the runner, and records
+  the bytes available before it and, where the runner has
+  `/usr/bin/time`, its record, else a line that it has none, in `job.txt`;
+  then it runs
+  `cargo xtask formal run --calibration --shard qualification` in a
+  container of the image, with the flags, the user and the mounted
   checkout of the job `formal run` ([CI job](#ci-job)), and the variables
   `GITHUB_REF`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and
   `KREPI_FORMAL_IMAGE`, but no event, so that the guard does not run;
 - `planned example`, beside it, runs
   `cargo xtask formal run --calibration --target calibration-planned` in
   the same way;
+- `calibration shard <name>`, beside them, one for each formal target of
+  the calibration registry, which the workflow writes out and a unit test
+  keeps equal to that registry, runs the steps of the shard job of
+  `formal` with `cargo xtask formal run --calibration --shard
+  target/<name>`;
+- `calibration merge` runs the steps of the merge job of `formal` with
+  `cargo xtask formal merge --calibration` on the downloaded
+  `calibration-formal-part-*` artifacts. It runs when the jobs above ran,
+  unless the run was cancelled, and it waits for the planned example as
+  well, since both run in one matrix job;
 - `calibration mutants`, on a manual run whose input `mutants` asks for it
   and on a pull request with the label, runs
   `cargo xtask formal mutants calibration --calibration`.
 
 Each main command runs under `.github/scripts/deadline.sh --stop-commands`,
 which passes a cancellation on to it and turns workflow commands off while
-it prints. The deadline of the calibration run is the gate's 7,200 s and
-the 3,000 s of the formal target of the calibration, that of the planned
-example the 7,200 s and the 1,800 s of its planned target, and that of the
-mutants the 14,400 s of `formal mutants`; with the 300 s of the receipt,
-175, 155 and 245 minutes. Each step has two minutes more, the jobs of the
-two runs 23 minutes more than their steps and the job of the mutants 20,
-267 minutes in all. The limits of the jobs `calibration run` and
-`planned example` are an expression of their matrix, so the records of
-the runs of the workflow name no limit for them, as for the jobs
-`formal run` and `formal planned`. A newer event of the same pull request
-cancels a job that has not ended. Each job summarizes its receipt with
-workflow commands turned off, since the receipt holds text of Lean and
-Lake: the two run jobs list the budget and the seconds of each target, and
-every summary gives the SHA-256 of the receipt. Each job uploads the
-receipt, the summary, and the record of the runner and the logs of the
-gate compressed into `logs.tar.gz`, which for `calibration run` also holds
-the output of the check, as `formal-calibration-<job>-<commit>-<attempt>`.
+it prints. With `/usr/bin/time` in front, as for the check and the merge,
+a SIGTERM, at the deadline or from the runner on a cancellation, can end
+the step before the command has ended, and no SIGKILL follows. The
+deadline of the qualification job of the calibration is
+the gate's 7,200 s and 600 s for the extraction, that of the planned
+example the 7,200 s and the 1,800 s of its planned target, that of the
+shard of `calibration` 300 s and its 3,000 s, and that of the mutants the
+14,400 s of `formal mutants`; with the 300 s of the receipt, 135, 155, 60
+and 245 minutes. Each step has two minutes more than its deadline. The
+jobs of the qualification and of the planned example have 23 minutes more
+than their steps, 160 and 180, that of the shard 15 minutes before its
+step and 3 after it, 80, and that of the mutants 20 more than its step,
+267; the merge has 15. The limits of the jobs `calibration run` and
+`planned example` and those of the shard jobs are an expression of their
+matrix, so the records of the runs of the workflow name no limit for them,
+as for the jobs `formal run`, `formal planned` and `formal shard`. A newer
+event of the same pull request cancels a job of the parts, of the planned
+example or of the mutants that has not ended; the merge of an older run
+whose parts it cancelled still runs and fails, and only the latest run of
+a pull request counts. Each job
+summarizes its receipt, and the merge its record, with workflow commands
+turned off, since the receipt holds text of Lean and Lake: the run and
+shard jobs list the budget and the seconds of each target, and every
+summary gives the SHA-256 of the receipts. The jobs `calibration run` and
+`planned example` upload the receipt, the summary, and the record of the
+runner and the logs of the gate compressed into `logs.tar.gz`, which for
+`calibration run` also holds the output of the check; a shard job uploads
+`job.txt` beside them, and the merge its record, its summary and
+`job.txt`. The artifacts are
+`calibration-formal-part-qualification-<commit>-<attempt>` of the job
+`calibration run`, `calibration-formal-part-target-<name>-<commit>-<attempt>`,
+`formal-calibration-planned-<commit>-<attempt>`,
+`formal-calibration-merge-<commit>-<attempt>` and
+`formal-calibration-mutants-<commit>-<attempt>`.
 The job of the mutants uploads the list of survivors as well, from
 `artifacts/formal/mutants/` and only when its run passed: a run that fails
 writes no list, and the checkout may hold the list of an earlier run.

@@ -1,8 +1,10 @@
 //! Tests of the committed workflows: those of the CI lines, the pull request
 //! line and the main line in `check.yml`, the full line, the nightly line
-//! and the weekly line, of the record workflow, and the retention of the
-//! artifacts of every workflow. They run in the `test` step; the rules hold
-//! for these files only and are not part of the workflows step.
+//! and the weekly line, of the record workflow, the retention of the
+//! artifacts of every workflow, and the uploads of the jobs of the gate in
+//! the formal workflows, the names of their parts and the steps that the two
+//! workflows share. They run in the `test` step; the rules hold for these
+//! files only and are not part of the workflows step.
 
 use yaml_rust2::{Yaml, YamlLoader};
 
@@ -356,7 +358,7 @@ const BY_RECORD: &str = "${{ steps.record.outputs.retention }}";
 
 /// Every upload step of the tracked workflows: the file, the key of the
 /// job, the name of the step and its `retention-days` as written.
-const RETENTION: [(&str, &str, &str, &str); 24] = [
+const RETENTION: [(&str, &str, &str, &str); 28] = [
     (
         ".github/workflows/check.yml",
         "check",
@@ -389,6 +391,18 @@ const RETENTION: [(&str, &str, &str, &str); 24] = [
     ),
     (
         ".github/workflows/formal-calibration.yml",
+        "shard",
+        "Upload the receipt, the summary and the logs of the shard",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal-calibration.yml",
+        "merge",
+        "Upload the merge record",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal-calibration.yml",
         "mutants",
         "Upload the list of survivors, the receipt and the logs",
         BY_REF,
@@ -415,6 +429,18 @@ const RETENTION: [(&str, &str, &str, &str); 24] = [
         ".github/workflows/formal.yml",
         "gate",
         "Upload the receipt and the logs",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal.yml",
+        "shard",
+        "Upload the receipt, the summary and the logs of the shard",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal.yml",
+        "merge",
+        "Upload the merge record",
         BY_REF,
     ),
     (
@@ -777,6 +803,282 @@ fn a_download_takes_the_name_of_its_artifact_from_the_job_that_uploaded_it() {
     for (text, problem) in cases {
         assert_eq!(download_problems(&parse(&text)), [problem], "{text}");
     }
+}
+
+/// The workflow of the gate.
+const FORMAL: &str = ".github/workflows/formal.yml";
+/// The workflow of the calibration target.
+const CALIBRATION: &str = ".github/workflows/formal-calibration.yml";
+/// The jobs of the gate in the formal workflows: the file and the key.
+const GATE_JOBS: [(&str, &str); 7] = [
+    (FORMAL, "gate"),
+    (FORMAL, "shard"),
+    (FORMAL, "merge"),
+    (FORMAL, "planned"),
+    (CALIBRATION, "calibration"),
+    (CALIBRATION, "shard"),
+    (CALIBRATION, "merge"),
+];
+/// What their uploads may hold: receipts, summaries, the records of the
+/// run and the logs of the run packed into `logs.tar.gz`.
+const GATE_UPLOADS: [&str; 13] = [
+    "artifacts/formal/runs/*/receipt.json",
+    "artifacts/formal/summary.md",
+    "artifacts/formal/merge/record.json",
+    "artifacts/formal/merge/summary.md",
+    "artifacts/formal/logs.tar.gz",
+    "artifacts/formal/job.txt",
+    "artifacts/formal/event.json",
+    "artifacts/formal/guard.txt",
+    "artifacts/formal/vectors.txt",
+    "artifacts/formal/vectors-tests.txt",
+    "artifacts/formal/vectors-fixture.txt",
+    "artifacts/formal/vectors/",
+    "artifacts/formal/samples.tsv",
+];
+/// The archive of the logs of a run.
+const PACKED_LOGS: &str = "artifacts/formal/logs.tar.gz";
+
+/// The paths that the upload `step` names, one on each line.
+fn upload_paths(step: &Yaml) -> Vec<&str> {
+    let paths = step["with"]["path"].as_str().unwrap_or_default();
+    (paths.lines().map(str::trim))
+        .filter(|path| !path.is_empty())
+        .collect()
+}
+
+/// The problems of the uploads of `job`: a path that [`GATE_UPLOADS`] does
+/// not list, and an archive of logs that no step of the job writes.
+fn gate_upload_problems(job: &Yaml) -> Vec<String> {
+    let written = (scripts_of(job).into_iter())
+        .any(|script| script.contains(&format!("tar -czf {PACKED_LOGS}")));
+    let mut problems = Vec::new();
+    for step in steps_using(job, "actions/upload-artifact") {
+        let paths = upload_paths(step);
+        for path in &paths {
+            if !GATE_UPLOADS.contains(path) {
+                problems.push(format!("uploads {path}"));
+            }
+        }
+        if paths.contains(&PACKED_LOGS) && !written {
+            problems.push("uploads logs.tar.gz, which no step writes".to_string());
+        }
+    }
+    problems
+}
+
+/// The artifact that the first upload of `job` names.
+fn upload_name(job: &Yaml) -> &str {
+    let uploads = steps_using(job, "actions/upload-artifact");
+    let name = (uploads.first().copied()).and_then(|step| step["with"]["name"].as_str());
+    name.expect("an upload with a name")
+}
+
+/// The script of the step of `job` with the id `id`.
+fn script_with_id<'a>(job: &'a Yaml, id: &str) -> &'a str {
+    let mut steps = job["steps"].as_vec().into_iter().flatten();
+    let found = steps.find(|step| step["id"].as_str() == Some(id));
+    let script = found.and_then(|step| step["run"].as_str());
+    script.unwrap_or_else(|| panic!("a step {id} with a script"))
+}
+
+#[test]
+fn the_jobs_of_the_gate_upload_receipts_summaries_records_and_packed_logs() {
+    let documents = [FORMAL, CALIBRATION].map(|path| (path, workflow(path)));
+    for (path, key) in GATE_JOBS {
+        let (_, document) = (documents.iter())
+            .find(|(file, _)| *file == path)
+            .expect("a formal workflow");
+        let job = &document["jobs"][key];
+        let uploads = steps_using(job, "actions/upload-artifact");
+        assert_eq!(uploads.len(), 1, "{path}: {key}");
+        assert_eq!(
+            gate_upload_problems(job),
+            Vec::<String>::new(),
+            "{path}: {key}"
+        );
+        // Every job but the merge runs the gate and uploads its logs packed.
+        let packed = upload_paths(uploads[0]).contains(&PACKED_LOGS);
+        assert_eq!(packed, key != "merge", "{path}: {key}");
+    }
+    // The logs of a run are not uploaded as they are.
+    let logs = parse(
+        "steps:\n  - uses: actions/upload-artifact@1\n    with:\n      path: |\n        \
+         artifacts/formal/runs/*/receipt.json\n        artifacts/formal/runs/*/logs/\n",
+    );
+    assert_eq!(
+        gate_upload_problems(&logs),
+        ["uploads artifacts/formal/runs/*/logs/"]
+    );
+    // An archive needs a step that writes it.
+    let unwritten = format!(
+        "steps:\n  - run: tar -czf other.tar.gz logs\n  - uses: actions/upload-artifact@1\n    \
+         with:\n      path: {PACKED_LOGS}\n"
+    );
+    assert_eq!(
+        gate_upload_problems(&parse(&unwritten)),
+        ["uploads logs.tar.gz, which no step writes"]
+    );
+    let written = unwritten.replace("other.tar.gz", PACKED_LOGS);
+    assert_eq!(gate_upload_problems(&parse(&written)), Vec::<String>::new());
+}
+
+#[test]
+fn the_parts_of_a_run_are_named_for_the_merge_that_downloads_them() {
+    let head = "${{ github.event.pull_request.head.sha || github.sha }}";
+    let attempt = "${{ github.run_attempt }}";
+    let formal = workflow(FORMAL);
+    let calibration = workflow(CALIBRATION);
+    let (gate, shard, merge) = (
+        &formal["jobs"]["gate"],
+        &formal["jobs"]["shard"],
+        &formal["jobs"]["merge"],
+    );
+    // Each part names its artifact by the part, with `-` for `/`, the commit
+    // and the attempt.
+    let qualification = format!("formal-part-qualification-{head}-{attempt}");
+    assert_eq!(upload_name(gate), qualification);
+    let target = format!("formal-part-target-${{{{ matrix.name }}}}-{head}-{attempt}");
+    assert_eq!(upload_name(shard), target);
+    for (job, id) in [(gate, "gate"), (shard, "shard")] {
+        assert!(
+            script_with_id(job, id).contains("--env GITHUB_RUN_ATTEMPT"),
+            "{id}"
+        );
+    }
+    // The merge runs after them, unless the run was cancelled, on the
+    // runner, with a limit that the record of the run reads.
+    assert_eq!(needs(merge), ["gate", "shard"]);
+    assert_eq!(
+        merge["if"].as_str(),
+        Some("${{ !cancelled() && github.event_name != 'workflow_dispatch' }}")
+    );
+    assert!(merge["timeout-minutes"].as_i64().is_some());
+    assert!(
+        scripts_of(merge)
+            .iter()
+            .all(|script| !script.contains("docker"))
+    );
+    // It downloads every attempt of every part of the run below one path,
+    // without merging them: a single artifact into the path itself, several
+    // each into a directory of its own, where the merge step finds the
+    // receipts at any depth.
+    let downloads = steps_using(merge, "actions/download-artifact");
+    assert_eq!(downloads.len(), 1);
+    let with = &downloads[0]["with"];
+    let pattern = format!("formal-part-*-{head}-*");
+    assert_eq!(with["pattern"].as_str(), Some(pattern.as_str()));
+    assert_eq!(with["path"].as_str(), Some("artifacts/formal/parts"));
+    assert!(with["name"].is_badvalue() && with["merge-multiple"].is_badvalue());
+    // Its first step records the start of the job for the merge.
+    let steps = merge["steps"].as_vec().expect("the steps");
+    let first = steps[0]["run"].as_str().unwrap_or_default();
+    let started = format!("{}=", crate::formal::merge::STARTED);
+    assert!(
+        first.contains(&started) && first.contains("\"$GITHUB_ENV\""),
+        "{first}"
+    );
+    let merged = script_with_id(merge, "merge");
+    assert!(merged.contains("deadline.sh --stop-commands"), "{merged}");
+    assert!(
+        merged.contains("formal merge \"${receipts[@]}\""),
+        "{merged}"
+    );
+    // The calibration names the part of its qualification job with its own
+    // prefix, which the artifact of the planned example does not have.
+    let job = &calibration["jobs"]["calibration"];
+    let rows = job["strategy"]["matrix"]["include"]
+        .as_vec()
+        .expect("the matrix");
+    let prefix = "calibration-formal-part-";
+    assert_eq!(
+        rows[0]["artifact"].as_str(),
+        Some("calibration-formal-part-qualification")
+    );
+    assert!(
+        !rows[1]["artifact"]
+            .as_str()
+            .expect("an artifact")
+            .starts_with(prefix)
+    );
+    let artifact = format!("${{{{ matrix.artifact }}}}-{head}-{attempt}");
+    assert_eq!(upload_name(job), artifact);
+    let merge = &calibration["jobs"]["merge"];
+    assert_eq!(needs(merge), ["calibration", "shard"]);
+    assert_eq!(
+        merge["if"].as_str(),
+        Some("${{ !cancelled() && needs.calibration.result != 'skipped' }}")
+    );
+    // Each merge has a group of its own. The merge of an older run whose
+    // parts a newer event cancelled still runs and fails; only the latest
+    // run of a pull request counts.
+    for (document, group) in [
+        (&formal, "formal-merge-"),
+        (&calibration, "formal-calibration-merge-"),
+    ] {
+        let concurrency = &document["jobs"]["merge"]["concurrency"];
+        let own = concurrency["group"]
+            .as_str()
+            .is_some_and(|text| text.starts_with(group));
+        assert!(own, "{group}");
+        assert_eq!(
+            concurrency["cancel-in-progress"].as_str(),
+            Some("${{ github.event_name == 'pull_request' }}")
+        );
+    }
+}
+
+#[test]
+fn the_calibration_shard_and_merge_run_the_steps_of_those_of_formal() {
+    let formal = workflow(FORMAL);
+    let calibration = workflow(CALIBRATION);
+    let emit = |steps: &Yaml| {
+        let mut text = String::new();
+        let mut emitter = yaml_rust2::YamlEmitter::new(&mut text);
+        emitter.dump(steps).expect("the steps");
+        text
+    };
+    // The steps as parsed, so their comments may differ: in the calibration,
+    // the flag of its layout and the prefixes of its artifacts, at most once
+    // each, as counted below.
+    let replaced = [
+        (" --calibration", ""),
+        ("calibration-formal-part-", "formal-part-"),
+        ("formal-calibration-merge-", "formal-merge-"),
+    ];
+    for (key, counts) in [("shard", [1, 1, 0]), ("merge", [1, 1, 1])] {
+        let own = emit(&formal["jobs"][key]["steps"]);
+        let mut copied = emit(&calibration["jobs"][key]["steps"]);
+        let found = replaced.map(|(from, _)| copied.matches(from).count());
+        assert_eq!(found, counts, "{key}");
+        for (from, to) in replaced {
+            copied = copied.replace(from, to);
+        }
+        assert_eq!(copied, own, "{key}");
+    }
+    // The jobs as well, but for their names, their needs and conditions, the
+    // matrix of the shards and the concurrency group.
+    let settings = |job: &Yaml| {
+        let mut job = job.as_hash().expect("a job").clone();
+        for key in ["name", "needs", "if", "steps"] {
+            job.remove(&Yaml::String(key.to_string()));
+        }
+        for (key, own) in [("strategy", "matrix"), ("concurrency", "group")] {
+            let inner = job.get_mut(&Yaml::String(key.to_string()));
+            if let Some(inner) = inner.and_then(Yaml::as_mut_hash) {
+                inner.remove(&Yaml::String(own.to_string()));
+            }
+        }
+        job
+    };
+    for key in ["shard", "merge"] {
+        let (own, copied) = (&formal["jobs"][key], &calibration["jobs"][key]);
+        assert_eq!(settings(copied), settings(own), "{key}");
+    }
+    // The shards run on the events of the qualification job.
+    let jobs = &calibration["jobs"];
+    assert_eq!(jobs["shard"]["if"], jobs["calibration"]["if"]);
+    assert!(jobs["shard"]["if"].as_str().is_some());
 }
 
 /// The script that runs a main command of a step under its deadline.

@@ -142,5 +142,7 @@ walkdir = "=2.5.0"
 # that the steps of a workflow use, `cargo xtask run-record` the loader for
 # the limits of the jobs of a workflow, as the tests of the check do for
 # the committed workflows, on text that is already UTF-8, so the
-# input-decoding support of the default feature is left out.
+# input-decoding support of the default feature is left out. One of those
+# tests writes the steps of the shard and merge jobs of the two formal
+# workflows with the emitter to compare them.
 yaml-rust2 = { version = "=0.13.0", default-features = false }
