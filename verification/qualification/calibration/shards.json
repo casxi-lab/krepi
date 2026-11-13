@@ -1,4 +1,21 @@
 {
   "schema": 1,
-  "parts": []
+  "parts": [
+    {
+      "part": "qualification",
+      "disk_peak": 456228864,
+      "seconds": 1146.539,
+      "cgroup_memory_peak": 6563893248,
+      "run_id": "43479132128",
+      "commit": "7e291ff0e7e67d36b71c5a37d15f482f8bbe5602"
+    },
+    {
+      "part": "target/calibration",
+      "disk_peak": 201076736,
+      "seconds": 409.317,
+      "cgroup_memory_peak": 2786652160,
+      "run_id": "43479132128",
+      "commit": "7e291ff0e7e67d36b71c5a37d15f482f8bbe5602"
+    }
+  ]
 }

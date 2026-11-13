@@ -851,8 +851,11 @@ The shard plan is `verification/shards.json`, and
 array with one entry for each part of the gate that a run of CI has
 measured: `qualification`, or `target/<name>` for a registered target,
 each named by its unit. It is written by hand from the receipts of runs on
-a standard `ubuntu-24.04-arm` runner, never by a run, and both files are
-present and empty. Each entry has these fields:
+a standard `ubuntu-24.04-arm` runner, never by a run. The entries are
+those of the runs on `main` that measured the parts:
+`verification/shards.json` has `qualification`, and the plan of the
+calibration target has `qualification` and `target/calibration`. Each entry
+has these fields:
 
 | Field | Content |
 | --- | --- |
@@ -892,7 +895,12 @@ target is no shard. The shard limit is 3,300 s: the wall-clock limit of the
 gate, 3,600 s, less the time of the merge, 300 s. `cargo xtask formal check`
 refuses a shard whose registered budget, divided by the workers of a shard,
 one, and rounded up, is more than the shard limit, in either layout
-([proof targets](#proof-targets)).
+([proof targets](#proof-targets)). A shard has one worker, which builds the
+mutants of its target one after another, each in a stage of its own: on a
+standard `ubuntu-24.04-arm` runner the shard of the calibration target, with
+its 30 mutants, took about 400 s of its budget of 3,000 s, and the parts of
+the gate stayed well within the wall-clock limit, the memory and the disk of
+the runner.
 
 The disk guard of a run, after the steps of the gate inputs and before the
 first phase, reads the plan of the export. The parts of a run are
@@ -931,7 +939,9 @@ receipt is no part of a merge. `--shard` cannot be given with `--target`.
 In CI the jobs `formal run`, `formal shard <name>` and `formal merge` of
 the workflow `formal` run these parts and their merge, and the workflow
 `formal calibration` runs those of the calibration
-([CI job](#ci-job), [calibration target](#calibration-target)).
+([CI job](#ci-job), [calibration target](#calibration-target)). These parts
+and their merge are the default way of running the gate in CI, and the
+merge is the check that the required gate is to use (planned).
 
 - **The qualification job** has the [guard](#guard) on a pull request, the
   [qualification](#qualification), the extraction of every formal target,
