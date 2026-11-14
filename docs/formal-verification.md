@@ -2468,7 +2468,8 @@ a whole run extracts no planned target and records none, so a
 hand-written module that imports the generated definitions of a planned
 target fails the base build of such a run. The shard of a target
 extracts its target alone, and the qualification job every formal target
-as commands of `base` ([shards and merge](#shards-and-merge)). The phase
+but those of the [waivers](#waivers) that hold, as commands of `base`
+([shards and merge](#shards-and-merge)). The phase
 has the budgets of the targets that it extracts, or 600 s in the
 qualification job, and the gate's budget grows by those of the selected
 targets alone. For each target, in `work/targets/<name>/`, it
