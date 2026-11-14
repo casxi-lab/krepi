@@ -15,7 +15,7 @@ use syn::punctuated::Punctuated;
 use syn::visit::{self, Visit};
 use syn::{Attribute, Expr, Ident, Lit, Token, Type};
 
-use super::{Layout, classify, mutants, registry, storage};
+use super::{Layout, classify, mutants, registry, storage, waiver};
 use crate::manifests;
 use crate::repo::{self, Tree};
 
@@ -389,6 +389,8 @@ pub fn check(tree: &Tree, roots: &[(String, bool)], layout: &Layout) -> (String,
             .into_iter()
             .map(|problem| format!("{}: {problem}", layout.axioms)),
     );
+    let waivers = waiver::parse(tree.text(layout.waivers), &targets).err();
+    problems.extend(waivers.map(|problem| format!("{}: {problem}", layout.waivers)));
     let mut keys = BTreeSet::new();
     for target in &targets {
         let lists = [("proves", &target.proves), ("unclosed", &target.unclosed)];
@@ -1189,6 +1191,29 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
         assert!(
             error.contains(&"schema 1 where 2 is expected".to_string()),
             "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_waiver_record_that_breaks_its_rules_fails_the_check_of_production_only() {
+        let lib = (LIB, "");
+        let waivers = r#"{"schema": 1, "waivers": [{"reason": "r", "scope": ["x"],
+            "expires": "2026-01-01", "author": "a"}]}"#;
+        let problem = r#"verification/waivers.json: waiver 0: "x" is no registered target"#;
+        assert_eq!(problems(&[lib, (LAYOUT.waivers, waivers)]), [problem]);
+        // No waiver applies to the calibration, whose layout has no record.
+        let layout = Layout::CALIBRATION;
+        let tree = Tree::from_files(&[
+            (layout.registry, NO_TARGETS),
+            (layout.models, NO_MODELS),
+            (layout.axioms, NO_AXIOMS),
+            (layout.shards, NO_PARTS),
+            (LAYOUT.waivers, waivers),
+        ]);
+        let found = check(&tree, &roots(&[]), &layout).1;
+        assert!(
+            !found.iter().any(|p| p.contains(LAYOUT.waivers)),
+            "{found:?}"
         );
     }
 

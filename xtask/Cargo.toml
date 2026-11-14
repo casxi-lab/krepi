@@ -56,7 +56,8 @@ libc = { version = "=0.2.191", default-features = false }
 # manifests and subset steps, `cargo xtask formal run` and
 # `cargo xtask formal check` read the output of `cargo metadata`, the
 # qualification cases, the statement, axiom, trusted-base and model
-# registries, the shard plans, the `translation.json` that Aeneas writes,
+# registries, the waiver record, the shard plans, the `translation.json`
+# that Aeneas writes,
 # the messages of `lean --json`, the image pin `verification/image-pin.json`,
 # the `versions.json` of the proof-tool image and the event of a pull request
 # that `cargo xtask formal guard` reads, `cargo xtask formal check` writes
@@ -69,7 +70,8 @@ libc = { version = "=0.2.191", default-features = false }
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
 # `verification/toolchain.json`, `verification/targets.json`, the shard plans,
 # the qualification cases, the extraction configuration, the statement, axiom
-# and trusted-base registries, the `translation.json` that Aeneas writes,
+# and trusted-base registries, the waiver record, the `translation.json` that
+# Aeneas writes,
 # the compile-fail cases of the `subset` step of `cargo xtask check` and the
 # `vectors` blocks of the contracts that `cargo xtask formal vectors` reads
 # are read into types that derive `Deserialize`, the records of the steps of
@@ -125,6 +127,11 @@ sha2 = { version = "=0.11.1", default-features = false }
 # its run directory. Extended attributes are not unpacked, so the default
 # `xattr` feature is left out.
 tar = { version = "=0.4.46", default-features = false }
+# `cargo xtask formal check` requires the expiry of each waiver of
+# `verification/waivers.json` to be a date of the calendar. Only the date
+# type of the core is used, so the standard-library support of the default
+# feature is left out.
+time = { version = "=0.3.55", default-features = false }
 # Manifests and Cargo configuration files are parsed into tables, which
 # `serde` defines, and `suites.toml`, the extraction configuration of
 # `cargo xtask formal run`, the compile-fail cases of the `subset` step of

@@ -28,6 +28,7 @@ pub mod run;
 pub mod storage;
 pub mod toolchain;
 pub mod vectors;
+pub mod waiver;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -98,6 +99,9 @@ pub struct Layout {
     /// The directory of the reviewed tool patches, relative to the
     /// repository root.
     pub tooling: &'static str,
+    /// The waiver record, relative to the repository root, or none in a
+    /// layout to which no waiver applies.
+    pub waivers: &'static str,
 }
 
 impl Layout {
@@ -126,6 +130,7 @@ impl Layout {
         toolchain: "verification/toolchain.json",
         image_pin: "verification/image-pin.json",
         tooling: "verification/tooling",
+        waivers: "verification/waivers.json",
     };
 
     /// The layout of the calibration target: its workspace, Lake project and
@@ -142,6 +147,7 @@ impl Layout {
         open: "",
         mutants: "verification/qualification/calibration/mutants",
         shards: "verification/qualification/calibration/shards.json",
+        waivers: "",
         ..Layout::PRODUCTION
     };
 }
@@ -165,7 +171,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "check",
-        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, that the target registry and verification/axioms.json keep their rules, with every key of a target in the inventory, that the registries hold nothing that the gate does not support, that every survivor of the lists of survivors has a class, and that the shard plan and the budget of each shard keep their rules; --write first writes the file, and --calibration checks the calibration target",
+        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, that the target registry, verification/axioms.json and the waiver record verification/waivers.json keep their rules, with every key of a target in the inventory, that the registries hold nothing that the gate does not support, that every survivor of the lists of survivors has a class, and that the shard plan and the budget of each shard keep their rules; --write first writes the file, and --calibration checks the calibration target",
         subcommands: &[],
     },
     Command {
@@ -563,6 +569,7 @@ mod tests {
             layout.axioms.to_string(),
             layout.tcb.to_string(),
             layout.shards.to_string(),
+            layout.waivers.to_string(),
             format!("{}/LICENSE-Apache-2.0", layout.tooling),
         ]
         .into_iter()
@@ -581,6 +588,7 @@ mod tests {
             layout.statements,
             layout.axioms,
             layout.tcb,
+            layout.waivers,
         ] {
             assert!(
                 path.starts_with(&format!("{}/", layout.project)),
@@ -644,8 +652,10 @@ mod tests {
             [paths, names, tools]
         };
         assert_eq!(shared(&layout), shared(&production));
-        // No contract describes the calibration, whose survivors are its own.
+        // No contract describes the calibration, whose survivors are its own,
+        // and no waiver applies to it.
         assert!(layout.open.is_empty() && !production.open.is_empty());
+        assert!(layout.waivers.is_empty() && !production.waivers.is_empty());
         let own = format!("{}/", layout.qualification);
         assert!(layout.mutants.starts_with(&own) && !production.mutants.starts_with(&own));
     }

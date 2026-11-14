@@ -19,9 +19,10 @@ The registries `verification/targets.json`, `verification/models.json` and
 `verification/legacy.json` exist, and so do the open obligations
 `verification/open.json`, the statement registry
 `verification/statements.json`, the registry of library axioms
-`verification/axioms.json` and the registry of the trusted base
-`verification/tcb.json`: no target, model, statement, library axiom or
-trusted item is registered. The pinned tools exist: the tool manifest
+`verification/axioms.json`, the registry of the trusted base
+`verification/tcb.json` and the waiver record `verification/waivers.json`
+([waivers](#waivers)): no target, model, statement, library axiom,
+trusted item or waiver is registered. The pinned tools exist: the tool manifest
 `verification/toolchain.json`, the reviewed Aeneas patch, the recipe of the
 image that holds the tools, the workflows that build and publish it, the
 pin of the published image, `verification/image-pin.json`, and
@@ -125,6 +126,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/statements.json` | The statement hash, and each statement with its theorem and state ([statements and proofs](#statements-and-proofs)) | Present, empty |
 | `verification/axioms.json` | The axioms of the Aeneas Lean library that target theorems may use, each with its source and reason ([base round](#base-round)) | Present, empty |
 | `verification/tcb.json` | Items of the trusted base: native decisions and patterns of generated axioms, whose classification comes later ([base round](#base-round)) | Present, empty |
+| `verification/waivers.json` | The waiver record: each waiver of registered targets with its reason, scope, expiry and author ([waivers](#waivers)) | Present, empty |
 | `verification/legacy.json` | Kept empty: production functions without a proof are listed in `open.json` ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty by design |
 | `verification/open.json` | The open obligations of the production code, generated from the `Open obligations` tables of the contracts of the components ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
@@ -675,7 +677,7 @@ The commands of `cargo xtask formal` follow the design of the gate.
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
 | `cargo xtask formal run [--target NAME]... [--shard NAME] [--calibration] [--keep]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets, `--shard` only the qualification job or the shard of a formal target ([shards and merge](#shards-and-merge)), `--calibration` runs in the layout of the [calibration target](#calibration-target), and `--keep` keeps the work directory of the run ([layout](#layout)). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run of the whole gate has |
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs, sources and registries ([guard](#guard)) |
-| `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
+| `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)) and of the waiver record ([waivers](#waivers)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
 | `cargo xtask formal receipt [--require-fresh]` (planned) | Says whether a receipt is current for the checkout: the same gate inputs and image, one conclusion for each unit, complete and `VERIFIED`; `--require-fresh` also requires a run of the whole gate from a clean checkout without planned statements |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its job fetched and built: `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from the outcomes of the steps of the job ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
@@ -1096,6 +1098,26 @@ For example, with values that are only an illustration:
   "problems": []
 }
 ```
+
+### Waivers
+
+`verification/waivers.json`, the waiver record, is a gate input with
+schema 1 and a list `waivers`, and is committed empty. Each waiver has
+
+- `reason`, why the targets that it covers may stay unverified;
+- `scope`, the names of the registered targets that it covers;
+- `expires`, the last UTC date on which it holds, as `YYYY-MM-DD`;
+- `author`, the author of the pull request that adds it.
+
+A waiver holds on each date up to its expiry, that date included; dates
+in this form sort as text in the order of the calendar.
+`cargo xtask formal check` refuses a record of another schema or with an
+unknown field, and a waiver with a blank reason or author, an empty scope,
+a name in it that `verification/targets.json` does not register, or an
+expiry that is not a date of the calendar in that form. A planned target
+may be named, and a name may repeat. A missing record has no waivers,
+and the layout of the [calibration target](#calibration-target) has no
+record. Of the commands, only `cargo xtask formal check` reads it.
 
 ### Extraction
 
