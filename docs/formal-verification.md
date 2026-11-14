@@ -80,11 +80,11 @@ pinned image when the label `full-check` is added to a pull request to
 as the qualification job with the comparator part after it, a shard for
 each formal target and their merge; four jobs judge the conclusion and
 each hard gate in the record of the merge, and with `formal fast` and
-`formal guard` they are the six checks of the gate, which are not required
-checks. On a push to `main`, a job reviews the record of the merged head
-([CI job](#ci-job)). Everything else
-on this page is planned: specifications, statements and targets of the
-kernel, the required gate and the other commands of `cargo xtask formal`.
+`formal guard` they are the six checks of the gate, which the rules of
+`main` require. On a push to `main`, a job reviews the record of the merged
+head ([CI job](#ci-job)). Everything else on this page is planned:
+specifications, statements and targets of the kernel and the other
+commands of `cargo xtask formal`.
 They are set up by porting the tooling of the CAS project and the
 prototype tree, and this page changes with them. Nothing about the kernel
 is proved.
@@ -718,9 +718,9 @@ run of `main` and once a week, and four jobs judge the record of the merge
 that a committed [waiver](#waivers) covers, and `formal axioms`,
 `formal leanchecker` and `formal comparator` its hard gates. On a pull
 request, the jobs `formal fast` and `formal guard` run
-`cargo xtask formal impact` and `cargo xtask formal guard`. None of these
-six jobs is required: a change is to merge only when a required gate
-passes on its head, which is planned. On a push to `main`, the job
+`cargo xtask formal impact` and `cargo xtask formal guard`. The rules of
+`main` require these six jobs, so a pull request merges only when they
+pass on its head ([CI job](#ci-job)). On a push to `main`, the job
 `formal receipt review` judges the record of the merged head with
 `cargo xtask formal receipt`.
 
@@ -1008,8 +1008,7 @@ workflow `formal` run these parts and their merge, and the workflow
 and their merge are the default way of running the gate in CI, and the
 jobs `formal merge`, `formal axioms`, `formal leanchecker` and
 `formal comparator` of the workflow `formal`, which judge the record of
-the merge, are among the checks that the required gate (planned) is to
-use.
+the merge, are among the required checks of `main`.
 
 - **The qualification job** has the [guard](#guard) on a pull request, the
   [qualification](#qualification), the extraction of every formal target
@@ -2431,7 +2430,27 @@ as one of theirs. They are skipped only on `main`: `formal fast` and
 the verdicts on a push to `main`, where the job `formal receipt review`
 judges the merged head instead. On any other event or ref that they do
 not judge, such as a manual run of another branch, each fails, so that no
-such run leaves them passed or skipped. None of them is a required check.
+such run leaves them passed or skipped.
+
+The rules of `main`, a ruleset of the repository, require checks of the
+app GitHub Actions to pass on the head of a pull request before it merges.
+The required checks are `cargo xtask check`, `check summary`,
+`formal fast`, `formal guard`, `formal merge`, `formal axioms`,
+`formal leanchecker` and `formal comparator`. Each counts with its newest
+run on the head, so an event after the gate ran that fails the verdicts,
+such as an edit of the description, blocks the merge until the label
+`full-check` is added again. The head must contain `main`, so after `main`
+moves a pull request is updated before it merges, and one whose change
+affects the gate runs the gate again. Merging with GitHub and pushing a
+merge made locally to `main` are both refused until the checks pass. The
+ruleset has no bypass list, so the rules bind administrators too, though
+an administrator can change them; deleting `main` or pushing to it other
+than as a fast-forward is refused. A merge of a head that contains `main` has
+the tree of that head, so `main` then has the tree that the checks judged.
+The rules require no approving review, and the checks run the workflows
+and the xtask of the head: a pull request that changes them is judged by
+its own version, so only review catches a change that weakens them
+([limitations](#limitations)).
 
 The steps of the job `formal run`, the qualification job:
 
@@ -3828,3 +3847,8 @@ in a checkout are not evidence; only a run of the gate produces receipts.
   sandbox, so a metaprogram of a proof module could tamper with them. The
   [guard](#guard), the review of the specifications and the replay with
   `leanchecker` remain; isolating the comparator further is future work.
+- The gate runs the workflows and the xtask of the head that it judges,
+  and the rules of `main` require no approving review: a pull request that
+  changes the gate or its workflows is judged by its own version, and only
+  review catches a change that weakens them. An administrator of the
+  repository can also change the rules themselves ([CI job](#ci-job)).

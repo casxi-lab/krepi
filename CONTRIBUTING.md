@@ -195,10 +195,15 @@ rewritten into its alternative and any other rejection is handled as that
 convention states. Do not edit generated definitions, introduce unproved
 wrappers or weaken contracts to hide failures.
 
-Once the required proof gate runs in CI, a kernel change merges only when the
-gate passes on its head or a waiver committed in `verification/waivers.json`
-covers the failure ([waivers](docs/formal-verification.md#waivers)). A red
-gate is never merged over.
+The six checks of the proof gate are required checks of `main`
+([CI job](docs/formal-verification.md#ci-job)): a change merges only when
+they pass on its head, and a change that affects the gate needs the label
+`full-check` added on that head after its other events. The gate passes
+over a failure of a target only while a waiver committed in
+`verification/waivers.json` holds for it
+([waivers](docs/formal-verification.md#waivers)); no waiver covers the
+guard, the qualification, the unit `base` with its replay by
+`leanchecker`, or the unit `comparator`. A red gate is never merged over.
 
 ## Porting from the prototype tree
 
