@@ -306,7 +306,11 @@ CI runs in lines, each a workflow of `.github/workflows/` on GitHub-hosted
   first job fails unless the head contains the `main` of that moment, and
   then `cargo xtask check --slow`, with the pull of the image and the
   requirement on the formal step of the pull request line, the images and
-  `cargo xtask suite --slow` run.
+  `cargo xtask suite --slow` run. The same label runs the proof gate of the
+  workflow `formal` when the change of the pull request affects it; that
+  workflow also runs the gate on a manual run of `main` and every Tuesday
+  at 12:37 UTC
+  ([CI job](../formal-verification.md#ci-job)).
 - The nightly line, `nightly.yml`, every day at 10:43 UTC and on a manual
   run, on `main` only: `cargo xtask check --slow`, with the same pull and
   requirement, the images and `cargo xtask suite --slow`.
@@ -331,7 +335,9 @@ to `timeout`, which passes them on to the command, and does not end before
 the command has: a check that a newer push to its pull request cancels
 writes its receipt with the result `interrupted`, and the upload after it
 finds the receipt. The script exits with the status of the command, and with
-124 when the deadline stopped it, also when `timeout` had to kill it then.
+124 when the deadline stopped it, also when `timeout` had to kill it then;
+with `--status FILE`, it also writes that status into `FILE` once the
+command has ended, as the toolchain canary needs for its verdict.
 Along the longest chain of jobs that need each other the limits add up to 20
 minutes on the pull request line and to 46 minutes on the full line, within
 the 20 and 60 minutes that those lines allow. After each completed run of
@@ -361,10 +367,38 @@ download of the parts of their run by the pattern of their names in their
 merge jobs, to the steps of those of `formal` in the shard and merge jobs of
 the calibration, and to main commands that run under that script as the last
 command of their step, at a deadline that with the limit of the pull before
-the check ends one or two minutes before the limit of their job. Where GNU
+the check ends one or two minutes before the limit of their job. Other unit
+tests hold the workflow `formal` to its six checks of the gate, jobs of
+that workflow alone, named as written and without a matrix, which run
+unless the run is cancelled and are skipped only on `main`, whose first
+steps, which the tests run with bash for each event and decision, fail on
+an event or a ref that they do not judge and, with a stand-in of `gh`, on a
+re-run of a run of a pull request that is not the newest of its head, with
+read access to the workflow runs, and whose verdicts judge the
+record by its schema, run, commit, trigger and conclusion or hard gate;
+to its events, the gate on the
+label `full-check` for a change that affects it and on a manual or weekly
+run of `main`, with one concurrency group for each pull request; to a
+condition that starts with `!cancelled()` for each of its jobs that needs
+another; to the trigger that each event gives the parts; to the jobs of
+the affected planned targets alone, whose decision step they run with jq;
+and to the review of the receipt on a push to `main`. They also hold the
+formal workflows to the comparator part after the gate in a container of
+its own, with its probe, its mounts and its settings, running a copy of
+xtask made before the gate and mounted read-only, in `formal` and in
+the calibration, whose check of the two challenges that the comparator
+must reject they run with jq on receipts and logs of their own; to a
+notice of its limit in every job whose limit is an expression; to main
+commands that run under `deadline.sh` at a deadline at least two minutes
+before the limit of their step, and to every command of their steps under
+that script at a deadline that with its kill-after ends before that limit;
+and to the scripts of the measurement
+steps, which run with the flags of the runner's shell. A test runs its
+scripts with jq only where jq is on the path, as on the runners. Where GNU
 `env` and GNU `timeout` are on the path, as on the runners, a unit test also
 sends SIGINT to the script and requires that it ends only after its command
-has, with the status of the command.
+has, with the status of the command, and another that `--status` writes
+that status.
 
 Every upload step of every workflow of the directory sets `retention-days`,
 which the repository setting of 90 days bounds. A job that runs on `main`
@@ -676,7 +710,12 @@ the file that holds expressions `${{ }}`, such as
 stands for some text, possibly empty, between the text around it, also once
 the values of a matrix in parentheses are left out; the names that fit give
 the limit when they all give the same one. Otherwise the job has no known
-limit. `--own <run.json> --now <seconds>` gives the run of
+limit. A job whose limit in the file is an expression, or that has no
+known limit there, takes the minutes of its first annotation of level
+`notice` titled `timeout-minutes` whose message is a whole number, which a
+job writes with `::notice title=timeout-minutes::<minutes>` for a limit that
+it computes; without the workflow file no job has a known limit.
+`--own <run.json> --now <seconds>` gives the run of
 the record workflow itself. The command creates the new directory `<dir>`
 and writes `record.json` and `summary.md` into it. The record, of `format`
 2, holds the run with its line: `pull request` or `main` for the workflow
@@ -883,7 +922,9 @@ downloads, hand-written build logs in the plain form of BuildKit and
 receipts of the gate; one reads the workflow and keeps its steps copied
 from the image workflows and from the job of the gate equal to their
 sources, but for the command line of the gate, which runs the whole gate
-there and the qualification part in `formal`.
+there and the qualification part in `formal`, and for its deadline, which
+grows by the budget of each formal target of the registry, and the file
+into which `deadline.sh` writes its status there.
 
 `cargo xtask formal run` runs the proof gate on a snapshot of the gate
 inputs and writes a receipt of the run below `artifacts/formal/runs/`
@@ -893,24 +934,28 @@ and the targets that it selects, each with its registered mutants, with
 the guard on a pull request; with `--calibration`, the same phases on the
 calibration target; with `--shard`, only the qualification job, which
 leaves out the targets of the waivers that hold
-([waivers](../formal-verification.md#waivers)), or the shard of one
-formal target
+([waivers](../formal-verification.md#waivers)), the comparator part on
+the stage that that job kept
+([comparator](../formal-verification.md#comparator)), or the shard of one
+formal target; and with `--target`, only the part of the named targets
 ([shards and merge](../formal-verification.md#shards-and-merge)). It is not
 part of the check: CI runs it in the pinned proof-tool image with
-`--shard qualification` as the job `formal run` of
-`.github/workflows/formal.yml`, and with `--shard target/<name>` as a job
-`formal shard <name>` for each formal target, on a GitHub-hosted
-`ubuntu-24.04-arm` runner, on every push to `main` and on every pull
-request to `main`, also when its labels or description change. The jobs
-are not required; each uploads its receipt, its summary and its logs
-packed into `logs.tar.gz` as the artifact
+`--shard qualification --keep` and then `--shard comparator` as the job
+`formal run` of `.github/workflows/formal.yml`, and with
+`--shard target/<name>` as a job `formal shard <name>` for each formal
+target, on a GitHub-hosted `ubuntu-24.04-arm` runner, when the label
+`full-check` is added to a pull request to `main` whose change affects the
+gate, on a manual run of `main` and once a week. The jobs are not
+required; each uploads its receipts, its summary and its logs packed into
+`logs.tar.gz` as the artifact
 `formal-part-qualification-<commit>-<attempt>` or
-`formal-part-target-<name>-<commit>-<attempt>`, and the job `formal merge`
-merges them. Beside them, the job `formal planned` runs the command with
-`--target` on the planned targets of the registry, and the job
-`formal limits` before them computes their limits and the shards from the
-registered budgets. The measurement jobs, `leanchecker` in two modes and
-`lake comparator`, are in `.github/workflows/formal-measure.yml` and run
+`formal-part-target-<name>-<commit>-<attempt>`, and the job
+`formal parts` merges them. Beside them, a job `formal scoped <name>` runs
+the command with `--target` on each planned target that the pull request
+affects, and the job `formal limits` before them computes their limits and
+the shards from the registered budgets. The measurement jobs,
+`leanchecker` in two modes and `lake comparator`, are in
+`.github/workflows/formal-measure.yml` and run
 on a manual run of that workflow on `main` and when the label
 `formal-measure` is added to a pull request
 ([CI job](../formal-verification.md#ci-job)). Its unit
@@ -926,8 +971,10 @@ its removal, and give the run readings of the free space of their own, so
 that the disk guard and the receipt do not depend on the disk of the host;
 each repository holds an empty shard plan and the directories of the
 Aeneas Lean library and of Lean, which a run lists before its first phase
-and after its last. The runs of the qualification job and of the shard of
-a target are tested on the same repositories and fake tools; the waivers
+and after its last. The runs of the qualification job, of the comparator
+part and of the shard of a target are tested on the same repositories and
+fake tools, the comparator part after the qualification job and on
+receipts of that job that its tests edit; the waivers
 of their tests expire on 2000-01-01 or 9999-12-31, so that whether one
 holds does not depend on the date of the host. The
 texts that tests read in the forms of Lean, Lake and `leanchecker` are
@@ -961,12 +1008,16 @@ that name another repository.
 `HEAD`, the paths changed since, whether they affect the gate inputs and
 the registered targets that the change affects
 ([commands](../formal-verification.md#commands)). It runs no proof tool
-and is not part of the check. On every pull request to `main`, the job
-`formal fast` of `.github/workflows/formal.yml` runs it with the base of
-the pull request, and the job `formal guard` runs
+and is not part of the check. On every event of a pull request to
+`main`, the job `formal fast` of `.github/workflows/formal.yml` runs it
+with the base of the pull request, whose decision starts the gate on the
+label `full-check`, and the job `formal guard` runs
 `cargo xtask formal guard` with the event of the run; both run on the
 runner without the image, write the output of their command into the
-summary of the run and are not required. Its unit tests run in the `test`
+summary of the run and are not required. On a manual or scheduled run of
+`main`, the job `formal merge` runs it on the commit itself, and on a push
+to `main` the job `formal receipt review` with the first parent of the
+merge as the base. Its unit tests run in the `test`
 step above, on Git repositories with a commit for each change, one of them
 on a base that has diverged from the head.
 
@@ -1014,38 +1065,56 @@ judgement of a build on the captured outputs of
 and fake tools of the tests of `cargo xtask formal run`.
 
 `cargo xtask formal merge [--calibration] RECEIPT...` merges the receipts
-of the qualification job and of the shard of each formal target of the
-commit checked out into the conclusion of the whole gate, with the waivers
-that hold, and writes its record and summary below `artifacts/formal/merge/`
+of the qualification job, of the comparator part and of the shard of each
+formal target of the commit checked out into the conclusion of the whole
+gate, with the waivers that hold, and writes its record and summary below
+`artifacts/formal/merge/`
 ([shards and merge](../formal-verification.md#shards-and-merge)). It runs
-no proof tool and is not part of the check: the job `formal merge` of
-`.github/workflows/formal.yml` and the job `calibration merge` of the
-workflow `formal calibration` run it on the runner with the receipts of
-the parts of their run. Its
-unit tests run in the `test` step above, on the Git repositories of the
-tests of `cargo xtask formal run` with receipts that the tests write, and
-on the receipts of runs of the qualification job and of the shard of a
-target in those repositories; their waivers, too, expire on 2000-01-01 or
-9999-12-31.
+no proof tool and is not part of the check: the job `formal parts` of
+`.github/workflows/formal.yml`, whose record the jobs `formal merge`,
+`formal axioms`, `formal leanchecker` and `formal comparator` judge, and
+the job `calibration merge` of the workflow `formal calibration` run it on
+the runner with the receipts of the parts of their run. Its unit tests
+run in the `test` step above, on the Git repositories of the tests of
+`cargo xtask formal run` with
+receipts that the tests write, one of the comparator part of no seconds
+beside each of the qualification job unless a test gives its own, those of
+the qualification job with an audit and a replay of its base round that
+passed, and on the receipts of runs of the qualification job, of the
+comparator part and of the shard of a target in those repositories; their
+waivers, too, expire on 2000-01-01 or 9999-12-31. Tests judge the three
+hard gates on the entries of each, on a problem of the merge, on a rejected
+target with and without its waiver, on a statement left out only through
+an import and on the units of mutants; others judge the seconds of the job
+of the qualification and the comparator and the axioms that the record
+reports.
 
 `cargo xtask formal receipt [--require-fresh] [RECORD]` judges the record
 of a merge against the checkout: current, waived, or fresh as well
 ([current and fresh records](../formal-verification.md#current-and-fresh-records)).
-It runs no proof tool, is not part of the check, and no job of CI runs it.
+It runs no proof tool and is not part of the check. In CI, the job
+`formal merge` of `.github/workflows/formal.yml` reads the record of a
+manual or scheduled run of `main` back with `--require-fresh`, and the job
+`formal receipt review` judges the record of the head of a pull request
+merged into `main`.
 Its unit tests run in the `test` step above, on the Git repositories of the
 tests of `cargo xtask formal merge` with an image pin that they commit and
 the records of merges of receipts that the tests write, and on the record
 of a merge of the receipt of a run of named targets; their waivers expire
 on 9999-12-31, and a test edits the expiry recorded in a record to
-2000-01-01.
+2000-01-01. A test writes a current record as a merge of schema 2 wrote
+it, which is not current.
 
 The workflow `formal calibration`, `.github/workflows/formal-calibration.yml`,
 runs the gate on the calibration target in the pinned proof-tool image
 once a week, on a manual run and on a pull request with the label
-`formal-calibration`: `cargo xtask formal check --calibration` and
-`cargo xtask formal run --calibration --shard qualification` in the job
-`calibration run`, the shard of each formal target of the calibration with
-`--shard target/<name>` in a job `calibration shard <name>`, their merge
+`formal-calibration`: `cargo xtask formal check --calibration`,
+`cargo xtask formal run --calibration --shard qualification --keep`, the
+comparator part on the stage that it kept, with `--shard comparator`, and
+a check that the comparator rejected the two challenges that it must
+reject in the job `calibration run`, the shard of each formal target of
+the calibration with `--shard target/<name>` in a job
+`calibration shard <name>`, their merge
 with `cargo xtask formal merge --calibration` in the job
 `calibration merge`, the planned target of the calibration alone, and, on
 a manual run that asks for it and on a pull request with the label,
@@ -1053,8 +1122,8 @@ a manual run that asks for it and on a pull request with the label,
 ([calibration target](../formal-verification.md#calibration-target)).
 It is not required. A unit test keeps its limits equal to the deadlines
 of its gates and receipts, its shards equal to the formal targets of the
-calibration registry, and the steps of its shard and merge jobs equal to
-those of `formal`.
+calibration registry, and the steps of its comparator part, its shard and
+its merge jobs equal to those of `formal`.
 
 `cargo xtask formal vectors [DOMAIN/COMPONENT]` replays the frozen test
 vectors of a component through its specification with the pinned Lean and
@@ -1269,7 +1338,7 @@ to an exact version in the manifest of the crate that uses it:
 | `xtask/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask check`, `cargo xtask image`, `cargo xtask suite`, `cargo xtask run-record`, `cargo xtask release-assets`, `cargo xtask usage`, `cargo xtask formal run`, `cargo xtask formal guard`, `cargo xtask formal toolchain-check`, `cargo xtask formal check`, `cargo xtask formal mutants`, `cargo xtask formal vectors`, `cargo xtask formal canary`, `cargo xtask formal impact`, `cargo xtask formal merge` and `cargo xtask formal receipt`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
 | `xtask/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The process groups of the commands of `cargo xtask check`, `cargo xtask formal run`, `cargo xtask formal mutants` and `cargo xtask formal vectors`: killing a command's group, finding whether any of its processes remain, seeing that a command has ended without collecting it, and the default disposition of `SIGCHLD` that this needs; finding whether SIGHUP is ignored when the run starts; and the effective user of the run, the bytes available on the file system of its run directory, at its start and every second during it, and the largest resident set of a process that it collected, which its receipt records |
 | `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json`, `cargo xtask formal check` reads `verification/targets.json`, `verification/axioms.json`, `verification/waivers.json` and the shard plan, `cargo xtask formal run` reads `verification/targets.json`, `verification/qualification/cases.json`, `verification/extraction.toml`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/waivers.json`, the shard plan and the `translation.json` that Aeneas writes, `cargo xtask formal guard` reads `verification/targets.json` and `verification/tcb.json` at two commits, `cargo xtask formal impact` reads `verification/targets.json` at two commits, the lists of survivors that `cargo xtask formal mutants` writes and `cargo xtask formal check` reads, the type into which the `subset` step of `cargo xtask check` reads its compile-fail cases, the type into which `cargo xtask formal vectors` reads the `vectors` block of a contract, the record `images.json` that `cargo xtask image` writes and `cargo xtask suite` reads, the suites of `suites.toml`, the run and jobs that `cargo xtask run-record` reads, the run that `cargo xtask release-assets` reads, the data of a month that `cargo xtask usage` reads, the record of a step of `cargo xtask formal canary`, and the types of the receipt of `cargo xtask formal run`, which the canary and `cargo xtask formal merge` also read, and of the record of a merge, which `cargo xtask formal receipt` reads |
-| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, of the record of `cargo xtask formal merge`, which `cargo xtask formal receipt` reads, of `verification/open.json`, of the lists of survivors of `cargo xtask formal mutants`, of the record `images.json` of `cargo xtask image`, of the report of `cargo xtask suite` and of the record of `cargo xtask run-record`, reading `images.json` and the run and jobs of a record, reading the run, `images.json` and the check receipt that `cargo xtask release-assets` checks, the summary of `cargo xtask usage`, reading the output of `cargo metadata` in the `manifests` and `subset` steps, in `cargo xtask formal run` and in `cargo xtask formal check`, the messages of Cargo's build of the test executable of xtask in the `formal` step of `cargo xtask check`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/models.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/waivers.json`, the shard plans `verification/shards.json` and that of the calibration target, `verification/image-pin.json`, the `versions.json` of the proof-tool image, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the receipts that `cargo xtask formal merge` merges, the messages that `lean --json` prints, the event of a pull request that `cargo xtask formal guard` reads, and the tool manifest, the Lake locks, the statement registry, the records of its steps and the receipt that `cargo xtask formal canary` reads and writes |
+| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, of the record of `cargo xtask formal merge`, which `cargo xtask formal receipt` reads, of `verification/open.json`, of the lists of survivors of `cargo xtask formal mutants`, of the record `images.json` of `cargo xtask image`, of the report of `cargo xtask suite` and of the record of `cargo xtask run-record`, reading `images.json` and the run and jobs of a record, reading the run, `images.json` and the check receipt that `cargo xtask release-assets` checks, the summary of `cargo xtask usage`, reading the output of `cargo metadata` in the `manifests` and `subset` steps, in `cargo xtask formal run` and in `cargo xtask formal check`, the messages of Cargo's build of the test executable of xtask in the `formal` step of `cargo xtask check`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/models.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/waivers.json`, the shard plans `verification/shards.json` and that of the calibration target, `verification/image-pin.json`, the `versions.json` of the proof-tool image, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the receipts that `cargo xtask formal merge` merges and those of the qualification job that the comparator part reads, the configurations of `lake comparator` that it writes, the messages that `lean --json` prints, the event of a pull request that `cargo xtask formal guard` reads, and the tool manifest, the Lake locks, the statement registry, the records of its steps and the receipt that `cargo xtask formal canary` reads and writes |
 | `xtask/Cargo.toml` | `syn` without default features, with `full`, `parsing` and `visit` | MIT OR Apache-2.0 | Parsing the source files of the kernel workspace for the inventory of `cargo xtask formal check` and for the `subset` step of `cargo xtask check`, walking their items and reading their attributes, paths and tokens, walking the bodies of the functions of a target for the source mutants of `cargo xtask formal mutants`, the crate attributes of the library of the root package of the kernel workspace for the `manifests` step and `cargo xtask formal run`, and in a unit test of the check the Rust files of every workspace for the names of the slow tests |
 | `xtask/Cargo.toml` | `proc-macro2` without default features, with `span-locations` | MIT OR Apache-2.0 | The token type under `syn`, whose span locations give the line of each problem that the `subset` step reports and the point of each source mutant of `cargo xtask formal mutants` |
 | `xtask/Cargo.toml` | `signal-hook` without default features | MIT OR Apache-2.0 | The handler that lets SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop `cargo xtask check`, `cargo xtask formal run`, `cargo xtask formal mutants` and `cargo xtask formal vectors`; the emulation of their default action with which the formal commands then end, whereas the check exits with 128 plus the signal number; and the names of the signals in the output of the check |

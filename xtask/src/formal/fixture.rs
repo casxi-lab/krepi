@@ -236,7 +236,7 @@ fn aeneas(root: &str) -> String {
 /// The Lake stand-in, whose `@ROOT@` is the root of the fixture. It
 /// records each call and keys it: in the stage of the base round by what it
 /// runs, `build`, `planned` (a build without `--wfail`), `audit`,
-/// `heartbeats` or `leanchecker-<prefix>`; in the stage of a proof target
+/// `heartbeats` or `leanchecker-<module>`; in the stage of a proof target
 /// the audit is `audit` too; elsewhere by the target that it builds, or
 /// `Audit`. It runs the script `<key>.sh` of `artifacts/lake` that
 /// a test gives, then answers. A build completes. The case audit reports
@@ -249,9 +249,10 @@ fn aeneas(root: &str) -> String {
 /// `artifacts/lake/statements/<statement>`, else the name without its last
 /// component when that file exists, and `true`. A
 /// heartbeat copy is counted ten heartbeats per line at each inserted line.
-/// `leanchecker` passes. The range printer `Ranges.lean`, keyed `ranges`,
-/// prints for each module that it names a range on the line of each theorem
-/// of its file, and their count.
+/// `leanchecker` passes, and so does `lake comparator`, keyed `comparator`,
+/// whose configuration is its third argument. The range printer
+/// `Ranges.lean`, keyed `ranges`, prints for each module that it names a
+/// range on the line of each theorem of its file, and their count.
 const LAKE: &str = r##"lake='@ROOT@/artifacts/lake'
 mkdir -p "$lake"
 echo "$PWD $*" >> "$lake/calls"
@@ -261,8 +262,9 @@ case "$PWD $1 $2 $3" in
   */base/stage/*" build "*) key=planned; case " $* " in *" --wfail "*) key=build ;; esac ;;
   */base/stage/*" env lean --json") key=heartbeats ;;
   */base/stage/*" env lean "*) key=audit ;;
-  */base/stage/*" env leanchecker "*) key=leanchecker-$3 ;;
+  */base/stage/*" env leanchecker "*) key=leanchecker-$4 ;;
   */targets/*" env lean "*) key=audit ;;
+  *" comparator --config "*) key=comparator ;;
   *" build "*) for argument; do key=$argument; done ;;
   *) key=Audit ;;
 esac
@@ -306,6 +308,7 @@ case $key in
       echo "{\"severity\":\"information\",\"data\":\"$data\",\"pos\":{\"line\":$line,\"column\":0}}"
     done ;;
   leanchecker-*) ;;
+  comparator) echo 'Your solution is okay!' ;;
   ranges)
     for module in $(sed -n 's/^#krepi_declaration_ranges //p' Ranges.lean); do
       count=0

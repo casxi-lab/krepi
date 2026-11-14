@@ -624,17 +624,15 @@ pub fn target_problems(
     problems
 }
 
-/// Why the output of `leanchecker`, `ran`, is not what it writes: an exit other
-/// than 0 must report a module and a kernel problem not about a resource.
+/// Why the output of `leanchecker --fresh`, `ran`, is not what it writes: an
+/// exit other than 0 must report a kernel problem not about a resource.
 pub fn leanchecker_read(ran: &Ran) -> Result<(), String> {
     const RESOURCES: &str = "deterministic timeout,excessive memory,deep recursion,interrupted";
-    let lines = || ran.output.lines();
-    let module = lines().any(|line| line.starts_with("leanchecker found a problem in "));
     let resource = |text: &str| RESOURCES.split(',').any(|it| text.starts_with(it));
-    let mut kernel = lines().filter_map(|line| line.split_once("(kernel) "));
-    let report = module && kernel.any(|(_, text)| !resource(text));
+    let mut kernel = (ran.output.lines()).filter_map(|line| line.split_once("(kernel) "));
+    let report = kernel.any(|(_, text)| !resource(text));
     match ran.code() {
-        Some(c) if c != 0 && !report => Err("it reported no kernel problem in a module".into()),
+        Some(c) if c != 0 && !report => Err("it reported no kernel problem".into()),
         _ => Ok(()),
     }
 }
@@ -2112,27 +2110,34 @@ mod tests {
     }
 
     #[test]
-    fn leanchecker_and_the_version_query_are_read() {
-        // What `leanchecker` printed for a declaration added without the
-        // kernel, without the `.olean` files it was asked for, and for a
-        // resource exception of the kernel.
-        let report = "leanchecker found a problem in Krepi.Proofs.Hack\n\
-            uncaught exception: while replaying declaration 'Krepi.Proofs.Hack.bad':\n\
+    fn leanchecker_read_takes_a_kernel_report_without_the_module_line() {
+        // What `leanchecker --fresh Krepi` printed for a declaration added
+        // without the kernel in a module that the root imports: no line names
+        // the module, which only a replay by prefix prints.
+        let fresh = "uncaught exception: while replaying declaration 'Krepi.Proofs.Hack.bad':\n\
             (kernel) declaration type mismatch, 'Krepi.Proofs.Hack.bad' has type\n  True\n\
             but it is expected to have type\n  False\n";
-        assert_eq!(leanchecker_read(&ran(1, report)), Ok(()));
+        assert_eq!(leanchecker_read(&ran(1, fresh)), Ok(()));
+        let prefix = format!("leanchecker found a problem in Krepi.Proofs.Hack\n{fresh}");
+        assert_eq!(leanchecker_read(&ran(1, &prefix)), Ok(()));
         assert_eq!(leanchecker_read(&ran(0, "")), Ok(()));
+    }
+
+    #[test]
+    fn leanchecker_and_the_version_query_are_read() {
+        // What `leanchecker --fresh` printed without the `.olean` files it
+        // was asked for, and for a resource exception of the kernel, with
+        // or without the line of a module.
         for output in [
-            "uncaught exception: Could not find any oleans for: Krepi.Proofs\n",
+            "uncaught exception: Could not find any oleans for: Krepi\n",
+            "uncaught exception: while replaying declaration 'Krepi.Proofs.Deep.d':\n\
+             (kernel) deep recursion detected\n",
             "leanchecker found a problem in Krepi.Proofs.Deep\n(kernel) deep recursion detected\n",
-            "(kernel) declaration type mismatch\n",
+            "uncaught exception: (kernel) deterministic timeout\n",
         ] {
             let read = leanchecker_read(&ran(1, output));
-            assert_eq!(
-                read,
-                Err("it reported no kernel problem in a module".to_string()),
-                "{output}"
-            );
+            let no_report = Err("it reported no kernel problem".to_string());
+            assert_eq!(read, no_report, "{output}");
         }
         let version = captured(include_str!("fixtures/base/lean-version.txt"));
         assert_eq!(

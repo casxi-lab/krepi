@@ -1,10 +1,10 @@
 //! The shards of the proof gate and their merge, as "Shards and merge" in
-//! `docs/formal-verification.md` describes: beside the qualification job,
-//! every formal target is a shard of its own, named by its unit, whose
-//! registered budget, over its workers, is at most the shard limit, the
-//! wall-clock limit of the gate less the time of the merge; and
+//! `docs/formal-verification.md` describes: beside the qualification job and
+//! the comparator part, every formal target is a shard of its own, named by
+//! its unit, whose registered budget, over its workers, is at most the shard
+//! limit, the wall-clock limit of the gate less the time of the merge; and
 //! `cargo xtask formal merge` combines the receipts of these parts of one
-//! commit into the conclusion of the whole gate, with the waivers that hold.
+//! commit into the conclusions of the gate and its hard gates, with waivers.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -21,7 +21,7 @@ use super::receipt::{self, Merge, Part, Receipt, SCHEMA};
 use super::registry::{self, State, Target};
 use super::run::{self, Gate, Phase};
 use super::toolchain::sha256;
-use super::{base, guard, qualify, waiver};
+use super::{base, comparator, guard, qualify, waiver};
 
 /// The wall-clock limit of the gate, from the start of its first job to the
 /// end of its merge.
@@ -90,17 +90,19 @@ pub fn target(shard: &str) -> Option<&str> {
 }
 
 /// The budget of a run of `shard` in place of the gate's: the gate's and the
-/// extraction margin for the qualification job, and the shard margin for
-/// the shard of a target, which the budget of its target grows.
+/// extraction margin for the qualification job, the comparator's for its part,
+/// and for the shard of a target the shard margin, which its budget grows.
 pub fn budget(shard: &str) -> Duration {
     let qualification = run::GATE_BUDGET + EXTRACTION_MARGIN;
-    [qualification, SHARD_MARGIN][usize::from(target(shard).is_some())]
+    let budget = [qualification, SHARD_MARGIN][usize::from(target(shard).is_some())];
+    [budget, comparator::BUDGET][usize::from(shard == comparator::PHASE)]
 }
 
-/// The shard that `--shard` names: `qualification` or `target/<name>`.
+/// The shard that `--shard` names: `qualification`, `comparator` or `target/<name>`.
 pub fn shard(name: &str) -> Result<String, String> {
-    let valid = name == qualify::PHASE || target(name).is_some_and(|t| !t.is_empty());
-    let invalid = format!("`{name}` is neither {} nor target/<name>", qualify::PHASE);
+    let parts = [qualify::PHASE, comparator::PHASE];
+    let valid = parts.contains(&name) || target(name).is_some_and(|t| !t.is_empty());
+    let invalid = format!("`{name}` is not {} or target/<name>", parts.join(", "));
     valid.then(|| name.to_string()).ok_or(invalid)
 }
 
@@ -118,12 +120,13 @@ pub fn handwritten(gate: &mut Gate) -> Result<Vec<String>, String> {
 }
 
 /// Each unit that the checkout at `root` registers in `layout`, with its
-/// phase: of the qualification, the base round and each formal target.
+/// phase: of the qualification, base round, comparator and formal targets.
 pub fn registered(root: &Path, layout: &Layout) -> Vec<(String, String)> {
     let [_, finish] = run::target_phases(root, layout, &BTreeSet::new(), None, None);
     let (qualification, base) = (qualify::phase(root, layout), base::phase(root, layout));
+    let comparator = comparator::phase(root, layout, None);
     let units = |phase: Phase| (phase.units.into_iter()).map(move |u| (u, phase.name.clone()));
-    Vec::from_iter([qualification, base, finish].into_iter().flat_map(units))
+    Vec::from_iter(([qualification, base, comparator, finish].into_iter()).flat_map(units))
 }
 
 /// The synthetic wall clock of the slowest part, `slowest` seconds, and of
@@ -231,6 +234,10 @@ pub fn merge(root: &Path, layout: &Layout, paths: &[PathBuf], job: Option<Durati
         }
         let trigger = receipt.trigger.clone();
         triggers.insert((Some(trigger.mode), trigger.reference, trigger.run_id));
+        // The axioms of each theorem that the base round of the job audited.
+        let theorems = receipt.base.iter().flat_map(|base| &base.theorems);
+        let audited = theorems.filter_map(|(t, of)| Some((t.clone(), of.axioms.clone()?)));
+        merged.axioms.extend(audited);
         images.insert(receipt.image.as_ref().and_then(|i| i.reference.clone()));
         match (receipt.schema, receipt.shard.as_deref()) {
             (SCHEMA, Some(shard)) => *given.entry(shard).or_insert(0) += 1,
@@ -245,7 +252,7 @@ pub fn merge(root: &Path, layout: &Layout, paths: &[PathBuf], job: Option<Durati
         problems.push(format!("the receipts do not name one image: {images}"));
     }
     let shown = (triggers.iter()).map(|(m, r, i)| format!("{} {} {}", word(m), none(r), none(i)));
-    let shown = Vec::from_iter(shown).join(", ").escape_debug().to_string();
+    let shown = Vec::from_iter(shown).join(", ");
     let other = format!("the receipts do not have one trigger: {shown}");
     problems.extend((triggers.len() > 1).then_some(other));
     let one = triggers.pop_first().filter(|_| triggers.is_empty());
@@ -273,9 +280,9 @@ pub fn merge(root: &Path, layout: &Layout, paths: &[PathBuf], job: Option<Durati
     let registered = registered(root, layout);
     let (units, unaccounted) = outcome::account(&registered, concluded.collect(), None);
     problems.extend(unaccounted);
-    // One receipt of the qualification job and of the shard of each formal target.
+    // One receipt of the qualification job, the comparator and each formal target's shard.
     let mut expected = BTreeSet::from_iter(shards(&targets).into_keys());
-    expected.insert(qualify::PHASE.to_string());
+    expected.extend([qualify::PHASE, comparator::PHASE].map(String::from));
     for part in &expected {
         let count = given.remove(part.as_str()).unwrap_or(0);
         let problem = format!("{count} receipts are of the part {part}, where one is expected");
@@ -311,9 +318,16 @@ pub fn merge(root: &Path, layout: &Layout, paths: &[PathBuf], job: Option<Durati
     merged.waiver_date = date;
     let statements = statements.unwrap_or_default();
     waiver::conclude(&mut merged, layout, &kept, &waivers, &targets, &statements);
-    // The synthetic wall clock: the slowest part and the merge to its end.
-    let kept = merged.parts.iter().filter(|part| !part.superseded);
-    merged.slowest_part_seconds = kept.map(|part| part.seconds).fold(0.0, f64::max);
+    // The synthetic wall clock: the slowest job and the merge to its end. The
+    // comparator part runs in the job of the qualification part, after it.
+    let in_job = |p: &Part| matches!(p.shard.as_deref(), Some(qualify::PHASE | comparator::PHASE));
+    let kept = || merged.parts.iter().filter(|part| !part.superseded);
+    let joint: f64 = Iterator::sum(kept().filter(|p| in_job(p)).map(|p| p.seconds));
+    merged.slowest_part_seconds = kept().map(|part| part.seconds).fold(joint, f64::max);
+    let first = |p: &&mut Part| !p.superseded && p.shard.as_deref() == Some(qualify::PHASE);
+    for part in merged.parts.iter_mut().filter(first) {
+        part.over_seconds = joint > FLAG.as_secs_f64();
+    }
     merged.merge_from = ["command", "job"][usize::from(job.is_some())].to_string();
     merged.merge_seconds = receipt::seconds(job.unwrap_or_default() + start.elapsed());
     let (slowest, seconds) = (merged.slowest_part_seconds, merged.merge_seconds);
@@ -321,8 +335,9 @@ pub fn merge(root: &Path, layout: &Layout, paths: &[PathBuf], job: Option<Durati
     merged
 }
 
-/// The summary of `merged`: its conclusion, wall clock and trigger, that it
-/// passes when it is not `VERIFIED`, and each waiver, flag and problem.
+/// The summary of `merged`: its conclusion, wall clock and trigger, its hard
+/// gates, that it passes when it is not `VERIFIED`, and each waiver, flag
+/// and problem.
 fn summary(merged: &Merge) -> String {
     let (status, seconds) = (word(&merged.status), merged.wall_clock_seconds);
     let complete = ["not ", ""][usize::from(merged.complete)];
@@ -332,6 +347,11 @@ fn summary(merged: &Merge) -> String {
     let (reference, run) = (text(&merged.reference), text(&merged.run_id));
     let trigger = |mode| format!("- trigger {} {reference} {run}", word(&mode));
     lines.extend(merged.trigger.map(trigger));
+    let g = &merged.gates;
+    let [a, l, c] =
+        [g.axioms, g.leanchecker, g.comparator].map(|p| ["fail", "pass"][usize::from(p)]);
+    let checks = format!("- checks: axioms {a}, leanchecker {l}, comparator {c}");
+    lines.push(checks);
     let passes = "- passes: every unit and part outside the waivers is VERIFIED".to_string();
     lines.extend((merged.passes && status != "VERIFIED").then_some(passes));
     let waivers = (merged.waivers.iter()).map(|waived| format!("- {}", waived.line()));
@@ -339,9 +359,10 @@ fn summary(merged: &Merge) -> String {
     let over = "the synthetic wall clock is above 80% of the wall-clock limit of the gate";
     let over = format!("- {over}, {} s", WALL_CLOCK.as_secs());
     lines.extend(merged.over_80_percent.then_some(over));
+    let flag = FLAG.as_secs();
     for part in merged.parts.iter().filter(|part| !part.superseded) {
         let (shard, seconds, peak) = (text(&part.shard), part.seconds, part.cgroup_memory_peak);
-        let over = format!("- part {shard}: {seconds} s, above {} s", FLAG.as_secs());
+        let over = format!("- part {shard}: {seconds} s, its job above {flag} s");
         lines.extend(part.over_seconds.then_some(over));
         let peak = peak.filter(|_| part.over_memory == Some(true));
         lines.extend(peak.map(|p| format!("- part {shard}: memory peak {p} B, above {MEMORY} B")));
@@ -355,7 +376,9 @@ fn summary(merged: &Merge) -> String {
 pub(crate) mod tests {
     use super::*;
     use crate::formal::fixture::{self, Fixture};
-    use crate::formal::receipt::{Failure, Image, Inputs, Mode, Unit};
+    use crate::formal::outcome::{Class, Site};
+    use crate::formal::process::LimitBy;
+    use crate::formal::receipt::{Command, Failure, Gates, Image, Inputs, Mode, Unit};
     use crate::formal::registry;
     use crate::formal::run::tests::register;
     use crate::formal::waiver::tests::waive;
@@ -432,13 +455,48 @@ pub(crate) mod tests {
         }
     }
 
+    /// The command of a tool, `argv`, of `unit` at `site`, which concluded `class`.
+    pub(crate) fn tool(unit: &str, site: Site, argv: &str, class: Class) -> Command {
+        Command {
+            sequence: 1,
+            phase: None,
+            unit: Some(unit.to_string()),
+            site,
+            argv: Vec::from_iter(argv.split(' ').map(String::from)),
+            cwd: String::new(),
+            class,
+            reason: None,
+            exit_code: Some(0),
+            signal: None,
+            timed_out: false,
+            limit_seconds: 1.0,
+            limit: LimitBy::Phase,
+            seconds: 0.0,
+            group_survived: false,
+            stdout: None,
+            stderr: None,
+        }
+    }
+
+    /// The audit of the base round, concluded `class`.
+    pub(crate) fn audit(class: Class) -> Command {
+        tool("base", Site::AxiomAudit, "lake env lean Audit.lean", class)
+    }
+
+    /// The replay of the base round with `leanchecker --fresh`, concluded `class`.
+    pub(crate) fn replay(class: Class) -> Command {
+        let argv = "lake env leanchecker --fresh Krepi";
+        tool("base", Site::Leanchecker, argv, class)
+    }
+
     /// The receipt of the qualification job of `fixture` at its head, which
     /// extracted every formal target of its registry but those of the
     /// waivers that hold today, as the job does, and none when the registry
-    /// cannot be read.
+    /// cannot be read, and whose base round audited and replayed its stage.
     pub(crate) fn qualification(fixture: &Fixture) -> Receipt {
         let units = qualification_units(fixture.root());
         let mut job = receipt(fixture, qualify::PHASE, &units);
+        job.commands = vec![audit(Class::Passed), replay(Class::Passed)];
         let text = fs::read_to_string(fixture.root().join(LAYOUT.registry));
         let parsed = text.ok().and_then(|text| registry::parse(&text).ok());
         let targets = parsed.map(|registry| registry.targets).unwrap_or_default();
@@ -461,10 +519,66 @@ pub(crate) mod tests {
         fixture.root().join(path)
     }
 
-    /// The merge of the receipts at `paths` in `fixture`, with 60 s of its
-    /// job before the command.
+    /// The merge of the receipts at `paths` [`with_comparator`] in
+    /// `fixture`, with 60 s of its job before the command.
     pub(crate) fn merge_in(fixture: &Fixture, paths: &[PathBuf]) -> Merge {
-        merge(fixture.root(), LAYOUT, paths, Some(Duration::from_secs(60)))
+        let paths = with_comparator(fixture, paths);
+        merge(
+            fixture.root(),
+            LAYOUT,
+            &paths,
+            Some(Duration::from_secs(60)),
+        )
+    }
+
+    /// `paths`, followed, unless they hold a receipt of the comparator part,
+    /// by the receipt of that part beside each receipt of the qualification
+    /// job among them, as the job writes it: of the commit, tree, gate
+    /// inputs, trigger and image of that receipt, of no seconds, and with the
+    /// units of the comparator that the checkout registers, `VERIFIED`.
+    pub(crate) fn with_comparator(fixture: &Fixture, paths: &[PathBuf]) -> Vec<PathBuf> {
+        let read = |path: &PathBuf| serde_json::from_slice::<Receipt>(&fs::read(path).ok()?).ok();
+        let shard = |path: &&PathBuf| read(path).and_then(|receipt| receipt.shard);
+        let given = |part: &'static str| {
+            let of = move |path: &&PathBuf| shard(path).as_deref() == Some(part);
+            BTreeSet::from_iter(paths.iter().filter(of))
+        };
+        let mut all = paths.to_vec();
+        if !given(comparator::PHASE).is_empty() {
+            return all;
+        }
+        let units = comparator::phase(fixture.root(), LAYOUT, None).units;
+        let unit = |name: &String| {
+            let (phase, status, reason) = (comparator::PHASE.to_string(), Status::Verified, None);
+            (
+                name.clone(),
+                Unit {
+                    phase,
+                    status,
+                    reason,
+                },
+            )
+        };
+        for path in given(qualify::PHASE) {
+            let job = read(path).expect("a receipt");
+            let part = Receipt {
+                schema: SCHEMA,
+                status: Status::Verified,
+                complete: true,
+                trigger: job.trigger,
+                shard: Some(comparator::PHASE.to_string()),
+                image: job.image,
+                seconds: 0.0,
+                commit: job.commit,
+                tree: job.tree,
+                inputs: job.inputs,
+                units: BTreeMap::from_iter(units.iter().map(unit)),
+                ..Receipt::default()
+            };
+            let name = path.file_stem().expect("a file name").to_string_lossy();
+            all.push(write(fixture, &format!("{name}-comparator"), &part));
+        }
+        all
     }
 
     /// The units of a target `t` without mutants.
@@ -494,6 +608,61 @@ pub(crate) mod tests {
         )
     }
 
+    /// The path of the receipt of the comparator part that [`with_comparator`]
+    /// writes beside the receipt `name` of the qualification job.
+    fn comparator_of(fixture: &Fixture, name: &str) -> PathBuf {
+        fixture
+            .root()
+            .join(format!("artifacts/parts/{name}-comparator.json"))
+    }
+
+    #[test]
+    fn the_comparator_is_a_part_of_every_merge() {
+        let target = r#"[{"name": "a", "module": "A", "proof_modules": ["Krepi.Proofs.A"]}]"#;
+        let fixture = checkout("merge-comparator", target);
+        let statements = serde_json::json!({"schema": 1, "hash": "0".repeat(40), "statements": [
+            {"name": "Krepi.Statements.S", "theorem": "Krepi.Proofs.A.s", "module": "Krepi.Proofs.A", "state": "proved"},
+            {"name": "Krepi.Statements.R", "theorem": "Krepi.Proofs.R.r", "module": "Krepi.Proofs.R", "state": "proved"},
+            {"name": "Krepi.Statements.P", "theorem": "Krepi.Proofs.A.p", "module": "Krepi.Proofs.A", "state": "planned"},
+        ]});
+        fixture.write(LAYOUT.statements, &statements.to_string());
+        fixture.commit_all();
+        // Its units are those of the proved statements of the formal target
+        // that lists their module, and one for the others.
+        let registered = registered(fixture.root(), LAYOUT).into_iter();
+        let units = Vec::from_iter(registered.filter(|(_, phase)| phase == comparator::PHASE));
+        let unit = |name: &str| (name.to_string(), comparator::PHASE.to_string());
+        assert_eq!(units, [unit("comparator"), unit("comparator/a")]);
+        let q = write(&fixture, "q", &qualification(&fixture));
+        let t = write(
+            &fixture,
+            "t",
+            &receipt(&fixture, "target/a", &units_of("a")),
+        );
+        let names = ["comparator".to_string(), "comparator/a".to_string()];
+        let c = write(&fixture, "c", &receipt(&fixture, comparator::PHASE, &names));
+        let paths = [q.clone(), c, t.clone()];
+        verified(&merge(fixture.root(), LAYOUT, &paths, None));
+        // Without its receipt, or with one that misses a unit, the merge has
+        // no conclusion.
+        let merged = merge(fixture.root(), LAYOUT, &[q.clone(), t.clone()], None);
+        let missing = |unit: &str| format!("the unit {unit} has no conclusion");
+        let none = "0 receipts are of the part comparator, where one is expected";
+        let problems = [
+            missing("comparator"),
+            missing("comparator/a"),
+            none.to_string(),
+        ];
+        no_conclusion(&merged, &problems);
+        let c = write(
+            &fixture,
+            "c",
+            &receipt(&fixture, comparator::PHASE, &names[1..]),
+        );
+        let merged = merge(fixture.root(), LAYOUT, &[q, c, t], None);
+        no_conclusion(&merged, &[missing("comparator")]);
+    }
+
     #[test]
     fn receipts_that_agree_but_are_not_of_the_commit_checked_out_give_no_conclusion() {
         let fixture = checkout("merge-elsewhere", r#"[{"name": "a"}]"#);
@@ -511,7 +680,9 @@ pub(crate) mod tests {
         let (c1, t1) = (rev(&fixture, "HEAD"), rev(&fixture, "HEAD^{tree}"));
         let merged = merge_in(&fixture, &[q.clone(), t.clone()]);
         let (at, head) = ((c0.as_str(), t0.as_str()), (c1.as_str(), t1.as_str()));
-        no_conclusion(&merged, &[elsewhere(&q, at, head), elsewhere(&t, at, head)]);
+        let c = comparator_of(&fixture, "q");
+        let problems = [&q, &t, &c].map(|path| elsewhere(path, at, head));
+        no_conclusion(&merged, &problems);
         assert_eq!(merged.commit.as_deref(), Some(c1.as_str()));
     }
 
@@ -590,7 +761,8 @@ pub(crate) mod tests {
         );
         let merged = merge_in(&fixture, &[q.clone(), t]);
         let (at, head) = ((c0.as_str(), t0.as_str()), (c1.as_str(), t1.as_str()));
-        no_conclusion(&merged, &[elsewhere(&q, at, head)]);
+        let c = comparator_of(&fixture, "q");
+        no_conclusion(&merged, &[elsewhere(&q, at, head), elsewhere(&c, at, head)]);
     }
 
     #[test]
@@ -712,12 +884,13 @@ pub(crate) mod tests {
         let mut units = qualification_units(fixture.root());
         units.sort();
         assert_eq!(keys, units);
-        assert_eq!(merged.parts.len(), 1);
+        assert_eq!(merged.parts.len(), 2);
         let bytes = fs::read(&q).expect("the receipt");
         assert_eq!(merged.parts[0].sha256, Some(sha256(&bytes)));
         // A shard where the registry has no formal target.
         let x = write(&fixture, "x", &receipt(&fixture, "target/x", &[]));
-        let merged = super::merge(fixture.root(), LAYOUT, &[q, x], None);
+        let paths = with_comparator(&fixture, &[q, x]);
+        let merged = super::merge(fixture.root(), LAYOUT, &paths, None);
         let problem = "target/x is not a part of verification/targets.json";
         no_conclusion(&merged, &[problem.to_string()]);
     }
@@ -741,7 +914,7 @@ pub(crate) mod tests {
         verified(&merged);
         assert_eq!(
             Vec::from_iter(merged.parts.iter().map(|p| p.superseded)),
-            [false, true, false]
+            [false, true, false, false]
         );
         // Two receipts of one part and of the same attempt.
         let merged = merge_in(&fixture, &[q, first.clone(), first]);
@@ -752,8 +925,13 @@ pub(crate) mod tests {
         no_conclusion(&merged, &problems.map(String::from));
     }
 
-    /// The exit of `cargo xtask formal merge` in `fixture` for `paths`.
+    /// The exit of `cargo xtask formal merge` in `fixture` for `paths`
+    /// [`with_comparator`].
     pub(crate) fn exit(fixture: &Fixture, paths: &[&PathBuf]) -> ExitCode {
+        let paths = with_comparator(
+            fixture,
+            &Vec::from_iter(paths.iter().map(|p| p.to_path_buf())),
+        );
         let args = Vec::from_iter(paths.iter().map(|path| path.to_str().expect("UTF-8")));
         let matches = cli("").try_get_matches_from(["merge"].into_iter().chain(args));
         command(fixture.root(), LAYOUT, &matches.expect("the command line"))
@@ -827,8 +1005,12 @@ pub(crate) mod tests {
                 format!("{count} receipts are of the part qualification, where one is expected");
             Vec::from_iter(units.chain([part]))
         };
+        // Without it, the comparator part is missing too.
         let merged = merge_in(&fixture, std::slice::from_ref(&t));
-        no_conclusion(&merged, &problems("has no conclusion", 0));
+        let mut missing = problems("has no conclusion", 0);
+        let comparator = "0 receipts are of the part comparator, where one is expected";
+        missing.insert(missing.len() - 1, comparator.to_string());
+        no_conclusion(&merged, &missing);
         let merged = merge_in(&fixture, &[q.clone(), q, t]);
         no_conclusion(&merged, &problems("has 2 conclusions", 2));
     }
@@ -876,7 +1058,10 @@ pub(crate) mod tests {
         let shown = old.display();
         let merged = merge_in(&fixture, &[old.clone(), write(&fixture, "t", &shard)]);
         let schema = format!("{shown}: schema 4 where 5 is expected");
-        no_conclusion(&merged, &[schema, none("qualification")]);
+        no_conclusion(
+            &merged,
+            &[schema, none("comparator"), none("qualification")],
+        );
         // A receipt of schema 5 without a shard.
         let mut unnamed = shard;
         unnamed.shard = None;
@@ -1036,13 +1221,77 @@ pub(crate) mod tests {
         (merged.status, merged.complete, merged.passes)
     }
 
+    /// The hard gates of `merged`: the axioms, `leanchecker` and the comparator.
+    fn gates(merged: &Merge) -> [bool; 3] {
+        let Gates {
+            axioms,
+            leanchecker,
+            comparator,
+        } = merged.gates;
+        [axioms, leanchecker, comparator]
+    }
+
+    /// The theorem of the statement in the proof module of `a` of [`proving`].
+    const PROVED: &str = "Krepi.Proofs.A.s";
+
+    /// The checkout `label` with the formal target `a`, whose proof module
+    /// proves a statement with [`PROVED`], committed.
+    fn proving(label: &str) -> Fixture {
+        let target = r#"[{"name": "a", "module": "A", "proof_modules": ["Krepi.Proofs.A"]}]"#;
+        let fixture = checkout(label, target);
+        let statements = serde_json::json!({"schema": 1, "hash": "0".repeat(40), "statements": [
+            {"name": "Krepi.Statements.S", "theorem": PROVED, "module": "Krepi.Proofs.A", "state": "proved"},
+        ]});
+        fixture.write(LAYOUT.statements, &statements.to_string());
+        fixture.commit_all();
+        fixture
+    }
+
+    /// The receipts of the qualification job of `fixture` of [`proving`],
+    /// whose base round concluded the statement `statement`, of the shard of
+    /// `a`, whose proofs the shard rejects after its audit concluded `audit`,
+    /// and of the comparator part, which concluded `comparator/a` `compared`.
+    fn proved_parts(
+        fixture: &Fixture,
+        statement: Status,
+        audit: Class,
+        compared: Status,
+    ) -> [PathBuf; 3] {
+        let mut job = qualification(fixture);
+        job.units
+            .get_mut(&base::unit(PROVED))
+            .expect("the unit")
+            .status = statement;
+        let mut shard = receipt(fixture, "target/a", &units_of("a"));
+        shard.status = Status::Rejected;
+        shard.units.get_mut("target/a").expect("the unit").status = Status::Rejected;
+        let argv = "lake env lean Audit.lean";
+        shard.commands = vec![tool("target/a", Site::AxiomAudit, argv, audit)];
+        let mut part = receipt(fixture, comparator::PHASE, &["comparator/a".to_string()]);
+        part.units.get_mut("comparator/a").expect("the unit").status = compared;
+        [("q", job), ("t", shard), ("c", part)].map(|(name, part)| write(fixture, name, &part))
+    }
+
     #[test]
-    fn without_a_waiver_a_rejected_target_fails_the_merge() {
+    fn without_a_waiver_a_rejected_target_fails_the_merge_and_the_gates_it_reaches() {
         let fixture = checkout("merge-unwaived", r#"[{"name": "a"}]"#);
         let [q, t] = rejected(&fixture);
         let merged = merge_in(&fixture, &[q.clone(), t.clone()]);
         assert_eq!(conclusion(&merged), (Status::Rejected, true, false));
+        assert_eq!(gates(&merged), [false, true, true]);
         assert_eq!(exit(&fixture, &[&q, &t]), ExitCode::FAILURE);
+        // The base round rejected the statement that `a` proves for an axiom,
+        // so the comparator did not run on it, and the shard rejects `a`.
+        let fixture = proving("merge-unwaived-statement");
+        let parts = proved_parts(&fixture, Status::Rejected, Class::Passed, Status::NotRun);
+        let merged = merge_in(&fixture, &parts);
+        assert_eq!(conclusion(&merged), (Status::Rejected, true, false));
+        assert_eq!(gates(&merged), [false, true, false]);
+        let summary = summary(&merged);
+        let line = "- checks: axioms fail, leanchecker pass, comparator fail";
+        assert!(summary.lines().any(|l| l == line), "{summary}");
+        let [q, t, c] = &parts;
+        assert_eq!(exit(&fixture, &[q, t, c]), ExitCode::FAILURE);
     }
 
     #[test]
@@ -1059,22 +1308,39 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_valid_waiver_passes_the_merge_of_a_rejected_target_and_the_record_stays_rejected() {
-        let fixture = checkout("merge-waived", r#"[{"name": "a"}]"#);
+    fn a_valid_waiver_passes_the_merge_and_the_hard_gates_of_a_rejected_target_and_the_record_stays_rejected()
+     {
+        let fixture = proving("merge-waived");
         waive(&fixture, "a", "9999-12-31");
-        let [q, t] = rejected(&fixture);
-        let merged = merge_in(&fixture, &[q.clone(), t.clone()]);
+        // The base round leaves out the statement that `a` proves, so the
+        // comparator does not check it either, and the shard rejects `a`
+        // after its audit failed.
+        let parts = proved_parts(
+            &fixture,
+            Status::Scoped,
+            Class::ProofFailure,
+            Status::Scoped,
+        );
+        let merged = merge_in(&fixture, &parts);
         assert_eq!(conclusion(&merged), (Status::Rejected, true, true));
+        assert_eq!(gates(&merged), [true, true, true]);
         assert_eq!(merged.units["target/a"].status, Status::Rejected);
+        assert_eq!(merged.units["comparator/a"].status, Status::Scoped);
         let waived = Vec::from_iter(merged.waivers.iter().map(|w| (&w.waiver.scope, w.used)));
         assert_eq!(waived, [(&vec!["a".to_string()], true)]);
-        assert_eq!(exit(&fixture, &[&q, &t]), ExitCode::SUCCESS);
+        let [q, t, c] = &parts;
+        assert_eq!(exit(&fixture, &[q, t, c]), ExitCode::SUCCESS);
+        let record = fs::read_to_string(fixture.root().join(DIR).join("record.json"));
+        let record: Merge = serde_json::from_str(&record.expect("the record")).expect("a record");
+        assert_eq!((record.status, record.passes), (Status::Rejected, true));
+        assert_eq!(gates(&record), [true, true, true]);
         let summary = summary(&merged);
         let lines = Vec::from_iter(summary.lines().skip(1));
         assert_eq!(
             lines,
             [
                 "- trigger MANUAL none none",
+                "- checks: axioms pass, leanchecker pass, comparator pass",
                 "- passes: every unit and part outside the waivers is VERIFIED",
                 "- waiver of a until 9999-12-31 by someone, used: The proofs wait for a fix of the tool.",
             ]
@@ -1243,10 +1509,14 @@ pub(crate) mod tests {
             no_conclusion(&merged, &[problem(other)]);
             assert_eq!((merged.trigger, merged.run_id), (None, None));
         }
-        // Their values are escaped.
+        // The record holds their values as they are, and the summary escapes
+        // them once.
         triggered(&mut shard, Mode::Required, "1\n2", "1");
         let merged = merge_in(&fixture, &[q, write(&fixture, "t", &shard)]);
-        no_conclusion(&merged, &[problem("REQUIRED refs/pull/7/merge 1\\n2")]);
+        no_conclusion(&merged, &[problem("REQUIRED refs/pull/7/merge 1\n2")]);
+        let line = format!("- problem: {}", problem("REQUIRED refs/pull/7/merge 1\\n2"));
+        let summary = summary(&merged);
+        assert!(summary.lines().any(|l| l == line), "{summary}");
     }
 
     #[test]
@@ -1293,6 +1563,7 @@ pub(crate) mod tests {
                 (Some(13_372_738_764), false, Some(false)),
                 (Some(13_372_738_765), true, Some(true)),
                 (None, false, None),
+                (None, false, None),
             ]
         );
         let summary = summary(&merged);
@@ -1300,7 +1571,7 @@ pub(crate) mod tests {
         assert_eq!(
             parts,
             [
-                "- part target/a: 2880.001 s, above 2880 s",
+                "- part target/a: 2880.001 s, its job above 2880 s",
                 "- part target/a: memory peak 13372738765 B, above 13372738764 B",
             ]
         );
@@ -1351,6 +1622,7 @@ pub(crate) mod tests {
             lines,
             [
                 "- trigger MANUAL none none",
+                "- checks: axioms fail, leanchecker fail, comparator fail",
                 "- problem: verification/waivers.json: unknown field `x\\nformal merge: VERIFIED, complete`, expected `schema` or `waivers` at line 1 column 66",
             ]
         );
@@ -1403,5 +1675,269 @@ pub(crate) mod tests {
         );
         let merged = merge_in(&fixture, &[q, t]);
         assert_eq!(conclusion(&merged), (Status::Scoped, true, false));
+    }
+
+    #[test]
+    fn each_hard_gate_fails_on_its_own_entries() {
+        let fixture = proving("merge-gates");
+        let parts = |fixture: &Fixture| {
+            let shard = receipt(fixture, "target/a", &units_of("a"));
+            let compared = receipt(fixture, comparator::PHASE, &["comparator/a".to_string()]);
+            (qualification(fixture), shard, compared)
+        };
+        let gates_of = |fixture: &Fixture, job: &Receipt, shard: &Receipt, compared: &Receipt| {
+            let parts = [("q", job), ("t", shard), ("c", compared)];
+            let merged = merge_in(
+                fixture,
+                &parts.map(|(name, part)| write(fixture, name, part)),
+            );
+            assert_eq!(merged.problems, Vec::<String>::new());
+            gates(&merged)
+        };
+        let (job, shard, compared) = parts(&fixture);
+        let all = |job: &Receipt| gates_of(&fixture, job, &shard, &compared);
+        assert_eq!(all(&job), [true, true, true]);
+        let status = |receipt: &mut Receipt, unit: &str, status: Status| {
+            receipt.units.get_mut(unit).expect("the unit").status = status;
+        };
+        // The axioms: an audit that did not pass, no audit, or a unit of the
+        // base round or of a target that is not VERIFIED; a run of the
+        // heartbeats is no audit.
+        let mut other = job.clone();
+        other.commands[0].class = Class::ProofFailure;
+        assert_eq!(all(&other), [false, true, true]);
+        other.commands.remove(0);
+        assert_eq!(all(&other), [false, true, true]);
+        let heartbeats = "lake env lean --json .heartbeats/Krepi/Proofs/A.lean";
+        let heartbeats = tool("base", Site::AxiomAudit, heartbeats, Class::ProofFailure);
+        let mut other = job.clone();
+        other.commands.push(heartbeats);
+        assert_eq!(all(&other), [true, true, true]);
+        for unit in [base::PHASE.to_string(), base::unit(PROVED)] {
+            let mut other = job.clone();
+            status(&mut other, &unit, Status::Rejected);
+            assert_eq!(all(&other), [false, true, true], "{unit}");
+        }
+        let mut other = shard.clone();
+        let argv = "lake env lean Audit.lean";
+        other.commands = vec![tool("target/a", Site::AxiomAudit, argv, Class::ToolFailure)];
+        assert_eq!(
+            gates_of(&fixture, &job, &other, &compared),
+            [false, true, true]
+        );
+        status(&mut other, "target/a", Status::Rejected);
+        other.commands.clear();
+        assert_eq!(
+            gates_of(&fixture, &job, &other, &compared),
+            [false, true, true]
+        );
+        // `leanchecker`: no replay, two, or one that did not pass; the version
+        // of Lean is no replay.
+        let mut other = job.clone();
+        other.commands.pop();
+        assert_eq!(all(&other), [true, false, true]);
+        other
+            .commands
+            .extend([replay(Class::Passed), replay(Class::Passed)]);
+        assert_eq!(all(&other), [true, false, true]);
+        other.commands.pop();
+        other.commands[1].class = Class::ProofFailure;
+        assert_eq!(all(&other), [true, false, true]);
+        let mut other = job.clone();
+        let version = tool(
+            "base",
+            Site::Leanchecker,
+            "lean --version",
+            Class::ToolFailure,
+        );
+        other.commands.push(version);
+        assert_eq!(all(&other), [true, true, true]);
+        // The comparator: a unit that is not VERIFIED.
+        for unit_status in [Status::Rejected, Status::NotRun] {
+            let mut other = compared.clone();
+            status(&mut other, "comparator/a", unit_status);
+            let found = gates_of(&fixture, &job, &shard, &other);
+            assert_eq!(found, [true, true, false], "{unit_status:?}");
+        }
+        // Under a waiver of `a`, its commands and units hold, but neither the
+        // unit `base` nor a replay does.
+        waive(&fixture, "a", "9999-12-31");
+        let (mut job, mut shard, mut compared) = parts(&fixture);
+        status(&mut job, &base::unit(PROVED), Status::Rejected);
+        shard.commands = vec![tool("target/a", Site::AxiomAudit, argv, Class::ToolFailure)];
+        status(&mut shard, "target/a", Status::Rejected);
+        status(&mut compared, "comparator/a", Status::NotRun);
+        assert_eq!(
+            gates_of(&fixture, &job, &shard, &compared),
+            [true, true, true]
+        );
+        job.commands[1].class = Class::ProofFailure;
+        status(&mut job, base::PHASE, Status::Rejected);
+        assert_eq!(
+            gates_of(&fixture, &job, &shard, &compared),
+            [false, false, true]
+        );
+    }
+
+    #[test]
+    fn a_unit_of_a_mutant_is_no_entry_of_the_hard_gates() {
+        let mutant = r#"{"name": "m", "file": "src/lib.rs", "find": "a", "replace": "b",
+            "fails": ["Krepi.Proofs.T.f_spec"]}"#;
+        let targets = format!(r#"[{{"name": "a", "mutants": [{mutant}]}}]"#);
+        let fixture = checkout("merge-gates-mutant", &targets);
+        let all = ["target/a".to_string(), "target/a/mutant/m".to_string()];
+        let mut shard = receipt(&fixture, "target/a", &all);
+        let survived = shard.units.get_mut(&all[1]).expect("the unit");
+        survived.status = Status::Rejected;
+        let q = write(&fixture, "q", &qualification(&fixture));
+        let merged = merge_in(&fixture, &[q, write(&fixture, "t", &shard)]);
+        assert_eq!(conclusion(&merged), (Status::Rejected, true, false));
+        assert_eq!(gates(&merged), [true, true, true]);
+    }
+
+    #[test]
+    fn a_statement_left_out_only_through_an_import_fails_the_hard_gates() {
+        let target = r#"[{"name": "a", "module": "A", "proof_modules": ["Krepi.Proofs.A"]}]"#;
+        let fixture = checkout("merge-gates-import", target);
+        let statements = serde_json::json!({"schema": 1, "hash": "0".repeat(40), "statements": [
+            {"name": "Krepi.Statements.S", "theorem": "Krepi.Proofs.A.s", "module": "Krepi.Proofs.A", "state": "proved"},
+            {"name": "Krepi.Statements.R", "theorem": "Krepi.Proofs.Helper.r", "module": "Krepi.Proofs.Helper", "state": "proved"},
+        ]});
+        fixture.write(LAYOUT.statements, &statements.to_string());
+        waive(&fixture, "a", "9999-12-31");
+        let t = write(
+            &fixture,
+            "t",
+            &receipt(&fixture, "target/a", &units_of("a")),
+        );
+        let names = ["comparator".to_string(), "comparator/a".to_string()];
+        let (mut job, mut part) = (
+            qualification(&fixture),
+            receipt(&fixture, comparator::PHASE, &names),
+        );
+        let scoped = |receipt: &mut Receipt, unit: &str| {
+            receipt.units.get_mut(unit).expect("the unit").status = Status::Scoped;
+        };
+        let merged = |job: &Receipt, part: &Receipt| {
+            let (q, c) = (write(&fixture, "q", job), write(&fixture, "c", part));
+            merge_in(&fixture, &[q, t.clone(), c])
+        };
+        // The statement in the proof module of `a` is left out and covered.
+        scoped(&mut job, &base::unit("Krepi.Proofs.A.s"));
+        scoped(&mut part, "comparator/a");
+        let waived = merged(&job, &part);
+        assert_eq!(conclusion(&waived), (Status::Rejected, true, true));
+        assert_eq!(gates(&waived), [true, true, true]);
+        // That of a module that only imports what the waiver leaves out is not.
+        scoped(&mut job, &base::unit("Krepi.Proofs.Helper.r"));
+        scoped(&mut part, "comparator");
+        let imported = merged(&job, &part);
+        assert_eq!(conclusion(&imported), (Status::Scoped, true, false));
+        assert_eq!(gates(&imported), [false, true, false]);
+    }
+
+    #[test]
+    fn a_problem_of_the_merge_fails_every_hard_gate() {
+        let fixture = checkout("merge-gates-problem", r#"[{"name": "a"}]"#);
+        let q = write(&fixture, "q", &qualification(&fixture));
+        let t = write(
+            &fixture,
+            "t",
+            &receipt(&fixture, "target/a", &units_of("a")),
+        );
+        let merged = merge_in(&fixture, &[q.clone(), t.clone()]);
+        verified(&merged);
+        assert_eq!(gates(&merged), [true, true, true]);
+        let line = "- checks: axioms pass, leanchecker pass, comparator pass";
+        assert!(summary(&merged).lines().any(|l| l == line));
+        fixture.write("verification/x", "");
+        let merged = merge_in(&fixture, &[q, t]);
+        let dirty = "the gate inputs of the checkout are not clean: ?? verification/x";
+        no_conclusion(&merged, &[dirty.to_string()]);
+        assert_eq!(gates(&merged), [false, false, false]);
+        let line = "- checks: axioms fail, leanchecker fail, comparator fail";
+        assert!(summary(&merged).lines().any(|l| l == line));
+    }
+
+    #[test]
+    fn the_seconds_of_the_comparator_count_toward_the_qualification_job_and_its_flag() {
+        let fixture = checkout("merge-job", r#"[{"name": "a"}]"#);
+        let part = |name: &str, mut receipt: Receipt, seconds: f64| {
+            receipt.seconds = seconds;
+            write(&fixture, name, &receipt)
+        };
+        // The receipts of the qualification, comparator and `a` of `seconds`.
+        let merged = |[q, c, t]: [f64; 3]| {
+            let q = part("q", qualification(&fixture), q);
+            let c = part("c", receipt(&fixture, comparator::PHASE, &[]), c);
+            let t = part("t", receipt(&fixture, "target/a", &units_of("a")), t);
+            let merged = merge_in(&fixture, &[q, c, t]);
+            verified(&merged);
+            merged
+        };
+        let flags = |merged: &Merge| Vec::from_iter(merged.parts.iter().map(|p| p.over_seconds));
+        // The job of the qualification and the comparator is the slowest, or
+        // the shard is.
+        let job = merged([1_500.0, 1_000.0, 2_400.0]);
+        assert_eq!(job.slowest_part_seconds, 2_500.0);
+        assert_eq!(flags(&job), [false, false, false]);
+        assert_eq!(
+            merged([1_500.0, 1_000.0, 2_600.0]).slowest_part_seconds,
+            2_600.0
+        );
+        // Their sum above 2,880 s flags the qualification part, and only it.
+        assert_eq!(
+            flags(&merged([1_500.0, 1_380.0, 10.0])),
+            [false, false, false]
+        );
+        let over = merged([1_500.0, 1_380.5, 10.0]);
+        assert_eq!(over.slowest_part_seconds, 2_880.5);
+        assert!(over.over_80_percent);
+        assert_eq!(flags(&over), [true, false, false]);
+        let summary = summary(&over);
+        let line = "- part qualification: 1500 s, its job above 2880 s";
+        assert!(summary.lines().any(|l| l == line), "{summary}");
+        // The comparator part keeps its own flag.
+        assert_eq!(flags(&merged([10.0, 2_880.5, 10.0])), [true, true, false]);
+    }
+
+    #[test]
+    fn the_record_reports_the_axioms_of_each_audited_theorem() {
+        let fixture = checkout("merge-axioms", "[]");
+        let theorem = |axioms: Option<&[&str]>, status| base::Theorem {
+            axioms: axioms.map(|axioms| Vec::from_iter(axioms.iter().map(|a| a.to_string()))),
+            status,
+            ..base::Theorem::default()
+        };
+        let theorems = [
+            (
+                "Krepi.Proofs.A.s",
+                theorem(Some(&["propext", "Quot.sound"]), Status::Verified),
+            ),
+            ("Krepi.Proofs.A.h", theorem(Some(&[]), Status::Verified)),
+            (
+                "Krepi.Proofs.A.r",
+                theorem(Some(&["sorryAx"]), Status::Rejected),
+            ),
+            ("Krepi.Proofs.B.t", theorem(None, Status::Scoped)),
+        ];
+        let mut job = qualification(&fixture);
+        job.base = Some(base::Record {
+            theorems: BTreeMap::from(theorems.map(|(name, t)| (name.to_string(), t))),
+            ..base::Record::default()
+        });
+        let merged = merge_in(&fixture, &[write(&fixture, "q", &job)]);
+        verified(&merged);
+        let axioms = |axioms: &[&str]| Vec::from_iter(axioms.iter().map(|a| a.to_string()));
+        let expected = [
+            ("Krepi.Proofs.A.h", axioms(&[])),
+            ("Krepi.Proofs.A.r", axioms(&["sorryAx"])),
+            ("Krepi.Proofs.A.s", axioms(&["propext", "Quot.sound"])),
+        ];
+        let expected = BTreeMap::from(expected.map(|(name, axioms)| (name.to_string(), axioms)));
+        assert_eq!(merged.axioms, expected);
+        // Without a base round, the record has none.
+        let merged = merge_in(&fixture, &[write(&fixture, "q", &qualification(&fixture))]);
+        assert_eq!(merged.axioms, BTreeMap::new());
     }
 }

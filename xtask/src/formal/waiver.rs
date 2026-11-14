@@ -1,6 +1,6 @@
 //! The waiver record `verification/waivers.json`, what its waivers leave
-//! out of the base round and how they conclude a merge, as "Waivers" in
-//! `docs/formal-verification.md` describes them.
+//! out of the base round and how they conclude a merge and its hard gates,
+//! as "Waivers" in `docs/formal-verification.md` describes them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -10,9 +10,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use time::{Date, Month, UtcDateTime};
 
+use super::outcome::{Class, Site, Status};
 use super::receipt::{Merge, Receipt, Waived};
 use super::registry::{State, Target};
-use super::{Layout, base, guard, lean, merge, mutants, outcome::Status};
+use super::{Layout, base, comparator, guard, lean, merge, mutants};
 
 /// The waiver record: schema 1 and its waivers.
 #[derive(Debug, Deserialize)]
@@ -102,10 +103,15 @@ pub fn left_out(layout: &Layout, targets: &[Target], waived: &BTreeSet<String>) 
 /// Concludes `merged`, whose status, units, problems and waiver date are
 /// set, with the `waivers`, `targets` and `statements` of the checkout and
 /// its `kept` receipts: the units and parts of the targets of the waivers
-/// that hold, and the `base/<theorem>` of each statement in a module that
-/// they leave out, are recorded and not required. It passes when it has no
-/// problem, every other unit is `VERIFIED` and no other part has a failure,
-/// and is then `REJECTED` when it used a waiver.
+/// that hold, their units of the comparator included, and the
+/// `base/<theorem>` of each statement in a module that they leave out, are
+/// recorded and not required. It passes when it has no problem, every other
+/// unit is `VERIFIED` and no other part has a failure, and is then
+/// `REJECTED` when it used a waiver. Each hard gate of a merge without a
+/// problem passes over the same waivers: the axioms when there are audits,
+/// each passed, and each unit of the base round and of a target is
+/// `VERIFIED`; `leanchecker` when its one replay passed; the comparator when
+/// each of its units is `VERIFIED`.
 pub fn conclude(
     merged: &mut Merge,
     layout: &Layout,
@@ -119,16 +125,35 @@ pub fn conclude(
     // The target of each unit that is not VERIFIED and part with a failure.
     let left = left_out(layout, targets, &waived);
     let modules = BTreeMap::from_iter(statements.iter().map(|s| (base::unit(&s.theorem), s)));
-    let owner = |unit: &String| match modules.get(unit) {
+    let of = |u: &str| (u.strip_prefix(comparator::PHASE)?.strip_prefix('/')).map(String::from);
+    let owner = |unit: &str| match modules.get(unit) {
         Some(statement) => left.get(&statement.module).cloned(),
-        None => merge::target(mutants::owner(unit)).map(String::from),
+        None => (merge::target(mutants::owner(unit)).map(String::from)).or_else(|| of(unit)),
     };
     let units = (merged.units.iter()).filter(|(_, unit)| unit.status != Status::Verified);
     let parts = (kept.iter()).filter(|receipt| !receipt.failures.is_empty());
-    let parts = parts.map(|receipt| owner(&receipt.shard.clone().unwrap_or_default()));
+    let parts = parts.map(|receipt| owner(receipt.shard.as_deref().unwrap_or_default()));
     let failing = Vec::from_iter(units.map(|(unit, _)| owner(unit)).chain(parts));
     let covered = |owner: &Option<String>| owner.as_ref().is_some_and(|o| waived.contains(o));
-    merged.passes = merged.problems.is_empty() && failing.iter().all(covered);
+    let ok = merged.problems.is_empty();
+    merged.passes = ok && failing.iter().all(covered);
+    // The entries of the hard gates, commands and units, each passed or covered.
+    let fine = |unit: Option<&str>, passed: bool| passed || covered(&unit.and_then(owner));
+    let commands = Vec::from_iter(kept.iter().flat_map(|receipt| &receipt.commands));
+    let ran = |site: Site, arg: &str| {
+        let ran = (commands.iter()).filter(|c| c.site == site && c.argv.iter().any(|a| a == arg));
+        Vec::from_iter(ran.map(|c| fine(c.unit.as_deref(), c.class == Class::Passed)))
+    };
+    let verified = |entry: &dyn Fn(&str) -> bool| {
+        let mut units = (merged.units.iter()).filter(|(unit, _)| entry(unit));
+        units.all(|(unit, u)| fine(Some(unit), u.status == Status::Verified))
+    };
+    let within = |unit: &str, phase: &str| unit.split('/').next() == Some(phase);
+    let target = |u: &str| merge::target(u).is_some() && mutants::owner(u) == u;
+    let audits = ok && ran(Site::AxiomAudit, lean::AUDIT).into_iter().min() == Some(true);
+    merged.gates.axioms = audits && verified(&|u| within(u, base::PHASE) || target(u));
+    merged.gates.leanchecker = ok && ran(Site::Leanchecker, "leanchecker") == [true];
+    merged.gates.comparator = ok && verified(&|unit| within(unit, comparator::PHASE));
     let used = |w: &Waiver| (w.scope.iter()).any(|name| failing.contains(&Some(name.clone())));
     let held = (waivers.iter().filter(holds)).map(|w| (w.clone(), used(w)));
     merged.waivers = Vec::from_iter(held.map(|(waiver, used)| Waived { waiver, used }));

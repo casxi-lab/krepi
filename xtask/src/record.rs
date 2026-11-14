@@ -24,7 +24,8 @@
 //! in parentheses; failing that, of the jobs whose names hold expressions
 //! `${{ }}` and fit its name, with or without the values of a matrix in
 //! parentheses, when each expression stands for some text and all of them
-//! give the same limit ([`job_limit`]); otherwise it has no known limit.
+//! give the same limit ([`job_limit`]). A job with no limit there, or with
+//! an expression, takes the minutes that it noted ([`noted`]), if any.
 //! `--own` names the same object for the run of the record workflow itself,
 //! with `--now` the current time.
 //!
@@ -85,6 +86,9 @@ pub const OVER: &str = "exceeds 80% of its limit";
 /// The annotation of a step whose command `timeout` stopped at its deadline:
 /// `timeout` then exits with 124, and the runner reports that status.
 pub const DEADLINE_EXIT: &str = "Process completed with exit code 124.";
+/// The title of the notice in which a job whose limit is an expression
+/// writes its minutes: `::notice title=timeout-minutes::<minutes>`.
+pub const LIMIT_NOTICE: &str = "timeout-minutes";
 
 /// The data of a run, as `jq` writes it.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -305,6 +309,13 @@ fn job_limit(limits: &[(String, Option<u64>)], name: &str) -> Option<u64> {
     found.all(|timeout| timeout == first).then_some(first)?
 }
 
+/// The minutes that `job` noted as its limit: the first message of its
+/// notices titled [`LIMIT_NOTICE`] that is a whole number.
+fn noted(job: &JobData) -> Option<u64> {
+    let limit = |n: &&Annotation| n.level == "notice" && n.title.as_deref() == Some(LIMIT_NOTICE);
+    (job.annotations.iter().filter(limit)).find_map(|note| note.message.parse().ok())
+}
+
 /// Why the job `job`, which ran for `seconds` against a limit of `limit`
 /// minutes, is a `TIMEOUT`, if it is one: a job that did not succeed is one
 /// when it ran at least as long as its limit (`limit`), or when one of its
@@ -357,7 +368,7 @@ pub fn record(
         let seconds = seconds(job, None);
         let used = seconds.map_or(0, minutes);
         total += used;
-        let limit = limits.and_then(|limits| job_limit(limits, &job.name));
+        let limit = limits.and_then(|limits| job_limit(limits, &job.name).or_else(|| noted(job)));
         let stopped = timeout(job, seconds, limit);
         let result = match stopped {
             Some(_) => Some("TIMEOUT"),

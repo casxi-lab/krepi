@@ -27,8 +27,13 @@ every pull request to `main` and on every push to `main`. Beside it, one
 job writes the images of the QEMU suites, another runs the suites of
 `suites.toml` on those images, and a summary job requires the three jobs to
 succeed; the slow tests run in the full line, which the label `full-check`
-starts on a reviewed head, and every night. The jobs restore a cache of
-the Cargo registry and build directories and a cache of the CI tools, which
+starts on a reviewed head, and every night. The same label runs the proof
+gate on a head whose change affects it, which CI also runs on a manual run
+of `main` and once a week; on a push to `main`, CI reviews the record of
+the gate of the merged head
+([formal verification](docs/formal-verification.md#ci-job)). The jobs
+restore a cache of the Cargo registry and build directories and a cache of
+the CI tools, which
 only the workflow `cache` saves, from `main`. A change that updates a tool
 version updates `toolchains.toml` in the same change. The proof tools are
 pinned separately, in `verification/toolchain.json`: a change to them runs

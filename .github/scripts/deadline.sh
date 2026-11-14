@@ -1,7 +1,7 @@
 # Runs the main command of a step under a deadline and passes a stop signal
 # of the runner on to it:
 #
-#   exec bash .github/scripts/deadline.sh [--stop-commands] DURATION KILL_AFTER COMMAND [ARGUMENT...]
+#   exec bash .github/scripts/deadline.sh [--stop-commands] [--status FILE] DURATION KILL_AFTER COMMAND [ARGUMENT...]
 #
 # The command runs under `timeout --signal=TERM --kill-after=KILL_AFTER
 # DURATION`, which stops it with SIGTERM at the deadline, and with SIGKILL
@@ -25,15 +25,26 @@
 # whole number of seconds, minutes, hours or days, such as `13m`. With
 # --stop-commands, the script turns workflow commands off with a random token
 # before the command starts and on again once it has ended, so that its
-# output cannot act as a workflow command.
+# output cannot act as a workflow command. With --status, it writes the
+# status with which it exits to FILE, followed by a line feed, once the
+# command has ended, so that a later step can read it.
 
 set -u
 
-usage="usage: deadline.sh [--stop-commands] DURATION KILL_AFTER COMMAND [ARGUMENT...]"
+usage="usage: deadline.sh [--stop-commands] [--status FILE] DURATION KILL_AFTER COMMAND [ARGUMENT...]"
 stop_commands=
+status_file=
 if [ "${1-}" = --stop-commands ]; then
   stop_commands=1
   shift
+fi
+if [ "${1-}" = --status ]; then
+  if [ "$#" -lt 2 ]; then
+    echo "$usage" >&2
+    exit 2
+  fi
+  status_file=$2
+  shift 2
 fi
 if [ "$#" -lt 3 ]; then
   echo "$usage" >&2
@@ -103,6 +114,9 @@ while [ -n "$signalled" ]; do
 done
 if [ "$status" -eq 137 ] && [ "$SECONDS" -ge "$limit" ]; then
   status=124
+fi
+if [ -n "$status_file" ]; then
+  echo "$status" > "$status_file"
 fi
 
 if [ -n "$token" ]; then

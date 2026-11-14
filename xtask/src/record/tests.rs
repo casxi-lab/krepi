@@ -509,15 +509,15 @@ fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
         ]
     };
     // The fixture has the measurement jobs beside the gate. The committed
-    // workflow of the gate has the jobs of the limits and of the planned
-    // targets, and its gates take their limits from the first: expressions,
-    // which give no limit; the measurement jobs have a workflow of their own.
+    // workflow of the gate has the job of the limits and the qualification
+    // job, each with a limit of its own, and no job of the planned targets;
+    // the measurement jobs have a workflow of their own.
     for (text, names) in [
         (
             FORMAL,
             [&measured(Some(30))[..], &gates(Some(195), None)].concat(),
         ),
-        (committed.as_str(), gates(None, Some(5)).to_vec()),
+        (committed.as_str(), gates(Some(192), Some(5)).to_vec()),
         (measure.as_str(), measured(Some(45)).to_vec()),
     ] {
         let limits = limits(text).expect("the workflow reads");
@@ -525,12 +525,29 @@ fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
             assert_eq!(job_limit(&limits, name), limit, "{name}");
         }
     }
-    // The committed file runs the gate as parts: the shards take their
-    // limits from the matrix, and the merge has a limit of its own.
+    // The committed file runs the gate as parts: the shards and the planned
+    // targets that run alone take their limits from the matrix, which they
+    // write in a notice; the merge of the parts, the verdicts and the review
+    // have limits of their own.
     let committed = limits(&committed).expect("the workflow reads");
-    let shard = ("formal shard ${{ matrix.name }}".to_string(), None);
-    assert!(committed.contains(&shard));
-    for (name, limit) in [("formal shard t", None), ("formal merge", Some(15))] {
+    for name in [
+        "formal shard ${{ matrix.name }}",
+        "formal scoped ${{ matrix.name }}",
+    ] {
+        assert!(committed.contains(&(name.to_string(), None)), "{name}");
+    }
+    for (name, limit) in [
+        ("formal shard t", None),
+        ("formal scoped t", None),
+        ("formal parts", Some(15)),
+        ("formal merge", Some(15)),
+        ("formal axioms", Some(6)),
+        ("formal leanchecker", Some(6)),
+        ("formal comparator", Some(6)),
+        ("formal fast", Some(10)),
+        ("formal guard", Some(10)),
+        ("formal receipt review", Some(15)),
+    ] {
         assert_eq!(job_limit(&committed, name), limit, "{name}");
     }
     let limit = |limits: &[(&str, Option<u64>)], name: &str| {
@@ -584,6 +601,59 @@ fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
     let record = record(&input, Some(&limits), None);
     assert_eq!(record["jobs"][0]["timeout_minutes"], 120);
     assert_eq!(record["jobs"][0]["timeout"], "limit");
+}
+
+#[test]
+fn a_job_whose_limit_is_an_expression_takes_the_minutes_of_its_notice() {
+    let workflow = "jobs:\n  shard:\n    name: formal shard ${{ matrix.name }}\n    \
+                    timeout-minutes: ${{ matrix.job }}\n  merge:\n    name: formal merge\n    \
+                    timeout-minutes: 15\n";
+    let limits = limits(workflow).expect("the workflow reads");
+    let note = |level: &str, title: Option<&str>, message: &str| Annotation {
+        level: level.to_string(),
+        title: title.map(str::to_string),
+        message: message.to_string(),
+    };
+    let notice = |minutes: &str| note("notice", Some(LIMIT_NOTICE), minutes);
+    // The limit and the result of the job `name` with the annotations
+    // `notes`, which ran for 65 minutes and failed.
+    let judged = |name: &str, notes: Vec<Annotation>, limits: Option<&[(String, Option<u64>)]>| {
+        let mut ran = job(name, "failure", 3_900);
+        ran.annotations = notes;
+        let input = run("formal", "pull_request", "topic", vec![ran]);
+        let record = super::record(&input, limits, None);
+        let job = &record["jobs"][0];
+        (job["timeout_minutes"].clone(), job["result"].clone())
+    };
+    let shard = "formal shard t";
+    let read = Some(&limits[..]);
+    assert_eq!(LIMIT_NOTICE, "timeout-minutes");
+    // The notice gives the limit of the job, which ran as long as it or not.
+    let found = judged(shard, vec![notice("65")], read);
+    assert_eq!(found, (json!(65), json!("TIMEOUT")));
+    let found = judged(shard, vec![notice("66")], read);
+    assert_eq!(found, (json!(66), json!("failure")));
+    // Without one, the limit stays unknown.
+    assert_eq!(
+        judged(shard, Vec::new(), read),
+        (Value::Null, json!("failure"))
+    );
+    // Only the first notice of that title whose message is a whole number.
+    let notes = vec![
+        note("warning", Some(LIMIT_NOTICE), "1"),
+        note("notice", Some("timeout"), "2"),
+        note("notice", None, "3"),
+        notice("65 minutes"),
+        notice("-1"),
+        notice("65"),
+        notice("70"),
+    ];
+    assert_eq!(judged(shard, notes, read), (json!(65), json!("TIMEOUT")));
+    // A literal limit wins, and without the workflow file no limit is known.
+    let found = judged("formal merge", vec![notice("200")], read);
+    assert_eq!(found, (json!(15), json!("TIMEOUT")));
+    let found = judged(shard, vec![notice("65")], None);
+    assert_eq!(found, (Value::Null, json!("failure")));
 }
 
 #[test]

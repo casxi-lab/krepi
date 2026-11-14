@@ -1,5 +1,5 @@
 //! The receipt of `cargo xtask formal run`, schema 5, the record of
-//! `cargo xtask formal merge`, schema 2, as "Receipt" and "Shards and merge"
+//! `cargo xtask formal merge`, schema 3, as "Receipt" and "Shards and merge"
 //! in `docs/formal-verification.md` document them, and
 //! `cargo xtask formal receipt`, which judges a record against the checkout,
 //! as "Current and fresh records" there describes.
@@ -248,7 +248,16 @@ pub struct Failure {
 }
 
 /// The schema of the record of `cargo xtask formal merge`.
-pub const MERGE_SCHEMA: u32 = 2;
+pub const MERGE_SCHEMA: u32 = 3;
+
+/// Whether each hard gate of a merge passes: the axiom audits, the replay of
+/// `leanchecker --fresh` and the comparator.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Gates {
+    pub axioms: bool,
+    pub leanchecker: bool,
+    pub comparator: bool,
+}
 
 /// The record of a merge; its fields are written in this order.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -257,6 +266,7 @@ pub struct Merge {
     pub status: Status,
     pub complete: bool,
     pub passes: bool,
+    pub gates: Gates,
     pub commit: Option<String>,
     pub tree: Option<String>,
     pub inputs: Option<Snapshot>,
@@ -270,6 +280,7 @@ pub struct Merge {
     pub waivers: Vec<Waived>,
     pub parts: Vec<Part>,
     pub units: BTreeMap<String, Unit>,
+    pub axioms: BTreeMap<String, Vec<String>>,
     pub slowest_part_seconds: f64,
     pub merge_seconds: f64,
     pub merge_from: String,
@@ -751,15 +762,15 @@ mod tests {
             leanchecker: Leanchecker {
                 version: Some("Lean (version 4.35.0, Release)".to_string()),
                 sha256: "8".repeat(64),
-                mode: "prefix".to_string(),
-                prefixes: names(&["Krepi", "KrepiGen"]),
+                mode: "fresh".to_string(),
+                prefixes: names(&["Krepi"]),
             },
             heartbeats: Heartbeats {
                 method: "count_heartbeats".to_string(),
                 counts: BTreeMap::from([("Krepi.Proofs.C.t".to_string(), 1_326)]),
                 missing: BTreeMap::from([("Krepi/Proofs/D.lean".to_string(), "error".to_string())]),
             },
-            problems: vec!["leanchecker Krepi: a problem".to_string()],
+            problems: vec!["leanchecker --fresh Krepi: a problem".to_string()],
         }
     }
 
@@ -1072,6 +1083,11 @@ mod tests {
             status: Status::Verified,
             complete: true,
             passes: true,
+            gates: Gates {
+                axioms: true,
+                leanchecker: true,
+                comparator: true,
+            },
             commit: Some("c".repeat(40)),
             tree: Some("d".repeat(40)),
             inputs: Some(BTreeMap::from([
@@ -1115,6 +1131,12 @@ mod tests {
                     reason: None,
                 },
             )]),
+            axioms: BTreeMap::from([(
+                "Krepi.Proofs.Counter.t".to_string(),
+                ["propext", "Classical.choice", "Quot.sound"]
+                    .map(String::from)
+                    .to_vec(),
+            )]),
             slowest_part_seconds: 1_095.7,
             merge_seconds: 62.0,
             merge_from: "job".to_string(),
@@ -1131,10 +1153,15 @@ mod tests {
         );
         let expected = format!(
             r#"{{
-  "schema": 2,
+  "schema": 3,
   "status": "VERIFIED",
   "complete": true,
   "passes": true,
+  "gates": {{
+    "axioms": true,
+    "leanchecker": true,
+    "comparator": true
+  }},
   "commit": "{c}",
   "tree": "{d}",
   "inputs": {{
@@ -1186,6 +1213,13 @@ mod tests {
       "status": "VERIFIED",
       "reason": null
     }}
+  }},
+  "axioms": {{
+    "Krepi.Proofs.Counter.t": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ]
   }},
   "slowest_part_seconds": 1095.7,
   "merge_seconds": 62.0,
@@ -1468,12 +1502,12 @@ mod tests {
         assert_eq!(read(&render(&record)), Ok(record.clone()));
         let mut value = serde_json::to_value(&record).expect("JSON");
         value["schema"] = 1.into();
-        let other = "the record has schema 1 where 2 is expected".to_string();
+        let other = "the record has schema 1 where 3 is expected".to_string();
         assert_eq!(read(&value.to_string()), Err(other));
         value.as_object_mut().expect("an object").remove("schema");
-        let none = "the record has schema null where 2 is expected".to_string();
+        let none = "the record has schema null where 3 is expected".to_string();
         assert_eq!(read(&value.to_string()), Err(none));
-        value["schema"] = 2.into();
+        value["schema"] = 3.into();
         value.as_object_mut().expect("an object").remove("passes");
         let error = read(&value.to_string()).expect_err("a missing field");
         assert!(
@@ -1482,6 +1516,29 @@ mod tests {
         );
         let error = read("{").expect_err("no JSON");
         assert!(error.starts_with("the record does not parse: "), "{error}");
+    }
+
+    #[test]
+    fn a_record_of_schema_2_is_not_current() {
+        let fixture = pinned("receipt-schema-2", None);
+        let record = merged(&fixture, Mode::Weekly, Some("7"));
+        let path = fixture.root().join("artifacts/record.json");
+        let judge = |text: &str| {
+            fs::write(&path, text).expect("write the record");
+            let args = ["receipt", path.to_str().expect("UTF-8")];
+            let matches = cli("").try_get_matches_from(args).expect("arguments");
+            super::command(fixture.root(), &Layout::PRODUCTION, &matches)
+        };
+        assert_eq!(judge(&render(&record)), ExitCode::SUCCESS);
+        // The same record as a merge of schema 2 wrote it, without its gates
+        // and the axioms of its theorems.
+        let mut value = serde_json::to_value(&record).expect("JSON");
+        value["schema"] = 2.into();
+        let fields = value.as_object_mut().expect("an object");
+        fields.retain(|field, _| !["gates", "axioms"].contains(&field.as_str()));
+        assert_eq!(judge(&value.to_string()), ExitCode::FAILURE);
+        let other = "the record has schema 2 where 3 is expected".to_string();
+        assert_eq!(read(&value.to_string()), Err(other));
     }
 
     #[test]

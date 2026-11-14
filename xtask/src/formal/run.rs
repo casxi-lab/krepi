@@ -15,6 +15,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::Layout;
+use super::comparator;
 use super::inventory::{self, Inventory};
 use super::lean;
 use super::outcome::{self, Class, Conclusion, Site, Status, Verdict, word};
@@ -133,7 +134,7 @@ pub(crate) struct Context<'a> {
     /// Reads the bytes available on the file system of a path:
     /// [`process::disk_available`], or a reading that a test gives.
     pub free: fn(&Path) -> Option<u64>,
-    /// The shard of the run, `qualification` or `target/<name>`, if any.
+    /// The shard of the run, if any: `qualification`, `comparator` or `target/<name>`.
     pub shard: Option<&'a str>,
 }
 
@@ -155,7 +156,7 @@ pub struct Gate {
     /// The tool manifest that the run read from the checkout, and its text.
     manifest: Option<(Manifest, String)>,
     deadline: Instant,
-    /// Whether the run has a budget of its own, which its targets do not grow.
+    /// Whether it is a run of `formal mutants`, whose targets do not grow its budget.
     fixed: bool,
     /// The phase that runs, and its deadline.
     phase: Option<(String, Instant)>,
@@ -477,7 +478,7 @@ pub(crate) fn execute(
         run: run.clone(),
         manifest: None,
         deadline: start + context.budget.unwrap_or(GATE_BUDGET),
-        fixed: context.budget.is_some() && context.shard.is_none(),
+        fixed: context.budget == Some(mutants::RUN_BUDGET),
         phase: None,
         conclusions: Vec::new(),
         receipt: blank(context, targets, &run.id, &directory),
@@ -843,7 +844,7 @@ pub fn target_project(gate: &Gate, name: &str) -> PathBuf {
 /// the selected planned ones; and `targets`, after it, which concludes the
 /// selected formal ones and their mutants, the source mutants of `generate`
 /// in a run that generates them. The first stops on another registry in the
-/// export; the shard of a target extracts its target alone, and the
+/// export; a run of targets [`alone`] extracts them alone, and the
 /// qualification job no target of a waiver that holds.
 pub(super) fn target_phases<'a>(
     root: &Path,
@@ -861,7 +862,7 @@ pub(super) fn target_phases<'a>(
     let named = Vec::from_iter(named.iter().cloned());
     let chosen = selected(&states, &named, shard.is_some()).into_iter();
     let chosen = BTreeSet::from_iter(chosen.map(String::from));
-    let alone = shard.and_then(merge::target).is_some();
+    let alone = alone(shard, !named.is_empty(), generate.is_some());
     all.retain(|t| (t.state == State::Formal && !alone) || chosen.contains(&t.name));
     let pick = |t: &&Target, state| t.state == state && chosen.contains(&t.name);
     let formal = Vec::from_iter(all.iter().filter(|t| pick(t, State::Formal)).cloned());
@@ -899,8 +900,8 @@ pub(super) fn target_phases<'a>(
             (all.iter()).try_for_each(|t| extract_target(gate, t, chosen.contains(&t.name)))
         }),
         Box::new(move |gate| {
-            // Without a base round, the shard lists the hand-written modules.
-            if alone {
+            // Without a base round, the run lists the hand-written modules.
+            if alone && !formal.is_empty() {
                 gate.handwritten = merge::handwritten(gate)?;
             }
             let generate = generate.as_deref();
@@ -1178,16 +1179,27 @@ pub(crate) fn finish(
     ExitCode::from(120)
 }
 
+/// Whether a run runs the part of its targets alone: the shard of a target,
+/// and a run that names targets without a shard or source mutants.
+fn alone(shard: Option<&str>, named: bool, generate: bool) -> bool {
+    shard.and_then(merge::target).is_some() || (shard.is_none() && named && !generate)
+}
+
 /// The phases of a run of `targets` with `context`, the guard on a pull
-/// request first: the shard of a target runs its extraction and its phase
-/// alone, and the qualification job every phase but that of the targets.
+/// request first: the comparator part has only its phase, a run of targets
+/// [`alone`] only their extraction and phase, and the qualification job
+/// every phase but that of the targets.
 fn phases<'a>(
     context: &Context<'a>,
     targets: &BTreeSet<String>,
     generate: Option<Vec<String>>,
 ) -> Vec<Phase<'a>> {
     let (root, layout, shard) = (context.root, context.layout, context.shard);
-    let alone = shard.and_then(merge::target).is_some();
+    if shard == Some(comparator::PHASE) {
+        let runs = (context.var)(comparator::RUNS);
+        return vec![comparator::phase(root, layout, runs)];
+    }
+    let alone = alone(shard, !targets.is_empty(), generate.is_some());
     let mut phases = Vec::from_iter(guard::phase(context.var).filter(|_| !alone));
     let [extraction, finish] = target_phases(root, layout, targets, generate, shard);
     phases.extend((!alone).then(|| qualify::phase(root, layout)));
@@ -1216,7 +1228,9 @@ pub fn command(
         host: host(),
         uid: process::effective_uid(),
         var: &var,
-        budget: (generate.as_ref().map(|_| mutants::RUN_BUDGET)).or(shard.map(merge::budget)),
+        budget: (generate.as_ref().map(|_| mutants::RUN_BUDGET))
+            .or(shard.map(merge::budget))
+            .or((!targets.is_empty()).then_some(merge::SHARD_MARGIN)),
         keep,
         free: process::disk_available,
         shard,
@@ -1765,8 +1779,9 @@ pub(crate) mod tests {
         vec![extraction, base, finish]
     }
 
-    /// The phases of a run of `named` targets of the fixture at `root` in the
-    /// production layout, as [`command`] puts them together, but the guard.
+    /// The phases of a whole run of the fixture at `root` in the production
+    /// layout, as [`command`] puts them together but the guard, with the
+    /// extraction of a run of `named` targets.
     pub(crate) fn every_phase<'a>(root: &Path, named: &[&str]) -> Vec<Phase<'a>> {
         let named = BTreeSet::from_iter(named.iter().map(|name| name.to_string()));
         let layout = &Layout::PRODUCTION;
@@ -1819,6 +1834,45 @@ pub(crate) mod tests {
         let context = shard_context(fixture.root(), Some(shard), &no_variable, free);
         let targets = shard_targets(shard);
         gate_with(&context, run, &targets, phases, Box::new(io::sink()))
+    }
+
+    /// Runs the targets `named` of `fixture` as `cargo xtask formal run
+    /// --target` does, with the phases and the budget that [`command`] gives
+    /// it outside a pull request, into a new run directory, and writes its
+    /// receipt.
+    fn named_run(fixture: &Fixture, named: &[&str]) -> Done {
+        let root = fixture.root();
+        let context = Context {
+            budget: Some(merge::SHARD_MARGIN),
+            ..shard_context(root, None, &no_variable, plenty)
+        };
+        let targets = BTreeSet::from_iter(named.iter().map(|name| name.to_string()));
+        let run = RunDir::create(root).expect("create the run directory");
+        let phases = phases(&context, &targets, None);
+        gate_with(&context, run, &targets, phases, Box::new(io::sink()))
+    }
+
+    /// Runs the comparator part of `fixture` in `layout` as `cargo xtask
+    /// formal run --shard comparator` does, with `runs` in the variable of
+    /// its runs directory, if given, into a new run directory, and writes its
+    /// receipt.
+    pub(crate) fn comparator_part(fixture: &Fixture, layout: &Layout, runs: Option<&Path>) -> Done {
+        let runs = runs.map(|runs| runs.display().to_string());
+        let var = |name: &str| runs.clone().filter(|_| name == comparator::RUNS);
+        let shard = Some(comparator::PHASE);
+        let context = Context {
+            layout,
+            ..shard_context(fixture.root(), shard, &var, plenty)
+        };
+        let run = RunDir::create(fixture.root()).expect("create the run directory");
+        let phases = phases(&context, &BTreeSet::new(), None);
+        gate_with(
+            &context,
+            run,
+            &BTreeSet::new(),
+            phases,
+            Box::new(io::sink()),
+        )
     }
 
     /// The phases of the shard `shard` of the checkout `root`, as [`command`]
@@ -2005,6 +2059,120 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_run_of_named_targets_runs_only_their_part_within_the_shard_margin() {
+        let fixture = with_targets("named-run", &two_targets(1_800, 1));
+        // On a pull request as elsewhere, it has neither the guard nor the
+        // qualification or the base round.
+        let event = |name: &str| match name {
+            "GITHUB_EVENT_NAME" => Some("pull_request".to_string()),
+            "GITHUB_EVENT_PATH" => Some("event.json".to_string()),
+            _ => None,
+        };
+        let context = shard_context(fixture.root(), None, &event, plenty);
+        let named = BTreeSet::from(["t".to_string()]);
+        let phases = phases(&context, &named, None).into_iter();
+        let names = Vec::from_iter(phases.map(|phase| phase.name));
+        assert_eq!(names, ["extraction", "targets"]);
+        let done = named_run(&fixture, &["t"]);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        let receipt = done.written();
+        assert_eq!((receipt.status, receipt.complete), (Status::Scoped, false));
+        assert_eq!(receipt.trigger.mode, Mode::Scoped);
+        assert_eq!(receipt.shard, None);
+        assert_eq!(receipt.targets, ["t"]);
+        // Its budget is the shard margin and the budget of its target, which
+        // its extraction shares with the phase of the target.
+        assert_eq!(receipt.budgets.gate_seconds, 300 + 1_800);
+        assert_eq!(
+            Vec::from_iter(receipt.phases.keys()),
+            ["extraction", "targets"]
+        );
+        assert_eq!(receipt.phases["extraction"].budget_seconds, 1_800);
+        let units = ["target/t", "target/t/mutant/m0"];
+        assert_eq!(Vec::from_iter(receipt.units.keys()), units);
+        for unit in units {
+            assert_eq!(fixture::status(&done, unit), (Status::Verified, None));
+        }
+        assert!(fixture::commands(&done, "base").is_empty());
+        assert_eq!(Vec::from_iter(receipt.proof_targets.keys()), ["t"]);
+        // Without a base round, the phase of the target lists the
+        // hand-written module files, and its stage holds them.
+        let stage = done.run.path.join("work/targets/t/stage/verification");
+        assert!(stage.join("Krepi/Proofs/T.lean").is_file());
+    }
+
+    #[test]
+    fn a_run_of_formal_mutants_keeps_its_own_budget() {
+        // It runs every phase of the gate, with the budget of `formal mutants`
+        // in place of the gate's, which the budget of its target does not grow.
+        let fixture = with_targets("mutants-budget", &two_targets(1_800, 1));
+        let context = Context {
+            budget: Some(mutants::RUN_BUDGET),
+            ..shard_context(fixture.root(), None, &no_variable, plenty)
+        };
+        let named = BTreeSet::from(["t".to_string()]);
+        let operators = vec!["literal".to_string()];
+        let phases = phases(&context, &named, Some(operators.clone())).into_iter();
+        let names = Vec::from_iter(phases.map(|phase| phase.name));
+        assert_eq!(names, ["qualification", "extraction", "base", "targets"]);
+        let run = RunDir::create(fixture.root()).expect("create the run directory");
+        let phases = generating_run(&fixture, &["t"], Some(operators));
+        let done = gate_with(&context, run, &named, phases, Box::new(io::sink()));
+        assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.failures());
+        assert_eq!(done.receipt.budgets.gate_seconds, 14_400);
+        let verified = (Status::Verified, None);
+        assert_eq!(fixture::status(&done, "mutants/t"), verified);
+    }
+
+    #[test]
+    fn no_other_budget_of_a_run_equals_that_of_formal_mutants() {
+        // A run is one of `formal mutants`, whose budget its targets do not
+        // grow, by its budget alone.
+        let budgets = [
+            merge::SHARD_MARGIN,
+            merge::budget(qualify::PHASE),
+            merge::budget("target/t"),
+            comparator::BUDGET,
+        ];
+        for budget in budgets {
+            assert_ne!(budget, mutants::RUN_BUDGET);
+        }
+        assert_eq!(merge::budget(comparator::PHASE), comparator::BUDGET);
+    }
+
+    #[test]
+    fn the_comparator_shard_runs_its_phase_alone() {
+        let fixture = merge::tests::checkout("comparator-shard", "[]");
+        // On a pull request as elsewhere, it has neither the guard nor any
+        // other phase.
+        let event = |name: &str| match name {
+            "GITHUB_EVENT_NAME" => Some("pull_request".to_string()),
+            "GITHUB_EVENT_PATH" => Some("event.json".to_string()),
+            _ => None,
+        };
+        let shard = Some(comparator::PHASE);
+        let context = shard_context(fixture.root(), shard, &event, plenty);
+        let phases = phases(&context, &BTreeSet::new(), None).into_iter();
+        assert_eq!(
+            Vec::from_iter(phases.map(|phase| phase.name)),
+            ["comparator"]
+        );
+        // Without a proved statement it has no unit and runs nothing.
+        let done = comparator_part(&fixture, &Layout::PRODUCTION, None);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        let receipt = done.written();
+        assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
+        assert_eq!(receipt.shard.as_deref(), Some("comparator"));
+        assert_eq!(receipt.trigger.mode, Mode::Manual);
+        assert_eq!(receipt.targets, Vec::<String>::new());
+        assert_eq!(receipt.budgets.gate_seconds, 1_800);
+        assert_eq!(Vec::from_iter(receipt.phases.keys()), ["comparator"]);
+        assert_eq!(receipt.phases["comparator"].budget_seconds, 1_800);
+        assert!(receipt.phases["comparator"].ran && receipt.units.is_empty());
+        assert!(!done.sites().contains(&Site::Comparator));
+    }
+
+    #[test]
     fn the_budgets_of_the_target_phases_saturate_instead_of_overflowing() {
         let fixture = with_targets("saturated-budgets", &two_targets(u64::MAX, 0));
         // The extraction adds the budget of the planned target to the largest.
@@ -2080,25 +2248,22 @@ pub(crate) mod tests {
         // The Cargo target directory of the extraction is removed after it.
         assert!(done.run.path.join("work/targets/t/extract").is_dir());
         assert!(!done.run.path.join("work/targets/t/extract/target").exists());
-        // A run of the planned target concludes it as scoped, and extracts
-        // the formal one for the base round alone, as commands of `base`.
-        let done = gate(&fixture, &["p"], target_run(&fixture, &["p"]));
+        // A run of the planned target, which runs its part alone, extracts
+        // and concludes it as scoped, and extracts no other target.
+        let done = named_run(&fixture, &["p"]);
         assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.receipt);
         assert_eq!(fixture::status(&done, "target/p"), (Status::Scoped, None));
-        assert!(!done.receipt.units.contains_key("target/t"));
-        let (formal, planned) = (
-            &done.receipt.proof_targets["t"],
-            &done.receipt.proof_targets["p"],
-        );
-        assert_eq!(
-            (formal.unit.as_deref(), planned.unit.as_deref()),
-            (None, Some("target/p"))
-        );
-        assert!(formal.typed && planned.typed);
-        let base = Vec::from_iter(fixture::commands(&done, "base").iter().map(|c| c.site));
-        assert_eq!(base, [Site::Charon, Site::Aeneas, Site::TargetBuild]);
-        assert_eq!(done.receipt.budgets.gate_seconds, 7_200 + 1_800);
-        assert_eq!(done.receipt.phases["extraction"].budget_seconds, 2 * 1_800);
+        assert_eq!(Vec::from_iter(done.receipt.units.keys()), ["target/p"]);
+        assert_eq!(Vec::from_iter(done.receipt.proof_targets.keys()), ["p"]);
+        let planned = &done.receipt.proof_targets["p"];
+        assert_eq!(planned.unit.as_deref(), Some("target/p"));
+        assert!(planned.typed);
+        let planned = fixture::commands(&done, "target/p").into_iter();
+        let sites = Vec::from_iter(planned.map(|command| command.site));
+        assert_eq!(sites, [Site::Charon, Site::Aeneas, Site::TargetBuild]);
+        assert!(fixture::commands(&done, "base").is_empty());
+        assert_eq!(done.receipt.budgets.gate_seconds, 300 + 1_800);
+        assert_eq!(done.receipt.phases["extraction"].budget_seconds, 1_800);
     }
 
     #[test]
