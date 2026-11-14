@@ -426,6 +426,18 @@ const RETENTION: [(&str, &str, &str, &str); 28] = [
         "90",
     ),
     (
+        ".github/workflows/formal-measure.yml",
+        "leanchecker",
+        "Upload the measurement",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal-measure.yml",
+        "comparator",
+        "Upload the results",
+        BY_REF,
+    ),
+    (
         ".github/workflows/formal.yml",
         "gate",
         "Upload the receipt and the logs",
@@ -445,20 +457,8 @@ const RETENTION: [(&str, &str, &str, &str); 28] = [
     ),
     (
         ".github/workflows/formal.yml",
-        "leanchecker",
-        "Upload the measurement",
-        BY_REF,
-    ),
-    (
-        ".github/workflows/formal.yml",
         "planned",
         "Upload the receipt and the logs of the planned targets",
-        BY_REF,
-    ),
-    (
-        ".github/workflows/formal.yml",
-        "comparator",
-        "Upload the results",
         BY_REF,
     ),
     (
@@ -807,6 +807,8 @@ fn a_download_takes_the_name_of_its_artifact_from_the_job_that_uploaded_it() {
 
 /// The workflow of the gate.
 const FORMAL: &str = ".github/workflows/formal.yml";
+/// The workflow of the measurement jobs of the gate.
+const MEASURE: &str = ".github/workflows/formal-measure.yml";
 /// The workflow of the calibration target.
 const CALIBRATION: &str = ".github/workflows/formal-calibration.yml";
 /// The jobs of the gate in the formal workflows: the file and the key.
@@ -821,7 +823,7 @@ const GATE_JOBS: [(&str, &str); 7] = [
 ];
 /// What their uploads may hold: receipts, summaries, the records of the
 /// run and the logs of the run packed into `logs.tar.gz`.
-const GATE_UPLOADS: [&str; 13] = [
+const GATE_UPLOADS: [&str; 7] = [
     "artifacts/formal/runs/*/receipt.json",
     "artifacts/formal/summary.md",
     "artifacts/formal/merge/record.json",
@@ -829,12 +831,6 @@ const GATE_UPLOADS: [&str; 13] = [
     "artifacts/formal/logs.tar.gz",
     "artifacts/formal/job.txt",
     "artifacts/formal/event.json",
-    "artifacts/formal/guard.txt",
-    "artifacts/formal/vectors.txt",
-    "artifacts/formal/vectors-tests.txt",
-    "artifacts/formal/vectors-fixture.txt",
-    "artifacts/formal/vectors/",
-    "artifacts/formal/samples.tsv",
 ];
 /// The archive of the logs of a run.
 const PACKED_LOGS: &str = "artifacts/formal/logs.tar.gz";
@@ -1139,16 +1135,23 @@ fn deadline_of(line: &str) -> Result<(bool, i64, i64), String> {
 /// number. Each runs as the last command of its step under [`DEADLINE`],
 /// with `exec` so that the script receives the signals of the runner, with
 /// `--stop-commands` for the suite alone, and at a deadline that with its
-/// kill-after ends before the limit of its job and, when `tight`, one or two
-/// minutes before that limit. No other command of a script calls `timeout`.
+/// kill-after ends before the limit of its job and, when `tight`, that with
+/// the limits of the steps before it that pull the image ([`PULL`]) ends one
+/// or two minutes before that limit. No other command of a script calls
+/// `timeout`.
 fn deadline_problems(document: &Yaml, tight: bool) -> (usize, Vec<String>) {
     let mut problems = Vec::new();
     let mut count = 0;
     for (key, job) in jobs(document) {
         let limit = job["timeout-minutes"].as_i64();
-        for script in
-            (job["steps"].as_vec().into_iter().flatten()).filter_map(|step| step["run"].as_str())
-        {
+        let mut pulls = 0;
+        for step in job["steps"].as_vec().into_iter().flatten() {
+            let Some(script) = step["run"].as_str() else {
+                continue;
+            };
+            if script == PULL {
+                pulls += step["timeout-minutes"].as_i64().unwrap_or_default();
+            }
             let lines = logical_lines(script);
             let named: Vec<usize> = (0..lines.len())
                 .filter(|at| main_command(&lines[*at]).is_some())
@@ -1185,14 +1188,16 @@ fn deadline_problems(document: &Yaml, tight: bool) -> (usize, Vec<String>) {
             }
             match limit {
                 None => problems.push(format!("job {key} has no timeout-minutes")),
-                Some(limit) if minutes * 60 + seconds >= limit * 60 => problems.push(format!(
+                Some(limit) if (minutes + pulls) * 60 + seconds >= limit * 60 => problems.push(format!(
                     "job {key}: the deadline of cargo xtask {main} and its kill-after reach the \
                      limit of {limit} minutes"
                 )),
-                Some(limit) if tight && !(1..=2).contains(&(limit - minutes)) => {
+                Some(limit) if tight && !(1..=2).contains(&(limit - minutes - pulls)) => {
+                    let pulled = (pulls > 0).then(|| format!(", after {pulls} minutes of pulls,"));
+                    let pulled = pulled.unwrap_or_default();
                     problems.push(format!(
-                        "job {key}: the deadline of cargo xtask {main} is not one or two minutes \
-                         before the limit of {limit} minutes"
+                        "job {key}: the deadline of cargo xtask {main}{pulled} is not one or two \
+                         minutes before the limit of {limit} minutes"
                     ));
                 }
                 Some(_) => {}
@@ -1299,6 +1304,34 @@ fn every_main_command_of_the_lines_runs_under_its_deadline() {
             "{text}"
         );
     }
+    // The limit of a pull of the image before the check counts before its
+    // deadline.
+    let pulled = good.replace(
+        "    steps:\n      - run: |\n          echo start",
+        &format!(
+            "    steps:\n      - timeout-minutes: 3\n        run: {PULL}\n      - run: |\n          \
+             echo start"
+        ),
+    );
+    let raised = pulled.replace("timeout-minutes: 15", "timeout-minutes: 17");
+    for (text, limit) in [(&pulled, 15), (&raised, 17)] {
+        assert_eq!(
+            deadline_problems(&parse(text), true).1,
+            [format!(
+                "job check: the deadline of cargo xtask check and its kill-after reach the limit \
+                 of {limit} minutes"
+            )]
+        );
+    }
+    assert_eq!(
+        deadline_problems(&parse(&raised.replace("13m 90s", "10m 90s")), true).1,
+        [
+            "job check: the deadline of cargo xtask check, after 3 minutes of pulls, is not one \
+             or two minutes before the limit of 17 minutes"
+        ]
+    );
+    let earlier = raised.replace("13m 90s", "12m 90s");
+    assert_eq!(deadline_problems(&parse(&earlier), true), (2, Vec::new()));
     // Away from the lines, the deadline may be earlier.
     let early = good.replace("13m 90s", "10m 90s");
     assert_eq!(deadline_problems(&parse(&early), false), (2, Vec::new()));
@@ -1360,6 +1393,188 @@ fn the_deadline_script_passes_on_a_stop_signal_and_waits_for_the_command() {
     // status of the command.
     assert!(path("stopped").exists(), "{}", said());
     assert_eq!(status.code(), Some(3), "{}", said());
+}
+
+/// The option of `cargo xtask check` that records the formal step as not
+/// run, which CI does not accept.
+const SKIP_FORMAL: &str = "--skip-formal";
+
+/// The problems of `files`, each a path and its text: a line that names
+/// [`SKIP_FORMAL`], in any letter case and comments included.
+pub(super) fn skip_formal_problems(files: &[(&str, &str)]) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (path, text) in files {
+        for (at, line) in text.lines().enumerate() {
+            if line.to_ascii_lowercase().contains(SKIP_FORMAL) {
+                let line = at + 1;
+                problems.push(format!(
+                    "{path}:{line}: names {SKIP_FORMAL}, which CI does not accept"
+                ));
+            }
+        }
+    }
+    problems
+}
+
+/// The tracked files below `.github/` with their texts.
+pub(super) fn github(tree: &Tree) -> Vec<(&str, &str)> {
+    (tree.texts())
+        .filter(|(path, _)| crate::repo::is_within(path, ".github"))
+        .collect()
+}
+
+#[test]
+fn no_workflow_passes_skip_formal() {
+    let tree = Tree::load(&crate::repo::root()).expect("the tracked files");
+    let files = github(&tree);
+    assert!(files.iter().any(|(path, _)| *path == LINES[0]), "{files:?}");
+    assert!(files.iter().any(|(path, _)| *path == DEADLINE), "{files:?}");
+    assert_eq!(skip_formal_problems(&files), Vec::<String>::new());
+    let path = ".github/workflows/a.yml";
+    let problem = |line| format!("{path}:{line}: names --skip-formal, which CI does not accept");
+    for (text, problems) in [
+        ("run: cargo xtask check --skip-formal\n", vec![problem(1)]),
+        (
+            "on: push\n# cargo xtask check --SKIP-FORMAL\n",
+            vec![problem(2)],
+        ),
+        ("env:\n  FLAGS: --Skip-Formal --slow\n", vec![problem(2)]),
+        ("run: cargo xtask check --slow\n", vec![]),
+    ] {
+        assert_eq!(skip_formal_problems(&[(path, text)]), problems, "{text}");
+    }
+}
+
+/// The script of the step before the check in the jobs of the lines that run
+/// it, and of the job of the workflow that saves the caches: it pulls the
+/// image that `verification/image-pin.json` pins.
+const PULL: &str =
+    r#"docker pull "$(jq -er '"\(.repository)@\(.digest)"' verification/image-pin.json)""#;
+/// The script of the step after the check: the receipt of the check holds one
+/// formal step, and that step passed.
+const REQUIRE: &str = r#"jq -e '[.steps[] | select(.name == "formal")] | length == 1 and .[0].status == "passed"' artifacts/check-receipt.json"#;
+/// The receipt that the check writes and the step after it reads.
+const CHECK_RECEIPT: &str = "--receipt artifacts/check-receipt.json";
+
+/// The problems of the steps around the check in `job`: the step before it
+/// pulls the pinned image within 3 minutes, the step after it requires the
+/// formal step of the receipt to have passed, and both run when the check
+/// runs.
+fn formal_step_problems(job: &Yaml) -> Vec<String> {
+    let steps = job["steps"].as_vec().map_or(&[][..], Vec::as_slice);
+    let check = |step: &Yaml| {
+        let script = step["run"].as_str().unwrap_or_default();
+        logical_lines(script)
+            .iter()
+            .any(|line| main_command(line) == Some("check"))
+    };
+    let Some(at) = steps.iter().position(check) else {
+        return vec!["no step runs cargo xtask check".to_string()];
+    };
+    let mut problems = Vec::new();
+    if !steps[at]["run"]
+        .as_str()
+        .unwrap_or_default()
+        .contains(CHECK_RECEIPT)
+    {
+        problems.push(format!(
+            "the check does not write its receipt with {CHECK_RECEIPT}"
+        ));
+    }
+    let around = [
+        (
+            at.checked_sub(1),
+            "Pull the pinned proof-tool image",
+            PULL,
+            Some(3),
+        ),
+        (
+            Some(at + 1),
+            "Require the formal step to have passed",
+            REQUIRE,
+            None,
+        ),
+    ];
+    for (place, name, script, minutes) in around {
+        let step = place.and_then(|place| steps.get(place));
+        let found = step.is_some_and(|step| {
+            step["name"].as_str() == Some(name)
+                && step["run"].as_str() == Some(script)
+                && step["timeout-minutes"].as_i64() == minutes
+                && step["if"] == steps[at]["if"]
+        });
+        if !found {
+            problems.push(format!(
+                "the check is not next to the step `{name}` as it should be"
+            ));
+        }
+    }
+    problems
+}
+
+#[test]
+fn the_lines_pull_the_pinned_image_and_require_the_formal_step() {
+    for (path, key) in [
+        (LINES[0], "check"),
+        (LINES[1], "check"),
+        (LINES[2], "check"),
+        (CACHE, "build"),
+    ] {
+        let job = &workflow(path)["jobs"][key];
+        assert_eq!(formal_step_problems(job), Vec::<String>::new(), "{path}");
+    }
+    // The workflow that saves the caches pulls and requires only when its
+    // check runs.
+    let build = &workflow(CACHE)["jobs"]["build"];
+    let pull = (build["steps"].as_vec().into_iter().flatten())
+        .find(|step| step["run"].as_str() == Some(PULL))
+        .expect("the pull");
+    assert_eq!(
+        pull["if"].as_str(),
+        Some("steps.cargo.outputs.cache-hit != 'true'")
+    );
+    // The pull names the fields of the pin.
+    let tree = Tree::load(&crate::repo::root()).expect("the tracked files");
+    let pin = tree.text(crate::formal::Layout::PRODUCTION.image_pin);
+    let pinned = crate::formal::toolchain::image_pin(pin.expect("the pin"));
+    assert!(pinned.is_some());
+    assert!(PULL.contains(crate::formal::Layout::PRODUCTION.image_pin));
+    // A job whose check is not after the pull.
+    let check = format!("exec bash {DEADLINE} 13m 90s cargo xtask check {CHECK_RECEIPT}");
+    let job = parse(&format!(
+        "steps:\n  - name: Run the check\n    run: {check}\n  - name: Require the formal step \
+         to have passed\n    run: {REQUIRE}\n  - name: Pull the pinned proof-tool image\n    \
+         timeout-minutes: 3\n    run: {PULL}\n"
+    ));
+    assert_eq!(
+        formal_step_problems(&job),
+        ["the check is not next to the step `Pull the pinned proof-tool image` as it should be"]
+    );
+}
+
+#[test]
+fn the_gate_flags_of_the_formal_step_are_those_of_the_workflows() {
+    let tree = Tree::load(&crate::repo::root()).expect("the tracked files");
+    let expected = format!("GATE_FLAGS: \"{}\"", crate::check::GATE_FLAGS);
+    let mut files = Vec::new();
+    for (path, text) in (tree.texts()).filter(|(path, _)| crate::workflows::is_workflow(path)) {
+        for line in text
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("GATE_FLAGS"))
+        {
+            assert_eq!(line, expected, "{path}");
+            files.push(path);
+        }
+    }
+    for path in [
+        FORMAL,
+        MEASURE,
+        CALIBRATION,
+        ".github/workflows/formal-canary.yml",
+    ] {
+        assert!(files.contains(&path), "{path}: {files:?}");
+    }
 }
 
 /// The workflow that saves the caches.

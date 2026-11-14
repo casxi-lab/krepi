@@ -351,6 +351,11 @@ jobs:
           GATE_OUTCOME: ${{ steps.gate.outcome }}
         run: |
           shopt -s nullglob
+          # The receipt holds text of Lean, Lake and the registries of the
+          # head: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
           receipts=(artifacts/formal/runs/*/receipt.json)
           {
             echo "## formal run"

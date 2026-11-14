@@ -7,14 +7,15 @@
 //! result (`passed`, `failed` or `interrupted`) with the number of the stop
 //! signal or `null`, the lanes with the names of their steps (a lane without
 //! steps is listed with none), and each step with its lane, status (`passed`,
-//! `failed`, `cancelled` or `not run`), the milliseconds from the start of
-//! the check to its start (`null` for a step that did not run), its duration,
-//! the detail of a failed or cancelled step and its facts (the toolchain
-//! step's facts are the tool versions it found), then the runner image and
-//! the GitHub Actions run. A value that cannot be read, or an environment
-//! variable that is not set, is `null`. The text is the pretty form of
-//! `serde_json`, with two-space indentation and the fields in the order in
-//! which they are written.
+//! `failed`, `tool failure`, `cancelled` or `not run`), the milliseconds from
+//! the start of the check to its start (`null` for a step that did not run),
+//! its duration, the detail of a failed, cancelled or tool failure step, or
+//! the option that skipped a step that is not run, and its facts (the
+//! toolchain step's facts are the tool versions it found), then the runner
+//! image and the GitHub Actions run. A value that cannot be read, or an
+//! environment variable that is not set, is `null`. The text is the pretty
+//! form of `serde_json`, with two-space indentation and the fields in the
+//! order in which they are written.
 
 use std::fs;
 use std::io;
@@ -154,7 +155,11 @@ fn step(outcome: &Outcome) -> Value {
         "offset_ms": outcome.offset.map(millis),
         "duration_ms": millis(outcome.duration),
     });
-    if let Status::Failed(detail) | Status::Cancelled(detail) = &outcome.status {
+    if let Status::Failed(detail)
+    | Status::ToolFailure(detail)
+    | Status::Cancelled(detail)
+    | Status::Skipped(detail) = &outcome.status
+    {
         step["detail"] = Value::from(detail.as_str());
     }
     let facts: Map<String, Value> = outcome

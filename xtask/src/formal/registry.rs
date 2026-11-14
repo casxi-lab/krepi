@@ -54,12 +54,8 @@ pub enum State {
 
 /// A proof target, as "Proof targets" in `docs/formal-verification.md`
 /// describes its fields.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[expect(
-    dead_code,
-    reason = "the feature and the description are for the review"
-)]
 pub struct Target {
     pub name: String,
     #[serde(default)]
@@ -103,7 +99,7 @@ fn budget() -> u64 {
 /// A cut point: the Charon pattern of the items translated without their
 /// bodies, where they are and why the statements do not depend on their
 /// bodies.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Opaque {
     pub pattern: String,
@@ -112,18 +108,16 @@ pub struct Opaque {
 }
 
 /// An axiom beyond the allowlist that the theorems of a target may use.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustedAxiom {
     pub name: String,
-    #[expect(dead_code, reason = "review reads the reason, the gate the name")]
     pub reason: String,
 }
 
 /// An obligation: a statement and the theorems that establish it.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "the target phase of the gate reads the statement")]
 pub struct Obligation {
     pub id: String,
     pub statement: Option<String>,
@@ -133,7 +127,7 @@ pub struct Obligation {
 
 /// A source mutant: `find`, which occurs once in `file`, replaced by
 /// `replace`, must make a theorem of `fails` fail.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Mutant {
     pub name: String,
@@ -170,11 +164,13 @@ fn blank(text: &Option<String>) -> bool {
 }
 
 /// The static rules of the registry: names, modules and theorems are
-/// unique; a target with a module has a root in `start_from`; a formal
-/// target has an obligation and a mutant, every obligation a theorem, every
-/// mutant a theorem of its target that is to fail; `proves`, `unclosed` and
-/// `derived` are disjoint; a cut point gives its source and reason; and no
-/// target registers more than [`MUTANTS`] mutants.
+/// unique; a target name is made of lowercase letters, digits and hyphens
+/// and starts with a letter or a digit; a target with a module has a root
+/// in `start_from`; a formal target has an obligation and a mutant, every
+/// obligation a theorem, every mutant a theorem of its target that is to
+/// fail; `proves`, `unclosed` and `derived` are disjoint; a cut point gives
+/// its source and reason; and no target registers more than [`MUTANTS`]
+/// mutants.
 pub fn rules(registry: &Registry) -> Vec<String> {
     let mut problems = Vec::new();
     let (mut names, mut modules, mut theorems) =
@@ -196,6 +192,12 @@ pub fn rules(registry: &Registry) -> Vec<String> {
         let name = &target.name;
         if !names.insert(name) {
             problems.push(format!("two targets are named {name}"));
+        }
+        let first = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
+        if !name.starts_with(first) || !name.chars().all(|c| first(c) || c == '-') {
+            problems.push(format!(
+                "target name {name:?} does not match [a-z0-9][a-z0-9-]*"
+            ));
         }
         if let Some(module) = &target.module
             && let Some(first) = modules.insert(module, name)
@@ -414,14 +416,14 @@ fn without_modifiers(mut line: &str) -> &str {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use serde_json::json;
 
     use super::*;
 
     /// A registry that keeps every rule: a formal target and a planned one
     /// without obligations and mutants, beside a specification.
-    fn valid() -> Value {
+    pub(crate) fn valid() -> Value {
         json!({
             "schema": 2,
             "specifications": [{
@@ -556,6 +558,22 @@ mod tests {
     fn two_targets_of_one_name_fail() {
         let problems = broken(|registry| registry["targets"][1]["name"] = json!("table"));
         assert_eq!(problems, ["two targets are named table"]);
+    }
+
+    #[test]
+    fn a_target_name_outside_lowercase_letters_digits_and_hyphens_is_refused() {
+        let refused = [
+            "", "-table", "Table", "table_1", "table 1", "tablé", "table/x",
+        ];
+        for name in refused {
+            let problems = broken(|registry| registry["targets"][1]["name"] = json!(name));
+            let problem = format!("target name {name:?} does not match [a-z0-9][a-z0-9-]*");
+            assert_eq!(problems, [problem], "{name}");
+        }
+        for name in ["0table", "table-2", "table-", "a"] {
+            let problems = broken(|registry| registry["targets"][1]["name"] = json!(name));
+            assert_eq!(problems, Vec::<String>::new(), "{name}");
+        }
     }
 
     #[test]

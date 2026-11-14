@@ -13,9 +13,11 @@
 //! group that took over a freed number. A passing command therefore leaves
 //! no process of its group behind either. A check written in this crate runs
 //! on the thread of its lane until it returns, with the commands it starts
-//! in the group of the check. When a step ends, its log and a line with its
-//! status and seconds are printed in one write, so the output of two lanes
-//! never interleaves.
+//! in the group of the check; a step that supervises its commands runs on it
+//! as well, with the log of its step and how the check stops. A step that
+//! fails or ends as a tool failure stops the check. When a step ends, its
+//! log and a line with its status and seconds are printed in one write, so
+//! the output of two lanes never interleaves.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -27,7 +29,7 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::{Action, Check, Cmd, Facts, Lane, Mode, Outcome, Status, Step, signal_name};
+use super::{Action, Cmd, Facts, Lane, Mode, Outcome, Status, Step, signal_name};
 use crate::formal::process;
 
 /// What a run of the steps gives.
@@ -40,7 +42,7 @@ pub struct Run {
 
 /// Why the check stops: the first step that failed, or the stop signal.
 #[derive(Default)]
-pub(super) struct Stop {
+pub(crate) struct Stop {
     failed: OnceLock<&'static str>,
 }
 
@@ -164,32 +166,29 @@ fn run_step(context: &Context, at: usize) -> Outcome {
     let offset = context.begin.elapsed();
     let started = Instant::now();
     let mut facts = Facts::new();
-    let mut log = None;
-    let status = match &step.action {
-        Action::Commands(commands) => match context.logs {
-            Ok(dir) => {
-                let path = dir.join(format!("{:02}-{}.log", at + 1, step.name));
-                let status = run_commands(context, commands, &path);
-                log = Some(path);
-                status
-            }
-            Err(error) => Status::Failed(error.to_string()),
-        },
-        Action::Internal(check) => match run_internal(check, context.root, &mut facts) {
-            Ok(()) => Status::Passed,
-            Err(detail) => Status::Failed(detail),
-        },
+    // A check written in this crate writes no log.
+    let log = (context.logs).map(|dir| dir.join(format!("{:02}-{}.log", at + 1, step.name)));
+    let status = match (&step.action, &log) {
+        (Action::Internal(check), _) => unwound(|| check(context.root, &mut facts))
+            .and_then(|checked| checked)
+            .map_or_else(Status::Failed, |()| Status::Passed),
+        (_, Err(error)) => Status::Failed(error.to_string()),
+        (Action::Commands(commands), Ok(log)) => run_commands(context, commands, log),
+        (Action::Supervised(supervise), Ok(log)) => {
+            unwound(|| supervise(context.root, log, context.stop, &mut facts))
+                .unwrap_or_else(Status::Failed)
+        }
     };
-    if matches!(status, Status::Failed(_)) {
+    if matches!(status, Status::Failed(_) | Status::ToolFailure(_)) {
         let _ = context.stop.failed.set(step.name);
     }
     let duration = started.elapsed();
-    print!("{}", block(step, &status, duration, log.as_deref()));
+    print!("{}", block(step, &status, duration, log.as_deref().ok()));
     Outcome {
         step: step.name,
         lane: step.lane,
+        offset: (!matches!(status, Status::Skipped(_))).then_some(offset),
         status,
-        offset: Some(offset),
         duration,
         facts,
     }
@@ -225,20 +224,41 @@ fn block(step: &Step, status: &Status, duration: Duration, log: Option<&Path>) -
 /// Runs `commands` in order with their output appended to `log`, until one
 /// fails or the check stops.
 fn run_commands(context: &Context, commands: &[Cmd], log: &Path) -> Status {
-    for cmd in commands {
-        if let Some(reason) = context.stop.reason() {
-            return Status::Cancelled(reason);
-        }
-        match run_command(context.root, cmd, log, context.stop) {
-            Ended::Exited(status) if status.success() => {}
-            Ended::Exited(status) => {
-                return Status::Failed(format!("`{}` exited with {status}", shown(cmd)));
-            }
-            Ended::Cancelled(reason) => return Status::Cancelled(reason),
-            Ended::Failed(detail) => return Status::Failed(detail),
-        }
+    let run = |cmd| output(context.root, cmd, log, context.stop, Status::Failed).map(drop);
+    let ran = commands.iter().try_for_each(run);
+    ran.err().unwrap_or(Status::Passed)
+}
+
+/// Runs `cmd` in `root` with its output appended to `log`, unless the check
+/// stops, and gives that output, or the status of its step: cancelled,
+/// failed, or the status that `failure` makes when the command could not run
+/// or exited with 125 to 127, as `docker run` does without its image or when
+/// it cannot run or find the command it is given.
+pub(super) fn output(
+    root: &Path,
+    cmd: &Cmd,
+    log: &Path,
+    stop: &Stop,
+    failure: fn(String) -> Status,
+) -> Result<String, Status> {
+    if let Some(reason) = stop.reason() {
+        return Err(Status::Cancelled(reason));
     }
-    Status::Passed
+    let start = fs::metadata(log).map_or(0, |meta| meta.len() as usize);
+    let exited = |status: ExitStatus| format!("`{}` exited with {status}", shown(cmd));
+    match run_command(root, cmd, log, stop) {
+        Ended::Exited(status) if status.success() => {
+            let text = fs::read(log).unwrap_or_default();
+            let text = String::from_utf8_lossy(text.get(start..).unwrap_or_default());
+            Ok(text.split_once('\n').map_or("", |(_, rest)| rest).into())
+        }
+        Ended::Exited(status) if matches!(status.code(), Some(125..=127)) => {
+            Err(failure(exited(status)))
+        }
+        Ended::Exited(status) => Err(Status::Failed(exited(status))),
+        Ended::Cancelled(reason) => Err(Status::Cancelled(reason)),
+        Ended::Failed(detail) => Err(failure(detail)),
+    }
 }
 
 /// How a command ended.
@@ -315,16 +335,16 @@ fn run_command(root: &Path, cmd: &Cmd, log: &Path, stop: &Stop) -> Ended {
     }
 }
 
-/// Runs a check written in this crate. A panic in it fails the step like an
-/// error, so that the receipt is still written.
-fn run_internal(check: &Check, root: &Path, facts: &mut Facts) -> Result<(), String> {
-    panic::catch_unwind(AssertUnwindSafe(|| check(root, facts))).unwrap_or_else(|payload| {
+/// Runs a step written in this crate. A panic in it gives `Err`, which fails
+/// the step like an error, so that the receipt is still written.
+fn unwound<T>(run: impl FnOnce() -> T) -> Result<T, String> {
+    panic::catch_unwind(AssertUnwindSafe(run)).map_err(|payload| {
         let message = payload
             .downcast_ref::<&str>()
             .map(|text| text.to_string())
             .or_else(|| payload.downcast_ref::<String>().cloned())
             .unwrap_or_default();
-        Err(format!("panicked: {message}"))
+        format!("panicked: {message}")
     })
 }
 
@@ -333,7 +353,7 @@ pub(super) mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::super::tests::ORDER;
-    use super::super::{failure, steps};
+    use super::super::{Check, failure, steps};
     use super::*;
     use crate::formal::process::tests::probe;
     use crate::scratch::Scratch;
@@ -594,7 +614,7 @@ pub(super) mod tests {
     /// every other step replaced by one that records that it ran and adds a
     /// fact; each keeps its lane.
     fn with_failure(failing: &str, ran: &Ran) -> Vec<Step> {
-        steps(false)
+        steps(false, false)
             .into_iter()
             .map(|step| {
                 let (name, lane) = (step.name, step.lane);
@@ -610,6 +630,10 @@ pub(super) mod tests {
                     Action::Internal(_) => Action::Internal(Box::new(|_, facts| {
                         facts.push(("seen".to_string(), "before failing".to_string()));
                         Err("forced failure".to_string())
+                    })),
+                    Action::Supervised(_) => Action::Supervised(Box::new(|_, _, _, facts| {
+                        facts.push(("seen".to_string(), "before failing".to_string()));
+                        Status::Failed("forced failure".to_string())
                     })),
                 };
                 Step { name, lane, action }
@@ -703,8 +727,13 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn a_workflows_failure_fails_the_check_after_every_other_step() {
+    fn a_workflows_failure_stops_the_check_before_the_formal_step() {
         assert_fails_at("workflows");
+    }
+
+    #[test]
+    fn a_formal_failure_fails_the_check_after_every_other_step() {
+        assert_fails_at("formal");
     }
 
     #[test]
@@ -729,6 +758,22 @@ pub(super) mod tests {
             );
             assert_eq!(run.outcomes[docs + 1].status, Status::NotRun);
         }
+        // So does a step that supervises its commands.
+        let mut steps = with_failure("formal", &ran);
+        let formal = ORDER.iter().position(|name| *name == "formal").unwrap();
+        steps[formal].action = Action::Supervised(Box::new(|_, _, _, facts| {
+            facts.push(("seen".to_string(), "before panicking".to_string()));
+            panic!("forced {}", "panic");
+        }));
+        let run = run_in(&scratch, &steps, Mode::Sequential);
+        assert_eq!(
+            run.outcomes[formal].status,
+            Status::Failed("panicked: forced panic".to_string())
+        );
+        assert_eq!(
+            run.outcomes[formal].facts,
+            [("seen".to_string(), "before panicking".to_string())]
+        );
     }
 
     #[test]

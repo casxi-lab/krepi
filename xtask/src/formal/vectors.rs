@@ -784,30 +784,17 @@ esac"#;
     }
 
     #[test]
-    fn the_formal_workflow_runs_the_fixture_replay() {
-        let workflow = include_str!("../../../.github/workflows/formal.yml");
-        let steps = workflow.split("\n      - name: ");
-        let step = steps
-            .clone()
-            .find(|step| step.starts_with("Compare the test vectors in the image\n"));
-        let step = step.expect("the vectors step of the job formal run");
+    fn the_formal_step_names_the_fixture_replay() {
         let (_, tests) = module_path!()
             .split_once("::")
             .expect("a module path below the crate");
         let test = format!("{tests}::the_fixture_replays_with_the_pinned_lean");
-        for text in [
-            test.as_str(),
-            "--exact --ignored --nocapture",
-            "'^test result: ok\\. 1 passed; 0 failed'",
-            "formal vectors",
-        ] {
-            assert!(step.contains(text), "{text}: {step}");
-        }
-        // The step compares on a change of the paths that the docs list,
-        // since the merge base, and says that it compares nothing otherwise.
-        let paths = ["kernel", "user", "verification", "docs/domains", "xtask"];
-        let paths = Vec::from_iter(paths.map(|path| format!("`{path}/`")));
-        let paths = [paths, vec!["`.github/workflows/formal.yml`".to_string()]].concat();
+        assert_eq!(crate::check::FIXTURE, test);
+        assert_eq!(
+            crate::check::REPLAYED,
+            "test result: ok. 1 passed; 0 failed"
+        );
+        // The docs give the parts of the step in their order.
         let docs = include_str!("../../../docs/formal-verification.md");
         let (_, section) = docs
             .split_once("\n### Vectors in CI\n")
@@ -817,26 +804,23 @@ esac"#;
             .next()
             .expect("the section")
             .replace('\n', " ");
-        for path in &paths {
-            assert!(section.contains(path), "{path}: {section}");
+        let replayed = format!("`{}`", crate::check::REPLAYED);
+        let parts = [
+            "`cargo xtask formal check`",
+            "[fixture](#fixture)",
+            "`--exact --ignored --nocapture`",
+            &replayed,
+            "`artifacts/formal/vectors`",
+            "`KREPI_VECTOR_RESULTS`",
+            "`cargo xtask formal vectors`",
+            "`--skip-formal`",
+        ];
+        let mut rest = section.as_str();
+        for part in parts {
+            let at = rest.find(part);
+            let at = at.unwrap_or_else(|| panic!("{part} after the parts before it: {section}"));
+            rest = &rest[at + part.len()..];
         }
-        let paths = paths.join(" ").replace('`', "").replace("/ ", " ");
-        let lines = Vec::from_iter(step.lines().map(str::trim));
-        let listed = format!("paths=({paths})");
-        let at = lines.iter().position(|line| *line == listed);
-        let at = at.unwrap_or_else(|| panic!("{listed}: {step}"));
-        let selected = "if git diff --quiet \"$merge_base\" \"$HEAD_SHA\" -- \"${paths[@]}\"; then";
-        let nothing = "echo \"no change in the paths that select the comparison: 0 components\"";
-        let merge_base = "merge_base=$(git merge-base \"$base\" \"$HEAD_SHA\")";
-        let expected = [merge_base, &listed, selected, nothing, "else"];
-        assert_eq!(lines[at - 1..at + 4], expected, "{step}");
-        // Each container is removed when it ends, and ends within the step.
-        assert_eq!(step.matches("docker run ").count(), 1, "{step}");
-        assert!(
-            step.contains("timeout --kill-after 1m \"$limit\" docker run --rm --name \"$name\""),
-            "{step}"
-        );
-        assert!(step.contains("docker rm --force \"$name\""), "{step}");
     }
 
     /// The replay of the fixture by the pinned Lean, in a stage of the Lake

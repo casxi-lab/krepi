@@ -1680,7 +1680,7 @@ mod tests { fn t() { let _ = 1 + 1; } }
             let line = format!("{name}={value}\n");
             assert!(formal.contains(&line), "{line}");
         }
-        // With these lines, which give the qualification job 136 and 205
+        // With these lines, which give the qualification job 136 and 150
         // minutes whatever the registry, and a shard the minutes of its
         // budget and margins, as `merge::shards` and `merge::budget_problems`
         // group and check them.
@@ -1700,16 +1700,16 @@ mod tests { fn t() { let _ = 1 + 1; } }
             r#"over=$(jq -r --argjson limit "$shard_limit" --argjson workers "$workers" \"#,
             r#"'[.[] | select((.budget + $workers - 1) / $workers | floor > $limit) | .name] | join(" ")' <<< "$shards")"#,
             r#"echo "gate=$((gate + 1))""#,
-            r#"echo "job=$((15 + 55 + gate))""#,
+            r#"echo "job=$((15 + gate))""#,
             r#"echo "shards=$shards""#,
             r#"echo "planned-gate=$((planned + 2))""#,
             r#"echo "planned-job=$((15 + planned + 2 + 3))""#,
-            "if [ $((15 + 55 + gate)) -gt 360 ] || [ $((15 + planned + 2 + 3)) -gt 360 ]; then",
+            "if [ $((15 + gate)) -gt 360 ] || [ $((15 + planned + 2 + 3)) -gt 360 ]; then",
         ] {
             assert!(formal.lines().any(|l| l.trim_start() == line), "{line}");
         }
         let qualification = minutes(gate + extraction + margin);
-        assert_eq!((qualification + 1, 15 + 55 + qualification), (136, 205));
+        assert_eq!((qualification + 1, 15 + qualification), (136, 150));
         let shard = |budget: u64| {
             let step = minutes(shard_margin + budget + margin) + 2;
             (step, 15 + step + 3)

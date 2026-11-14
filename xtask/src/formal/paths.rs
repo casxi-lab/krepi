@@ -1,19 +1,27 @@
 //! The gate inputs, defined here once, and what a run does with them through
 //! Git: the snapshot, the check that they are clean, and the export of the
-//! snapshot commit, checked file by file against the commit.
+//! snapshot commit, checked file by file against the commit. Also the change
+//! since a merge base, the targets that it affects and `cargo xtask formal impact`.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::process::ExitCode;
 
+use clap::{Arg, ArgMatches};
 use serde::{Deserialize, Serialize};
 
 use super::Layout;
+use super::lean;
+use super::registry::{self, State, Target};
 use super::toolchain::environment::text;
 
 /// The Cargo configuration that Cargo reads in the repository.
 pub const CARGO_CONFIG: &str = ".cargo/config.toml";
+
+/// The inputs of extraction: the first `EXTRACTION` gate inputs.
+pub const EXTRACTION: usize = 3;
 
 /// The gate inputs, as repository-relative paths, the inputs of extraction
 /// first; a path may lie below another.
@@ -173,6 +181,143 @@ pub fn export(
     ))
 }
 
+/// The paths changed from the merge base of two commits to the second, the
+/// head, each with Git's status letter, without rename detection: a moved
+/// file is the deletion of one path and the addition of another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change {
+    pub merge_base: String,
+    pub head: String,
+    pub paths: Vec<(String, String)>,
+}
+
+impl Change {
+    /// The changed paths that lie within one of `inputs`.
+    pub fn within<'a>(&'a self, inputs: &[&str]) -> Vec<&'a str> {
+        let paths = self.paths.iter().map(|(_, path)| path.as_str());
+        let within = |path: &&str| inputs.iter().any(|dir| crate::repo::is_within(path, dir));
+        paths.filter(within).collect()
+    }
+
+    /// The changed paths within the gate inputs of `layout`; without one,
+    /// the change leaves the gate unaffected.
+    pub fn affecting(&self, layout: &Layout) -> Vec<&str> {
+        self.within(&gate_inputs(layout))
+    }
+
+    /// The text of `path` at the merge base and at the head, empty on the
+    /// side that lacks it as the change adds or deletes it.
+    pub fn texts(&self, git: &mut dyn Git, path: &str) -> Result<[String; 2], String> {
+        let status = self.paths.iter().find(|(_, changed)| changed == path);
+        let status = status.map_or("", |(status, _)| status.as_str());
+        let mut text = |commit: &str, absent: &str| match status == absent {
+            true => Ok(String::new()),
+            false => text_at(git, commit, path),
+        };
+        Ok([text(&self.merge_base, "A")?, text(&self.head, "D")?])
+    }
+}
+
+/// The change from the merge base of `base` and `head` to `head`.
+pub fn since_merge_base(git: &mut dyn Git, base: &str, head: &str) -> Result<Change, String> {
+    let merge_base = git.git(&["merge-base", base, head], None)?;
+    let merge_base = String::from_utf8_lossy(&merge_base).trim().to_string();
+    // Without `--`, a file named as a revision, such as `HEAD`, is ambiguous.
+    let diff = ["diff", "--name-status", "--no-renames", "-z"];
+    let diff = [&diff[..], &[merge_base.as_str(), head, "--"]].concat();
+    let diff = git.git(&diff, None)?;
+    let diff = String::from_utf8_lossy(&diff);
+    let mut fields = diff.split_terminator('\0').map(String::from);
+    let paths = std::iter::from_fn(|| Some((fields.next()?, fields.next()?))).collect();
+    Ok(Change {
+        merge_base,
+        head: head.to_string(),
+        paths,
+    })
+}
+
+/// The text of `path` at `commit`, with any byte that is not UTF-8 replaced.
+pub fn text_at(git: &mut dyn Git, commit: &str, path: &str) -> Result<String, String> {
+    let blob = git.git(&["cat-file", "blob", &format!("{commit}:{path}")], None)?;
+    Ok(String::from_utf8_lossy(&blob).into_owned())
+}
+
+/// The targets of the registry `text` by name, none for an empty text.
+pub(super) fn targets(text: &str) -> Result<BTreeMap<String, Target>, String> {
+    let registry = (!text.is_empty()).then(|| registry::parse(text));
+    let targets = (registry.transpose()?).map_or_else(Vec::new, |registry| registry.targets);
+    Ok(targets.into_iter().map(|t| (t.name.clone(), t)).collect())
+}
+
+/// The targets that a change affects, with their states, and why the
+/// registry at the merge base cannot be read, if it cannot.
+pub type Impact = (Vec<(String, State)>, Option<String>);
+
+/// The targets registered at the head of `change`, with their states, that
+/// it affects: all when it changes an input of extraction, and otherwise
+/// each with another entry than at the merge base or a changed proof module;
+/// a registry at the merge base that cannot be read counts as one without
+/// targets, so that every target is affected.
+pub fn impacted(git: &mut dyn Git, layout: &Layout, change: &Change) -> Result<Impact, String> {
+    let [before, after] = change.texts(git, layout.registry)?;
+    let (before, after) = (targets(&before), targets(&after)?);
+    let unreadable = before.as_ref().err().cloned();
+    let before = before.unwrap_or_default();
+    let extraction = !change.within(&gate_inputs(layout)[..EXTRACTION]).is_empty();
+    let module = |name: &String| format!("{}/{}", layout.project, lean::module_file(name));
+    let affected = |(name, target): &(&String, &Target)| {
+        let mut files = target.proof_modules.iter().map(module);
+        let changed = |file: String| change.paths.iter().any(|(_, path)| *path == file);
+        extraction || before.get(*name) != Some(target) || files.any(changed)
+    };
+    let affected = after.iter().filter(affected);
+    let affected = affected.map(|(name, target)| (name.clone(), target.state));
+    Ok((affected.collect(), unreadable))
+}
+
+/// The command line of `cargo xtask formal impact`, with `about`.
+pub fn cli(about: &'static str) -> clap::Command {
+    let base = Arg::new("base").long("base").value_name("REV");
+    let command = clap::Command::new("impact").about(about);
+    command.arg(base.required(true))
+}
+
+/// Entry point of `cargo xtask formal impact` in the repository `root`: it
+/// prints [`impact_lines`] and exits with 1 when Git fails or the registry
+/// at the head cannot be read.
+pub fn command(root: &Path, layout: &Layout, matches: &ArgMatches) -> ExitCode {
+    let base = (matches.get_one::<String>("base")).expect("a required option");
+    let lines = impact_lines(&mut super::guard::Standalone(root), layout, base);
+    (lines.iter().flatten()).for_each(|line| println!("{line}"));
+    let error = (lines.as_ref().err()).map(|error| eprintln!("formal impact: {error}"));
+    ExitCode::from(u8::from(error.is_some()))
+}
+
+/// The lines of `cargo xtask formal impact --base <base>`: the merge base of
+/// `base` and `HEAD`, each changed path, the decision, why the registry at
+/// the merge base cannot be read, if it cannot, and each target that the
+/// change affects, with paths, names and that reason escaped so that none
+/// splits a line.
+fn impact_lines(git: &mut dyn Git, layout: &Layout, base: &str) -> Result<Vec<String>, String> {
+    if base.is_empty() || base.starts_with('-') {
+        return Err(format!("{base:?} is not a revision"));
+    }
+    let change = since_merge_base(git, base, "HEAD")?;
+    let mut lines = vec![format!("merge base {}", change.merge_base)];
+    let paths = change.paths.iter();
+    lines.extend(paths.map(|(status, path)| format!("changed {status} {}", path.escape_debug())));
+    let decision = ["unaffected", "affected"][usize::from(!change.affecting(layout).is_empty())];
+    lines.push(format!("decision {decision}"));
+    let (affected, unreadable) = impacted(git, layout, &change)?;
+    let at = format!("unreadable {} at the merge base", layout.registry);
+    lines.extend(unreadable.map(|error| format!("{at}: {}", error.escape_debug())));
+    for (name, state) in affected {
+        let state = format!("{state:?}").to_lowercase();
+        lines.push(format!("target {} {state}", name.escape_debug()));
+    }
+    Ok(lines)
+}
+
 /// How the export in `dest` differs from `files`: a missing path, a path of
 /// another mode, or a content without the object name of the snapshot. Git
 /// computes the object names without filters, from a list of paths written
@@ -269,8 +414,331 @@ mod tests {
             ]
         );
         assert_eq!(
-            &gate_inputs(&layout)[..2],
-            [layout.kernel, layout.qualification]
+            &gate_inputs(&layout)[..EXTRACTION],
+            [layout.kernel, layout.qualification, CARGO_CONFIG]
+        );
+    }
+
+    /// The commit at the head of `fixture`.
+    fn head_of(fixture: &Fixture) -> String {
+        fixture.git(&["rev-parse", "HEAD"]).trim().to_string()
+    }
+
+    /// A fixture with `files` committed, and the change of a commit of what
+    /// `change` writes on it.
+    fn changed_by(
+        label: &str,
+        files: &[(&str, &str)],
+        change: impl FnOnce(&Fixture),
+    ) -> (Fixture, Change) {
+        let mut fixture = Fixture::new(label);
+        (files.iter()).for_each(|(path, text)| fixture.write(path, text));
+        fixture.commit_all();
+        let base = head_of(&fixture);
+        change(&fixture);
+        fixture.commit_all();
+        let change = since_merge_base(&mut fixture, &base, "HEAD").expect("Git runs");
+        assert_eq!(change.merge_base, base);
+        (fixture, change)
+    }
+
+    /// The paths, with their statuses, that `change` changes in a fixture
+    /// with a crate of the user-space workspace, and those of them that
+    /// affect the gate inputs.
+    fn decided(label: &str, change: impl FnOnce(&Fixture)) -> (Vec<(String, String)>, Vec<String>) {
+        let app = [("user/app/src/main.rs", "fn main() {}\n")];
+        let (_, change) = changed_by(label, &app, change);
+        let affecting = change.affecting(&Layout::PRODUCTION);
+        let affecting = Vec::from_iter(affecting.into_iter().map(String::from));
+        (change.paths, affecting)
+    }
+
+    /// `(status, path)` pairs.
+    fn changed(paths: &[(&str, &str)]) -> Vec<(String, String)> {
+        let pair = |(status, path): &(&str, &str)| (status.to_string(), path.to_string());
+        paths.iter().map(pair).collect()
+    }
+
+    #[test]
+    fn a_change_of_the_user_space_workspace_alone_is_unaffected() {
+        let (paths, affecting) = decided("user-space", |fixture| {
+            fixture.write("user/app/src/main.rs", "fn main() { let _ = 1; }\n");
+            fixture.write("user/app/Cargo.toml", "[package]\nname = \"app\"\n");
+        });
+        let expected = [("A", "user/app/Cargo.toml"), ("M", "user/app/src/main.rs")];
+        assert_eq!(paths, changed(&expected));
+        assert_eq!(affecting, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_change_of_the_kernel_workspace_is_affected() {
+        let (paths, affecting) = decided("kernel", |fixture| {
+            fixture.write("kernel/abi/src/lib.rs", "//! Changed.\n");
+        });
+        assert_eq!(paths, changed(&[("M", "kernel/abi/src/lib.rs")]));
+        assert_eq!(affecting, ["kernel/abi/src/lib.rs"]);
+    }
+
+    #[test]
+    fn a_change_below_verification_is_affected() {
+        let (paths, affecting) = decided("verification", |fixture| {
+            fixture.write("verification/Krepi/Spec/A.lean", "module\n");
+        });
+        assert_eq!(paths, changed(&[("A", "verification/Krepi/Spec/A.lean")]));
+        assert_eq!(affecting, ["verification/Krepi/Spec/A.lean"]);
+    }
+
+    #[test]
+    fn a_change_of_a_toolchain_manifest_is_affected() {
+        let (paths, affecting) = decided("toolchain", |fixture| {
+            fixture.write("rust-toolchain.toml", "[toolchain]\nchannel = \"1.99.1\"\n");
+            fixture.write("toolchains.toml", "# Other tool versions.\n");
+        });
+        let expected = [("M", "rust-toolchain.toml"), ("M", "toolchains.toml")];
+        assert_eq!(paths, changed(&expected));
+        assert_eq!(affecting, ["rust-toolchain.toml", "toolchains.toml"]);
+    }
+
+    #[test]
+    fn a_change_below_xtask_is_affected() {
+        let (paths, affecting) = decided("xtask", |fixture| {
+            fixture.write("xtask/README", "Changed.\n");
+        });
+        assert_eq!(paths, changed(&[("M", "xtask/README")]));
+        assert_eq!(affecting, ["xtask/README"]);
+    }
+
+    #[test]
+    fn a_change_of_a_workflow_is_affected() {
+        let (paths, affecting) = decided("workflow", |fixture| {
+            fixture.write(".github/workflows/check.yml", "name: changed\n");
+        });
+        assert_eq!(paths, changed(&[("M", ".github/workflows/check.yml")]));
+        assert_eq!(affecting, [".github/workflows/check.yml"]);
+    }
+
+    #[test]
+    fn a_file_moved_from_the_kernel_to_the_user_space_workspace_is_affected() {
+        // Without rename detection, the move is a deletion in the kernel
+        // workspace and an addition in the user-space workspace.
+        let (paths, affecting) = decided("moved", |fixture| {
+            fixture.git(&["mv", "kernel/abi/src/lib.rs", "user/app/src/lib.rs"]);
+        });
+        let expected = [("D", "kernel/abi/src/lib.rs"), ("A", "user/app/src/lib.rs")];
+        assert_eq!(paths, changed(&expected));
+        assert_eq!(affecting, ["kernel/abi/src/lib.rs"]);
+    }
+
+    #[test]
+    fn a_user_space_change_is_unaffected_after_main_changed_the_kernel() {
+        // A comparison of the base itself with the head would take the change
+        // of the kernel on main for one of the pull request.
+        let mut fixture = Fixture::new("diverged");
+        let fork = head_of(&fixture);
+        fixture.write("kernel/abi/src/lib.rs", "//! Changed on main.\n");
+        fixture.commit_all();
+        let main = head_of(&fixture);
+        fixture.git(&["checkout", "--quiet", "-b", "topic", &fork]);
+        fixture.write("user/app/src/main.rs", "fn main() {}\n");
+        fixture.commit_all();
+        let change = since_merge_base(&mut fixture, &main, "HEAD").expect("Git runs");
+        assert_eq!(change.merge_base, fork);
+        assert_eq!(change.paths, changed(&[("A", "user/app/src/main.rs")]));
+        assert_eq!(change.affecting(&Layout::PRODUCTION), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn paths_beside_a_gate_input_are_not_within_it() {
+        let (paths, affecting) = decided("beside", |fixture| {
+            fixture.write("kernelx/a.rs", "\n");
+            fixture.write("xtaskfoo/b", "\n");
+        });
+        let expected = [("A", "kernelx/a.rs"), ("A", "xtaskfoo/b")];
+        assert_eq!(paths, changed(&expected));
+        assert_eq!(affecting, Vec::<String>::new());
+    }
+
+    const REGISTRY: &str = "verification/targets.json";
+    const PROOF: &str = "verification/Krepi/Proofs/A.lean";
+
+    /// The registry of the impact fixture: the formal target `a`, with the
+    /// proof module `Krepi.Proofs.A`, and the planned target `b`.
+    const TARGETS: &str = r#"{"schema": 2, "targets": [
+        {"name": "a", "proof_modules": ["Krepi.Proofs.A"]},
+        {"name": "b", "state": "planned"}
+    ]}
+"#;
+
+    /// The targets that `change` affects in a fixture with the registry
+    /// [`TARGETS`] and the proof module of `a`.
+    fn impact(label: &str, change: impl FnOnce(&Fixture)) -> Vec<(String, State)> {
+        let files = [(REGISTRY, TARGETS), (PROOF, "module\n")];
+        let (mut fixture, change) = changed_by(label, &files, change);
+        let found = impacted(&mut fixture, &Layout::PRODUCTION, &change);
+        let (found, unreadable) = found.expect("the registry");
+        assert_eq!(unreadable, None);
+        found
+    }
+
+    /// `(name, state)` pairs.
+    fn listed(targets: &[(&str, State)]) -> Vec<(String, State)> {
+        targets
+            .iter()
+            .map(|(name, state)| (name.to_string(), *state))
+            .collect()
+    }
+
+    #[test]
+    fn impact_lists_every_target_when_an_extraction_input_changes() {
+        let all = listed(&[("a", State::Formal), ("b", State::Planned)]);
+        let inputs = [
+            "kernel/abi/src/lib.rs",
+            "verification/qualification/src/lib.rs",
+            CARGO_CONFIG,
+        ];
+        for path in inputs {
+            let found = impact("extraction", |fixture| fixture.write(path, "// changed\n"));
+            assert_eq!(found, all, "{path}");
+        }
+    }
+
+    #[test]
+    fn impact_lists_a_target_whose_entry_changed() {
+        // A target of another entry and a new one, but not one removed.
+        let edited = TARGETS.replace(
+            r#"{"name": "a", "proof_modules": ["Krepi.Proofs.A"]},"#,
+            r#"{"name": "c"},"#,
+        );
+        let edited = edited.replace(r#""planned"}"#, r#""planned", "budget": 60}"#);
+        let found = impact("entry", |fixture| fixture.write(REGISTRY, &edited));
+        assert_eq!(
+            found,
+            listed(&[("b", State::Planned), ("c", State::Formal)])
+        );
+        // Another form of the same entries.
+        let value: serde_json::Value = serde_json::from_str(TARGETS).expect("JSON");
+        let found = impact("form", |fixture| {
+            fixture.write(REGISTRY, &value.to_string())
+        });
+        assert_eq!(found, []);
+    }
+
+    #[test]
+    fn impact_lists_a_target_whose_proof_module_changed() {
+        let found = impact("proof", |fixture| {
+            fixture.write(PROOF, "module\n-- a proof\n")
+        });
+        assert_eq!(found, listed(&[("a", State::Formal)]));
+    }
+
+    #[test]
+    fn impact_lists_no_target_for_other_changes() {
+        // Gate inputs that are no inputs of extraction, and other paths.
+        let found = impact("other", |fixture| {
+            fixture.write("xtask/README", "Changed.\n");
+            fixture.write("verification/Krepi/Spec/S.lean", "module\n");
+            fixture.write("README.md", "Changed.\n");
+        });
+        assert_eq!(found, []);
+    }
+
+    #[test]
+    fn impact_refuses_a_base_that_starts_with_a_hyphen_or_is_unknown() {
+        let mut fixture = Fixture::new("refused");
+        let layout = Layout::PRODUCTION;
+        for base in ["-x", "--output=x", ""] {
+            let refused = Err(format!("{base:?} is not a revision"));
+            assert_eq!(impact_lines(&mut fixture, &layout, base), refused);
+        }
+        let error = impact_lines(&mut fixture, &layout, "unknown").expect_err("no revision");
+        assert!(error.contains("unknown"), "{error}");
+        // The command exits with 1 on an error and with 0 otherwise.
+        let impact = |base: &str| {
+            let matches = cli("").try_get_matches_from(["impact", "--base", base]);
+            command(fixture.root(), &layout, &matches.expect("a command line"))
+        };
+        assert_eq!(impact("unknown"), ExitCode::FAILURE);
+        assert_eq!(impact("HEAD"), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn the_impact_lines_give_the_paths_the_decision_and_the_targets() {
+        // A path with a line break is printed escaped, on its line.
+        let files = [(REGISTRY, TARGETS), (PROOF, "module\n")];
+        let (mut fixture, change) = changed_by("lines", &files, |fixture| {
+            fixture.write(PROOF, "module\n-- a proof\n");
+            fixture.write("user/a\nb.rs", "\n");
+        });
+        let base = change.merge_base;
+        assert_eq!(
+            impact_lines(&mut fixture, &Layout::PRODUCTION, &base),
+            Ok(vec![
+                format!("merge base {base}"),
+                "changed A user/a\\nb.rs".to_string(),
+                format!("changed M {PROOF}"),
+                "decision affected".to_string(),
+                "target a formal".to_string(),
+            ])
+        );
+        let head = head_of(&fixture);
+        assert_eq!(
+            impact_lines(&mut fixture, &Layout::PRODUCTION, &head),
+            Ok(vec![
+                format!("merge base {head}"),
+                "decision unaffected".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn impact_lists_every_target_when_the_registry_at_the_merge_base_cannot_be_read() {
+        // A merge base of another schema, as a change of the schema leaves
+        // it, has no targets; a registry at the head that cannot be read
+        // stays an error.
+        let other = r#"{"schema": 3, "targets": []}"#;
+        let (mut fixture, change) = changed_by("unreadable", &[(REGISTRY, other)], |fixture| {
+            fixture.write(REGISTRY, TARGETS)
+        });
+        let (layout, base) = (Layout::PRODUCTION, change.merge_base);
+        let why = "schema 3 where 2 is expected";
+        assert_eq!(
+            impact_lines(&mut fixture, &layout, &base),
+            Ok(vec![
+                format!("merge base {base}"),
+                format!("changed M {REGISTRY}"),
+                "decision affected".to_string(),
+                format!("unreadable {REGISTRY} at the merge base: {why}"),
+                "target a formal".to_string(),
+                "target b planned".to_string(),
+            ])
+        );
+        let impact = |fixture: &Fixture| {
+            let matches = cli("").try_get_matches_from(["impact", "--base", &base]);
+            command(fixture.root(), &layout, &matches.expect("a command line"))
+        };
+        assert_eq!(impact(&fixture), ExitCode::SUCCESS);
+        fixture.write(REGISTRY, other);
+        fixture.commit_all();
+        let refused = impact_lines(&mut fixture, &layout, &base);
+        assert_eq!(refused, Err(why.to_string()));
+        assert_eq!(impact(&fixture), ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn impact_runs_beside_a_file_named_head() {
+        // `git diff` takes the file for the revision without `--`.
+        let notes = [("docs/notes.md", "Notes.\n")];
+        let (mut fixture, change) = changed_by("head-file", &notes, |fixture| {
+            fixture.write("HEAD", "A file named HEAD.\n")
+        });
+        let base = change.merge_base;
+        assert_eq!(
+            impact_lines(&mut fixture, &Layout::PRODUCTION, &base),
+            Ok(vec![
+                format!("merge base {base}"),
+                "changed A HEAD".to_string(),
+                "decision unaffected".to_string(),
+            ])
         );
     }
 

@@ -155,7 +155,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "guard",
-        about: "With --event PATH, the JSON of a pull_request event, check the pull request against the rules for changes of statements, proofs and sources",
+        about: "With --event PATH, the JSON of a pull_request event, check the pull request against the rules for changes of statements, proofs, sources and registries",
         subcommands: &[],
     },
     Command {
@@ -171,6 +171,11 @@ pub const COMMANDS: &[Command] = &[
     Command {
         name: "mutants",
         about: "Generate the source mutants of TARGET with every operator, or those that --operator names, run each through the proof gate with the theorems of the target, and write the survivors to the list of survivors of the target; --calibration takes a target of the calibration, and --keep keeps the work directory of the run",
+        subcommands: &[],
+    },
+    Command {
+        name: "impact",
+        about: "With --base REV, list the merge base of REV and HEAD, each path changed since, whether the change affects the gate inputs, and the registered targets that it affects; it decides nothing",
         subcommands: &[],
     },
     Command {
@@ -231,6 +236,7 @@ fn cli() -> clap::Command {
         )
         .subcommand(inventory::cli(about("check")))
         .subcommand(mutants::cli(about("mutants")).arg(keep()))
+        .subcommand(paths::cli(about("impact")))
         .subcommand(merge::cli(about("merge")))
         .subcommand(vectors::cli(about("vectors")))
         .subcommand(canary::cli(about("canary")))
@@ -285,6 +291,7 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
                 None,
             )
         }
+        Some(("impact", matches)) => paths::command(root, &Layout::PRODUCTION, matches),
         Some(("merge", matches)) => merge::command(root, layout(matches), matches),
         Some(("guard", matches)) => guard::command(root, &Layout::PRODUCTION, matches),
         Some(("toolchain-check", matches)) => {
@@ -434,6 +441,10 @@ mod tests {
         let args = ["run", "--shard", "target/t", "--calibration", "--keep"];
         let t = BTreeSet::from(["t".to_string()]);
         assert_eq!(shard(&args), (Some("target/t".to_string()), t, true));
+        let matches = read(&["impact", "--base", "origin/main"]).expect("a valid command line");
+        let (name, matches) = matches.subcommand().expect("a subcommand");
+        let base = matches.get_one::<String>("base").map(String::as_str);
+        assert_eq!((name, base), ("impact", Some("origin/main")));
         let matches = read(&["merge", "a.json", "b.json", "--calibration"]);
         let matches = matches.expect("a valid command line");
         let (name, matches) = matches.subcommand().expect("a subcommand");
@@ -468,6 +479,9 @@ mod tests {
             &["guard", "--event"],
             &["guard", "--event", "a", "b"],
             &["guard", "a"],
+            &["impact"],
+            &["impact", "--base"],
+            &["impact", "--base", "a", "b"],
             &["run", "--target"],
             &["run", "--target", ""],
             &["run", "--targets", "a"],

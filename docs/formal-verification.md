@@ -58,7 +58,10 @@ against the targets and the open obligations
 ([legacy inventory and admission](#legacy-inventory-and-admission)), and
 `cargo xtask formal vectors` compares a component's frozen test vectors
 through its specification with the results of its host tests
-([test vectors](#test-vectors)), though no contract names vectors yet. A
+([test vectors](#test-vectors)), though no contract names vectors yet; the
+formal step of `cargo xtask check` runs both, the second in the pinned
+image ([vectors in CI](#vectors-in-ci)). `cargo xtask formal impact` lists
+the targets that a change affects ([commands](#commands)). A
 weekly toolchain canary runs the gate with the tools of Aeneas main through
 the steps of `cargo xtask formal canary` and records what they would break
 ([toolchain canary](#toolchain-canary)). None of them verifies anything
@@ -106,7 +109,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/toolchain.json` | The tool manifest: Lean, the Aeneas source commit with its reviewed patch and the Lake lock of its Lean library, Charon, the Rust nightly used by Charon, opam and GMP, with the downloads of each host ([tools](#tool-manifest)) | Present |
 | `verification/tooling/` | Reviewed tool patches, named by the manifest, and their license texts | Present |
 | `verification/image/` | The recipe of the image that holds the pinned tools, the list of its third-party notices, and the check of the built image as a user other than root ([image](#image)) | Present |
-| `verification/image-pin.json` | The published image that the CI jobs of the gate run, by its digest ([image pin](#image-pin)) | Present |
+| `verification/image-pin.json` | The published image that the CI jobs of the gate and the formal step of `cargo xtask check` run, by its digest ([image pin](#image-pin)) | Present |
 | `verification/lakefile.toml`, `lean-toolchain`, `lake-manifest.json` | The Lake project of the hand-written Lean and of the generated definitions, with the Lean toolchain and the packages of the Lake lock of the Aeneas Lean library ([qualification](#qualification)), and the library `KrepiRoot` of the root module that the [base round](#base-round) writes | Present |
 | `verification/extraction.toml` | How Charon compiles each extracted crate ([extraction](#extraction)) | Present |
 | `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there, where it has one | Planned |
@@ -127,7 +130,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
 | `verification/qualification/calibration/` | The [calibration target](#calibration-target): a workspace with a root package and a member, its Lake project with its statements and proofs, its registries and shard plan, and the lists of survivors of its source mutants in `mutants/` | Present |
 | `verification/mutants/` | The list of survivors of the source mutants of each target that has one, `<target>.json` ([source mutants and survivors](#source-mutants-and-survivors)) | Absent until a list is written |
-| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `mutants`, `vectors`, `canary` and `merge` present, the others planned |
+| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `mutants`, `vectors`, `canary`, `impact` and `merge` present, the others planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
 `artifacts/formal/` directory, and the Lake build directory
@@ -343,7 +346,8 @@ text, and also when one of the packages below has none:
 ### Image pin
 
 `verification/image-pin.json` names the published image that the CI jobs of
-the gate run ([CI job](#ci-job)). It has schema 1:
+the gate ([CI job](#ci-job)) and the formal step of `cargo xtask check` run.
+It has schema 1:
 
 | Field | Content |
 | --- | --- |
@@ -354,11 +358,19 @@ the gate run ([CI job](#ci-job)). It has schema 1:
 
 The file lies outside `verification/image/` and the other paths that start
 the image workflows, so changing it builds and publishes no image, and the
-image does not contain it. It has three readers:
+image does not contain it. It has these readers:
 
-- `.github/workflows/formal.yml` names the image as
-  `<repository>@<digest>` in its variable `IMAGE`, which every container of
-  the workflow runs, after a pull that takes the image by that digest.
+- `.github/workflows/formal.yml`, `formal-measure.yml` and
+  `formal-calibration.yml` name the image as `<repository>@<digest>` in
+  their variable `IMAGE`, which every container of these workflows runs,
+  after a pull that takes the image by that digest.
+- The formal step of `cargo xtask check` reads the pin of the checkout,
+  fails unless it has schema 1, a repository without a tag or a digest, a
+  digest and a revision, and runs its containers on
+  `<repository>@<digest>` with `--pull never`
+  ([vectors in CI](#vectors-in-ci)). Each job that runs the check, in
+  `check.yml`, `full.yml`, `nightly.yml` and `cache.yml`, first pulls that
+  reference, which it reads from the pin with `jq`.
 - The `workflows` step of `cargo xtask check` reads the pin from the tracked
   files and fails unless a workflow that runs on `pull_request` names that
   reference and every mention of the repository in such a workflow,
@@ -655,35 +667,40 @@ The commands of `cargo xtask formal` follow the design of the gate.
 `cargo xtask formal toolchain-check`, `cargo xtask formal run`,
 `cargo xtask formal guard`, `cargo xtask formal check`,
 `cargo xtask formal mutants`, `cargo xtask formal vectors`,
-`cargo xtask formal canary` and `cargo xtask formal merge` exist; the
-others are planned.
+`cargo xtask formal canary`, `cargo xtask formal impact` and
+`cargo xtask formal merge` exist; the others are planned.
 
 | Command | Purpose |
 | --- | --- |
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
 | `cargo xtask formal run [--target NAME]... [--shard NAME] [--calibration] [--keep]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets, `--shard` only the qualification job or the shard of a formal target ([shards and merge](#shards-and-merge)), `--calibration` runs in the layout of the [calibration target](#calibration-target), and `--keep` keeps the work directory of the run ([layout](#layout)). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run of the whole gate has |
-| `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs and sources ([guard](#guard)) |
+| `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs, sources and registries ([guard](#guard)) |
 | `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
 | `cargo xtask formal receipt [--require-fresh]` (planned) | Says whether a receipt is current for the checkout: the same gate inputs and image, one conclusion for each unit, complete and `VERIFIED`; `--require-fresh` also requires a run of the whole gate from a clean checkout without planned statements |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its job fetched and built: `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from the outcomes of the steps of the job ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
 | `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration, and `--keep` keeps the work directory of the run, as for `run` |
-| `cargo xtask formal impact --base REV` (planned) | Lists the targets that a change since `REV` affects |
+| `cargo xtask formal impact --base REV` | Lists, one item per line, the merge base of `REV` and `HEAD`, each path changed since with its Git status, without rename detection, the decision, `unaffected` when no changed path lies within a [gate input](#gate-inputs-and-snapshot) and `affected` otherwise, and the registered targets that the change affects, with their states: every target when an input of extraction changed, and otherwise each whose entry in `verification/targets.json` changed and each with a changed file of its `proof_modules`. A registry that cannot be read at the merge base, as after a change of its schema, counts as one without targets, so that every target is listed, after a line `unreadable verification/targets.json at the merge base: <why>`. Paths, names and that reason are printed escaped, so that none splits a line. It decides nothing, and exits with 1 only on a base that is not a revision or when Git or the registry at the head cannot be read |
 | `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
 
-`cargo xtask check` does not run the gate, which needs the pinned tools.
+`cargo xtask check` does not run the gate, which needs the pinned tools;
+its formal step runs `cargo xtask formal check` and
+`cargo xtask formal vectors` ([vectors in CI](#vectors-in-ci)).
 CI runs the gate as its parts and their merge on every pull request to
 `main` and every push to `main` ([CI job](#ci-job)). None of these jobs is
 required: a change is to merge only when a required gate passes on its
 head or a committed waiver record covers the failure, and both are
-planned.
+planned. On a pull request, the jobs `formal fast` and `formal guard` run
+`cargo xtask formal impact` and `cargo xtask formal guard`, and are not
+required either.
 
 ## Gate run
 
 `cargo xtask formal run` runs the gate on the commit checked out, the
 snapshot commit, and writes a receipt of the run, whether it passes, fails
 or stops on an internal error. Its code is in `xtask/src/formal/`: the gate
-inputs in `paths.rs`, the commands in `process.rs`, their classes and the
+inputs, the change since a merge base and the targets that it affects in
+`paths.rs`, the commands in `process.rs`, their classes and the
 statuses in `outcome.rs`, the receipt in `receipt.rs`, the extraction in
 `extract.rs`, the Lake stages, the source rules and the allowlist in
 `lean.rs`, the qualification in `qualify.rs`, the base round in `base.rs`,
@@ -777,6 +794,16 @@ tool failure of the run that names up to 20 paths, so that a command of
 the extraction, of a target or of a mutant that writes the installation
 fails the run as one of the qualification or the base round does, and so
 is a listing that cannot be taken then.
+
+`paths.rs` also gives the change between two commits, which the
+[guard](#guard) and `cargo xtask formal impact` share: their merge base and
+the paths changed from it to the second commit, each with its Git status,
+from `git diff --name-status --no-renames` with `--` after the two commits,
+so that a moved file counts as the deletion of its old path and the addition
+of its new one, and a file named as a revision, such as `HEAD`, is a path. A
+change leaves the gate unaffected when none of its paths is a gate input or
+lies below one, compared by whole path components, so that `kernelx/a.rs`
+does not lie below `kernel/`; otherwise it affects the gate.
 
 ### Cargo configuration
 
@@ -933,8 +960,8 @@ The gate runs as parts of one commit: the qualification job,
 formal target of the registry, `cargo xtask formal run --shard
 target/<name>`, which `cargo xtask formal merge` combines into the
 conclusion of the whole gate. A run without `--shard` has every phase in
-one process; local runs, the measurement jobs such as
-`leanchecker fresh` ([CI job](#ci-job)), the
+one process; local runs, the measurement jobs of the workflow
+`formal measure` such as `leanchecker fresh` ([CI job](#ci-job)), the
 [toolchain canary](#toolchain-canary) and `formal mutants` use it, and its
 receipt is no part of a merge. `--shard` cannot be given with `--target`.
 In CI the jobs `formal run`, `formal shard <name>` and `formal merge` of
@@ -1405,8 +1432,8 @@ where the tactic is `native_decide`, `decide` or `bv_decide`, with
 target theorem, and `axioms.json` refuses such names. Any module could
 declare an axiom of such a name without the kernel, so the item allows it
 only when the audit finds it declared in the module of the item's `file`.
-Changes of `tcb.json` itself are not guarded yet: the rules of the guard
-for the registries are planned.
+A pull request that adds an item to `tcb.json` or changes the reason of
+one needs the label `spec`, by the registry rules of the [guard](#guard).
 
 `verification/axioms.json` has schema 1 and a list `axioms`, each with
 `name`, `source`, the module of the Aeneas Lean library that declares the
@@ -1522,7 +1549,8 @@ theorem that depends on them fails the audit.
 ### Guard
 
 `cargo xtask formal guard --event PATH`, in `guard.rs`, checks a pull
-request against the rules for changes of statements, proofs and sources.
+request against the rules for changes of statements, proofs, sources and
+registries.
 `PATH` is the JSON of a `pull_request` event as GitHub writes it, the file
 of `GITHUB_EVENT_PATH`; the guard reads `pull_request.base.sha`,
 `pull_request.head.sha`, the names of `pull_request.labels`, and
@@ -1544,7 +1572,8 @@ From Git alone, the guard finds
 
 - the merge base of the two commits, and the paths that changed from it to
   the head, with `git diff --name-status --no-renames`, so that a renamed
-  file counts at its old and at its new path;
+  file counts at its old and at its new path
+  ([gate inputs and snapshot](#gate-inputs-and-snapshot));
 - among those paths, the statement side, the proof files, which are the
   `.lean` files below `verification/Krepi/Proofs/`, and the sources, which
   are the `.rs` files below `kernel/` and `user/`, `build.rs` included;
@@ -1572,6 +1601,14 @@ From Git alone, the guard finds
   the Aeneas templates raises the limit: its reviewer gives a
   `Heartbeats-Review` or removes the line. A limit that a metaprogram sets
   without the text `maxHeartbeats` is outside this rule;
+- what the registry rules below find in `verification/targets.json`,
+  `verification/models.json` and `verification/tcb.json`, when the pull
+  request changes them: each is read at the merge base and at the head as
+  the gate reads it, a side without the file as an empty registry, and
+  their targets, mutants and items are compared as values, so that another
+  order of the entries, of the theorems of an obligation or of the fields,
+  other white space and a default written out change nothing. A registry
+  that cannot be read on one side is compared on neither side;
 - the statement hash of the head.
 
 The description of the pull request gives these fields, each on a line of
@@ -1591,11 +1628,13 @@ comment, where no line starts with the name of a field.
 | `Phase` | The phase of the proof work that the pull request belongs to: `statement`, `proof` or `rewrite` |
 | `Author` | The opaque id of the author of the pull request, in the same form as `Review` |
 
-The labels are `spec` for a change of statements, `proof` for a change of
-proofs, and `ai-proof` for a pull request with proofs that an AI system
-wrote, which the guard records and never judges. Other labels are recorded
-and ignored. The rules are rows of one table, to which later checks add
-theirs:
+The labels are `spec` for a change of statements and for the registry
+changes below, `proof` for a change of proofs, and `ai-proof` for a pull
+request with proofs that an AI system wrote, which the guard records and
+never judges. Other labels are recorded and ignored. The rules are rows of
+one table, to which later checks add theirs; each rule from
+`registry-target-removed` on fails when it finds something and the label
+`spec` is missing:
 
 | Rule | Fails when |
 | --- | --- |
@@ -1605,10 +1644,54 @@ theirs:
 | `heartbeats-need-review` | A heartbeat limit is newly raised and `Heartbeats-Review` is missing |
 | `phase-and-author` | The label `spec` or `proof` is present and `Phase` or `Author` is missing, or `Phase` is not `statement`, `proof` or `rewrite` |
 | `proof-of-registered-statements` | A statement is restated and the label `spec` is missing: a proof may only prove a statement that the merge base registers |
+| `registry-target-removed` | A target of the merge base is not registered at the head |
+| `registry-theorem-removed` | A theorem of an obligation of a target of the merge base is not one of that target at the head |
+| `registry-mutant-removed` | A mutant of a target of the merge base is not one of that target at the head |
+| `registry-proves-narrowed` | A key of `proves` of a target of the merge base is not in that of the target at the head |
+| `registry-formal-made-planned` | A formal target of the merge base is planned at the head |
+| `registry-unconstrained-added` | A target of the head lists a function in `unconstrained` that it does not list at the merge base |
+| `registry-opaque-added` | A target of the head has a cut point, by its pattern, that it does not have at the merge base |
+| `registry-trusted-axiom-added` | A target of the head has a trusted axiom, by its name, that it does not have at the merge base, or `tcb.json` has an item, by its kind and its file and declaration or its prefix, that it does not have there |
+| `registry-model-added` | `models.json` has a model, by its name, an item of a model or a target in the `used_by` of a model that it does not have at the merge base, or a target of the head names a `models` directory that it does not name there |
+| `registry-obligation-changed` | A target of both commits has other obligations, compared by `id`, `statement` and the set of their theorems |
+| `registry-start-from-changed` | A target of both commits has another set of roots in `start_from` |
+| `registry-mutant-file-changed` | A mutant of a target of both commits, by its name, has another `file` |
+| `registry-mutant-find-changed` | A mutant of a target of both commits, by its name, has another `find` |
+| `registry-mutant-replace-changed` | A mutant of a target of both commits, by its name, has another `replace` |
+| `registry-mutant-renamed` | A mutant of a target of both commits is missing at the head, where the target has a new mutant with the same `file`, `find` and `replace` |
+| `registry-mutant-fails-grown` | A mutant of a target of both commits lists a theorem in `fails` that it does not list at the merge base |
+| `registry-trusted-reason-changed` | A trusted axiom or a cut point of a target, or an item of `tcb.json`, that both commits have, has another reason |
+| `registry-unreadable` | A changed registry cannot be read at the merge base or at the head |
 
 `proof-of-registered-statements` judges every pull request, whatever its
 labels: adding, removing or renaming a statement needs the label `spec`,
 and with it the fields that `spec-approval` checks.
+
+The rules of removals compare the targets of the merge base, so a target new
+at the head removes nothing; the rules of additions, which widen the trusted
+base or the models, compare the head, so a target new at the head adds all
+that it has; and the rules of changes compare only the targets and mutants
+that both commits have, where a target that gains its first obligation or
+root in `start_from` changes them. Removing a theorem of an obligation also
+changes the obligation, and renaming a mutant also removes its old name, so
+both rules fail. Tightening a registry, such as making a planned target
+formal, removing a trusted axiom, an unconstrained function, a cut point or
+an item of the trusted base, or adding a key to `proves`, fails no rule. The
+reason of a registry rule starts with what it found, such as
+`it removes the targets slots in targets.json`, with each item as
+`<value> in <target>` or `<target>/<mutant>`, an item of a model as
+`<item> in <model> in models.json` and a target that a model is for as
+`<model> for <target> in models.json`, and ends with
+`without the label spec`; with the label, `spec-approval` requires the
+review and the approval as for a statement change. The approved hash is the
+statement hash, which does not cover `targets.json`, `models.json` or
+`tcb.json`: a registry changed after the approval leaves the approval valid,
+so the reviewer checks the registries of the head that carries the label.
+Each item of a reason, a path or a value of a registry, is printed escaped,
+as `cargo xtask formal impact` prints paths, so that none splits a line.
+`cargo xtask formal guard` compares the registries of the production layout,
+so a change of those of the [calibration target](#calibration-target) fails
+no registry rule.
 
 On a pull request, when `GITHUB_EVENT_NAME` is `pull_request` and
 `GITHUB_EVENT_PATH` names the event, `cargo xtask formal run` runs the same
@@ -1616,7 +1699,8 @@ check through the gate's Git in a first phase, `guard`, with a budget of
 300 s, and records what it found in the receipt. The phase has no unit: a
 failing rule does not change the status of the run, which is about the
 proofs, and the standalone command decides. An event that cannot be read,
-or a failed Git command, stops the run as an internal error. Without a
+or a failed Git command, stops the run as an internal error; a registry
+that cannot be read does not, as `registry-unreadable` names it. Without a
 pull request event, and in the shard of a target, the run has no guard
 phase.
 
@@ -1883,7 +1967,8 @@ contents, use no stored credentials, and run actions pinned to full commit
 SHAs. The steps of the job `formal run`:
 
 1. check out the head of the pull request, or the pushed commit, with its
-   whole history, which the guard needs for the merge base;
+   whole history, which the guard phase of the gate needs for the merge
+   base;
 2. record the runner (its user, processors, memory, disk, kernel, and
    Docker's cgroup version and security options), and fail when the
    runner's user is root or does not own the checkout; pull the image by
@@ -1898,51 +1983,28 @@ SHAs. The steps of the job `formal run`:
    the only network interface, every attempt to create a file in or change
    the mode of `lean/`, `backend/`, `bin/`, `rustup/` and `cargo/` of the
    installation fails, and xtask starts in the image;
-5. on a pull request, run `cargo xtask formal guard` with the copied event,
-   as the binary of step 3 on the runner; its failure fails the job, and the
-   gate still runs. The step records the bytes available on `/` before and
-   after the guard and, where the runner has `/usr/bin/time`, its record,
-   else a line that it has none, in `job.txt`, and then starts a process
-   that writes, every second until the vectors step has ended or the gate
-   has started, the time, the bytes available on `/` and the memory in use
-   on the runner, `MemTotal` less `MemAvailable`, in KiB, into
-   `samples.tsv`;
-6. on a pull request that changes `kernel/`, `user/`, `verification/`,
-   `docs/domains/`, `xtask/` or `.github/workflows/formal.yml` since the
-   merge base, compare the test vectors ([vectors in CI](#vectors-in-ci)):
-   build the test executable of xtask and run its ignored replay of the
-   fixture in a container of the image, run the host tests of the kernel and
-   user-space workspaces with `KREPI_VECTOR_RESULTS` set, and run
-   `cargo xtask formal vectors` in another container. Each container has the
-   flags, the user and the mounted checkout of the gate's and is removed
-   when it ends. Under `timeout`, the build of the test executable has 5
-   minutes, the fixture replay 6, the host tests of each workspace 5 and the
-   comparison 31, and each container a minute more for its kill, so that
-   none outlives the step's 55 minutes. Its failure fails the job, and the
-   gate still runs;
-7. run `cargo xtask formal run --shard qualification`, as the same binary,
-   in a container of the image, as the runner's user and group, with
+5. run `cargo xtask formal run --shard qualification`, as the binary of
+   step 3, in a container of the image, as the runner's user and group, with
    `--pull never --init --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --network none`,
    the checkout mounted at its own path as the working directory, and the
    variables `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and
    `GITHUB_RUN_ATTEMPT` of the run, `GITHUB_EVENT_PATH` naming the copied
    event, and `KREPI_FORMAL_IMAGE` naming the image of `IMAGE`;
-8. always, remove the container of the gate if a cancelled step left it;
-9. always, write a summary of the receipt to the summary of the workflow
-   run: the status, whether the run is complete, its time and that of each
-   phase, the number of units of each status, the image, the resources, the
-   rules of the guard, every unit that is not `VERIFIED` and every failure.
-   The step fails when the gate's step ran and left no receipt;
-10. always, stop that process if it still runs, write `summary.md` (the
-    status, phases, units, resources and failures of the receipt, with its
-    SHA-256), and pack the `logs/` of the run into `logs.tar.gz`;
-11. always, upload the summary, the archive, `job.txt`, the record of steps
-    2 to 5 and of the start and end of the gate, the output of the guard,
-    the output of the vectors step with that of the fixture replay, the path
-    of its test executable and the host results, the event, `samples.tsv`
-    and the receipt of the run as the artifact
-    `formal-part-qualification-<commit>-<attempt>`. The logs of the run are
-    uploaded only in the archive.
+6. always, remove the container of the gate if a cancelled step left it;
+7. always, with workflow commands turned off, write a summary of the
+   receipt to the summary of the workflow run: the status, whether the run
+   is complete, its time and that of each phase, the number of units of
+   each status, the image, the resources, the rules of the guard, every
+   unit that is not `VERIFIED` and every failure. The step fails when the
+   gate's step ran and left no receipt;
+8. always, write `summary.md` (the status, phases, units, resources and
+   failures of the receipt, with its SHA-256), and pack the `logs/` of the
+   run into `logs.tar.gz`;
+9. always, upload the summary, the archive, `job.txt`, the record of steps
+   2 to 4 and of the start and end of the gate, the event and the receipt
+   of the run as the artifact
+   `formal-part-qualification-<commit>-<attempt>`. The logs of the run are
+   uploaded only in the archive.
 
 xtask finds the repository through the path at which it was compiled, so
 the checkout is mounted at that path; the runner and the image are the same
@@ -1955,64 +2017,63 @@ process collects processes that leave their group, which the gate as
 process 1 would not, and `--pull never` makes a missing image an error
 instead of a pull.
 
-The job may take the time that the job `formal limits` computes, below:
-15 minutes for the steps before the vectors step (2 to check out, 8 to
-record the runner and pull, 3 to build xtask, 1 for the probe and 1 for the
-guard), the 55 of the vectors step, and the minutes of the deadline of
-the qualification job, 7,200 s and 600 s, with the 300 s of its receipt,
-205 in all whatever the registry. The gate's step has a backstop one
-minute after the gate's own end, 136 minutes. When the steps
-before the gate and the gate use all their time, the steps after it have
-almost none, and the limit of the job may cut the upload; the receipt is
-still written in the checkout. When the gate's
-step is cancelled or reaches its limit, the step after it removes the
-container, and the gate writes no receipt.
+The job may take the time that the job `formal limits` computes, below: 15
+minutes for the steps before the gate's step (2 to check out, 8 to record
+the runner and pull, 3 to build xtask and 1 for the probe) and the backstop
+of the gate's step, one minute after the gate's own end, and the minutes of
+the deadline of the qualification job, 7,200 s and 600 s, with the 300 s of
+its receipt, 150 in all whatever the registry. The gate's step has 136
+minutes. When the steps before the gate and the gate use all their time, the
+steps after it have almost none, and the limit of the job may cut the
+upload; the receipt is still written in the checkout. When the gate's step
+is cancelled or reaches its limit, the step after it removes the container,
+and the gate writes no receipt.
 
 The gate's step fails whenever the gate does not exit with 0, `REJECTED`
 included, and nothing marks a failure as expected.
 
 The job `formal limits`, before the job `formal run`, checks out the head
 and computes the limits of the jobs of the gate and its shards from the
-head's `verification/targets.json`, with the gate's 7,200 s and the 300 s
-of the receipt: the deadline of the qualification job is the 7,200 s and
-600 s for the extraction of every formal target, that of the shard of a
-target 300 s and the budget of the target, 1,800 s unless the registry
-gives another, and that of a run of the planned targets the 7,200 s and
-their budgets; each has the 300 s of its receipt. The gate's step of the
+head's `verification/targets.json`, with the gate's 7,200 s and the 300 s of
+the receipt: the deadline of the qualification job is the 7,200 s and 600 s
+for the extraction of every formal target, that of the shard of a target
+300 s and the budget of the target, 1,800 s unless the registry gives
+another, and that of a run of the planned targets the 7,200 s and their
+budgets; each has the 300 s of its receipt. The gate's step of the
 qualification job then has the minutes of its deadline and its receipt,
 rounded up, and one more as a backstop, 136; the step of a shard or of the
 planned targets has two more, as `deadline.sh` kills its command a minute
 after its deadline. So the receipt of each part is written before its step
 ends, however many formal targets the registry has. The job `formal run`
-then has the 15 minutes before the vectors step, the 55 of that step and
-the minutes of the deadline and the receipt, 205; a shard job and the job
-`formal planned` have 15 minutes before their step, the step and 3 minutes
-after it. The shards form a matrix with one entry for each formal target,
-by its name, with its registered budget and the minutes of its step and
-job. A shard whose registered budget per worker is more than the shard
+then has the 15 minutes of the steps before the gate's step and its
+backstop, and the minutes of the deadline and the receipt, 150; a shard job
+and the job `formal planned` have 15 minutes before their step, the step and
+3 minutes after it. The shards form a matrix with one entry for each formal
+target, by its name, with its registered budget and the minutes of its step
+and job. A shard whose registered budget per worker is more than the shard
 limit of 3,300 s fails the job, as `cargo xtask formal check` refuses it
 ([shards and merge](#shards-and-merge)), so a shard job has at most 85
 minutes. The qualification job, the shard jobs and the job of the planned
-targets have limits that are expressions, so the records of the runs of
-the workflow name no limit for them; the merge job has 15 minutes. A job of
-a hosted runner ends after 360 minutes; when the budgets of the planned
+targets have limits that are expressions, so the records of the runs of the
+workflow name no limit for them; the merge job has 15 minutes. A job of a
+hosted runner ends after 360 minutes; when the budgets of the planned
 targets need a longer job, or a target name is not of lowercase letters,
-digits and hyphens, the job `formal limits` fails, the jobs of the parts
-and `formal planned` do not run, and the merge fails without a receipt.
+digits and hyphens, the job `formal limits` fails, the jobs of the parts and
+`formal planned` do not run, and the merge fails without a receipt.
 
 Each job `formal shard <name>`, beside `formal run`, runs the shard of one
-formal target. It is prepared as `formal run` is, with the shorter probe
-of `formal planned`, and without the guard, the vectors and the event. Its
-main command, `cargo xtask formal run --shard target/<name>` in a container
-of the image with the flags of the gate and the variables `GITHUB_REF`,
-`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and `KREPI_FORMAL_IMAGE`, runs under
+formal target. It is prepared as `formal run` is, with the shorter probe of
+`formal planned`, and without the event. Its main command,
+`cargo xtask formal run --shard target/<name>` in a container of the image
+with the flags of the gate and the variables `GITHUB_REF`, `GITHUB_RUN_ID`,
+`GITHUB_RUN_ATTEMPT` and `KREPI_FORMAL_IMAGE`, runs under
 `.github/scripts/deadline.sh --stop-commands` with the minutes of its
 deadline and receipt and a minute for its kill. The job summarizes the
 receipt with workflow commands turned off, writes `summary.md` and
 `logs.tar.gz`, and uploads them with `job.txt` and the receipt as
 `formal-part-target-<name>-<commit>-<attempt>`. The failure of one shard
-cancels no other, the concurrency group of each holds its name, and
-without a formal target in the registry the job does not run.
+cancels no other, the concurrency group of each holds its name, and without
+a formal target in the registry the job does not run.
 
 The job `formal merge` runs after `formal run` and the shards unless the
 run was cancelled, also when a part failed or did not run, and not on a
@@ -2054,29 +2115,43 @@ concludes each as `SCOPED` and is never required. Its main command runs
 under `.github/scripts/deadline.sh --stop-commands` with the minutes of the
 deadline and the receipt, and a minute for its kill, so that a cancellation
 reaches the gate and it writes its receipt; the step has two minutes more
-than that deadline. Its steps
-are those of `formal run`, without the guard and the vectors, and with a
-shorter probe; without a planned target it checks out the head, says that
-there are none and passes. It summarizes the receipt, with workflow
-commands turned off, and uploads the receipt, the summary and the logs
-packed into `logs.tar.gz` with `job.txt` as
-`formal-planned-<commit>-<attempt>`. Until a planned target is
-registered in `verification/targets.json`, it runs nothing.
+than that deadline. Its steps are those of `formal run`, with a shorter
+probe; without a planned target it checks out the head, says that there are
+none and passes. It summarizes the receipt, with workflow commands turned
+off, and uploads the receipt, the summary and the logs packed into
+`logs.tar.gz` with `job.txt` as `formal-planned-<commit>-<attempt>`. Until a
+planned target is registered in `verification/targets.json`, it runs
+nothing.
+
+On a pull request, beside the gate and on the same events, two jobs of the
+workflow run on the runner without the image. `formal fast` runs
+`cargo xtask formal impact --base` with the base of the pull request, which
+lists the merge base, the paths changed since, whether they affect the gate
+inputs and the registered targets that they affect, and fails only when it
+cannot list them. `formal guard` runs `cargo xtask formal guard` with the
+event of the run ([guard](#guard)), and its failure fails the job. Each
+checks out the head with its history, builds xtask, runs its command under
+`.github/scripts/deadline.sh --stop-commands` with 1 minute and 30 s for its
+kill, and writes what the command printed into the summary of the workflow
+run, with each carriage return escaped and indented as code; each has 8
+minutes and uploads nothing. Neither is a required check, and a newer event
+of the same pull request cancels a run of either that has not ended.
 
 The measurement jobs `leanchecker fresh`, `leanchecker prefix` and
-`lake comparator` run on a manual run of the workflow (`workflow_dispatch`,
-which runs the workflow of the branch it is started on) and on a pull
-request that has the label `formal-measure`, when it is opened, reopened or
-updated and when that label is added, but not when its description is
-edited or another label changes; the jobs of the gate (`formal limits`,
-`formal run`, `formal shard`, `formal merge` and `formal planned`) do not
-run on a manual run. Each waits for an earlier run of itself on the same pull request
-or commit instead of cancelling it.
+`lake comparator` are in the workflow `formal measure`,
+`.github/workflows/formal-measure.yml`, which has the variables `IMAGE` and
+`GATE_FLAGS` of the workflow `formal`. They run on a manual run of that
+workflow on `main` (`workflow_dispatch`) and when the label `formal-measure`
+is added to a pull request to `main`, and on no other event. Each waits for
+an earlier run of itself on the same pull request or commit instead of
+cancelling it. A manual run of the workflow `formal` runs no job yet;
+measurements are dispatched from `formal measure`.
 
 - `leanchecker fresh` and `leanchecker prefix`, 120 minutes each, prepare
   as the job `formal run` does and run the whole gate, without `--shard`,
-  without the probe and the guard step and with `--keep`, which keeps the stage of the base round; a gate
-  that exits with 1 passes there, and any other status but 0 fails. The gate's step has 75 minutes there, which hold a qualification
+  without the probe and with `--keep`, which keeps the stage of the base
+  round; a gate that exits with 1 passes there, and any other status but 0
+  fails. The gate's step has 75 minutes there, which hold a qualification
   that uses its whole budget and a base round of the expected length. Then
   they drop the page cache of the runner and run, in the stage of the base
   round, in a container with the flags of the gate,
@@ -2100,23 +2175,36 @@ or commit instead of cancelling it.
   of the job to the end of the last call and to the summary. The output and
   the `/usr/bin/time` record of each call, the times and the receipt with
   its logs are uploaded as `formal-leanchecker-<mode>-<commit>-<attempt>`.
-- `lake comparator`, 30 minutes, writes a Lake project from the counter
+- `lake comparator`, 45 minutes, writes a Lake project from the counter
   fixtures of `xtask/src/formal/fixtures/base/counter/`, with two
-  handwritten challenges, and runs `lake comparator` on three
-  configurations: a challenge that the solution proves, the statement
-  module as the challenge, and a challenge that the solution proves only in
-  a weaker form. It runs each, in a new copy of the project, in these
-  container settings in turn: Docker's defaults, as root; those with seccomp
-  and AppArmor unconfined; the container of the gate; and, after
+  handwritten challenges, and three configurations: a challenge that the
+  solution proves, the statement module as the challenge, and a challenge
+  that the solution proves only in a weaker form. It records the kernel, the
+  settings of user namespaces, Docker's security options, and the version of
+  bubblewrap and the executables of the toolchain in the image, and fails
+  when the image has no `leanexport`, the exporter that the comparator runs.
+  In a copy of the project, in a container with the flags of the gate whose
+  home and temporary directory are its `/tmp`, Lake builds the solution, and
+  for each configuration `leanexport` exports from the module `Krepi` what
+  the comparator exports of a solution: `Quot`, `Quot.mk`, `Quot.lift` and
+  `Quot.ind` when `Quot.sound` is permitted, the theorems, the permitted
+  axioms and the constants that the kernel builds in; an export that fails
+  is removed. It then runs `lake comparator` on each configuration, in a new
+  copy of the project, in two modes, `plain`, where the comparator builds
+  and exports the solution itself, and `export`, where it judges the export
+  with `--solution-from-export`, and in four container settings in turn:
+  `gate`, the container of the gate; and, after
   `kernel.apparmor_restrict_unprivileged_userns` is set to 0 on the runner,
-  the second setting and the gate's container again, and both once more
-  with an empty `/run`, where bubblewrap creates `/run/user`, the gate's
-  container then also with seccomp and AppArmor unconfined. It records the
-  kernel, the settings of user namespaces, Docker's security options and
-  the version of bubblewrap in the image, and the exit status and output of
-  each run, and uploads them as `formal-comparator-<commit>-<attempt>`. A
-  result of the comparator never fails the job; an error of Docker, exit
-  status 125 to 127, or of the runner does.
+  `gate-userns`, the container of the gate again, `relaxed`, that container
+  with seccomp and AppArmor unconfined and an empty `/run/user`, which
+  bubblewrap needs as a mount point, and `relaxed-systempaths`, that with
+  Docker's masked and read-only system paths unconfined as well. It records
+  the exit status and output of each export and each run, which it prints
+  with workflow commands turned off, summarizes them by setting, mode and
+  configuration, and uploads them with the project as
+  `formal-comparator-<commit>-<attempt>`. A result of an export or of the
+  comparator never fails the job; an error of Docker, exit status 125 to
+  127, a failed sysctl or an image without `leanexport` does.
 
 ## Proof targets
 
@@ -2149,6 +2237,8 @@ a tool, and each broken rule is a problem:
 - no two targets have the same name or module, and no theorem is registered
   twice, by the obligations of one target or of two, or by a target and a
   specification;
+- a target name is made of lowercase letters, digits and hyphens and
+  starts with a letter or a digit;
 - a target with a `module` has at least one root in `start_from`;
 - a formal target has at least one obligation and at least one mutant, and
   every obligation has at least one theorem; a planned target needs neither
@@ -2171,11 +2261,9 @@ a tool, and each broken rule is a problem:
 `cargo xtask formal check` also checks the shard plan
 ([shard plan and disk guard](#shard-plan-and-disk-guard)).
 
-A target name is made of lowercase letters, digits and hyphens and starts
-with a letter or a digit. `cargo xtask formal check` does not check it: the
-job `formal limits` of the workflow `formal` ([CI job](#ci-job)) fails on
-another name before the names reach a gate, and on a shard whose
-registered budget per worker is more than the shard limit.
+The job `formal limits` of the workflow `formal` ([CI job](#ci-job)) also
+fails on another target name before the names reach a gate, and on a shard
+whose registered budget per worker is more than the shard limit.
 
 The targets of the registry run in two phases of the gate. The phase
 `extraction`, before the base round, extracts the targets that the run
@@ -2788,26 +2876,33 @@ block names no replay, and `<n> components, <m> problems`. A problem before
 any comparison, such as a block that cannot be read, is then the only line
 before the counts, a `FAILED` line without a component, and the host line
 is not printed. It exits with 1 when there is a problem and with 2 for a
-usage error. It writes no receipt and does not check the image: in CI, the
-gate of the same job checks it ([image pin](#image-pin)).
+usage error. It writes no receipt and does not check the image: the formal
+step of `cargo xtask check` runs it in the image that the pin names by its
+digest ([vectors in CI](#vectors-in-ci)).
 
 ### Vectors in CI
 
-On a pull request, step 6 of the [CI job](#ci-job) compares the vectors when
-the pull request changes `kernel/`, `user/`, `verification/`,
-`docs/domains/`, `xtask/` or `.github/workflows/formal.yml` since the merge
-base, and otherwise prints that it compares 0 components. Every
-specification module lies below `verification/`, every source below
-`kernel/` or `user/` and every contract below `docs/domains/`, so the rule
-selects every component whose specification or sources changed, and more; a
-vector file outside these paths, such as one below `tools/`, is compared
-only when one of them changes too. `xtask/` and the workflow are in the list
-so that a change of the comparison runs it too. The step runs the fixture
-replay below, then the host tests of the kernel and user-space workspaces
-with `KREPI_VECTOR_RESULTS` set, and then `cargo xtask formal vectors`
-without a component in a container of the image. It does not block a merge,
-since the job is not required. Selecting the components one by one, a
-receipt of the comparison and a check of the image are planned.
+The formal step of `cargo xtask check`
+([testing](conventions/testing.md#entry-points)) compares the vectors on
+every run of the check, after `cargo xtask formal check`. In containers of
+the pinned image ([image pin](#image-pin)), with the flags of the gate, as
+the owner of the checkout, which they mount at its path, it replays the
+[fixture](#fixture) with `--exact --ignored --nocapture` and requires a line
+that starts with `test result: ok. 1 passed; 0 failed`, since an exact
+filter that matches no test passes as well. It then empties
+`artifacts/formal/vectors`, runs the host tests of the kernel and
+user-space workspaces with `KREPI_VECTOR_RESULTS` set to that directory, and
+runs `cargo xtask formal vectors` without a component in a container. Each
+container is named after the process of the check and its part and is
+removed before and after it runs, also when the check stops, which kills
+only the Docker client. The image runs executables built on the host, so the
+step needs a linux-aarch64 host with Docker and the pinned image: without
+one of them, or without Lake in the image, it ends as a tool failure, which
+fails the check like a failed step. `--skip-formal` records the step as not
+run; no workflow passes it, and the workflows that run the check pull the
+pinned image before it and require the step to have passed in its receipt.
+Since the check is required, a failed comparison blocks a merge. Selecting
+the components one by one and a receipt of the comparison are planned.
 
 ### Fixture
 
@@ -2821,8 +2916,9 @@ stand-in in place of the pinned Lean. The ignored test
 it with the pinned Lean in a stage of the Lake project of the repository,
 which links the Aeneas library and Mathlib but builds neither, and checks
 that equal results pass and that results with one item that differs give
-exactly that problem, within 300 s. Step 6 of the CI job runs it in the
-image, and a local run needs the `darwin-arm64` installation at
+exactly that problem, within 300 s. The formal step of `cargo xtask check`
+runs it in the image ([vectors in CI](#vectors-in-ci)), and a local run
+needs the `darwin-arm64` installation at
 `artifacts/formal/tools`:
 
 ```sh
@@ -2856,8 +2952,8 @@ and needs no label `spec`; its paths are gate inputs, so a change of them
 runs the gate.
 
 Generated modules and the root module exist only in the stages of a run.
-`verification/tcb.json` is not on the statement side; changes of it are to
-be reviewed through the registry rules of the [guard](#guard) (planned).
+`verification/tcb.json` is not on the statement side; the registry rules
+of the [guard](#guard) review its changes.
 Nor are the pins of the tools: `verification/toolchain.json` and the patch
 of the Aeneas Lean library in `verification/tooling/` also decide what the
 definitions of that library mean, but a change of them changes no
@@ -3097,15 +3193,17 @@ there is any:
 
 Its last line counts the files, functions, derived methods and open
 obligations of the inventory and, after them, names the function of each
-survivor of class `no-theorem`, which no theorem covers yet. No CI job runs
-it in the production layout, nor does `cargo xtask check`: run it before
-proposing a change to the kernel workspace, a contract or the registries.
+survivor of class `no-theorem`, which no theorem covers yet. The formal
+step of `cargo xtask check` runs it in the production layout first, in
+every job of CI that runs the check; `--skip-formal` skips it with the
+rest of the step, so with that option run it before proposing a change to
+the kernel workspace, a contract or the registries.
 The job `calibration run` of the workflow `formal calibration` runs it in
 the layout of the calibration.
 The removal of a target, a theorem or a proved function, and any widening
 of the trusted base, are reviewed through the registry rules of the
-[guard](#guard) (planned), and `cargo xtask formal impact --base REV`
-(planned) lists the targets that a change affects. A function without a
+[guard](#guard), and `cargo xtask formal impact --base REV` lists the
+targets that a change affects. A function without a
 proof is never trusted by a proof and appears in a target's `unclosed` list
 when reached.
 

@@ -15,7 +15,14 @@ git diff --cached --check
 ```
 
 [Testing](docs/conventions/testing.md#entry-points) describes what the check
-runs. CI runs the same check, and then the QEMU boot suite, in one job on
+runs. Its formal step runs `cargo xtask formal check` and then the test
+vectors in the pinned proof-tool image, which runs executables built on the
+host, so it needs a `linux-aarch64` host with Docker and that image;
+without them it ends as a tool failure, which fails the check and cancels
+the other lanes. There, run `cargo xtask check --skip-formal`, which
+records the formal step as not run, and `cargo xtask formal check`; every
+job of CI that runs the check runs the formal step and fails unless it
+passed. CI runs the same check, and then the QEMU boot suite, in one job on
 every pull request to `main` and on every push to `main`. Beside it, one
 job writes the images of the QEMU suites, another runs the suites of
 `suites.toml` on those images, and a summary job requires the three jobs to
@@ -162,8 +169,9 @@ Charon/Aeneas is the implementation-refinement toolchain. Follow
 [formal verification](docs/formal-verification.md). Before proposing a
 change to the kernel workspace, a component contract or the proof
 registries, run `cargo xtask formal check`, which holds every production
-function against the proof targets and the open obligations; it is not
-part of `cargo xtask check` yet.
+function against the proof targets and the open obligations; the formal
+step of `cargo xtask check` runs it, but `--skip-formal` skips it with the
+rest of that step.
 
 Code of the modules that the
 [provable Rust subset](docs/conventions/provable-subset.md) lists follows it
