@@ -34,13 +34,15 @@ once, and each runs its steps one after another: the debug lane runs `test`,
 the order of the list, and stops at the first failure.
 
 The steps `fmt`, `clippy`, `test` and `test-release` run commands, and so
-does `formal`, which `xtask` implements and which runs its commands as
-those steps do. Each of their commands runs in a process group of its own,
-with no input; the check kills the group when the command has ended or the
-check stops, before it collects the command, and then waits up to 60 s for
-the group to be empty, failing the step if processes of the group outlive
-that. A passing command therefore leaves no process of its group behind
-either. A command's output and error output go to the log of its step,
+does `formal`, which `xtask` implements and which runs its commands as those
+steps do, except the removals of its containers, which run in the process
+group of the check and write to no log. Each of their commands runs in a
+process group of its own, with no input; the check kills the group when the
+command has ended or the check stops, before it collects the command, and
+then waits up to 60 s for the group to be empty, failing the step if
+processes of the group outlive that. A passing command therefore leaves no
+process of its group behind either.
+A command's output and error output go to the log of its step,
 `artifacts/check/<UTC time>Z-<process ID>/<NN>-<step>.log`, where `NN` is the
 number of the step in the list, such as `05-test.log`, after a line with the
 command; when the step ends, the check prints its log and a line with its

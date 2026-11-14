@@ -222,8 +222,10 @@ impl Change {
 pub fn since_merge_base(git: &mut dyn Git, base: &str, head: &str) -> Result<Change, String> {
     let merge_base = git.git(&["merge-base", base, head], None)?;
     let merge_base = String::from_utf8_lossy(&merge_base).trim().to_string();
+    // Without `--`, a file named as a revision, such as `HEAD`, is ambiguous.
     let diff = ["diff", "--name-status", "--no-renames", "-z"];
-    let diff = git.git(&[&diff[..], &[merge_base.as_str(), head]].concat(), None)?;
+    let diff = [&diff[..], &[merge_base.as_str(), head, "--"]].concat();
+    let diff = git.git(&diff, None)?;
     let diff = String::from_utf8_lossy(&diff);
     let mut fields = diff.split_terminator('\0').map(String::from);
     let paths = std::iter::from_fn(|| Some((fields.next()?, fields.next()?))).collect();
@@ -247,17 +249,20 @@ pub(super) fn targets(text: &str) -> Result<BTreeMap<String, Target>, String> {
     Ok(targets.into_iter().map(|t| (t.name.clone(), t)).collect())
 }
 
+/// The targets that a change affects, with their states, and why the
+/// registry at the merge base cannot be read, if it cannot.
+pub type Impact = (Vec<(String, State)>, Option<String>);
+
 /// The targets registered at the head of `change`, with their states, that
 /// it affects: all when it changes an input of extraction, and otherwise
-/// each with another entry than at the merge base or a changed proof module.
-pub fn impacted(
-    git: &mut dyn Git,
-    layout: &Layout,
-    change: &Change,
-) -> Result<Vec<(String, State)>, String> {
-    let texts = change.texts(git, layout.registry)?;
-    let [before, after] = texts.map(|text| targets(&text));
-    let (before, after) = (before?, after?);
+/// each with another entry than at the merge base or a changed proof module;
+/// a registry at the merge base that cannot be read counts as one without
+/// targets, so that every target is affected.
+pub fn impacted(git: &mut dyn Git, layout: &Layout, change: &Change) -> Result<Impact, String> {
+    let [before, after] = change.texts(git, layout.registry)?;
+    let (before, after) = (targets(&before), targets(&after)?);
+    let unreadable = before.as_ref().err().cloned();
+    let before = before.unwrap_or_default();
     let extraction = !change.within(&gate_inputs(layout)[..EXTRACTION]).is_empty();
     let module = |name: &String| format!("{}/{}", layout.project, lean::module_file(name));
     let affected = |(name, target): &(&String, &Target)| {
@@ -267,7 +272,7 @@ pub fn impacted(
     };
     let affected = after.iter().filter(affected);
     let affected = affected.map(|(name, target)| (name.clone(), target.state));
-    Ok(affected.collect())
+    Ok((affected.collect(), unreadable))
 }
 
 /// The command line of `cargo xtask formal impact`, with `about`.
@@ -278,7 +283,8 @@ pub fn cli(about: &'static str) -> clap::Command {
 }
 
 /// Entry point of `cargo xtask formal impact` in the repository `root`: it
-/// prints [`impact_lines`] and exits with 1 when Git or a registry fails.
+/// prints [`impact_lines`] and exits with 1 when Git fails or the registry
+/// at the head cannot be read.
 pub fn command(root: &Path, layout: &Layout, matches: &ArgMatches) -> ExitCode {
     let base = (matches.get_one::<String>("base")).expect("a required option");
     let lines = impact_lines(&mut super::guard::Standalone(root), layout, base);
@@ -288,8 +294,10 @@ pub fn command(root: &Path, layout: &Layout, matches: &ArgMatches) -> ExitCode {
 }
 
 /// The lines of `cargo xtask formal impact --base <base>`: the merge base of
-/// `base` and `HEAD`, each changed path, the decision and each target that
-/// the change affects, with paths and names escaped so that none splits a line.
+/// `base` and `HEAD`, each changed path, the decision, why the registry at
+/// the merge base cannot be read, if it cannot, and each target that the
+/// change affects, with paths, names and that reason escaped so that none
+/// splits a line.
 fn impact_lines(git: &mut dyn Git, layout: &Layout, base: &str) -> Result<Vec<String>, String> {
     if base.is_empty() || base.starts_with('-') {
         return Err(format!("{base:?} is not a revision"));
@@ -300,7 +308,10 @@ fn impact_lines(git: &mut dyn Git, layout: &Layout, base: &str) -> Result<Vec<St
     lines.extend(paths.map(|(status, path)| format!("changed {status} {}", path.escape_debug())));
     let decision = ["unaffected", "affected"][usize::from(!change.affecting(layout).is_empty())];
     lines.push(format!("decision {decision}"));
-    for (name, state) in impacted(git, layout, &change)? {
+    let (affected, unreadable) = impacted(git, layout, &change)?;
+    let at = format!("unreadable {} at the merge base", layout.registry);
+    lines.extend(unreadable.map(|error| format!("{at}: {}", error.escape_debug())));
+    for (name, state) in affected {
         let state = format!("{state:?}").to_lowercase();
         lines.push(format!("target {} {state}", name.escape_debug()));
     }
@@ -563,7 +574,10 @@ mod tests {
     fn impact(label: &str, change: impl FnOnce(&Fixture)) -> Vec<(String, State)> {
         let files = [(REGISTRY, TARGETS), (PROOF, "module\n")];
         let (mut fixture, change) = changed_by(label, &files, change);
-        impacted(&mut fixture, &Layout::PRODUCTION, &change).expect("the registry")
+        let found = impacted(&mut fixture, &Layout::PRODUCTION, &change);
+        let (found, unreadable) = found.expect("the registry");
+        assert_eq!(unreadable, None);
+        found
     }
 
     /// `(name, state)` pairs.
@@ -672,6 +686,58 @@ mod tests {
             Ok(vec![
                 format!("merge base {head}"),
                 "decision unaffected".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn impact_lists_every_target_when_the_registry_at_the_merge_base_cannot_be_read() {
+        // A merge base of another schema, as a change of the schema leaves
+        // it, has no targets; a registry at the head that cannot be read
+        // stays an error.
+        let other = r#"{"schema": 3, "targets": []}"#;
+        let (mut fixture, change) = changed_by("unreadable", &[(REGISTRY, other)], |fixture| {
+            fixture.write(REGISTRY, TARGETS)
+        });
+        let (layout, base) = (Layout::PRODUCTION, change.merge_base);
+        let why = "schema 3 where 2 is expected";
+        assert_eq!(
+            impact_lines(&mut fixture, &layout, &base),
+            Ok(vec![
+                format!("merge base {base}"),
+                format!("changed M {REGISTRY}"),
+                "decision affected".to_string(),
+                format!("unreadable {REGISTRY} at the merge base: {why}"),
+                "target a formal".to_string(),
+                "target b planned".to_string(),
+            ])
+        );
+        let impact = |fixture: &Fixture| {
+            let matches = cli("").try_get_matches_from(["impact", "--base", &base]);
+            command(fixture.root(), &layout, &matches.expect("a command line"))
+        };
+        assert_eq!(impact(&fixture), ExitCode::SUCCESS);
+        fixture.write(REGISTRY, other);
+        fixture.commit_all();
+        let refused = impact_lines(&mut fixture, &layout, &base);
+        assert_eq!(refused, Err(why.to_string()));
+        assert_eq!(impact(&fixture), ExitCode::FAILURE);
+    }
+
+    #[test]
+    fn impact_runs_beside_a_file_named_head() {
+        // `git diff` takes the file for the revision without `--`.
+        let notes = [("docs/notes.md", "Notes.\n")];
+        let (mut fixture, change) = changed_by("head-file", &notes, |fixture| {
+            fixture.write("HEAD", "A file named HEAD.\n")
+        });
+        let base = change.merge_base;
+        assert_eq!(
+            impact_lines(&mut fixture, &Layout::PRODUCTION, &base),
+            Ok(vec![
+                format!("merge base {base}"),
+                "changed A HEAD".to_string(),
+                "decision unaffected".to_string(),
             ])
         );
     }

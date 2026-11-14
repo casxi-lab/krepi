@@ -680,7 +680,7 @@ The commands of `cargo xtask formal` follow the design of the gate.
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its job fetched and built: `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from the outcomes of the steps of the job ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
 | `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration, and `--keep` keeps the work directory of the run, as for `run` |
-| `cargo xtask formal impact --base REV` | Lists, one item per line, the merge base of `REV` and `HEAD`, each path changed since with its Git status, without rename detection, the decision, `unaffected` when no changed path lies within a [gate input](#gate-inputs-and-snapshot) and `affected` otherwise, and the registered targets that the change affects, with their states: every target when an input of extraction changed, and otherwise each whose entry in `verification/targets.json` changed and each with a changed file of its `proof_modules`. Paths and names are printed escaped, so that none splits a line. It decides nothing, and exits with 1 only on a base that is not a revision or when Git or the registry cannot be read |
+| `cargo xtask formal impact --base REV` | Lists, one item per line, the merge base of `REV` and `HEAD`, each path changed since with its Git status, without rename detection, the decision, `unaffected` when no changed path lies within a [gate input](#gate-inputs-and-snapshot) and `affected` otherwise, and the registered targets that the change affects, with their states: every target when an input of extraction changed, and otherwise each whose entry in `verification/targets.json` changed and each with a changed file of its `proof_modules`. A registry that cannot be read at the merge base, as after a change of its schema, counts as one without targets, so that every target is listed, after a line `unreadable verification/targets.json at the merge base: <why>`. Paths, names and that reason are printed escaped, so that none splits a line. It decides nothing, and exits with 1 only on a base that is not a revision or when Git or the registry at the head cannot be read |
 | `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
 
 `cargo xtask check` does not run the gate, which needs the pinned tools;
@@ -798,11 +798,12 @@ is a listing that cannot be taken then.
 `paths.rs` also gives the change between two commits, which the
 [guard](#guard) and `cargo xtask formal impact` share: their merge base and
 the paths changed from it to the second commit, each with its Git status,
-from `git diff --name-status --no-renames`, so that a moved file counts as
-the deletion of its old path and the addition of its new one. A change
-leaves the gate unaffected when none of its paths is a gate input or lies
-below one, compared by whole path components, so that `kernelx/a.rs` does
-not lie below `kernel/`; otherwise it affects the gate.
+from `git diff --name-status --no-renames` with `--` after the two commits,
+so that a moved file counts as the deletion of its old path and the addition
+of its new one, and a file named as a revision, such as `HEAD`, is a path. A
+change leaves the gate unaffected when none of its paths is a gate input or
+lies below one, compared by whole path components, so that `kernelx/a.rs`
+does not lie below `kernel/`; otherwise it affects the gate.
 
 ### Cargo configuration
 
@@ -1651,7 +1652,7 @@ one table, to which later checks add theirs; each rule from
 | `registry-unconstrained-added` | A target of the head lists a function in `unconstrained` that it does not list at the merge base |
 | `registry-opaque-added` | A target of the head has a cut point, by its pattern, that it does not have at the merge base |
 | `registry-trusted-axiom-added` | A target of the head has a trusted axiom, by its name, that it does not have at the merge base, or `tcb.json` has an item, by its kind and its file and declaration or its prefix, that it does not have there |
-| `registry-model-added` | `models.json` has a model, by its name, that it does not have at the merge base, or a target of the head names a `models` directory that it does not name there |
+| `registry-model-added` | `models.json` has a model, by its name, an item of a model or a target in the `used_by` of a model that it does not have at the merge base, or a target of the head names a `models` directory that it does not name there |
 | `registry-obligation-changed` | A target of both commits has other obligations, compared by `id`, `statement` and the set of their theorems |
 | `registry-start-from-changed` | A target of both commits has another set of roots in `start_from` |
 | `registry-mutant-file-changed` | A mutant of a target of both commits, by its name, has another `file` |
@@ -1666,24 +1667,31 @@ one table, to which later checks add theirs; each rule from
 labels: adding, removing or renaming a statement needs the label `spec`,
 and with it the fields that `spec-approval` checks.
 
-The rules of removals compare the targets of the merge base, so a target
-new at the head removes nothing; the rules of additions, which widen the
-trusted base or the models, compare the head, so a target new at the head
-adds all that it has; and the rules of changes compare only the targets
-and mutants that both commits have, where a target that gains its first
-obligation or root in `start_from` changes them. Removing a theorem of an
-obligation also changes the obligation, and renaming a mutant also removes
-its old name, so both rules fail. Tightening a registry, such as making a
-planned target formal, removing a trusted axiom, an unconstrained
-function, a cut point or an item of the trusted base, or adding a key to
-`proves`, fails no rule. The reason of a registry rule starts with what it
-found, such as `it removes the targets slots in targets.json`, with each
-item as `<value> in <target>` or `<target>/<mutant>`, and ends with
+The rules of removals compare the targets of the merge base, so a target new
+at the head removes nothing; the rules of additions, which widen the trusted
+base or the models, compare the head, so a target new at the head adds all
+that it has; and the rules of changes compare only the targets and mutants
+that both commits have, where a target that gains its first obligation or
+root in `start_from` changes them. Removing a theorem of an obligation also
+changes the obligation, and renaming a mutant also removes its old name, so
+both rules fail. Tightening a registry, such as making a planned target
+formal, removing a trusted axiom, an unconstrained function, a cut point or
+an item of the trusted base, or adding a key to `proves`, fails no rule. The
+reason of a registry rule starts with what it found, such as
+`it removes the targets slots in targets.json`, with each item as
+`<value> in <target>` or `<target>/<mutant>`, an item of a model as
+`<item> in <model> in models.json` and a target that a model is for as
+`<model> for <target> in models.json`, and ends with
 `without the label spec`; with the label, `spec-approval` requires the
-review and the approval as for a statement change.
-`cargo xtask formal guard` compares the registries of the production
-layout, so a change of those of the
-[calibration target](#calibration-target) fails no registry rule.
+review and the approval as for a statement change. The approved hash is the
+statement hash, which does not cover `targets.json`, `models.json` or
+`tcb.json`: a registry changed after the approval leaves the approval valid,
+so the reviewer checks the registries of the head that carries the label.
+Each item of a reason, a path or a value of a registry, is printed escaped,
+as `cargo xtask formal impact` prints paths, so that none splits a line.
+`cargo xtask formal guard` compares the registries of the production layout,
+so a change of those of the [calibration target](#calibration-target) fails
+no registry rule.
 
 On a pull request, when `GITHUB_EVENT_NAME` is `pull_request` and
 `GITHUB_EVENT_PATH` names the event, `cargo xtask formal run` runs the same

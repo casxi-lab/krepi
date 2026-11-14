@@ -157,8 +157,10 @@ const RULES: [(&str, Rule); 24] = [
 ];
 
 /// The registries that the guard compares at one commit: the targets by
-/// name, the names of the models and the items of the trusted base; at the
-/// head, also why a changed registry cannot be read on either side.
+/// name, the models by name with each item of a model as
+/// `<item> in <model>` and each target in its `used_by` as
+/// `<model> for <target>`, and the items of the trusted base; at the head,
+/// also why a changed registry cannot be read on either side.
 #[derive(Debug, Clone, Default)]
 struct Registries {
     targets: BTreeMap<String, Target>,
@@ -178,8 +180,17 @@ impl Registries {
         } else if path == layout.models {
             let json: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
             let models = json["models"].as_array().filter(|_| json["schema"] == 1);
-            let models = models.ok_or("not a model registry of schema 1")?;
-            self.models = Vec::from_iter(models.iter().map(|model| model["name"].to_string()));
+            // A string as its text, any other value as JSON.
+            let bare = |value: &Value| value.as_str().map_or_else(|| value.to_string(), From::from);
+            for model in models.ok_or("not a model registry of schema 1")? {
+                let name = bare(&model["name"]);
+                let items = model["items"].as_array().into_iter().flatten();
+                let items = items.map(|item| format!("{} in {name}", bare(item)));
+                let users = model["used_by"].as_object().into_iter().flatten();
+                let users = users.map(|(target, _)| format!("{name} for {target}"));
+                self.models.extend(items.chain(users));
+                self.models.push(name);
+            }
         } else {
             self.tcb = lean::load_tcb(text)?;
         }
@@ -363,9 +374,12 @@ fn class<const C: usize>(record: &Record, _: &BTreeMap<&str, Option<&str>>) -> O
     found.map(|found| format!("{found} without the label spec"))
 }
 
-/// `what` and the items of `list`, when it has any.
+/// `what` and the items of `list`, when it has any, each escaped so that
+/// none splits a line.
 fn named<T: std::borrow::Borrow<str>>(what: &str, list: &[T]) -> Option<String> {
-    (!list.is_empty()).then(|| format!("{what} {}", list.join(", ")))
+    let escaped = |item: &T| item.borrow().escape_debug().to_string();
+    let items = Vec::from_iter(list.iter().map(escaped));
+    (!list.is_empty()).then(|| format!("{what} {}", items.join(", ")))
 }
 
 /// Reads `verification/statements.json`, `text`: the hash names a Git tree,
@@ -1814,15 +1828,46 @@ mod tests {
             |r| list(&mut r[1], "models").push(json!({"name": "clock"})),
             &[(
                 "registry-model-added",
-                "it adds the models \"clock\" in models.json without the label spec",
+                "it adds the models clock in models.json without the label spec",
             )],
         );
+        // A model of both commits with a new item and a new target among
+        // its users.
+        let mut fixture = project("model-widened");
+        let mut values = registries();
+        let model = json!({"name": "clock", "items": ["a::b"], "used_by": {"slots": []}});
+        list(&mut values[1].1, "models").push(model);
+        let base = commit_registries(&fixture, &values);
+        let model = &mut list(&mut values[1].1, "models")[0];
+        list(model, "items").push(json!("krepi_kernel::table::write"));
+        model["used_by"]["table"] = json!(["Krepi.Proofs.Table.lookup"]);
+        commit_registries(&fixture, &values);
+        let why = "it adds the models clock for table in models.json, krepi_kernel::table::write \
+                   in clock in models.json without the label spec";
+        let record = guard(&mut fixture, &base, &[], None);
+        assert_eq!(failed(&record), [("registry-model-added", why)]);
         registry_change(
             "target-models-added",
             |r| table(r)["models"] = json!("verification/models/table"),
             &[(
                 "registry-model-added",
                 "it adds the models verification/models/table in table without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn a_name_with_a_line_break_is_printed_escaped() {
+        // A value of the head cannot end the line of its rule and print one
+        // of its own.
+        let name = "krepi_kernel::table::raw2\r\nPASSED registry-unconstrained-added";
+        registry_change(
+            "escaped",
+            |r| list(table(r), "unconstrained").push(json!(name)),
+            &[(
+                "registry-unconstrained-added",
+                "it adds the unconstrained krepi_kernel::table::raw2\\r\\nPASSED \
+                 registry-unconstrained-added in table without the label spec",
             )],
         );
     }
