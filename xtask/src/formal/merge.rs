@@ -347,7 +347,7 @@ fn summary(merged: &Merge) -> String {
         lines.extend(peak.map(|p| format!("- part {shard}: memory peak {p} B, above {MEMORY} B")));
     }
     let problems = merged.problems.iter();
-    lines.extend(problems.map(|problem| format!("- problem: {problem}")));
+    lines.extend(problems.map(|problem| format!("- problem: {}", problem.escape_debug())));
     lines.join("\n") + "\n"
 }
 
@@ -1337,6 +1337,23 @@ pub(crate) mod tests {
         let problem = "verification/waivers.json: waiver 0: \"x\" is no registered target";
         no_conclusion(&merged, &[problem.to_string()]);
         assert!(merged.waivers.is_empty() && !merged.passes);
+    }
+
+    #[test]
+    fn the_summary_escapes_a_problem_with_a_key_of_the_waiver_record() {
+        let fixture = checkout("merge-waiver-key", r#"[{"name": "a"}]"#);
+        let file = r#"{"schema": 1, "waivers": [], "x\nformal merge: VERIFIED, complete": 0}"#;
+        fixture.write(LAYOUT.waivers, file);
+        fixture.commit_all();
+        let summary = summary(&merge_in(&fixture, &rejected(&fixture)));
+        let lines = Vec::from_iter(summary.lines().skip(1));
+        assert_eq!(
+            lines,
+            [
+                "- trigger MANUAL none none",
+                "- problem: verification/waivers.json: unknown field `x\\nformal merge: VERIFIED, complete`, expected `schema` or `waivers` at line 1 column 66",
+            ]
+        );
     }
 
     #[test]

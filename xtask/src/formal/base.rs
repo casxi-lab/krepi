@@ -2034,7 +2034,8 @@ mod tests {
     fn a_module_that_imports_what_a_waiver_leaves_out_is_left_out_unless_an_extracted_target_lists_it()
      {
         // `t` is waived, `u` is not and lists `Main`, which imports a module
-        // that is left out; a module may import the generated code of `t`.
+        // that is left out, so the base round fails; a module may import the
+        // generated code of `t`.
         let mut fixture = base("waived-importers");
         run::tests::root_package(&fixture, "krepi-kernel", "");
         let target = |name: &str, module: &str, proofs: &str| json!({"name": name, "module": module, "start_from": ["crate::f"], "proof_modules": [proofs]});
@@ -2064,17 +2065,20 @@ mod tests {
                 ("Krepi.Statements.Counter.R", h, "proved"),
             ],
         );
+        // As in a real build, `Main` does not build without `Helper`.
+        let error = "error: Krepi/Proofs/Main.lean:3:0: unknown module prefix Krepi.Proofs.Helper";
+        let failing = fixture::failing("Krepi.Proofs.Main", &[error], 1);
+        let missing = "[ -f Krepi/Proofs/Main.lean ] && [ ! -f Krepi/Proofs/Helper.lean ]";
+        let build = format!("if {missing}; then\n{failing}fi\n");
+        lake_script(&fixture, "build", &build);
         waiver::tests::waive(&fixture, "t", "9999-12-31");
         hashed(&mut fixture);
         let done = job(&fixture);
         let receipt = done.written();
         let conclusion = (receipt.status, receipt.complete);
-        assert_eq!(
-            conclusion,
-            (Status::Verified, true),
-            "{:?}",
-            done.failures()
-        );
+        assert_eq!(conclusion, (Status::Rejected, true));
+        let reason = "the base build failed: Krepi/Proofs/Main.lean:3:0";
+        assert_eq!(status(&done, PHASE), (Status::Rejected, Some(reason)));
         assert_eq!(Vec::from_iter(receipt.proof_targets.keys()), ["u"]);
         let staged = |file: &str| {
             stage(&done)

@@ -983,9 +983,10 @@ gate (planned) is to use.
 - **The qualification job** has the [guard](#guard) on a pull request, the
   [qualification](#qualification), the extraction of every formal target
   but those of the [waivers](#waivers) that hold, whose commands are those
-  of the unit `base`, and the [base round](#base-round); it runs no target. Its budget is 7,800 s: the
-  gate's 7,200 s and 600 s for the extraction, which the budgets of the
-  targets do not grow. Its disk guard counts `qualification` alone.
+  of the unit `base`, and the [base round](#base-round); it runs no target.
+  Its budget is 7,800 s: the gate's 7,200 s and 600 s for the extraction,
+  which the budgets of the targets do not grow. Its disk guard counts
+  `qualification` alone.
 - **The shard of a target** has the extraction of that formal target, whose
   commands are those of its unit, and the phase `targets` for it: its
   build, type check, audit, declaration ranges and registered
@@ -1014,10 +1015,12 @@ of one part and one attempt are two receipts of the part. It gives the
 conclusion of the whole gate only when:
 
 1. every receipt can be read and parses, has schema 5 and a part, and its
-   commit and tree are those of the checkout, whose gate inputs are clean
-   and whose registry, `statements.json`, qualification cases and waiver
-   record can be read and keep their rules, and the clock of the host
-   gives a date from 1970-01-01 to 9999-12-31;
+   commit and tree are those of the checkout, whose gate inputs are clean,
+   whose registry, `statements.json` and qualification cases can be read
+   and keep their rules and whose waiver record, where it can be read,
+   keeps its rules (a missing or unreadable record has no
+   [waivers](#waivers)), and the clock of the host gives a date from
+   1970-01-01 to 9999-12-31;
 2. each receipt of the commit started from the gate inputs of the
    checkout, its `inputs.before` ([receipt](#receipt)), which its commit
    and tree imply, so that this only guards against a receipt without them;
@@ -1048,18 +1051,22 @@ the image that the receipts name and does not compare it with the pin.
 
 The units of the targets of the waivers that hold on the date of the merge,
 with their registered mutants and the `base/<theorem>` of each statement
-in a module that these waivers leave out of the base round, and the parts
-of the shards of these targets are recorded and not required. The merge
-passes when it has no problem, every other unit is `VERIFIED` and no
-other part has a failure. A waiver is used when a unit of its targets is
-not `VERIFIED` or a part of them has a failure, and a merge that passes
-with a used waiver is `REJECTED`: a waiver only lets the merge pass. A
-merge whose units are all `VERIFIED` is `VERIFIED`, with its waivers
-unused. A merge without a waiver that holds passes only when every unit is
-`VERIFIED` and no part has a failure. A waiver that expires after the
-qualification job and before the merge leaves a target out of the job that
-no waiver covers at the merge, which gives no conclusion; running the merge
-again does not help, the gate must run again.
+in a proof module of these targets that the base round leaves out, and the
+parts of the shards of these targets are recorded and not required. A
+statement in a module that the base round leaves out only because the
+module imports what a waiver leaves out stays required: its `SCOPED`
+`base/<theorem>` fails the merge ([waivers](#waivers)). The merge passes
+when it has no problem, every other unit is `VERIFIED` and no other part
+has a failure. A waiver is used when a unit of its targets is not
+`VERIFIED` or a part of them has a failure, and a merge that passes with a
+used waiver is `REJECTED`: a waiver only lets the merge pass. A merge
+whose units are all `VERIFIED` and whose parts have no failure is
+`VERIFIED`, with its waivers unused. A merge without a waiver that holds
+passes only when every unit is `VERIFIED` and no part has a failure. A
+waiver that expires after the qualification job and before the merge
+leaves a target out of the job that no waiver covers at the merge, which
+gives no conclusion; running the merge again does not help, the gate must
+run again.
 
 The synthetic wall clock is the `seconds` of the slowest part and the
 seconds of the merge, from the start of its job, which the job gives in
@@ -1210,10 +1217,16 @@ missing module does. The round neither builds nor checks a statement
 whose module is left out: its `base/<theorem>` is `SCOPED`, with the
 reason that the waiver of the target leaves the module out of the base
 round, and is a unit of that target when the module is one of its proof
-modules. The [source rules](#source-rules)
-still apply to every tracked Lean file, those left out included. The
-shard of a waived target runs as any other. A run without `--shard`, the
-shard of a target, the calibration target and the
+modules. A waiver of a target that proves a registered statement in one of
+its proof modules that the round leaves out is therefore always used: the
+round leaves the statement unchecked, so the merge is `REJECTED` and
+`cargo xtask formal receipt` calls its record `WAIVED`, not `CURRENT`,
+even when the shard of the target is `VERIFIED`; once the waiver has
+expired, the record is not current
+([current and fresh records](#current-and-fresh-records)). The
+[source rules](#source-rules) still apply to every tracked Lean file, those
+left out included. The shard of a waived target runs as any other. A run
+without `--shard`, the shard of a target, the calibration target and the
 [toolchain canary](#toolchain-canary) do not read the record.
 
 `cargo xtask formal merge` reads the record of the checkout and judges it
@@ -1577,16 +1590,16 @@ failure otherwise ([results](#results)).
 
 **Audit.** `Audit.lean` is not a module. It imports the root, sets
 `pp.privateNames`, states `example : S := t` for the theorem `t` of each
-proved statement `S` of a module in the stage, and runs a program that, for each own module, prints
-a marker, runs `#print axioms` on each theorem constant of the module that
-is not private, not an internal detail and not the theorem of a planned
-statement, prints the module that declares each of its native-decision
-axioms, and prints the line at which each theorem's declaration range
-starts; it then prints, for each proved statement, the module that defines
-`S` and whether the type of `t` in the environment is the constant `S`
-itself. The `example` alone would not show that: elaborating `t` against
-`S` may insert a coercion, apply an instance or fill an argument that the
-proofs declare.
+proved statement `S` of a module in the stage, and runs a program that,
+for each own module, prints a marker, runs `#print axioms` on each theorem
+constant of the module that is not private, not an internal detail and not
+the theorem of a planned statement, prints the module that declares each
+of its native-decision axioms, and prints the line at which each theorem's
+declaration range starts; it then prints, for each proved statement, the
+module that defines `S` and whether the type of `t` in the environment is
+the constant `S` itself. The `example` alone would not show that:
+elaborating `t` against `S` may insert a coercion, apply an instance or
+fill an argument that the proofs declare.
 The list of theorems is Lean's, so it holds the theorems that Lean
 generates, such as `injEq` and `congr_eq` lemmas, and theorems that a
 metaprogram adds. The round rejects
