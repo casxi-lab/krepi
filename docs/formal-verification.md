@@ -1219,10 +1219,10 @@ reason that the waiver of the target leaves the module out of the base
 round, and is a unit of that target when the module is one of its proof
 modules. A waiver of a target that proves a registered statement in one of
 its proof modules that the round leaves out is therefore always used: the
-round leaves the statement unchecked, so the merge is `REJECTED` and
-`cargo xtask formal receipt` calls its record `WAIVED`, not `CURRENT`,
-even when the shard of the target is `VERIFIED`; once the waiver has
-expired, the record is not current
+round leaves the statement unchecked, so a merge that passes is `REJECTED`,
+never `VERIFIED`, and `cargo xtask formal receipt` calls its record `WAIVED`
+at best, not `CURRENT`, even when the shard of the target is `VERIFIED`;
+once the waiver has expired, the record is not current
 ([current and fresh records](#current-and-fresh-records)). The
 [source rules](#source-rules) still apply to every tracked Lean file, those
 left out included. The shard of a waived target runs as any other. A run
