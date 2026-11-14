@@ -306,7 +306,11 @@ CI runs in lines, each a workflow of `.github/workflows/` on GitHub-hosted
   first job fails unless the head contains the `main` of that moment, and
   then `cargo xtask check --slow`, with the pull of the image and the
   requirement on the formal step of the pull request line, the images and
-  `cargo xtask suite --slow` run.
+  `cargo xtask suite --slow` run. The same label runs the proof gate of the
+  workflow `formal` when the change of the pull request affects it; that
+  workflow also runs the gate on a manual run of `main` and every Tuesday
+  at 12:37 UTC
+  ([CI job](../formal-verification.md#ci-job)).
 - The nightly line, `nightly.yml`, every day at 10:43 UTC and on a manual
   run, on `main` only: `cargo xtask check --slow`, with the same pull and
   requirement, the images and `cargo xtask suite --slow`.
@@ -331,7 +335,9 @@ to `timeout`, which passes them on to the command, and does not end before
 the command has: a check that a newer push to its pull request cancels
 writes its receipt with the result `interrupted`, and the upload after it
 finds the receipt. The script exits with the status of the command, and with
-124 when the deadline stopped it, also when `timeout` had to kill it then.
+124 when the deadline stopped it, also when `timeout` had to kill it then;
+with `--status FILE`, it also writes that status into `FILE` once the
+command has ended, as the toolchain canary needs for its verdict.
 Along the longest chain of jobs that need each other the limits add up to 20
 minutes on the pull request line and to 46 minutes on the full line, within
 the 20 and 60 minutes that those lines allow. After each completed run of
@@ -361,10 +367,33 @@ download of the parts of their run by the pattern of their names in their
 merge jobs, to the steps of those of `formal` in the shard and merge jobs of
 the calibration, and to main commands that run under that script as the last
 command of their step, at a deadline that with the limit of the pull before
-the check ends one or two minutes before the limit of their job. Where GNU
+the check ends one or two minutes before the limit of their job. Other unit
+tests hold the workflow `formal` to its six checks of the gate, jobs of
+that workflow alone, named as written and without a matrix, which run
+unless the run is cancelled and are skipped only on `main`, whose first
+steps, which the tests run with bash for each event and decision, fail on
+an event or a ref that they do not judge, and whose verdicts judge the
+record by its schema, run, commit, trigger and conclusion or hard gate;
+to its events, the gate on the
+label `full-check` for a change that affects it and on a manual or weekly
+run of `main`, with one concurrency group for each pull request; to a
+condition that starts with `!cancelled()` for each of its jobs that needs
+another; to the trigger that each event gives the parts; to the jobs of
+the affected planned targets alone, whose decision step they run with jq;
+and to the review of the receipt on a push to `main`. They also hold the
+formal workflows to the comparator part after the gate in a container of
+its own, with its probe, its mounts and its settings, in `formal` and in
+the calibration, whose check of the two challenges that the comparator
+must reject they run with jq on receipts and logs of their own; to a
+notice of its limit in every job whose limit is an expression; to main
+commands that run under `deadline.sh` at a deadline at least two minutes
+before the limit of their step; and to the scripts of the measurement
+steps, which run with the flags of the runner's shell. A test runs its
+scripts with jq only where jq is on the path, as on the runners. Where GNU
 `env` and GNU `timeout` are on the path, as on the runners, a unit test also
 sends SIGINT to the script and requires that it ends only after its command
-has, with the status of the command.
+has, with the status of the command, and another that `--status` writes
+that status.
 
 Every upload step of every workflow of the directory sets `retention-days`,
 which the repository setting of 90 days bounds. A job that runs on `main`
@@ -888,7 +917,8 @@ downloads, hand-written build logs in the plain form of BuildKit and
 receipts of the gate; one reads the workflow and keeps its steps copied
 from the image workflows and from the job of the gate equal to their
 sources, but for the command line of the gate, which runs the whole gate
-there and the qualification part in `formal`.
+there and the qualification part in `formal`, and for its deadline and the
+file into which `deadline.sh` writes its status there.
 
 `cargo xtask formal run` runs the proof gate on a snapshot of the gate
 inputs and writes a receipt of the run below `artifacts/formal/runs/`
@@ -904,20 +934,22 @@ the stage that that job kept
 formal target; and with `--target`, only the part of the named targets
 ([shards and merge](../formal-verification.md#shards-and-merge)). It is not
 part of the check: CI runs it in the pinned proof-tool image with
-`--shard qualification` as the job `formal run` of
-`.github/workflows/formal.yml`, and with `--shard target/<name>` as a job
-`formal shard <name>` for each formal target, on a GitHub-hosted
-`ubuntu-24.04-arm` runner, on every push to `main` and on every pull
-request to `main`, also when its labels or description change. The jobs
-are not required; each uploads its receipt, its summary and its logs
-packed into `logs.tar.gz` as the artifact
+`--shard qualification --keep` and then `--shard comparator` as the job
+`formal run` of `.github/workflows/formal.yml`, and with
+`--shard target/<name>` as a job `formal shard <name>` for each formal
+target, on a GitHub-hosted `ubuntu-24.04-arm` runner, when the label
+`full-check` is added to a pull request to `main` whose change affects the
+gate, on a manual run of `main` and once a week. The jobs are not
+required; each uploads its receipts, its summary and its logs packed into
+`logs.tar.gz` as the artifact
 `formal-part-qualification-<commit>-<attempt>` or
-`formal-part-target-<name>-<commit>-<attempt>`, and the job `formal merge`
-merges them. Beside them, the job `formal planned` runs the command with
-`--target` on the planned targets of the registry, and the job
-`formal limits` before them computes their limits and the shards from the
-registered budgets. The measurement jobs, `leanchecker` in two modes and
-`lake comparator`, are in `.github/workflows/formal-measure.yml` and run
+`formal-part-target-<name>-<commit>-<attempt>`, and the job
+`formal parts` merges them. Beside them, a job `formal scoped <name>` runs
+the command with `--target` on each planned target that the pull request
+affects, and the job `formal limits` before them computes their limits and
+the shards from the registered budgets. The measurement jobs,
+`leanchecker` in two modes and `lake comparator`, are in
+`.github/workflows/formal-measure.yml` and run
 on a manual run of that workflow on `main` and when the label
 `formal-measure` is added to a pull request
 ([CI job](../formal-verification.md#ci-job)). Its unit
@@ -970,12 +1002,16 @@ that name another repository.
 `HEAD`, the paths changed since, whether they affect the gate inputs and
 the registered targets that the change affects
 ([commands](../formal-verification.md#commands)). It runs no proof tool
-and is not part of the check. On every pull request to `main`, the job
-`formal fast` of `.github/workflows/formal.yml` runs it with the base of
-the pull request, and the job `formal guard` runs
+and is not part of the check. On every event of a pull request to
+`main`, the job `formal fast` of `.github/workflows/formal.yml` runs it
+with the base of the pull request, whose decision starts the gate on the
+label `full-check`, and the job `formal guard` runs
 `cargo xtask formal guard` with the event of the run; both run on the
 runner without the image, write the output of their command into the
-summary of the run and are not required. Its unit tests run in the `test`
+summary of the run and are not required. On a manual or scheduled run of
+`main`, the job `formal merge` runs it on the commit itself, and on a push
+to `main` the job `formal receipt review` with the first parent of the
+merge as the base. Its unit tests run in the `test`
 step above, on Git repositories with a commit for each change, one of them
 on a base that has diverged from the head.
 
@@ -1028,11 +1064,13 @@ formal target of the commit checked out into the conclusion of the whole
 gate, with the waivers that hold, and writes its record and summary below
 `artifacts/formal/merge/`
 ([shards and merge](../formal-verification.md#shards-and-merge)). It runs
-no proof tool and is not part of the check: the job `formal merge` of
-`.github/workflows/formal.yml` and the job `calibration merge` of the
-workflow `formal calibration` run it on the runner with the receipts of
-the parts of their run. Its unit tests run in the `test` step above, on
-the Git repositories of the tests of `cargo xtask formal run` with
+no proof tool and is not part of the check: the job `formal parts` of
+`.github/workflows/formal.yml`, whose record the jobs `formal merge`,
+`formal axioms`, `formal leanchecker` and `formal comparator` judge, and
+the job `calibration merge` of the workflow `formal calibration` run it on
+the runner with the receipts of the parts of their run. Its unit tests
+run in the `test` step above, on the Git repositories of the tests of
+`cargo xtask formal run` with
 receipts that the tests write, one of the comparator part of no seconds
 beside each of the qualification job unless a test gives its own, those of
 the qualification job with an audit and a replay of its base round that
@@ -1048,7 +1086,11 @@ reports.
 `cargo xtask formal receipt [--require-fresh] [RECORD]` judges the record
 of a merge against the checkout: current, waived, or fresh as well
 ([current and fresh records](../formal-verification.md#current-and-fresh-records)).
-It runs no proof tool, is not part of the check, and no job of CI runs it.
+It runs no proof tool and is not part of the check. In CI, the job
+`formal merge` of `.github/workflows/formal.yml` reads the record of a
+manual or scheduled run of `main` back with `--require-fresh`, and the job
+`formal receipt review` judges the record of the head of a pull request
+merged into `main`.
 Its unit tests run in the `test` step above, on the Git repositories of the
 tests of `cargo xtask formal merge` with an image pin that they commit and
 the records of merges of receipts that the tests write, and on the record
@@ -1060,10 +1102,13 @@ it, which is not current.
 The workflow `formal calibration`, `.github/workflows/formal-calibration.yml`,
 runs the gate on the calibration target in the pinned proof-tool image
 once a week, on a manual run and on a pull request with the label
-`formal-calibration`: `cargo xtask formal check --calibration` and
-`cargo xtask formal run --calibration --shard qualification` in the job
-`calibration run`, the shard of each formal target of the calibration with
-`--shard target/<name>` in a job `calibration shard <name>`, their merge
+`formal-calibration`: `cargo xtask formal check --calibration`,
+`cargo xtask formal run --calibration --shard qualification --keep`, the
+comparator part on the stage that it kept, with `--shard comparator`, and
+a check that the comparator rejected the two challenges that it must
+reject in the job `calibration run`, the shard of each formal target of
+the calibration with `--shard target/<name>` in a job
+`calibration shard <name>`, their merge
 with `cargo xtask formal merge --calibration` in the job
 `calibration merge`, the planned target of the calibration alone, and, on
 a manual run that asks for it and on a pull request with the label,
@@ -1071,8 +1116,8 @@ a manual run that asks for it and on a pull request with the label,
 ([calibration target](../formal-verification.md#calibration-target)).
 It is not required. A unit test keeps its limits equal to the deadlines
 of its gates and receipts, its shards equal to the formal targets of the
-calibration registry, and the steps of its shard and merge jobs equal to
-those of `formal`.
+calibration registry, and the steps of its comparator part, its shard and
+its merge jobs equal to those of `formal`.
 
 `cargo xtask formal vectors [DOMAIN/COMPONENT]` replays the frozen test
 vectors of a component through its specification with the pinned Lean and

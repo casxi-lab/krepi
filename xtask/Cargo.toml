@@ -64,10 +64,12 @@ libc = { version = "=0.2.191", default-features = false }
 # that `cargo xtask formal guard` reads, `cargo xtask formal check` writes
 # `verification/open.json` with its keys in order, `cargo xtask formal canary`
 # reads and writes the tool manifest, the Lake locks, the statement
-# registry, the records of its steps and the receipt of the gate, and the
-# test of `cargo xtask qemu` reads the receipt of a run. All are text in
-# memory, so the standard-library support of the default feature is left
-# out.
+# registry, the records of its steps and the receipt of the gate, the
+# comparator part of `cargo xtask formal run` reads the receipts of the
+# qualification job and writes the configurations of `lake comparator`,
+# and the test of `cargo xtask qemu` reads the receipt of a run. All are
+# text in memory, so the standard-library support of the default feature is
+# left out.
 serde_json = { version = "=1.0.154", default-features = false, features = ["preserve_order"] }
 # `verification/toolchain.json`, `verification/targets.json`, the shard plans,
 # the qualification cases, the extraction configuration, the statement, axiom
