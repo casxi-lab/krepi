@@ -676,7 +676,12 @@ the file that holds expressions `${{ }}`, such as
 stands for some text, possibly empty, between the text around it, also once
 the values of a matrix in parentheses are left out; the names that fit give
 the limit when they all give the same one. Otherwise the job has no known
-limit. `--own <run.json> --now <seconds>` gives the run of
+limit. A job whose limit in the file is an expression, or that has no
+known limit there, takes the minutes of its first annotation of level
+`notice` titled `timeout-minutes` whose message is a whole number, which a
+job writes with `::notice title=timeout-minutes::<minutes>` for a limit that
+it computes; without the workflow file no job has a known limit.
+`--own <run.json> --now <seconds>` gives the run of
 the record workflow itself. The command creates the new directory `<dir>`
 and writes `record.json` and `summary.md` into it. The record, of `format`
 2, holds the run with its line: `pull request` or `main` for the workflow
