@@ -327,6 +327,7 @@ jobs:
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --env GITHUB_EVENT_NAME --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            --env KREPI_FORMAL_TRIGGER \
             --env GITHUB_EVENT_PATH="$GITHUB_WORKSPACE/artifacts/formal/event.json" \
             "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run || status=$?
           echo "$status" > artifacts/canary/gate-status

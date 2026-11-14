@@ -1,20 +1,28 @@
-# The proof gate in CI, in parts of one commit. On the head of every pull
-# request to main and on every push to main, the job `formal run`, the
-# qualification job, runs `cargo xtask formal run --shard qualification` in
-# the pinned proof-tool image and then the comparator part on the stage
-# that it kept; beside it, the job `formal shard <name>`
-# runs the shard of each formal target of the head's registry; after them,
-# the job `formal merge` combines their receipts on the runner into the
-# conclusion of the gate. The job `formal planned` runs the gate on the
-# planned targets of the head's registry, when it has any. The job
-# `formal limits` before them computes their time limits and the shards
-# from the budgets of the registry. On a pull request, the job
-# `formal fast` lists the paths that it changes since its merge base,
-# whether they affect the gate and the registered targets that they affect,
-# and the job `formal guard` runs `cargo xtask formal guard`, both on the
-# runner. None is a required check. The measurement jobs are in the
-# workflow `formal measure`, `formal-measure.yml`. A manual run of `formal`
-# runs no job yet; measurements are dispatched from `formal measure`.
+# The proof gate in CI, in parts of one commit, and its verdicts. On every
+# event of a pull request to main, the job `formal fast` lists the paths
+# that the pull request changes since its merge base, whether they affect
+# the gate and the registered targets that they affect, and the job
+# `formal guard` runs `cargo xtask formal guard`, both on the runner. The
+# gate runs when the label full-check is added to a pull request whose
+# change affects it, on a manual run of main, `full` or `weekly`, and on the
+# weekly schedule, on Tuesdays at 12:37 UTC. Then the job `formal limits`
+# computes the shards and their limits from the budgets of the registry;
+# the job `formal run`, the qualification job, runs `cargo xtask formal run
+# --shard qualification --keep` in the pinned proof-tool image and then the
+# comparator part on the stage that it kept; beside it, the job `formal
+# shard <name>` runs the shard of each formal target of the head's
+# registry, and the job `formal scoped <name>` each planned target that the
+# pull request affects, alone; after them, the job `formal parts` merges
+# the receipts of the parts on the runner. The jobs `formal merge`, `formal
+# axioms`, `formal leanchecker` and `formal comparator` judge its record,
+# the conclusion of the gate and each hard gate, on the events above and
+# fail on any other; with `formal fast` and `formal guard`, they are the
+# six checks of the gate, which run on every event of a pull request, are
+# skipped only on main and fail on an event or a ref that they do not
+# judge. On a push to main, which is the merge of a pull request, the job
+# `formal receipt review` reviews the merge record of the merged head. The
+# measurement jobs are in the workflow `formal measure`,
+# `formal-measure.yml`.
 # Actions are pinned to full commit SHAs; the comment names the release.
 name: formal
 
@@ -25,6 +33,22 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: The run of the gate, full or weekly
+        type: choice
+        options: [full, weekly]
+        required: true
+  schedule:
+    - cron: "37 12 * * 2"
+
+# The runs of a pull request share a group, and a newer run cancels an
+# older one with all its jobs, also those that wait for others, so that no
+# older run concludes after a newer event; any other run has a group of its
+# own.
+concurrency:
+  group: formal-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # `bash` runs every step with `-eo pipefail`, so that a failed command in a
 # pipeline, such as `docker run ... | tee`, fails its step.
@@ -41,32 +65,37 @@ env:
   # the user, which is the runner's own, the mount and the working directory.
   GATE_FLAGS: "--pull never --init --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --network none"
   HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  # The trigger of the run, which the parts of the gate record: REQUIRED on
+  # a pull request, FORCED_FULL on a manual run `full`, and WEEKLY on a
+  # manual run `weekly` and on the schedule.
+  KREPI_FORMAL_TRIGGER: ${{ github.event_name == 'pull_request' && 'REQUIRED' || github.event_name == 'schedule' && 'WEEKLY' || github.event_name == 'workflow_dispatch' && inputs.mode == 'full' && 'FORCED_FULL' || github.event_name == 'workflow_dispatch' && inputs.mode == 'weekly' && 'WEEKLY' || '' }}
 
 jobs:
-  # The deadline of the shard of a target is 300 s and the budget of its
-  # target, and that of a run of the planned targets the gate's 7,200 s and
-  # their budgets; then each has the 300 s of its receipt. The step of a
-  # shard or of the planned targets has the minutes of its deadline and
+  # Runs the gate: when the label full-check is added to a pull request
+  # whose change affects the gate, by the decision of `formal fast`, and on
+  # a manual or scheduled run of main. The deadline of the shard of a
+  # target, and of a planned target that the pull request affects, which
+  # runs alone, is 300 s and the budget of the target; then each has the
+  # 300 s of its receipt. Its step has the minutes of its deadline and
   # receipt, rounded up, and two more, as `deadline.sh` kills its command a
-  # minute after its deadline; their job 15 minutes before the step, the
-  # step and 3 minutes after it. Every formal target is a shard of its own,
-  # named by its unit, whose registered budget per worker may be at most
-  # the shard limit, 3,300 s, as `cargo xtask formal check` requires; a job
-  # of the hosted runners ends after 360 minutes. Target names are checked
+  # minute after its deadline; its job 15 minutes before the step, the step
+  # and 3 minutes after it. Every formal target is a shard of its own, named
+  # by its unit, whose registered budget per worker may be at most the
+  # shard limit, 3,300 s, as `cargo xtask formal check` requires; a job of
+  # the hosted runners ends after 360 minutes. Target names are checked
   # before they are passed on. The limits of the qualification job do not
   # depend on the registry and are written in it.
   limits:
     name: formal limits
-    if: github.event_name != 'workflow_dispatch'
+    needs: fast
+    if: ${{ !cancelled() && ((github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'full-check' && needs.fast.result == 'success' && needs.fast.outputs.decision == 'affected') || (github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))) }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
       contents: read
     outputs:
       shards: ${{ steps.limits.outputs.shards }}
-      planned: ${{ steps.limits.outputs.planned }}
-      planned-gate: ${{ steps.limits.outputs.planned-gate }}
-      planned-job: ${{ steps.limits.outputs.planned-job }}
+      scoped: ${{ steps.limits.outputs.scoped }}
     steps:
       - name: Check out the candidate commit
         timeout-minutes: 2
@@ -78,45 +107,45 @@ jobs:
       - name: Compute the limits from the registered budgets
         id: limits
         timeout-minutes: 1
+        env:
+          SCOPED: ${{ needs.fast.outputs.scoped || '[]' }}
         run: |
-          gate_budget=7200
           shard_margin=300
           receipt_margin=300
           shard_limit=3300
           workers=1
           registry=verification/targets.json
           jq -e 'all(.targets[]; .name | test("^[a-z0-9][a-z0-9-]*$"))' "$registry" > /dev/null
-          budgets() {
-            jq -er --arg state "$1" \
-              '[.targets[] | select((.state // "formal") == $state) | .budget // 1800] | add // 0' \
+          # The targets of the state $1 with a name of the list $2, or with
+          # any name when it is null, grouped by their name with the sum of
+          # their budgets, and the limits of the step and the job of each.
+          rows() {
+            jq -c --argjson margin "$((shard_margin + receipt_margin))" --arg state "$1" --argjson names "$2" '
+              [.targets[] | select((.state // "formal") == $state and ($names == null or (.name | IN($names[]))))
+                | {name, budget: (.budget // 1800)}]
+              | group_by(.name) | map({name: .[0].name, budget: (map(.budget) | add)})
+              | map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 3)' \
               "$registry"
           }
-          minutes() { echo $(( (gate_budget + $1 + receipt_margin + 59) / 60 )); }
-          planned=$(minutes "$(budgets planned)")
-          names=$(jq -r '[.targets[] | select(.state == "planned") | .name] | join(" ")' "$registry")
-          # One shard for each formal target, with the budgets of its
-          # targets, and the limits of its step and job.
-          shards=$(jq -c --argjson margin "$((shard_margin + receipt_margin))" '
-            [.targets[] | select((.state // "formal") == "formal") | {name, budget: (.budget // 1800)}]
-            | group_by(.name) | map({name: .[0].name, budget: (map(.budget) | add)})
-            | map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 3)' \
-            "$registry")
+          # One shard for each formal target, and one job for each planned
+          # target that the pull request affects, which runs it alone.
+          shards=$(rows formal null)
+          scoped=$(rows planned "$SCOPED")
           over=$(jq -r --argjson limit "$shard_limit" --argjson workers "$workers" \
             '[.[] | select((.budget + $workers - 1) / $workers | floor > $limit) | .name] | join(" ")' <<< "$shards")
           if [ -n "$over" ]; then
             echo "the registered budget per worker of the shard of $over is more than $shard_limit s" >&2
             exit 1
           fi
-          {
-            echo "shards=$shards"
-            echo "planned=$names"
-            echo "planned-gate=$((planned + 2))"
-            echo "planned-job=$((15 + planned + 2 + 3))"
-          } | tee -a "$GITHUB_OUTPUT"
-          if [ $((15 + planned + 2 + 3)) -gt 360 ]; then
-            echo "the registered budgets need a job longer than 360 minutes" >&2
+          long=$(jq -r '[.[] | select(.job > 360) | .name] | join(" ")' <<< "$scoped")
+          if [ -n "$long" ]; then
+            echo "the registered budget of $long needs a job longer than 360 minutes" >&2
             exit 1
           fi
+          {
+            echo "shards=$shards"
+            echo "scoped=$scoped"
+          } | tee -a "$GITHUB_OUTPUT"
 
   # The qualification job: `cargo xtask formal run --shard qualification
   # --keep` (the guard phase, the qualification, the extraction of every
@@ -131,14 +160,11 @@ jobs:
   gate:
     name: formal run
     needs: limits
-    if: github.event_name != 'workflow_dispatch'
+    if: ${{ !cancelled() && needs.limits.result == 'success' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 192
     permissions:
       contents: read
-    concurrency:
-      group: formal-gate-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Check out the candidate commit with its history
         timeout-minutes: 2
@@ -255,6 +281,7 @@ jobs:
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --env GITHUB_EVENT_NAME --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            --env KREPI_FORMAL_TRIGGER \
             --env GITHUB_EVENT_PATH="$GITHUB_WORKSPACE/artifacts/formal/event.json" \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
             "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard qualification --keep || status=$?
@@ -321,7 +348,7 @@ jobs:
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --volume "$GITHUB_WORKSPACE/artifacts/formal/runs:/krepi-runs" --env KREPI_FORMAL_RUNS=/krepi-runs \
             --volume "$RUNNER_TEMP/gitconfig:/etc/gitconfig:ro" \
-            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
             "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard comparator
 
@@ -432,14 +459,15 @@ jobs:
   # qualification job: `cargo xtask formal run --shard target/<name>` in a
   # container of the image, prepared as the qualification job is, with a
   # shorter probe and without the event, with the limits that the job
-  # `formal limits` gives the shard. Its main command runs under
-  # `deadline.sh`, which passes a cancellation on to it. Without a formal
-  # target in the registry the job does not run. The calibration workflow
-  # runs the same steps on the calibration target.
+  # `formal limits` gives the shard, which the job writes in a notice for
+  # the record of the run. Its main command runs under `deadline.sh`, which
+  # passes a cancellation on to it. Without a formal target in the registry
+  # the job does not run. The calibration workflow runs the same steps on
+  # the calibration target.
   shard:
     name: formal shard ${{ matrix.name }}
     needs: limits
-    if: needs.limits.outputs.shards != '[]'
+    if: ${{ !cancelled() && needs.limits.result == 'success' && needs.limits.outputs.shards != '[]' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: ${{ matrix.job }}
     permissions:
@@ -448,11 +476,9 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.limits.outputs.shards) }}
-    concurrency:
-      group: formal-shard-${{ matrix.name }}-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     env:
       NAME: ${{ matrix.name }}
+      LIMIT: ${{ matrix.job }}
     steps:
       - name: Check out the candidate commit
         timeout-minutes: 2
@@ -464,6 +490,7 @@ jobs:
       - name: Record the runner and pull the image
         timeout-minutes: 8
         run: |
+          echo "::notice title=timeout-minutes::$LIMIT"
           mkdir -p artifacts/formal
           {
             echo "== prepare started $(date -u +%FT%TZ)"
@@ -492,7 +519,7 @@ jobs:
             cargo build --locked --manifest-path xtask/Cargo.toml
           } 2>&1 | tee -a artifacts/formal/job.txt
 
-      # The probe of the job `formal planned`.
+      # The probe of the job `formal scoped`.
       - name: Probe the container of the gate
         id: probe
         timeout-minutes: 1
@@ -524,7 +551,7 @@ jobs:
             docker run --rm --name "formal-shard-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
-            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
             "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard "target/$NAME"
 
@@ -590,23 +617,24 @@ jobs:
   # Merges the receipts of the parts of this run on the runner, without the
   # image: it downloads the artifacts of the job `formal run` and of each
   # shard, of any attempt of the run, and runs `cargo xtask formal merge`
-  # under `deadline.sh`. It runs unless the run was cancelled, also when a
-  # part failed or did not run, so that a missing part fails the merge. Its
-  # first step records the start of the job for the synthetic wall clock,
-  # and the record of the job gets the disk and memory before the download
-  # and after the merge. The calibration workflow runs the same steps on the
-  # parts of the calibration target.
-  merge:
-    name: formal merge
+  # under `deadline.sh`. It runs when the gate ran, unless the run was
+  # cancelled, also when a part failed or did not run, so that a missing
+  # part fails the merge; the jobs of the verdicts take the name of the
+  # artifact of its record from its output. Its first step records the start
+  # of the job for the synthetic wall clock, and the record of the job gets
+  # the disk and memory before the download and after the merge. The
+  # calibration workflow runs the same steps on the parts of the
+  # calibration target.
+  parts:
+    name: formal parts
     needs: [gate, shard]
-    if: ${{ !cancelled() && github.event_name != 'workflow_dispatch' }}
+    if: ${{ !cancelled() && needs.gate.result != 'skipped' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
       contents: read
-    concurrency:
-      group: formal-merge-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    outputs:
+      record: formal-merge-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
     steps:
       # The start of the runner's worker process, else that of this step.
       - name: Record the start of the job
@@ -714,24 +742,29 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
-  # Runs the gate on every planned target of the head's registry, as the
-  # job `formal run` does, besides it: `formal run --target` with each of
-  # them, which concludes them as `SCOPED` and is never required. Without a
-  # planned target it runs nothing and passes. The main command runs under
-  # `deadline.sh`, which passes a cancellation on to it.
-  planned:
-    name: formal planned
+  # Runs each planned target that the pull request affects alone, beside
+  # the qualification job: `cargo xtask formal run --target <name>`, which
+  # runs only the part of the target and concludes it as `SCOPED`, in a
+  # container of the image with the steps of the shard job and the limits
+  # that the job `formal limits` gives it, which the job writes in a notice
+  # for the record of the run. Its receipt is no part of the merge and the
+  # job is no check of the gate. Without an affected planned target the job
+  # does not run.
+  scoped:
+    name: formal scoped ${{ matrix.name }}
     needs: limits
-    if: github.event_name != 'workflow_dispatch'
+    if: ${{ !cancelled() && needs.limits.result == 'success' && needs.limits.outputs.scoped != '[]' }}
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: ${{ fromJSON(needs.limits.outputs.planned-job) }}
+    timeout-minutes: ${{ matrix.job }}
     permissions:
       contents: read
-    concurrency:
-      group: formal-planned-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.limits.outputs.scoped) }}
     env:
-      PLANNED: ${{ needs.limits.outputs.planned }}
+      NAME: ${{ matrix.name }}
+      LIMIT: ${{ matrix.job }}
     steps:
       - name: Check out the candidate commit
         timeout-minutes: 2
@@ -741,14 +774,14 @@ jobs:
           persist-credentials: false
 
       - name: Record the runner and pull the image
-        if: env.PLANNED != ''
         timeout-minutes: 8
         run: |
+          echo "::notice title=timeout-minutes::$LIMIT"
           mkdir -p artifacts/formal
           {
             echo "== prepare started $(date -u +%FT%TZ)"
             echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
-              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, planned targets: $PLANNED"
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, planned target $NAME"
             echo "user: $(id)"
             echo "processors: $(nproc)"
             free -b
@@ -760,10 +793,10 @@ jobs:
             echo "== docker pull $IMAGE"
             docker pull "$IMAGE"
             docker image inspect --format 'pulled {{json .RepoDigests}}, {{.Size}} bytes' "$IMAGE"
+            df -B1 /
           } 2>&1 | tee artifacts/formal/job.txt
 
       - name: Build xtask
-        if: env.PLANNED != ''
         timeout-minutes: 3
         run: |
           {
@@ -777,7 +810,6 @@ jobs:
       # network.
       - name: Probe the container of the gate
         id: probe
-        if: env.PLANNED != ''
         timeout-minutes: 1
         run: |
           read -r -a gate_flags <<< "$GATE_FLAGS"
@@ -791,39 +823,36 @@ jobs:
           echo "the probe passed"
           PROBE
 
-      - name: Run the gate on the planned targets
-        id: planned
-        if: ${{ !cancelled() && (env.PLANNED == '' || steps.probe.outcome == 'success') }}
-        timeout-minutes: ${{ fromJSON(needs.limits.outputs.planned-gate) }}
+      # The step ends two minutes after the deadline of the target and its
+      # receipt, from the matrix; `deadline.sh` stops the command at that
+      # deadline and kills it a minute later. The run of a named target is
+      # SCOPED whatever its trigger, so it is given none.
+      - name: Run the planned target in the image
+        id: scoped
+        if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
+        timeout-minutes: ${{ matrix.step }}
+        env:
+          STEP: ${{ matrix.step }}
         run: |
-          if [ -z "$PLANNED" ]; then
-            echo "the registry has no planned target: 0 targets"
-            exit 0
-          fi
           read -r -a gate_flags <<< "$GATE_FLAGS"
-          read -r -a names <<< "$PLANNED"
-          targets=()
-          for name in "${names[@]}"; do targets+=(--target "$name"); done
-          limit=$(( (PLANNED_GATE - 2) * 60 ))s
+          limit=$(( (STEP - 2) * 60 ))s
           exec bash .github/scripts/deadline.sh --stop-commands "$limit" 1m \
-            docker run --rm --name "formal-planned-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            docker run --rm --name "formal-scoped-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run "${targets[@]}"
-        env:
-          PLANNED_GATE: ${{ needs.limits.outputs.planned-gate }}
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --target "$NAME"
 
       - name: Remove the container of the gate
         if: always()
         run: |
-          docker rm --force "formal-planned-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
+          docker rm --force "formal-scoped-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
 
       - name: Summarize the receipt and compress the logs
         if: always()
         env:
-          GATE_OUTCOME: ${{ steps.planned.outcome }}
+          GATE_OUTCOME: ${{ steps.scoped.outcome }}
         run: |
           shopt -s nullglob
           # The receipts hold text of Lean and Lake: no workflow commands.
@@ -837,28 +866,29 @@ jobs:
           fi
           receipts=(artifacts/formal/runs/*/receipt.json)
           {
-            echo "## formal planned"
+            echo "## formal scoped $NAME"
             echo
-            echo "Planned targets: ${PLANNED:-none}; the gate step: $GATE_OUTCOME."
+            echo "Image \`$IMAGE\`; the step of the target: $GATE_OUTCOME."
             echo
             for receipt in "${receipts[@]}"; do
-              jq -r --arg path "$receipt" '
-                "- Receipt `\($path)`: `\(.status)`, complete \(.complete), \(.seconds) s",
+              jq -r --arg path "$receipt" --arg sha "$(sha256sum "$receipt" | cut -d ' ' -f 1)" '
+                "- Receipt `\($path)`, SHA-256 `\($sha)`: `\(.status)`, complete \(.complete), \(.seconds) s",
+                (.proof_targets | to_entries[] | "- Target `\(.key)`: budget \(.value.budget_seconds) s, \(.value.seconds) s"),
                 (.units | to_entries[] | "- `\(.key)`: \(.value.status)"),
                 (.failures[] | "- \(.status): \(.message | .[0:500])")
               ' "$receipt"
             done
           } | tee artifacts/formal/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
-          if [ -n "$PLANNED" ] && [ "${#receipts[@]}" = 0 ] && [[ "$GATE_OUTCOME" =~ ^(success|failure)$ ]]; then
-            echo "the gate step ran and left no receipt" >&2
+          if [ "${#receipts[@]}" = 0 ] && [[ "$GATE_OUTCOME" =~ ^(success|failure)$ ]]; then
+            echo "the step of the target ran and left no receipt" >&2
             exit 1
           fi
 
-      - name: Upload the receipt and the logs of the planned targets
-        if: always() && env.PLANNED != ''
+      - name: Upload the receipt, the summary and the logs of the planned target
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: formal-planned-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          name: formal-scoped-${{ matrix.name }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: |
             artifacts/formal/summary.md
             artifacts/formal/logs.tar.gz
@@ -867,25 +897,37 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
-  # On a pull request, lists the paths that it changes since its merge base,
-  # whether they affect the gate and the registered targets that they
-  # affect, with `cargo xtask formal impact` on the runner, and writes the
-  # list into the summary of the run. It judges nothing: it fails only when
-  # the list cannot be made. Its main command runs under `deadline.sh`,
-  # which turns workflow commands off while it prints the paths of the pull
-  # request, and the summary escapes carriage returns and indents the list
-  # as code.
+  # On every event of a pull request, lists the paths that it changes since
+  # its merge base, whether they affect the gate and the registered targets
+  # that they affect, with `cargo xtask formal impact` on the runner, and
+  # writes the list into the summary of the run. Its outputs give the
+  # decision, the planned targets that the change affects, for the job
+  # `formal limits`, and the name of the artifact of the list, for the jobs
+  # of the verdicts. It judges nothing: it fails only when the list cannot
+  # be made, and on any other event than a pull request, which it does not
+  # judge. Its main command runs under `deadline.sh`, which turns workflow
+  # commands off while it prints the paths of the pull request, and the
+  # summary escapes carriage returns and indents the list as code.
   fast:
     name: formal fast
-    if: github.event_name == 'pull_request'
+    if: ${{ !cancelled() && !(github.event_name != 'pull_request' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 8
     permissions:
       contents: read
-    concurrency:
-      group: formal-fast-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    outputs:
+      decision: ${{ steps.decision.outputs.decision }}
+      scoped: ${{ steps.decision.outputs.scoped }}
+      impact: formal-impact-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
     steps:
+      - name: Check that the event is a pull request
+        timeout-minutes: 1
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo "the job judges pull requests, not a run of $GITHUB_EVENT_NAME on $GITHUB_REF" >&2
+            exit 1
+          fi
+
       - name: Check out the head with its history
         timeout-minutes: 2
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -909,6 +951,22 @@ jobs:
           exec bash .github/scripts/deadline.sh --stop-commands 1m 30s bash -o pipefail -c \
             'xtask/target/debug/xtask formal impact --base "$BASE_SHA" 2>&1 | tee artifacts/formal/impact.txt'
 
+      # The decision, `affected` or `unaffected`, and the planned targets that
+      # the change affects, by names that the registry allows, as JSON.
+      - name: Write the decision and the planned targets
+        id: decision
+        if: always()
+        timeout-minutes: 1
+        run: |
+          lines=$(cat artifacts/formal/impact.txt 2> /dev/null || true)
+          decision=$(sed -n -E 's/^decision (affected|unaffected)$/\1/p' <<< "$lines")
+          scoped=$(sed -n -E 's/^target ([a-z0-9][a-z0-9-]*) planned$/\1/p' <<< "$lines" \
+            | jq -R -s -c 'split("\n") | map(select(. != ""))')
+          {
+            echo "decision=$decision"
+            echo "scoped=$scoped"
+          } | tee -a "$GITHUB_OUTPUT"
+
       - name: Summarize the paths and the targets
         if: always()
         run: |
@@ -922,23 +980,38 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # On a pull request, `cargo xtask formal guard` on the runner, with the
-  # event of the run: it checks the pull request against the rules for
-  # changes of statements, proofs, sources and registries, and its failure
-  # fails the job. Its main command runs under `deadline.sh`, which turns
-  # workflow commands off while it prints, and the summary escapes carriage
-  # returns and indents its output as code.
+      - name: Upload the list of the changed paths
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-impact-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: artifacts/formal/impact.txt
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+  # On every event of a pull request, `cargo xtask formal guard` on the
+  # runner, with the event of the run: it checks the pull request against
+  # the rules for changes of statements, proofs, sources and registries, and
+  # its failure fails the job; it fails as well on any other event than a
+  # pull request, which it does not judge. Its main command runs under
+  # `deadline.sh`, which turns workflow commands off while it prints, and
+  # the summary escapes carriage returns and indents its output as code.
   guard:
     name: formal guard
-    if: github.event_name == 'pull_request'
+    if: ${{ !cancelled() && !(github.event_name != 'pull_request' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 8
     permissions:
       contents: read
-    concurrency:
-      group: formal-guard-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
+      - name: Check that the event is a pull request
+        timeout-minutes: 1
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo "the job judges pull requests, not a run of $GITHUB_EVENT_NAME on $GITHUB_REF" >&2
+            exit 1
+          fi
+
       - name: Check out the head with its history
         timeout-minutes: 2
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -973,3 +1046,605 @@ jobs:
               echo "The guard did not run."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The verdict of the gate on the event of the run, from the record of the
+  # job `formal parts`. Its first step judges the event, with the same text
+  # as the other three verdicts. On a pull request, a change that does not
+  # affect the gate, by the decision of `formal fast`, passes, with the
+  # paths that it changes in the summary; one that affects the gate needs
+  # the event that runs the gate, the label full-check added, and a record
+  # of `formal parts`. A manual or scheduled run of main runs the gate
+  # whatever the decision, which the job then makes on the commit itself
+  # and writes to the summary. Any other event or ref fails it. The record
+  # must be of schema 3, of this run, commit and trigger, and pass; on main
+  # the job then reads it back as a fresh record with `cargo xtask formal
+  # receipt --require-fresh`, which changes no verdict.
+  merge:
+    name: formal merge
+    needs: [fast, parts]
+    if: ${{ !cancelled() && !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Judge the event
+        id: event
+        timeout-minutes: 1
+        env:
+          FAST: ${{ needs.fast.result }}
+          DECISION: ${{ needs.fast.outputs.decision }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          PARTS: ${{ needs.parts.result }}
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              if [ "$FAST" != success ]; then
+                echo "formal fast did not succeed: $FAST" >&2
+                exit 1
+              fi
+              case "$DECISION" in
+                unaffected) gate=unaffected ;;
+                affected)
+                  if [ "$ACTION" != labeled ] || [ "$LABEL" != full-check ]; then
+                    echo "the change affects the gate, which did not run on this event" >&2
+                    exit 1
+                  fi
+                  gate=ran
+                  ;;
+                *)
+                  echo "formal fast made no decision" >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
+            schedule | workflow_dispatch)
+              if [ "$GITHUB_REF" != refs/heads/main ]; then
+                echo "the gate runs on a run of $GITHUB_EVENT_NAME of main only" >&2
+                exit 1
+              fi
+              gate=ran
+              ;;
+            *)
+              echo "no verdict of the gate on a run of $GITHUB_EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$gate" = ran ] && [ "$PARTS" != success ] && [ "$PARTS" != failure ]; then
+            echo "formal parts did not run to its end: $PARTS" >&2
+            exit 1
+          fi
+          echo "gate=$gate" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Check out the commit
+        if: steps.event.outputs.gate == 'ran' && github.event_name != 'pull_request'
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Build xtask on the runner
+        if: steps.event.outputs.gate == 'ran' && github.event_name != 'pull_request'
+        timeout-minutes: 3
+        run: |
+          rustup toolchain install
+          cargo build --locked --manifest-path xtask/Cargo.toml
+
+      - name: Decide on the commit itself
+        if: steps.event.outputs.gate == 'ran' && github.event_name != 'pull_request'
+        timeout-minutes: 2
+        run: |
+          mkdir -p artifacts/formal
+          exec bash .github/scripts/deadline.sh --stop-commands 1m 30s bash -o pipefail -c \
+            'xtask/target/debug/xtask formal impact --base "$GITHUB_SHA" 2>&1 | tee artifacts/formal/impact.txt'
+
+      - name: Summarize the decision on the commit itself
+        if: ${{ always() && steps.event.outputs.gate == 'ran' && github.event_name != 'pull_request' }}
+        timeout-minutes: 1
+        run: |
+          {
+            echo "## formal merge: the decision on the commit itself"
+            echo
+            echo "A run of $GITHUB_EVENT_NAME runs the gate whatever the decision."
+            echo
+            if [ -f artifacts/formal/impact.txt ]; then
+              sed 's/\r/\\r/g; s/^/    /' artifacts/formal/impact.txt
+            else
+              echo "The decision was not made."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Download the list of the changed paths
+        if: steps.event.outputs.gate == 'unaffected'
+        timeout-minutes: 2
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.fast.outputs.impact }}
+          path: artifacts/formal/impact
+
+      - name: Summarize the changed paths
+        if: steps.event.outputs.gate == 'unaffected'
+        timeout-minutes: 1
+        run: |
+          {
+            echo "## formal merge"
+            echo
+            echo "The change does not affect the gate; the paths that it changes:"
+            echo
+            sed 's/\r/\\r/g; s/^/    /' artifacts/formal/impact/impact.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Download the merge record
+        if: steps.event.outputs.gate == 'ran'
+        timeout-minutes: 2
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.parts.outputs.record }}
+          path: artifacts/formal/verdict
+
+      - name: Judge the record
+        id: record
+        if: steps.event.outputs.gate == 'ran'
+        timeout-minutes: 1
+        run: |
+          record=$(find artifacts/formal/verdict -name record.json -print -quit)
+          if [ -z "$record" ]; then
+            echo "the artifact of formal parts holds no record" >&2
+            exit 1
+          fi
+          echo "record=$record" >> "$GITHUB_OUTPUT"
+          jq -e --arg run "$GITHUB_RUN_ID" --arg sha "$HEAD_SHA" --arg mode "$KREPI_FORMAL_TRIGGER" \
+            '.schema == 3 and .run_id == $run and .commit == $sha and .trigger == $mode and .passes' "$record"
+
+      - name: Summarize the record
+        if: ${{ always() && steps.record.outputs.record != '' }}
+        timeout-minutes: 1
+        env:
+          RECORD: ${{ steps.record.outputs.record }}
+        run: |
+          # The record holds text of the receipts: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          {
+            echo "## formal merge"
+            echo
+            cat "$(dirname "$RECORD")/summary.md"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The line `formal receipt: CURRENT and fresh` in the log of this step
+      # is the evidence of a fresh record of main.
+      - name: Read the record back as a fresh one
+        if: steps.event.outputs.gate == 'ran' && github.event_name != 'pull_request'
+        timeout-minutes: 1
+        env:
+          RECORD: ${{ steps.record.outputs.record }}
+        run: |
+          exec bash .github/scripts/deadline.sh --stop-commands 1m 30s bash -c \
+            'xtask/target/debug/xtask formal receipt --require-fresh "$1" || true' readback "$RECORD"
+
+  # The verdict of the hard gate of the axiom audits, on the events and with
+  # the first step of `formal merge`: the field `gates.axioms` of the same
+  # record. Its summary reports the axioms of each audited theorem, and each
+  # target that a waiver left out of the base audit, which its shard audits.
+  axioms:
+    name: formal axioms
+    needs: [fast, parts]
+    if: ${{ !cancelled() && !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Judge the event
+        id: event
+        timeout-minutes: 1
+        env:
+          FAST: ${{ needs.fast.result }}
+          DECISION: ${{ needs.fast.outputs.decision }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          PARTS: ${{ needs.parts.result }}
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              if [ "$FAST" != success ]; then
+                echo "formal fast did not succeed: $FAST" >&2
+                exit 1
+              fi
+              case "$DECISION" in
+                unaffected) gate=unaffected ;;
+                affected)
+                  if [ "$ACTION" != labeled ] || [ "$LABEL" != full-check ]; then
+                    echo "the change affects the gate, which did not run on this event" >&2
+                    exit 1
+                  fi
+                  gate=ran
+                  ;;
+                *)
+                  echo "formal fast made no decision" >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
+            schedule | workflow_dispatch)
+              if [ "$GITHUB_REF" != refs/heads/main ]; then
+                echo "the gate runs on a run of $GITHUB_EVENT_NAME of main only" >&2
+                exit 1
+              fi
+              gate=ran
+              ;;
+            *)
+              echo "no verdict of the gate on a run of $GITHUB_EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$gate" = ran ] && [ "$PARTS" != success ] && [ "$PARTS" != failure ]; then
+            echo "formal parts did not run to its end: $PARTS" >&2
+            exit 1
+          fi
+          echo "gate=$gate" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Write that the change does not affect the gate
+        if: steps.event.outputs.gate == 'unaffected'
+        timeout-minutes: 1
+        run: |
+          echo "unaffected: the change does not affect the gate" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Download the merge record
+        if: steps.event.outputs.gate == 'ran'
+        timeout-minutes: 2
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.parts.outputs.record }}
+          path: artifacts/formal/verdict
+
+      - name: Judge the record
+        id: record
+        if: steps.event.outputs.gate == 'ran'
+        timeout-minutes: 1
+        run: |
+          record=$(find artifacts/formal/verdict -name record.json -print -quit)
+          if [ -z "$record" ]; then
+            echo "the artifact of formal parts holds no record" >&2
+            exit 1
+          fi
+          echo "record=$record" >> "$GITHUB_OUTPUT"
+          jq -e --arg run "$GITHUB_RUN_ID" --arg sha "$HEAD_SHA" --arg mode "$KREPI_FORMAL_TRIGGER" \
+            '.schema == 3 and .run_id == $run and .commit == $sha and .trigger == $mode and .gates.axioms == true' "$record"
+
+      - name: Report the axioms of the audited theorems
+        if: ${{ always() && steps.record.outputs.record != '' }}
+        timeout-minutes: 1
+        env:
+          RECORD: ${{ steps.record.outputs.record }}
+        run: |
+          # The record holds names of the head: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          {
+            echo "## formal axioms"
+            echo
+            jq -r '"- the hard gate: \(if .gates.axioms then "passes" else "fails" end)",
+              (if .axioms == {} then "- no audited theorem" else
+                (.axioms | to_entries[] | "- `\(.key)`: \(.value | join(", "))") end),
+              (.waivers[] | .waiver.scope[]
+                | "- target `\(.)`: left out of the base audit by a waiver; the shard of its target audits it")' \
+              "$RECORD"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # The verdict of the hard gate of the replay of the stage with
+  # `leanchecker --fresh`, on the events and with the first step of
+  # `formal merge`: the field `gates.leanchecker` of the same record.
+  leanchecker:
+    name: formal leanchecker
+    needs: [fast, parts]
+    if: ${{ !cancelled() && !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Judge the event
+        id: event
+        timeout-minutes: 1
+        env:
+          FAST: ${{ needs.fast.result }}
+          DECISION: ${{ needs.fast.outputs.decision }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          PARTS: ${{ needs.parts.result }}
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              if [ "$FAST" != success ]; then
+                echo "formal fast did not succeed: $FAST" >&2
+                exit 1
+              fi
+              case "$DECISION" in
+                unaffected) gate=unaffected ;;
+                affected)
+                  if [ "$ACTION" != labeled ] || [ "$LABEL" != full-check ]; then
+                    echo "the change affects the gate, which did not run on this event" >&2
+                    exit 1
+                  fi
+                  gate=ran
+                  ;;
+                *)
+                  echo "formal fast made no decision" >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
+            schedule | workflow_dispatch)
+              if [ "$GITHUB_REF" != refs/heads/main ]; then
+                echo "the gate runs on a run of $GITHUB_EVENT_NAME of main only" >&2
+                exit 1
+              fi
+              gate=ran
+              ;;
+            *)
+              echo "no verdict of the gate on a run of $GITHUB_EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$gate" = ran ] && [ "$PARTS" != success ] && [ "$PARTS" != failure ]; then
+            echo "formal parts did not run to its end: $PARTS" >&2
+            exit 1
+          fi
+          echo "gate=$gate" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Write that the change does not affect the gate
+        if: steps.event.outputs.gate == 'unaffected'
+        timeout-minutes: 1
+        run: |
+          echo "unaffected: the change does not affect the gate" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Download the merge record
+        if: steps.event.outputs.gate == 'ran'
+        timeout-minutes: 2
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.parts.outputs.record }}
+          path: artifacts/formal/verdict
+
+      - name: Judge the record
+        id: record
+        if: steps.event.outputs.gate == 'ran'
+        timeout-minutes: 1
+        run: |
+          record=$(find artifacts/formal/verdict -name record.json -print -quit)
+          if [ -z "$record" ]; then
+            echo "the artifact of formal parts holds no record" >&2
+            exit 1
+          fi
+          echo "record=$record" >> "$GITHUB_OUTPUT"
+          jq -e --arg run "$GITHUB_RUN_ID" --arg sha "$HEAD_SHA" --arg mode "$KREPI_FORMAL_TRIGGER" \
+            '.schema == 3 and .run_id == $run and .commit == $sha and .trigger == $mode and .gates.leanchecker == true' "$record"
+
+      - name: Summarize the hard gate
+        if: ${{ always() && steps.record.outputs.record != '' }}
+        timeout-minutes: 1
+        env:
+          RECORD: ${{ steps.record.outputs.record }}
+        run: |
+          {
+            echo "## formal leanchecker"
+            echo
+            jq -r '"- the hard gate: \(if .gates.leanchecker then "passes" else "fails" end)"' "$RECORD"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # The verdict of the hard gate of the comparator, on the events and with
+  # the first step of `formal merge`: the field `gates.comparator` of the
+  # same record. Its summary gives the conclusion of each unit of the
+  # comparator, or that there is no proved statement.
+  comparator:
+    name: formal comparator
+    needs: [fast, parts]
+    if: ${{ !cancelled() && !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Judge the event
+        id: event
+        timeout-minutes: 1
+        env:
+          FAST: ${{ needs.fast.result }}
+          DECISION: ${{ needs.fast.outputs.decision }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          PARTS: ${{ needs.parts.result }}
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              if [ "$FAST" != success ]; then
+                echo "formal fast did not succeed: $FAST" >&2
+                exit 1
+              fi
+              case "$DECISION" in
+                unaffected) gate=unaffected ;;
+                affected)
+                  if [ "$ACTION" != labeled ] || [ "$LABEL" != full-check ]; then
+                    echo "the change affects the gate, which did not run on this event" >&2
+                    exit 1
+                  fi
+                  gate=ran
+                  ;;
+                *)
+                  echo "formal fast made no decision" >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
+            schedule | workflow_dispatch)
+              if [ "$GITHUB_REF" != refs/heads/main ]; then
+                echo "the gate runs on a run of $GITHUB_EVENT_NAME of main only" >&2
+                exit 1
+              fi
+              gate=ran
+              ;;
+            *)
+              echo "no verdict of the gate on a run of $GITHUB_EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$gate" = ran ] && [ "$PARTS" != success ] && [ "$PARTS" != failure ]; then
+            echo "formal parts did not run to its end: $PARTS" >&2
+            exit 1
+          fi
+          echo "gate=$gate" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Write that the change does not affect the gate
+        if: steps.event.outputs.gate == 'unaffected'
+        timeout-minutes: 1
+        run: |
+          echo "unaffected: the change does not affect the gate" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Download the merge record
+        if: steps.event.outputs.gate == 'ran'
+        timeout-minutes: 2
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.parts.outputs.record }}
+          path: artifacts/formal/verdict
+
+      - name: Judge the record
+        id: record
+        if: steps.event.outputs.gate == 'ran'
+        timeout-minutes: 1
+        run: |
+          record=$(find artifacts/formal/verdict -name record.json -print -quit)
+          if [ -z "$record" ]; then
+            echo "the artifact of formal parts holds no record" >&2
+            exit 1
+          fi
+          echo "record=$record" >> "$GITHUB_OUTPUT"
+          jq -e --arg run "$GITHUB_RUN_ID" --arg sha "$HEAD_SHA" --arg mode "$KREPI_FORMAL_TRIGGER" \
+            '.schema == 3 and .run_id == $run and .commit == $sha and .trigger == $mode and .gates.comparator == true' "$record"
+
+      - name: Summarize the units of the comparator
+        if: ${{ always() && steps.record.outputs.record != '' }}
+        timeout-minutes: 1
+        env:
+          RECORD: ${{ steps.record.outputs.record }}
+        run: |
+          # The record holds names of the head: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          {
+            echo "## formal comparator"
+            echo
+            jq -r '"- the hard gate: \(if .gates.comparator then "passes" else "fails" end)",
+              ([.units | to_entries[] | select(.key == "comparator" or (.key | startswith("comparator/")))]
+                | if . == [] then "- no proved statement" else .[] | "- `\(.key)`: \(.value.status)" end)' \
+              "$RECORD"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # On a push to main, the merge of a pull request: reviews the merge record
+  # of the merged head, the second parent of the merge, whose tree the merge
+  # must keep. A change that does not affect the gate, by the decision of
+  # `cargo xtask formal impact` against the first parent, passes, which is
+  # no evidence that the record is CURRENT. Otherwise the job takes the
+  # latest run of this workflow on a pull request with that head in which
+  # `formal run` concluded and `formal merge` succeeded, downloads the merge
+  # record of its latest attempt and judges it with `cargo xtask formal
+  # receipt`: CURRENT passes, and WAIVED passes when the waivers that it
+  # used hold on the day of the review; anything else fails.
+  review:
+    name: formal receipt review
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the merge with its history
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build xtask on the runner
+        timeout-minutes: 3
+        run: |
+          rustup toolchain install
+          cargo build --locked --manifest-path xtask/Cargo.toml
+
+      - name: Decide on the merged head
+        timeout-minutes: 2
+        run: |
+          if ! head=$(git rev-parse --verify --quiet 'HEAD^2'); then
+            echo "$GITHUB_SHA has no second parent: it is no merge of a pull request" >&2
+            exit 1
+          fi
+          if ! git diff --quiet "$head" HEAD; then
+            echo "the merge changed the tree of the head $head" >&2
+            exit 1
+          fi
+          echo "MERGED_HEAD=$head" | tee -a "$GITHUB_ENV"
+          mkdir -p artifacts/formal
+          exec bash .github/scripts/deadline.sh --stop-commands 1m 30s bash -o pipefail -c \
+            'xtask/target/debug/xtask formal impact --base HEAD^1 2>&1 | tee artifacts/formal/impact.txt'
+
+      - name: Review the receipt of the merged head
+        timeout-minutes: 5
+        run: |
+          case "$(sed -n 's/^decision //p' artifacts/formal/impact.txt)" in
+            unaffected)
+              echo "unaffected: not evidence of CURRENT" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+              ;;
+            affected) ;;
+            *)
+              echo "formal impact made no decision" >&2
+              exit 1
+              ;;
+          esac
+          # The runs of a pull request with the head, the newest first.
+          api=repos/$GITHUB_REPOSITORY/actions
+          runs=$(gh api --paginate "$api/workflows/formal.yml/runs?event=pull_request&head_sha=$MERGED_HEAD&per_page=100" \
+            --jq '.workflow_runs[].id')
+          run=
+          for id in $runs; do
+            verdicts=$(gh api "$api/runs/$id/jobs?filter=latest&per_page=100" \
+              --jq '[.jobs[] | select(.name == "formal run" or .name == "formal merge") | "\(.name)=\(.conclusion)"] | sort | join(" ")')
+            case "$verdicts" in
+              "formal merge=success formal run=success" | "formal merge=success formal run=failure")
+                run=$id
+                break
+                ;;
+            esac
+          done
+          if [ -z "$run" ]; then
+            echo "no run of a pull request with the head $MERGED_HEAD ran the gate and passed formal merge" >&2
+            exit 1
+          fi
+          name=$(gh api --paginate "$api/runs/$run/artifacts?per_page=100" \
+            --jq ".artifacts[] | select(.expired | not) | .name | select(startswith(\"formal-merge-$MERGED_HEAD-\"))" \
+            | sort -t - -k 4,4 -n | tail -n 1)
+          if [ -z "$name" ]; then
+            echo "the run $run has no merge record of the head $MERGED_HEAD" >&2
+            exit 1
+          fi
+          echo "run $run, artifact $name" | tee -a "$GITHUB_STEP_SUMMARY"
+          gh run download -R "$GITHUB_REPOSITORY" "$run" -n "$name" -D artifacts/formal/review
+          record=$(find artifacts/formal/review -name record.json -print -quit)
+          if [ -z "$record" ]; then
+            echo "the artifact $name holds no record" >&2
+            exit 1
+          fi
+          # The verdict: 0 is CURRENT and 3 WAIVED, whose waivers hold today.
+          exec bash .github/scripts/deadline.sh --stop-commands 1m 30s bash -c \
+            'xtask/target/debug/xtask formal receipt "$1" | tee -a "$GITHUB_STEP_SUMMARY"; s=${PIPESTATUS[0]}; [ "$s" = 0 ] || [ "$s" = 3 ]' \
+            review "$record"

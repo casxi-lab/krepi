@@ -509,10 +509,9 @@ fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
         ]
     };
     // The fixture has the measurement jobs beside the gate. The committed
-    // workflow of the gate has the jobs of the limits and of the planned
-    // targets: the qualification job has a limit of its own, the planned
-    // targets take theirs from the first, an expression, which gives no
-    // limit; the measurement jobs have a workflow of their own.
+    // workflow of the gate has the job of the limits and the qualification
+    // job, each with a limit of its own, and no job of the planned targets;
+    // the measurement jobs have a workflow of their own.
     for (text, names) in [
         (
             FORMAL,
@@ -526,12 +525,29 @@ fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
             assert_eq!(job_limit(&limits, name), limit, "{name}");
         }
     }
-    // The committed file runs the gate as parts: the shards take their
-    // limits from the matrix, and the merge has a limit of its own.
+    // The committed file runs the gate as parts: the shards and the planned
+    // targets that run alone take their limits from the matrix, which they
+    // write in a notice; the merge of the parts, the verdicts and the review
+    // have limits of their own.
     let committed = limits(&committed).expect("the workflow reads");
-    let shard = ("formal shard ${{ matrix.name }}".to_string(), None);
-    assert!(committed.contains(&shard));
-    for (name, limit) in [("formal shard t", None), ("formal merge", Some(15))] {
+    for name in [
+        "formal shard ${{ matrix.name }}",
+        "formal scoped ${{ matrix.name }}",
+    ] {
+        assert!(committed.contains(&(name.to_string(), None)), "{name}");
+    }
+    for (name, limit) in [
+        ("formal shard t", None),
+        ("formal scoped t", None),
+        ("formal parts", Some(15)),
+        ("formal merge", Some(15)),
+        ("formal axioms", Some(5)),
+        ("formal leanchecker", Some(5)),
+        ("formal comparator", Some(5)),
+        ("formal fast", Some(8)),
+        ("formal guard", Some(8)),
+        ("formal receipt review", Some(15)),
+    ] {
         assert_eq!(job_limit(&committed, name), limit, "{name}");
     }
     let limit = |limits: &[(&str, Option<u64>)], name: &str| {

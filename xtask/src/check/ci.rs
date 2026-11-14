@@ -358,7 +358,7 @@ const BY_RECORD: &str = "${{ steps.record.outputs.retention }}";
 
 /// Every upload step of the tracked workflows: the file, the key of the
 /// job, the name of the step and its `retention-days` as written.
-const RETENTION: [(&str, &str, &str, &str); 28] = [
+const RETENTION: [(&str, &str, &str, &str); 29] = [
     (
         ".github/workflows/check.yml",
         "check",
@@ -451,14 +451,20 @@ const RETENTION: [(&str, &str, &str, &str); 28] = [
     ),
     (
         ".github/workflows/formal.yml",
-        "merge",
+        "parts",
         "Upload the merge record",
         BY_REF,
     ),
     (
         ".github/workflows/formal.yml",
-        "planned",
-        "Upload the receipt and the logs of the planned targets",
+        "scoped",
+        "Upload the receipt, the summary and the logs of the planned target",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal.yml",
+        "fast",
+        "Upload the list of the changed paths",
         BY_REF,
     ),
     (
@@ -815,8 +821,8 @@ const CALIBRATION: &str = ".github/workflows/formal-calibration.yml";
 const GATE_JOBS: [(&str, &str); 7] = [
     (FORMAL, "gate"),
     (FORMAL, "shard"),
-    (FORMAL, "merge"),
-    (FORMAL, "planned"),
+    (FORMAL, "parts"),
+    (FORMAL, "scoped"),
     (CALIBRATION, "calibration"),
     (CALIBRATION, "shard"),
     (CALIBRATION, "merge"),
@@ -893,9 +899,10 @@ fn the_jobs_of_the_gate_upload_receipts_summaries_records_and_packed_logs() {
             Vec::<String>::new(),
             "{path}: {key}"
         );
-        // Every job but the merge runs the gate and uploads its logs packed.
+        // Every job but the merge of the parts runs the gate and uploads its
+        // logs packed.
         let packed = upload_paths(uploads[0]).contains(&PACKED_LOGS);
-        assert_eq!(packed, key != "merge", "{path}: {key}");
+        assert_eq!(packed, !["parts", "merge"].contains(&key), "{path}: {key}");
     }
     // The logs of a run are not uploaded as they are.
     let logs = parse(
@@ -928,7 +935,7 @@ fn the_parts_of_a_run_are_named_for_the_merge_that_downloads_them() {
     let (gate, shard, merge) = (
         &formal["jobs"]["gate"],
         &formal["jobs"]["shard"],
-        &formal["jobs"]["merge"],
+        &formal["jobs"]["parts"],
     );
     // Each part names its artifact by the part, with `-` for `/`, the commit
     // and the attempt.
@@ -942,14 +949,22 @@ fn the_parts_of_a_run_are_named_for_the_merge_that_downloads_them() {
             "{id}"
         );
     }
-    // The merge runs after them, unless the run was cancelled, on the
-    // runner, with a limit that the record of the run reads.
+    // The merge runs after them when the gate ran, unless the run was
+    // cancelled, on the runner, with a limit that the record of the run
+    // reads; its output names the artifact of its record for the verdicts.
+    assert_eq!(merge["name"].as_str(), Some("formal parts"));
     assert_eq!(needs(merge), ["gate", "shard"]);
     assert_eq!(
         merge["if"].as_str(),
-        Some("${{ !cancelled() && github.event_name != 'workflow_dispatch' }}")
+        Some("${{ !cancelled() && needs.gate.result != 'skipped' }}")
     );
     assert!(merge["timeout-minutes"].as_i64().is_some());
+    assert_eq!(
+        merge["outputs"]["record"].as_str(),
+        Some(upload_name(merge))
+    );
+    let record = format!("formal-merge-{head}-{attempt}");
+    assert_eq!(upload_name(merge), record);
     assert!(
         scripts_of(merge)
             .iter()
@@ -1005,23 +1020,20 @@ fn the_parts_of_a_run_are_named_for_the_merge_that_downloads_them() {
         merge["if"].as_str(),
         Some("${{ !cancelled() && needs.calibration.result != 'skipped' }}")
     );
-    // Each merge has a group of its own. The merge of an older run whose
-    // parts a newer event cancelled still runs and fails; only the latest
-    // run of a pull request counts.
-    for (document, group) in [
-        (&formal, "formal-merge-"),
-        (&calibration, "formal-calibration-merge-"),
-    ] {
-        let concurrency = &document["jobs"]["merge"]["concurrency"];
-        let own = concurrency["group"]
-            .as_str()
-            .is_some_and(|text| text.starts_with(group));
-        assert!(own, "{group}");
-        assert_eq!(
-            concurrency["cancel-in-progress"].as_str(),
-            Some("${{ github.event_name == 'pull_request' }}")
-        );
-    }
+    // The merge of the calibration has a group of its own. The merge of an
+    // older run whose parts a newer event cancelled still runs and fails;
+    // only the latest run of a pull request counts. The runs of formal share
+    // the group of their pull request, which cancels the whole older run.
+    let concurrency = &calibration["jobs"]["merge"]["concurrency"];
+    let own = concurrency["group"]
+        .as_str()
+        .is_some_and(|text| text.starts_with("formal-calibration-merge-"));
+    assert!(own);
+    assert_eq!(
+        concurrency["cancel-in-progress"].as_str(),
+        Some("${{ github.event_name == 'pull_request' }}")
+    );
+    assert!(formal["jobs"]["parts"]["concurrency"].is_badvalue());
 }
 
 #[test]
@@ -1042,9 +1054,10 @@ fn the_calibration_shard_and_merge_run_the_steps_of_those_of_formal() {
         ("calibration-formal-part-", "formal-part-"),
         ("formal-calibration-merge-", "formal-merge-"),
     ];
-    for (key, counts) in [("shard", [1, 1, 0]), ("merge", [1, 1, 1])] {
+    let pairs = [("shard", "shard"), ("parts", "merge")];
+    for ((key, copy), counts) in pairs.into_iter().zip([[1, 1, 0], [1, 1, 1]]) {
         let own = emit(&formal["jobs"][key]["steps"]);
-        let mut copied = emit(&calibration["jobs"][key]["steps"]);
+        let mut copied = emit(&calibration["jobs"][copy]["steps"]);
         let found = replaced.map(|(from, _)| copied.matches(from).count());
         assert_eq!(found, counts, "{key}");
         for (from, to) in replaced {
@@ -1053,22 +1066,21 @@ fn the_calibration_shard_and_merge_run_the_steps_of_those_of_formal() {
         assert_eq!(copied, own, "{key}");
     }
     // The jobs as well, but for their names, their needs and conditions, the
-    // matrix of the shards and the concurrency group.
+    // matrix of the shards, the concurrency of the calibration and the
+    // output of the merge of formal.
     let settings = |job: &Yaml| {
         let mut job = job.as_hash().expect("a job").clone();
-        for key in ["name", "needs", "if", "steps"] {
+        for key in ["name", "needs", "if", "steps", "concurrency", "outputs"] {
             job.remove(&Yaml::String(key.to_string()));
         }
-        for (key, own) in [("strategy", "matrix"), ("concurrency", "group")] {
-            let inner = job.get_mut(&Yaml::String(key.to_string()));
-            if let Some(inner) = inner.and_then(Yaml::as_mut_hash) {
-                inner.remove(&Yaml::String(own.to_string()));
-            }
+        let strategy = job.get_mut(&Yaml::String("strategy".to_string()));
+        if let Some(strategy) = strategy.and_then(Yaml::as_mut_hash) {
+            strategy.remove(&Yaml::String("matrix".to_string()));
         }
         job
     };
-    for key in ["shard", "merge"] {
-        let (own, copied) = (&formal["jobs"][key], &calibration["jobs"][key]);
+    for (key, copy) in pairs {
+        let (own, copied) = (&formal["jobs"][key], &calibration["jobs"][copy]);
         assert_eq!(settings(copied), settings(own), "{key}");
     }
     // The shards run on the events of the qualification job.
@@ -1399,6 +1411,656 @@ fn the_calibration_checks_that_the_comparator_rejects_its_fixed_challenges() {
             "{line}: {summary}"
         );
     }
+}
+
+/// The six checks of the gate, by the keys and the names of their jobs.
+const GATE_CHECKS: [(&str, &str); 6] = [
+    ("fast", "formal fast"),
+    ("guard", "formal guard"),
+    ("merge", "formal merge"),
+    ("axioms", "formal axioms"),
+    ("leanchecker", "formal leanchecker"),
+    ("comparator", "formal comparator"),
+];
+/// The jobs of the verdicts of the record of the parts, and the condition
+/// of each that the record must meet: the gate passes or a hard gate does.
+const VERDICTS: [(&str, &str); 4] = [
+    ("merge", ".passes"),
+    ("axioms", ".gates.axioms == true"),
+    ("leanchecker", ".gates.leanchecker == true"),
+    ("comparator", ".gates.comparator == true"),
+];
+/// The condition of the jobs of the pull requests: they run unless the run
+/// was cancelled, also when a job that they need failed or was skipped, and
+/// are skipped only on another event than a pull request on main.
+const ON_PULL_REQUESTS: &str = "${{ !cancelled() && !(github.event_name != 'pull_request' && github.ref == 'refs/heads/main') }}";
+/// The condition of the verdicts: as that of the jobs of the pull requests,
+/// but skipped only on a push to main.
+const ON_VERDICTS: &str =
+    "${{ !cancelled() && !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}";
+/// The step that the jobs of the pull requests run first.
+const PULL_REQUEST_STEP: &str = "Check that the event is a pull request";
+/// The step that the verdicts run first, and the one that judges the record.
+const EVENT_STEP: &str = "Judge the event";
+const RECORD_STEP: &str = "Judge the record";
+
+#[test]
+fn the_six_checks_of_the_gate_are_literal_jobs_of_formal_alone() {
+    let names = GATE_CHECKS.map(|(_, name)| name);
+    let mut found = Vec::new();
+    for (path, document) in workflows() {
+        for (key, job) in jobs(&document) {
+            let name = job["name"].as_str().unwrap_or_default();
+            if names.contains(&name) {
+                found.push((path.clone(), key.to_string(), name.to_string()));
+            }
+            // A name of another job of the formal workflows does not start
+            // as one of them, whatever its expressions give.
+            if path.starts_with(".github/workflows/formal") && !names.contains(&name) {
+                let literal = name.split("${{").next().unwrap_or_default();
+                let clash = names.iter().any(|check| check.starts_with(literal));
+                assert!(literal.is_empty() || !clash, "{path}: {key}: {name}");
+            }
+        }
+    }
+    let expected =
+        GATE_CHECKS.map(|(key, name)| (FORMAL.to_string(), key.to_string(), name.to_string()));
+    found.sort();
+    let mut expected = Vec::from(expected);
+    expected.sort();
+    assert_eq!(found, expected);
+    let formal = workflow(FORMAL);
+    for (key, _) in GATE_CHECKS {
+        let job = &formal["jobs"][key];
+        assert!(job["strategy"].is_badvalue(), "{key} runs no matrix");
+    }
+}
+
+#[test]
+fn the_six_checks_run_unless_cancelled_and_are_skipped_on_main_alone() {
+    let formal = workflow(FORMAL);
+    for (key, _) in GATE_CHECKS {
+        let job = &formal["jobs"][key];
+        let expected = if ["fast", "guard"].contains(&key) {
+            (ON_PULL_REQUESTS, Vec::new())
+        } else {
+            (ON_VERDICTS, vec!["fast", "parts"])
+        };
+        assert_eq!(
+            (job["if"].as_str(), needs(job)),
+            (Some(expected.0), expected.1),
+            "{key}"
+        );
+    }
+}
+
+/// Runs `script` with the shell of the steps, in a new directory, with the
+/// variables `vars`: its exit status, its standard error and the outputs
+/// that it wrote.
+fn run_step(script: &str, vars: &[(&str, &str)]) -> (Option<i32>, String, String) {
+    let scratch = crate::scratch::Scratch::temporary("step");
+    scratch.write("step.sh", script);
+    let output = std::process::Command::new("bash")
+        .args(["--noprofile", "--norc", "-eo", "pipefail", "step.sh"])
+        .current_dir(&scratch.0)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("GITHUB_OUTPUT", scratch.0.join("output"))
+        .env("GITHUB_STEP_SUMMARY", scratch.0.join("summary"))
+        .envs(vars.iter().copied())
+        .output()
+        .expect("run the script of the step");
+    let outputs = std::fs::read_to_string(scratch.0.join("output")).unwrap_or_default();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    (output.status.code(), stderr, outputs)
+}
+
+#[test]
+fn the_six_checks_fail_on_another_event_or_ref() {
+    let formal = workflow(FORMAL);
+    let jobs = &formal["jobs"];
+    // The jobs of the pull requests fail on any other event.
+    let first = |key: &str| jobs[key]["steps"][0].clone();
+    assert_eq!(first("fast"), first("guard"));
+    assert_eq!(first("fast")["name"].as_str(), Some(PULL_REQUEST_STEP));
+    let script = first("fast")["run"].as_str().expect("a script").to_string();
+    for (event, code) in [
+        ("pull_request", 0),
+        ("push", 1),
+        ("workflow_dispatch", 1),
+        ("schedule", 1),
+    ] {
+        let vars = [
+            ("GITHUB_EVENT_NAME", event),
+            ("GITHUB_REF", "refs/heads/topic"),
+        ];
+        assert_eq!(run_step(&script, &vars).0, Some(code), "{event}");
+    }
+    // The verdicts judge the event first, with the same step.
+    let event = jobs["merge"]["steps"][0].clone();
+    assert_eq!(event["name"].as_str(), Some(EVENT_STEP));
+    assert_eq!(event["id"].as_str(), Some("event"));
+    for (key, _) in VERDICTS {
+        assert_eq!(jobs[key]["steps"][0], event, "{key}");
+    }
+    let inputs = [
+        ("FAST", "${{ needs.fast.result }}"),
+        ("DECISION", "${{ needs.fast.outputs.decision }}"),
+        ("ACTION", "${{ github.event.action }}"),
+        ("LABEL", "${{ github.event.label.name }}"),
+        ("PARTS", "${{ needs.parts.result }}"),
+    ];
+    for (name, value) in inputs {
+        assert_eq!(event["env"][name].as_str(), Some(value), "{name}");
+    }
+    assert_eq!(
+        event["env"].as_hash().map(|env| env.len()),
+        Some(inputs.len())
+    );
+    // A change that does not affect the gate passes on any event of its pull
+    // request; one that affects it only on the event that ran the gate, and
+    // only when the merge of the parts ran to its end. A manual or scheduled
+    // run of main ran the gate; any other event or ref fails.
+    let script = event["run"].as_str().expect("a script").to_string();
+    let pull = |action: &str, label: &str, decision: &str, parts: &str| {
+        let vars = [
+            ("GITHUB_EVENT_NAME", "pull_request"),
+            ("GITHUB_REF", "refs/pull/1/merge"),
+            ("FAST", "success"),
+            ("DECISION", decision),
+            ("ACTION", action),
+            ("LABEL", label),
+            ("PARTS", parts),
+        ];
+        run_step(&script, &vars)
+    };
+    let passed = |gate: &str| (Some(0), String::new(), format!("gate={gate}\n"));
+    let failed = |why: &str| (Some(1), format!("{why}\n"), String::new());
+    assert_eq!(
+        pull("synchronize", "", "unaffected", "skipped"),
+        passed("unaffected")
+    );
+    assert_eq!(
+        pull("labeled", "full-check", "affected", "success"),
+        passed("ran")
+    );
+    assert_eq!(
+        pull("labeled", "full-check", "affected", "failure"),
+        passed("ran")
+    );
+    let not_run = "the change affects the gate, which did not run on this event";
+    assert_eq!(
+        pull("synchronize", "", "affected", "skipped"),
+        failed(not_run)
+    );
+    assert_eq!(
+        pull("unlabeled", "full-check", "affected", "skipped"),
+        failed(not_run)
+    );
+    assert_eq!(
+        pull("labeled", "spec", "affected", "skipped"),
+        failed(not_run)
+    );
+    assert_eq!(
+        pull("labeled", "full-check", "", "skipped"),
+        failed("formal fast made no decision")
+    );
+    for parts in ["skipped", "cancelled", ""] {
+        let unended = format!("formal parts did not run to its end: {parts}");
+        assert_eq!(
+            pull("labeled", "full-check", "affected", parts),
+            failed(&unended)
+        );
+    }
+    let fast_failed = [
+        ("GITHUB_EVENT_NAME", "pull_request"),
+        ("FAST", "failure"),
+        ("DECISION", "unaffected"),
+    ];
+    assert_eq!(
+        run_step(&script, &fast_failed),
+        failed("formal fast did not succeed: failure")
+    );
+    let on = |event: &str, reference: &str, parts: &str| {
+        let vars = [
+            ("GITHUB_EVENT_NAME", event),
+            ("GITHUB_REF", reference),
+            ("PARTS", parts),
+        ];
+        run_step(&script, &vars)
+    };
+    for event in ["schedule", "workflow_dispatch"] {
+        assert_eq!(
+            on(event, "refs/heads/main", "success"),
+            passed("ran"),
+            "{event}"
+        );
+        let main = format!("the gate runs on a run of {event} of main only");
+        assert_eq!(
+            on(event, "refs/heads/topic", "success"),
+            failed(&main),
+            "{event}"
+        );
+        let unended = "formal parts did not run to its end: skipped";
+        assert_eq!(
+            on(event, "refs/heads/main", "skipped"),
+            failed(unended),
+            "{event}"
+        );
+    }
+    let push = on("push", "refs/heads/main", "skipped");
+    assert_eq!(push, failed("no verdict of the gate on a run of push"));
+    // Then each judges the record of this run, commit and trigger, of the
+    // schema of the merge, by its own condition, which is all that differs.
+    let judged = |key: &str| step_named(&jobs[key], RECORD_STEP)["run"].clone();
+    let schema = crate::formal::receipt::MERGE_SCHEMA;
+    let common = format!(
+        "'.schema == {schema} and .run_id == $run and .commit == $sha and .trigger == $mode and "
+    );
+    let arguments = "jq -e --arg run \"$GITHUB_RUN_ID\" --arg sha \"$HEAD_SHA\" --arg mode \
+                     \"$KREPI_FORMAL_TRIGGER\"";
+    let merge = judged("merge").as_str().expect("a script").to_string();
+    for (key, condition) in VERDICTS {
+        let text = judged(key).as_str().expect("a script").to_string();
+        let full = format!("{common}{condition}' \"$record\"");
+        assert!(text.contains(&full), "{key}: {text}");
+        assert!(text.contains(arguments), "{key}");
+        assert_eq!(text.replace(condition, ".passes"), merge, "{key}");
+        let step = step_named(&jobs[key], RECORD_STEP);
+        assert_eq!(
+            step["if"].as_str(),
+            Some("steps.event.outputs.gate == 'ran'")
+        );
+        // The artifacts that they download are named by the outputs of the
+        // jobs that they need, which are the names of the uploads of those
+        // jobs, so that a verdict never downloads every artifact of the run.
+        for download in steps_using(&jobs[key], "actions/download-artifact") {
+            let name = download["with"]["name"].as_str().unwrap_or_default();
+            let from = [
+                ("${{ needs.parts.outputs.record }}", "parts", "record"),
+                ("${{ needs.fast.outputs.impact }}", "fast", "impact"),
+            ];
+            let (_, job, output) = (from.iter())
+                .find(|(written, _, _)| *written == name)
+                .unwrap_or_else(|| panic!("{key} downloads {name}"));
+            assert!(needs(&jobs[key]).contains(job), "{key}");
+            assert_eq!(
+                jobs[*job]["outputs"][*output].as_str(),
+                Some(upload_name(&jobs[*job]))
+            );
+        }
+    }
+    assert!(
+        merge.contains("echo \"record=$record\" >> \"$GITHUB_OUTPUT\""),
+        "{merge}"
+    );
+}
+
+#[test]
+fn formal_runs_on_pull_requests_by_hand_and_weekly_in_one_group_for_each_pull_request() {
+    let formal = workflow(FORMAL);
+    assert_eq!(
+        events(&formal),
+        ["pull_request", "push", "workflow_dispatch", "schedule"]
+    );
+    let types = formal["on"]["pull_request"]["types"]
+        .as_vec()
+        .expect("the types");
+    let types: Vec<&str> = types.iter().filter_map(Yaml::as_str).collect();
+    let expected = [
+        "opened",
+        "synchronize",
+        "reopened",
+        "labeled",
+        "unlabeled",
+        "edited",
+    ];
+    assert_eq!(types, expected);
+    let branches = |event: &str| {
+        let branches = formal["on"][event]["branches"]
+            .as_vec()
+            .expect("the branches");
+        branches.iter().filter_map(Yaml::as_str).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        (branches("pull_request"), branches("push")),
+        (vec!["main"], vec!["main"])
+    );
+    // A manual run is `full` or `weekly`; the schedule runs on Tuesdays.
+    let mode = &formal["on"]["workflow_dispatch"]["inputs"]["mode"];
+    assert_eq!(mode["type"].as_str(), Some("choice"));
+    assert_eq!(mode["required"].as_bool(), Some(true));
+    let options = mode["options"].as_vec().expect("the options");
+    let options: Vec<&str> = options.iter().filter_map(Yaml::as_str).collect();
+    assert_eq!(options, ["full", "weekly"]);
+    let schedules = formal["on"]["schedule"].as_vec().expect("the schedule");
+    assert_eq!(schedules.len(), 1);
+    assert_eq!(schedules[0]["cron"].as_str(), Some("37 12 * * 2"));
+    // The runs of a pull request share a group in which a newer run cancels
+    // the older; every other run has a group of its own, and no job has a
+    // group.
+    let concurrency = &formal["concurrency"];
+    assert_eq!(
+        concurrency["group"].as_str(),
+        Some(
+            "formal-${{ github.event_name == 'pull_request' && format('pr-{0}', \
+             github.event.pull_request.number) || github.run_id }}"
+        )
+    );
+    assert_eq!(
+        concurrency["cancel-in-progress"].as_str(),
+        Some("${{ github.event_name == 'pull_request' }}")
+    );
+    for (key, job) in jobs(&formal) {
+        assert!(job["concurrency"].is_badvalue(), "{key}");
+    }
+}
+
+#[test]
+fn the_gate_runs_on_the_full_check_label_and_on_main_by_hand_or_weekly() {
+    let formal = workflow(FORMAL);
+    let jobs = &formal["jobs"];
+    let limits = format!(
+        "${{{{ !cancelled() && ((github.event_name == 'pull_request' && github.event.action == \
+         'labeled' && github.event.label.name == '{FULL_LABEL}' && needs.fast.result == 'success' \
+         && needs.fast.outputs.decision == 'affected') || (github.ref == 'refs/heads/main' && \
+         (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))) }}}}"
+    );
+    for (key, needed, condition) in [
+        ("limits", vec!["fast"], limits.as_str()),
+        (
+            "gate",
+            vec!["limits"],
+            "${{ !cancelled() && needs.limits.result == 'success' }}",
+        ),
+        (
+            "shard",
+            vec!["limits"],
+            "${{ !cancelled() && needs.limits.result == 'success' && needs.limits.outputs.shards \
+             != '[]' }}",
+        ),
+        (
+            "scoped",
+            vec!["limits"],
+            "${{ !cancelled() && needs.limits.result == 'success' && needs.limits.outputs.scoped \
+             != '[]' }}",
+        ),
+        (
+            "parts",
+            vec!["gate", "shard"],
+            "${{ !cancelled() && needs.gate.result != 'skipped' }}",
+        ),
+    ] {
+        let job = &jobs[key];
+        assert_eq!(
+            (needs(job), job["if"].as_str()),
+            (needed, Some(condition)),
+            "{key}"
+        );
+    }
+}
+
+/// The problems of the conditions of the jobs of `document`: a job that
+/// needs another and does not start its condition with `${{ !cancelled()`,
+/// so that it would be skipped whenever a job before it was skipped.
+fn unless_cancelled_problems(document: &Yaml) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (key, job) in jobs(document) {
+        let condition = job["if"].as_str().unwrap_or_default();
+        if !needs(job).is_empty() && !condition.starts_with("${{ !cancelled()") {
+            problems.push(format!(
+                "job {key} needs another and may be skipped with it"
+            ));
+        }
+    }
+    problems
+}
+
+#[test]
+fn every_job_of_formal_that_needs_another_runs_unless_cancelled() {
+    let formal = workflow(FORMAL);
+    assert_eq!(unless_cancelled_problems(&formal), Vec::<String>::new());
+    let needing = jobs(&formal)
+        .into_iter()
+        .filter(|(_, job)| !needs(job).is_empty());
+    assert_eq!(needing.count(), 9);
+    let good = "jobs:\n  a:\n    if: x\n  b:\n    needs: a\n    if: ${{ !cancelled() && y }}\n";
+    assert_eq!(
+        unless_cancelled_problems(&parse(good)),
+        Vec::<String>::new()
+    );
+    let problem = ["job b needs another and may be skipped with it"];
+    for text in [
+        good.replace("    if: ${{ !cancelled() && y }}\n", ""),
+        good.replace("${{ !cancelled() && y }}", "y && !cancelled()"),
+        good.replace("${{ !cancelled() && y }}", "${{ always() }}"),
+    ] {
+        assert_eq!(unless_cancelled_problems(&parse(&text)), problem, "{text}");
+    }
+}
+
+#[test]
+fn the_trigger_of_a_run_follows_its_event() {
+    use crate::formal::outcome::word;
+    use crate::formal::receipt::{Mode, TRIGGER};
+    let [required, forced, weekly] =
+        [Mode::Required, Mode::ForcedFull, Mode::Weekly].map(|mode| word(&mode));
+    let formal = workflow(FORMAL);
+    let calibration = workflow(CALIBRATION);
+    assert_eq!(
+        formal["env"][TRIGGER].as_str().map(str::to_string),
+        Some(format!(
+            "${{{{ github.event_name == 'pull_request' && '{required}' || github.event_name == \
+             'schedule' && '{weekly}' || github.event_name == 'workflow_dispatch' && inputs.mode \
+             == 'full' && '{forced}' || github.event_name == 'workflow_dispatch' && inputs.mode == \
+             'weekly' && '{weekly}' || '' }}}}"
+        ))
+    );
+    assert_eq!(
+        calibration["env"][TRIGGER].as_str().map(str::to_string),
+        Some(format!(
+            "${{{{ github.event_name == 'schedule' && '{weekly}' || '' }}}}"
+        ))
+    );
+    // The containers of the parts of the gate get it, and the run of a
+    // planned target alone, which is SCOPED, does not.
+    let passed = format!("--env {TRIGGER}");
+    let script = |document: &Yaml, key: &str, id: &str| {
+        script_with_id(&document["jobs"][key], id).to_string()
+    };
+    for (document, key, id) in [
+        (&formal, "gate", "gate"),
+        (&formal, "gate", "comparator"),
+        (&formal, "shard", "shard"),
+        (&calibration, "calibration", "gate"),
+        (&calibration, "calibration", "comparator"),
+        (&calibration, "shard", "shard"),
+    ] {
+        let lines = logical_lines(&script(document, key, id));
+        let run = lines
+            .iter()
+            .find(|line| line.contains("docker run --rm --name"));
+        let words: Vec<&str> = run.expect("the container").split_whitespace().collect();
+        let given = words.windows(2).any(|pair| pair == ["--env", TRIGGER]);
+        assert!(given, "{key}: {id}");
+    }
+    assert!(!script(&formal, "scoped", "scoped").contains(&passed));
+}
+
+#[test]
+fn the_scoped_jobs_run_the_affected_planned_targets_alone() {
+    let formal = workflow(FORMAL);
+    let jobs = &formal["jobs"];
+    let scoped = &jobs["scoped"];
+    assert_eq!(
+        scoped["name"].as_str(),
+        Some("formal scoped ${{ matrix.name }}")
+    );
+    assert_eq!(
+        scoped["strategy"]["matrix"]["include"].as_str(),
+        Some("${{ fromJSON(needs.limits.outputs.scoped) }}")
+    );
+    assert_eq!(scoped["strategy"]["fail-fast"].as_bool(), Some(false));
+    assert_eq!(
+        scoped["timeout-minutes"].as_str(),
+        Some("${{ matrix.job }}")
+    );
+    // The limits come from the planned targets that `formal fast` lists.
+    let limits = &jobs["limits"];
+    assert_eq!(
+        limits["outputs"]["scoped"].as_str(),
+        Some("${{ steps.limits.outputs.scoped }}")
+    );
+    let computed = step_named(limits, "Compute the limits from the registered budgets");
+    assert_eq!(
+        computed["env"]["SCOPED"].as_str(),
+        Some("${{ needs.fast.outputs.scoped || '[]' }}")
+    );
+    assert_eq!(
+        jobs["fast"]["outputs"]["scoped"].as_str(),
+        Some("${{ steps.decision.outputs.scoped }}")
+    );
+    // Each runs `formal run --target` with its name alone, under its deadline,
+    // and its artifact is no part of the merge.
+    let run = step_named(scoped, "Run the planned target in the image");
+    assert_eq!(run["timeout-minutes"].as_str(), Some("${{ matrix.step }}"));
+    let script = run["run"].as_str().expect("a script");
+    assert!(script.contains("limit=$(( (STEP - 2) * 60 ))s"), "{script}");
+    assert!(
+        script.contains("deadline.sh --stop-commands \"$limit\" 1m"),
+        "{script}"
+    );
+    assert!(
+        script.ends_with("formal run --target \"$NAME\"\n"),
+        "{script}"
+    );
+    let head = "${{ github.event.pull_request.head.sha || github.sha }}";
+    let name = format!("formal-scoped-${{{{ matrix.name }}}}-{head}-${{{{ github.run_attempt }}}}");
+    assert_eq!(upload_name(scoped), name);
+    let parts = steps_using(&jobs["parts"], "actions/download-artifact");
+    let pattern = parts[0]["with"]["pattern"].as_str().unwrap_or_default();
+    assert!(!name.starts_with(pattern.split('*').next().unwrap_or(pattern)));
+    assert!(!needs(&jobs["parts"]).contains(&"scoped"));
+    // The decision of `formal fast`, and the planned targets that it lists by
+    // names that the registry allows, as JSON; where jq is on the path, as
+    // on the runners.
+    let decision = script_with_id(&jobs["fast"], "decision");
+    let jq = std::process::Command::new("jq")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .status();
+    if !jq.is_ok_and(|status| status.success()) {
+        eprintln!("skipped: jq is not on the path");
+        return;
+    }
+    let decide = |impact: Option<&str>| {
+        let scratch = crate::scratch::Scratch::temporary("decision");
+        if let Some(impact) = impact {
+            scratch.write("artifacts/formal/impact.txt", impact);
+        }
+        scratch.write("step.sh", decision);
+        let output = std::process::Command::new("bash")
+            .args(["--noprofile", "--norc", "-eo", "pipefail", "step.sh"])
+            .current_dir(&scratch.0)
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("GITHUB_OUTPUT", scratch.0.join("output"))
+            .output()
+            .expect("run the step");
+        assert!(output.status.success(), "{output:?}");
+        std::fs::read_to_string(scratch.0.join("output")).expect("the outputs")
+    };
+    let impact = "merge base 1\nchanged M a\ndecision affected\ntarget a formal\n\
+                  target b planned\ntarget c-2 planned\ntarget d\\n planned\n";
+    assert_eq!(
+        decide(Some(impact)),
+        "decision=affected\nscoped=[\"b\",\"c-2\"]\n"
+    );
+    let unaffected = "merge base 1\nchanged M decision affected\ndecision unaffected\n";
+    assert_eq!(decide(Some(unaffected)), "decision=unaffected\nscoped=[]\n");
+    assert_eq!(decide(None), "decision=\nscoped=[]\n");
+}
+
+#[test]
+fn the_receipt_review_runs_on_pushes_to_main_with_read_access_to_actions() {
+    let formal = workflow(FORMAL);
+    let review = &formal["jobs"]["review"];
+    assert_eq!(review["name"].as_str(), Some("formal receipt review"));
+    assert_eq!(
+        review["if"].as_str(),
+        Some("github.event_name == 'push' && github.ref == 'refs/heads/main'")
+    );
+    assert!(needs(review).is_empty());
+    let permissions = review["permissions"].as_hash().expect("the permissions");
+    let grants: Vec<(&str, &str)> = (permissions.iter())
+        .map(|(scope, level)| {
+            (
+                scope.as_str().unwrap_or_default(),
+                level.as_str().unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(grants, [("actions", "read"), ("contents", "read")]);
+    assert_eq!(
+        review["env"]["GH_TOKEN"].as_str(),
+        Some("${{ github.token }}")
+    );
+    let checkout = steps_using(review, "actions/checkout");
+    assert_eq!(checkout[0]["with"]["fetch-depth"].as_i64(), Some(0));
+    // The merged head is the second parent, whose tree the merge keeps; the
+    // decision compares it with the first parent; the run is that of a pull
+    // request of the head that ran the gate and passed its merge, and its
+    // record the latest of the run, judged CURRENT or WAIVED.
+    let script = scripts_of(review).join("\n");
+    for text in [
+        "head=$(git rev-parse --verify --quiet 'HEAD^2')",
+        "if ! git diff --quiet \"$head\" HEAD; then",
+        "formal impact --base HEAD^1",
+        "unaffected: not evidence of CURRENT",
+        "workflows/formal.yml/runs?event=pull_request&head_sha=$MERGED_HEAD",
+        "jobs?filter=latest",
+        "\"formal merge=success formal run=success\" | \"formal merge=success formal run=failure\")",
+        "select(startswith(\\\"formal-merge-$MERGED_HEAD-\\\"))",
+        "sort -t - -k 4,4 -n | tail -n 1",
+        "gh run download -R \"$GITHUB_REPOSITORY\" \"$run\" -n \"$name\"",
+        "formal receipt \"$1\"",
+        "[ \"$s\" = 0 ] || [ \"$s\" = 3 ]",
+    ] {
+        assert!(script.contains(text), "{text}");
+    }
+}
+
+#[test]
+fn every_job_with_a_computed_limit_writes_it_in_a_notice() {
+    let notice = format!(
+        "echo \"::notice title={}::$LIMIT\"",
+        crate::record::LIMIT_NOTICE
+    );
+    let mut computed = Vec::new();
+    for (path, document) in workflows() {
+        for (key, job) in jobs(&document) {
+            let Some(limit) = job["timeout-minutes"].as_str() else {
+                continue;
+            };
+            computed.push((path.clone(), key.to_string()));
+            assert_eq!(job["env"]["LIMIT"].as_str(), Some(limit), "{path}: {key}");
+            let first = scripts_of(job)
+                .first()
+                .and_then(|script| script.lines().next());
+            assert_eq!(first, Some(notice.as_str()), "{path}: {key}");
+        }
+    }
+    computed.sort();
+    let expected = [
+        (CALIBRATION, "calibration"),
+        (CALIBRATION, "shard"),
+        (FORMAL, "scoped"),
+        (FORMAL, "shard"),
+    ];
+    let expected: Vec<_> = (expected.iter())
+        .map(|(path, key)| (path.to_string(), key.to_string()))
+        .collect();
+    assert_eq!(computed, expected);
 }
 
 /// The script that runs a main command of a step under its deadline.

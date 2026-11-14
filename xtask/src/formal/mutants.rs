@@ -1670,7 +1670,6 @@ mod tests { fn t() { let _ = 1 + 1; } }
         // xtask.
         let formal = include_str!("../../../.github/workflows/formal.yml");
         for (name, value) in [
-            ("gate_budget", gate),
             ("shard_margin", shard_margin),
             ("receipt_margin", margin),
             ("shard_limit", SHARD_LIMIT.as_secs()),
@@ -1679,27 +1678,25 @@ mod tests { fn t() { let _ = 1 + 1; } }
             let line = format!("{name}={value}\n");
             assert!(formal.contains(&line), "{line}");
         }
-        // With these lines, which give a shard the minutes of its budget and
+        // With these lines, which give a shard, and a planned target that a
+        // pull request affects run alone, the minutes of its budget and
         // margins, as `merge::shards` and `merge::budget_problems` group and
         // check them.
-        let default = format!(
-            "[.targets[] | select((.state // \"formal\") == \"formal\") | {{name, budget: (.budget // {})}}]",
-            registry::BUDGET
-        );
+        let default = format!("| {{name, budget: (.budget // {})}}]", registry::BUDGET);
         for line in [
             r#"jq -e 'all(.targets[]; .name | test("^[a-z0-9][a-z0-9-]*$"))' "$registry" > /dev/null"#,
-            "minutes() { echo $(( (gate_budget + $1 + receipt_margin + 59) / 60 )); }",
-            r#"planned=$(minutes "$(budgets planned)")"#,
-            r#"shards=$(jq -c --argjson margin "$((shard_margin + receipt_margin))" '"#,
+            r#"jq -c --argjson margin "$((shard_margin + receipt_margin))" --arg state "$1" --argjson names "$2" '"#,
+            r#"[.targets[] | select((.state // "formal") == $state and ($names == null or (.name | IN($names[]))))"#,
             default.as_str(),
             "| group_by(.name) | map({name: .[0].name, budget: (map(.budget) | add)})",
             r"| map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 3)' \",
+            "shards=$(rows formal null)",
+            r#"scoped=$(rows planned "$SCOPED")"#,
             r#"over=$(jq -r --argjson limit "$shard_limit" --argjson workers "$workers" \"#,
             r#"'[.[] | select((.budget + $workers - 1) / $workers | floor > $limit) | .name] | join(" ")' <<< "$shards")"#,
+            r#"long=$(jq -r '[.[] | select(.job > 360) | .name] | join(" ")' <<< "$scoped")"#,
             r#"echo "shards=$shards""#,
-            r#"echo "planned-gate=$((planned + 2))""#,
-            r#"echo "planned-job=$((15 + planned + 2 + 3))""#,
-            "if [ $((15 + planned + 2 + 3)) -gt 360 ]; then",
+            r#"echo "scoped=$scoped""#,
         ] {
             assert!(formal.lines().any(|l| l.trim_start() == line), "{line}");
         }
@@ -1743,35 +1740,35 @@ mod tests { fn t() { let _ = 1 + 1; } }
             limit(&find_step(gate_job, "id", "comparator")),
             Some(comparator)
         );
-        for output in ["gate", "job"] {
-            assert!(jobs["limits"]["outputs"][output].is_badvalue(), "{output}");
+        let outputs = jobs["limits"]["outputs"].as_hash().expect("the outputs");
+        let outputs = Vec::from_iter(
+            outputs
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str())),
+        );
+        assert_eq!(
+            outputs,
+            [
+                (Some("shards"), Some("${{ steps.limits.outputs.shards }}")),
+                (Some("scoped"), Some("${{ steps.limits.outputs.scoped }}")),
+            ]
+        );
+        for (key, rows) in [("shard", "shards"), ("scoped", "scoped")] {
+            let job = &jobs[key];
+            let include = format!("${{{{ fromJSON(needs.limits.outputs.{rows}) }}}}");
+            let matrix = &job["strategy"]["matrix"]["include"];
+            assert_eq!(matrix.as_str(), Some(include.as_str()));
+            assert_eq!(job["strategy"]["fail-fast"].as_bool(), Some(false));
+            assert_eq!(job["timeout-minutes"].as_str(), Some("${{ matrix.job }}"));
+            let run = find_step(job, "id", key);
+            assert_eq!(run["timeout-minutes"].as_str(), Some("${{ matrix.step }}"));
+            let script = run["run"].as_str().expect("the script");
+            assert!(script.contains("limit=$(( (STEP - 2) * 60 ))s"), "{script}");
+            assert!(
+                script.contains(r#"deadline.sh --stop-commands "$limit" 1m"#),
+                "{script}"
+            );
         }
-        assert_eq!(
-            jobs["limits"]["outputs"]["shards"].as_str(),
-            Some("${{ steps.limits.outputs.shards }}")
-        );
-        let shard_job = &jobs["shard"];
-        assert_eq!(
-            shard_job["if"].as_str(),
-            Some("needs.limits.outputs.shards != '[]'")
-        );
-        assert_eq!(
-            shard_job["strategy"]["matrix"]["include"].as_str(),
-            Some("${{ fromJSON(needs.limits.outputs.shards) }}")
-        );
-        assert_eq!(shard_job["strategy"]["fail-fast"].as_bool(), Some(false));
-        assert_eq!(
-            shard_job["timeout-minutes"].as_str(),
-            Some("${{ matrix.job }}")
-        );
-        let run = find_step(shard_job, "id", "shard");
-        assert_eq!(run["timeout-minutes"].as_str(), Some("${{ matrix.step }}"));
-        let script = run["run"].as_str().expect("the script");
-        assert!(script.contains("limit=$(( (STEP - 2) * 60 ))s"), "{script}");
-        assert!(
-            script.contains(r#"deadline.sh --stop-commands "$limit" 1m"#),
-            "{script}"
-        );
         // `formal-calibration.yml` writes them for the registry of the
         // calibration.
         let text = include_str!("../../../.github/workflows/formal-calibration.yml");
@@ -1801,10 +1798,12 @@ mod tests { fn t() { let _ = 1 + 1; } }
             Some("--target calibration-planned")
         );
         // Each job has 23 minutes more than its step, and the run row the
-        // step of the comparator and 3 minutes after it as well.
+        // step of the comparator and 3 minutes after it as well; the planned
+        // example runs the part of its target alone.
+        let planned = shard_margin + budget(registry::State::Planned);
         for (row, seconds, after) in [
             (&rows[0], gate + extraction, comparator + 3),
-            (&rows[1], gate + budget(registry::State::Planned), 0),
+            (&rows[1], planned, 0),
         ] {
             let deadline = minutes(seconds + margin);
             assert_eq!(
@@ -1815,6 +1814,11 @@ mod tests { fn t() { let _ = 1 + 1; } }
             assert_eq!(number(&row["step"]), Some(step));
             assert_eq!(number(&row["job"]), Some(step + 23 + after));
         }
+        let written = rows
+            .iter()
+            .map(|row| (number(&row["step"]), number(&row["job"])));
+        let written = Vec::from_iter(written.map(|(step, job)| step.zip(job)));
+        assert_eq!(written, [Some((137, 200)), Some((42, 65))]);
         // One shard for each formal target of the calibration, with its
         // budget and the limits that `formal limits` would give it.
         let shards = document["jobs"]["shard"]["strategy"]["matrix"]["include"]
