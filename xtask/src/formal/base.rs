@@ -1850,7 +1850,8 @@ mod tests {
             (done.receipt.commands.iter())
                 .all(|c| c.site != Site::Charon || c.unit != Some(PHASE.to_string()))
         );
-        // A run that names it, from a root package, builds nothing of `base`.
+        // Extracted for the base round, from a root package, its definitions
+        // that do not type-check reject the round.
         run::tests::root_package(&fixture, "krepi-kernel", "");
         hashed(&mut fixture);
         let done = gate(

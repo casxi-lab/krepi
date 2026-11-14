@@ -894,7 +894,7 @@ the guard on a pull request; with `--calibration`, the same phases on the
 calibration target; with `--shard`, only the qualification job, which
 leaves out the targets of the waivers that hold
 ([waivers](../formal-verification.md#waivers)), or the shard of one
-formal target
+formal target; and with `--target`, only the part of the named targets
 ([shards and merge](../formal-verification.md#shards-and-merge)). It is not
 part of the check: CI runs it in the pinned proof-tool image with
 `--shard qualification` as the job `formal run` of

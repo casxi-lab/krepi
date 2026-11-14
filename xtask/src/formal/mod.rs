@@ -156,7 +156,7 @@ impl Layout {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "run",
-        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the named targets, --shard NAME only the qualification job, qualification, or the shard of a formal target, target/<name>, --calibration runs the calibration target, and --keep keeps the work directory of the run",
+        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the part of the named targets, their extraction and the phase targets, --shard NAME only the qualification job, qualification, or the shard of a formal target, target/<name>, --calibration runs the calibration target, and --keep keeps the work directory of the run",
         subcommands: &[],
     },
     Command {
