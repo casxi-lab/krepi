@@ -483,6 +483,11 @@ jobs:
       - name: Export the solution in the container of the gate
         timeout-minutes: 5
         run: |
+          # Lake and leanexport print text of the Lean sources of the head:
+          # no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
           read -r -a gate_flags <<< "$GATE_FLAGS"
           template=$RUNNER_TEMP/comparator/template
           dir=$RUNNER_TEMP/comparator/export
@@ -534,6 +539,11 @@ jobs:
       - name: Run lake comparator in each mode and container setting
         timeout-minutes: 25
         run: |
+          # The comparator prints text of the Lean sources of the head: no
+          # workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
           read -r -a gate_flags <<< "$GATE_FLAGS"
           template=$RUNNER_TEMP/comparator/template
           printf 'setting\tmode\tconfiguration\texit\n' > artifacts/comparator/results.tsv

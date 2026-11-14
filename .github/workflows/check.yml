@@ -8,13 +8,14 @@
 # the slow cases. `check summary` succeeds only when the other three jobs
 # did. A newer push to a pull request cancels the run of its older head;
 # runs on main are never cancelled. Each job has a limit. The check, the
-# image command and the suite command also stop at a deadline two minutes
-# before the limit of their job, so that the uploads still run when one of
-# them takes too long; the QEMU boot suite runs after the check without a
-# deadline of its own. The script that sets the deadline also passes a stop
-# signal of the runner on to the command and waits for it, so that a
-# cancelled check still writes its receipt. Actions are pinned to full
-# commit SHAs; the comment names the release.
+# image command and the suite command also stop at a deadline one or two
+# minutes before the limit of their job, counting for the check the limit
+# of the pull of the proof-tool image before it, so that the uploads still
+# run when one of them takes too long; the QEMU boot suite runs after the
+# check without a deadline of its own. The script that sets the deadline
+# also passes a stop signal of the runner on to the command and waits for
+# it, so that a cancelled check still writes its receipt. Actions are
+# pinned to full commit SHAs; the comment names the release.
 name: check
 
 on:
@@ -40,7 +41,7 @@ jobs:
   check:
     name: cargo xtask check
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 15
+    timeout-minutes: 17
     permissions:
       contents: read
     steps:
@@ -86,7 +87,7 @@ jobs:
         run: rustup toolchain install
 
       - name: Pull the pinned proof-tool image
-        timeout-minutes: 5
+        timeout-minutes: 3
         run: docker pull "$(jq -er '"\(.repository)@\(.digest)"' verification/image-pin.json)"
 
       - name: Run cargo xtask check

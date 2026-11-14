@@ -12,7 +12,8 @@
 # whether they affect the gate and the registered targets that they affect,
 # and the job `formal guard` runs `cargo xtask formal guard`, both on the
 # runner. None is a required check. The measurement jobs are in the
-# workflow `formal measure`, `formal-measure.yml`.
+# workflow `formal measure`, `formal-measure.yml`. A manual run of `formal`
+# runs no job yet; measurements are dispatched from `formal measure`.
 # Actions are pinned to full commit SHAs; the comment names the release.
 name: formal
 
@@ -279,6 +280,11 @@ jobs:
           GATE_OUTCOME: ${{ steps.gate.outcome }}
         run: |
           shopt -s nullglob
+          # The receipt holds text of Lean, Lake and the registries of the
+          # head: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
           receipts=(artifacts/formal/runs/*/receipt.json)
           {
             echo "## formal run"
@@ -806,7 +812,8 @@ jobs:
   # list into the summary of the run. It judges nothing: it fails only when
   # the list cannot be made. Its main command runs under `deadline.sh`,
   # which turns workflow commands off while it prints the paths of the pull
-  # request, and the summary indents them as code.
+  # request, and the summary escapes carriage returns and indents the list
+  # as code.
   fast:
     name: formal fast
     if: github.event_name == 'pull_request'
@@ -848,7 +855,7 @@ jobs:
             echo "## formal fast"
             echo
             if [ -f artifacts/formal/impact.txt ]; then
-              sed 's/^/    /' artifacts/formal/impact.txt
+              sed 's/\r/\\r/g; s/^/    /' artifacts/formal/impact.txt
             else
               echo "The list was not made."
             fi
@@ -858,8 +865,8 @@ jobs:
   # event of the run: it checks the pull request against the rules for
   # changes of statements, proofs, sources and registries, and its failure
   # fails the job. Its main command runs under `deadline.sh`, which turns
-  # workflow commands off while it prints, and the summary indents its
-  # output as code.
+  # workflow commands off while it prints, and the summary escapes carriage
+  # returns and indents its output as code.
   guard:
     name: formal guard
     if: github.event_name == 'pull_request'
@@ -900,7 +907,7 @@ jobs:
             echo "## formal guard"
             echo
             if [ -f artifacts/formal/guard.txt ]; then
-              sed 's/^/    /' artifacts/formal/guard.txt
+              sed 's/\r/\\r/g; s/^/    /' artifacts/formal/guard.txt
             else
               echo "The guard did not run."
             fi

@@ -2,10 +2,11 @@
 # only. It runs the host checks with the slow tests, and every QEMU suite
 # with its slow cases on the images taken by their digests. Each job has a
 # limit, and the check, the image command and the suite command also stop
-# at a deadline two minutes before the limit of their job; the script that
-# sets the deadline passes a stop signal of the runner on to the command
-# and waits for it. Actions are pinned to full commit SHAs; the comment
-# names the release.
+# at a deadline one or two minutes before the limit of their job, counting
+# for the check the limit of the pull of the proof-tool image before it;
+# the script that sets the deadline passes a stop signal of the runner on
+# to the command and waits for it. Actions are pinned to full commit SHAs;
+# the comment names the release.
 name: nightly
 
 on:
@@ -31,7 +32,7 @@ jobs:
     name: nightly cargo xtask check --slow
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 40
+    timeout-minutes: 42
     permissions:
       contents: read
     steps:
@@ -76,7 +77,7 @@ jobs:
         run: rustup toolchain install
 
       - name: Pull the pinned proof-tool image
-        timeout-minutes: 5
+        timeout-minutes: 3
         run: docker pull "$(jq -er '"\(.repository)@\(.digest)"' verification/image-pin.json)"
 
       - name: Run cargo xtask check with the slow tests

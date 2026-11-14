@@ -1135,16 +1135,23 @@ fn deadline_of(line: &str) -> Result<(bool, i64, i64), String> {
 /// number. Each runs as the last command of its step under [`DEADLINE`],
 /// with `exec` so that the script receives the signals of the runner, with
 /// `--stop-commands` for the suite alone, and at a deadline that with its
-/// kill-after ends before the limit of its job and, when `tight`, one or two
-/// minutes before that limit. No other command of a script calls `timeout`.
+/// kill-after ends before the limit of its job and, when `tight`, that with
+/// the limits of the steps before it that pull the image ([`PULL`]) ends one
+/// or two minutes before that limit. No other command of a script calls
+/// `timeout`.
 fn deadline_problems(document: &Yaml, tight: bool) -> (usize, Vec<String>) {
     let mut problems = Vec::new();
     let mut count = 0;
     for (key, job) in jobs(document) {
         let limit = job["timeout-minutes"].as_i64();
-        for script in
-            (job["steps"].as_vec().into_iter().flatten()).filter_map(|step| step["run"].as_str())
-        {
+        let mut pulls = 0;
+        for step in job["steps"].as_vec().into_iter().flatten() {
+            let Some(script) = step["run"].as_str() else {
+                continue;
+            };
+            if script == PULL {
+                pulls += step["timeout-minutes"].as_i64().unwrap_or_default();
+            }
             let lines = logical_lines(script);
             let named: Vec<usize> = (0..lines.len())
                 .filter(|at| main_command(&lines[*at]).is_some())
@@ -1185,10 +1192,12 @@ fn deadline_problems(document: &Yaml, tight: bool) -> (usize, Vec<String>) {
                     "job {key}: the deadline of cargo xtask {main} and its kill-after reach the \
                      limit of {limit} minutes"
                 )),
-                Some(limit) if tight && !(1..=2).contains(&(limit - minutes)) => {
+                Some(limit) if tight && !(1..=2).contains(&(limit - minutes - pulls)) => {
+                    let pulled = (pulls > 0).then(|| format!(", after {pulls} minutes of pulls,"));
+                    let pulled = pulled.unwrap_or_default();
                     problems.push(format!(
-                        "job {key}: the deadline of cargo xtask {main} is not one or two minutes \
-                         before the limit of {limit} minutes"
+                        "job {key}: the deadline of cargo xtask {main}{pulled} is not one or two \
+                         minutes before the limit of {limit} minutes"
                     ));
                 }
                 Some(_) => {}
@@ -1295,6 +1304,24 @@ fn every_main_command_of_the_lines_runs_under_its_deadline() {
             "{text}"
         );
     }
+    // The limit of a pull of the image before the check counts before its
+    // deadline.
+    let pulled = good.replace(
+        "    steps:\n      - run: |\n          echo start",
+        &format!(
+            "    steps:\n      - timeout-minutes: 3\n        run: {PULL}\n      - run: |\n          \
+             echo start"
+        ),
+    );
+    assert_eq!(
+        deadline_problems(&parse(&pulled), true).1,
+        [
+            "job check: the deadline of cargo xtask check, after 3 minutes of pulls, is not one \
+             or two minutes before the limit of 15 minutes"
+        ]
+    );
+    let raised = pulled.replace("timeout-minutes: 15", "timeout-minutes: 17");
+    assert_eq!(deadline_problems(&parse(&raised), true), (2, Vec::new()));
     // Away from the lines, the deadline may be earlier.
     let early = good.replace("13m 90s", "10m 90s");
     assert_eq!(deadline_problems(&parse(&early), false), (2, Vec::new()));
@@ -1420,7 +1447,7 @@ const REQUIRE: &str = r#"jq -e '[.steps[] | select(.name == "formal")] | length 
 const CHECK_RECEIPT: &str = "--receipt artifacts/check-receipt.json";
 
 /// The problems of the steps around the check in `job`: the step before it
-/// pulls the pinned image within 5 minutes, the step after it requires the
+/// pulls the pinned image within 3 minutes, the step after it requires the
 /// formal step of the receipt to have passed, and both run when the check
 /// runs.
 fn formal_step_problems(job: &Yaml) -> Vec<String> {
@@ -1449,7 +1476,7 @@ fn formal_step_problems(job: &Yaml) -> Vec<String> {
             at.checked_sub(1),
             "Pull the pinned proof-tool image",
             PULL,
-            Some(5),
+            Some(3),
         ),
         (
             Some(at + 1),
@@ -1507,7 +1534,7 @@ fn the_lines_pull_the_pinned_image_and_require_the_formal_step() {
     let job = parse(&format!(
         "steps:\n  - name: Run the check\n    run: {check}\n  - name: Require the formal step \
          to have passed\n    run: {REQUIRE}\n  - name: Pull the pinned proof-tool image\n    \
-         timeout-minutes: 5\n    run: {PULL}\n"
+         timeout-minutes: 3\n    run: {PULL}\n"
     ));
     assert_eq!(
         formal_step_problems(&job),

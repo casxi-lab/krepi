@@ -315,52 +315,54 @@ CI runs in lines, each a workflow of `.github/workflows/` on GitHub-hosted
 
 Every job of these lines has a `timeout-minutes`. In the jobs that run
 `cargo xtask check`, `cargo xtask image` or `cargo xtask suite`, that
-command also ends at a deadline that `timeout` sets two minutes before the
-limit of its job, so that the uploads still run when the command takes too
-long; `cargo xtask qemu-boot` runs after the check in the same job without
-a deadline of its own. The step starts the command as the last command of
-its script with `exec bash .github/scripts/deadline.sh`, so that this script
-is the process of the step and receives the signals with which the runner
-stops a step: SIGINT when the run is cancelled, SIGTERM some seconds later
-and then SIGKILL. `timeout` runs the command in a process group of its own,
-which those signals do not reach, so the script passes SIGINT and SIGTERM
-on to `timeout`, which passes them on to the command, and does not end
-before the command has: a check that a newer push to its pull request
-cancels writes its receipt with the result `interrupted`, and the upload
-after it finds the receipt. The script exits with the status of the
-command, and with 124 when the deadline stopped it, also when `timeout`
-had to kill it then. Along the longest chain of jobs that need each
-other the limits add up to 18 minutes on the pull request line and to 43
-minutes on the full line, within the 20 and 60 minutes that those lines
-allow. After each completed run of another workflow of the directory,
-the workflow `run record` (`run-record.yml`) writes its record with
-`cargo xtask run-record`, described below, adds the summary to the run's
-summary page and uploads the record as `run-record-<run>-<attempt>`, kept
-90 days for a run on `main` that a pull request did not trigger and 30 days
-for the others; it runs the code of the default branch with read
-permissions only, and a manual run of it on `main` records the run whose ID
-it takes. Unit tests of the check read the committed workflows and hold
-them to these limits, to the label of the full line as its only trigger, to
-`--slow` in the full and nightly lines only, to the one job named
-`cargo xtask check` and the summary of the pull request line, to the pull
-of the pinned image before the check and the requirement on its formal
-step after it in each job that runs the check, the job of the workflow
-`cache` included, to no mention of `--skip-formal` in any workflow, in any
-letter case and comments included, to the flags of the containers of the
-formal step, which are the `GATE_FLAGS` of the formal workflows, to the list
-of workflows that the record workflow follows, to a retention by the rule
-below for every upload step of every workflow, against a table of those
-steps, to downloads that take the name of their
-artifact from an output of the job that uploaded it, so that a rerun of
-the downloading job alone still finds the artifact, to uploads of
-receipts, summaries, records of the run and the logs packed into
+command also ends at a deadline that `timeout` sets one or two minutes
+before the limit of its job, counting for the check the 3-minute limit of
+the pull of the image before it, so that the uploads still run when the
+command takes too long: the check has 13 minutes of the 17 of its job on the
+pull request and main lines and 38 of 42 on the full and nightly lines.
+`cargo xtask qemu-boot` runs after the check in the same job without a
+deadline of its own. The step starts the command as the last command of its
+script with `exec bash .github/scripts/deadline.sh`, so that this script is
+the process of the step and receives the signals with which the runner stops
+a step: SIGINT when the run is cancelled, SIGTERM some seconds later and
+then SIGKILL. `timeout` runs the command in a process group of its own,
+which those signals do not reach, so the script passes SIGINT and SIGTERM on
+to `timeout`, which passes them on to the command, and does not end before
+the command has: a check that a newer push to its pull request cancels
+writes its receipt with the result `interrupted`, and the upload after it
+finds the receipt. The script exits with the status of the command, and with
+124 when the deadline stopped it, also when `timeout` had to kill it then.
+Along the longest chain of jobs that need each other the limits add up to 20
+minutes on the pull request line and to 45 minutes on the full line, within
+the 20 and 60 minutes that those lines allow. After each completed run of
+another workflow of the directory, the workflow `run record`
+(`run-record.yml`) writes its record with `cargo xtask run-record`,
+described below, adds the summary to the run's summary page and uploads the
+record as `run-record-<run>-<attempt>`, kept 90 days for a run on `main`
+that a pull request did not trigger and 30 days for the others; it runs the
+code of the default branch with read permissions only, and a manual run of
+it on `main` records the run whose ID it takes. Unit tests of the check read
+the committed workflows and hold them to these limits, to the label of the
+full line as its only trigger, to `--slow` in the full and nightly lines
+only, to the one job named `cargo xtask check` and the summary of the pull
+request line, to the pull of the pinned image within 3 minutes before the
+check and the requirement on its formal step after it in each job that runs
+the check, the job of the workflow `cache` included, to no mention of
+`--skip-formal` in any workflow, in any letter case and comments included,
+to the flags of the containers of the formal step, which are the
+`GATE_FLAGS` of the formal workflows, to the list of workflows that the
+record workflow follows, to a retention by the rule below for every upload
+step of every workflow, against a table of those steps, to downloads that
+take the name of their artifact from an output of the job that uploaded it,
+so that a rerun of the downloading job alone still finds the artifact, to
+uploads of receipts, summaries, records of the run and the logs packed into
 `logs.tar.gz` in the jobs of the gate of the two formal workflows, to a
 download of the parts of their run by the pattern of their names in their
-merge jobs, to the steps of those of `formal` in the shard and merge jobs
-of the calibration, and to main commands
-that run under that script as the last command of their step, at a
-deadline one or two minutes before the limit of their job. Where GNU `env`
-and GNU `timeout` are on the path, as on the runners, a unit test also
+merge jobs, to the steps of those of `formal` in the shard and merge jobs of
+the calibration, and to main commands that run under that script as the last
+command of their step, at a deadline that with the limit of the pull before
+the check ends one or two minutes before the limit of their job. Where GNU
+`env` and GNU `timeout` are on the path, as on the runners, a unit test also
 sends SIGINT to the script and requires that it ends only after its command
 has, with the status of the command.
 

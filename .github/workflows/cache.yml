@@ -49,7 +49,7 @@ jobs:
     name: cache build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 25
+    timeout-minutes: 27
     permissions:
       contents: read
     outputs:
@@ -104,7 +104,7 @@ jobs:
 
       - name: Pull the pinned proof-tool image
         if: steps.cargo.outputs.cache-hit != 'true'
-        timeout-minutes: 5
+        timeout-minutes: 3
         run: docker pull "$(jq -er '"\(.repository)@\(.digest)"' verification/image-pin.json)"
 
       # The check builds what the jobs of the lines build.
