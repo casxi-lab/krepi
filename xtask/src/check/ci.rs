@@ -3,8 +3,9 @@
 //! and the weekly line, of the record workflow, the retention of the
 //! artifacts of every workflow, and the uploads of the jobs of the gate in
 //! the formal workflows, the names of their parts and the steps that the two
-//! workflows share. They run in the `test` step; the rules hold for these
-//! files only and are not part of the workflows step.
+//! workflows share, and the sentence of the documentation that names the
+//! required checks of `main`. They run in the `test` step; the rules hold
+//! for these files only and are not part of the workflows step.
 
 use yaml_rust2::{Yaml, YamlLoader};
 
@@ -24,8 +25,11 @@ const PULL_REQUEST_LIMIT: i64 = 20;
 const FULL_LIMIT: i64 = 60;
 /// The label that starts the full line.
 const FULL_LABEL: &str = "full-check";
-/// The job that the rules of `main` require.
+/// The check of the pull request line that the rules of `main` require,
+/// beside its summary and the six checks of the gate.
 const REQUIRED: &str = "cargo xtask check";
+/// The summary of the pull request line, which the rules of `main` require.
+const SUMMARY: &str = "check summary";
 
 /// The tracked workflow files with their YAML documents.
 fn workflows() -> Vec<(String, Yaml)> {
@@ -324,7 +328,7 @@ fn the_pull_request_line_keeps_its_required_check_and_its_summary() {
     let check = workflow(LINES[0]);
     assert!(check["on"]["pull_request"].as_hash().is_some());
     let summary = &check["jobs"]["summary"];
-    assert_eq!(summary["name"].as_str(), Some("check summary"));
+    assert_eq!(summary["name"].as_str(), Some(SUMMARY));
     assert_eq!(needs(summary), ["check", "image", "suite"]);
     assert_eq!(summary["if"].as_str(), Some("always()"));
     assert_eq!(needs(&check["jobs"]["suite"]), ["image"]);
@@ -1493,6 +1497,24 @@ fn the_six_checks_of_the_gate_are_literal_jobs_of_formal_alone() {
         let job = &formal["jobs"][key];
         assert!(job["strategy"].is_badvalue(), "{key} runs no matrix");
     }
+}
+
+#[test]
+fn the_documentation_names_the_required_checks_of_main() {
+    // The rules of main require the check of the pull request line, its
+    // summary and the six checks of the gate, which "CI job" lists in one
+    // sentence.
+    let docs = include_str!("../../../docs/formal-verification.md");
+    let (_, section) = docs.split_once("\n### CI job\n").expect("the section");
+    let section = section.split("\n## ").next().expect("the section");
+    let section = section.replace('\n', " ");
+    let (_, sentence) = (section.split_once("The required checks are "))
+        .expect("the sentence of the required checks");
+    let (sentence, _) = sentence.split_once(". ").expect("its end");
+    let names: Vec<&str> = sentence.split('`').skip(1).step_by(2).collect();
+    let mut expected = vec![REQUIRED, SUMMARY];
+    expected.extend(GATE_CHECKS.map(|(_, name)| name));
+    assert_eq!(names, expected);
 }
 
 #[test]

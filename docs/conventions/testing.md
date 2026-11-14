@@ -393,7 +393,10 @@ commands that run under `deadline.sh` at a deadline at least two minutes
 before the limit of their step, and to every command of their steps under
 that script at a deadline that with its kill-after ends before that limit;
 and to the scripts of the measurement
-steps, which run with the flags of the runner's shell. A test runs its
+steps, which run with the flags of the runner's shell. One more holds the
+sentence of [CI job](../formal-verification.md#ci-job) that names the
+required checks of `main` to the check and the summary of the pull request
+line and the six checks of the gate. A test runs its
 scripts with jq only where jq is on the path, as on the runners. Where GNU
 `env` and GNU `timeout` are on the path, as on the runners, a unit test also
 sends SIGINT to the script and requires that it ends only after its command
@@ -946,7 +949,9 @@ part of the check: CI runs it in the pinned proof-tool image with
 target, on a GitHub-hosted `ubuntu-24.04-arm` runner, when the label
 `full-check` is added to a pull request to `main` whose change affects the
 gate, on a manual run of `main` and once a week. The jobs are not
-required; each uploads its receipts, its summary and its logs packed into
+required checks; the verdicts that judge their merge are
+([CI job](../formal-verification.md#ci-job)). Each uploads its receipts,
+its summary and its logs packed into
 `logs.tar.gz` as the artifact
 `formal-part-qualification-<commit>-<attempt>` or
 `formal-part-target-<name>-<commit>-<attempt>`, and the job
@@ -1014,7 +1019,8 @@ with the base of the pull request, whose decision starts the gate on the
 label `full-check`, and the job `formal guard` runs
 `cargo xtask formal guard` with the event of the run; both run on the
 runner without the image, write the output of their command into the
-summary of the run and are not required. On a manual or scheduled run of
+summary of the run and are required checks of `main`
+([CI job](../formal-verification.md#ci-job)). On a manual or scheduled run of
 `main`, the job `formal merge` runs it on the commit itself, and on a push
 to `main` the job `formal receipt review` with the first parent of the
 merge as the base. Its unit tests run in the `test`
