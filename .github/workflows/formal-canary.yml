@@ -220,21 +220,21 @@ jobs:
         timeout-minutes: 1
         run: xtask/target/debug/xtask formal canary patch
 
-      # The `docker build` of `formal image build`, under a limit of 52
-      # minutes that ends it within the step's limit; its exit status is
-      # kept for the verdict.
+      # The `docker build` of `formal image build`, under `deadline.sh` with
+      # a deadline of 52 minutes that ends it within the step's limit and
+      # with workflow commands off; `deadline.sh` keeps its exit status for
+      # the verdict.
       - name: Build the image
         id: build
         timeout-minutes: 55
         run: |
-          status=0
-          timeout --kill-after 1m 52m docker build --progress=plain --file verification/image/Dockerfile \
+          exec bash .github/scripts/deadline.sh --stop-commands --status artifacts/canary/build-status \
+            52m 1m bash -o pipefail -c '
+          docker build --progress=plain --file verification/image/Dockerfile \
             --build-context aeneas-src=artifacts/image/aeneas \
             --build-context charon-src=artifacts/image/charon \
             --build-arg REVISION="$REVISION" --tag "$IMAGE_REF" verification 2>&1 \
-            | tee artifacts/image/build.log || status=$?
-          echo "$status" > artifacts/canary/build-status
-          exit "$status"
+            | tee artifacts/image/build.log'
 
       - name: Record the image
         id: record
@@ -313,27 +313,25 @@ jobs:
           echo "== the probe passed; prepare ended $(date -u +%FT%TZ)" \
             | tee -a artifacts/formal/job.txt
 
-      # As the job `formal run` of formal.yml runs the gate, but in the image
-      # that this job built, which the gate is not given as a reference: the
-      # receipt records none and compares no pin.
+      # As the job `formal run` of formal.yml runs the gate, but the whole
+      # gate and in the image that this job built, which the gate is not
+      # given as a reference: the receipt records none and compares no pin.
+      # Its deadline is the gate's 7,200 s and the 300 s of its receipt;
+      # `deadline.sh` keeps its exit status for the verdict.
       - name: Run the gate in the image
         id: gate
-        timeout-minutes: 126
+        timeout-minutes: 127
         run: |
           read -r -a gate_flags <<< "$GATE_FLAGS"
           echo "== gate started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
-          status=0
-          docker run --rm --name "formal-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+          exec bash .github/scripts/deadline.sh --stop-commands --status artifacts/canary/gate-status 125m 1m \
+            docker run --rm --name "formal-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --env GITHUB_EVENT_NAME --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
             --env KREPI_FORMAL_TRIGGER \
             --env GITHUB_EVENT_PATH="$GITHUB_WORKSPACE/artifacts/formal/event.json" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run || status=$?
-          echo "$status" > artifacts/canary/gate-status
-          echo "== gate ended $(date -u +%FT%TZ) with exit status $status" \
-            | tee -a artifacts/formal/job.txt
-          exit "$status"
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run
 
       - name: Remove the container of the gate
         if: always()

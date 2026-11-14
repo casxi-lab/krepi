@@ -2323,12 +2323,10 @@ fn every_main_command_of_the_lines_runs_under_its_deadline() {
     assert_eq!(deadline_problems(&parse(&early), false), (2, Vec::new()));
 }
 
-#[test]
-fn the_deadline_script_passes_on_a_stop_signal_and_waits_for_the_command() {
+/// Whether GNU `env` and GNU `timeout`, which [`DEADLINE`] needs, are on
+/// the path, as on the runners.
+fn gnu_tools() -> bool {
     use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
-    // The script needs GNU `env` and GNU `timeout`, as on the runners;
-    // elsewhere the test has nothing to run.
     let output = |program: &str, args: &[&str]| {
         let output = Command::new(program)
             .args(args)
@@ -2339,7 +2337,15 @@ fn the_deadline_script_passes_on_a_stop_signal_and_waits_for_the_command() {
     let gnu_env = output("env", &["--default-signal=INT", "true"]).is_some();
     let gnu_timeout = output("timeout", &["--version"])
         .is_some_and(|output| String::from_utf8_lossy(&output.stdout).contains("GNU coreutils"));
-    if !gnu_env || !gnu_timeout {
+    gnu_env && gnu_timeout
+}
+
+#[test]
+fn the_deadline_script_passes_on_a_stop_signal_and_waits_for_the_command() {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    // Elsewhere than on the runners the test has nothing to run.
+    if !gnu_tools() {
         eprintln!("skipped: GNU env and GNU timeout are not on the path");
         return;
     }
@@ -2379,6 +2385,302 @@ fn the_deadline_script_passes_on_a_stop_signal_and_waits_for_the_command() {
     // status of the command.
     assert!(path("stopped").exists(), "{}", said());
     assert_eq!(status.code(), Some(3), "{}", said());
+}
+
+#[test]
+fn the_deadline_script_writes_the_status_of_the_command_when_asked() {
+    use std::process::{Command, Stdio};
+    if !gnu_tools() {
+        eprintln!("skipped: GNU env and GNU timeout are not on the path");
+        return;
+    }
+    let scratch = crate::scratch::Scratch::temporary("deadline-status");
+    let run = |args: &[&str]| {
+        let output = Command::new("bash")
+            .arg(crate::repo::root().join(DEADLINE))
+            .args(args)
+            .current_dir(&scratch.0)
+            .stdin(Stdio::null())
+            .output()
+            .expect("run the script");
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        (output.status.code(), stdout)
+    };
+    let written = |name: &str| std::fs::read_to_string(scratch.0.join(name)).ok();
+    // The status of the command, with workflow commands off around it.
+    let args = [
+        "--stop-commands",
+        "--status",
+        "exit",
+        "30s",
+        "5s",
+        "bash",
+        "-c",
+        "echo out; exit 3",
+    ];
+    let (code, stdout) = run(&args);
+    assert_eq!(code, Some(3), "{stdout}");
+    assert_eq!(written("exit").as_deref(), Some("3\n"));
+    let lines: Vec<&str> = stdout.lines().collect();
+    let token = lines[0]
+        .strip_prefix("::stop-commands::")
+        .expect("the token");
+    let end = format!("::{token}::");
+    assert_eq!(lines[1..], ["out", end.as_str()]);
+    // 124 when the deadline stopped it.
+    let (code, _) = run(&["--status", "deadline", "1s", "5s", "sleep", "30"]);
+    assert_eq!(
+        (code, written("deadline").as_deref()),
+        (Some(124), Some("124\n"))
+    );
+    // Without the option no status is written, and the option needs a file.
+    let (code, _) = run(&["30s", "5s", "true"]);
+    assert_eq!(code, Some(0));
+    let files = std::fs::read_dir(&scratch.0)
+        .expect("the directory")
+        .count();
+    assert_eq!(files, 2);
+    for args in [
+        &["--status"][..],
+        &["--stop-commands", "--status", "s", "1s"],
+    ] {
+        assert_eq!(run(args).0, Some(2), "{args:?}");
+    }
+}
+
+/// The steps of the workflows of the gate, the calibration, the canary and
+/// the measurements that run the main command of a container of the image,
+/// or build the image, under [`DEADLINE`]: the file, the job, the step, and
+/// the minutes of its deadline, or `None` where the matrix of the job gives
+/// them.
+const CONTAINER_STEPS: [(&str, &str, &str, Option<i64>); 14] = [
+    (FORMAL, "gate", "Run the gate in the image", Some(135)),
+    (FORMAL, "gate", COMPARATOR_STEP, Some(35)),
+    (FORMAL, "shard", "Run the shard in the image", None),
+    (
+        FORMAL,
+        "scoped",
+        "Run the planned target in the image",
+        None,
+    ),
+    (
+        CALIBRATION,
+        "calibration",
+        "Run the gate on the calibration in the image",
+        None,
+    ),
+    (CALIBRATION, "calibration", COMPARATOR_STEP, Some(35)),
+    (CALIBRATION, "shard", "Run the shard in the image", None),
+    (
+        CALIBRATION,
+        "mutants",
+        "Run the source mutants of the calibration in the image",
+        Some(245),
+    ),
+    (CANARY, "canary", "Build the image", Some(52)),
+    (CANARY, "canary", "Run the gate in the image", Some(125)),
+    (
+        MEASURE,
+        "leanchecker",
+        "Run the gate in the image",
+        Some(73),
+    ),
+    (
+        MEASURE,
+        "leanchecker",
+        "Measure leanchecker on a cold page cache",
+        Some(28),
+    ),
+    (
+        MEASURE,
+        "comparator",
+        "Export the solution in the container of the gate",
+        Some(3),
+    ),
+    (MEASURE, "comparator", MEASURED_COMPARATOR, Some(23)),
+];
+/// The workflow of the toolchain canary.
+const CANARY: &str = ".github/workflows/formal-canary.yml";
+/// The step of the measurement of the comparator.
+const MEASURED_COMPARATOR: &str = "Run lake comparator in each mode and container setting";
+/// The other steps of those workflows that start a container of the image,
+/// each briefly and within a limit of a few minutes: the probes, and these,
+/// which pull the image or record it.
+const SHORT_CONTAINER_STEPS: [&str; 2] =
+    ["Record the runner and pull the image", "Record the image"];
+
+/// The options, the deadline and the kill-after with which the line `line`
+/// runs its command under [`DEADLINE`], if it does: whether it turns
+/// workflow commands off, the file of `--status` and the two durations.
+fn deadline_options(line: &str) -> Option<(bool, Option<&str>, &str, &str)> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let mut rest = words.strip_prefix(&["exec", "bash", DEADLINE][..])?;
+    let stop = rest.first() == Some(&"--stop-commands");
+    if stop {
+        rest = &rest[1..];
+    }
+    let mut status = None;
+    if let ["--status", file, after @ ..] = rest {
+        (status, rest) = (Some(*file), after);
+    }
+    match rest {
+        [deadline, kill, _, ..] => Some((stop, status, deadline, kill)),
+        _ => None,
+    }
+}
+
+#[test]
+fn the_main_commands_of_the_formal_workflows_run_under_their_deadlines() {
+    let mut checked = Vec::new();
+    for (path, document) in workflows() {
+        if ![FORMAL, CALIBRATION, CANARY, MEASURE].contains(&path.as_str()) {
+            continue;
+        }
+        for (key, job) in jobs(&document) {
+            for step in job["steps"].as_vec().into_iter().flatten() {
+                let script = step["run"].as_str().unwrap_or_default();
+                if !script.contains("docker run ") && !script.contains("docker build ") {
+                    continue;
+                }
+                let name = step["name"].as_str().unwrap_or_default();
+                let listed = (CONTAINER_STEPS.iter())
+                    .find(|(f, j, s, _)| (*f, *j, *s) == (path.as_str(), key, name));
+                let limit = step["timeout-minutes"].as_i64();
+                let Some((_, _, _, minutes)) = listed else {
+                    // A probe or a short step.
+                    let short =
+                        script.contains("<<'PROBE'") || SHORT_CONTAINER_STEPS.contains(&name);
+                    assert!(short, "{path}: {key}: {name}");
+                    assert!(
+                        limit.is_some_and(|limit| limit <= 8),
+                        "{path}: {key}: {name}"
+                    );
+                    continue;
+                };
+                checked.push((path.clone(), key.to_string(), name.to_string()));
+                // The step ends with its main command under the script, with
+                // `exec`, and turns workflow commands off while it prints;
+                // the deadline and the kill-after of a minute end before the
+                // limit of the step.
+                let lines = logical_lines(script);
+                let at = lines
+                    .iter()
+                    .position(|line| line.trim_start().starts_with("exec bash"));
+                let at = at.unwrap_or_else(|| panic!("{path}: {key}: {name}"));
+                let quoted =
+                    lines[at].trim_end().ends_with('\'') && script.trim_end().ends_with('\'');
+                assert!(at == lines.len() - 1 || quoted, "{path}: {key}: {name}");
+                let options = deadline_options(&lines[at]);
+                let (stop, _, deadline, kill) = options.unwrap_or_else(|| panic!("{path}: {name}"));
+                assert!(stop, "{path}: {key}: {name}");
+                assert_eq!(kill, "1m", "{path}: {key}: {name}");
+                match minutes {
+                    Some(minutes) => {
+                        assert_eq!(deadline, format!("{minutes}m"), "{path}: {key}: {name}");
+                        let limit = limit.expect("a limit of the step");
+                        assert!(minutes + 1 < limit, "{path}: {key}: {name}");
+                    }
+                    None => {
+                        let given = ["\"$limit\"", "\"$DEADLINE\""].contains(&deadline);
+                        assert!(given, "{path}: {key}: {name}");
+                        assert_eq!(step["timeout-minutes"].as_str(), Some("${{ matrix.step }}"));
+                    }
+                }
+            }
+        }
+    }
+    checked.sort();
+    let mut expected: Vec<_> = (CONTAINER_STEPS.iter())
+        .map(|(path, key, name, _)| (path.to_string(), key.to_string(), name.to_string()))
+        .collect();
+    expected.sort();
+    assert_eq!(checked, expected);
+    // The canary keeps the status of the build and of the gate for its
+    // verdict.
+    let canary = workflow(CANARY);
+    for (name, file) in [
+        ("Build the image", "artifacts/canary/build-status"),
+        ("Run the gate in the image", "artifacts/canary/gate-status"),
+    ] {
+        let script = step_named(&canary["jobs"]["canary"], name)["run"]
+            .as_str()
+            .unwrap_or_default();
+        let lines = logical_lines(script);
+        let exec = lines
+            .iter()
+            .find(|line| line.trim_start().starts_with("exec bash"));
+        let status = exec.and_then(|line| deadline_options(line)?.1);
+        assert_eq!(status, Some(file), "{name}");
+    }
+}
+
+#[test]
+fn the_measure_scripts_run_with_the_flags_of_the_runner() {
+    use std::process::{Command, Stdio};
+    // Each step of the measurement that runs under the script writes its
+    // body into a script of its own, which runs with `-e` and `pipefail`
+    // as the shell of a step does, behind the `tee` of its log.
+    let measure = workflow(MEASURE);
+    let wrapper = "'bash -eo pipefail \"$1\" 2>&1 | tee \"$2\"'";
+    let mut written = Vec::new();
+    for (key, job) in jobs(&measure) {
+        for step in job["steps"].as_vec().into_iter().flatten() {
+            let script = step["run"].as_str().unwrap_or_default();
+            let Some(start) = script
+                .lines()
+                .position(|line| line.ends_with("<<'MEASURE'"))
+            else {
+                continue;
+            };
+            let lines: Vec<&str> = script.lines().collect();
+            let file = lines[start]
+                .strip_prefix("cat > \"")
+                .and_then(|rest| rest.split_once('"'));
+            let (file, _) = file.unwrap_or_else(|| panic!("{key}: {}", lines[start]));
+            let last = logical_lines(script).pop().expect("a line");
+            let words: Vec<&str> = last.split_whitespace().collect();
+            let tail = words
+                .iter()
+                .position(|word| *word == "-c")
+                .map(|at| words[at + 1..].join(" "));
+            let ran = format!("{wrapper} measure \"{file}\"");
+            assert!(
+                tail.is_some_and(|tail| tail.starts_with(&ran)),
+                "{key}: {last}"
+            );
+            written.push(file.to_string());
+        }
+    }
+    assert_eq!(
+        written,
+        [
+            "$RUNNER_TEMP/leanchecker.sh",
+            "$RUNNER_TEMP/export.sh",
+            "$RUNNER_TEMP/comparator.sh"
+        ]
+    );
+    // The wrapper fails with the status of the first command of the body
+    // that fails, behind the `tee` of its log, and keeps what came before.
+    let scratch = crate::scratch::Scratch::temporary("measure");
+    let wrapped = wrapper.trim_matches('\'');
+    for (body, code, log) in [
+        ("echo a\nfalse\necho b\n", Some(1), "a\n"),
+        ("echo a\nfalse | cat\necho b\n", Some(1), "a\n"),
+        ("echo a\nexit 3\n", Some(3), "a\n"),
+        ("echo a >&2\n", Some(0), "a\n"),
+    ] {
+        scratch.write("body.sh", body);
+        let status = Command::new("bash")
+            .args(["-o", "pipefail", "-c", wrapped, "measure", "body.sh", "log"])
+            .current_dir(&scratch.0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .status()
+            .expect("run the wrapper");
+        assert_eq!(status.code(), code, "{body}");
+        let text = std::fs::read_to_string(scratch.0.join("log")).expect("the log");
+        assert_eq!(text, log, "{body}");
+    }
 }
 
 /// The option of `cargo xtask check` that records the formal step as not

@@ -155,8 +155,9 @@ jobs:
   # one part of the merge. The deadline of the gate is its 7,200 s and 600 s
   # for the extraction of every formal target, that of the comparator its
   # 1,800 s; then each has the 300 s of its receipt. Each step has the
-  # minutes of its deadline and receipt and two more, and the job 15
-  # minutes before the gate step, the two steps and 3 minutes after them.
+  # minutes of its deadline and receipt and two more, as `deadline.sh` kills
+  # its command a minute after its deadline, and the job 15 minutes before
+  # the gate step, the two steps and 3 minutes after them.
   gate:
     name: formal run
     needs: limits
@@ -266,9 +267,11 @@ jobs:
           echo "== the probe passed; prepare ended $(date -u +%FT%TZ)" \
             | tee -a artifacts/formal/job.txt
 
-      # The gate ends by its own deadline; the step's limit is a backstop two
-      # minutes after it and its receipt. The receipt is the gate's verdict,
-      # so the step fails whenever the gate does, `REJECTED` included.
+      # The gate ends by its own deadline; `deadline.sh` stops it at that
+      # deadline and its receipt and kills it a minute later, a minute before
+      # the step's limit, and turns workflow commands off while it prints.
+      # The receipt is the gate's verdict, so the step fails whenever the gate
+      # does, `REJECTED` included.
       - name: Run the gate in the image
         id: gate
         if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
@@ -276,18 +279,15 @@ jobs:
         run: |
           read -r -a gate_flags <<< "$GATE_FLAGS"
           echo "== gate started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
-          status=0
-          docker run --rm --name "formal-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+          exec bash .github/scripts/deadline.sh --stop-commands 135m 1m \
+            docker run --rm --name "formal-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --env GITHUB_EVENT_NAME --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
             --env KREPI_FORMAL_TRIGGER \
             --env GITHUB_EVENT_PATH="$GITHUB_WORKSPACE/artifacts/formal/event.json" \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard qualification --keep || status=$?
-          echo "== gate ended $(date -u +%FT%TZ) with exit status $status" \
-            | tee -a artifacts/formal/job.txt
-          exit "$status"
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard qualification --keep
 
       - name: Remove the container of the gate
         if: always()

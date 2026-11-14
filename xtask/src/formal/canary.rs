@@ -1866,23 +1866,44 @@ mod tests {
         let tee = ["2>&1 | tee artifacts/canary/toolchain-check.txt"];
         assert_eq!(step(CANARY, check, &tee), step(BUILD, check, &[]));
         let gate = "Run the gate in the image";
-        let status = "echo \"$status\" > artifacts/canary/gate-status";
         let image = "--env KREPI_FORMAL_IMAGE=\"$IMAGE\" \\";
-        // The command line alone differs: the canary runs the whole gate,
-        // the job of `formal` the qualification part.
+        // The deadline and the command line alone differ: the canary runs
+        // the whole gate, whose deadline is the gate's and that of its
+        // receipt, and keeps its exit status for the verdict; the job of
+        // `formal` runs the qualification part, whose deadline adds the
+        // extraction of the formal targets. Each step ends a minute after
+        // `deadline.sh` kills the gate.
         let xtask = "\"$IMAGE\" \"$GITHUB_WORKSPACE/xtask/target/debug/xtask\" formal run";
         let (whole, part) = (
-            format!("{xtask} || status=$?"),
-            format!("{xtask} --shard qualification --keep || status=$?"),
+            xtask.to_string(),
+            format!("{xtask} --shard qualification --keep"),
         );
+        let minutes = |seconds: u64| seconds.div_ceil(60);
+        let gate_seconds = run::GATE_BUDGET.as_secs() + run::RECEIPT_MARGIN.as_secs();
+        let extraction = crate::formal::merge::EXTRACTION_MARGIN.as_secs();
+        let (own, theirs) = (minutes(gate_seconds), minutes(gate_seconds + extraction));
+        let deadline = |options: &str, minutes: u64| {
+            format!("exec bash .github/scripts/deadline.sh {options} {minutes}m 1m \\")
+        };
+        let status = "--stop-commands --status artifacts/canary/gate-status";
+        let (canary, formal) = (deadline(status, own), deadline("--stop-commands", theirs));
         let has = |workflow, line: &str| {
             let lines = step(workflow, gate, &[]);
             lines.iter().any(|l| l.trim_start() == line)
         };
         assert!(has(CANARY, &whole) && has(FORMAL, &part));
-        let formal = step(FORMAL, gate, &[image]).into_iter();
-        let formal = Vec::from_iter(formal.map(|line| line.replace(&part, &whole)));
-        assert_eq!(step(CANARY, gate, &[status]), formal);
+        assert!(has(CANARY, &canary) && has(FORMAL, &formal), "{canary}");
+        let limit = |workflow: &str, minutes: u64| {
+            let (_, lines) = (steps(workflow).into_iter())
+                .find(|(name, _)| *name == gate)
+                .expect(gate);
+            lines.contains(&format!("        timeout-minutes: {}", minutes + 2).as_str())
+        };
+        assert!(limit(CANARY, own) && limit(FORMAL, theirs));
+        let formal_lines = step(FORMAL, gate, &[image]).into_iter();
+        let formal_lines =
+            formal_lines.map(|line| line.replace(&part, &whole).replace(&formal, &canary));
+        assert_eq!(step(CANARY, gate, &[]), Vec::from_iter(formal_lines));
         let build = |workflow: &'static str| {
             let start = workflow
                 .find("docker build --progress=plain")
