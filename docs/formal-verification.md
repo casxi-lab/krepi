@@ -58,7 +58,10 @@ against the targets and the open obligations
 ([legacy inventory and admission](#legacy-inventory-and-admission)), and
 `cargo xtask formal vectors` compares a component's frozen test vectors
 through its specification with the results of its host tests
-([test vectors](#test-vectors)), though no contract names vectors yet. A
+([test vectors](#test-vectors)), though no contract names vectors yet; the
+formal step of `cargo xtask check` runs both, the second in the pinned
+image ([vectors in CI](#vectors-in-ci)). `cargo xtask formal impact` lists
+the targets that a change affects ([commands](#commands)). A
 weekly toolchain canary runs the gate with the tools of Aeneas main through
 the steps of `cargo xtask formal canary` and records what they would break
 ([toolchain canary](#toolchain-canary)). None of them verifies anything
@@ -106,7 +109,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/toolchain.json` | The tool manifest: Lean, the Aeneas source commit with its reviewed patch and the Lake lock of its Lean library, Charon, the Rust nightly used by Charon, opam and GMP, with the downloads of each host ([tools](#tool-manifest)) | Present |
 | `verification/tooling/` | Reviewed tool patches, named by the manifest, and their license texts | Present |
 | `verification/image/` | The recipe of the image that holds the pinned tools, the list of its third-party notices, and the check of the built image as a user other than root ([image](#image)) | Present |
-| `verification/image-pin.json` | The published image that the CI jobs of the gate run, by its digest ([image pin](#image-pin)) | Present |
+| `verification/image-pin.json` | The published image that the CI jobs of the gate and the formal step of `cargo xtask check` run, by its digest ([image pin](#image-pin)) | Present |
 | `verification/lakefile.toml`, `lean-toolchain`, `lake-manifest.json` | The Lake project of the hand-written Lean and of the generated definitions, with the Lean toolchain and the packages of the Lake lock of the Aeneas Lean library ([qualification](#qualification)), and the library `KrepiRoot` of the root module that the [base round](#base-round) writes | Present |
 | `verification/extraction.toml` | How Charon compiles each extracted crate ([extraction](#extraction)) | Present |
 | `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there, where it has one | Planned |
@@ -343,7 +346,8 @@ text, and also when one of the packages below has none:
 ### Image pin
 
 `verification/image-pin.json` names the published image that the CI jobs of
-the gate run ([CI job](#ci-job)). It has schema 1:
+the gate ([CI job](#ci-job)) and the formal step of `cargo xtask check` run.
+It has schema 1:
 
 | Field | Content |
 | --- | --- |
@@ -354,11 +358,19 @@ the gate run ([CI job](#ci-job)). It has schema 1:
 
 The file lies outside `verification/image/` and the other paths that start
 the image workflows, so changing it builds and publishes no image, and the
-image does not contain it. It has three readers:
+image does not contain it. It has these readers:
 
-- `.github/workflows/formal.yml` names the image as
-  `<repository>@<digest>` in its variable `IMAGE`, which every container of
-  the workflow runs, after a pull that takes the image by that digest.
+- `.github/workflows/formal.yml`, `formal-measure.yml` and
+  `formal-calibration.yml` name the image as `<repository>@<digest>` in
+  their variable `IMAGE`, which every container of these workflows runs,
+  after a pull that takes the image by that digest.
+- The formal step of `cargo xtask check` reads the pin of the checkout,
+  fails unless it has schema 1, a repository without a tag or a digest, a
+  digest and a revision, and runs its containers on
+  `<repository>@<digest>` with `--pull never`
+  ([vectors in CI](#vectors-in-ci)). Each job that runs the check, in
+  `check.yml`, `full.yml`, `nightly.yml` and `cache.yml`, first pulls that
+  reference, which it reads from the pin with `jq`.
 - The `workflows` step of `cargo xtask check` reads the pin from the tracked
   files and fails unless a workflow that runs on `pull_request` names that
   reference and every mention of the repository in such a workflow,
@@ -671,19 +683,24 @@ The commands of `cargo xtask formal` follow the design of the gate.
 | `cargo xtask formal impact --base REV` | Lists, one item per line, the merge base of `REV` and `HEAD`, each path changed since with its Git status, without rename detection, the decision, `unaffected` when no changed path lies within a [gate input](#gate-inputs-and-snapshot) and `affected` otherwise, and the registered targets that the change affects, with their states: every target when an input of extraction changed, and otherwise each whose entry in `verification/targets.json` changed and each with a changed file of its `proof_modules`. Paths and names are printed escaped, so that none splits a line. It decides nothing, and exits with 1 only on a base that is not a revision or when Git or the registry cannot be read |
 | `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
 
-`cargo xtask check` does not run the gate, which needs the pinned tools.
+`cargo xtask check` does not run the gate, which needs the pinned tools;
+its formal step runs `cargo xtask formal check` and
+`cargo xtask formal vectors` ([vectors in CI](#vectors-in-ci)).
 CI runs the gate as its parts and their merge on every pull request to
 `main` and every push to `main` ([CI job](#ci-job)). None of these jobs is
 required: a change is to merge only when a required gate passes on its
 head or a committed waiver record covers the failure, and both are
-planned.
+planned. On a pull request, the jobs `formal fast` and `formal guard` run
+`cargo xtask formal impact` and `cargo xtask formal guard`, and are not
+required either.
 
 ## Gate run
 
 `cargo xtask formal run` runs the gate on the commit checked out, the
 snapshot commit, and writes a receipt of the run, whether it passes, fails
 or stops on an internal error. Its code is in `xtask/src/formal/`: the gate
-inputs in `paths.rs`, the commands in `process.rs`, their classes and the
+inputs, the change since a merge base and the targets that it affects in
+`paths.rs`, the commands in `process.rs`, their classes and the
 statuses in `outcome.rs`, the receipt in `receipt.rs`, the extraction in
 `extract.rs`, the Lake stages, the source rules and the allowlist in
 `lean.rs`, the qualification in `qualify.rs`, the base round in `base.rs`,
@@ -777,6 +794,15 @@ tool failure of the run that names up to 20 paths, so that a command of
 the extraction, of a target or of a mutant that writes the installation
 fails the run as one of the qualification or the base round does, and so
 is a listing that cannot be taken then.
+
+`paths.rs` also gives the change between two commits, which the
+[guard](#guard) and `cargo xtask formal impact` share: their merge base and
+the paths changed from it to the second commit, each with its Git status,
+from `git diff --name-status --no-renames`, so that a moved file counts as
+the deletion of its old path and the addition of its new one. A change
+leaves the gate unaffected when none of its paths is a gate input or lies
+below one, compared by whole path components, so that `kernelx/a.rs` does
+not lie below `kernel/`; otherwise it affects the gate.
 
 ### Cargo configuration
 
@@ -933,8 +959,8 @@ The gate runs as parts of one commit: the qualification job,
 formal target of the registry, `cargo xtask formal run --shard
 target/<name>`, which `cargo xtask formal merge` combines into the
 conclusion of the whole gate. A run without `--shard` has every phase in
-one process; local runs, the measurement jobs such as
-`leanchecker fresh` ([CI job](#ci-job)), the
+one process; local runs, the measurement jobs of the workflow
+`formal measure` such as `leanchecker fresh` ([CI job](#ci-job)), the
 [toolchain canary](#toolchain-canary) and `formal mutants` use it, and its
 receipt is no part of a merge. `--shard` cannot be given with `--target`.
 In CI the jobs `formal run`, `formal shard <name>` and `formal merge` of
@@ -1405,8 +1431,8 @@ where the tactic is `native_decide`, `decide` or `bv_decide`, with
 target theorem, and `axioms.json` refuses such names. Any module could
 declare an axiom of such a name without the kernel, so the item allows it
 only when the audit finds it declared in the module of the item's `file`.
-Changes of `tcb.json` itself are not guarded yet: the rules of the guard
-for the registries are planned.
+A pull request that adds an item to `tcb.json` or changes the reason of
+one needs the label `spec`, by the registry rules of the [guard](#guard).
 
 `verification/axioms.json` has schema 1 and a list `axioms`, each with
 `name`, `source`, the module of the Aeneas Lean library that declares the
@@ -1545,7 +1571,8 @@ From Git alone, the guard finds
 
 - the merge base of the two commits, and the paths that changed from it to
   the head, with `git diff --name-status --no-renames`, so that a renamed
-  file counts at its old and at its new path;
+  file counts at its old and at its new path
+  ([gate inputs and snapshot](#gate-inputs-and-snapshot));
 - among those paths, the statement side, the proof files, which are the
   `.lean` files below `verification/Krepi/Proofs/`, and the sources, which
   are the `.rs` files below `kernel/` and `user/`, `build.rs` included;
@@ -1573,6 +1600,14 @@ From Git alone, the guard finds
   the Aeneas templates raises the limit: its reviewer gives a
   `Heartbeats-Review` or removes the line. A limit that a metaprogram sets
   without the text `maxHeartbeats` is outside this rule;
+- what the registry rules below find in `verification/targets.json`,
+  `verification/models.json` and `verification/tcb.json`, when the pull
+  request changes them: each is read at the merge base and at the head as
+  the gate reads it, a side without the file as an empty registry, and
+  their targets, mutants and items are compared as values, so that another
+  order of the entries, of the theorems of an obligation or of the fields,
+  other white space and a default written out change nothing. A registry
+  that cannot be read on one side is compared on neither side;
 - the statement hash of the head.
 
 The description of the pull request gives these fields, each on a line of
@@ -1592,11 +1627,13 @@ comment, where no line starts with the name of a field.
 | `Phase` | The phase of the proof work that the pull request belongs to: `statement`, `proof` or `rewrite` |
 | `Author` | The opaque id of the author of the pull request, in the same form as `Review` |
 
-The labels are `spec` for a change of statements, `proof` for a change of
-proofs, and `ai-proof` for a pull request with proofs that an AI system
-wrote, which the guard records and never judges. Other labels are recorded
-and ignored. The rules are rows of one table, to which later checks add
-theirs:
+The labels are `spec` for a change of statements and for the registry
+changes below, `proof` for a change of proofs, and `ai-proof` for a pull
+request with proofs that an AI system wrote, which the guard records and
+never judges. Other labels are recorded and ignored. The rules are rows of
+one table, to which later checks add theirs; each rule from
+`registry-target-removed` on fails when it finds something and the label
+`spec` is missing:
 
 | Rule | Fails when |
 | --- | --- |
@@ -1606,10 +1643,47 @@ theirs:
 | `heartbeats-need-review` | A heartbeat limit is newly raised and `Heartbeats-Review` is missing |
 | `phase-and-author` | The label `spec` or `proof` is present and `Phase` or `Author` is missing, or `Phase` is not `statement`, `proof` or `rewrite` |
 | `proof-of-registered-statements` | A statement is restated and the label `spec` is missing: a proof may only prove a statement that the merge base registers |
+| `registry-target-removed` | A target of the merge base is not registered at the head |
+| `registry-theorem-removed` | A theorem of an obligation of a target of the merge base is not one of that target at the head |
+| `registry-mutant-removed` | A mutant of a target of the merge base is not one of that target at the head |
+| `registry-proves-narrowed` | A key of `proves` of a target of the merge base is not in that of the target at the head |
+| `registry-formal-made-planned` | A formal target of the merge base is planned at the head |
+| `registry-unconstrained-added` | A target of the head lists a function in `unconstrained` that it does not list at the merge base |
+| `registry-opaque-added` | A target of the head has a cut point, by its pattern, that it does not have at the merge base |
+| `registry-trusted-axiom-added` | A target of the head has a trusted axiom, by its name, that it does not have at the merge base, or `tcb.json` has an item, by its kind and its file and declaration or its prefix, that it does not have there |
+| `registry-model-added` | `models.json` has a model, by its name, that it does not have at the merge base, or a target of the head names a `models` directory that it does not name there |
+| `registry-obligation-changed` | A target of both commits has other obligations, compared by `id`, `statement` and the set of their theorems |
+| `registry-start-from-changed` | A target of both commits has another set of roots in `start_from` |
+| `registry-mutant-file-changed` | A mutant of a target of both commits, by its name, has another `file` |
+| `registry-mutant-find-changed` | A mutant of a target of both commits, by its name, has another `find` |
+| `registry-mutant-replace-changed` | A mutant of a target of both commits, by its name, has another `replace` |
+| `registry-mutant-renamed` | A mutant of a target of both commits is missing at the head, where the target has a new mutant with the same `file`, `find` and `replace` |
+| `registry-mutant-fails-grown` | A mutant of a target of both commits lists a theorem in `fails` that it does not list at the merge base |
+| `registry-trusted-reason-changed` | A trusted axiom or a cut point of a target, or an item of `tcb.json`, that both commits have, has another reason |
+| `registry-unreadable` | A changed registry cannot be read at the merge base or at the head |
 
 `proof-of-registered-statements` judges every pull request, whatever its
 labels: adding, removing or renaming a statement needs the label `spec`,
 and with it the fields that `spec-approval` checks.
+
+The rules of removals compare the targets of the merge base, so a target
+new at the head removes nothing; the rules of additions, which widen the
+trusted base or the models, compare the head, so a target new at the head
+adds all that it has; and the rules of changes compare only the targets
+and mutants that both commits have, where a target that gains its first
+obligation or root in `start_from` changes them. Removing a theorem of an
+obligation also changes the obligation, and renaming a mutant also removes
+its old name, so both rules fail. Tightening a registry, such as making a
+planned target formal, removing a trusted axiom, an unconstrained
+function, a cut point or an item of the trusted base, or adding a key to
+`proves`, fails no rule. The reason of a registry rule starts with what it
+found, such as `it removes the targets slots in targets.json`, with each
+item as `<value> in <target>` or `<target>/<mutant>`, and ends with
+`without the label spec`; with the label, `spec-approval` requires the
+review and the approval as for a statement change.
+`cargo xtask formal guard` compares the registries of the production
+layout, so a change of those of the
+[calibration target](#calibration-target) fails no registry rule.
 
 On a pull request, when `GITHUB_EVENT_NAME` is `pull_request` and
 `GITHUB_EVENT_PATH` names the event, `cargo xtask formal run` runs the same
@@ -1617,7 +1691,8 @@ check through the gate's Git in a first phase, `guard`, with a budget of
 300 s, and records what it found in the receipt. The phase has no unit: a
 failing rule does not change the status of the run, which is about the
 proofs, and the standalone command decides. An event that cannot be read,
-or a failed Git command, stops the run as an internal error. Without a
+or a failed Git command, stops the run as an internal error; a registry
+that cannot be read does not, as `registry-unreadable` names it. Without a
 pull request event, and in the shard of a target, the run has no guard
 phase.
 
@@ -2793,8 +2868,9 @@ block names no replay, and `<n> components, <m> problems`. A problem before
 any comparison, such as a block that cannot be read, is then the only line
 before the counts, a `FAILED` line without a component, and the host line
 is not printed. It exits with 1 when there is a problem and with 2 for a
-usage error. It writes no receipt and does not check the image: in CI, the
-gate of the same job checks it ([image pin](#image-pin)).
+usage error. It writes no receipt and does not check the image: the formal
+step of `cargo xtask check` runs it in the image that the pin names by its
+digest ([vectors in CI](#vectors-in-ci)).
 
 ### Vectors in CI
 
@@ -2868,8 +2944,8 @@ and needs no label `spec`; its paths are gate inputs, so a change of them
 runs the gate.
 
 Generated modules and the root module exist only in the stages of a run.
-`verification/tcb.json` is not on the statement side; changes of it are to
-be reviewed through the registry rules of the [guard](#guard) (planned).
+`verification/tcb.json` is not on the statement side; the registry rules
+of the [guard](#guard) review its changes.
 Nor are the pins of the tools: `verification/toolchain.json` and the patch
 of the Aeneas Lean library in `verification/tooling/` also decide what the
 definitions of that library mean, but a change of them changes no
@@ -3109,9 +3185,11 @@ there is any:
 
 Its last line counts the files, functions, derived methods and open
 obligations of the inventory and, after them, names the function of each
-survivor of class `no-theorem`, which no theorem covers yet. No CI job runs
-it in the production layout, nor does `cargo xtask check`: run it before
-proposing a change to the kernel workspace, a contract or the registries.
+survivor of class `no-theorem`, which no theorem covers yet. The formal
+step of `cargo xtask check` runs it in the production layout first, in
+every job of CI that runs the check; `--skip-formal` skips it with the
+rest of the step, so with that option run it before proposing a change to
+the kernel workspace, a contract or the registries.
 The job `calibration run` of the workflow `formal calibration` runs it in
 the layout of the calibration.
 The removal of a target, a theorem or a proved function, and any widening

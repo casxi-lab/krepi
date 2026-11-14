@@ -52,6 +52,16 @@ The required host checks run from the repository root and need the tools that
 cargo xtask check
 ```
 
+Their formal step runs the test vectors in the pinned proof-tool image and
+needs a `linux-aarch64` host with Docker and that image. On another host,
+record the step as not run and run its first part, the inventory check of
+the proof targets, on its own; CI runs the whole step:
+
+```sh
+cargo xtask check --skip-formal
+cargo xtask formal check
+```
+
 The QEMU boot suite builds the default image and the test images, boots
 the default image three times and each test image once on QEMU virt; the
 default image can also be built in `kernel/` and run with the QEMU runner,
