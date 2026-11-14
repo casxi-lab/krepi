@@ -403,14 +403,16 @@ impl Git for Gate {
     }
 }
 
-/// The receipt of a run that has not done anything yet.
+/// The receipt of a run that has not done anything yet, of the mode that
+/// [`receipt::mode`] gives unless it is scoped, and failed by its error.
 fn blank(context: &Context, targets: &BTreeSet<String>, run: &str, directory: &str) -> Receipt {
+    let (mode, status) = (receipt::mode(context.var), Status::ToolFailure);
     Receipt {
         schema: receipt::SCHEMA,
         command: receipt::COMMAND.to_string(),
         trigger: Trigger {
             mode: if targets.is_empty() || context.shard.is_some() {
-                Mode::Manual
+                mode.clone().unwrap_or_default()
             } else {
                 Mode::Scoped
             },
@@ -435,6 +437,7 @@ fn blank(context: &Context, targets: &BTreeSet<String>, run: &str, directory: &s
             gate_seconds: context.budget.unwrap_or(GATE_BUDGET).as_secs(),
             receipt_margin_seconds: RECEIPT_MARGIN.as_secs(),
         },
+        failures: Vec::from_iter(mode.err().map(|message| Failure { status, message })),
         ..Receipt::default()
     }
 }
@@ -3594,6 +3597,46 @@ pub(crate) mod tests {
             &done,
             "image: the snapshot pins no image or another than the job's",
         );
+    }
+
+    #[test]
+    fn the_trigger_variable_gives_the_mode_of_whole_runs_and_shards_but_not_of_named_targets() {
+        let weekly = |name: &str| (name == receipt::TRIGGER).then(|| "WEEKLY".to_string());
+        let blank_of = |shard: Option<&str>, targets: &[&str]| {
+            let context = shard_context(Path::new("."), shard, &weekly, plenty);
+            let targets = BTreeSet::from_iter(targets.iter().map(|name| name.to_string()));
+            blank(&context, &targets, "run", "directory")
+        };
+        let runs = [
+            (None, &[][..]),
+            (Some("qualification"), &[]),
+            (Some("target/t"), &["t"]),
+        ];
+        for (shard, targets) in runs {
+            let receipt = blank_of(shard, targets);
+            assert_eq!(receipt.trigger.mode, Mode::Weekly);
+            assert_eq!(receipt.failures, []);
+        }
+        assert_eq!(blank_of(None, &["t"]).trigger.mode, Mode::Scoped);
+    }
+
+    #[test]
+    fn an_unknown_trigger_is_a_tool_failure_before_the_phases() {
+        let fixture = Fixture::new("trigger");
+        let done = on_the_ci_host(&fixture, other_uid(), &[(receipt::TRIGGER, "REQUIRED")]);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(done.written().trigger.mode, Mode::Required);
+        // The mode of a run of named targets is no value of the variable.
+        let done = on_the_ci_host(&fixture, other_uid(), &[(receipt::TRIGGER, "SCOPED")]);
+        assert_eq!(done.code, ExitCode::FAILURE);
+        let receipt = done.written();
+        let found = (receipt.status, receipt.complete, receipt.trigger.mode);
+        assert_eq!(found, (Status::ToolFailure, false, Mode::Manual));
+        let not = "KREPI_FORMAL_TRIGGER is \"SCOPED\", not REQUIRED, FORCED_FULL or WEEKLY";
+        assert_eq!(done.failures(), [not]);
+        let stopped = Some("a failure before the phases stopped the run");
+        assert_eq!(fixture::status(&done, "u1"), (Status::NotRun, stopped));
+        assert!(!receipt.phases["checks"].ran);
     }
 
     #[test]

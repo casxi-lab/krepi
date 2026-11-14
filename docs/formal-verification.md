@@ -988,9 +988,10 @@ gate (planned) is to use.
   registered budget of its target, which its extraction shares. Its disk
   guard counts the unit of its target alone. A shard of a planned or
   unknown target is a tool failure before the phases.
-- **The receipt of a part** names its part in `shard` and is `MANUAL`,
-  never `SCOPED`; it is complete by the rule of a run of the whole gate
-  over its own units ([results](#results)).
+- **The receipt of a part** names its part in `shard` and has the mode
+  that `KREPI_FORMAL_TRIGGER` gives ([receipt](#receipt)), `MANUAL`
+  without it, never `SCOPED`; it is complete by the rule of a run of the
+  whole gate over its own units ([results](#results)).
 
 `cargo xtask formal merge [--calibration] RECEIPT...` runs on the host in a
 checkout of the commit of the receipts; it pulls no image and runs no proof
@@ -1792,11 +1793,12 @@ its checks, or of a phase, the closing steps still run; an error of the
 start ends the run without the second snapshot, and a panic of the run
 outside a phase ends it without any later command. The receipt is written in every case. It
 is a tool failure as well when the gate inputs are not clean at the start,
-when a name given with `--target` is not in `verification/targets.json`
-or the target of a shard is not a formal target of it, and when a
-registered unit has no conclusion or more than one, or a conclusion is
-given for a unit that is not registered. After any failure
-before the phases, the refusal of the disk guard included, no phase
+when `KREPI_FORMAL_TRIGGER` names no mode of a job of CI
+([receipt](#receipt)), when a name given with `--target` is not in
+`verification/targets.json` or the target of a shard is not a formal
+target of it, and when a registered unit has no conclusion or more than
+one, or a conclusion is given for a unit that is not registered. After any
+failure before the phases, the refusal of the disk guard included, no phase
 runs, and after a phase stops no later phase runs; every registered unit
 without a conclusion is then `NOT_RUN`. A run of named targets is
 `SCOPED` and is never complete. A run of the whole gate, or of a part
@@ -1824,7 +1826,7 @@ keys; times are seconds, rounded to milliseconds.
 | `command` | `cargo xtask formal run` |
 | `status` | `VERIFIED`, `REJECTED`, `STALE`, `TOOL_FAILURE`, `BUDGET`, `NOT_RUN` or `SCOPED` |
 | `complete` | Whether the run is complete, as defined above |
-| `trigger` | `mode`, `MANUAL` for a run of the whole gate or of a part and `SCOPED` for a run of named targets, with `REQUIRED`, `FORCED_FULL` and `WEEKLY` kept for the jobs of CI; `event`, `ref`, `run_id` and `attempt`, from `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`, or `null` |
+| `trigger` | `mode`: `SCOPED` for a run of named targets; for a run of the whole gate or of a part, the mode that `KREPI_FORMAL_TRIGGER`, the variable through which a job of CI gives the trigger of its run, names, `REQUIRED`, `FORCED_FULL` or `WEEKLY`, and `MANUAL` when it is unset or empty, or when it holds any other value, `SCOPED` and `MANUAL` included, which is a tool failure before the phases ([results](#results)); `event`, `ref`, `run_id` and `attempt`, from `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`, or `null` |
 | `targets` | The names given with `--target`, sorted, or the target of the shard of a target; empty for a run of the whole gate and for the qualification job |
 | `shard` | The part of a run with `--shard`, `qualification` or `target/<name>`, or `null` |
 | `host` | `linux-aarch64` or `darwin-arm64`, or `null` on another host |

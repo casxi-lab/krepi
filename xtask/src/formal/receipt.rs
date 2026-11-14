@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use super::outcome::{Class, Site, Status};
+use super::outcome::{Class, Site, Status, word};
 use super::paths::Snapshot;
 use super::process::LimitBy;
 use super::qualify::Expect;
@@ -67,6 +67,21 @@ pub struct Trigger {
     pub reference: Option<String>,
     pub run_id: Option<String>,
     pub attempt: Option<String>,
+}
+
+/// The variable through which a job of CI gives the trigger of its run.
+pub const TRIGGER: &str = "KREPI_FORMAL_TRIGGER";
+
+/// The mode that [`TRIGGER`] gives through `var`: `MANUAL` when it is unset
+/// or empty, `REQUIRED`, `FORCED_FULL` or `WEEKLY`, and otherwise why not.
+pub fn mode(var: &dyn Fn(&str) -> Option<String>) -> Result<Mode, String> {
+    let Some(value) = var(TRIGGER).filter(|value| !value.is_empty()) else {
+        return Ok(Mode::Manual);
+    };
+    let modes = [Mode::Required, Mode::ForcedFull, Mode::Weekly];
+    let found = modes.into_iter().find(|mode| word(mode) == value);
+    let not = format!("{TRIGGER} is {value:?}, not REQUIRED, FORCED_FULL or WEEKLY");
+    found.ok_or(not)
 }
 
 /// The image of a run on the CI host: the reference that the job gave, the
@@ -658,6 +673,27 @@ mod tests {
         for site in SITES {
             assert!(text.contains(&format!("\"site\": \"{}\"", word(&site))));
         }
+    }
+
+    #[test]
+    fn the_trigger_variable_gives_the_mode_of_a_ci_run() {
+        let mode_of = |value: Option<&str>| {
+            mode(&|name: &str| value.filter(|_| name == TRIGGER).map(str::to_string))
+        };
+        assert_eq!(mode_of(None), Ok(Mode::Manual));
+        assert_eq!(mode_of(Some("")), Ok(Mode::Manual));
+        for expected in [Mode::Required, Mode::ForcedFull, Mode::Weekly] {
+            assert_eq!(mode_of(Some(&word(&expected))), Ok(expected));
+        }
+        // It gives neither the mode of named targets nor the default by
+        // name, nor another spelling, and the value is escaped.
+        let not = |value: &str| {
+            format!("KREPI_FORMAL_TRIGGER is \"{value}\", not REQUIRED, FORCED_FULL or WEEKLY")
+        };
+        for value in ["SCOPED", "MANUAL", "weekly", " WEEKLY", "Weekly"] {
+            assert_eq!(mode_of(Some(value)), Err(not(value)));
+        }
+        assert_eq!(mode_of(Some("WEEKLY\n\"")), Err(not("WEEKLY\\n\\\"")));
     }
 
     #[test]
