@@ -191,7 +191,7 @@ fn resolve(files: &BTreeMap<&str, Option<Scan>>, at: &(String, String), chain: &
         (dir.clone(), dir)
     });
     let found = |file: String| files.contains_key(file.as_str()).then_some(file);
-    let below = format!("{}/{name}", at.1);
+    let below = join(&at.1, name);
     let (flat, nested) = (format!("{below}.rs"), format!("{below}/mod.rs"));
     let file = match (path, found(flat.clone()), found(nested.clone())) {
         (Some(path), ..) => found(join(&at.0, path)).ok_or(format!("mod {name}: no {path:?}"))?,
@@ -1337,6 +1337,20 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
                 ("kernel/demo/src/other.rs", vec!["c"]),
             ]
         );
+    }
+
+    #[test]
+    fn a_file_at_the_root_declares_its_submodules_at_the_root() {
+        // The inventory reads only below the kernel directory, so the files
+        // are resolved from the repository root directly.
+        let files = BTreeMap::from_iter(["a.rs", "b/mod.rs"].map(|file| (file, None)));
+        let root = (String::new(), String::new());
+        let declared = |name: &str| resolve(&files, &root, &vec![(name.to_string(), None)]);
+        let at = |dir: &str, below: &str| (dir.to_string(), below.to_string());
+        assert_eq!(declared("a"), Ok(("a.rs".to_string(), at("", "a"))));
+        assert_eq!(declared("b"), Ok(("b/mod.rs".to_string(), at("b", "b"))));
+        let missing = "mod c: no file c.rs or c/mod.rs";
+        assert_eq!(declared("c"), Err(missing.to_string()));
     }
 
     #[test]
