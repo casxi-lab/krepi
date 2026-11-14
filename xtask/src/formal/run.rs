@@ -24,7 +24,7 @@ use super::receipt::{self, Budgets, Failure, Mode, Receipt, Trigger};
 use super::registry::{self, State, Target};
 use super::toolchain::environment::{self, Installation, RunDirs, Tool};
 use super::toolchain::{self, Manifest};
-use super::{base, classify, externals, extract, guard, merge, mutants, qualify, storage};
+use super::{base, classify, externals, extract, guard, merge, mutants, qualify, storage, waiver};
 use crate::manifests;
 use crate::repo::{self, Entry, Tree};
 
@@ -173,6 +173,9 @@ pub struct Gate {
     /// The hand-written module files of the Lake project, which the base
     /// round finds and the stages of the targets hold too.
     pub(super) handwritten: Vec<String>,
+    /// What the waivers that hold leave out of the base round, which the
+    /// qualification job finds when it extracts.
+    pub(super) waived: waiver::LeftOut,
     /// Whether the run keeps its work directory and what it extracted.
     pub(super) keep: bool,
     progress: Box<dyn Write>,
@@ -482,6 +485,7 @@ pub(crate) fn execute(
         budgets: BTreeMap::new(),
         inventory: None,
         handwritten: Vec::new(),
+        waived: waiver::LeftOut::new(),
         keep: context.keep,
         progress,
         #[cfg(test)]
@@ -839,7 +843,8 @@ pub fn target_project(gate: &Gate, name: &str) -> PathBuf {
 /// the selected planned ones; and `targets`, after it, which concludes the
 /// selected formal ones and their mutants, the source mutants of `generate`
 /// in a run that generates them. The first stops on another registry in the
-/// export; the shard of a target extracts its target alone.
+/// export; the shard of a target extracts its target alone, and the
+/// qualification job no target of a waiver that holds.
 pub(super) fn target_phases<'a>(
     root: &Path,
     layout: &Layout,
@@ -881,9 +886,15 @@ pub(super) fn target_phases<'a>(
     ];
     let bodies: [Body<'a>; 2] = [
         Box::new(move |gate| {
-            let (_, text) = read?;
+            let (registered, text) = read?;
             if base::read(&gate.source().join(path))? != text {
                 return Err(format!("{path} differs from the one read at the start"));
+            }
+            if margin {
+                let waivers = waiver::read(&gate.source(), &gate.layout, &registered)?;
+                let waived = waiver::holding(&waivers, &waiver::today(SystemTime::now())?);
+                all.retain(|target| !waived.contains(&target.name));
+                gate.waived = waiver::left_out(&gate.layout, &registered, &waived);
             }
             (all.iter()).try_for_each(|t| extract_target(gate, t, chosen.contains(&t.name)))
         }),
@@ -1891,6 +1902,63 @@ pub(crate) mod tests {
         let base = Vec::from_iter(fixture::commands(&done, "base").iter().map(|c| c.site));
         assert_eq!(base, [Site::Charon, Site::Aeneas, Site::TargetBuild]);
         assert_eq!(Vec::from_iter(receipt.units.keys()), ["base"]);
+    }
+
+    #[test]
+    fn the_qualification_job_leaves_out_the_targets_of_a_waiver_that_holds_when_it_extracts() {
+        let fixture = with_targets("waived-job", &two_targets(1_800, 1));
+        let job = |fixture: &Fixture| {
+            let done = gate_shard(fixture, "qualification", qualification_job(fixture), plenty);
+            let charon = (done.receipt.commands.iter()).any(|c| c.site == Site::Charon);
+            (done.written(), charon)
+        };
+        // An expired waiver leaves nothing out.
+        waiver::tests::waive(&fixture, "t", "2000-01-01");
+        let (receipt, charon) = job(&fixture);
+        assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
+        assert_eq!(Vec::from_iter(receipt.proof_targets.keys()), ["t"]);
+        assert!(charon);
+        // A waiver that holds leaves its target out of the extraction.
+        waiver::tests::waive(&fixture, "t", "9999-12-31");
+        let (receipt, charon) = job(&fixture);
+        assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
+        assert!(receipt.proof_targets.is_empty() && !charon);
+        assert!(receipt.phases["extraction"].ran);
+        // A record that breaks its rules stops the extraction.
+        fixture.write(
+            Layout::PRODUCTION.waivers,
+            "{\"schema\": 2, \"waivers\": []}\n",
+        );
+        fixture.commit_all();
+        let done = gate_shard(
+            &fixture,
+            "qualification",
+            qualification_job(&fixture),
+            plenty,
+        );
+        let receipt = done.written();
+        assert_eq!(
+            (receipt.status, receipt.complete),
+            (Status::ToolFailure, false)
+        );
+        let stopped =
+            "the phase extraction stopped: verification/waivers.json: schema 2 where 1 is expected";
+        assert_eq!(done.failures(), [stopped]);
+        assert!(receipt.proof_targets.is_empty() && !receipt.phases["base"].ran);
+    }
+
+    #[test]
+    fn a_whole_run_and_the_shard_of_a_waived_target_extract_it() {
+        let fixture = with_targets("waived-run", &two_targets(1_800, 1));
+        waiver::tests::waive(&fixture, "t", "9999-12-31");
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(Vec::from_iter(done.receipt.proof_targets.keys()), ["t"]);
+        assert_eq!(fixture::status(&done, "target/t"), (Status::Verified, None));
+        let phases = shard_phases(fixture.root(), "target/t");
+        let done = gate_shard(&fixture, "target/t", phases, plenty);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(Vec::from_iter(done.receipt.proof_targets.keys()), ["t"]);
     }
 
     #[test]

@@ -3,7 +3,8 @@
 //! snapshot, with the generated modules of the proof cases of the
 //! qualification, built in a stage of its own from a generated root module,
 //! audited, replayed by `leanchecker` and counted in heartbeats. Its units
-//! are `base` and one for each proved statement of `statements.json`.
+//! are `base` and one for each proved statement of `statements.json`. In the
+//! qualification job it leaves out what the waivers that hold leave out.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -22,6 +23,7 @@ use super::qualify::{self, conclusion, lake};
 use super::registry::{self, declared_axioms};
 use super::run::{self, Gate, Phase, Request};
 use super::toolchain::sha256;
+use super::waiver;
 
 /// The name of the phase, and the first part of the name of its units.
 pub const PHASE: &str = "base";
@@ -212,6 +214,31 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     let project = lean::create_stage(&export, &pins, &stage, &installation.backend())?;
     let (mut files, found) = handwritten(&layout, &source, &tracked, &sources.tcb)?;
     problems.extend(found);
+    // What the waivers leave out, and each module that imports what is left
+    // out unless a target that the run extracted lists it.
+    let mut left = gate.waived.clone();
+    let listed = (gate.receipt.proof_targets.values()).flat_map(|t| t.proof_modules.clone());
+    let (listed, mut imports) = (BTreeSet::from_iter(listed), Vec::new());
+    let module = |file: &String| file.trim_end_matches(".lean").replace('/', ".");
+    for file in files.iter().filter(|file| !listed.contains(&module(file))) {
+        let header = guard::header_imports(&lean::tokens(&read(&export.join(file))?));
+        imports.push((module(file), header.1));
+    }
+    // A generated module is left out by the prefix of its target's modules.
+    let found = |left: &waiver::LeftOut, (module, imports): &(String, Vec<String>)| {
+        let of = |import: &String| {
+            let prefix = format!("{}.", import.rsplit_once('.').unwrap_or_default().0);
+            (left.get(import)).or(left.get(&prefix)).cloned()
+        };
+        let target = (imports.iter().find_map(of)).filter(|_| !left.contains_key(module));
+        target.map(|target| (module.clone(), target))
+    };
+    while let Some((module, target)) = imports.iter().find_map(|entry| found(&left, entry)) {
+        left.insert(module, target);
+    }
+    files.retain(|file| !left.contains_key(&module(file)));
+    let (waived, kept): (Vec<Statement>, Vec<Statement>) =
+        (statements.statements.iter().cloned()).partition(|s| left.contains_key(&s.module));
     for file in &files {
         lean::copy_into(&export, &project, file)?;
     }
@@ -294,7 +321,7 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     let own = (modules.iter()).filter(|m| m.starts_with(&mine) || cases.contains_key(*m));
     let own: Vec<String> = own.cloned().collect();
     let (proved, planned): (Vec<&Statement>, Vec<&Statement>) =
-        (statements.statements.iter()).partition(|statement| statement.state == State::Proved);
+        (kept.iter()).partition(|statement| statement.state == State::Proved);
     let planned: BTreeSet<&String> = planned.into_iter().map(|planned| &planned.module).collect();
     let absent = planned.iter().filter(|module| !modules.contains(**module));
     problems.extend(absent.map(|module| format!("the planned module {module} has no file")));
@@ -331,7 +358,7 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
         }
     }
     // The audit, `leanchecker` with each prefix, and the version of Lean.
-    let audit = lean::audit_source(layout.namespace, &statements.statements, &own);
+    let audit = lean::audit_source(layout.namespace, &kept, &own);
     write(&project.join(lean::AUDIT), &audit)?;
     let args = lean::check_args(lean::AUDIT);
     let request = lake(Site::AxiomAudit, &args, &project);
@@ -411,7 +438,7 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
             (theorem.module, theorem.axioms) = (module.clone(), Some(axioms.clone()));
         }
     }
-    for statement in &statements.statements {
+    for statement in &kept {
         let (name, module) = (&statement.name, &statement.module);
         let theorem = theorems.entry(statement.theorem.clone()).or_default();
         (theorem.state, theorem.status) = (Some(statement.state), Status::NotRun);
@@ -450,6 +477,18 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
             Some(_) => gate.conclude_from(&unit(name), &of, status),
             None if forced => base,
             None => status.0,
+        };
+    }
+    // A statement whose module is left out is not checked: it is `SCOPED`.
+    for statement in &waived {
+        let module = &statement.module;
+        let reason = format!("its module {module} is left out of the base round by the waiver");
+        let reason = Some(format!("{reason} of {}", left[module]));
+        let theorem = theorems.entry(statement.theorem.clone()).or_default();
+        (theorem.module, theorem.state) = (module.clone(), Some(statement.state));
+        theorem.status = match statement.state {
+            State::Proved => gate.conclude(&unit(&statement.theorem), (Status::Scoped, reason)),
+            State::Planned => Status::NotRun,
         };
     }
     record.modules = modules.into_iter().collect();
@@ -1922,5 +1961,136 @@ mod tests {
         assert_eq!(merged.problems, Vec::<String>::new());
         assert_eq!((merged.status, merged.complete), (Status::Verified, true));
         assert_eq!(merged.units, whole.receipt.units);
+    }
+
+    /// The receipt of the qualification job of `fixture`.
+    fn job(fixture: &Fixture) -> Done {
+        let phases = run::tests::shard_phases(fixture.root(), "qualification");
+        run::tests::gate_shard(fixture, "qualification", phases, run::tests::plenty)
+    }
+
+    #[test]
+    fn a_waived_target_leaves_its_proof_modules_and_their_statements_out_of_the_base_round() {
+        // The target proves the statement `S` in its proof module.
+        let mut fixture = base("waived");
+        run::tests::root_package(&fixture, "krepi-kernel", "");
+        let target = json!({
+            "name": "t", "module": "T", "start_from": ["crate::f"],
+            "proof_modules": ["Krepi.Proofs.Counter"],
+            "obligations": [{"id": "s", "theorems": [T]}],
+        });
+        targets(&fixture, &json!([target]));
+        let counter = "Krepi/Proofs/Counter.lean";
+        // An expired waiver leaves nothing out.
+        waiver::tests::waive(&fixture, "t", "2000-01-01");
+        hashed(&mut fixture);
+        let done = job(&fixture);
+        assert_eq!(status(&done, &unit(T)), (Status::Verified, None));
+        assert!(stage(&done).join(counter).is_file());
+        // A waiver that holds leaves the target, its proof module and the
+        // statement that it proves out, and the statement is the target's.
+        waiver::tests::waive(&fixture, "t", "9999-12-31");
+        let done = job(&fixture);
+        let receipt = done.written();
+        let conclusion = (receipt.status, receipt.complete);
+        assert_eq!(
+            conclusion,
+            (Status::Verified, true),
+            "{:?}",
+            done.failures()
+        );
+        assert!(receipt.proof_targets.is_empty());
+        assert_eq!(status(&done, PHASE), (Status::Verified, None));
+        let reason =
+            "its module Krepi.Proofs.Counter is left out of the base round by the waiver of t";
+        assert_eq!(status(&done, &unit(T)), (Status::Scoped, Some(reason)));
+        let theorem = &record(&done).theorems[T];
+        let module = (
+            theorem.module.as_str(),
+            theorem.state,
+            theorem.axioms.as_ref(),
+        );
+        assert_eq!(module, ("Krepi.Proofs.Counter", Some(State::Proved), None));
+        assert_eq!(theorem.status, Status::Scoped);
+        assert!(!stage(&done).join(counter).exists());
+        assert!(stage(&done).join("Krepi/Proofs/Main.lean").is_file());
+        let audit = fs::read_to_string(stage(&done).join(lean::AUDIT)).expect("the audit");
+        assert!(!audit.contains("Krepi.Proofs.Counter"), "{audit}");
+        // The source rules still apply to the module.
+        let axiom = format!("{COUNTER}\naxiom bad : False\n");
+        fixture.write(&format!("verification/{counter}"), &axiom);
+        hashed(&mut fixture);
+        let done = job(&fixture);
+        let problem = format!("verification/{counter}:16: axiom");
+        assert_eq!(
+            status(&done, PHASE),
+            (Status::Rejected, Some(problem.as_str()))
+        );
+    }
+
+    #[test]
+    fn a_module_that_imports_what_a_waiver_leaves_out_is_left_out_unless_an_extracted_target_lists_it()
+     {
+        // `t` is waived, `u` is not and lists `Main`, which imports a module
+        // that is left out; a module may import the generated code of `t`.
+        let mut fixture = base("waived-importers");
+        run::tests::root_package(&fixture, "krepi-kernel", "");
+        let target = |name: &str, module: &str, proofs: &str| json!({"name": name, "module": module, "start_from": ["crate::f"], "proof_modules": [proofs]});
+        let (t, u) = (
+            target("t", "T", "Krepi.Proofs.Counter"),
+            target("u", "U", "Krepi.Proofs.Main"),
+        );
+        targets(&fixture, &json!([t, u]));
+        let importing = |import: &str| format!("module\n\npublic import {import}\n");
+        for (file, import) in [
+            ("Helper", "Krepi.Proofs.Counter"),
+            ("Uses", "KrepiGen.T.Funs"),
+            ("Deep", "Krepi.Proofs.Helper"),
+            ("Elsewhere", "KrepiGen.T.Sub.Funs"),
+            ("Main", "Krepi.Proofs.Helper"),
+        ] {
+            fixture.write(
+                &format!("verification/Krepi/Proofs/{file}.lean"),
+                &importing(import),
+            );
+        }
+        let h = "Krepi.Proofs.Helper.h";
+        register(
+            &fixture,
+            &[
+                (S, T, "proved"),
+                ("Krepi.Statements.Counter.R", h, "proved"),
+            ],
+        );
+        waiver::tests::waive(&fixture, "t", "9999-12-31");
+        hashed(&mut fixture);
+        let done = job(&fixture);
+        let receipt = done.written();
+        let conclusion = (receipt.status, receipt.complete);
+        assert_eq!(
+            conclusion,
+            (Status::Verified, true),
+            "{:?}",
+            done.failures()
+        );
+        assert_eq!(Vec::from_iter(receipt.proof_targets.keys()), ["u"]);
+        let staged = |file: &str| {
+            stage(&done)
+                .join(format!("Krepi/Proofs/{file}.lean"))
+                .is_file()
+        };
+        for file in ["Counter", "Helper", "Uses", "Deep"] {
+            assert!(!staged(file), "{file}");
+        }
+        assert!(staged("Main") && staged("Elsewhere"));
+        for (theorem, module) in [(T, "Counter"), (h, "Helper")] {
+            let reason = format!(
+                "its module Krepi.Proofs.{module} is left out of the base round by the waiver of t"
+            );
+            assert_eq!(
+                status(&done, &unit(theorem)),
+                (Status::Scoped, Some(reason.as_str()))
+            );
+        }
     }
 }

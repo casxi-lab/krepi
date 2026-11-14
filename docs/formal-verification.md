@@ -771,8 +771,9 @@ in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
    `--target`; a run extracts these and, for the base round, the formal
    targets that it does not select, so a whole run extracts no planned
    target. The qualification job selects no target and extracts every
-   formal target for the base round; the shard of a target selects its
-   target and extracts no other. A whole run whose registry has no formal
+   formal target for the base round but those of the waivers that hold
+   ([waivers](#waivers)); the shard of a target selects its target and
+   extracts no other. A whole run whose registry has no formal
    target selects and extracts none, and the workspace may then have no
    root package. When the run selects targets, it takes the inventory of
    the exported workspace for their registration checks
@@ -975,9 +976,9 @@ job `formal merge` of the workflow `formal` is the check that the required
 gate (planned) is to use.
 
 - **The qualification job** has the [guard](#guard) on a pull request, the
-  [qualification](#qualification), the extraction of every formal target,
-  whose commands are those of the unit `base`, and the
-  [base round](#base-round); it runs no target. Its budget is 7,800 s: the
+  [qualification](#qualification), the extraction of every formal target
+  but those of the [waivers](#waivers) that hold, whose commands are those
+  of the unit `base`, and the [base round](#base-round); it runs no target. Its budget is 7,800 s: the
   gate's 7,200 s and 600 s for the extraction, which the budgets of the
   targets do not grow. Its disk guard counts `qualification` alone.
 - **The shard of a target** has the extraction of that formal target, whose
@@ -1115,9 +1116,29 @@ in this form sort as text in the order of the calendar.
 unknown field, and a waiver with a blank reason or author, an empty scope,
 a name in it that `verification/targets.json` does not register, or an
 expiry that is not a date of the calendar in that form. A planned target
-may be named, and a name may repeat. A missing record has no waivers,
-and the layout of the [calibration target](#calibration-target) has no
-record. Of the commands, only `cargo xtask formal check` reads it.
+may be named, and a name may repeat. A record that is missing or cannot
+be read has no waivers, and the layout of the
+[calibration target](#calibration-target) has no record.
+
+The qualification job reads the record of its export when its extraction
+starts, with the UTC date of the clock of the host, and leaves the formal
+targets of the waivers that hold then out of the extraction and of the
+[base round](#base-round). A record that breaks its rules, or a clock that
+reads before 1970-01-01 or after 9999-12-31, stops the extraction as a
+tool failure. The base round leaves out the proof modules of those targets
+that no other formal target lists, and every hand-written module that
+imports a module left out, or a generated module of such a target,
+`KrepiGen.<module>.<file>`, unless a target that the job extracted lists
+it: such a module of a target fails the build, as the import of any
+missing module does. The round neither builds nor checks a statement
+whose module is left out: its `base/<theorem>` is `SCOPED`, with the
+reason that the waiver of the target leaves the module out of the base
+round, and is a unit of that target when the module is one of its proof
+modules. The [source rules](#source-rules)
+still apply to every tracked Lean file, those left out included. The
+shard of a waived target runs as any other. A run without `--shard`, the
+shard of a target, the calibration target and the
+[toolchain canary](#toolchain-canary) do not read the record.
 
 ### Extraction
 
@@ -1354,7 +1375,8 @@ the phase. Then it
    [source rule](#source-rules);
 3. creates the stage `work/base/stage/` as the qualification creates the
    stage of a case: the project files of the export, its module files below
-   `verification/Krepi/` whose paths name modules, so that no file that
+   `verification/Krepi/` whose paths name modules but those that the
+   [waivers](#waivers) leave out, so that no file that
    step 2 rejects for its form reaches the root, the two links to the
    installation, and, for each
    qualification case with a proof whose generated code built, the
@@ -1410,7 +1432,7 @@ failure otherwise ([results](#results)).
 
 **Audit.** `Audit.lean` is not a module. It imports the root, sets
 `pp.privateNames`, states `example : S := t` for the theorem `t` of each
-proved statement `S`, and runs a program that, for each own module, prints
+proved statement `S` of a module in the stage, and runs a program that, for each own module, prints
 a marker, runs `#print axioms` on each theorem constant of the module that
 is not private, not an internal detail and not the theorem of a planned
 statement, prints the module that declares each of its native-decision
@@ -1531,7 +1553,8 @@ its own problems, and when the build failed or `leanchecker` reported a
 declaration that the kernel rejects, and `VERIFIED` otherwise; the other
 audited theorems get their status in the receipt the same way. A tool
 failure among the round's commands forces `base` and each of its
-theorems.
+theorems. A `base/<theorem>` whose module a waiver leaves out is
+`SCOPED` ([waivers](#waivers)).
 
 ### Source rules
 

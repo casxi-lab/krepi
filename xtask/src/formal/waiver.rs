@@ -1,12 +1,17 @@
-//! The waiver record `verification/waivers.json`, as "Waivers" in
-//! `docs/formal-verification.md` describes it: each waiver names the
-//! registered targets that it covers, why, the author of the pull request
-//! that adds it, and the last UTC date on which it holds.
+//! The waiver record `verification/waivers.json` and what its waivers leave
+//! out of the base round, as "Waivers" in `docs/formal-verification.md`
+//! describes them.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
-use time::{Date, Month};
+use time::{Date, Month, UtcDateTime};
 
-use super::{lean, registry::Target};
+use super::registry::{State, Target};
+use super::{Layout, lean};
 
 /// The waiver record: schema 1 and its waivers.
 #[derive(Debug, Deserialize)]
@@ -41,14 +46,56 @@ pub fn parse(text: Option<&str>, targets: &[Target]) -> Result<Vec<Waiver>, Stri
         let empty = (waiver.scope.is_empty()).then(|| "its scope is empty".to_string());
         let unknown = (waiver.scope.iter()).filter(|n| !targets.iter().any(|t| t.name == **n));
         let unknown = unknown.map(|name| format!("{name:?} is no registered target"));
-        let expires = &waiver.expires;
-        let not = format!("its expiry {expires:?} is no date YYYY-MM-DD");
-        let not = (!is_date(expires)).then_some(not);
+        let not = format!("its expiry {:?} is no date YYYY-MM-DD", waiver.expires);
+        let not = (!is_date(&waiver.expires)).then_some(not);
         found.extend(empty.into_iter().chain(unknown).chain(not));
         problems.extend(found.iter().map(|found| format!("waiver {at}: {found}")));
     }
     let waivers = problems.is_empty().then_some(file.waivers);
     waivers.ok_or(problems.join("; "))
+}
+
+/// The waivers of the record of `layout` below `root`, with the registered
+/// `targets`: none when it cannot be read, as without a record.
+pub fn read(root: &Path, layout: &Layout, targets: &[Target]) -> Result<Vec<Waiver>, String> {
+    let text = fs::read_to_string(root.join(layout.waivers)).ok();
+    parse(text.as_deref(), targets).map_err(|error| format!("{}: {error}", layout.waivers))
+}
+
+/// The UTC date of the clock reading `now`, `YYYY-MM-DD`, or why there is
+/// none: a reading before 1970-01-01 or after 9999-12-31.
+pub fn today(now: SystemTime) -> Result<String, String> {
+    let since = (now.duration_since(UNIX_EPOCH)).map_err(|_| "the clock reads before 1970")?;
+    let seconds = i64::try_from(since.as_secs()).unwrap_or(i64::MAX);
+    let at = UtcDateTime::from_unix_timestamp(seconds).map_err(|error| error.to_string())?;
+    Ok(at.date().to_string())
+}
+
+/// The targets of the `waivers` that hold on `date`, their expiry included.
+pub fn holding(waivers: &[Waiver], date: &str) -> BTreeSet<String> {
+    let holds = (waivers.iter()).filter(|waiver| date <= waiver.expires.as_str());
+    holds.flat_map(|waiver| waiver.scope.clone()).collect()
+}
+
+/// The modules that waivers leave out of the base round, each with the
+/// waived target that leaves it out.
+pub type LeftOut = BTreeMap<String, String>;
+
+/// What the waivers of the targets `waived` leave out of the base round of
+/// the registered `targets`: the proof modules of the waived formal targets
+/// that no other formal target lists, and their generated modules, by the
+/// prefix `<generated>.<module>.`.
+pub fn left_out(layout: &Layout, targets: &[Target], waived: &BTreeSet<String>) -> LeftOut {
+    let formal = (targets.iter()).filter(|target| target.state == State::Formal);
+    let (out, kept): (Vec<_>, Vec<_>) = formal.partition(|t| waived.contains(&t.name));
+    let kept = BTreeSet::from_iter(kept.into_iter().flat_map(|t| t.proof_modules.clone()));
+    let mut modules = LeftOut::new();
+    for target in out {
+        let generated = (target.module.iter()).map(|m| format!("{}.{m}.", layout.generated));
+        let own = (target.proof_modules.iter()).filter(|m| !kept.contains(*m));
+        modules.extend((own.cloned().chain(generated)).map(|m| (m, target.name.clone())));
+    }
+    modules
 }
 
 /// Whether `text` is a date of the calendar written `YYYY-MM-DD`, as the
@@ -62,11 +109,23 @@ fn is_date(text: &str) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use std::time::Duration;
+
     use serde_json::json;
 
     use super::*;
-    use crate::formal::{Layout, registry};
+    use crate::formal::fixture::Fixture;
+    use crate::formal::registry;
+    use crate::scratch::Scratch;
+
+    /// Writes the waiver record of `fixture` with a waiver of `target` until
+    /// `expires`, and commits it.
+    pub(crate) fn waive(fixture: &Fixture, target: &str, expires: &str) {
+        let file = json!({"schema": 1, "waivers": [waiver(&[target], expires)]});
+        fixture.write(Layout::PRODUCTION.waivers, &format!("{file}\n"));
+        fixture.commit_all();
+    }
 
     /// The formal target `a` and the planned target `b`.
     fn targets() -> Vec<Target> {
@@ -152,5 +211,80 @@ mod tests {
         ] {
             assert!(!is_date(text), "{text:?}");
         }
+    }
+
+    #[test]
+    fn a_record_that_cannot_be_read_has_no_waivers_and_one_that_breaks_its_rules_is_an_error() {
+        let scratch = Scratch::temporary("waiver-read");
+        let read_in = |layout: &Layout| read(&scratch.0, layout, &targets());
+        assert_eq!(read_in(&Layout::PRODUCTION), Ok(Vec::new()));
+        // A directory in its place cannot be read, and the calibration layout
+        // names no record.
+        fs::create_dir_all(scratch.0.join(Layout::PRODUCTION.waivers)).expect("a directory");
+        assert_eq!(read_in(&Layout::PRODUCTION), Ok(Vec::new()));
+        assert_eq!(read_in(&Layout::CALIBRATION), Ok(Vec::new()));
+        fs::remove_dir(scratch.0.join(Layout::PRODUCTION.waivers)).expect("remove it");
+        let file = json!({"schema": 1, "waivers": [waiver(&["a"], "9999-12-31")]});
+        scratch.write(Layout::PRODUCTION.waivers, &file.to_string());
+        assert_eq!(read_in(&Layout::CALIBRATION), Ok(Vec::new()));
+        let found = read_in(&Layout::PRODUCTION).expect("the waivers");
+        assert_eq!(
+            holding(&found, "2026-11-13"),
+            BTreeSet::from(["a".to_string()])
+        );
+        scratch.write(Layout::PRODUCTION.waivers, "{");
+        let error = read_in(&Layout::PRODUCTION).expect_err("a record that does not parse");
+        assert!(error.starts_with("verification/waivers.json: "), "{error}");
+    }
+
+    #[test]
+    fn a_waiver_holds_through_its_expiry_date_in_utc() {
+        let waivers = [
+            parsed(&[waiver(&["a"], "2026-11-13")]),
+            parsed(&[waiver(&["b", "a"], "2026-12-01")]),
+        ];
+        let waivers = Vec::from_iter(waivers.into_iter().flat_map(|w| w.expect("a waiver")));
+        let names = |names: &[&str]| BTreeSet::from_iter(names.iter().map(|n| n.to_string()));
+        assert_eq!(holding(&waivers, "2026-11-12"), names(&["a", "b"]));
+        assert_eq!(holding(&waivers, "2026-11-13"), names(&["a", "b"]));
+        assert_eq!(holding(&waivers, "2026-11-14"), names(&["a", "b"]));
+        assert_eq!(holding(&waivers, "2026-12-02"), names(&[]));
+        assert_eq!(holding(&waivers[..1], "2026-11-14"), names(&[]));
+        // The last second of a day and the first of the next, and readings
+        // that give no date.
+        let at = |seconds: u64| today(UNIX_EPOCH + Duration::from_secs(seconds));
+        assert_eq!(at(0), Ok("1970-01-01".to_string()));
+        assert_eq!(at(1_794_614_399), Ok("2026-11-13".to_string()));
+        assert_eq!(at(1_794_614_400), Ok("2026-11-14".to_string()));
+        assert_eq!(at(253_402_300_799), Ok("9999-12-31".to_string()));
+        assert!(at(253_402_300_800).is_err());
+        let before = today(UNIX_EPOCH - Duration::from_secs(1));
+        assert_eq!(before, Err("the clock reads before 1970".to_string()));
+    }
+
+    #[test]
+    fn a_waiver_leaves_out_the_proof_modules_that_no_other_formal_target_lists() {
+        let text = json!({"schema": 2, "targets": [
+            {"name": "t", "module": "T", "proof_modules": ["P.A", "P.Shared"]},
+            {"name": "u", "module": "U", "proof_modules": ["P.Shared", "P.B"]},
+            {"name": "p", "state": "planned", "module": "Q", "proof_modules": ["P.C"]},
+        ]});
+        let targets = registry::parse(&text.to_string())
+            .expect("a registry")
+            .targets;
+        let names = |names: &[&str]| BTreeSet::from_iter(names.iter().map(|n| n.to_string()));
+        let left = |waived: &[&str]| left_out(&Layout::PRODUCTION, &targets, &names(waived));
+        let entries = |entries: &[(&str, &str)]| {
+            LeftOut::from_iter(entries.iter().map(|(m, t)| (m.to_string(), t.to_string())))
+        };
+        assert_eq!(left(&[]), LeftOut::new());
+        assert_eq!(
+            left(&["t", "p"]),
+            entries(&[("KrepiGen.T.", "t"), ("P.A", "t")])
+        );
+        // A module of two waived targets is left out with one of them.
+        let both = left(&["t", "u"]);
+        let modules = ["KrepiGen.T.", "KrepiGen.U.", "P.A", "P.B", "P.Shared"];
+        assert_eq!(Vec::from_iter(both.keys()), modules);
     }
 }
