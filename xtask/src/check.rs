@@ -753,11 +753,10 @@ pub fn command(root: PathBuf, args: &[&str]) -> ExitCode {
             let _ = error.print();
             ExitCode::from(u8::try_from(error.exit_code()).unwrap_or(2))
         }
-        Ok(options) => ExitCode::from(run(
-            &root,
-            &options,
-            &steps(options.slow, options.skip_formal),
-        )),
+        Ok(options) => {
+            let steps = steps(options.slow, options.skip_formal);
+            ExitCode::from(run(&root, &options, &steps))
+        }
     }
 }
 
