@@ -25,6 +25,7 @@ on:
       - formal canary
       - formal image build
       - formal image publish
+      - formal measure
       - full
       - nightly
       - release

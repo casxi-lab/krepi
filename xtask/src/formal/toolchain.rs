@@ -1440,9 +1440,9 @@ mod tests {
     /// other than root.
     const IMAGE_CHECK: &str = include_str!("../../../verification/image/non-root-check.sh");
 
-    /// The workflow of the gate's CI jobs, whose measurement job runs
-    /// `leanchecker` in the stage of a run.
-    const FORMAL_WORKFLOW: &str = include_str!("../../../.github/workflows/formal.yml");
+    /// The workflow of the measurement jobs of the gate, whose job
+    /// `leanchecker` runs `leanchecker` in the stage of a run.
+    const MEASURE_WORKFLOW: &str = include_str!("../../../.github/workflows/formal-measure.yml");
 
     #[test]
     fn the_image_check_runs_tools_with_the_tool_environment() {
@@ -1451,7 +1451,7 @@ mod tests {
 
     #[test]
     fn the_measurement_job_runs_leanchecker_with_the_tool_environment() {
-        assert_lists_the_tool_environment(FORMAL_WORKFLOW, Tool::Leanchecker);
+        assert_lists_the_tool_environment(MEASURE_WORKFLOW, Tool::Leanchecker);
     }
 
     /// Asserts that the lines of `text` between its only line `tool_env=(`

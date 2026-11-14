@@ -426,6 +426,18 @@ const RETENTION: [(&str, &str, &str, &str); 28] = [
         "90",
     ),
     (
+        ".github/workflows/formal-measure.yml",
+        "leanchecker",
+        "Upload the measurement",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal-measure.yml",
+        "comparator",
+        "Upload the results",
+        BY_REF,
+    ),
+    (
         ".github/workflows/formal.yml",
         "gate",
         "Upload the receipt and the logs",
@@ -445,20 +457,8 @@ const RETENTION: [(&str, &str, &str, &str); 28] = [
     ),
     (
         ".github/workflows/formal.yml",
-        "leanchecker",
-        "Upload the measurement",
-        BY_REF,
-    ),
-    (
-        ".github/workflows/formal.yml",
         "planned",
         "Upload the receipt and the logs of the planned targets",
-        BY_REF,
-    ),
-    (
-        ".github/workflows/formal.yml",
-        "comparator",
-        "Upload the results",
         BY_REF,
     ),
     (
@@ -807,6 +807,8 @@ fn a_download_takes_the_name_of_its_artifact_from_the_job_that_uploaded_it() {
 
 /// The workflow of the gate.
 const FORMAL: &str = ".github/workflows/formal.yml";
+/// The workflow of the measurement jobs of the gate.
+const MEASURE: &str = ".github/workflows/formal-measure.yml";
 /// The workflow of the calibration target.
 const CALIBRATION: &str = ".github/workflows/formal-calibration.yml";
 /// The jobs of the gate in the formal workflows: the file and the key.
@@ -821,7 +823,7 @@ const GATE_JOBS: [(&str, &str); 7] = [
 ];
 /// What their uploads may hold: receipts, summaries, the records of the
 /// run and the logs of the run packed into `logs.tar.gz`.
-const GATE_UPLOADS: [&str; 13] = [
+const GATE_UPLOADS: [&str; 7] = [
     "artifacts/formal/runs/*/receipt.json",
     "artifacts/formal/summary.md",
     "artifacts/formal/merge/record.json",
@@ -829,12 +831,6 @@ const GATE_UPLOADS: [&str; 13] = [
     "artifacts/formal/logs.tar.gz",
     "artifacts/formal/job.txt",
     "artifacts/formal/event.json",
-    "artifacts/formal/guard.txt",
-    "artifacts/formal/vectors.txt",
-    "artifacts/formal/vectors-tests.txt",
-    "artifacts/formal/vectors-fixture.txt",
-    "artifacts/formal/vectors/",
-    "artifacts/formal/samples.tsv",
 ];
 /// The archive of the logs of a run.
 const PACKED_LOGS: &str = "artifacts/formal/logs.tar.gz";
@@ -1534,7 +1530,12 @@ fn the_gate_flags_of_the_formal_step_are_those_of_the_workflows() {
             files.push(path);
         }
     }
-    for path in [FORMAL, CALIBRATION, ".github/workflows/formal-canary.yml"] {
+    for path in [
+        FORMAL,
+        MEASURE,
+        CALIBRATION,
+        ".github/workflows/formal-canary.yml",
+    ] {
         assert!(files.contains(&path), "{path}: {files:?}");
     }
 }

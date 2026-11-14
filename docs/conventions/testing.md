@@ -333,7 +333,7 @@ The artifacts hold receipts, records, summaries and logs, which the zip of
 the artifact compresses, and the images that the QEMU suites boot. The
 jobs of the gate of the two formal workflows pack the logs of a run into
 `logs.tar.gz` and upload none uncompressed; the measurement jobs of the
-formal workflow and the formal canary upload theirs as they are.
+workflow `formal measure` and the formal canary upload theirs as they are.
 
 The lines use two caches, which only the workflow `cache` (`cache.yml`)
 saves, from `main`. The cargo cache holds `~/.cargo/registry/index/`,
@@ -860,10 +860,11 @@ packed into `logs.tar.gz` as the artifact
 merges them. Beside them, the job `formal planned` runs the command with
 `--target` on the planned targets of the registry, and the job
 `formal limits` before them computes their limits and the shards from the
-registered budgets. The same workflow has
-measurement jobs, `leanchecker` in two modes and `lake comparator`, which
-run on a manual run of the workflow and on a pull request with the label
-`formal-measure` ([CI job](../formal-verification.md#ci-job)). Its unit
+registered budgets. The measurement jobs, `leanchecker` in two modes and
+`lake comparator`, are in `.github/workflows/formal-measure.yml` and run
+on a manual run of that workflow on `main` and when the label
+`formal-measure` is added to a pull request
+([CI job](../formal-verification.md#ci-job)). Its unit
 tests run in the `test` step above, on Git repositories that they create
 with the gate inputs in a minimal form, and with fake tools: shell scripts
 that hang, exit with a given status, end by a signal or print what a tool
@@ -977,20 +978,18 @@ those of `formal`.
 `cargo xtask formal vectors [DOMAIN/COMPONENT]` replays the frozen test
 vectors of a component through its specification with the pinned Lean and
 compares the results line by line with those that its host tests wrote
-([test vectors](../formal-verification.md#test-vectors)). It is not part of
-the check: on a pull request that changes the kernel or user-space
-workspace, the Lake project, a component's directory, xtask or
-`.github/workflows/formal.yml`, the job `formal run` runs the host tests
-with `KREPI_VECTOR_RESULTS` set and then the command in the pinned image,
-for every component whose contract names a replay. Its unit tests run in the
-`test` step above, on Git repositories with a fixture component and a Lake
-stand-in, a shell script that records its calls and environment and writes
-the expected outputs as the results of the replay; a test that reads the
-output and the exit status of the command starts the test executable again
-to run it. One test,
+([test vectors](../formal-verification.md#test-vectors)). The formal step
+of the check runs the host tests with `KREPI_VECTOR_RESULTS` set and then
+the command in the pinned image, for every component whose contract names a
+replay ([vectors in CI](../formal-verification.md#vectors-in-ci)). Its unit
+tests run in the `test` step above, on Git repositories with a fixture
+component and a Lake stand-in, a shell script that records its calls and
+environment and writes the expected outputs as the results of the replay; a
+test that reads the output and the exit status of the command starts the
+test executable again to run it. One test,
 `formal::vectors::tests::the_fixture_replays_with_the_pinned_lean`, is
-ignored because it needs the pinned Lean: the job runs it in the image, and
-a local run needs the `darwin-arm64` installation at
+ignored because it needs the pinned Lean: the formal step runs it in the
+image, and a local run needs the `darwin-arm64` installation at
 `artifacts/formal/tools`.
 
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel, and

@@ -485,31 +485,43 @@ fn the_deadline_rule_contains_the_limit_rule() {
 
 #[test]
 fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
-    // The jobs of the formal workflow, as the record reads them and as the
-    // committed file gives them: a job of a matrix is named by its mode.
-    let path = ".github/workflows/formal.yml";
-    let committed = fs::read_to_string(crate::repo::root().join(path)).expect("the workflow");
-    // The committed file has the jobs of the limits and of the planned
-    // targets, and its gates take their limits from the first: expressions,
-    // which give no limit.
-    let both = [
-        (FORMAL, Some(195), None, None),
-        (committed.as_str(), None, Some(5), None),
-    ];
-    for (text, gate, before, planned) in both {
-        let limits = limits(text).expect("the workflow reads");
-        for (name, limit) in [
+    // The jobs of the formal workflows, as the record reads them and as the
+    // committed files give them: a job of a matrix is named by its mode.
+    let read = |path: &str| fs::read_to_string(crate::repo::root().join(path)).expect("a workflow");
+    let committed = read(".github/workflows/formal.yml");
+    let measure = read(".github/workflows/formal-measure.yml");
+    let measured = |comparator: Option<u64>| {
+        [
             ("leanchecker fresh", Some(120)),
             ("leanchecker prefix", Some(120)),
             ("leanchecker ${{ matrix.mode }}", Some(120)),
             ("leanchecker ", Some(120)),
-            ("formal limits", before),
-            ("formal run", gate),
-            ("formal planned", planned),
-            ("lake comparator", Some(30)),
+            ("lake comparator", comparator),
             ("leanchecker", None),
             ("lake", None),
-        ] {
+        ]
+    };
+    let gates = |gate: Option<u64>, before: Option<u64>| {
+        [
+            ("formal limits", before),
+            ("formal run", gate),
+            ("formal planned", None),
+        ]
+    };
+    // The fixture has the measurement jobs beside the gate. The committed
+    // workflow of the gate has the jobs of the limits and of the planned
+    // targets, and its gates take their limits from the first: expressions,
+    // which give no limit; the measurement jobs have a workflow of their own.
+    for (text, names) in [
+        (
+            FORMAL,
+            [&measured(Some(30))[..], &gates(Some(195), None)].concat(),
+        ),
+        (committed.as_str(), gates(None, Some(5)).to_vec()),
+        (measure.as_str(), measured(Some(45)).to_vec()),
+    ] {
+        let limits = limits(text).expect("the workflow reads");
+        for (name, limit) in names {
             assert_eq!(job_limit(&limits, name), limit, "{name}");
         }
     }

@@ -1884,7 +1884,8 @@ contents, use no stored credentials, and run actions pinned to full commit
 SHAs. The steps of the job `formal run`:
 
 1. check out the head of the pull request, or the pushed commit, with its
-   whole history, which the guard needs for the merge base;
+   whole history, which the guard phase of the gate needs for the merge
+   base;
 2. record the runner (its user, processors, memory, disk, kernel, and
    Docker's cgroup version and security options), and fail when the
    runner's user is root or does not own the checkout; pull the image by
@@ -1899,51 +1900,27 @@ SHAs. The steps of the job `formal run`:
    the only network interface, every attempt to create a file in or change
    the mode of `lean/`, `backend/`, `bin/`, `rustup/` and `cargo/` of the
    installation fails, and xtask starts in the image;
-5. on a pull request, run `cargo xtask formal guard` with the copied event,
-   as the binary of step 3 on the runner; its failure fails the job, and the
-   gate still runs. The step records the bytes available on `/` before and
-   after the guard and, where the runner has `/usr/bin/time`, its record,
-   else a line that it has none, in `job.txt`, and then starts a process
-   that writes, every second until the vectors step has ended or the gate
-   has started, the time, the bytes available on `/` and the memory in use
-   on the runner, `MemTotal` less `MemAvailable`, in KiB, into
-   `samples.tsv`;
-6. on a pull request that changes `kernel/`, `user/`, `verification/`,
-   `docs/domains/`, `xtask/` or `.github/workflows/formal.yml` since the
-   merge base, compare the test vectors ([vectors in CI](#vectors-in-ci)):
-   build the test executable of xtask and run its ignored replay of the
-   fixture in a container of the image, run the host tests of the kernel and
-   user-space workspaces with `KREPI_VECTOR_RESULTS` set, and run
-   `cargo xtask formal vectors` in another container. Each container has the
-   flags, the user and the mounted checkout of the gate's and is removed
-   when it ends. Under `timeout`, the build of the test executable has 5
-   minutes, the fixture replay 6, the host tests of each workspace 5 and the
-   comparison 31, and each container a minute more for its kill, so that
-   none outlives the step's 55 minutes. Its failure fails the job, and the
-   gate still runs;
-7. run `cargo xtask formal run --shard qualification`, as the same binary,
-   in a container of the image, as the runner's user and group, with
+5. run `cargo xtask formal run --shard qualification`, as the binary of
+   step 3, in a container of the image, as the runner's user and group, with
    `--pull never --init --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --network none`,
    the checkout mounted at its own path as the working directory, and the
    variables `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and
    `GITHUB_RUN_ATTEMPT` of the run, `GITHUB_EVENT_PATH` naming the copied
    event, and `KREPI_FORMAL_IMAGE` naming the image of `IMAGE`;
-8. always, remove the container of the gate if a cancelled step left it;
-9. always, write a summary of the receipt to the summary of the workflow
+6. always, remove the container of the gate if a cancelled step left it;
+7. always, write a summary of the receipt to the summary of the workflow
    run: the status, whether the run is complete, its time and that of each
    phase, the number of units of each status, the image, the resources, the
    rules of the guard, every unit that is not `VERIFIED` and every failure.
    The step fails when the gate's step ran and left no receipt;
-10. always, stop that process if it still runs, write `summary.md` (the
-    status, phases, units, resources and failures of the receipt, with its
-    SHA-256), and pack the `logs/` of the run into `logs.tar.gz`;
-11. always, upload the summary, the archive, `job.txt`, the record of steps
-    2 to 5 and of the start and end of the gate, the output of the guard,
-    the output of the vectors step with that of the fixture replay, the path
-    of its test executable and the host results, the event, `samples.tsv`
-    and the receipt of the run as the artifact
-    `formal-part-qualification-<commit>-<attempt>`. The logs of the run are
-    uploaded only in the archive.
+8. always, write `summary.md` (the status, phases, units, resources and
+   failures of the receipt, with its SHA-256), and pack the `logs/` of the
+   run into `logs.tar.gz`;
+9. always, upload the summary, the archive, `job.txt`, the record of steps
+   2 to 4 and of the start and end of the gate, the event and the receipt
+   of the run as the artifact
+   `formal-part-qualification-<commit>-<attempt>`. The logs of the run are
+   uploaded only in the archive.
 
 xtask finds the repository through the path at which it was compiled, so
 the checkout is mounted at that path; the runner and the image are the same
@@ -1957,12 +1934,12 @@ process 1 would not, and `--pull never` makes a missing image an error
 instead of a pull.
 
 The job may take the time that the job `formal limits` computes, below:
-15 minutes for the steps before the vectors step (2 to check out, 8 to
-record the runner and pull, 3 to build xtask, 1 for the probe and 1 for the
-guard), the 55 of the vectors step, and the minutes of the deadline of
-the qualification job, 7,200 s and 600 s, with the 300 s of its receipt,
-205 in all whatever the registry. The gate's step has a backstop one
-minute after the gate's own end, 136 minutes. When the steps
+15 minutes for the steps before the gate's step (2 to check out, 8 to
+record the runner and pull, 3 to build xtask and 1 for the probe) and the
+backstop of the gate's step, one minute after the gate's own end, and the
+minutes of the deadline of the qualification job, 7,200 s and 600 s, with
+the 300 s of its receipt, 150 in all whatever the registry. The gate's step
+has 136 minutes. When the steps
 before the gate and the gate use all their time, the steps after it have
 almost none, and the limit of the job may cut the upload; the receipt is
 still written in the checkout. When the gate's
@@ -1985,8 +1962,9 @@ rounded up, and one more as a backstop, 136; the step of a shard or of the
 planned targets has two more, as `deadline.sh` kills its command a minute
 after its deadline. So the receipt of each part is written before its step
 ends, however many formal targets the registry has. The job `formal run`
-then has the 15 minutes before the vectors step, the 55 of that step and
-the minutes of the deadline and the receipt, 205; a shard job and the job
+then has the 15 minutes of the steps before the gate's step and its
+backstop, and the minutes of the deadline and the receipt, 150; a shard job
+and the job
 `formal planned` have 15 minutes before their step, the step and 3 minutes
 after it. The shards form a matrix with one entry for each formal target,
 by its name, with its registered budget and the minutes of its step and
@@ -2003,7 +1981,7 @@ and `formal planned` do not run, and the merge fails without a receipt.
 
 Each job `formal shard <name>`, beside `formal run`, runs the shard of one
 formal target. It is prepared as `formal run` is, with the shorter probe
-of `formal planned`, and without the guard, the vectors and the event. Its
+of `formal planned`, and without the event. Its
 main command, `cargo xtask formal run --shard target/<name>` in a container
 of the image with the flags of the gate and the variables `GITHUB_REF`,
 `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT` and `KREPI_FORMAL_IMAGE`, runs under
@@ -2056,28 +2034,41 @@ under `.github/scripts/deadline.sh --stop-commands` with the minutes of the
 deadline and the receipt, and a minute for its kill, so that a cancellation
 reaches the gate and it writes its receipt; the step has two minutes more
 than that deadline. Its steps
-are those of `formal run`, without the guard and the vectors, and with a
-shorter probe; without a planned target it checks out the head, says that
+are those of `formal run`, with a shorter probe; without a planned target it checks out the head, says that
 there are none and passes. It summarizes the receipt, with workflow
 commands turned off, and uploads the receipt, the summary and the logs
 packed into `logs.tar.gz` with `job.txt` as
 `formal-planned-<commit>-<attempt>`. Until a planned target is
 registered in `verification/targets.json`, it runs nothing.
 
+On a pull request, beside the gate and on the same events, two jobs of
+the workflow run on the runner without the image. `formal fast` runs
+`cargo xtask formal impact --base` with the base of the pull request, which
+lists the merge base, the paths changed since, whether they affect the gate
+inputs and the registered targets that they affect, and fails only when it
+cannot list them. `formal guard` runs `cargo xtask formal guard` with the
+event of the run ([guard](#guard)), and its failure fails the job. Each
+checks out the head with its history, builds xtask, runs its command under
+`.github/scripts/deadline.sh --stop-commands` with 1 minute and 30 s for its
+kill, and writes what the command printed into the summary of the workflow
+run, indented as code; each has 8 minutes and uploads nothing. Neither is a
+required check, and a newer event of the same pull request cancels a run of
+either that has not ended.
+
 The measurement jobs `leanchecker fresh`, `leanchecker prefix` and
-`lake comparator` run on a manual run of the workflow (`workflow_dispatch`,
-which runs the workflow of the branch it is started on) and on a pull
-request that has the label `formal-measure`, when it is opened, reopened or
-updated and when that label is added, but not when its description is
-edited or another label changes; the jobs of the gate (`formal limits`,
-`formal run`, `formal shard`, `formal merge` and `formal planned`) do not
-run on a manual run. Each waits for an earlier run of itself on the same pull request
-or commit instead of cancelling it.
+`lake comparator` are in the workflow `formal measure`,
+`.github/workflows/formal-measure.yml`, which has the variables `IMAGE` and
+`GATE_FLAGS` of the workflow `formal`. They run on a manual run of that
+workflow on `main` (`workflow_dispatch`) and when the label
+`formal-measure` is added to a pull request to `main`, and on no other
+event. Each waits for an earlier run of itself on the same pull request or
+commit instead of cancelling it.
 
 - `leanchecker fresh` and `leanchecker prefix`, 120 minutes each, prepare
   as the job `formal run` does and run the whole gate, without `--shard`,
-  without the probe and the guard step and with `--keep`, which keeps the stage of the base round; a gate
-  that exits with 1 passes there, and any other status but 0 fails. The gate's step has 75 minutes there, which hold a qualification
+  without the probe and with `--keep`, which keeps the stage of the base
+  round; a gate that exits with 1 passes there, and any other status but 0
+  fails. The gate's step has 75 minutes there, which hold a qualification
   that uses its whole budget and a base round of the expected length. Then
   they drop the page cache of the runner and run, in the stage of the base
   round, in a container with the flags of the gate,
@@ -2101,23 +2092,36 @@ or commit instead of cancelling it.
   of the job to the end of the last call and to the summary. The output and
   the `/usr/bin/time` record of each call, the times and the receipt with
   its logs are uploaded as `formal-leanchecker-<mode>-<commit>-<attempt>`.
-- `lake comparator`, 30 minutes, writes a Lake project from the counter
+- `lake comparator`, 45 minutes, writes a Lake project from the counter
   fixtures of `xtask/src/formal/fixtures/base/counter/`, with two
-  handwritten challenges, and runs `lake comparator` on three
-  configurations: a challenge that the solution proves, the statement
-  module as the challenge, and a challenge that the solution proves only in
-  a weaker form. It runs each, in a new copy of the project, in these
-  container settings in turn: Docker's defaults, as root; those with seccomp
-  and AppArmor unconfined; the container of the gate; and, after
+  handwritten challenges, and three configurations: a challenge that the
+  solution proves, the statement module as the challenge, and a challenge
+  that the solution proves only in a weaker form. It records the kernel,
+  the settings of user namespaces, Docker's security options, and the
+  version of bubblewrap and the executables of the toolchain in the image,
+  and fails when the image has no `leanexport`, the exporter that the
+  comparator runs. In a copy of the project, in a container with the flags
+  of the gate whose home and temporary directory are its `/tmp`, Lake
+  builds the solution, and for each configuration `leanexport` exports
+  from the module `Krepi` what the comparator exports of a solution:
+  `Quot`, `Quot.mk`, `Quot.lift` and `Quot.ind` when `Quot.sound` is
+  permitted, the theorems, the permitted axioms and the constants that the
+  kernel builds in; an export that fails is removed. It then runs
+  `lake comparator` on each configuration, in a new copy of the project, in
+  two modes, `plain`, where the comparator builds and exports the solution
+  itself, and `export`, where it judges the export with
+  `--solution-from-export`, and in four container settings in turn:
+  `gate`, the container of the gate; and, after
   `kernel.apparmor_restrict_unprivileged_userns` is set to 0 on the runner,
-  the second setting and the gate's container again, and both once more
-  with an empty `/run`, where bubblewrap creates `/run/user`, the gate's
-  container then also with seccomp and AppArmor unconfined. It records the
-  kernel, the settings of user namespaces, Docker's security options and
-  the version of bubblewrap in the image, and the exit status and output of
-  each run, and uploads them as `formal-comparator-<commit>-<attempt>`. A
-  result of the comparator never fails the job; an error of Docker, exit
-  status 125 to 127, or of the runner does.
+  `gate-userns`, the container of the gate again, `relaxed`, that container
+  with seccomp and AppArmor unconfined and an empty `/run/user`, which
+  bubblewrap needs as a mount point, and `relaxed-systempaths`, that with
+  Docker's masked and read-only system paths unconfined as well. It records
+  the exit status and output of each export and each run, summarizes them
+  by setting, mode and configuration, and uploads them with the project as
+  `formal-comparator-<commit>-<attempt>`. A result of an export or of the
+  comparator never fails the job; an error of Docker, exit status 125 to
+  127, a failed sysctl or an image without `leanexport` does.
 
 ## Proof targets
 
@@ -2828,8 +2832,9 @@ stand-in in place of the pinned Lean. The ignored test
 it with the pinned Lean in a stage of the Lake project of the repository,
 which links the Aeneas library and Mathlib but builds neither, and checks
 that equal results pass and that results with one item that differs give
-exactly that problem, within 300 s. Step 6 of the CI job runs it in the
-image, and a local run needs the `darwin-arm64` installation at
+exactly that problem, within 300 s. The formal step of `cargo xtask check`
+runs it in the image ([vectors in CI](#vectors-in-ci)), and a local run
+needs the `darwin-arm64` installation at
 `artifacts/formal/tools`:
 
 ```sh

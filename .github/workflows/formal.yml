@@ -4,17 +4,15 @@
 # the pinned proof-tool image; beside it, the job `formal shard <name>`
 # runs the shard of each formal target of the head's registry; after them,
 # the job `formal merge` combines their receipts on the runner into the
-# conclusion of the gate. None is a required check. Before its part, on a
-# pull request that changes xtask, the Lake project, a workspace, a
-# component's directory or this workflow, a step of the job `formal run`
-# compares the test vectors in the image. The job `formal planned` runs the
-# gate on the planned targets of the head's registry, when it has any. The
-# job `formal limits` before them computes their time limits and the
-# shards from the budgets of the registry. The measurement jobs run
-# on a manual dispatch, or on a pull request that carries the label
-# formal-measure: `leanchecker`, in two modes, replays the stage of the
-# gate's base round with and without --fresh on a cold page cache, and
-# `lake comparator` judges a small challenge in six container settings.
+# conclusion of the gate. The job `formal planned` runs the gate on the
+# planned targets of the head's registry, when it has any. The job
+# `formal limits` before them computes their time limits and the shards
+# from the budgets of the registry. On a pull request, the job
+# `formal fast` lists the paths that it changes since its merge base,
+# whether they affect the gate and the registered targets that they affect,
+# and the job `formal guard` runs `cargo xtask formal guard`, both on the
+# runner. None is a required check. The measurement jobs are in the
+# workflow `formal measure`, `formal-measure.yml`.
 # Actions are pinned to full commit SHAs; the comment names the release.
 name: formal
 
@@ -51,13 +49,14 @@ jobs:
   # deadline and receipt, rounded up, and one more as a backstop; that of a
   # shard or of the planned targets two more, as `deadline.sh` kills its
   # command a minute after its deadline. The qualification job has 15
-  # minutes before the vectors step, its 55 and the minutes of the deadline
-  # and the receipt; a shard and the job of the planned targets 15 minutes
-  # before their step, the step and 3 minutes after it. Every formal target
-  # is a shard of its own, named by its unit, whose registered budget per
-  # worker may be at most the shard limit, 3,300 s, as
-  # `cargo xtask formal check` requires; a job of the hosted runners ends
-  # after 360 minutes. Target names are checked before they are passed on.
+  # minutes for the steps before its gate step and the backstop of that
+  # step, and the minutes of the deadline and the receipt; a shard and the
+  # job of the planned targets 15 minutes before their step, the step and 3
+  # minutes after it. Every formal target is a shard of its own, named by
+  # its unit, whose registered budget per worker may be at most the shard
+  # limit, 3,300 s, as `cargo xtask formal check` requires; a job of the
+  # hosted runners ends after 360 minutes. Target names are checked before
+  # they are passed on.
   limits:
     name: formal limits
     if: github.event_name != 'workflow_dispatch'
@@ -116,21 +115,20 @@ jobs:
           fi
           {
             echo "gate=$((gate + 1))"
-            echo "job=$((15 + 55 + gate))"
+            echo "job=$((15 + gate))"
             echo "shards=$shards"
             echo "planned=$names"
             echo "planned-gate=$((planned + 2))"
             echo "planned-job=$((15 + planned + 2 + 3))"
           } | tee -a "$GITHUB_OUTPUT"
-          if [ $((15 + 55 + gate)) -gt 360 ] || [ $((15 + planned + 2 + 3)) -gt 360 ]; then
+          if [ $((15 + gate)) -gt 360 ] || [ $((15 + planned + 2 + 3)) -gt 360 ]; then
             echo "the registered budgets need a job longer than 360 minutes" >&2
             exit 1
           fi
 
-  # The qualification job: on a pull request the guard and the vectors, then
-  # `cargo xtask formal run --shard qualification` (the guard phase, the
-  # qualification, the extraction of every formal target and the base
-  # round), whose receipt is one part of the merge.
+  # The qualification job: `cargo xtask formal run --shard qualification`
+  # (the guard phase, the qualification, the extraction of every formal
+  # target and the base round), whose receipt is one part of the merge.
   gate:
     name: formal run
     needs: limits
@@ -243,97 +241,6 @@ jobs:
           echo "== the probe passed; prepare ended $(date -u +%FT%TZ)" \
             | tee -a artifacts/formal/job.txt
 
-      # The output of the guard. For the readings of the steps of a pull
-      # request, the record of the job gets the bytes available on the root
-      # file system before and after the guard and, where the runner has
-      # it, the record of `/usr/bin/time -v`. Then a process in the
-      # background writes, every second until the vectors step has ended or
-      # the gate has started, the time, the bytes available on the root file
-      # system and the memory in use on the runner, `MemTotal` less
-      # `MemAvailable`, in KiB into `samples.tsv`; the step that writes the
-      # summary file stops it if it still runs.
-      - name: Check the pull request with formal guard
-        if: github.event_name == 'pull_request'
-        timeout-minutes: 1
-        run: |
-          timer=()
-          if [ -x /usr/bin/time ]; then
-            timer=(/usr/bin/time -v -a -o artifacts/formal/job.txt)
-          else
-            echo "no /usr/bin/time on the runner" >> artifacts/formal/job.txt
-          fi
-          { echo "== guard started $(date -u +%FT%TZ)"; df -B1 /; } >> artifacts/formal/job.txt
-          status=0
-          "${timer[@]}" xtask/target/debug/xtask formal guard --event artifacts/formal/event.json 2>&1 \
-            | tee artifacts/formal/guard.txt || status=$?
-          { echo "== guard ended $(date -u +%FT%TZ) with exit status $status"; df -B1 /; } \
-            >> artifacts/formal/job.txt
-          nohup bash -c '
-            until grep -qs "^== vectors ended" artifacts/formal/vectors.txt \
-                || grep -qs "^== gate started" artifacts/formal/job.txt; do
-              printf "%s\t%s\t%s\n" "$(date +%s)" \
-                "$(df -B1 --output=avail / | tail -n 1 | tr -d " ")" \
-                "$(awk "/^MemTotal:/ { t = \$2 } /^MemAvailable:/ { a = \$2 } END { print t - a }" /proc/meminfo)"
-              sleep 1
-            done' > artifacts/formal/samples.tsv 2> /dev/null < /dev/null &
-          echo "$!" > "$RUNNER_TEMP/sampler.pid"
-          exit "$status"
-
-      # On a pull request that changes the kernel or user-space workspace,
-      # the Lake project, a component's directory, xtask or this workflow
-      # since the merge base: replays the vectors fixture of xtask with the
-      # pinned Lean in a container of the gate, runs the host tests, which
-      # write their result files, and runs `formal vectors` in the image on
-      # every component whose contract names a replay. Each container is
-      # removed when it ends, and its limit, with those of the commands
-      # before it, ends it within the step's. Its failure fails the job; the
-      # gate still runs.
-      - name: Compare the test vectors in the image
-        if: ${{ !cancelled() && steps.probe.outcome == 'success' && github.event_name == 'pull_request' }}
-        timeout-minutes: 55
-        run: |
-          read -r -a gate_flags <<< "$GATE_FLAGS"
-          # Runs the command after the first two arguments in a container of
-          # the gate named after the first, for at most the time of the second.
-          in_image() {
-            local name="formal-vectors-$1-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" limit=$2 status=0
-            shift 2
-            timeout --kill-after 1m "$limit" docker run --rm --name "$name" "${gate_flags[@]}" \
-              --user "$(id -u):$(id -g)" \
-              --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
-              "$IMAGE" "$@" || status=$?
-            docker rm --force "$name" > /dev/null 2>&1 || true
-            return "$status"
-          }
-          {
-            echo "== vectors started $(date -u +%FT%TZ)"
-            status=0
-            base=$(jq -er .pull_request.base.sha artifacts/formal/event.json)
-            merge_base=$(git merge-base "$base" "$HEAD_SHA")
-            paths=(kernel user verification docs/domains xtask .github/workflows/formal.yml)
-            if git diff --quiet "$merge_base" "$HEAD_SHA" -- "${paths[@]}"; then
-              echo "no change in the paths that select the comparison: 0 components"
-            else
-              timeout 5m cargo test --locked --manifest-path xtask/Cargo.toml --bin xtask --no-run \
-                --message-format=json-render-diagnostics \
-                | jq -r 'select(.profile.test == true and .executable != null) | .executable' \
-                > artifacts/formal/vectors-tests.txt
-              [ "$(wc -l < artifacts/formal/vectors-tests.txt)" = 1 ]
-              in_image fixture 6m "$(cat artifacts/formal/vectors-tests.txt)" --exact --ignored --nocapture \
-                formal::vectors::tests::the_fixture_replays_with_the_pinned_lean \
-                > artifacts/formal/vectors-fixture.txt 2>&1 || status=1
-              cat artifacts/formal/vectors-fixture.txt
-              grep -q '^test result: ok\. 1 passed; 0 failed' artifacts/formal/vectors-fixture.txt || status=1
-              for workspace in kernel user; do
-                KREPI_VECTOR_RESULTS="$GITHUB_WORKSPACE/artifacts/formal/vectors" \
-                  timeout 5m cargo test --locked --workspace --manifest-path "$workspace/Cargo.toml" || status=1
-              done
-              in_image compare 31m "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal vectors || status=1
-            fi
-            echo "== vectors ended $(date -u +%FT%TZ) with exit status $status"
-            exit "$status"
-          } 2>&1 | tee artifacts/formal/vectors.txt
-
       # The gate ends by its own deadline; the step's limit is a backstop one
       # minute after it and its receipt, from the job `formal limits`. The
       # receipt is the gate's verdict, so the step fails whenever the gate
@@ -418,9 +325,6 @@ jobs:
         if: always()
         run: |
           shopt -s nullglob
-          if [ -f "$RUNNER_TEMP/sampler.pid" ]; then
-            kill "$(cat "$RUNNER_TEMP/sampler.pid")" 2> /dev/null || true
-          fi
           mkdir -p artifacts/formal
           logs=(artifacts/formal/runs/*/logs)
           if [ "${#logs[@]}" -gt 0 ]; then
@@ -452,13 +356,7 @@ jobs:
             artifacts/formal/summary.md
             artifacts/formal/logs.tar.gz
             artifacts/formal/job.txt
-            artifacts/formal/guard.txt
-            artifacts/formal/vectors.txt
-            artifacts/formal/vectors-tests.txt
-            artifacts/formal/vectors-fixture.txt
-            artifacts/formal/vectors/
             artifacts/formal/event.json
-            artifacts/formal/samples.tsv
             artifacts/formal/runs/*/receipt.json
           if-no-files-found: warn
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
@@ -466,11 +364,11 @@ jobs:
   # The shard of each formal target of the head's registry, beside the
   # qualification job: `cargo xtask formal run --shard target/<name>` in a
   # container of the image, prepared as the qualification job is, with a
-  # shorter probe, without the guard and the vectors and without the event,
-  # with the limits that the job `formal limits` gives the shard. Its main
-  # command runs under `deadline.sh`, which passes a cancellation on to it.
-  # Without a formal target in the registry the job does not run. The
-  # calibration workflow runs the same steps on the calibration target.
+  # shorter probe and without the event, with the limits that the job
+  # `formal limits` gives the shard. Its main command runs under
+  # `deadline.sh`, which passes a cancellation on to it. Without a formal
+  # target in the registry the job does not run. The calibration workflow
+  # runs the same steps on the calibration target.
   shard:
     name: formal shard ${{ matrix.name }}
     needs: limits
@@ -902,48 +800,25 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
-  # Runs the gate as the job above does, then replays the stage of its base
-  # round with `leanchecker` on a cold page cache: `--fresh Krepi`, or the
-  # two prefixes `Krepi` and `KrepiGen`, each under `/usr/bin/time -v`. The
-  # summary gives the parts of the time that a job running only what
-  # `--fresh` needs would take. On a pull request with the label
-  # formal-measure, the job runs when the pull request is opened, reopened
-  # or updated and when that label is added, not when its description is
-  # edited or another label changes.
-  leanchecker:
-    name: leanchecker ${{ matrix.mode }}
-    if: >-
-      github.event_name == 'workflow_dispatch'
-      || (contains(github.event.pull_request.labels.*.name, 'formal-measure')
-      && github.event.action != 'edited' && github.event.action != 'unlabeled'
-      && (github.event.action != 'labeled' || github.event.label.name == 'formal-measure'))
+  # On a pull request, lists the paths that it changes since its merge base,
+  # whether they affect the gate and the registered targets that they
+  # affect, with `cargo xtask formal impact` on the runner, and writes the
+  # list into the summary of the run. It judges nothing: it fails only when
+  # the list cannot be made. Its main command runs under `deadline.sh`,
+  # which turns workflow commands off while it prints the paths of the pull
+  # request, and the summary indents them as code.
+  fast:
+    name: formal fast
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 120
+    timeout-minutes: 8
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [fresh, prefix]
     concurrency:
-      group: formal-leanchecker-${{ matrix.mode }}-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: false
-    env:
-      MODE: ${{ matrix.mode }}
+      group: formal-fast-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
-      # The runner's worker process starts with the job.
-      - name: Record the start of the job
-        timeout-minutes: 1
-        run: |
-          start=$(date +%s.%N)
-          echo "job_first_step=$start" > "$RUNNER_TEMP/epochs.txt"
-          if worker=$(ps -o etimes= -C Runner.Worker | sort -n | tail -n 1 | tr -d ' ') \
-              && [ -n "$worker" ]; then
-            echo "worker_started=$(( ${start%.*} - worker ))" >> "$RUNNER_TEMP/epochs.txt"
-          fi
-          cat "$RUNNER_TEMP/epochs.txt"
-
-      - name: Check out the candidate commit with its history
+      - name: Check out the head with its history
         timeout-minutes: 2
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -951,463 +826,82 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Record the runner and pull the image
-        timeout-minutes: 8
-        run: |
-          mkdir -p artifacts/formal/measure
-          {
-            echo "== prepare started $(date -u +%FT%TZ)"
-            echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
-              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, mode $MODE"
-            echo "user: $(id)"
-            echo "processors: $(nproc)"
-            free -b
-            df -B1 /
-            uname -srvm
-            docker info --format 'Docker {{.ServerVersion}}, cgroup version {{.CgroupVersion}}'
-            docker info --format 'security options {{json .SecurityOptions}}'
-            if [ "$(id -u)" = 0 ] || [ "$(stat -c %u "$GITHUB_WORKSPACE")" != "$(id -u)" ]; then
-              echo "the runner's user is root or does not own the checkout" >&2
-              exit 1
-            fi
-            echo "== docker pull $IMAGE"
-            docker pull "$IMAGE"
-            docker image inspect --format 'pulled {{json .RepoDigests}}, {{.Size}} bytes' "$IMAGE"
-            cp "$GITHUB_EVENT_PATH" artifacts/formal/event.json
-            echo "the event is copied to artifacts/formal/event.json"
-          } 2>&1 | tee artifacts/formal/job.txt
-
-      - name: Build xtask
+      - name: Build xtask on the runner
         timeout-minutes: 3
         run: |
-          {
-            echo "== build xtask, started $(date -u +%FT%TZ)"
-            rustup toolchain install
-            cargo build --locked --manifest-path xtask/Cargo.toml
-            ls -l xtask/target/debug/xtask
-            echo "prepare_ended=$(date +%s.%N)" | tee -a "$RUNNER_TEMP/epochs.txt"
-          } 2>&1 | tee -a artifacts/formal/job.txt
+          rustup toolchain install
+          cargo build --locked --manifest-path xtask/Cargo.toml
 
-      # As in the job `formal run`, with `--keep`, so that the steps below
-      # find the stage of the base round. The verdict does not matter here,
-      # so the step passes when the gate exits with 0 or 1 and fails on any
-      # other status, which is an error of the run or of Docker. Its 75 minutes
-      # hold a qualification that uses its whole budget of 3,600 s and a base
-      # round of the expected length; the rest of the job's 120 minutes is
-      # left to `leanchecker`.
-      - name: Run the gate in the image
-        timeout-minutes: 75
+      - name: List the changed paths and the affected targets
+        timeout-minutes: 2
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          read -r -a gate_flags <<< "$GATE_FLAGS"
-          echo "== gate started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
-          status=0
-          docker run --rm --name "formal-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
-            --user "$(id -u):$(id -g)" \
-            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
-            --env GITHUB_EVENT_NAME --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
-            --env GITHUB_EVENT_PATH="$GITHUB_WORKSPACE/artifacts/formal/event.json" \
-            --env KREPI_FORMAL_IMAGE="$IMAGE" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --keep || status=$?
-          echo "gate_ended=$(date +%s.%N)" >> "$RUNNER_TEMP/epochs.txt"
-          echo "== gate ended $(date -u +%FT%TZ) with exit status $status" \
-            | tee -a artifacts/formal/job.txt
-          if [ "$status" != 0 ] && [ "$status" != 1 ]; then
-            echo "the gate exited with $status: an error of the run, not a verdict" >&2
-            exit 1
-          fi
+          mkdir -p artifacts/formal
+          exec bash .github/scripts/deadline.sh --stop-commands 1m 30s bash -o pipefail -c \
+            'xtask/target/debug/xtask formal impact --base "$BASE_SHA" 2>&1 | tee artifacts/formal/impact.txt'
 
-      # Each `leanchecker` runs in a container of its own with the flags of
-      # the gate, in the stage of the base round, with the variables that the
-      # gate gives tool commands (a test of xtask keeps the list below equal
-      # to them, but for the home and temporary directories, which are the
-      # run's). The step fails when the base round did not build its stage
-      # or a `leanchecker` does not exit with 0. It has no limit of its own:
-      # the job's limit bounds it, which leaves it at least 31 minutes and,
-      # after a gate of the expected length, about an hour. A call that the
-      # limit cuts has no time record; the summary gives how long its
-      # container ran until the next step removed it.
-      - name: Measure leanchecker on a cold page cache
-        run: |
-          read -r -a gate_flags <<< "$GATE_FLAGS"
-          shopt -s nullglob
-          receipts=(artifacts/formal/runs/*/receipt.json)
-          {
-            if [ "${#receipts[@]}" != 1 ]; then
-              echo "the gate left ${#receipts[@]} receipts, not one" >&2
-              exit 1
-            fi
-            run=$GITHUB_WORKSPACE/$(dirname "${receipts[0]}")
-            stage=$run/work/base/stage/verification
-            built=$(jq '[.commands[] | select(.site == "base-build")]
-              | length > 0 and all(.class == "PASSED")' "${receipts[0]}")
-            if [ "$built" != true ]; then
-              echo "the base round did not build its stage, so leanchecker cannot replay it" >&2
-              exit 1
-            fi
-            mkdir -p "$run/work/home" "$run/work/tmp"
-            tool_env=(
-              LAKE_ARTIFACT_CACHE=false
-              CARGO_NET_OFFLINE=true
-              CARGO_HOME=/opt/krepi-formal/cargo
-              RUSTUP_HOME=/opt/krepi-formal/rustup
-              RUSTUP_TOOLCHAIN=nightly-2026-09-17
-              LANG=C.UTF-8
-              LC_ALL=C.UTF-8
-              GIT_CONFIG_NOSYSTEM=1
-              GIT_CONFIG_GLOBAL=/dev/null
-              GIT_CONFIG_COUNT=1
-              GIT_CONFIG_KEY_0=safe.directory
-              GIT_CONFIG_VALUE_0='*'
-              PATH=/opt/krepi-formal/lean/bin:/opt/krepi-formal/bin:/opt/krepi-formal/cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin
-              "HOME=$run/work/home"
-              "TMPDIR=$run/work/tmp"
-            )
-            case "$MODE" in
-              fresh) calls=("--fresh Krepi") ;;
-              *) calls=("Krepi" "KrepiGen") ;;
-            esac
-            echo "== drop the page cache of the runner"
-            sync
-            echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
-            free -b
-            status=0
-            for call in "${calls[@]}"; do
-              read -r -a args <<< "$call"
-              name=$MODE-${call##* }
-              out=artifacts/formal/measure/$name
-              echo "== $name: lake env /usr/bin/time -v leanchecker $call, in $stage"
-              echo "${name}_started=$(date +%s.%N)" >> "$RUNNER_TEMP/epochs.txt"
-              code=0
-              docker run --rm --name "formal-measure-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
-                "${gate_flags[@]}" --user "$(id -u):$(id -g)" \
-                --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$stage" \
-                "$IMAGE" env -i "${tool_env[@]}" \
-                lake env /usr/bin/time -v -o "$GITHUB_WORKSPACE/$out.time" leanchecker "${args[@]}" \
-                > "$out.txt" 2>&1 || code=$?
-              echo "${name}_ended=$(date +%s.%N)" >> "$RUNNER_TEMP/epochs.txt"
-              echo "$code" > "$out.exit"
-              tail -n 20 "$out.txt"
-              echo "exit status $code"
-              if [ -f "$out.time" ]; then
-                cat "$out.time"
-              fi
-              if [ "$code" != 0 ]; then
-                status=1
-              fi
-            done
-            exit "$status"
-          } 2>&1 | tee artifacts/formal/measure/steps.txt
-
-      - name: Remove the containers of the job
+      - name: Summarize the paths and the targets
         if: always()
         run: |
-          for name in gate measure; do
-            container=formal-$name-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT
-            if docker rm --force "$container" > /dev/null 2>&1; then
-              echo "removed $container"
-              echo "${name}_removed=$(date +%s.%N)" | tee -a "$RUNNER_TEMP/epochs.txt"
-            fi
-          done
-
-      # P runs from the start of the job to the end of the build of xtask,
-      # taken from the runner's worker process, else from the first step;
-      # E is the extraction of the three cases with proofs and B the base
-      # round without its audits and `leanchecker`, both from the receipt;
-      # F is the wall time of the measured `leanchecker` calls. As context,
-      # the summary gives how long the container of each call ran, also when
-      # the call did not end, and the time from the start of the job to the
-      # end of the last call.
-      - name: Summarize the measurement
-        if: always()
-        run: |
-          shopt -s nullglob
-          mkdir -p artifacts/formal/measure
-          receipts=(artifacts/formal/runs/*/receipt.json)
-          cp "$RUNNER_TEMP/epochs.txt" artifacts/formal/measure/epochs.txt || true
-          value() { sed -n "s/^$1=//p" "$RUNNER_TEMP/epochs.txt" 2> /dev/null | tail -n 1 || true; }
-          # The sum of the arguments, which may be negative, to milliseconds.
-          sum() { printf '%s\n' "$@" | awk '{ s += $1 } END { printf "%.3f\n", s }'; }
-          # The wall time in seconds that `/usr/bin/time -v` wrote to the file $1.
-          wall() {
-            awk -F': ' '/Elapsed \(wall clock\) time/ {
-              n = split($2, part, ":"); s = 0
-              for (i = 1; i <= n; i++) s = s * 60 + part[i]
-              print s
-            }' "$1"
-          }
-          start=$(value worker_started)
-          start=${start:-$(value job_first_step)}
-          prepared=$(value prepare_ended)
-          P= E= B= F=
-          if [ -n "$start" ] && [ -n "$prepared" ]; then
-            P=$(sum "$prepared" "-$start")
-          fi
-          if [ "${#receipts[@]}" = 1 ]; then
-            E=$(jq '[.commands[] | select((.site == "charon" or .site == "aeneas") and (.unit
-              | IN("qualification/arithmetic", "qualification/checked", "qualification/single-loop")))
-              | .seconds] | if length == 6 then add * 1000 | round / 1000 else empty end' "${receipts[0]}")
-            B=$(jq '.phases.base.seconds as $base | if $base == null then empty else $base
-              - ([.commands[] | select(.phase == "base" and (.site == "axiom-audit"
-                or .site == "leanchecker")) | .seconds] | add // 0) | . * 1000 | round / 1000 end' \
-              "${receipts[0]}")
-          fi
-          times=(artifacts/formal/measure/"$MODE"-*.time)
-          walls=()
-          for time in "${times[@]}"; do
-            if [ "$(cat "${time%.time}.exit")" = 0 ]; then
-              walls+=("$(wall "$time")")
-            fi
-          done
-          if [ "$MODE" = fresh ]; then names=(fresh-Krepi); else names=(prefix-Krepi prefix-KrepiGen); fi
-          if [ "${#walls[@]}" = "${#names[@]}" ]; then
-            F=$(sum "${walls[@]}")
-          fi
           {
-            echo "## leanchecker $MODE"
+            echo "## formal fast"
             echo
-            echo "| Part | Seconds |"
-            echo "| --- | --- |"
-            echo "| P, start of the job to the end of the build of xtask | ${P:-not measured} |"
-            echo "| E, extraction of the three cases with proofs | ${E:-not measured} |"
-            echo "| B, base round without its audits and leanchecker | ${B:-not measured} |"
-            echo "| F, leanchecker of this job | ${F:-not measured} |"
-            if [ -n "$P" ] && [ -n "$E" ] && [ -n "$B" ] && [ -n "$F" ]; then
-              D=$(sum "$P" "$E" "$B" "$F")
-              echo "| P + E + B + F | $D |"
-              echo
-              echo "P + E + B + F within 3600 s: $(awk -v d="$D" 'BEGIN { print ((d + 0 <= 3600) ? "yes" : "no") }')."
+            if [ -f artifacts/formal/impact.txt ]; then
+              sed 's/^/    /' artifacts/formal/impact.txt
             else
-              echo
-              echo "A part is missing, so the sum cannot be formed."
+              echo "The list was not made."
             fi
-            echo
-            if [ -z "$(value gate_ended)" ]; then
-              echo "- The gate did not run to its end."
-            fi
-            last=
-            for name in "${names[@]}"; do
-              began=$(value "${name}_started")
-              ended=$(value "${name}_ended")
-              removed=$(value measure_removed)
-              if [ -z "$began" ]; then
-                echo "- $name did not start."
-              elif [ -n "$ended" ]; then
-                echo "- The container of $name ran $(sum "$ended" "-$began") s."
-                last=$name
-              elif [ -n "$removed" ]; then
-                echo "- $name did not end: its container ran $(sum "$removed" "-$began") s," \
-                  "until the step after it removed the container."
-              else
-                echo "- $name did not end: it started $(sum "$(date +%s.%N)" "-$began") s" \
-                  "before this step."
-              fi
-            done
-            if [ -n "$last" ] && [ -n "$start" ]; then
-              echo "- From the start of the job to the end of $last:" \
-                "$(sum "$(value "${last}_ended")" "-$start") s."
-            fi
-            echo "- From the start of the job to this step: $(sum "$(date +%s.%N)" "-${start:-0}") s."
-            for time in "${times[@]}"; do
-              echo
-              echo "\`${time##*/}\`: exit $(cat "${time%.time}.exit"); wall $(wall "$time") s;" \
-                "$(grep -E 'User time|System time|Maximum resident set size' "$time" \
-                  | sed 's/^[[:space:]]*//' | tr '\n' ';' | sed 's/;$//; s/;/; /g')"
-            done
-          } | tee artifacts/formal/measure/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload the measurement
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: formal-leanchecker-${{ matrix.mode }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
-          path: |
-            artifacts/formal/job.txt
-            artifacts/formal/measure/
-            artifacts/formal/runs/*/receipt.json
-            artifacts/formal/runs/*/logs/
-          if-no-files-found: warn
-          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
-
-  # Runs `lake comparator` on a challenge written from the tracked counter
-  # fixtures, in three configurations: a challenge that the solution meets,
-  # the statement module as the challenge, and a challenge that the solution
-  # proves only in a weaker form. Each runs in the container settings 1 to
-  # 3 in order: Docker's defaults as root; that with seccomp and AppArmor
-  # unconfined; and that after unprivileged user namespaces are allowed on
-  # the runner; and in setting 4, the container of the gate, before and
-  # after that change. Settings 5 and 6 repeat 3 and 4 with an empty /run,
-  # where bwrap creates /run/user, and 6 also with seccomp and AppArmor
-  # unconfined. The exit status and the output of each are recorded,
-  # whatever they are; only an error of Docker or of the runner fails the job.
-  # It runs on the same events as the job `leanchecker`.
-  comparator:
-    name: lake comparator
-    if: >-
-      github.event_name == 'workflow_dispatch'
-      || (contains(github.event.pull_request.labels.*.name, 'formal-measure')
-      && github.event.action != 'edited' && github.event.action != 'unlabeled'
-      && (github.event.action != 'labeled' || github.event.label.name == 'formal-measure'))
+  # On a pull request, `cargo xtask formal guard` on the runner, with the
+  # event of the run: it checks the pull request against the rules for
+  # changes of statements, proofs, sources and registries, and its failure
+  # fails the job. Its main command runs under `deadline.sh`, which turns
+  # workflow commands off while it prints, and the summary indents its
+  # output as code.
+  guard:
+    name: formal guard
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
+    timeout-minutes: 8
     permissions:
       contents: read
     concurrency:
-      group: formal-comparator-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: false
+      group: formal-guard-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
-      - name: Check out the candidate commit
+      - name: Check out the head with its history
         timeout-minutes: 2
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Record the runner and pull the image
-        timeout-minutes: 8
+      - name: Build xtask on the runner
+        timeout-minutes: 3
         run: |
-          mkdir -p artifacts/comparator
+          rustup toolchain install
+          cargo build --locked --manifest-path xtask/Cargo.toml
+
+      - name: Check the pull request with formal guard
+        timeout-minutes: 2
+        run: |
+          mkdir -p artifacts/formal
+          cp "$GITHUB_EVENT_PATH" artifacts/formal/event.json
+          exec bash .github/scripts/deadline.sh --stop-commands 1m 30s bash -o pipefail -c \
+            'xtask/target/debug/xtask formal guard --event artifacts/formal/event.json 2>&1 | tee artifacts/formal/guard.txt'
+
+      - name: Summarize the guard
+        if: always()
+        run: |
           {
-            echo "== started $(date -u +%FT%TZ); commit $HEAD_SHA, event $GITHUB_EVENT_NAME"
-            echo "user: $(id)"
-            echo "kernel: $(uname -srvm)"
-            for key in kernel.apparmor_restrict_unprivileged_userns user.max_user_namespaces \
-                kernel.unprivileged_userns_clone; do
-              sysctl "$key" 2>&1 || true
-            done
-            docker info --format 'Docker {{.ServerVersion}}, cgroup version {{.CgroupVersion}}'
-            docker info --format 'security options {{json .SecurityOptions}}'
-            echo "== docker pull $IMAGE"
-            docker pull "$IMAGE"
-            docker image inspect --format 'pulled {{json .RepoDigests}}' "$IMAGE"
-            echo "bubblewrap in the image: $(docker run --rm --pull never "$IMAGE" bwrap --version)"
-          } 2>&1 | tee artifacts/comparator/host.txt
-
-      - name: Write the Lake project of the challenge
-        timeout-minutes: 1
-        run: |
-          template=$RUNNER_TEMP/comparator/template
-          fixtures=xtask/src/formal/fixtures/base/counter/Krepi
-          mkdir -p "$template/Challenge"
-          for part in Spec Statements Proofs; do
-            mkdir -p "$template/Krepi/$part"
-            cp "$fixtures/$part/Counter.lean" "$template/Krepi/$part/Counter.lean"
-          done
-          cp verification/lean-toolchain "$template/lean-toolchain"
-          cat > "$template/lakefile.toml" <<'LAKEFILE'
-          name = "comparatorCheck"
-          defaultTargets = ["Krepi"]
-
-          [[lean_lib]]
-          name = "Krepi"
-
-          [[lean_lib]]
-          name = "Challenge"
-          LAKEFILE
-          cat > "$template/lake-manifest.json" <<'MANIFEST'
-          {"version": "1.3.0",
-           "packagesDir": ".lake/packages",
-           "packages": [],
-           "name": "comparatorCheck",
-           "lakeDir": ".lake",
-           "fixedToolchain": false}
-          MANIFEST
-          printf '%s\n' module '' 'public import Krepi.Spec.Counter' \
-            'public import Krepi.Statements.Counter' 'public import Krepi.Proofs.Counter' \
-            > "$template/Krepi.lean"
-          # A challenge of the theorem $2 of the statement S, in the module $1.
-          challenge() {
-            printf '%s\n' module '' 'public import Krepi.Statements.Counter' '' \
-              'namespace Krepi.Proofs.Counter' '' \
-              "public theorem $2 : Krepi.Statements.Counter.S := sorry" '' \
-              'end Krepi.Proofs.Counter' > "$template/Challenge/$1.lean"
-          }
-          challenge Counter s
-          challenge Weaker t
-          # The configuration $1: the challenge module $2 and the theorem $3.
-          configuration() {
-            printf '{"challenge_module": "%s", "solution_module": "Krepi", "theorem_names": ["%s"], %s}\n' \
-              "$2" "$3" '"permitted_axioms": ["propext", "Quot.sound", "Classical.choice"]' \
-              > "$template/$1.json"
-          }
-          configuration accept Challenge.Counter Krepi.Proofs.Counter.s
-          configuration statement Krepi.Statements.Counter Krepi.Proofs.Counter.s
-          configuration weaker Challenge.Weaker Krepi.Proofs.Counter.t
-          mkdir -p artifacts/comparator/project
-          cp -R "$template/." artifacts/comparator/project/
-          (cd "$template" && find . -type f | sort)
-
-      - name: Run lake comparator in each container setting
-        timeout-minutes: 15
-        run: |
-          read -r -a gate_flags <<< "$GATE_FLAGS"
-          template=$RUNNER_TEMP/comparator/template
-          printf 'setting\tconfiguration\texit\n' > artifacts/comparator/results.tsv
-          broken=0
-          # Runs the three configurations in a fresh copy of the project with
-          # the setting $1, whose flags of `docker run` follow.
-          compare() {
-            local setting=$1 config dir out status
-            shift
-            for config in accept statement weaker; do
-              dir=$RUNNER_TEMP/comparator/$setting/$config
-              out=artifacts/comparator/$setting-$config.txt
-              mkdir -p "$dir"
-              cp -R "$template/." "$dir/"
-              echo "== $setting, $config: docker run $* ... lake comparator --config $config.json"
-              status=0
-              docker run --rm "$@" --volume "$dir:$dir" --workdir "$dir" "$IMAGE" \
-                lake comparator --config "$config.json" > "$out" 2>&1 || status=$?
-              tail -n 30 "$out"
-              echo "exit status $status"
-              printf '%s\t%s\t%s\n' "$setting" "$config" "$status" >> artifacts/comparator/results.tsv
-              if [ "$status" -ge 125 ] && [ "$status" -le 127 ]; then
-                echo "docker could not run the container: an error of the job" >&2
-                broken=1
-              fi
-            done
-          }
-          {
-            unconfined=(--security-opt seccomp=unconfined --security-opt apparmor=unconfined)
-            compare 1-defaults --pull never
-            compare 2-unconfined --pull never "${unconfined[@]}"
-            compare 4-gate "${gate_flags[@]}" --user "$(id -u):$(id -g)"
-            echo "== allow unprivileged user namespaces on the runner"
-            if sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; then
-              compare 3-userns --pull never "${unconfined[@]}"
-              compare 4-gate-userns "${gate_flags[@]}" --user "$(id -u):$(id -g)"
-              # bwrap creates /run/user below the root, which the image does
-              # not have: with namespaces allowed, these two settings also
-              # mount an empty /run, the second with the gate's other flags.
-              compare 5-userns-run --pull never "${unconfined[@]}" --tmpfs /run
-              compare 6-gate-userns-run "${gate_flags[@]}" "${unconfined[@]}" \
-                --tmpfs /run --user "$(id -u):$(id -g)"
+            echo "## formal guard"
+            echo
+            if [ -f artifacts/formal/guard.txt ]; then
+              sed 's/^/    /' artifacts/formal/guard.txt
             else
-              echo "the sysctl failed: the settings after it are not measured" >&2
-              broken=1
+              echo "The guard did not run."
             fi
-            exit "$broken"
-          } 2>&1 | tee artifacts/comparator/runs.txt
-
-      - name: Summarize the results
-        if: always()
-        run: |
-          {
-            echo "## lake comparator"
-            echo
-            echo "Expected where the sandbox runs: accept 0, statement 1, weaker 1."
-            echo
-            echo "| Setting | Configuration | Exit |"
-            echo "| --- | --- | --- |"
-            if [ -f artifacts/comparator/results.tsv ]; then
-              tail -n +2 artifacts/comparator/results.tsv | awk -F '\t' '{ print "| " $1 " | " $2 " | " $3 " |" }'
-            fi
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload the results
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: formal-comparator-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
-          path: artifacts/comparator/
-          if-no-files-found: warn
-          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+          } >> "$GITHUB_STEP_SUMMARY"

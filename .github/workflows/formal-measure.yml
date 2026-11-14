@@ -1,0 +1,622 @@
+# The measurement jobs of the proof gate, on a manual run of the workflow on
+# main and when the label formal-measure is added to a pull request to main.
+# The job `leanchecker <mode>`, in two modes, runs the whole gate with
+# --keep in the pinned proof-tool image and replays the stage of its base
+# round with and without --fresh on a cold page cache; the job
+# `lake comparator` judges a small challenge in three configurations, with
+# the solution built by the comparator or exported before, in four container
+# settings. None is a required check, and none cancels an earlier run of
+# itself; they log in to no registry, push nothing and use no secret.
+# Actions are pinned to full commit SHAs; the comment names the release.
+name: formal measure
+
+on:
+  pull_request:
+    branches: [main]
+    types: [labeled]
+  workflow_dispatch:
+
+# `bash` runs every step with `-eo pipefail`, so that a failed command in a
+# pipeline, such as `docker run ... | tee`, fails its step.
+defaults:
+  run:
+    shell: bash
+
+env:
+  # The image that verification/image-pin.json pins. The workflows step of
+  # `cargo xtask check` requires every mention of the image's repository in
+  # this file to be this reference.
+  IMAGE: ghcr.io/casxi-lab/krepi-formal@sha256:cd3bd69b780538593e4cfe247c45145d82a0c351048bcc21882062537300f013
+  # The flags of every container that runs the gate or its tools, besides
+  # the user, which is the runner's own, the mount and the working directory.
+  GATE_FLAGS: "--pull never --init --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --network none"
+  HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  # Runs the whole gate in the image, as the job `formal run` of the
+  # workflow `formal` runs its part, then replays the stage of its base
+  # round with `leanchecker` on a cold page cache: `--fresh Krepi`, or the
+  # two prefixes `Krepi` and `KrepiGen`, each under `/usr/bin/time -v`. The
+  # summary gives the parts of the time that a job running only what
+  # `--fresh` needs would take.
+  leanchecker:
+    name: leanchecker ${{ matrix.mode }}
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'pull_request' && github.event.label.name == 'formal-measure')
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [fresh, prefix]
+    concurrency:
+      group: formal-leanchecker-${{ matrix.mode }}-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: false
+    env:
+      MODE: ${{ matrix.mode }}
+    steps:
+      # The runner's worker process starts with the job.
+      - name: Record the start of the job
+        timeout-minutes: 1
+        run: |
+          start=$(date +%s.%N)
+          echo "job_first_step=$start" > "$RUNNER_TEMP/epochs.txt"
+          if worker=$(ps -o etimes= -C Runner.Worker | sort -n | tail -n 1 | tr -d ' ') \
+              && [ -n "$worker" ]; then
+            echo "worker_started=$(( ${start%.*} - worker ))" >> "$RUNNER_TEMP/epochs.txt"
+          fi
+          cat "$RUNNER_TEMP/epochs.txt"
+
+      - name: Check out the candidate commit with its history
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record the runner and pull the image
+        timeout-minutes: 8
+        run: |
+          mkdir -p artifacts/formal/measure
+          {
+            echo "== prepare started $(date -u +%FT%TZ)"
+            echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, mode $MODE"
+            echo "user: $(id)"
+            echo "processors: $(nproc)"
+            free -b
+            df -B1 /
+            uname -srvm
+            docker info --format 'Docker {{.ServerVersion}}, cgroup version {{.CgroupVersion}}'
+            docker info --format 'security options {{json .SecurityOptions}}'
+            if [ "$(id -u)" = 0 ] || [ "$(stat -c %u "$GITHUB_WORKSPACE")" != "$(id -u)" ]; then
+              echo "the runner's user is root or does not own the checkout" >&2
+              exit 1
+            fi
+            echo "== docker pull $IMAGE"
+            docker pull "$IMAGE"
+            docker image inspect --format 'pulled {{json .RepoDigests}}, {{.Size}} bytes' "$IMAGE"
+            cp "$GITHUB_EVENT_PATH" artifacts/formal/event.json
+            echo "the event is copied to artifacts/formal/event.json"
+          } 2>&1 | tee artifacts/formal/job.txt
+
+      - name: Build xtask
+        timeout-minutes: 3
+        run: |
+          {
+            echo "== build xtask, started $(date -u +%FT%TZ)"
+            rustup toolchain install
+            cargo build --locked --manifest-path xtask/Cargo.toml
+            ls -l xtask/target/debug/xtask
+            echo "prepare_ended=$(date +%s.%N)" | tee -a "$RUNNER_TEMP/epochs.txt"
+          } 2>&1 | tee -a artifacts/formal/job.txt
+
+      # As in the job `formal run` of the workflow `formal`, with `--keep`, so
+      # that the steps below find the stage of the base round. The verdict
+      # does not matter here, so the step passes when the gate exits with 0
+      # or 1 and fails on any other status, which is an error of the run or
+      # of Docker. Its 75 minutes hold a qualification that uses its whole
+      # budget of 3,600 s and a base round of the expected length; the rest
+      # of the job's 120 minutes is left to `leanchecker`.
+      - name: Run the gate in the image
+        timeout-minutes: 75
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          echo "== gate started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
+          status=0
+          docker run --rm --name "formal-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --env GITHUB_EVENT_NAME --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            --env GITHUB_EVENT_PATH="$GITHUB_WORKSPACE/artifacts/formal/event.json" \
+            --env KREPI_FORMAL_IMAGE="$IMAGE" \
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --keep || status=$?
+          echo "gate_ended=$(date +%s.%N)" >> "$RUNNER_TEMP/epochs.txt"
+          echo "== gate ended $(date -u +%FT%TZ) with exit status $status" \
+            | tee -a artifacts/formal/job.txt
+          if [ "$status" != 0 ] && [ "$status" != 1 ]; then
+            echo "the gate exited with $status: an error of the run, not a verdict" >&2
+            exit 1
+          fi
+
+      # Each `leanchecker` runs in a container of its own with the flags of
+      # the gate, in the stage of the base round, with the variables that the
+      # gate gives tool commands (a test of xtask keeps the list below equal
+      # to them, but for the home and temporary directories, which are the
+      # run's). The step fails when the base round did not build its stage
+      # or a `leanchecker` does not exit with 0. It has no limit of its own:
+      # the job's limit bounds it, which leaves it at least 31 minutes and,
+      # after a gate of the expected length, about an hour. A call that the
+      # limit cuts has no time record; the summary gives how long its
+      # container ran until the next step removed it.
+      - name: Measure leanchecker on a cold page cache
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          shopt -s nullglob
+          receipts=(artifacts/formal/runs/*/receipt.json)
+          {
+            if [ "${#receipts[@]}" != 1 ]; then
+              echo "the gate left ${#receipts[@]} receipts, not one" >&2
+              exit 1
+            fi
+            run=$GITHUB_WORKSPACE/$(dirname "${receipts[0]}")
+            stage=$run/work/base/stage/verification
+            built=$(jq '[.commands[] | select(.site == "base-build")]
+              | length > 0 and all(.class == "PASSED")' "${receipts[0]}")
+            if [ "$built" != true ]; then
+              echo "the base round did not build its stage, so leanchecker cannot replay it" >&2
+              exit 1
+            fi
+            mkdir -p "$run/work/home" "$run/work/tmp"
+            tool_env=(
+              LAKE_ARTIFACT_CACHE=false
+              CARGO_NET_OFFLINE=true
+              CARGO_HOME=/opt/krepi-formal/cargo
+              RUSTUP_HOME=/opt/krepi-formal/rustup
+              RUSTUP_TOOLCHAIN=nightly-2026-09-17
+              LANG=C.UTF-8
+              LC_ALL=C.UTF-8
+              GIT_CONFIG_NOSYSTEM=1
+              GIT_CONFIG_GLOBAL=/dev/null
+              GIT_CONFIG_COUNT=1
+              GIT_CONFIG_KEY_0=safe.directory
+              GIT_CONFIG_VALUE_0='*'
+              PATH=/opt/krepi-formal/lean/bin:/opt/krepi-formal/bin:/opt/krepi-formal/cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin
+              "HOME=$run/work/home"
+              "TMPDIR=$run/work/tmp"
+            )
+            case "$MODE" in
+              fresh) calls=("--fresh Krepi") ;;
+              *) calls=("Krepi" "KrepiGen") ;;
+            esac
+            echo "== drop the page cache of the runner"
+            sync
+            echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
+            free -b
+            status=0
+            for call in "${calls[@]}"; do
+              read -r -a args <<< "$call"
+              name=$MODE-${call##* }
+              out=artifacts/formal/measure/$name
+              echo "== $name: lake env /usr/bin/time -v leanchecker $call, in $stage"
+              echo "${name}_started=$(date +%s.%N)" >> "$RUNNER_TEMP/epochs.txt"
+              code=0
+              docker run --rm --name "formal-measure-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+                "${gate_flags[@]}" --user "$(id -u):$(id -g)" \
+                --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$stage" \
+                "$IMAGE" env -i "${tool_env[@]}" \
+                lake env /usr/bin/time -v -o "$GITHUB_WORKSPACE/$out.time" leanchecker "${args[@]}" \
+                > "$out.txt" 2>&1 || code=$?
+              echo "${name}_ended=$(date +%s.%N)" >> "$RUNNER_TEMP/epochs.txt"
+              echo "$code" > "$out.exit"
+              tail -n 20 "$out.txt"
+              echo "exit status $code"
+              if [ -f "$out.time" ]; then
+                cat "$out.time"
+              fi
+              if [ "$code" != 0 ]; then
+                status=1
+              fi
+            done
+            exit "$status"
+          } 2>&1 | tee artifacts/formal/measure/steps.txt
+
+      - name: Remove the containers of the job
+        if: always()
+        run: |
+          for name in gate measure; do
+            container=formal-$name-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT
+            if docker rm --force "$container" > /dev/null 2>&1; then
+              echo "removed $container"
+              echo "${name}_removed=$(date +%s.%N)" | tee -a "$RUNNER_TEMP/epochs.txt"
+            fi
+          done
+
+      # P runs from the start of the job to the end of the build of xtask,
+      # taken from the runner's worker process, else from the first step;
+      # E is the extraction of the three cases with proofs and B the base
+      # round without its audits and `leanchecker`, both from the receipt;
+      # F is the wall time of the measured `leanchecker` calls. As context,
+      # the summary gives how long the container of each call ran, also when
+      # the call did not end, and the time from the start of the job to the
+      # end of the last call.
+      - name: Summarize the measurement
+        if: always()
+        run: |
+          shopt -s nullglob
+          mkdir -p artifacts/formal/measure
+          receipts=(artifacts/formal/runs/*/receipt.json)
+          cp "$RUNNER_TEMP/epochs.txt" artifacts/formal/measure/epochs.txt || true
+          value() { sed -n "s/^$1=//p" "$RUNNER_TEMP/epochs.txt" 2> /dev/null | tail -n 1 || true; }
+          # The sum of the arguments, which may be negative, to milliseconds.
+          sum() { printf '%s\n' "$@" | awk '{ s += $1 } END { printf "%.3f\n", s }'; }
+          # The wall time in seconds that `/usr/bin/time -v` wrote to the file $1.
+          wall() {
+            awk -F': ' '/Elapsed \(wall clock\) time/ {
+              n = split($2, part, ":"); s = 0
+              for (i = 1; i <= n; i++) s = s * 60 + part[i]
+              print s
+            }' "$1"
+          }
+          start=$(value worker_started)
+          start=${start:-$(value job_first_step)}
+          prepared=$(value prepare_ended)
+          P= E= B= F=
+          if [ -n "$start" ] && [ -n "$prepared" ]; then
+            P=$(sum "$prepared" "-$start")
+          fi
+          if [ "${#receipts[@]}" = 1 ]; then
+            E=$(jq '[.commands[] | select((.site == "charon" or .site == "aeneas") and (.unit
+              | IN("qualification/arithmetic", "qualification/checked", "qualification/single-loop")))
+              | .seconds] | if length == 6 then add * 1000 | round / 1000 else empty end' "${receipts[0]}")
+            B=$(jq '.phases.base.seconds as $base | if $base == null then empty else $base
+              - ([.commands[] | select(.phase == "base" and (.site == "axiom-audit"
+                or .site == "leanchecker")) | .seconds] | add // 0) | . * 1000 | round / 1000 end' \
+              "${receipts[0]}")
+          fi
+          times=(artifacts/formal/measure/"$MODE"-*.time)
+          walls=()
+          for time in "${times[@]}"; do
+            if [ "$(cat "${time%.time}.exit")" = 0 ]; then
+              walls+=("$(wall "$time")")
+            fi
+          done
+          if [ "$MODE" = fresh ]; then names=(fresh-Krepi); else names=(prefix-Krepi prefix-KrepiGen); fi
+          if [ "${#walls[@]}" = "${#names[@]}" ]; then
+            F=$(sum "${walls[@]}")
+          fi
+          {
+            echo "## leanchecker $MODE"
+            echo
+            echo "| Part | Seconds |"
+            echo "| --- | --- |"
+            echo "| P, start of the job to the end of the build of xtask | ${P:-not measured} |"
+            echo "| E, extraction of the three cases with proofs | ${E:-not measured} |"
+            echo "| B, base round without its audits and leanchecker | ${B:-not measured} |"
+            echo "| F, leanchecker of this job | ${F:-not measured} |"
+            if [ -n "$P" ] && [ -n "$E" ] && [ -n "$B" ] && [ -n "$F" ]; then
+              D=$(sum "$P" "$E" "$B" "$F")
+              echo "| P + E + B + F | $D |"
+              echo
+              echo "P + E + B + F within 3600 s: $(awk -v d="$D" 'BEGIN { print ((d + 0 <= 3600) ? "yes" : "no") }')."
+            else
+              echo
+              echo "A part is missing, so the sum cannot be formed."
+            fi
+            echo
+            if [ -z "$(value gate_ended)" ]; then
+              echo "- The gate did not run to its end."
+            fi
+            last=
+            for name in "${names[@]}"; do
+              began=$(value "${name}_started")
+              ended=$(value "${name}_ended")
+              removed=$(value measure_removed)
+              if [ -z "$began" ]; then
+                echo "- $name did not start."
+              elif [ -n "$ended" ]; then
+                echo "- The container of $name ran $(sum "$ended" "-$began") s."
+                last=$name
+              elif [ -n "$removed" ]; then
+                echo "- $name did not end: its container ran $(sum "$removed" "-$began") s," \
+                  "until the step after it removed the container."
+              else
+                echo "- $name did not end: it started $(sum "$(date +%s.%N)" "-$began") s" \
+                  "before this step."
+              fi
+            done
+            if [ -n "$last" ] && [ -n "$start" ]; then
+              echo "- From the start of the job to the end of $last:" \
+                "$(sum "$(value "${last}_ended")" "-$start") s."
+            fi
+            echo "- From the start of the job to this step: $(sum "$(date +%s.%N)" "-${start:-0}") s."
+            for time in "${times[@]}"; do
+              echo
+              echo "\`${time##*/}\`: exit $(cat "${time%.time}.exit"); wall $(wall "$time") s;" \
+                "$(grep -E 'User time|System time|Maximum resident set size' "$time" \
+                  | sed 's/^[[:space:]]*//' | tr '\n' ';' | sed 's/;$//; s/;/; /g')"
+            done
+          } | tee artifacts/formal/measure/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the measurement
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-leanchecker-${{ matrix.mode }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: |
+            artifacts/formal/job.txt
+            artifacts/formal/measure/
+            artifacts/formal/runs/*/receipt.json
+            artifacts/formal/runs/*/logs/
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+  # Runs `lake comparator` on a challenge written from the tracked counter
+  # fixtures, in three configurations: a challenge that the solution meets,
+  # the statement module as the challenge, and a challenge that the solution
+  # proves only in a weaker form. A container of the gate first exports the
+  # solution of each configuration with `leanexport`, the exporter of the
+  # toolchain. Each configuration then runs in two modes: `plain`, where the
+  # comparator builds and exports the solution itself, and `export`, where
+  # it judges that export (`--solution-from-export`); and in four container
+  # settings in turn: `gate`, the container of the gate; and, after
+  # unprivileged user namespaces are allowed on the runner, `gate-userns`,
+  # that container again, `relaxed`, that container with seccomp and
+  # AppArmor unconfined and an empty /run/user, which bubblewrap needs as a
+  # mount point, and `relaxed-systempaths`, that with Docker's masked and
+  # read-only system paths unconfined as well. The exit status and the
+  # output of each export and each run are recorded, whatever they are; only
+  # an error of Docker, exit status 125 to 127, a failed sysctl or an image
+  # without the exporter fails the job. It runs on the same events as the
+  # job `leanchecker`.
+  comparator:
+    name: lake comparator
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'pull_request' && github.event.label.name == 'formal-measure')
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    concurrency:
+      group: formal-comparator-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out the candidate commit
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record the runner and pull the image
+        timeout-minutes: 8
+        run: |
+          mkdir -p artifacts/comparator
+          {
+            echo "== started $(date -u +%FT%TZ); commit $HEAD_SHA, event $GITHUB_EVENT_NAME"
+            echo "user: $(id)"
+            echo "kernel: $(uname -srvm)"
+            for key in kernel.apparmor_restrict_unprivileged_userns user.max_user_namespaces \
+                kernel.unprivileged_userns_clone; do
+              sysctl "$key" 2>&1 || true
+            done
+            docker info --format 'Docker {{.ServerVersion}}, cgroup version {{.CgroupVersion}}'
+            docker info --format 'security options {{json .SecurityOptions}}'
+            echo "== docker pull $IMAGE"
+            docker pull "$IMAGE"
+            docker image inspect --format 'pulled {{json .RepoDigests}}' "$IMAGE"
+            echo "bubblewrap in the image: $(docker run --rm --pull never "$IMAGE" bwrap --version)"
+            echo "== the executables of the toolchain in the image"
+            docker run --rm --pull never "$IMAGE" ls -l /opt/krepi-formal/lean/bin
+            if ! docker run --rm --pull never "$IMAGE" test -x /opt/krepi-formal/lean/bin/leanexport; then
+              echo "the image has no exporter /opt/krepi-formal/lean/bin/leanexport" >&2
+              exit 1
+            fi
+          } 2>&1 | tee artifacts/comparator/host.txt
+
+      - name: Write the Lake project of the challenge
+        timeout-minutes: 1
+        run: |
+          template=$RUNNER_TEMP/comparator/template
+          fixtures=xtask/src/formal/fixtures/base/counter/Krepi
+          mkdir -p "$template/Challenge"
+          for part in Spec Statements Proofs; do
+            mkdir -p "$template/Krepi/$part"
+            cp "$fixtures/$part/Counter.lean" "$template/Krepi/$part/Counter.lean"
+          done
+          cp verification/lean-toolchain "$template/lean-toolchain"
+          cat > "$template/lakefile.toml" <<'LAKEFILE'
+          name = "comparatorCheck"
+          defaultTargets = ["Krepi"]
+
+          [[lean_lib]]
+          name = "Krepi"
+
+          [[lean_lib]]
+          name = "Challenge"
+          LAKEFILE
+          cat > "$template/lake-manifest.json" <<'MANIFEST'
+          {"version": "1.3.0",
+           "packagesDir": ".lake/packages",
+           "packages": [],
+           "name": "comparatorCheck",
+           "lakeDir": ".lake",
+           "fixedToolchain": false}
+          MANIFEST
+          printf '%s\n' module '' 'public import Krepi.Spec.Counter' \
+            'public import Krepi.Statements.Counter' 'public import Krepi.Proofs.Counter' \
+            > "$template/Krepi.lean"
+          # A challenge of the theorem $2 of the statement S, in the module $1.
+          challenge() {
+            printf '%s\n' module '' 'public import Krepi.Statements.Counter' '' \
+              'namespace Krepi.Proofs.Counter' '' \
+              "public theorem $2 : Krepi.Statements.Counter.S := sorry" '' \
+              'end Krepi.Proofs.Counter' > "$template/Challenge/$1.lean"
+          }
+          challenge Counter s
+          challenge Weaker t
+          # The configuration $1: the challenge module $2 and the theorem $3.
+          configuration() {
+            printf '{"challenge_module": "%s", "solution_module": "Krepi", "theorem_names": ["%s"], %s}\n' \
+              "$2" "$3" '"permitted_axioms": ["propext", "Quot.sound", "Classical.choice"]' \
+              > "$template/$1.json"
+          }
+          configuration accept Challenge.Counter Krepi.Proofs.Counter.s
+          configuration statement Krepi.Statements.Counter Krepi.Proofs.Counter.s
+          configuration weaker Challenge.Weaker Krepi.Proofs.Counter.t
+          mkdir -p artifacts/comparator/project
+          cp -R "$template/." artifacts/comparator/project/
+          (cd "$template" && find . -type f | sort)
+
+      # In a copy of the project, Lake builds the solution in a container of
+      # the gate, whose home and temporary directory are its /tmp, and then
+      # `leanexport` writes, for each configuration, what the comparator
+      # exports of a solution: the quotient when Quot.sound is permitted, the
+      # theorems, the permitted axioms and the constants that the kernel
+      # builds in, as Lake's comparator lists them. An export that fails is
+      # removed, so that the runs that would judge it cannot start.
+      - name: Export the solution in the container of the gate
+        timeout-minutes: 5
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          template=$RUNNER_TEMP/comparator/template
+          dir=$RUNNER_TEMP/comparator/export
+          mkdir -p "$dir" artifacts/comparator/exports
+          cp -R "$template/." "$dir/"
+          primitives=(Nat.add Nat.sub Nat.mul Nat.pow Nat.gcd Nat.div Nat.mod Nat.beq Nat.ble
+            Nat.land Nat.lor Nat.xor Nat.shiftLeft Nat.shiftRight String.ofList Char.ofNat List
+            eagerReduce Nat String String.mk Char optParam autoParam semiOutParam outParam)
+          printf 'export\texit\n' > artifacts/comparator/exports.tsv
+          broken=0
+          # Runs the command after the first argument in a container of the
+          # gate in the copy, records its exit status under the name $1 and
+          # returns it.
+          in_gate() {
+            local name=$1 status=0
+            shift
+            docker run --rm "${gate_flags[@]}" --user "$(id -u):$(id -g)" \
+              --env HOME=/tmp --env LAKE_ARTIFACT_CACHE=false \
+              --volume "$dir:$dir" --workdir "$dir" "$IMAGE" "$@" || status=$?
+            printf '%s\t%s\n' "$name" "$status" >> artifacts/comparator/exports.tsv
+            if [ "$status" -ge 125 ] && [ "$status" -le 127 ]; then
+              echo "docker could not run the container: an error of the job" >&2
+              broken=1
+            fi
+            return "$status"
+          }
+          {
+            echo "== lake build"
+            in_gate build lake build || echo "exit status $?"
+            for config in accept statement weaker; do
+              file=artifacts/comparator/exports/$config
+              mapfile -t names < <(jq -r '(if any(.permitted_axioms[]; . == "Quot.sound")
+                then ["Quot", "Quot.mk", "Quot.lift", "Quot.ind"] else [] end)
+                + .theorem_names + .permitted_axioms | .[]' "$template/$config.json")
+              names+=("${primitives[@]}")
+              echo "== $config: lake env leanexport Krepi -- ${names[*]}"
+              if in_gate "$config" lake env leanexport Krepi -- "${names[@]}" \
+                  > "$file.ndjson" 2> "$file.txt"; then
+                echo "$(wc -c < "$file.ndjson") bytes"
+              else
+                echo "exit status $?; the export is removed"
+                rm -f "artifacts/comparator/exports/$config.ndjson"
+              fi
+              tail -n 20 "$file.txt"
+            done
+            exit "$broken"
+          } 2>&1 | tee artifacts/comparator/export.txt
+
+      - name: Run lake comparator in each mode and container setting
+        timeout-minutes: 25
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          template=$RUNNER_TEMP/comparator/template
+          printf 'setting\tmode\tconfiguration\texit\n' > artifacts/comparator/results.tsv
+          broken=0
+          # Runs the three configurations in both modes, each in a fresh copy
+          # of the project, with the setting $1, whose flags of `docker run`
+          # follow.
+          compare() {
+            local setting=$1 mode config dir out status solution
+            shift
+            for mode in plain export; do
+              for config in accept statement weaker; do
+                dir=$RUNNER_TEMP/comparator/$setting/$mode/$config
+                out=artifacts/comparator/$setting-$mode-$config.txt
+                mkdir -p "$dir"
+                cp -R "$template/." "$dir/"
+                solution=()
+                if [ "$mode" = export ]; then
+                  solution=(--solution-from-export solution.ndjson)
+                  if [ -f "artifacts/comparator/exports/$config.ndjson" ]; then
+                    cp "artifacts/comparator/exports/$config.ndjson" "$dir/solution.ndjson"
+                  fi
+                fi
+                echo "== $setting, $mode, $config: docker run $* ... lake comparator --config $config.json ${solution[*]}"
+                status=0
+                docker run --rm "$@" --volume "$dir:$dir" --workdir "$dir" "$IMAGE" \
+                  lake comparator --config "$config.json" "${solution[@]}" > "$out" 2>&1 || status=$?
+                tail -n 30 "$out"
+                echo "exit status $status"
+                printf '%s\t%s\t%s\t%s\n' "$setting" "$mode" "$config" "$status" \
+                  >> artifacts/comparator/results.tsv
+                if [ "$status" -ge 125 ] && [ "$status" -le 127 ]; then
+                  echo "docker could not run the container: an error of the job" >&2
+                  broken=1
+                fi
+              done
+            done
+          }
+          {
+            user=(--user "$(id -u):$(id -g)")
+            relaxed=("${gate_flags[@]}" --security-opt seccomp=unconfined
+              --security-opt apparmor=unconfined --tmpfs /run/user)
+            compare gate "${gate_flags[@]}" "${user[@]}"
+            echo "== allow unprivileged user namespaces on the runner"
+            if sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; then
+              compare gate-userns "${gate_flags[@]}" "${user[@]}"
+              compare relaxed "${relaxed[@]}" "${user[@]}"
+              compare relaxed-systempaths "${relaxed[@]}" --security-opt systempaths=unconfined \
+                "${user[@]}"
+            else
+              echo "the sysctl failed: the settings after it are not measured" >&2
+              broken=1
+            fi
+            exit "$broken"
+          } 2>&1 | tee artifacts/comparator/runs.txt
+
+      - name: Summarize the results
+        if: always()
+        run: |
+          {
+            echo "## lake comparator"
+            echo
+            echo "Expected where the sandbox runs: accept 0, statement 1, weaker 1, in both modes."
+            echo
+            echo "| Export | Exit |"
+            echo "| --- | --- |"
+            if [ -f artifacts/comparator/exports.tsv ]; then
+              tail -n +2 artifacts/comparator/exports.tsv | awk -F '\t' '{ print "| " $1 " | " $2 " |" }'
+            fi
+            echo
+            echo "| Setting | Mode | Configuration | Exit |"
+            echo "| --- | --- | --- | --- |"
+            if [ -f artifacts/comparator/results.tsv ]; then
+              tail -n +2 artifacts/comparator/results.tsv \
+                | awk -F '\t' '{ print "| " $1 " | " $2 " | " $3 " | " $4 " |" }'
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-comparator-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: artifacts/comparator/
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
