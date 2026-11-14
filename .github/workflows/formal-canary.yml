@@ -316,8 +316,11 @@ jobs:
       # As the job `formal run` of formal.yml runs the gate, but the whole
       # gate and in the image that this job built, which the gate is not
       # given as a reference: the receipt records none and compares no pin.
-      # Its deadline is the gate's 7,200 s and the 300 s of its receipt;
-      # `deadline.sh` keeps its exit status for the verdict.
+      # Its deadline is the gate's 7,200 s, the budgets of the formal
+      # targets, none yet, and the 300 s of its receipt; a unit test fails
+      # once a formal target is registered until the deadline and the limits
+      # grow by its budget. `deadline.sh` keeps its exit status for the
+      # verdict. The canary does not run the comparator part.
       - name: Run the gate in the image
         id: gate
         timeout-minutes: 127

@@ -45,7 +45,9 @@ on:
 # The runs of a pull request share a group, and a newer run cancels an
 # older one with all its jobs, also those that wait for others, so that no
 # older run concludes after a newer event; any other run has a group of its
-# own.
+# own. A re-run keeps the event of its run, so the first step of each of
+# the six checks fails a re-run of a run that is not the newest of the
+# pull request's head, which it asks with the token of the run.
 concurrency:
   group: formal-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -218,6 +220,14 @@ jobs:
             ls -l xtask/target/debug/xtask
           } 2>&1 | tee -a artifacts/formal/job.txt
 
+      # The comparator part runs this copy of xtask, mounted read-only: the
+      # gate, whose container mounts only the checkout, cannot change it.
+      - name: Copy xtask for the comparator
+        timeout-minutes: 1
+        run: |
+          cp xtask/target/debug/xtask "$RUNNER_TEMP/xtask"
+          sha256sum "$RUNNER_TEMP/xtask" | tee -a artifacts/formal/job.txt
+
       # The probe fails unless the container runs as a user other than root,
       # on a read-only root file system, without capabilities, new privileges
       # or a network, and unless every attempt to write or re-mode the
@@ -307,8 +317,10 @@ jobs:
       # a second mount of the runs directory outside /home, which
       # KREPI_FORMAL_RUNS names; it clears the environment, so Git there
       # reads only /etc/gitconfig, which marks the packages of the image,
-      # which belong to root, as safe. `deadline.sh` stops the part at the
-      # deadline of the part and its receipt and kills it a minute later.
+      # which belong to root, as safe. The part runs the copy of xtask that
+      # the job made before the gate, at /krepi-xtask. `deadline.sh` stops
+      # the part at the deadline of the part and its receipt and kills it a
+      # minute later.
       - name: Run the comparator in its own container
         id: comparator
         if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
@@ -348,9 +360,10 @@ jobs:
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --volume "$GITHUB_WORKSPACE/artifacts/formal/runs:/krepi-runs" --env KREPI_FORMAL_RUNS=/krepi-runs \
             --volume "$RUNNER_TEMP/gitconfig:/etc/gitconfig:ro" \
+            --volume "$RUNNER_TEMP/xtask:/krepi-xtask:ro" \
             --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard comparator
+            "$IMAGE" /krepi-xtask formal run --shard comparator
 
       - name: Remove the container of the comparator
         if: always()
@@ -904,16 +917,17 @@ jobs:
   # decision, the planned targets that the change affects, for the job
   # `formal limits`, and the name of the artifact of the list, for the jobs
   # of the verdicts. It judges nothing: it fails only when the list cannot
-  # be made, and on any other event than a pull request, which it does not
-  # judge. Its main command runs under `deadline.sh`, which turns workflow
+  # be made, on any other event than a pull request, which it does not
+  # judge, and on a re-run of an older run. Its main command runs under `deadline.sh`, which turns workflow
   # commands off while it prints the paths of the pull request, and the
   # summary escapes carriage returns and indents the list as code.
   fast:
     name: formal fast
     if: ${{ !cancelled() && !(github.event_name != 'pull_request' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 8
+    timeout-minutes: 10
     permissions:
+      actions: read
       contents: read
     outputs:
       decision: ${{ steps.decision.outputs.decision }}
@@ -922,10 +936,22 @@ jobs:
     steps:
       - name: Check that the event is a pull request
         timeout-minutes: 1
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
             echo "the job judges pull requests, not a run of $GITHUB_EVENT_NAME on $GITHUB_REF" >&2
             exit 1
+          fi
+          # A re-run judges the event of its run again, which only the newest
+          # run of formal on a pull request with the head may do.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]; then
+            runs="repos/$GITHUB_REPOSITORY/actions/workflows/formal.yml/runs"
+            newest=$(gh api "$runs?event=pull_request&head_sha=$HEAD_SHA&per_page=1" --jq '.workflow_runs[0].id')
+            if [ "$newest" != "$GITHUB_RUN_ID" ]; then
+              echo "a re-run of run $GITHUB_RUN_ID judges an older event than run $newest of the head" >&2
+              exit 1
+            fi
           fi
 
       - name: Check out the head with its history
@@ -993,23 +1019,36 @@ jobs:
   # runner, with the event of the run: it checks the pull request against
   # the rules for changes of statements, proofs, sources and registries, and
   # its failure fails the job; it fails as well on any other event than a
-  # pull request, which it does not judge. Its main command runs under
+  # pull request, which it does not judge, and on a re-run of an older run. Its main command runs under
   # `deadline.sh`, which turns workflow commands off while it prints, and
   # the summary escapes carriage returns and indents its output as code.
   guard:
     name: formal guard
     if: ${{ !cancelled() && !(github.event_name != 'pull_request' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 8
+    timeout-minutes: 10
     permissions:
+      actions: read
       contents: read
     steps:
       - name: Check that the event is a pull request
         timeout-minutes: 1
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
             echo "the job judges pull requests, not a run of $GITHUB_EVENT_NAME on $GITHUB_REF" >&2
             exit 1
+          fi
+          # A re-run judges the event of its run again, which only the newest
+          # run of formal on a pull request with the head may do.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]; then
+            runs="repos/$GITHUB_REPOSITORY/actions/workflows/formal.yml/runs"
+            newest=$(gh api "$runs?event=pull_request&head_sha=$HEAD_SHA&per_page=1" --jq '.workflow_runs[0].id')
+            if [ "$newest" != "$GITHUB_RUN_ID" ]; then
+              echo "a re-run of run $GITHUB_RUN_ID judges an older event than run $newest of the head" >&2
+              exit 1
+            fi
           fi
 
       - name: Check out the head with its history
@@ -1055,7 +1094,8 @@ jobs:
   # the event that runs the gate, the label full-check added, and a record
   # of `formal parts`. A manual or scheduled run of main runs the gate
   # whatever the decision, which the job then makes on the commit itself
-  # and writes to the summary. Any other event or ref fails it. The record
+  # and writes to the summary. Any other event or ref fails it, and so does
+  # a re-run of an older run of a pull request. The record
   # must be of schema 3, of this run, commit and trigger, and pass; on main
   # the job then reads it back as a fresh record with `cargo xtask formal
   # receipt --require-fresh`, which changes no verdict.
@@ -1066,6 +1106,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     permissions:
+      actions: read
       contents: read
     steps:
       - name: Judge the event
@@ -1077,7 +1118,18 @@ jobs:
           ACTION: ${{ github.event.action }}
           LABEL: ${{ github.event.label.name }}
           PARTS: ${{ needs.parts.result }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # A re-run judges the event of its run again, which only the newest
+          # run of formal on a pull request with the head may do.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]; then
+            runs="repos/$GITHUB_REPOSITORY/actions/workflows/formal.yml/runs"
+            newest=$(gh api "$runs?event=pull_request&head_sha=$HEAD_SHA&per_page=1" --jq '.workflow_runs[0].id')
+            if [ "$newest" != "$GITHUB_RUN_ID" ]; then
+              echo "a re-run of run $GITHUB_RUN_ID judges an older event than run $newest of the head" >&2
+              exit 1
+            fi
+          fi
           case "$GITHUB_EVENT_NAME" in
             pull_request)
               if [ "$FAST" != success ]; then
@@ -1218,7 +1270,7 @@ jobs:
       # is the evidence of a fresh record of main.
       - name: Read the record back as a fresh one
         if: steps.event.outputs.gate == 'ran' && github.event_name != 'pull_request'
-        timeout-minutes: 1
+        timeout-minutes: 2
         env:
           RECORD: ${{ steps.record.outputs.record }}
         run: |
@@ -1228,14 +1280,17 @@ jobs:
   # The verdict of the hard gate of the axiom audits, on the events and with
   # the first step of `formal merge`: the field `gates.axioms` of the same
   # record. Its summary reports the axioms of each audited theorem, and each
-  # target that a waiver left out of the base audit, which its shard audits.
+  # target of a waiver, whose proof modules that no other formal target
+  # lists the base audit leaves out and its shard audits when its proofs
+  # build.
   axioms:
     name: formal axioms
     needs: [fast, parts]
     if: ${{ !cancelled() && !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 5
+    timeout-minutes: 6
     permissions:
+      actions: read
       contents: read
     steps:
       - name: Judge the event
@@ -1247,7 +1302,18 @@ jobs:
           ACTION: ${{ github.event.action }}
           LABEL: ${{ github.event.label.name }}
           PARTS: ${{ needs.parts.result }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # A re-run judges the event of its run again, which only the newest
+          # run of formal on a pull request with the head may do.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]; then
+            runs="repos/$GITHUB_REPOSITORY/actions/workflows/formal.yml/runs"
+            newest=$(gh api "$runs?event=pull_request&head_sha=$HEAD_SHA&per_page=1" --jq '.workflow_runs[0].id')
+            if [ "$newest" != "$GITHUB_RUN_ID" ]; then
+              echo "a re-run of run $GITHUB_RUN_ID judges an older event than run $newest of the head" >&2
+              exit 1
+            fi
+          fi
           case "$GITHUB_EVENT_NAME" in
             pull_request)
               if [ "$FAST" != success ]; then
@@ -1321,18 +1387,20 @@ jobs:
         env:
           RECORD: ${{ steps.record.outputs.record }}
         run: |
-          # The record holds names of the head: no workflow commands.
+          # The record holds names of the head: no workflow commands, and each
+          # name as a JSON string with its backticks escaped.
           token=$(openssl rand -hex 16)
           echo "::stop-commands::$token"
           trap 'echo "::$token::"' EXIT
           {
             echo "## formal axioms"
             echo
-            jq -r '"- the hard gate: \(if .gates.axioms then "passes" else "fails" end)",
+            jq -r 'def name: @json | gsub("`"; "\\`");
+              "- the hard gate: \(if .gates.axioms then "passes" else "fails" end)",
               (if .axioms == {} then "- no audited theorem" else
-                (.axioms | to_entries[] | "- `\(.key)`: \(.value | join(", "))") end),
-              (.waivers[] | .waiver.scope[]
-                | "- target `\(.)`: left out of the base audit by a waiver; the shard of its target audits it")' \
+                (.axioms | to_entries[] | "- \(.key | name): \(.value | map(name) | join(", "))") end),
+              (.waivers[] | .waiver.scope[] | "- target \(name): a waiver leaves its proof modules that no " +
+                "other formal target lists out of the base audit; its shard audits them when its proofs build")' \
               "$RECORD"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -1344,8 +1412,9 @@ jobs:
     needs: [fast, parts]
     if: ${{ !cancelled() && !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 5
+    timeout-minutes: 6
     permissions:
+      actions: read
       contents: read
     steps:
       - name: Judge the event
@@ -1357,7 +1426,18 @@ jobs:
           ACTION: ${{ github.event.action }}
           LABEL: ${{ github.event.label.name }}
           PARTS: ${{ needs.parts.result }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # A re-run judges the event of its run again, which only the newest
+          # run of formal on a pull request with the head may do.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]; then
+            runs="repos/$GITHUB_REPOSITORY/actions/workflows/formal.yml/runs"
+            newest=$(gh api "$runs?event=pull_request&head_sha=$HEAD_SHA&per_page=1" --jq '.workflow_runs[0].id')
+            if [ "$newest" != "$GITHUB_RUN_ID" ]; then
+              echo "a re-run of run $GITHUB_RUN_ID judges an older event than run $newest of the head" >&2
+              exit 1
+            fi
+          fi
           case "$GITHUB_EVENT_NAME" in
             pull_request)
               if [ "$FAST" != success ]; then
@@ -1446,8 +1526,9 @@ jobs:
     needs: [fast, parts]
     if: ${{ !cancelled() && !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 5
+    timeout-minutes: 6
     permissions:
+      actions: read
       contents: read
     steps:
       - name: Judge the event
@@ -1459,7 +1540,18 @@ jobs:
           ACTION: ${{ github.event.action }}
           LABEL: ${{ github.event.label.name }}
           PARTS: ${{ needs.parts.result }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # A re-run judges the event of its run again, which only the newest
+          # run of formal on a pull request with the head may do.
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && [ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]; then
+            runs="repos/$GITHUB_REPOSITORY/actions/workflows/formal.yml/runs"
+            newest=$(gh api "$runs?event=pull_request&head_sha=$HEAD_SHA&per_page=1" --jq '.workflow_runs[0].id')
+            if [ "$newest" != "$GITHUB_RUN_ID" ]; then
+              echo "a re-run of run $GITHUB_RUN_ID judges an older event than run $newest of the head" >&2
+              exit 1
+            fi
+          fi
           case "$GITHUB_EVENT_NAME" in
             pull_request)
               if [ "$FAST" != success ]; then

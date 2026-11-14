@@ -74,7 +74,13 @@ on the statement side, and needs no label `spec`.
    `.github/workflows/formal.yml`. The job `formal run` of the gate's CI on
    it, the qualification job, which the label `full-check` starts, is the
    first run of the gate in the new image, and its receipt is the result
-   of the requalification.
+   of the requalification. The same pull request also carries the label
+   `formal-calibration`, so that the workflow `formal calibration` runs
+   the comparator part in the new image and checks that the comparator
+   rejects its two fixed challenges ([calibration
+   target](formal-verification.md#calibration-target)); the canary does
+   not exercise `lake comparator`, so the pin is not switched before that
+   run passes.
 5. **Requalify.** Every unit of the qualification that is not `VERIFIED`
    in that receipt is a case whose outcome changed. Find the cause of each
    by a controlled comparison: the same case, arguments and environment in
@@ -147,6 +153,15 @@ Triage each run:
 | `BROKEN` at `gate` | The gate does not verify the commit in the new image | Compare the canary's receipt with the units of a merge record of `formal.yml` that `cargo xtask formal receipt` calls `CURRENT` for the same commit of `main`, such as that of a manual or weekly run on it, or that of the head whose merge the job `formal receipt review` judged: a unit is broken only when it is `VERIFIED` there and not in the canary. A finding names those units, the qualification cases among them and the tool failures of the gate, as the estimate of an upgrade |
 | `DEFECT` | A field that the canary derived disagrees with a tool or a check, or the canary cannot read a form of the trees or the downloads | No breakage: the canary is fixed, and the run is repeated |
 | `FAILED` | The run did not complete: a step limit, the disk, the network, the runner, or a step of the canary's own | No breakage: find the cause in the logs of the job and run it again. A build that reached its limit while it built Mathlib, because Mathlib had no build cache for the new Lake lock, or a disk that filled, is a limit of the job and of the hosted runner, not of the tools |
+
+The canary runs the whole gate without the [comparator
+part](formal-verification.md#comparator), so it never exercises
+`lake comparator`, its messages or its sandbox: `PASSED` says nothing
+about them, and the units of the comparator in a merge record have no
+counterpart in a canary receipt, so a `BROKEN` at `gate` compares the
+other units only. A change of the toolchain pin runs `formal calibration`,
+which runs the comparator part and its two challenges that must be
+rejected, before it switches (step 4 of the [procedure](#procedure)).
 
 A finding is registered in the project's coordination records, never in
 this repository, and nothing of a canary run is repaired: the breakage is

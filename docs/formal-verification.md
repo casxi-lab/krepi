@@ -605,7 +605,13 @@ These steps end the job at the first that fails, each by its id:
    variables but without `KREPI_FORMAL_IMAGE` and without a trigger, under
    `deadline.sh` with the gate's 7,200 s and the 300 s of its receipt, 125
    minutes, in a step of 127, which writes its exit status for the
-   verdict as well.
+   verdict as well. The whole gate adds the budget of each formal target
+   to its deadline, and a unit test adds those of the registry to the
+   canary's, so that registering a formal target fails `cargo xtask check`
+   until the deadline and the limits of the canary grow by its budget. The
+   canary does not run the [comparator](#comparator) part, so it does not
+   exercise `lake comparator` ([formal
+   upgrade](formal-upgrade.md#canary-verdicts)).
 
 The derived fields, each of the manifest of the build:
 
@@ -1953,7 +1959,11 @@ Git in the sandbox reads only the system's configuration, `/etc/gitconfig`,
 which CI provides to mark every directory as safe, since the packages of
 the installation belong to root
 ([environment of tool commands](#environment-of-tool-commands),
-[CI job](#ci-job)).
+[CI job](#ci-job)). In CI the part runs a copy of xtask that its job made
+outside the checkout before the gate, mounted read-only at `/krepi-xtask`,
+so that what the base build writes in the checkout does not change the
+program that concludes the part; the stage that it checks is still the
+output of that build ([limitations](#limitations)).
 
 In the layout of the [calibration target](#calibration-target), the part
 runs two more challenges after its first unit when that unit has two
@@ -2383,13 +2393,19 @@ is `full` or `weekly`; and once a week, on Tuesdays at 12:37 UTC. The runs
 of one pull request share a concurrency group, and a newer run cancels an
 older one with all its jobs, also those that wait for others, so that no
 older run concludes after a newer event; any other run has a group of its
-own. The variable `KREPI_FORMAL_TRIGGER` of the workflow gives the parts
+own. A re-run of a run of a pull request keeps the event of that run, so
+the first step of each of the six checks below fails on an attempt after
+the first unless the run is the newest run of `formal` on a pull request
+with the same head, which it asks the API of the workflow runs with the
+token of the run: a re-run of an older run fails, though it still joins
+the group and cancels a newer run that is in progress, which is then run
+again. The variable `KREPI_FORMAL_TRIGGER` of the workflow gives the parts
 the mode of their trigger ([receipt](#receipt)): `REQUIRED` on a pull
 request, `FORCED_FULL` on a manual run `full`, `WEEKLY` on a manual run
 `weekly` and on the schedule, and none on a push. The jobs run on a
 GitHub-hosted `ubuntu-24.04-arm` runner, may only read the repository's
-contents, the review below also its workflow runs, use no stored
-credentials, and run actions pinned to full commit SHAs.
+contents, the six checks and the review below also its workflow runs, use
+no stored credentials, and run actions pinned to full commit SHAs.
 
 The gate runs when the label `full-check` is added to a pull request whose
 change affects it, by the decision of the job `formal fast` below, and on
@@ -2429,7 +2445,8 @@ The steps of the job `formal run`, the qualification job:
    and size; copy the event to `artifacts/formal/event.json`, inside the
    checkout;
 3. build xtask on the runner with the Rust toolchain of
-   `rust-toolchain.toml`;
+   `rust-toolchain.toml`, and then copy it to `$RUNNER_TEMP/xtask`,
+   outside the checkout, and record its SHA-256, in a step of its own;
 4. probe a container of the image with the flags of the gate: the step
    fails unless the user is not root, the root file system is read-only, no
    capability is left in the bounding set, new privileges are off, `lo` is
@@ -2462,7 +2479,9 @@ The steps of the job `formal run`, the qualification job:
    checkout mounted a second time at `/krepi-runs`, which
    `KREPI_FORMAL_RUNS` names, a file that sets `safe.directory` to `*`
    mounted read-only at `/etc/gitconfig`, and the variables of the gate
-   but the event, under `deadline.sh --stop-commands`;
+   but the event, under `deadline.sh --stop-commands`; it runs the copy
+   of xtask of step 3, mounted read-only at `/krepi-xtask`, which the
+   container of the gate does not mount;
 8. always, remove the container of the comparator if a cancelled step left
    it, within a minute;
 9. always, with workflow commands turned off, write a summary of each
@@ -2492,18 +2511,18 @@ process 1 would not, and `--pull never` makes a missing image an error
 instead of a pull.
 
 The job `formal run` has 192 minutes, whatever the registry: 15 for the
-steps before the gate's step, whose own limits add up to 14 (2 to check
-out, 8 to record the runner and pull, 3 to build xtask and 1 for the
-probe), 137 for the gate's step, 37 for the comparator's step and 3 for
-the steps after them. `deadline.sh` stops the gate at the deadline of the
-qualification job, its 7,800 s, and the 300 s of its receipt, 135
+steps before the gate's step, whose own limits add up to 15 (2 to check
+out, 8 to record the runner and pull, 3 to build xtask, 1 to copy it and 1
+for the probe), 137 for the gate's step, 37 for the comparator's step and 3
+for the steps after them. `deadline.sh` stops the gate at the deadline of
+the qualification job, its 7,800 s, and the 300 s of its receipt, 135
 minutes, and kills it a minute later, a minute before the limit of its
 step; it does the same with the comparator part at its 1,800 s and the 300
-s of its receipt, 35 minutes. So the receipt of each part is written
-before its step ends. When the steps use all their time, the limit of the
-job may cut the upload; the receipts are still written in the checkout.
-When the step of a part is cancelled or reaches its limit, the step after
-it removes the container, and the part writes no receipt.
+s of its receipt, 35 minutes. So the receipt of each part is written before
+its step ends. When the steps use all their time, the limit of the job may
+cut the upload; the receipts are still written in the checkout. When the
+step of a part is cancelled or reaches its limit, the step after it removes
+the container, and the part writes no receipt.
 
 The gate's step fails whenever the gate does not exit with 0, `REJECTED`
 included, the comparator's step whenever the comparator part does not,
@@ -2601,14 +2620,15 @@ rule of the registry allows, as its outputs, and it uploads the list as
 `formal-impact-<commit>-<attempt>`. `formal guard` runs
 `cargo xtask formal guard` with the event of the run ([guard](#guard)), and
 its failure fails the job. Each first fails on any event but a pull
-request, then checks out the head with its history, builds xtask, runs its
-command under `.github/scripts/deadline.sh --stop-commands` with 1 minute
-and 30 s for its kill, and writes what the command printed into the summary
-of the workflow run, with each carriage return escaped and indented as
-code; each has 8 minutes.
+request and on a re-run of an older run, as above, then checks out the head
+with its history, builds xtask, runs its command under
+`.github/scripts/deadline.sh --stop-commands` with 1 minute and 30 s for
+its kill, and writes what the command printed into the summary of the
+workflow run, with each carriage return escaped and indented as code; each
+has 10 minutes.
 
 The four verdicts run after `formal fast` and `formal parts`, on the
-runner without the image, with 15 minutes for `formal merge` and 5 for the
+runner without the image, with 15 minutes for `formal merge` and 6 for the
 others. Their first step, the same in all four, judges the event:
 
 - on a pull request, it fails unless `formal fast` succeeded; a change
@@ -2619,6 +2639,8 @@ others. Their first step, the same in all four, judges the event:
 - on a manual or scheduled run, the gate ran when the run is of `main`,
   and the step fails otherwise;
 - on any other event the step fails;
+- on a re-run of an older run of a pull request, as above, it fails
+  first;
 - when the gate ran, the step fails unless `formal parts` succeeded or
   failed, so that it ran to its end.
 
@@ -2635,8 +2657,10 @@ where they print text of the head, `formal merge` then writes the summary
 of the merge into the summary of the workflow run, or the paths of a
 change that does not affect the gate; `formal axioms` whether its gate
 passes, the axioms of each audited theorem of the record, or that there is
-no audited theorem, and each target of a waiver of the record, which the
-base audit left out and the shard of the target audits; `formal
+no audited theorem, and each target of a waiver of the record, whose proof
+modules that no other formal target lists the base audit leaves out and
+whose shard audits them when its proofs build, each name of the record as
+a JSON string with its backticks escaped; `formal
 leanchecker` whether its gate passes; and `formal comparator` whether its
 gate passes and the status of each unit of the comparator, or that there
 is no proved statement. For a change that does not affect the gate, the
@@ -3157,7 +3181,9 @@ runners, may only read the repository's contents, use no stored
 credentials and run actions pinned to full commit SHAs:
 
 - `calibration run`, the qualification job of the calibration, checks out
-  the head, pulls the image, builds xtask, probes a container of the gate,
+  the head, pulls the image, builds xtask and copies it for the comparator
+  part with the step of the job `formal run`, probes a container of the
+  gate,
   runs `cargo xtask formal check --calibration` on the runner, and records
   the bytes available before it and, where the runner has
   `/usr/bin/time`, its record, else a line that it has none, in `job.txt`;
@@ -3170,7 +3196,8 @@ credentials and run actions pinned to full commit SHAs:
   the guard does not run. After it, with the step of the job `formal run`,
   which a unit test keeps equal but for `--calibration`, it runs the
   comparator part, `cargo xtask formal run --calibration --shard
-  comparator`, in a container of its own on the stage that the job kept.
+  comparator`, in a container of its own on the stage that the job kept,
+  with that copy of xtask.
   A step after it, of one minute, fails unless that part left one receipt
   in which the unit `comparator/calibration` is `VERIFIED` and the
   commands of the two challenges that the comparator must reject
@@ -3789,8 +3816,16 @@ in a checkout are not evidence; only a run of the gate produces receipts.
 - The audit program runs in the Lean environment of the code that it
   audits, so a krepi module could in principle change what `#print axioms`
   or the program reports; `leanchecker` replays the declarations, and the
-  comparator checks the axioms of the export independently against the
-  list that the audit admitted, so it rejects an axiom that the audit
-  missed or that a proof module hid from it. The list itself comes from
-  the audit's report, and a name added to it must pass the allowlist, or
-  the unit is not run ([comparator](#comparator)).
+  comparator checks the axioms of a new export of the solution against
+  the list that the audit admitted, so it rejects an axiom that the audit
+  missed or that a proof module hid from it, within the limit below. The
+  list itself comes from the audit's report, and a name added to it must
+  pass the allowlist, or the unit is not run ([comparator](#comparator)).
+- The comparator part is not isolated from the base build of its run. In
+  CI it runs a copy of xtask that the gate cannot write and requires
+  exactly one receipt of the qualification job of its commit and run, but
+  the stage's build outputs and the copied sources that its challenges
+  import are written by the base build of the same run, which has no
+  sandbox, so a metaprogram of a proof module could tamper with them. The
+  [guard](#guard), the review of the specifications and the replay with
+  `leanchecker` remain; isolating the comparator further is future work.

@@ -372,7 +372,9 @@ tests hold the workflow `formal` to its six checks of the gate, jobs of
 that workflow alone, named as written and without a matrix, which run
 unless the run is cancelled and are skipped only on `main`, whose first
 steps, which the tests run with bash for each event and decision, fail on
-an event or a ref that they do not judge, and whose verdicts judge the
+an event or a ref that they do not judge and, with a stand-in of `gh`, on a
+re-run of a run of a pull request that is not the newest of its head, with
+read access to the workflow runs, and whose verdicts judge the
 record by its schema, run, commit, trigger and conclusion or hard gate;
 to its events, the gate on the
 label `full-check` for a change that affects it and on a manual or weekly
@@ -382,12 +384,15 @@ another; to the trigger that each event gives the parts; to the jobs of
 the affected planned targets alone, whose decision step they run with jq;
 and to the review of the receipt on a push to `main`. They also hold the
 formal workflows to the comparator part after the gate in a container of
-its own, with its probe, its mounts and its settings, in `formal` and in
+its own, with its probe, its mounts and its settings, running a copy of
+xtask made before the gate and mounted read-only, in `formal` and in
 the calibration, whose check of the two challenges that the comparator
 must reject they run with jq on receipts and logs of their own; to a
 notice of its limit in every job whose limit is an expression; to main
 commands that run under `deadline.sh` at a deadline at least two minutes
-before the limit of their step; and to the scripts of the measurement
+before the limit of their step, and to every command of their steps under
+that script at a deadline that with its kill-after ends before that limit;
+and to the scripts of the measurement
 steps, which run with the flags of the runner's shell. A test runs its
 scripts with jq only where jq is on the path, as on the runners. Where GNU
 `env` and GNU `timeout` are on the path, as on the runners, a unit test also
@@ -917,8 +922,9 @@ downloads, hand-written build logs in the plain form of BuildKit and
 receipts of the gate; one reads the workflow and keeps its steps copied
 from the image workflows and from the job of the gate equal to their
 sources, but for the command line of the gate, which runs the whole gate
-there and the qualification part in `formal`, and for its deadline and the
-file into which `deadline.sh` writes its status there.
+there and the qualification part in `formal`, and for its deadline, which
+grows by the budget of each formal target of the registry, and the file
+into which `deadline.sh` writes its status there.
 
 `cargo xtask formal run` runs the proof gate on a snapshot of the gate
 inputs and writes a receipt of the run below `artifacts/formal/runs/`

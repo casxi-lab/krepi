@@ -1104,8 +1104,10 @@ fn step_names(job: &Yaml) -> Vec<&str> {
 }
 
 /// The step that runs the comparator part and those that remove its
-/// container and check its challenges.
+/// container and check its challenges, and the step that copies xtask for
+/// it before the gate.
 const COMPARATOR_STEP: &str = "Run the comparator in its own container";
+const XTASK_COPY: &str = "Copy xtask for the comparator";
 const COMPARATOR_REMOVAL: &str = "Remove the container of the comparator";
 const CHALLENGES_STEP: &str = "Check that the comparator rejects the fixed challenges";
 /// The security options that the container of the comparator leaves
@@ -1149,7 +1151,22 @@ fn the_comparator_runs_after_the_gate_in_a_container_of_its_own() {
         assert_eq!(removal["timeout-minutes"].as_i64(), Some(1));
         let always = removal["if"].as_str().unwrap_or_default();
         assert!(always.contains("always()"), "{always}");
+        // Right after xtask is built, before the gate, a copy of it goes
+        // outside the checkout, which no container of the gate mounts.
+        assert_eq!(at(XTASK_COPY), at("Build xtask").map(|at| at + 1));
+        let copy = step_named(job, XTASK_COPY);
+        assert_eq!(copy["timeout-minutes"].as_i64(), Some(1));
+        assert!(copy["if"].is_badvalue());
+        let copied = copy["run"].as_str().unwrap_or_default();
+        let line = "cp xtask/target/debug/xtask \"$RUNNER_TEMP/xtask\"";
+        assert_eq!(copied.lines().next(), Some(line));
+        let script = step_named(job, names[gate])["run"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(!script.contains("RUNNER_TEMP"), "{script}");
     }
+    let copy = |job: &Yaml| step_named(job, XTASK_COPY).clone();
+    assert_eq!(copy(gate), copy(run));
     // It runs unless the run was cancelled or the probe of the gate failed,
     // under the deadline of the part and its receipt, which `deadline.sh`
     // kills a minute later and the step ends a minute after that.
@@ -1170,14 +1187,15 @@ fn the_comparator_runs_after_the_gate_in_a_container_of_its_own() {
     let start = format!("exec bash {DEADLINE} --stop-commands {deadline}m 1m docker run --rm ");
     assert!(last.starts_with(&start), "{last}");
     assert!(
-        last.ends_with("xtask/target/debug/xtask\" formal run --shard comparator"),
+        last.ends_with("\"$IMAGE\" /krepi-xtask formal run --shard comparator"),
         "{last}"
     );
     // Unprivileged user namespaces are allowed on the runner, and the
     // container has the flags of the gate and the unconfined options; the
     // sandbox sees the stage through a second mount of the runs directory,
     // which the variable of the part names, and a read-only system Git
-    // configuration that marks the packages of the image as safe.
+    // configuration that marks the packages of the image as safe; the part
+    // runs the copy of xtask, mounted read-only.
     let runs = format!(
         "--volume \"$GITHUB_WORKSPACE/{}:/krepi-runs\" --env {}=/krepi-runs",
         crate::formal::run::RUNS,
@@ -1189,6 +1207,7 @@ fn the_comparator_runs_after_the_gate_in_a_container_of_its_own() {
         "--volume \"$GITHUB_WORKSPACE:$GITHUB_WORKSPACE\" --workdir \"$GITHUB_WORKSPACE\"",
         &runs,
         "--volume \"$RUNNER_TEMP/gitconfig:/etc/gitconfig:ro\"",
+        "--volume \"$RUNNER_TEMP/xtask:/krepi-xtask:ro\"",
         "--env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT",
         "--env KREPI_FORMAL_IMAGE=\"$IMAGE\"",
     ] {
@@ -1239,7 +1258,7 @@ fn the_comparator_runs_after_the_gate_in_a_container_of_its_own() {
     let copied = own["run"].as_str().expect("a script");
     assert_eq!(copied.matches(" --calibration").count(), 1);
     assert_eq!(copied.replace(" --calibration", ""), script);
-    assert!(copied.contains("formal run --calibration --shard comparator"));
+    assert!(copied.contains("/krepi-xtask formal run --calibration --shard comparator"));
     let removal = |job: &Yaml| step_named(job, COMPARATOR_REMOVAL)["run"].clone();
     assert_eq!(removal(run), removal(gate));
     // The unconfined options are in these steps and in the measurement of
@@ -1549,6 +1568,7 @@ fn the_six_checks_fail_on_another_event_or_ref() {
         ("ACTION", "${{ github.event.action }}"),
         ("LABEL", "${{ github.event.label.name }}"),
         ("PARTS", "${{ needs.parts.result }}"),
+        ("GH_TOKEN", "${{ github.token }}"),
     ];
     for (name, value) in inputs {
         assert_eq!(event["env"][name].as_str(), Some(value), "{name}");
@@ -1694,6 +1714,99 @@ fn the_six_checks_fail_on_another_event_or_ref() {
         merge.contains("echo \"record=$record\" >> \"$GITHUB_OUTPUT\""),
         "{merge}"
     );
+}
+
+/// The first line of the part of the first steps of the six checks that
+/// refuses a re-run of an older run of a pull request.
+const RE_RUN: &str = "# A re-run judges the event of its run again";
+
+#[test]
+fn a_re_run_of_an_older_run_of_a_pull_request_fails_the_six_checks() {
+    use std::os::unix::fs::PermissionsExt;
+    let formal = workflow(FORMAL);
+    let jobs = &formal["jobs"];
+    let script = |key: &str| {
+        jobs[key]["steps"][0]["run"]
+            .as_str()
+            .expect("a script")
+            .to_string()
+    };
+    // The first step of each has the same part, with the token of the run,
+    // which may read its workflow runs.
+    let part = |key: &str| {
+        let script = script(key);
+        let start = script.find(RE_RUN).unwrap_or_else(|| panic!("{key}"));
+        let end = script[start..].find("\nfi\n").expect("its end") + start;
+        script[start..end + 4].to_string()
+    };
+    for (key, _) in GATE_CHECKS {
+        assert_eq!(part(key), part("fast"), "{key}");
+        let token = jobs[key]["steps"][0]["env"]["GH_TOKEN"].as_str();
+        assert_eq!(token, Some("${{ github.token }}"), "{key}");
+        let permissions = jobs[key]["permissions"].as_hash().expect("the permissions");
+        let grants = Vec::from_iter(
+            (permissions.iter()).map(|(scope, level)| (scope.as_str(), level.as_str())),
+        );
+        assert_eq!(
+            grants,
+            [
+                (Some("actions"), Some("read")),
+                (Some("contents"), Some("read"))
+            ],
+            "{key}"
+        );
+    }
+    // With bash and a stand-in of gh that records its arguments and prints
+    // the newest run of the head, or fails.
+    let scratch = crate::scratch::Scratch::temporary("re-run");
+    let gh = "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$GH_ARGS\"\n[ -z \"$GH_FAIL\" ] || exit 1\necho \"$NEWEST\"\n";
+    scratch.write("bin/gh", gh);
+    let stand_in = scratch.0.join("bin/gh");
+    std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let path = std::env::var("PATH").unwrap_or_default();
+    let path = format!("{}:{path}", scratch.0.join("bin").display());
+    let args = scratch.0.join("args");
+    let args_text = args.to_str().expect("a UTF-8 path");
+    for key in ["fast", "merge"] {
+        let script = script(key);
+        let run = |attempt: &str, newest: &str, fail: &str| {
+            let _ = std::fs::remove_file(&args);
+            let vars = [
+                ("PATH", path.as_str()),
+                ("GITHUB_EVENT_NAME", "pull_request"),
+                ("GITHUB_REF", "refs/pull/1/merge"),
+                ("GITHUB_REPOSITORY", "casxi-lab/krepi"),
+                ("GITHUB_RUN_ID", "12"),
+                ("GITHUB_RUN_ATTEMPT", attempt),
+                ("HEAD_SHA", "abc"),
+                ("FAST", "success"),
+                ("DECISION", "unaffected"),
+                ("NEWEST", newest),
+                ("GH_FAIL", fail),
+                ("GH_ARGS", args_text),
+            ];
+            let (code, stderr, _) = run_step(&script, &vars);
+            (code, stderr, std::fs::read_to_string(&args).ok())
+        };
+        // A first attempt asks nothing; a re-run passes when its run is the
+        // newest of the head, and fails when it is not or gh fails.
+        assert_eq!(run("1", "13", ""), (Some(0), String::new(), None), "{key}");
+        let asked = "api repos/casxi-lab/krepi/actions/workflows/formal.yml/runs\
+                     ?event=pull_request&head_sha=abc&per_page=1 --jq .workflow_runs[0].id\n";
+        let asked = Some(asked.to_string());
+        assert_eq!(
+            run("2", "12", ""),
+            (Some(0), String::new(), asked.clone()),
+            "{key}"
+        );
+        let older = "a re-run of run 12 judges an older event than run 13 of the head\n";
+        assert_eq!(
+            run("3", "13", ""),
+            (Some(1), older.to_string(), asked.clone()),
+            "{key}"
+        );
+        assert_eq!(run("2", "12", "1").0, Some(1), "{key}");
+    }
 }
 
 #[test]
@@ -2529,9 +2642,21 @@ fn deadline_options(line: &str) -> Option<(bool, Option<&str>, &str, &str)> {
     }
 }
 
+/// The seconds of a duration of [`DEADLINE`], `<n>m` or `<n>s`, if it is
+/// written so.
+fn duration_seconds(text: &str) -> Option<i64> {
+    let (number, unit) = text.split_at_checked(text.len().checked_sub(1)?)?;
+    let scale = [("m", 60), ("s", 1)]
+        .into_iter()
+        .find(|(u, _)| *u == unit)?
+        .1;
+    Some(number.parse::<i64>().ok()? * scale)
+}
+
 #[test]
 fn the_main_commands_of_the_formal_workflows_run_under_their_deadlines() {
     let mut checked = Vec::new();
+    let (mut calls, mut written) = (0, 0);
     for (path, document) in workflows() {
         if ![FORMAL, CALIBRATION, CANARY, MEASURE].contains(&path.as_str()) {
             continue;
@@ -2539,13 +2664,31 @@ fn the_main_commands_of_the_formal_workflows_run_under_their_deadlines() {
         for (key, job) in jobs(&document) {
             for step in job["steps"].as_vec().into_iter().flatten() {
                 let script = step["run"].as_str().unwrap_or_default();
+                // Every command under the script, in a container or not, ends
+                // with its kill-after before the limit of its step, unless the
+                // matrix gives both.
+                let name = step["name"].as_str().unwrap_or_default();
+                let limit = step["timeout-minutes"].as_i64();
+                written += script.matches(&format!("exec bash {DEADLINE} ")).count();
+                for line in logical_lines(script) {
+                    let Some((_, _, deadline, kill)) = deadline_options(&line) else {
+                        continue;
+                    };
+                    calls += 1;
+                    let Some(deadline) = duration_seconds(deadline) else {
+                        let matrix = step["timeout-minutes"].as_str();
+                        assert_eq!(matrix, Some("${{ matrix.step }}"), "{path}: {key}: {name}");
+                        continue;
+                    };
+                    let kill = duration_seconds(kill).expect("a kill-after");
+                    let limit = limit.unwrap_or_else(|| panic!("{path}: {key}: {name}"));
+                    assert!(deadline + kill < limit * 60, "{path}: {key}: {name}");
+                }
                 if !script.contains("docker run ") && !script.contains("docker build ") {
                     continue;
                 }
-                let name = step["name"].as_str().unwrap_or_default();
                 let listed = (CONTAINER_STEPS.iter())
                     .find(|(f, j, s, _)| (*f, *j, *s) == (path.as_str(), key, name));
-                let limit = step["timeout-minutes"].as_i64();
                 let Some((_, _, _, minutes)) = listed else {
                     // A probe or a short step.
                     let short =
@@ -2589,6 +2732,7 @@ fn the_main_commands_of_the_formal_workflows_run_under_their_deadlines() {
             }
         }
     }
+    assert_eq!(calls, written);
     checked.sort();
     let mut expected: Vec<_> = (CONTAINER_STEPS.iter())
         .map(|(path, key, name, _)| (path.to_string(), key.to_string(), name.to_string()))

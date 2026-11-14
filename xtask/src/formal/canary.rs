@@ -1868,11 +1868,13 @@ mod tests {
         let gate = "Run the gate in the image";
         let image = "--env KREPI_FORMAL_IMAGE=\"$IMAGE\" \\";
         // The deadline and the command line alone differ: the canary runs
-        // the whole gate, whose deadline is the gate's and that of its
-        // receipt, and keeps its exit status for the verdict; the job of
-        // `formal` runs the qualification part, whose deadline adds the
-        // extraction of the formal targets. Each step ends a minute after
-        // `deadline.sh` kills the gate.
+        // the whole gate, whose deadline is the gate's, the budgets of the
+        // formal targets, which it selects, and that of its receipt, and
+        // keeps its exit status for the verdict; the job of `formal` runs
+        // the qualification part, whose deadline adds the extraction of the
+        // formal targets. Each step ends a minute after `deadline.sh` kills
+        // the gate. Registering a formal target thus fails this test until
+        // the deadline and the limits of the canary grow by its budget.
         let xtask = "\"$IMAGE\" \"$GITHUB_WORKSPACE/xtask/target/debug/xtask\" formal run";
         let (whole, part) = (
             xtask.to_string(),
@@ -1881,7 +1883,16 @@ mod tests {
         let minutes = |seconds: u64| seconds.div_ceil(60);
         let gate_seconds = run::GATE_BUDGET.as_secs() + run::RECEIPT_MARGIN.as_secs();
         let extraction = crate::formal::merge::EXTRACTION_MARGIN.as_secs();
-        let (own, theirs) = (minutes(gate_seconds), minutes(gate_seconds + extraction));
+        let registry = include_str!("../../../verification/targets.json");
+        let targets = crate::formal::registry::parse(registry)
+            .expect("the registry")
+            .targets;
+        let formal = targets
+            .iter()
+            .filter(|t| t.state == crate::formal::registry::State::Formal);
+        let budgets = formal.map(|target| target.budget).sum::<u64>();
+        let own = minutes(gate_seconds + budgets);
+        let theirs = minutes(gate_seconds + extraction);
         let deadline = |options: &str, minutes: u64| {
             format!("exec bash .github/scripts/deadline.sh {options} {minutes}m 1m \\")
         };

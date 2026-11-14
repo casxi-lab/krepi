@@ -541,11 +541,11 @@ fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
         ("formal scoped t", None),
         ("formal parts", Some(15)),
         ("formal merge", Some(15)),
-        ("formal axioms", Some(5)),
-        ("formal leanchecker", Some(5)),
-        ("formal comparator", Some(5)),
-        ("formal fast", Some(8)),
-        ("formal guard", Some(8)),
+        ("formal axioms", Some(6)),
+        ("formal leanchecker", Some(6)),
+        ("formal comparator", Some(6)),
+        ("formal fast", Some(10)),
+        ("formal guard", Some(10)),
         ("formal receipt review", Some(15)),
     ] {
         assert_eq!(job_limit(&committed, name), limit, "{name}");

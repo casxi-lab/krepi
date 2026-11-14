@@ -141,6 +141,14 @@ jobs:
             cargo build --locked --manifest-path xtask/Cargo.toml
           } 2>&1 | tee -a artifacts/formal/job.txt
 
+      # The comparator part runs this copy of xtask, mounted read-only: the
+      # gate, whose container mounts only the checkout, cannot change it.
+      - name: Copy xtask for the comparator
+        timeout-minutes: 1
+        run: |
+          cp xtask/target/debug/xtask "$RUNNER_TEMP/xtask"
+          sha256sum "$RUNNER_TEMP/xtask" | tee -a artifacts/formal/job.txt
+
       # A user other than root, a read-only root file system, no
       # capabilities and no network, as the probe of the job `formal run`.
       - name: Probe the container of the gate
@@ -245,9 +253,10 @@ jobs:
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --volume "$GITHUB_WORKSPACE/artifacts/formal/runs:/krepi-runs" --env KREPI_FORMAL_RUNS=/krepi-runs \
             --volume "$RUNNER_TEMP/gitconfig:/etc/gitconfig:ro" \
+            --volume "$RUNNER_TEMP/xtask:/krepi-xtask:ro" \
             --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --calibration --shard comparator
+            "$IMAGE" /krepi-xtask formal run --calibration --shard comparator
 
       - name: Remove the container of the comparator
         if: ${{ always() && matrix.key == 'run' }}
