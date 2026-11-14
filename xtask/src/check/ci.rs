@@ -1188,7 +1188,7 @@ fn deadline_problems(document: &Yaml, tight: bool) -> (usize, Vec<String>) {
             }
             match limit {
                 None => problems.push(format!("job {key} has no timeout-minutes")),
-                Some(limit) if minutes * 60 + seconds >= limit * 60 => problems.push(format!(
+                Some(limit) if (minutes + pulls) * 60 + seconds >= limit * 60 => problems.push(format!(
                     "job {key}: the deadline of cargo xtask {main} and its kill-after reach the \
                      limit of {limit} minutes"
                 )),
@@ -1313,15 +1313,25 @@ fn every_main_command_of_the_lines_runs_under_its_deadline() {
              echo start"
         ),
     );
+    let raised = pulled.replace("timeout-minutes: 15", "timeout-minutes: 17");
+    for (text, limit) in [(&pulled, 15), (&raised, 17)] {
+        assert_eq!(
+            deadline_problems(&parse(text), true).1,
+            [format!(
+                "job check: the deadline of cargo xtask check and its kill-after reach the limit \
+                 of {limit} minutes"
+            )]
+        );
+    }
     assert_eq!(
-        deadline_problems(&parse(&pulled), true).1,
+        deadline_problems(&parse(&raised.replace("13m 90s", "10m 90s")), true).1,
         [
             "job check: the deadline of cargo xtask check, after 3 minutes of pulls, is not one \
-             or two minutes before the limit of 15 minutes"
+             or two minutes before the limit of 17 minutes"
         ]
     );
-    let raised = pulled.replace("timeout-minutes: 15", "timeout-minutes: 17");
-    assert_eq!(deadline_problems(&parse(&raised), true), (2, Vec::new()));
+    let earlier = raised.replace("13m 90s", "12m 90s");
+    assert_eq!(deadline_problems(&parse(&earlier), true), (2, Vec::new()));
     // Away from the lines, the deadline may be earlier.
     let early = good.replace("13m 90s", "10m 90s");
     assert_eq!(deadline_problems(&parse(&early), false), (2, Vec::new()));

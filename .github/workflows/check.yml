@@ -91,7 +91,7 @@ jobs:
         run: docker pull "$(jq -er '"\(.repository)@\(.digest)"' verification/image-pin.json)"
 
       - name: Run cargo xtask check
-        run: exec bash .github/scripts/deadline.sh 13m 90s cargo xtask check --receipt artifacts/check-receipt.json
+        run: exec bash .github/scripts/deadline.sh 12m 90s cargo xtask check --receipt artifacts/check-receipt.json
 
       - name: Require the formal step to have passed
         run: jq -e '[.steps[] | select(.name == "formal")] | length == 1 and .[0].status == "passed"' artifacts/check-receipt.json

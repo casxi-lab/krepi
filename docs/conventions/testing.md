@@ -41,8 +41,8 @@ process group of its own, with no input; the check kills the group when the
 command has ended or the check stops, before it collects the command, and
 then waits up to 60 s for the group to be empty, failing the step if
 processes of the group outlive that. A passing command therefore leaves no
-process of its group behind either.
-A command's output and error output go to the log of its step,
+process of its group behind either. A command's output and error output go
+to the log of its step,
 `artifacts/check/<UTC time>Z-<process ID>/<NN>-<step>.log`, where `NN` is the
 number of the step in the list, such as `05-test.log`, after a line with the
 command; when the step ends, the check prints its log and a line with its
@@ -318,8 +318,8 @@ Every job of these lines has a `timeout-minutes`. In the jobs that run
 command also ends at a deadline that `timeout` sets one or two minutes
 before the limit of its job, counting for the check the 3-minute limit of
 the pull of the image before it, so that the uploads still run when the
-command takes too long: the check has 13 minutes of the 17 of its job on the
-pull request and main lines and 38 of 42 on the full and nightly lines.
+command takes too long: the check has 12 minutes of the 17 of its job on the
+pull request and main lines and 38 of 43 on the full and nightly lines.
 `cargo xtask qemu-boot` runs after the check in the same job without a
 deadline of its own. The step starts the command as the last command of its
 script with `exec bash .github/scripts/deadline.sh`, so that this script is
@@ -333,7 +333,7 @@ writes its receipt with the result `interrupted`, and the upload after it
 finds the receipt. The script exits with the status of the command, and with
 124 when the deadline stopped it, also when `timeout` had to kill it then.
 Along the longest chain of jobs that need each other the limits add up to 20
-minutes on the pull request line and to 45 minutes on the full line, within
+minutes on the pull request line and to 46 minutes on the full line, within
 the 20 and 60 minutes that those lines allow. After each completed run of
 another workflow of the directory, the workflow `run record`
 (`run-record.yml`) writes its record with `cargo xtask run-record`,
