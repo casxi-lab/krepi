@@ -80,14 +80,16 @@ pub struct Trigger {
 /// The variable through which a job of CI gives the trigger of its run.
 pub const TRIGGER: &str = "KREPI_FORMAL_TRIGGER";
 
+/// The modes of the runs of CI, which [`TRIGGER`] may name.
+pub const CI_MODES: [Mode; 3] = [Mode::Required, Mode::ForcedFull, Mode::Weekly];
+
 /// The mode that [`TRIGGER`] gives through `var`: `MANUAL` when it is unset
 /// or empty, `REQUIRED`, `FORCED_FULL` or `WEEKLY`, and otherwise why not.
 pub fn mode(var: &dyn Fn(&str) -> Option<String>) -> Result<Mode, String> {
     let Some(value) = var(TRIGGER).filter(|value| !value.is_empty()) else {
         return Ok(Mode::Manual);
     };
-    let modes = [Mode::Required, Mode::ForcedFull, Mode::Weekly];
-    let found = modes.into_iter().find(|mode| word(mode) == value);
+    let found = CI_MODES.into_iter().find(|mode| word(mode) == value);
     let not = format!("{TRIGGER} is {value:?}, not REQUIRED, FORCED_FULL or WEEKLY");
     found.ok_or(not)
 }
@@ -366,7 +368,7 @@ fn summary(record: &Merge, words: &str, reasons: &[String]) -> String {
     let mode = (record.trigger).map_or("none".to_string(), |mode| word(&mode));
     let [commit, refname, run] = [&record.commit, &record.reference, &record.run_id].map(text);
     let head = format!("formal receipt: {words}\ncommit {commit}\ntrigger {mode} {refname} {run}");
-    let waivers = record.waivers.iter().map(|waived| waived.line());
+    let waivers = record.waivers.iter().map(Waived::line);
     let reasons = (reasons.iter()).map(|reason| reason.escape_debug().to_string());
     let lines = waivers.chain(reasons).map(|line| format!("- {line}\n"));
     format!("{head}\n{}", String::from_iter(lines))
@@ -431,8 +433,7 @@ pub fn judge(root: &Path, layout: &Layout, record: &Merge, fresh: bool) -> (Verd
     let waived = !verified && record.passes && !used.is_empty() && reasons.len() == 1;
     // A fresh record is of a run of CI without planned statements or waivers.
     if fresh {
-        let modes = [Mode::Required, Mode::ForcedFull, Mode::Weekly];
-        let ci = modes.map(Some).contains(&record.trigger) && record.run_id.is_some();
+        let ci = CI_MODES.map(Some).contains(&record.trigger) && record.run_id.is_some();
         let mode = (record.trigger).map_or("none".to_string(), |mode| word(&mode));
         let without = [" without a run ID", ""][usize::from(record.run_id.is_some())];
         let trigger = format!("the record has the trigger {mode}{without}, not one of CI");
