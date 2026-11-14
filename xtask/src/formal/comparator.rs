@@ -35,8 +35,8 @@ const LIBRARY: &str = "KrepiChallenge";
 type Units = BTreeMap<String, Vec<Statement>>;
 
 /// The units of the checkout `root`: `comparator/<target>` with the proved
-/// statements of the first formal target that lists their modules, and
-/// `comparator` with the others.
+/// statements whose modules that formal target alone lists, as a waiver of
+/// it leaves them out, and `comparator` with the others.
 fn units(root: &Path, layout: &Layout) -> Result<Units, String> {
     let read = |path: &str| base::read(&root.join(path)).map_err(|e| format!("cannot read {e}"));
     let statements = guard::load_statements(&read(layout.statements)?, layout);
@@ -46,8 +46,9 @@ fn units(root: &Path, layout: &Layout) -> Result<Units, String> {
     let formal = Vec::from_iter((targets.iter()).filter(|t| t.state == registry::State::Formal));
     let mut units = Units::new();
     for statement in (statements.statements.into_iter()).filter(|s| s.state == State::Proved) {
-        let target = (formal.iter()).find(|t| t.proof_modules.contains(&statement.module));
-        let name = target.map_or(PHASE.to_string(), |t| format!("{PHASE}/{}", t.name));
+        let mut listing = (formal.iter()).filter(|t| t.proof_modules.contains(&statement.module));
+        let alone = (listing.next()).filter(|_| listing.next().is_none());
+        let name = alone.map_or(PHASE.to_string(), |t| format!("{PHASE}/{}", t.name));
         units.entry(name).or_default().push(statement);
     }
     Ok(units)
@@ -66,8 +67,8 @@ pub fn phase<'a>(root: &Path, layout: &'a Layout, runs: Option<String>) -> Phase
     }
 }
 
-/// Runs the comparator on `units` in the stage of the latest qualification
-/// job below `runs` of the commit and run of CI; an error stops the phase.
+/// Runs the comparator on `units` in the stage of the one qualification job
+/// below `runs` of the commit and run of CI; an error stops the phase.
 fn compare(gate: &mut Gate, units: Units, runs: &Path) -> Result<(), String> {
     if units.is_empty() {
         return Ok(());
@@ -79,8 +80,9 @@ fn compare(gate: &mut Gate, units: Units, runs: &Path) -> Result<(), String> {
     let read = |path: PathBuf| serde_json::from_slice::<Receipt>(&fs::read(path).ok()?).ok();
     let entries = fs::read_dir(runs).into_iter().flatten().flatten();
     let jobs = entries.filter_map(|entry| read(entry.path().join("receipt.json")));
-    let job = jobs.filter(ours).max_by_key(|job| job.started);
-    let job = job.ok_or(format!("{} has no qualification receipt", runs.display()))?;
+    let jobs = Vec::from_iter(jobs.filter(ours));
+    let found = format!("{} qualification receipts of the run, not one", jobs.len());
+    let [job] = <[_; 1]>::try_from(jobs).map_err(|_| format!("{} has {found}", runs.display()))?;
     let base = (job.base.as_ref()).ok_or(format!("the run {} has no base round", job.run))?;
     // The challenges are the modules of a library of their own in the stage.
     let stage = runs.join(format!("{}/work/{}/stage", job.run, base::PHASE));
@@ -178,8 +180,10 @@ mod tests {
     use crate::formal::fixture::{self, Fixture, commands, lake_script, status};
     use crate::formal::outcome::Class;
     use crate::formal::receipt;
-    use crate::formal::run::tests::{Done, comparator_part, root_package};
-    use crate::formal::waiver;
+    use crate::formal::run::tests::{
+        Done, comparator_part, gate_shard, plenty, root_package, shard_phases,
+    };
+    use crate::formal::{merge, waiver};
 
     const LAYOUT: Layout = Layout::PRODUCTION;
 
@@ -288,7 +292,8 @@ mod tests {
     #[test]
     fn the_units_are_the_formal_targets_with_proved_statements_and_one_for_the_others() {
         // A planned statement has no unit, nor a planned target, and a
-        // module that two formal targets list is in the unit of the first.
+        // module that two formal targets list is in the unit of neither, as
+        // a waiver of one of them does not leave it out.
         let fixture = fixtures::base("comparator-units");
         let statement = |name: &str, theorem: &str, state: &str| {
             let module = theorem.rsplit_once('.').expect("a module").0;
@@ -303,7 +308,7 @@ mod tests {
         let target = |name: &str, state: &str, modules: &[&str]| json!({"name": name, "state": state, "module": "T", "proof_modules": modules});
         let registry = json!([
             target("p", "planned", &["Krepi.Proofs.Other"]),
-            target("t", "formal", &[COUNTER]),
+            target("t", "formal", &[COUNTER, "Krepi.Proofs.Other"]),
             target("u", "formal", &[COUNTER, "Krepi.Proofs.Main"]),
         ]);
         fixtures::targets(&fixture, &registry);
@@ -313,10 +318,10 @@ mod tests {
             Vec::from_iter(found.keys()),
             ["comparator", "comparator/t", "comparator/u"]
         );
-        assert_eq!(theorems("comparator"), ["Krepi.Proofs.Other.q"]);
+        assert_eq!(theorems("comparator"), [T]);
         assert_eq!(
             (theorems("comparator/t"), theorems("comparator/u")),
-            (vec![T], vec![M])
+            (vec!["Krepi.Proofs.Other.q"], vec![M])
         );
         // The part concludes each with one challenge in the stage of the
         // job, and in production runs no other.
@@ -627,7 +632,62 @@ mod tests {
     }
 
     #[test]
-    fn without_a_qualification_receipt_of_the_run_the_part_is_a_tool_failure() {
+    fn a_waiver_does_not_cover_the_comparator_on_a_module_that_another_formal_target_lists() {
+        // `t` and `u` list the proof module of `T`, so that a waiver of `t`
+        // leaves it in the base round and in the unit `comparator`, whose
+        // rejection no waiver covers.
+        let mut fixture = fixtures::base("comparator-shared");
+        root_package(&fixture, "krepi-kernel", "");
+        let target = |name: &str, module: &str, theorems: &[&str]| {
+            let obligations =
+                Vec::from_iter(theorems.iter().map(|t| json!({"id": "s", "theorems": [t]})));
+            json!({"name": name, "module": module, "start_from": ["crate::f"],
+                "proof_modules": [COUNTER], "obligations": obligations})
+        };
+        fixtures::targets(
+            &fixture,
+            &json!([target("t", "T", &[T]), target("u", "U", &[])]),
+        );
+        waiver::tests::waive(&fixture, "t", "9999-12-31");
+        hashed(&mut fixture);
+        let job = job(&fixture);
+        let mismatch = "error: Challenge and solution theorem statement do not match";
+        lake_script(
+            &fixture,
+            "comparator",
+            &format!("echo '{mismatch}' >&2; exit 1\n"),
+        );
+        let done = compared(&fixture);
+        assert_eq!(Vec::from_iter(done.receipt.units.keys()), ["comparator"]);
+        assert_eq!(
+            status(&done, "comparator"),
+            (Status::Rejected, Some(mismatch))
+        );
+        let root = fixture.root();
+        let shard = |name: &str| {
+            let shard = format!("target/{name}");
+            gate_shard(&fixture, &shard, shard_phases(root, &shard), plenty)
+        };
+        let parts = [
+            ("q", job),
+            ("c", done),
+            ("t", shard("t")),
+            ("u", shard("u")),
+        ];
+        let parts = parts.map(|(name, done)| fixtures::part(&fixture, name, &done));
+        let merged = merge::merge(root, &LAYOUT, &parts, Some(Duration::ZERO));
+        assert_eq!(merged.problems, Vec::<String>::new());
+        let held = (
+            merged.passes,
+            merged.gates.comparator,
+            merged.waivers[0].used,
+        );
+        assert_eq!(held, (false, false, false));
+        assert_eq!(merged.status, Status::Rejected);
+    }
+
+    #[test]
+    fn without_exactly_one_qualification_receipt_of_the_run_the_part_is_a_tool_failure() {
         let fixture = checkout("comparator-alone", &[COUNTER], json!({}));
         let runs_of = fixture.root().join(run::RUNS);
         let stopped = |done: &Done, problem: &str| {
@@ -643,7 +703,11 @@ mod tests {
             }
             assert!(runs(done).is_empty());
         };
-        let none = format!("{} has no qualification receipt", runs_of.display());
+        let found = |count: usize| {
+            let runs = runs_of.display();
+            format!("{runs} has {count} qualification receipts of the run, not one")
+        };
+        let none = found(0);
         stopped(&compared(&fixture), &none);
         // A receipt of the job of another run of CI, or of another commit.
         let job = job(&fixture);
@@ -663,6 +727,10 @@ mod tests {
             &compared(&fixture),
             &format!("the run {} has no base round", job.run.id),
         );
+        // Two of the commit and run, as one that a build below the runs
+        // directory added would make, whichever has a base round.
+        self::job(&fixture);
+        stopped(&compared(&fixture), &found(2));
     }
 
     #[test]

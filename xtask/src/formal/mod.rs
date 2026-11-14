@@ -187,7 +187,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "merge",
-        about: "Merge RECEIPT..., the receipts of the qualification job and of the shard of each formal target of the commit checked out, into the conclusion of the whole gate with the waivers of verification/waivers.json that hold, which passes when every unit and part outside them is VERIFIED, and write its record and summary; --calibration merges those of the calibration target",
+        about: "Merge RECEIPT..., the receipts of the qualification job, of the comparator part and of the shard of each formal target of the commit checked out, into the conclusion of the whole gate with the waivers of verification/waivers.json that hold, which passes when every unit and part outside them is VERIFIED, and of its three hard gates, the axiom audits, the replay of leanchecker and the comparator, and write its record and summary; --calibration merges those of the calibration target",
         subcommands: &[],
     },
     Command {

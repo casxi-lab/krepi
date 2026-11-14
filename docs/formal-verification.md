@@ -1082,10 +1082,11 @@ of the whole gate with the failures of the receipts and the merged units,
 when every receipt is: a target that the proofs reject, whose mutants did
 not run, makes it `REJECTED` and not complete, and a part that the disk
 guard refused makes it `TOOL_FAILURE` and not complete, where that run
-itself is `NOT_RUN`. With no formal target in the registry, the receipt of
-the qualification job alone is merged. Each run whose job names its image
-compares that reference with the pin of its snapshot, so the merge records
-the image that the receipts name and does not compare it with the pin.
+itself is `NOT_RUN`. With no formal target in the registry, the receipts of
+the qualification job and of the comparator part alone are merged. Each run
+whose job names its image compares that reference with the pin of its
+snapshot, so the merge records the image that the receipts name and does
+not compare it with the pin.
 
 The units of the targets of the waivers that hold on the date of the merge,
 with their registered mutants and the `base/<theorem>` of each statement
@@ -1318,10 +1319,14 @@ each waiver that holds and whether it used it, and stays `REJECTED` when
 it used one. A waiver covers no unit of the qualification, not the unit
 `base`, and no `base/<theorem>` of a module that the base round leaves
 out only because the module imports what a waiver leaves out: that unit
-is `SCOPED` and fails the merge. The hard gates of the merge pass over the
-commands and units of the same targets in the same way, so the merge and
-its three gates can pass while the record is `REJECTED`; the replay of
-`leanchecker`, a command of the unit `base`, is never covered
+is `SCOPED` and fails the merge. Nor does a waiver cover the unit
+`comparator`, which holds the statements of a proof module that two formal
+targets list: a waiver of one of them leaves such a module in the base
+round, where it is checked, and waivers of all of them leave it out, which
+makes `comparator` `SCOPED` and fails the merge. The hard gates of the
+merge pass over the commands and units of the same targets in the same way,
+so the merge and its three gates can pass while the record is `REJECTED`;
+the replay of `leanchecker`, a command of the unit `base`, is never covered
 ([shards and merge](#shards-and-merge)).
 
 `cargo xtask formal receipt` calls a record that passes with a used waiver
@@ -1472,7 +1477,7 @@ triples.
 
 The qualification phase, in `qualify.rs`, checks the pinned tools against
 the code shapes of the qualification crate before anything relies on them.
-Every run but the shard of a target and a run of
+Every run but the shard of a target, the comparator part and a run of
 `cargo xtask formal run --target` has it, with a budget of 3,600 s.
 
 The crate `verification/qualification/` holds one module per shape. It is a
@@ -1596,8 +1601,9 @@ explains each with its evidence.
 The base round, in `base.rs`, builds, audits and replays the hand-written
 Lean of the snapshot with the generated modules of the proof cases of the
 qualification and of the targets that the run extracted. Every run but the
-shard of a target and a run of `cargo xtask formal run --target` has it
-after the qualification, with a budget of 3,600 s. Its units are `base` and
+shard of a target, the comparator part and a run of
+`cargo xtask formal run --target` has it after the qualification, with a
+budget of 3,600 s. Its units are `base` and
 `base/<theorem>` for each statement that `statements.json` registers as
 proved; the phase reads that file from the checkout at the start of the
 run, to register its units, and stops when the export's file is not the
@@ -1858,27 +1864,32 @@ which it checks on the export of the solution. `cargo xtask formal run
 commit, on the stage of the base round that the job kept with `--keep`
 ([shards and merge](#shards-and-merge)).
 
-Its units are `comparator/<target>` for each formal target that lists the
-module of a proved statement in its `proof_modules`, with those
-statements, the first such target of the registry for a module that two
-list, and `comparator` with the other proved statements; a planned
-statement has none. The phase reads them from `statements.json` and the
-registry of the checkout when the run starts, and stops when it cannot
-read them. Without a unit, as in production today, the part runs no
-command and is `VERIFIED`. Otherwise it
+Its units are `comparator/<target>` for each formal target that alone
+lists the module of a proved statement in its `proof_modules`, with those
+statements, and `comparator` with the other proved statements, among them
+those of a module that two formal targets list; a planned statement has
+none. A unit of a target thus holds only statements whose modules a
+[waiver](#waivers) of the target leaves out of the base round, and the
+waiver covers no result of the comparator on a statement that the round
+checked. The phase reads them from `statements.json` and the registry of
+the checkout when the run starts, and stops when it cannot read them.
+Without a unit, as in production today, the part runs no command and is
+`VERIFIED`. Otherwise it
 
 1. reads the receipts below the runs directory, `artifacts/formal/runs/`
-   or the directory that `KREPI_FORMAL_RUNS` names, and takes the latest,
-   by `started`, of the qualification job of the same commit and the same
-   `run_id` of the trigger; when there is none, or it has no base round,
-   the phase stops, so that the units are `NOT_RUN` and the run is a tool
-   failure;
+   or the directory that `KREPI_FORMAL_RUNS` names, and takes the one
+   receipt of the qualification job of the same commit and the same
+   `run_id` of the trigger; when there is none or more than one, as when
+   a build below that directory wrote another, or when that receipt has
+   no base round, the phase stops, so that the units are `NOT_RUN` and the
+   run is a tool failure;
 2. adds the Lean library `KrepiChallenge` to the `lakefile.toml` of the
    stage of that round, once however often the part runs on it;
 3. concludes each unit:
    - `SCOPED` when the base round left the statement of one of its
-     theorems out under a [waiver](#waivers), which makes the unit one of
-     the waived target;
+     theorems out under a [waiver](#waivers), which makes
+     `comparator/<target>` a unit of the waived target, while no waiver
+     covers `comparator`;
    - `NOT_RUN` when the base round did not verify one of its theorems with
      the axioms that the audit reported: the record of the round has no
      entry for it, an entry that is not `VERIFIED`, as after a failed base
@@ -2112,8 +2123,8 @@ failing rule does not change the status of the run, which is about the
 proofs, and the standalone command decides. An event that cannot be read,
 or a failed Git command, stops the run as an internal error; a registry
 that cannot be read does not, as `registry-unreadable` names it. Without a
-pull request event, in the shard of a target and in a run of
-`cargo xtask formal run --target`, the run has no guard phase.
+pull request event, in the shard of a target, in the comparator part and in
+a run of `cargo xtask formal run --target`, the run has no guard phase.
 
 ### Results
 
@@ -2237,7 +2248,7 @@ keys; times are seconds, rounded to milliseconds.
 | `status` | `VERIFIED`, `REJECTED`, `STALE`, `TOOL_FAILURE`, `BUDGET`, `NOT_RUN` or `SCOPED` |
 | `complete` | Whether the run is complete, as defined above |
 | `trigger` | `mode`: `SCOPED` for a run of named targets; for a run of the whole gate or of a part, the mode that `KREPI_FORMAL_TRIGGER`, the variable through which a job of CI gives the trigger of its run, names, `REQUIRED`, `FORCED_FULL` or `WEEKLY`, and `MANUAL` when it is unset or empty, or when it holds any other value, `SCOPED` and `MANUAL` included, which is a tool failure before the phases ([results](#results)); `event`, `ref`, `run_id` and `attempt`, from `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`, or `null` |
-| `targets` | The names given with `--target`, sorted, or the target of the shard of a target; empty for a run of the whole gate and for the qualification job |
+| `targets` | The names given with `--target`, sorted, or the target of the shard of a target; empty for a run of the whole gate, for the qualification job and for the comparator part |
 | `shard` | The part of a run with `--shard`, `qualification`, `comparator` or `target/<name>`, or `null` |
 | `host` | `linux-aarch64` or `darwin-arm64`, or `null` on another host |
 | `image` | The image of a run on `linux-aarch64`, below, or `null` on another host |
@@ -2245,7 +2256,7 @@ keys; times are seconds, rounded to milliseconds.
 | `started`, `seconds` | The Unix time in seconds at which the run started, and how long it took |
 | `commit`, `tree` | The snapshot commit and its root tree, or `null` |
 | `inputs` | `before` and `after`, the object of each gate input (`mode`, `type`, `oid`, or `null` when the commit does not have it) at the start and at the end, or `null` when they were not taken; `clean_after`, whether the gate inputs were clean at the end, or `null` |
-| `budgets` | `gate_seconds`, 7200 and the budget of each target that the run selects, 7,800 for the qualification job, 300 and the budgets of its targets for the shard of a target and for a run of `cargo xtask formal run --target`, or 14,400 for a run of `cargo xtask formal mutants`, whatever the budgets of its targets ([source mutants and survivors](#source-mutants-and-survivors)), and `receipt_margin_seconds`, 300 |
+| `budgets` | `gate_seconds`, 7200 and the budget of each target that the run selects, 7,800 for the qualification job, 1,800 for the comparator part, 300 and the budgets of its targets for the shard of a target and for a run of `cargo xtask formal run --target`, or 14,400 for a run of `cargo xtask formal mutants`, whatever the budgets of its targets ([source mutants and survivors](#source-mutants-and-survivors)), and `receipt_margin_seconds`, 300 |
 | `resources` | What the run used of the host, below |
 | `phases` | For each phase, `budget_seconds`, `seconds` and `ran` |
 | `units` | For each unit, its `phase`, its `status` and the `reason` for it, or `null` |
