@@ -144,8 +144,8 @@ pub fn conclude(
         let ran = (commands.iter()).filter(|c| c.site == site && c.argv.iter().any(|a| a == arg));
         Vec::from_iter(ran.map(|c| fine(c.unit.as_deref(), c.class == Class::Passed)))
     };
-    let verified = |of: &dyn Fn(&str) -> bool| {
-        let mut units = (merged.units.iter()).filter(|(unit, _)| of(unit));
+    let verified = |entry: &dyn Fn(&str) -> bool| {
+        let mut units = (merged.units.iter()).filter(|(unit, _)| entry(unit));
         units.all(|(unit, u)| fine(Some(unit), u.status == Status::Verified))
     };
     let within = |unit: &str, phase: &str| unit.split('/').next() == Some(phase);

@@ -96,9 +96,9 @@ fn compare(gate: &mut Gate, units: Units, runs: &Path) -> Result<(), String> {
     let kept = (base.modules.iter()).filter(|module| !proof(module));
     let imports = String::from_iter(kept.map(|module| format!("public import {module}\n")));
     let private = |a: &str| (a.strip_prefix("_private.")?.split_once(".0.")).map(|m| proof(m.0));
+    let entry = |s: &Statement| base.theorems.get(&s.theorem);
     for (index, (unit, proved)) in units.into_iter().enumerate() {
         // SCOPED for a statement left out, NOT_RUN for one not verified and audited.
-        let entry = |s: &Statement| base.theorems.get(&s.theorem);
         let state = |s: &&Statement| entry(s).map(|t| (t.status, t.axioms.is_some()));
         let scoped = (proved.iter()).find(|s| state(s).is_some_and(|(s, _)| s == Status::Scoped));
         let other = (proved.iter()).find(|s| state(s) != Some((Status::Verified, true)));

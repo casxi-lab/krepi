@@ -335,8 +335,9 @@ pub fn merge(root: &Path, layout: &Layout, paths: &[PathBuf], job: Option<Durati
     merged
 }
 
-/// The summary of `merged`: its conclusion, wall clock and trigger, that it
-/// passes when it is not `VERIFIED`, and each waiver, flag and problem.
+/// The summary of `merged`: its conclusion, wall clock and trigger, its hard
+/// gates, that it passes when it is not `VERIFIED`, and each waiver, flag
+/// and problem.
 fn summary(merged: &Merge) -> String {
     let (status, seconds) = (word(&merged.status), merged.wall_clock_seconds);
     let complete = ["not ", ""][usize::from(merged.complete)];

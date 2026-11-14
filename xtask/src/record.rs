@@ -312,10 +312,8 @@ fn job_limit(limits: &[(String, Option<u64>)], name: &str) -> Option<u64> {
 /// The minutes that `job` noted as its limit: the first message of its
 /// notices titled [`LIMIT_NOTICE`] that is a whole number.
 fn noted(job: &JobData) -> Option<u64> {
-    let notice = |note: &&Annotation| note.level == "notice";
-    let titled = |note: &&Annotation| note.title.as_deref() == Some(LIMIT_NOTICE);
-    let mut notes = job.annotations.iter().filter(notice).filter(titled);
-    notes.find_map(|note| note.message.parse().ok())
+    let limit = |n: &&Annotation| n.level == "notice" && n.title.as_deref() == Some(LIMIT_NOTICE);
+    (job.annotations.iter().filter(limit)).find_map(|note| note.message.parse().ok())
 }
 
 /// Why the job `job`, which ran for `seconds` against a limit of `limit`
