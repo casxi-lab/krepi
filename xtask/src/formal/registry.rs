@@ -54,12 +54,8 @@ pub enum State {
 
 /// A proof target, as "Proof targets" in `docs/formal-verification.md`
 /// describes its fields.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[expect(
-    dead_code,
-    reason = "the feature and the description are for the review"
-)]
 pub struct Target {
     pub name: String,
     #[serde(default)]
@@ -103,7 +99,7 @@ fn budget() -> u64 {
 /// A cut point: the Charon pattern of the items translated without their
 /// bodies, where they are and why the statements do not depend on their
 /// bodies.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Opaque {
     pub pattern: String,
@@ -112,18 +108,16 @@ pub struct Opaque {
 }
 
 /// An axiom beyond the allowlist that the theorems of a target may use.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrustedAxiom {
     pub name: String,
-    #[expect(dead_code, reason = "review reads the reason, the gate the name")]
     pub reason: String,
 }
 
 /// An obligation: a statement and the theorems that establish it.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "the target phase of the gate reads the statement")]
 pub struct Obligation {
     pub id: String,
     pub statement: Option<String>,
@@ -133,7 +127,7 @@ pub struct Obligation {
 
 /// A source mutant: `find`, which occurs once in `file`, replaced by
 /// `replace`, must make a theorem of `fails` fail.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Mutant {
     pub name: String,

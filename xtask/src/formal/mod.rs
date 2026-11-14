@@ -174,6 +174,11 @@ pub const COMMANDS: &[Command] = &[
         subcommands: &[],
     },
     Command {
+        name: "impact",
+        about: "With --base REV, list the merge base of REV and HEAD, each path changed since, whether the change affects the gate inputs, and the registered targets that it affects; it decides nothing",
+        subcommands: &[],
+    },
+    Command {
         name: "merge",
         about: "Merge RECEIPT..., the receipts of the qualification job and of the shard of each formal target of the commit checked out, into the conclusion of the whole gate, and write its record and summary; --calibration merges those of the calibration target",
         subcommands: &[],
@@ -231,6 +236,7 @@ fn cli() -> clap::Command {
         )
         .subcommand(inventory::cli(about("check")))
         .subcommand(mutants::cli(about("mutants")).arg(keep()))
+        .subcommand(paths::cli(about("impact")))
         .subcommand(merge::cli(about("merge")))
         .subcommand(vectors::cli(about("vectors")))
         .subcommand(canary::cli(about("canary")))
@@ -285,6 +291,7 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
                 None,
             )
         }
+        Some(("impact", matches)) => paths::command(root, &Layout::PRODUCTION, matches),
         Some(("merge", matches)) => merge::command(root, layout(matches), matches),
         Some(("guard", matches)) => guard::command(root, &Layout::PRODUCTION, matches),
         Some(("toolchain-check", matches)) => {
@@ -434,6 +441,10 @@ mod tests {
         let args = ["run", "--shard", "target/t", "--calibration", "--keep"];
         let t = BTreeSet::from(["t".to_string()]);
         assert_eq!(shard(&args), (Some("target/t".to_string()), t, true));
+        let matches = read(&["impact", "--base", "origin/main"]).expect("a valid command line");
+        let (name, matches) = matches.subcommand().expect("a subcommand");
+        let base = matches.get_one::<String>("base").map(String::as_str);
+        assert_eq!((name, base), ("impact", Some("origin/main")));
         let matches = read(&["merge", "a.json", "b.json", "--calibration"]);
         let matches = matches.expect("a valid command line");
         let (name, matches) = matches.subcommand().expect("a subcommand");
@@ -468,6 +479,9 @@ mod tests {
             &["guard", "--event"],
             &["guard", "--event", "a", "b"],
             &["guard", "a"],
+            &["impact"],
+            &["impact", "--base"],
+            &["impact", "--base", "a", "b"],
             &["run", "--target"],
             &["run", "--target", ""],
             &["run", "--targets", "a"],
