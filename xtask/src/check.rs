@@ -7,30 +7,36 @@
 //! the debug lane holds the tests of every workspace and the documentation,
 //! Lean source, provable-subset and workflow checks; the release lane holds
 //! the tests of the kernel and user-space workspaces in the release profile;
-//! the formal lane has no step yet. `--sequential` runs every step in one
-//! lane instead, in the order of [`steps`], which is also the order of the
-//! summary and of the receipt; each step keeps its lane there.
+//! the formal lane holds the formal step ([`formal`]), which runs
+//! `cargo xtask formal check` and the test vectors in the pinned image.
+//! `--sequential` runs every step in one lane instead, in the order of
+//! [`steps`], which is also the order of the summary and of the receipt; each
+//! step keeps its lane there. `--skip-formal` records the formal step as not
+//! run, which CI does not accept.
 //!
-//! Once a step fails, or SIGINT, SIGTERM or SIGHUP (unless it is ignored)
-//! reaches the check, no further step or command starts. A running command
-//! of a step that runs commands is killed with its process group, and its
-//! step is recorded as cancelled. A check written in this crate runs inside
-//! the check process, and the commands it starts run in the process group of
-//! the check: one that is running is not stopped, finishes and keeps its own
-//! result. The runner is in [`lanes`].
+//! Once a step fails or ends as a tool failure, or SIGINT, SIGTERM or SIGHUP
+//! (unless it is ignored) reaches the check, no further step or command
+//! starts. A running command of a step that runs commands or supervises them,
+//! as the formal step does, is killed with its process group, and its step is
+//! recorded as cancelled. A check written in this crate runs inside the check
+//! process, and the commands it starts run in the process group of the check:
+//! one that is running is not stopped, finishes and keeps its own result. The
+//! runner is in [`lanes`].
 //!
 //! The check ends with a summary table, one row per step with its segment,
 //! lane, status, start and seconds, writes the receipt if one was asked for
-//! ([`crate::receipt`]) and exits with 0 when every step passed, 1 when a
-//! step failed or the receipt could not be written, and 128 plus the number
-//! of the stop signal when one reached it before the summary, which takes
-//! precedence; a stop signal that arrives later is ignored.
+//! ([`crate::receipt`]) and exits with 0 when every step passed or was
+//! skipped, 1 when a step failed or ended as a tool failure or the receipt
+//! could not be written, and 128 plus the number of the stop signal when one
+//! reached it before the summary, which takes precedence; a stop signal that
+//! arrives later is ignored.
 //!
 //! `--slow` also runs the slow tests of every workspace: those marked
 //! `#[ignore = "slow"]`, whose names start with [`SLOW`].
 
 #[cfg(test)]
 mod ci;
+mod formal;
 mod lanes;
 
 use std::ffi::OsString;
@@ -66,6 +72,19 @@ pub const SLOW: &str = "slow_";
 /// directory of its step logs.
 pub const LOGS: &str = "artifacts/check";
 
+/// The flags of every container of the formal step and of the gate besides
+/// the user, the mount and the working directory.
+pub const GATE_FLAGS: &str = "--pull never --init --read-only --tmpfs /tmp --cap-drop ALL \
+                              --security-opt no-new-privileges --network none";
+
+/// The test that the formal step runs in the image to replay the fixture of
+/// the test vectors with the pinned Lean.
+pub const FIXTURE: &str = "formal::vectors::tests::the_fixture_replays_with_the_pinned_lean";
+
+/// The start of the line of libtest that the replay passed with: an exact
+/// filter that matches no test passes as well.
+pub const REPLAYED: &str = "test result: ok. 1 passed; 0 failed";
+
 /// A command run in the repository root.
 #[derive(Debug, Clone)]
 pub struct Cmd {
@@ -81,12 +100,19 @@ pub type Facts = Vec<(String, String)>;
 /// threads of their own, so a check can be shared with them.
 pub type Check = Box<dyn Fn(&Path, &mut Facts) -> Result<(), String> + Send + Sync>;
 
+/// A step written in this crate that runs its commands as the runner does,
+/// with the repository root, the log of its step and how the check stops,
+/// and gives the status of its step.
+pub type Supervisor = Box<dyn Fn(&Path, &Path, &lanes::Stop, &mut Facts) -> Status + Send + Sync>;
+
 /// What a step does.
 pub enum Action {
     /// Run commands in order; each must exit with status 0.
     Commands(Vec<Cmd>),
     /// Run a check written in this crate.
     Internal(Check),
+    /// Run a step that supervises its own commands.
+    Supervised(Supervisor),
 }
 
 /// A lane of the check: a sequence of steps that runs beside the other lanes
@@ -156,12 +182,18 @@ pub enum Status {
     Passed,
     /// The step failed, and why.
     Failed(String),
+    /// The step could not run its tools, such as Docker, the pinned image or
+    /// a tool in it, and why; it fails the check like a failed step.
+    ToolFailure(String),
     /// The check stopped while the step ran, and why: the step that failed
     /// or the stop signal. Its running command was killed with its group, or
     /// its next command did not start.
     Cancelled(String),
     /// The check stopped before the step started.
     NotRun,
+    /// The step did not run because an option, which is the detail, asked
+    /// for that; the check does not fail for it.
+    Skipped(String),
 }
 
 impl Status {
@@ -170,8 +202,9 @@ impl Status {
         match self {
             Status::Passed => "passed",
             Status::Failed(_) => "failed",
+            Status::ToolFailure(_) => "tool failure",
             Status::Cancelled(_) => "cancelled",
-            Status::NotRun => "not run",
+            Status::NotRun | Status::Skipped(_) => "not run",
         }
     }
 }
@@ -197,7 +230,7 @@ pub struct LaneSteps {
 }
 
 /// Every lane of [`Lane::ALL`] with the steps of `steps` in it; a lane
-/// without steps, such as the formal lane today, is listed with none.
+/// without steps is listed with none.
 pub fn layout(steps: &[Step]) -> Vec<LaneSteps> {
     Lane::ALL
         .iter()
@@ -247,13 +280,14 @@ pub struct Report {
 
 impl Report {
     /// `Interrupted` whenever a stop signal reached the check, whatever the
-    /// steps did; otherwise `Passed` only if every step passed.
+    /// steps did; otherwise `Passed` only if every step passed or was
+    /// skipped.
     pub fn verdict(&self) -> Verdict {
+        let passed =
+            |outcome: &Outcome| matches!(outcome.status, Status::Passed | Status::Skipped(_));
         match self.signal {
             Some(signal) => Verdict::Interrupted(signal),
-            None if (self.outcomes.iter()).all(|outcome| outcome.status == Status::Passed) => {
-                Verdict::Passed
-            }
+            None if self.outcomes.iter().all(passed) => Verdict::Passed,
             None => Verdict::Failed,
         }
     }
@@ -317,8 +351,9 @@ fn target_clippy() -> Cmd {
 
 /// The steps of `cargo xtask check`, in the order in which `--sequential`
 /// runs them, each in its lane; with `slow`, the test step also runs the slow
-/// tests of each workspace, after the other tests of every workspace.
-pub fn steps(slow: bool) -> Vec<Step> {
+/// tests of each workspace, after the other tests of every workspace, and
+/// with `skip_formal` the formal step does not run.
+pub fn steps(slow: bool, skip_formal: bool) -> Vec<Step> {
     let internal = |name, lane, check: Check| Step {
         name,
         lane,
@@ -368,6 +403,11 @@ pub fn steps(slow: bool) -> Vec<Step> {
         internal("lean", Lane::Debug, Box::new(|root, _| check_lean(root))),
         internal("subset", Lane::Debug, Box::new(subset::run)),
         internal("workflows", Lane::Debug, Box::new(check_workflows)),
+        Step {
+            name: "formal",
+            lane: Lane::Formal,
+            action: Action::Supervised(formal::step(skip_formal)),
+        },
     ]
 }
 
@@ -527,11 +567,13 @@ pub fn lean_problems(tree: &Tree, layout: &Layout) -> Vec<String> {
     problems
 }
 
-/// The first failed step in the order of the steps and why it failed, if
-/// one did.
+/// The first step in the order of the steps that failed or ended as a tool
+/// failure, and why, if one did.
 pub fn failure(outcomes: &[Outcome]) -> Option<(&'static str, &str)> {
     outcomes.iter().find_map(|outcome| match &outcome.status {
-        Status::Failed(detail) => Some((outcome.step, detail.as_str())),
+        Status::Failed(detail) | Status::ToolFailure(detail) => {
+            Some((outcome.step, detail.as_str()))
+        }
         _ => None,
     })
 }
@@ -546,7 +588,7 @@ pub fn summary(report: &Report, logs: &str) -> String {
     let width = longest.max().unwrap_or(0).max("step".len()) + 2;
     let row = |cells: [&str; 6]| {
         let [segment, lane, step, status, start, seconds] = cells;
-        let line = format!("{segment:<9}{lane:<9}{step:<width$}{status:<10}{start:>6}{seconds:>9}");
+        let line = format!("{segment:<9}{lane:<9}{step:<width$}{status:<13}{start:>6}{seconds:>9}");
         format!("{}\n", line.trim_end())
     };
     let seconds = |duration: Duration| format!("{:.1}", duration.as_secs_f64());
@@ -622,6 +664,7 @@ pub fn exit_code(verdict: Verdict, receipt_written: bool) -> u8 {
 pub struct Options {
     pub sequential: bool,
     pub slow: bool,
+    pub skip_formal: bool,
     pub receipt: Option<PathBuf>,
 }
 
@@ -643,6 +686,12 @@ fn cli() -> clap::Command {
             Arg::new("slow")
                 .long("slow")
                 .help("Also run the slow tests, those marked #[ignore = \"slow\"]")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("skip-formal")
+                .long("skip-formal")
+                .help("Record the formal step as not run; CI does not accept it")
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -690,6 +739,7 @@ fn options(args: &[&str]) -> Result<Options, clap::Error> {
     Ok(Options {
         sequential: matches.get_flag("sequential"),
         slow: matches.get_flag("slow"),
+        skip_formal: matches.get_flag("skip-formal"),
         receipt: matches.get_one::<PathBuf>("receipt").cloned(),
     })
 }
@@ -703,7 +753,11 @@ pub fn command(root: PathBuf, args: &[&str]) -> ExitCode {
             let _ = error.print();
             ExitCode::from(u8::try_from(error.exit_code()).unwrap_or(2))
         }
-        Ok(options) => ExitCode::from(run(&root, &options, &steps(options.slow))),
+        Ok(options) => ExitCode::from(run(
+            &root,
+            &options,
+            &steps(options.slow, options.skip_formal),
+        )),
     }
 }
 
@@ -792,7 +846,7 @@ mod tests {
     use crate::scratch::Scratch;
 
     /// The steps in the order in which `--sequential` runs them.
-    pub(super) const ORDER: [&str; 10] = [
+    pub(super) const ORDER: [&str; 11] = [
         "toolchain",
         "manifests",
         "fmt",
@@ -803,6 +857,7 @@ mod tests {
         "lean",
         "subset",
         "workflows",
+        "formal",
     ];
 
     /// The variable that makes the process of a test the check that the
@@ -1038,11 +1093,11 @@ mod tests {
                 vec!["test", "docs", "lean", "subset", "workflows"],
             ),
             (Lane::Release, vec!["test-release"]),
-            (Lane::Formal, vec![]),
+            (Lane::Formal, vec!["formal"]),
         ]
         .map(|(lane, steps)| LaneSteps { lane, steps });
-        for slow in [false, true] {
-            let steps = steps(slow);
+        for (slow, skip_formal) in [(false, false), (true, false), (false, true), (true, true)] {
+            let steps = steps(slow, skip_formal);
             let names: Vec<&str> = steps.iter().map(|step| step.name).collect();
             assert_eq!(names, ORDER, "the order of --sequential");
             assert_eq!(layout(&steps), expected);
@@ -1088,7 +1143,7 @@ mod tests {
             "tools/Cargo.toml",
         ];
         for slow in [false, true] {
-            let steps = steps(slow);
+            let steps = steps(slow, false);
             let step = |name: &str| {
                 (steps.iter())
                     .find(|step| step.name == name)
@@ -1182,7 +1237,7 @@ mod tests {
         };
         scratch.write("kernel/probe/src/lib.rs", &source(""));
         scratch.lock();
-        let steps = steps(false);
+        let steps = steps(false, false);
         let clippy = (steps.iter())
             .find(|step| step.name == "clippy")
             .expect("the clippy step");
@@ -1343,20 +1398,21 @@ mod tests {
 
     #[test]
     fn the_command_line_takes_the_options_in_any_order() {
-        let all = ["--sequential", "--slow", "--receipt p"];
+        let all = ["--sequential", "--slow", "--skip-formal", "--receipt p"];
         let expected = Options {
             sequential: true,
             slow: true,
+            skip_formal: true,
             receipt: Some(PathBuf::from("p")),
         };
-        for order in [
-            [0, 1, 2],
-            [0, 2, 1],
-            [1, 0, 2],
-            [1, 2, 0],
-            [2, 0, 1],
-            [2, 1, 0],
-        ] {
+        // Every order of the four options.
+        let orders = (0..256).map(|n| [n % 4, n / 4 % 4, n / 16 % 4, n / 64]);
+        let orders = orders.filter(|order| {
+            let mut sorted = *order;
+            sorted.sort_unstable();
+            sorted == [0, 1, 2, 3]
+        });
+        for order in orders {
             // `check` before all the options, between them and after them.
             for split in 0..=order.len() {
                 let mut words = order.map(|at| all[at]).to_vec();
@@ -1374,6 +1430,7 @@ mod tests {
         let none = Options {
             sequential: false,
             slow: false,
+            skip_formal: false,
             receipt: None,
         };
         assert_eq!(options(&[]).expect("no option"), none);
@@ -1383,6 +1440,7 @@ mod tests {
             &["--receipt"][..],
             &["--fast"],
             &["--slow", "--slow"],
+            &["--skip-formal", "--skip-formal"],
             &["--receipt", "a", "--receipt", "b"],
             &["extra"],
         ] {
@@ -1392,7 +1450,12 @@ mod tests {
         let help = options(&["--help"]).expect_err("help is printed");
         assert_eq!(help.exit_code(), 0);
         let text = help.to_string();
-        for option in ["--sequential", "--slow", "--receipt <PATH>"] {
+        for option in [
+            "--sequential",
+            "--slow",
+            "--skip-formal",
+            "--receipt <PATH>",
+        ] {
             assert!(text.contains(option), "{text}");
         }
     }
@@ -1493,11 +1556,11 @@ mod tests {
         let report = sample();
         let expected = "\
 summary: parallel, 18.8 s; step logs in artifacts/check/x
-segment  lane     step          status     start  seconds
-1        lint     toolchain     passed       0.0      0.4
-2        debug    test          cancelled   15.7      3.0
-2        release  test-release  failed      15.7      3.0
-2        debug    docs          not run        -        -
+segment  lane     step          status        start  seconds
+1        lint     toolchain     passed          0.0      0.4
+2        debug    test          cancelled      15.7      3.0
+2        release  test-release  failed         15.7      3.0
+2        debug    docs          not run           -        -
 2        formal   (no steps)
 ";
         assert_eq!(summary(&report, "step logs in artifacts/check/x"), expected);
@@ -1516,19 +1579,28 @@ segment  lane     step          status     start  seconds
             ending(&stopped),
             Ok("check interrupted by SIGTERM\n".to_string())
         );
-        // A sequential run of other steps: the column of the names widens.
+        // A sequential run of other steps: the column of the names widens,
+        // and that of the statuses holds a tool failure.
         let mut other = passed;
         other.mode = Mode::Sequential;
         other.outcomes[0].step = "a-much-longer-step";
+        let mut formal = ran("formal", Lane::Formal, Status::Passed, 1.0, 2.0);
+        formal.status = Status::ToolFailure("no docker".to_string());
+        other.outcomes.push(formal);
         other.layout.clear();
         let text = summary(&other, "no step logs: cannot create x");
         assert_eq!(
             text.lines().collect::<Vec<_>>(),
             [
                 "summary: sequential, 18.8 s; no step logs: cannot create x",
-                "segment  lane     step                status     start  seconds",
-                "1        lint     a-much-longer-step  passed       0.0      0.4",
+                "segment  lane     step                status        start  seconds",
+                "1        lint     a-much-longer-step  passed          0.0      0.4",
+                "2        formal   formal              tool failure    1.0      2.0",
             ]
+        );
+        assert_eq!(
+            ending(&other),
+            Err("no docker\ncheck failed at step formal\n".to_string())
         );
     }
 
@@ -1574,6 +1646,7 @@ segment  lane     step          status     start  seconds
             let options = Options {
                 sequential: false,
                 slow: false,
+                skip_formal: false,
                 receipt: Some(root.join("receipt.json")),
             };
             std::process::exit(i32::from(run(&root, &options, &steps)));

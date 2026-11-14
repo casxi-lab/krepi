@@ -85,8 +85,15 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install
 
+      - name: Pull the pinned proof-tool image
+        timeout-minutes: 5
+        run: docker pull "$(jq -er '"\(.repository)@\(.digest)"' verification/image-pin.json)"
+
       - name: Run cargo xtask check
         run: exec bash .github/scripts/deadline.sh 13m 90s cargo xtask check --receipt artifacts/check-receipt.json
+
+      - name: Require the formal step to have passed
+        run: jq -e '[.steps[] | select(.name == "formal")] | length == 1 and .[0].status == "passed"' artifacts/check-receipt.json
 
       - name: Run the QEMU boot suite
         run: cargo xtask qemu-boot --output-dir artifacts/qemu-boot

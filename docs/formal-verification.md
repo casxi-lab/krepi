@@ -2794,21 +2794,27 @@ gate of the same job checks it ([image pin](#image-pin)).
 
 ### Vectors in CI
 
-On a pull request, step 6 of the [CI job](#ci-job) compares the vectors when
-the pull request changes `kernel/`, `user/`, `verification/`,
-`docs/domains/`, `xtask/` or `.github/workflows/formal.yml` since the merge
-base, and otherwise prints that it compares 0 components. Every
-specification module lies below `verification/`, every source below
-`kernel/` or `user/` and every contract below `docs/domains/`, so the rule
-selects every component whose specification or sources changed, and more; a
-vector file outside these paths, such as one below `tools/`, is compared
-only when one of them changes too. `xtask/` and the workflow are in the list
-so that a change of the comparison runs it too. The step runs the fixture
-replay below, then the host tests of the kernel and user-space workspaces
-with `KREPI_VECTOR_RESULTS` set, and then `cargo xtask formal vectors`
-without a component in a container of the image. It does not block a merge,
-since the job is not required. Selecting the components one by one, a
-receipt of the comparison and a check of the image are planned.
+The formal step of `cargo xtask check`
+([testing](conventions/testing.md#entry-points)) compares the vectors on
+every run of the check, after `cargo xtask formal check`. In containers of
+the pinned image ([image pin](#image-pin)), with the flags of the gate, as
+the owner of the checkout, which they mount at its path, it replays the
+[fixture](#fixture) with `--exact --ignored --nocapture` and requires a line
+that starts with `test result: ok. 1 passed; 0 failed`, since an exact
+filter that matches no test passes as well. It then empties
+`artifacts/formal/vectors`, runs the host tests of the kernel and
+user-space workspaces with `KREPI_VECTOR_RESULTS` set to that directory, and
+runs `cargo xtask formal vectors` without a component in a container. Each
+container is named after the process of the check and its part and is
+removed before and after it runs, also when the check stops, which kills
+only the Docker client. The image runs executables built on the host, so the
+step needs a linux-aarch64 host with Docker and the pinned image: without
+one of them, or without Lake in the image, it ends as a tool failure, which
+fails the check like a failed step. `--skip-formal` records the step as not
+run; no workflow passes it, and the workflows that run the check pull the
+pinned image before it and require the step to have passed in its receipt.
+Since the check is required, a failed comparison blocks a merge. Selecting
+the components one by one and a receipt of the comparison are planned.
 
 ### Fixture
 
