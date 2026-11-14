@@ -918,9 +918,10 @@ jobs:
   # `formal limits`, and the name of the artifact of the list, for the jobs
   # of the verdicts. It judges nothing: it fails only when the list cannot
   # be made, on any other event than a pull request, which it does not
-  # judge, and on a re-run of an older run. Its main command runs under `deadline.sh`, which turns workflow
-  # commands off while it prints the paths of the pull request, and the
-  # summary escapes carriage returns and indents the list as code.
+  # judge, and on a re-run of an older run. Its main command runs under
+  # `deadline.sh`, which turns workflow commands off while it prints the
+  # paths of the pull request, and the summary escapes carriage returns and
+  # indents the list as code.
   fast:
     name: formal fast
     if: ${{ !cancelled() && !(github.event_name != 'pull_request' && github.ref == 'refs/heads/main') }}
@@ -1019,9 +1020,10 @@ jobs:
   # runner, with the event of the run: it checks the pull request against
   # the rules for changes of statements, proofs, sources and registries, and
   # its failure fails the job; it fails as well on any other event than a
-  # pull request, which it does not judge, and on a re-run of an older run. Its main command runs under
-  # `deadline.sh`, which turns workflow commands off while it prints, and
-  # the summary escapes carriage returns and indents its output as code.
+  # pull request, which it does not judge, and on a re-run of an older run.
+  # Its main command runs under `deadline.sh`, which turns workflow commands
+  # off while it prints, and the summary escapes carriage returns and
+  # indents its output as code.
   guard:
     name: formal guard
     if: ${{ !cancelled() && !(github.event_name != 'pull_request' && github.ref == 'refs/heads/main') }}
@@ -1395,7 +1397,7 @@ jobs:
           {
             echo "## formal axioms"
             echo
-            jq -r 'def name: @json | gsub("`"; "\\`");
+            jq -r 'def name: "`" + (@json | gsub("`"; "\\u0060")) + "`";
               "- the hard gate: \(if .gates.axioms then "passes" else "fails" end)",
               (if .axioms == {} then "- no audited theorem" else
                 (.axioms | to_entries[] | "- \(.key | name): \(.value | map(name) | join(", "))") end),

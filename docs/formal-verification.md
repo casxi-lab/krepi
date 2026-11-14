@@ -2398,8 +2398,8 @@ the first step of each of the six checks below fails on an attempt after
 the first unless the run is the newest run of `formal` on a pull request
 with the same head, which it asks the API of the workflow runs with the
 token of the run: a re-run of an older run fails, though it still joins
-the group and cancels a newer run that is in progress, which is then run
-again. The variable `KREPI_FORMAL_TRIGGER` of the workflow gives the parts
+the group and cancels a newer run that is in progress, which must then be
+re-run by hand. The variable `KREPI_FORMAL_TRIGGER` of the workflow gives the parts
 the mode of their trigger ([receipt](#receipt)): `REQUIRED` on a pull
 request, `FORCED_FULL` on a manual run `full`, `WEEKLY` on a manual run
 `weekly` and on the schedule, and none on a push. The jobs run on a
@@ -2660,7 +2660,7 @@ passes, the axioms of each audited theorem of the record, or that there is
 no audited theorem, and each target of a waiver of the record, whose proof
 modules that no other formal target lists the base audit leaves out and
 whose shard audits them when its proofs build, each name of the record as
-a JSON string with its backticks escaped; `formal
+a JSON string in code, with `\u0060` for each backtick; `formal
 leanchecker` whether its gate passes; and `formal comparator` whether its
 gate passes and the status of each unit of the comparator, or that there
 is no proved statement. For a change that does not affect the gate, the
@@ -3183,9 +3183,8 @@ credentials and run actions pinned to full commit SHAs:
 - `calibration run`, the qualification job of the calibration, checks out
   the head, pulls the image, builds xtask and copies it for the comparator
   part with the step of the job `formal run`, probes a container of the
-  gate,
-  runs `cargo xtask formal check --calibration` on the runner, and records
-  the bytes available before it and, where the runner has
+  gate, runs `cargo xtask formal check --calibration` on the runner, and
+  records the bytes available before it and, where the runner has
   `/usr/bin/time`, its record, else a line that it has none, in `job.txt`;
   then it runs
   `cargo xtask formal run --calibration --shard qualification --keep` in
