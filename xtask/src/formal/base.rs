@@ -2,9 +2,10 @@
 //! `docs/formal-verification.md` describes it: the hand-written Lean of the
 //! snapshot, with the generated modules of the proof cases of the
 //! qualification, built in a stage of its own from a generated root module,
-//! audited, replayed by `leanchecker` and counted in heartbeats. Its units
-//! are `base` and one for each proved statement of `statements.json`. In the
-//! qualification job it leaves out what the waivers that hold leave out.
+//! audited, replayed by `leanchecker --fresh` and counted in heartbeats.
+//! Its units are `base` and one for each proved statement of
+//! `statements.json`. In the qualification job it leaves out what the
+//! waivers that hold leave out.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -357,7 +358,7 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
             problems.extend(other.map(|line| format!("{message}: {line}")));
         }
     }
-    // The audit, `leanchecker` with each prefix, and the version of Lean.
+    // The audit, `leanchecker --fresh` of the root, and the version of Lean.
     let audit = lean::audit_source(layout.namespace, &kept, &own);
     write(&project.join(lean::AUDIT), &audit)?;
     let args = lean::check_args(lean::AUDIT);
@@ -365,15 +366,13 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     let (class, output, _) = step(gate, &mut stop, &request, |_| Ok(()));
     let ended = matches!(class, Class::Passed | Class::ProofFailure);
     let audit = ended.then(|| lean::audit_output(&output));
-    let prefixes = [layout.namespace, layout.generated];
-    for prefix in prefixes {
-        let args = ["env", "leanchecker", prefix].map(str::to_string);
-        let request = lake(Site::Leanchecker, &args, &project);
-        let (class, output, _) = step(gate, &mut stop, &request, lean::leanchecker_read);
-        if class == Class::ProofFailure {
-            let lines: Vec<&str> = output.lines().map(str::trim).collect();
-            inherited.push(format!("leanchecker {prefix}: {}", lines.join(" ")));
-        }
+    let args = ["env", "leanchecker", "--fresh", layout.namespace].map(str::to_string);
+    let request = lake(Site::Leanchecker, &args, &project);
+    let (class, output, _) = step(gate, &mut stop, &request, lean::leanchecker_read);
+    if class == Class::ProofFailure {
+        let lines: Vec<&str> = output.lines().map(str::trim).collect();
+        let replay = format!("leanchecker --fresh {}", layout.namespace);
+        inherited.push(format!("{replay}: {}", lines.join(" ")));
     }
     problems.extend(inherited.iter().cloned());
     let args = ["--version".to_string()];
@@ -381,8 +380,8 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     version.program = "lean";
     let checked = &mut record.leanchecker;
     checked.version = step(gate, &mut stop, &version, lean::lean_version).2;
-    (checked.sha256, checked.mode) = (sha256(&checker), "prefix".to_string());
-    checked.prefixes = prefixes.map(str::to_string).into();
+    (checked.sha256, checked.mode) = (sha256(&checker), "fresh".to_string());
+    checked.prefixes = vec![layout.namespace.to_string()];
     // The heartbeats of the theorems of each own file, which decide nothing.
     let counted = &mut record.heartbeats;
     counted.method = "count_heartbeats".to_string();
@@ -694,8 +693,7 @@ mod tests {
 
     const BUILD: &str = "lake build --no-cache --wfail +Krepi";
     const AUDIT: &str = "lake env lean Audit.lean";
-    const KREPI: &str = "lake env leanchecker Krepi";
-    const KREPI_GEN: &str = "lake env leanchecker KrepiGen";
+    const LEANCHECKER: &str = "lake env leanchecker --fresh Krepi";
     const VERSION: &str = "lean --version";
 
     #[test]
@@ -767,8 +765,8 @@ mod tests {
             .nth(1);
         assert_eq!(leanchecker.version.as_deref(), version);
         assert_eq!(leanchecker.sha256, sha256(b"leanchecker\n"));
-        assert_eq!(leanchecker.mode, "prefix");
-        assert_eq!(leanchecker.prefixes, ["Krepi", "KrepiGen"]);
+        assert_eq!(leanchecker.mode, "fresh");
+        assert_eq!(leanchecker.prefixes, ["Krepi"]);
         // The stage holds the hand-written files, the generated modules of
         // the case and the generated root.
         let stage = stage(&done);
@@ -796,8 +794,7 @@ mod tests {
         let passing = [
             BUILD.to_string(),
             AUDIT.to_string(),
-            KREPI.to_string(),
-            KREPI_GEN.to_string(),
+            LEANCHECKER.to_string(),
             VERSION.to_string(),
             heartbeats("Counter"),
             heartbeats("Main"),
@@ -807,7 +804,7 @@ mod tests {
             .map(|command| command.limit)
             .collect();
         use LimitBy::{Cap, Phase};
-        assert_eq!(limits, [Phase, Cap, Phase, Phase, Phase, Cap, Cap]);
+        assert_eq!(limits, [Phase, Cap, Phase, Phase, Cap, Cap]);
         let sites: Vec<Site> = (commands(&done, PHASE).into_iter())
             .map(|command| command.site)
             .collect();
@@ -817,7 +814,6 @@ mod tests {
             [
                 BaseBuild,
                 AxiomAudit,
-                Leanchecker,
                 Leanchecker,
                 Leanchecker,
                 AxiomAudit,
@@ -881,7 +877,7 @@ mod tests {
             .for_each(|line| *line = format!("lake {line}"));
         assert_eq!(argv(&done)[..2], planned);
         assert_eq!(record(&done).planned, ["Krepi.Proofs.Other"]);
-        assert_eq!(argv(&done).len(), 9);
+        assert_eq!(argv(&done).len(), 8);
     }
     #[test]
     fn every_convention_has_its_class_at_the_base_round_sites() {
@@ -894,7 +890,7 @@ mod tests {
         let base_sites = [
             (Site::BaseBuild, BUILD),
             (Site::AxiomAudit, AUDIT),
-            (Site::Leanchecker, KREPI),
+            (Site::Leanchecker, LEANCHECKER),
         ];
         let mut fixture = base("conventions");
         assert_eq!(run(&mut fixture).receipt.status, Status::Verified);
@@ -1354,12 +1350,12 @@ mod tests {
         );
     }
 
-    /// The failure that `leanchecker` printed for a declaration that a
-    /// metaprogram added without the kernel in `module`.
+    /// The failure that `leanchecker --fresh Krepi` printed for a
+    /// declaration that a metaprogram added without the kernel in `module`,
+    /// which the root imports.
     fn kernel_report(module: &str) -> String {
         format!(
-            "leanchecker found a problem in {module}\n\
-             uncaught exception: while replaying declaration '{module}.bad':\n\
+            "uncaught exception: while replaying declaration '{module}.bad':\n\
              (kernel) declaration type mismatch, '{module}.bad' has type\n  True\n\
              but it is expected to have type\n  False\n"
         )
@@ -1394,8 +1390,7 @@ mod tests {
         let done = run(&mut fixture);
         assert_eq!(class(&done, BUILD), Class::Passed);
         assert_eq!(class(&done, AUDIT), Class::Passed);
-        assert_eq!(class(&done, KREPI), Class::ProofFailure);
-        assert_eq!(class(&done, KREPI_GEN), Class::Passed);
+        assert_eq!(class(&done, LEANCHECKER), Class::ProofFailure);
         // No theorem is checked when the kernel rejects a declaration.
         assert_eq!(status(&done, &unit(T)).0, Status::Rejected);
         let tb = &record(&done).theorems["Krepi.Proofs.Hack.tb"];
@@ -1406,7 +1401,7 @@ mod tests {
         let (status, reason) = status(&done, PHASE);
         assert_eq!(status, Status::Rejected);
         let reason = reason.expect("a reason");
-        assert!(reason.starts_with(&format!("leanchecker Krepi: leanchecker found a problem in {module} uncaught exception: while replaying declaration '{module}.bad': (kernel) declaration type mismatch")), "{reason}");
+        assert!(reason.starts_with(&format!("leanchecker --fresh Krepi: uncaught exception: while replaying declaration '{module}.bad': (kernel) declaration type mismatch")), "{reason}");
     }
 
     #[test]
@@ -1428,7 +1423,7 @@ mod tests {
             "if [ -f {file} ] && grep -qx 'public import {module}' Krepi.lean; then\n{}fi\n",
             log(&kernel_report(module), 1)
         );
-        lake_script(&fixture, "leanchecker-KrepiGen", &check);
+        lake_script(&fixture, "leanchecker-Krepi", &check);
         let done = run(&mut fixture);
         assert_eq!(
             status(&done, "qualification/arithmetic"),
@@ -1438,10 +1433,33 @@ mod tests {
         let installed =
             fs::read_to_string(stage(&done).join(file)).expect("the external declarations");
         assert_eq!(installed, reviewed);
-        assert_eq!(class(&done, KREPI), Class::Passed);
-        assert_eq!(class(&done, KREPI_GEN), Class::ProofFailure);
+        assert_eq!(class(&done, LEANCHECKER), Class::ProofFailure);
         assert_eq!(status(&done, PHASE).0, Status::Rejected);
         assert_eq!(status(&done, &unit(T)).0, Status::Rejected);
+    }
+
+    #[test]
+    fn a_kernel_rejection_that_leanchecker_fresh_reports_without_a_module_rejects_the_round() {
+        // One replay of the root covers krepi's own modules and the
+        // generated ones, and its report names a declaration, not a module.
+        let mut fixture = base("fresh-report");
+        let report = kernel_report("KrepiGen.Qual.Arithmetic.Funs");
+        lake_script(&fixture, "leanchecker-Krepi", &log(&report, 1));
+        let done = run(&mut fixture);
+        let replays = (argv(&done).into_iter()).filter(|line| line.contains("leanchecker"));
+        assert_eq!(Vec::from_iter(replays), [LEANCHECKER]);
+        assert_eq!(class(&done, LEANCHECKER), Class::ProofFailure);
+        // A proof failure stops no later command.
+        assert_eq!(class(&done, VERSION), Class::Passed);
+        let lines = Vec::from_iter(report.lines().map(str::trim));
+        let reason = format!("leanchecker --fresh Krepi: {}", lines.join(" "));
+        let rejected = (Status::Rejected, Some(reason.as_str()));
+        assert_eq!(status(&done, PHASE), rejected);
+        assert_eq!(status(&done, &unit(T)), rejected);
+        let record = record(&done);
+        assert_eq!(record.problems, [reason.as_str()]);
+        assert_eq!(record.leanchecker.mode, "fresh");
+        assert_eq!(record.leanchecker.prefixes, ["Krepi"]);
     }
 
     #[test]
@@ -1519,7 +1537,7 @@ mod tests {
             (Status::Rejected, Some(reason.as_str()))
         );
         // Leanchecker does not depend on the audit.
-        assert_eq!(class(&done, KREPI), Class::Passed);
+        assert_eq!(class(&done, LEANCHECKER), Class::Passed);
         // The stage `counter` had no `Krepi.Proofs.Main`, which this one has.
         let problems = &record(&done).problems;
         assert_eq!(problems, &["the audit has no marker of Krepi.Proofs.Main"]);
@@ -1684,13 +1702,14 @@ mod tests {
         let mut fixture = base("checker-setup");
         for output in [
             "uncaught exception: Could not find any oleans for: Krepi\n",
-            "leanchecker found a problem in Krepi.Proofs.Main\n(kernel) deep recursion detected\n",
+            "uncaught exception: while replaying declaration 'Krepi.Proofs.Main.m':\n\
+             (kernel) deep recursion detected\n",
         ] {
             lake_script(&fixture, "leanchecker-Krepi", &log(output, 1));
             let done = run(&mut fixture);
-            assert_eq!(class(&done, KREPI), Class::ToolFailure, "{output}");
+            assert_eq!(class(&done, LEANCHECKER), Class::ToolFailure, "{output}");
             assert_eq!(status(&done, PHASE).0, Status::ToolFailure, "{output}");
-            assert_eq!(class(&done, KREPI_GEN), Class::NotRun);
+            assert_eq!(class(&done, VERSION), Class::NotRun);
         }
     }
 
@@ -1740,8 +1759,8 @@ mod tests {
         lake_script(&fixture, "heartbeats", "kill -9 $$");
         let done = run(&mut fixture);
         assert_eq!(status(&done, PHASE).0, Status::ToolFailure);
-        assert_eq!(argv(&done).len(), 7);
-        assert_eq!(commands(&done, PHASE)[6].class, Class::NotRun);
+        assert_eq!(argv(&done).len(), 6);
+        assert_eq!(commands(&done, PHASE)[5].class, Class::NotRun);
     }
 
     #[test]

@@ -751,15 +751,15 @@ mod tests {
             leanchecker: Leanchecker {
                 version: Some("Lean (version 4.35.0, Release)".to_string()),
                 sha256: "8".repeat(64),
-                mode: "prefix".to_string(),
-                prefixes: names(&["Krepi", "KrepiGen"]),
+                mode: "fresh".to_string(),
+                prefixes: names(&["Krepi"]),
             },
             heartbeats: Heartbeats {
                 method: "count_heartbeats".to_string(),
                 counts: BTreeMap::from([("Krepi.Proofs.C.t".to_string(), 1_326)]),
                 missing: BTreeMap::from([("Krepi/Proofs/D.lean".to_string(), "error".to_string())]),
             },
-            problems: vec!["leanchecker Krepi: a problem".to_string()],
+            problems: vec!["leanchecker --fresh Krepi: a problem".to_string()],
         }
     }
 

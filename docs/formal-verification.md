@@ -1565,7 +1565,7 @@ stage's `verification/`, in this order:
 | `lake build --no-cache --wfail +Krepi`; with planned statements, `+M` for each module that is neither the root nor the module of a planned statement | Base build | 7,200 s |
 | With planned statements, `lake build --no-cache +Krepi` | Base build | 7,200 s |
 | `lake env lean Audit.lean` | Axiom audit | 1,800 s |
-| `lake env leanchecker Krepi`, then `lake env leanchecker KrepiGen` | `leanchecker` | None |
+| `lake env leanchecker --fresh Krepi` | `leanchecker` | None |
 | `lean --version` | `leanchecker` | None |
 | `lake env lean --json .heartbeats/<file>`, for each own file with theorems | Axiom audit | 1,800 s |
 
@@ -1646,16 +1646,18 @@ hand-written file, `declaration` and `reason`, or `axiom-pattern`, with
 `prefix` and `reason`. Other kinds are refused until the trusted base is
 classified, and unknown fields are refused in both files.
 
-**Replay.** `leanchecker` checks again in the kernel every declaration of
-the modules that its prefix selects: `Krepi` selects the root and every
-module below it, `KrepiGen` the generated ones, by whole name components.
-The stage's build directory is new in every run, so that no earlier output
-is replayed. An exit with 0 passes. Another exit is a proof failure, which
-rejects the round with the lines that name the module and the declaration,
-when the output has the line `leanchecker found a problem in <module>` and
-a kernel message about something other than a deterministic timeout,
-excessive memory, deep recursion or an interruption; otherwise, such as
-when `leanchecker` finds no built modules, it is a tool failure.
+**Replay.** `leanchecker --fresh Krepi` imports the root module and checks
+again in the kernel, starting from an empty environment, every declaration
+that the import brings in but unsafe and partial ones: those of every
+module of the stage, krepi's own and the generated ones, and those of Lean,
+the Aeneas Lean library and its packages that they import. The stage's
+build directory is new in every run, so that no earlier output is
+replayed. An exit with 0 passes. Another exit is a proof failure, which
+rejects the round with the output, whose lines name the declaration but
+not its module, when the output has a kernel message about something other
+than a deterministic timeout, excessive memory, deep recursion or an
+interruption; otherwise, such as when `leanchecker` finds no built root
+module, it is a tool failure.
 `leanchecker` has no version option. The receipt records the output of
 `lean --version`, which must exit with 0 and print a line that starts with
 `Lean (version `, else it is a tool failure, and the SHA-256 of the
@@ -1955,7 +1957,7 @@ generated file, Lake's own `error: build failed`, a `trace:` line and a
 message without a position do not. The base round also reads what
 `leanchecker` and `lean --version` print before they are classified: a
 `leanchecker` that exits with a status other than 0 without reporting a
-kernel problem in a module, and a `lean --version` that does not exit with
+kernel problem, and a `lean --version` that does not exit with
 0 and print the version, are tool failures, never proof failures. A
 heartbeat command that ends by itself with another status is a proof
 failure by these conventions, but it decides nothing about the round.
@@ -2110,7 +2112,7 @@ The `base` record has these fields:
 | `own` | krepi's own modules, whose messages decide a failed build |
 | `planned` | The modules of planned statements, built without `--wfail` |
 | `theorems` | For each theorem that the audit reported or `statements.json` registers: its `module`; its `kind`, `specification`, `qualification` or `target`; its `state` in `statements.json`, `proved` or `planned`, or `null` for a theorem that is not registered; the `axioms` that the audit reported, or `null`; its `status`; and its `problems`. The status of a registered proved theorem is that of its unit, that of a planned one `NOT_RUN`, and that of any other `VERIFIED` without problems, `REJECTED` with them, or the status that forced `base` |
-| `leanchecker` | `version`, the version line of `lean --version`, or `null`; `sha256`, of the `leanchecker` program; `mode`, `prefix`; and `prefixes`, `Krepi` and `KrepiGen` |
+| `leanchecker` | `version`, the version line of `lean --version`, or `null`; `sha256`, of the `leanchecker` program; `mode`, `fresh`; and `prefixes`, the module that it replays, `Krepi` |
 | `heartbeats` | `method`, `count_heartbeats`; `counts`, the heartbeats of each theorem with a declaration range; and `missing`, why such a theorem, by its name, or a file, by its path, has none |
 | `problems` | The problems that reject `base` |
 
