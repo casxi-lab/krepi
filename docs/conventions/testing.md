@@ -893,7 +893,9 @@ and the targets that it selects, each with its registered mutants, with
 the guard on a pull request; with `--calibration`, the same phases on the
 calibration target; with `--shard`, only the qualification job, which
 leaves out the targets of the waivers that hold
-([waivers](../formal-verification.md#waivers)), or the shard of one
+([waivers](../formal-verification.md#waivers)), the comparator part on
+the stage that that job kept
+([comparator](../formal-verification.md#comparator)), or the shard of one
 formal target; and with `--target`, only the part of the named targets
 ([shards and merge](../formal-verification.md#shards-and-merge)). It is not
 part of the check: CI runs it in the pinned proof-tool image with
@@ -926,8 +928,10 @@ its removal, and give the run readings of the free space of their own, so
 that the disk guard and the receipt do not depend on the disk of the host;
 each repository holds an empty shard plan and the directories of the
 Aeneas Lean library and of Lean, which a run lists before its first phase
-and after its last. The runs of the qualification job and of the shard of
-a target are tested on the same repositories and fake tools; the waivers
+and after its last. The runs of the qualification job, of the comparator
+part and of the shard of a target are tested on the same repositories and
+fake tools, the comparator part after the qualification job and on
+receipts of that job that its tests edit; the waivers
 of their tests expire on 2000-01-01 or 9999-12-31, so that whether one
 holds does not depend on the date of the host. The
 texts that tests read in the forms of Lean, Lake and `leanchecker` are
@@ -1014,19 +1018,21 @@ judgement of a build on the captured outputs of
 and fake tools of the tests of `cargo xtask formal run`.
 
 `cargo xtask formal merge [--calibration] RECEIPT...` merges the receipts
-of the qualification job and of the shard of each formal target of the
-commit checked out into the conclusion of the whole gate, with the waivers
-that hold, and writes its record and summary below `artifacts/formal/merge/`
+of the qualification job, of the comparator part and of the shard of each
+formal target of the commit checked out into the conclusion of the whole
+gate, with the waivers that hold, and writes its record and summary below
+`artifacts/formal/merge/`
 ([shards and merge](../formal-verification.md#shards-and-merge)). It runs
 no proof tool and is not part of the check: the job `formal merge` of
 `.github/workflows/formal.yml` and the job `calibration merge` of the
 workflow `formal calibration` run it on the runner with the receipts of
-the parts of their run. Its
-unit tests run in the `test` step above, on the Git repositories of the
-tests of `cargo xtask formal run` with receipts that the tests write, and
-on the receipts of runs of the qualification job and of the shard of a
-target in those repositories; their waivers, too, expire on 2000-01-01 or
-9999-12-31.
+the parts of their run. Its unit tests run in the `test` step above, on
+the Git repositories of the tests of `cargo xtask formal run` with
+receipts that the tests write, one of the comparator part beside each of
+the qualification job unless a test gives its own, and on the receipts of
+runs of the qualification job, of the comparator part and of the shard of
+a target in those repositories; their waivers, too, expire on 2000-01-01
+or 9999-12-31.
 
 `cargo xtask formal receipt [--require-fresh] [RECORD]` judges the record
 of a merge against the checkout: current, waived, or fresh as well
@@ -1269,7 +1275,7 @@ to an exact version in the manifest of the crate that uses it:
 | `xtask/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask check`, `cargo xtask image`, `cargo xtask suite`, `cargo xtask run-record`, `cargo xtask release-assets`, `cargo xtask usage`, `cargo xtask formal run`, `cargo xtask formal guard`, `cargo xtask formal toolchain-check`, `cargo xtask formal check`, `cargo xtask formal mutants`, `cargo xtask formal vectors`, `cargo xtask formal canary`, `cargo xtask formal impact`, `cargo xtask formal merge` and `cargo xtask formal receipt`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
 | `xtask/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The process groups of the commands of `cargo xtask check`, `cargo xtask formal run`, `cargo xtask formal mutants` and `cargo xtask formal vectors`: killing a command's group, finding whether any of its processes remain, seeing that a command has ended without collecting it, and the default disposition of `SIGCHLD` that this needs; finding whether SIGHUP is ignored when the run starts; and the effective user of the run, the bytes available on the file system of its run directory, at its start and every second during it, and the largest resident set of a process that it collected, which its receipt records |
 | `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json`, `cargo xtask formal check` reads `verification/targets.json`, `verification/axioms.json`, `verification/waivers.json` and the shard plan, `cargo xtask formal run` reads `verification/targets.json`, `verification/qualification/cases.json`, `verification/extraction.toml`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/waivers.json`, the shard plan and the `translation.json` that Aeneas writes, `cargo xtask formal guard` reads `verification/targets.json` and `verification/tcb.json` at two commits, `cargo xtask formal impact` reads `verification/targets.json` at two commits, the lists of survivors that `cargo xtask formal mutants` writes and `cargo xtask formal check` reads, the type into which the `subset` step of `cargo xtask check` reads its compile-fail cases, the type into which `cargo xtask formal vectors` reads the `vectors` block of a contract, the record `images.json` that `cargo xtask image` writes and `cargo xtask suite` reads, the suites of `suites.toml`, the run and jobs that `cargo xtask run-record` reads, the run that `cargo xtask release-assets` reads, the data of a month that `cargo xtask usage` reads, the record of a step of `cargo xtask formal canary`, and the types of the receipt of `cargo xtask formal run`, which the canary and `cargo xtask formal merge` also read, and of the record of a merge, which `cargo xtask formal receipt` reads |
-| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, of the record of `cargo xtask formal merge`, which `cargo xtask formal receipt` reads, of `verification/open.json`, of the lists of survivors of `cargo xtask formal mutants`, of the record `images.json` of `cargo xtask image`, of the report of `cargo xtask suite` and of the record of `cargo xtask run-record`, reading `images.json` and the run and jobs of a record, reading the run, `images.json` and the check receipt that `cargo xtask release-assets` checks, the summary of `cargo xtask usage`, reading the output of `cargo metadata` in the `manifests` and `subset` steps, in `cargo xtask formal run` and in `cargo xtask formal check`, the messages of Cargo's build of the test executable of xtask in the `formal` step of `cargo xtask check`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/models.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/waivers.json`, the shard plans `verification/shards.json` and that of the calibration target, `verification/image-pin.json`, the `versions.json` of the proof-tool image, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the receipts that `cargo xtask formal merge` merges, the messages that `lean --json` prints, the event of a pull request that `cargo xtask formal guard` reads, and the tool manifest, the Lake locks, the statement registry, the records of its steps and the receipt that `cargo xtask formal canary` reads and writes |
+| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, of the record of `cargo xtask formal merge`, which `cargo xtask formal receipt` reads, of `verification/open.json`, of the lists of survivors of `cargo xtask formal mutants`, of the record `images.json` of `cargo xtask image`, of the report of `cargo xtask suite` and of the record of `cargo xtask run-record`, reading `images.json` and the run and jobs of a record, reading the run, `images.json` and the check receipt that `cargo xtask release-assets` checks, the summary of `cargo xtask usage`, reading the output of `cargo metadata` in the `manifests` and `subset` steps, in `cargo xtask formal run` and in `cargo xtask formal check`, the messages of Cargo's build of the test executable of xtask in the `formal` step of `cargo xtask check`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/models.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/waivers.json`, the shard plans `verification/shards.json` and that of the calibration target, `verification/image-pin.json`, the `versions.json` of the proof-tool image, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the receipts that `cargo xtask formal merge` merges and those of the qualification job that the comparator part reads, the configurations of `lake comparator` that it writes, the messages that `lean --json` prints, the event of a pull request that `cargo xtask formal guard` reads, and the tool manifest, the Lake locks, the statement registry, the records of its steps and the receipt that `cargo xtask formal canary` reads and writes |
 | `xtask/Cargo.toml` | `syn` without default features, with `full`, `parsing` and `visit` | MIT OR Apache-2.0 | Parsing the source files of the kernel workspace for the inventory of `cargo xtask formal check` and for the `subset` step of `cargo xtask check`, walking their items and reading their attributes, paths and tokens, walking the bodies of the functions of a target for the source mutants of `cargo xtask formal mutants`, the crate attributes of the library of the root package of the kernel workspace for the `manifests` step and `cargo xtask formal run`, and in a unit test of the check the Rust files of every workspace for the names of the slow tests |
 | `xtask/Cargo.toml` | `proc-macro2` without default features, with `span-locations` | MIT OR Apache-2.0 | The token type under `syn`, whose span locations give the line of each problem that the `subset` step reports and the point of each source mutant of `cargo xtask formal mutants` |
 | `xtask/Cargo.toml` | `signal-hook` without default features | MIT OR Apache-2.0 | The handler that lets SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop `cargo xtask check`, `cargo xtask formal run`, `cargo xtask formal mutants` and `cargo xtask formal vectors`; the emulation of their default action with which the formal commands then end, whereas the check exits with 128 plus the signal number; and the names of the signals in the output of the check |

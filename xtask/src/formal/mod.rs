@@ -9,6 +9,7 @@
 pub mod base;
 pub mod canary;
 pub mod classify;
+pub mod comparator;
 pub mod externals;
 pub mod extract;
 #[cfg(test)]
@@ -156,7 +157,7 @@ impl Layout {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "run",
-        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the part of the named targets, their extraction and the phase targets, --shard NAME only the qualification job, qualification, or the shard of a formal target, target/<name>, --calibration runs the calibration target, and --keep keeps the work directory of the run",
+        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the part of the named targets, their extraction and the phase targets, --shard NAME only the qualification job, qualification, the comparator part, comparator, which runs after it, or the shard of a formal target, target/<name>, --calibration runs the calibration target, and --keep keeps the work directory of the run",
         subcommands: &[],
     },
     Command {
@@ -231,7 +232,7 @@ fn cli() -> clap::Command {
                 Arg::new("shard")
                     .long("shard")
                     .value_name("NAME")
-                    .help("Run only the qualification job, qualification, or the shard of a formal target, target/<name>")
+                    .help("Run only the qualification job, qualification, the comparator part, comparator, or the shard of a formal target, target/<name>")
                     .conflicts_with("target")
                     .value_parser(merge::shard),
                 clap::arg!(--calibration "Run in the layout of the calibration target"),
@@ -451,6 +452,10 @@ mod tests {
             shard(&["run", "--shard", "qualification"]),
             (qualification, BTreeSet::new(), false)
         );
+        assert_eq!(
+            shard(&["run", "--shard", "comparator"]),
+            (Some("comparator".to_string()), BTreeSet::new(), false)
+        );
         let args = ["run", "--shard", "target/t", "--calibration", "--keep"];
         let t = BTreeSet::from(["t".to_string()]);
         assert_eq!(shard(&args), (Some("target/t".to_string()), t, true));
@@ -487,6 +492,7 @@ mod tests {
             &["run", "--shard"][..],
             &["run", "--shard", "base"],
             &["run", "--shard", "target/"],
+            &["run", "--shard", "comparator/t"],
             &["run", "--shard", "targets/t"],
             &["run", "--shard", "qualification", "--target", "t"],
             &["run", "--target", "t", "--shard", "target/t"],

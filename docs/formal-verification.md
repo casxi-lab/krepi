@@ -42,7 +42,8 @@ stage of its own and then build each of its registered
 On a pull request, a first phase records the
 [guard](#guard), which `cargo xtask formal guard` runs on its own. With
 `--shard`, `cargo xtask formal run` runs one part of the gate, the
-qualification job or the shard of one formal target, and
+qualification job, the [comparator](#comparator) part after it or the
+shard of one formal target, and
 `cargo xtask formal merge` combines the receipts of the parts of a commit
 into the conclusion of the whole gate, with the [waivers](#waivers) that
 hold ([shards and merge](#shards-and-merge)); CI runs the gate as these parts
@@ -680,14 +681,14 @@ others are planned.
 | Command | Purpose |
 | --- | --- |
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
-| `cargo xtask formal run [--target NAME]... [--shard NAME] [--calibration] [--keep]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the part of the named targets, their extraction and the phase `targets`, `--shard` only the qualification job or the shard of a formal target ([shards and merge](#shards-and-merge)), `--calibration` runs in the layout of the [calibration target](#calibration-target), and `--keep` keeps the work directory of the run ([layout](#layout)). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run of the whole gate has |
+| `cargo xtask formal run [--target NAME]... [--shard NAME] [--calibration] [--keep]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the part of the named targets, their extraction and the phase `targets`, `--shard` only the qualification job, the [comparator](#comparator) part or the shard of a formal target ([shards and merge](#shards-and-merge)), `--calibration` runs in the layout of the [calibration target](#calibration-target), and `--keep` keeps the work directory of the run ([layout](#layout)). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run of the whole gate has |
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs, sources and registries ([guard](#guard)) |
 | `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)) and of the waiver record ([waivers](#waivers)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its job fetched and built: `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from the outcomes of the steps of the job ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
 | `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration, and `--keep` keeps the work directory of the run, as for `run` |
 | `cargo xtask formal impact --base REV` | Lists, one item per line, the merge base of `REV` and `HEAD`, each path changed since with its Git status, without rename detection, the decision, `unaffected` when no changed path lies within a [gate input](#gate-inputs-and-snapshot) and `affected` otherwise, and the registered targets that the change affects, with their states: every target when an input of extraction changed, and otherwise each whose entry in `verification/targets.json` changed and each with a changed file of its `proof_modules`. A registry that cannot be read at the merge base, as after a change of its schema, counts as one without targets, so that every target is listed, after a line `unreadable verification/targets.json at the merge base: <why>`. Paths, names and that reason are printed escaped, so that none splits a line. It decides nothing, and exits with 1 only on a base that is not a revision or when Git or the registry at the head cannot be read |
-| `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, which passes when every unit and part outside the [waivers](#waivers) that hold is `VERIFIED`, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
+| `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job, of the comparator part and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, which passes when every unit and part outside the [waivers](#waivers) that hold is `VERIFIED`, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
 | `cargo xtask formal receipt [--require-fresh] [RECORD]` | Judges the record of a merge, by default `artifacts/formal/merge/record.json`, against the checkout ([current and fresh records](#current-and-fresh-records)): `CURRENT` when it has the gate inputs of the clean checkout, the pinned image and one conclusion for each registered unit and is complete, `VERIFIED` and passing, and `WAIVED` when it passes only within waivers that still hold; `--require-fresh` also requires the trigger of a run of CI, no planned statement and no waiver. It exits with 0 when the record is current, and fresh when asked, 3 when it is waived, 1 otherwise and 2 on a usage error. It runs no tool and proves nothing |
 
 `cargo xtask check` does not run the gate, which needs the pinned tools;
@@ -713,7 +714,8 @@ statuses in `outcome.rs`, the receipt in `receipt.rs`, the extraction in
 `lean.rs`, the qualification in `qualify.rs`, the base round in `base.rs`,
 the statement side and the guard in `guard.rs`, the registry and its rules
 in `registry.rs`, the check of a target's registration against its
-extraction in `classify.rs`, the installation of its generated files and
+extraction in `classify.rs`, the [comparator](#comparator) in
+`comparator.rs`, the installation of its generated files and
 reviewed external declarations in `externals.rs`, the shard plan, the
 disk guard and the removals in `storage.rs`, the shard limit, the parts
 of the gate and their merge in `merge.rs`, and the run, with the phases of
@@ -854,9 +856,9 @@ command wrote is kept. Its limit is the smallest of:
 - the rest of the budget of its phase;
 - the rest of the budget of the gate, 7,200 s from the start of the run
   and the budget of each target that the run selects; 7,800 s for the
-  qualification job, and 300 s and the budgets of its targets for the
-  shard of a target and for a run of `cargo xtask formal run --target`
-  ([shards and merge](#shards-and-merge));
+  qualification job, 1,800 s for the comparator part, and 300 s and the
+  budgets of its targets for the shard of a target and for a run of
+  `cargo xtask formal run --target` ([shards and merge](#shards-and-merge));
 - for a command of the unit of a target, the rest of the budget of the
   target: the budget less the seconds of the earlier commands of the unit,
   whichever phase ran them.
@@ -967,7 +969,8 @@ panics, is a tool failure of the run.
 ### Shards and merge
 
 The gate runs as parts of one commit: the qualification job,
-`cargo xtask formal run --shard qualification`, and the shard of each
+`cargo xtask formal run --shard qualification`, the comparator part after
+it, `cargo xtask formal run --shard comparator`, and the shard of each
 formal target of the registry, `cargo xtask formal run --shard
 target/<name>`, which `cargo xtask formal merge` combines into the
 conclusion of the whole gate. A run without `--shard` and `--target` has
@@ -990,6 +993,11 @@ gate (planned) is to use.
   Its budget is 7,800 s: the gate's 7,200 s and 600 s for the extraction,
   which the budgets of the targets do not grow. Its disk guard counts
   `qualification` alone.
+- **The comparator part** has the phase `comparator` alone
+  ([comparator](#comparator)), which checks the theorems of the proved
+  statements in the stage of the base round of the qualification job of
+  the same commit and run, which that job keeps with `--keep`. Its budget
+  is 1,800 s, and its disk guard counts `qualification`.
 - **The shard of a target** has the extraction of that formal target, whose
   commands are those of its unit, and the phase `targets` for it: its
   build, type check, audit, declaration ranges and registered
@@ -1037,15 +1045,16 @@ conclusion of the whole gate only when:
 3. every receipt names one and the same image;
 4. every receipt has one and the same trigger: the mode, `ref` and
    `run_id` of its `trigger`, whatever its event and attempt;
-5. one receipt is of the qualification job and one of the shard of each
-   formal target, and none is of another part;
+5. one receipt is of the qualification job, one of the comparator part
+   and one of the shard of each formal target, and none is of another
+   part;
 6. the receipt of the qualification job, unless it has a failure, has
    extracted every formal target but those of the waivers that hold on the
    date of the merge, as its `proof_targets` list them;
 7. each unit that the checkout registers, of the qualification, of the base
-   round and of each formal target with its registered mutants, has exactly
-   one conclusion among the receipts, and no receipt concludes another
-   unit.
+   round, of the comparator and of each formal target with its registered
+   mutants, has exactly one conclusion among the receipts, and no receipt
+   concludes another unit.
 
 When a condition fails, the merge gives no conclusion: it is `TOOL_FAILURE`
 and not complete, with each problem. Otherwise its status is that of a run
@@ -1243,9 +1252,9 @@ without `--shard`, the shard of a target, the calibration target and the
 on the UTC date of the clock of its host; a record that breaks its rules,
 or a clock that gives no date, leaves the merge without a conclusion
 ([shards and merge](#shards-and-merge)). The units of the targets of the
-waivers that hold then, their parts and the `base/<theorem>` of each
-statement in a proof module of theirs that the base round leaves out are
-recorded and not required: the merge passes over their failures, records
+waivers that hold then, the `comparator/<target>` of each among them,
+their parts and the `base/<theorem>` of each statement in a proof module
+of theirs that the base round leaves out are recorded and not required: the merge passes over their failures, records
 each waiver that holds and whether it used it, and stays `REJECTED` when
 it used one. A waiver covers no unit of the qualification, not the unit
 `base`, and no `base/<theorem>` of a module that the base round leaves
@@ -1762,6 +1771,105 @@ library itself declares the native-decision axioms of some of its lemmas,
 among them those behind `bv_tac`; no registry admits them yet, so a target
 theorem that depends on them fails the audit.
 
+### Comparator
+
+The comparator part, in `comparator.rs`, checks the theorem of each proved
+statement of `statements.json` once more, apart from the audit: Lake's
+`lake comparator` builds a challenge, which declares the theorem with the
+type of its statement and `sorry` for its proof, and the root module
+`Krepi` of the stage of the [base round](#base-round), exports both and
+requires the theorem of the solution to have exactly the type that the
+challenge gives it and to depend on no axiom outside the permitted list,
+which it checks on the export of the solution. `cargo xtask formal run
+--shard comparator` runs it after the qualification job of the same
+commit, on the stage of the base round that the job kept with `--keep`
+([shards and merge](#shards-and-merge)).
+
+Its units are `comparator/<target>` for each formal target that lists the
+module of a proved statement in its `proof_modules`, with those
+statements, the first such target of the registry for a module that two
+list, and `comparator` with the other proved statements; a planned
+statement has none. The phase reads them from `statements.json` and the
+registry of the checkout when the run starts, and stops when it cannot
+read them. Without a unit, as in production today, the part runs no
+command and is `VERIFIED`. Otherwise it
+
+1. reads the receipts below the runs directory, `artifacts/formal/runs/`
+   or the directory that `KREPI_FORMAL_RUNS` names, and takes the latest,
+   by `started`, of the qualification job of the same commit and the same
+   `run_id` of the trigger; when there is none, or it has no base round,
+   the phase stops, so that the units are `NOT_RUN` and the run is a tool
+   failure;
+2. adds the Lean library `KrepiChallenge` to the `lakefile.toml` of the
+   stage of that round, once however often the part runs on it;
+3. concludes each unit:
+   - `SCOPED` when the base round left the statement of one of its
+     theorems out under a [waiver](#waivers), which makes the unit one of
+     the waived target;
+   - `NOT_RUN` when the base round did not verify one of its theorems with
+     the axioms that the audit reported: the record of the round has no
+     entry for it, an entry that is not `VERIFIED`, as after a failed base
+     build, an axiom that the allowlist refused or a tool failure, or one
+     without axioms. The reason names the theorem and its status there.
+     `NOT_RUN` ranks below `REJECTED` ([results](#results)), so that the
+     merge keeps the `REJECTED` of the base round;
+   - otherwise by `lake comparator --config KrepiChallenge.C<i>.json`,
+     run in the stage, where `i` counts the units in the order of their
+     names from 0. The challenge `KrepiChallenge.C<i>` imports every
+     module of the stage but the proof modules, `Krepi.Proofs`, the
+     modules below it and the proof modules of the targets that the job
+     extracted, and declares each theorem of the unit as
+     `public theorem <theorem> : <statement> := sorry`. The configuration
+     names the challenge, the solution module `Krepi`, the theorems and
+     the permitted axioms. Exit 0 is `VERIFIED`, and exit 1 `REJECTED`,
+     with the lines of the comparator that hold `error:`, unless a line
+     starts with `error: Child exited with `: a build or an export in its
+     sandbox did not finish, as for a name that the challenge lacks, which
+     is a `TOOL_FAILURE`, as is any other status ([results](#results)).
+
+The permitted axioms of a unit are the axioms that the audit of the base
+round reported for its theorems, which the round verified, so that the
+allowlist admitted each with the sources of its theorem, and `propext`,
+`Classical.choice` and `Quot.sound`, without `sorryAx` and without a name
+`_private.<module>.0.<name>` of a proof module, sorted. They are part of
+what the allowlist admits for the target. No registry and no declaration
+of the stage adds to them: an axiom that no theorem of the unit uses is not
+permitted, whether `axioms.json`, a trusted axiom of the target or a
+template declaration names it, and neither is `sorryAx`, even when a
+trusted axiom admits it. The standard axioms are always permitted, since
+the walk of the comparator over the axioms of a theorem also follows the
+constructors and the recursor rules of the inductive types that it uses,
+which `#print axioms` does not. So:
+
+- a native decision in a proof module, which `native_decide`,
+  `decide +native` and `bv_decide` make, and Aeneas's `bv_tac` when its
+  goal reaches the stage of its SAT solver, adds an axiom private to that
+  module, which is never permitted: the comparator reports
+  `Illegal axiom detected` and the unit is `REJECTED`, even when a
+  `native-decision` item admits the axiom in the audit;
+- an axiom of a native decision that is not private, and an axiom of
+  `axioms.json` or a trusted axiom that a theorem uses and that only
+  modules outside the imports of the challenge declare, are permitted but
+  missing from the challenge: the comparator cannot export them, and the
+  unit is a `TOOL_FAILURE`, with the name in the comparator's standard
+  error;
+- a native decision of a library that the challenge imports, such as those
+  of the Aeneas Lean library behind `bv_tac`, is permitted when the audit
+  admitted it.
+
+In the layout of the [calibration target](#calibration-target), the part
+runs two more challenges after its first unit when that unit has two
+statements A and B, which conclude no unit: `KrepiChallenge.Statement`,
+the command of `comparator-negative/statement`, declares the theorem of A
+with the statement of B, with the permitted axioms of the unit, and
+`KrepiChallenge.Axiom`, that of `comparator-negative/axiom`, declares the
+theorem of A with its own statement, with the permitted axioms of the unit
+but `propext`. The comparator must reject both: the first because the
+statements differ, the second because of `propext`, which every theorem of
+the calibration uses. Their classes and logs in the receipt show whether
+it did. A first unit that is not checked, or has fewer than two
+statements, runs neither.
+
 ### Guard
 
 `cargo xtask formal guard --event PATH`, in `guard.rs`, checks a pull
@@ -1956,8 +2064,8 @@ build, the axiom audit and `leanchecker` of the [base round](#base-round),
 the target builds of the [targets](#proof-targets) and their
 [mutants](#mutants), whose audits are axiom audits, the declaration ranges
 of a target, `lake env lean Ranges.lean` with a cap of 1,800 s, the
-`cargo check` of a source mutant, with a cap of 1,800 s, and, planned, the
-comparator.
+`cargo check` of a source mutant, with a cap of 1,800 s, and the
+comparator of the [comparator](#comparator) part.
 
 krepi's own modules, in the rows of the base build, are every module below
 `Krepi` but the root module, and the reviewed external declarations
@@ -2043,7 +2151,7 @@ keys; times are seconds, rounded to milliseconds.
 | `complete` | Whether the run is complete, as defined above |
 | `trigger` | `mode`: `SCOPED` for a run of named targets; for a run of the whole gate or of a part, the mode that `KREPI_FORMAL_TRIGGER`, the variable through which a job of CI gives the trigger of its run, names, `REQUIRED`, `FORCED_FULL` or `WEEKLY`, and `MANUAL` when it is unset or empty, or when it holds any other value, `SCOPED` and `MANUAL` included, which is a tool failure before the phases ([results](#results)); `event`, `ref`, `run_id` and `attempt`, from `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`, or `null` |
 | `targets` | The names given with `--target`, sorted, or the target of the shard of a target; empty for a run of the whole gate and for the qualification job |
-| `shard` | The part of a run with `--shard`, `qualification` or `target/<name>`, or `null` |
+| `shard` | The part of a run with `--shard`, `qualification`, `comparator` or `target/<name>`, or `null` |
 | `host` | `linux-aarch64` or `darwin-arm64`, or `null` on another host |
 | `image` | The image of a run on `linux-aarch64`, below, or `null` on another host |
 | `run`, `directory` | The identifier of the run, and its directory relative to the repository root |

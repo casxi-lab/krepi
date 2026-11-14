@@ -1,8 +1,8 @@
 //! The shards of the proof gate and their merge, as "Shards and merge" in
-//! `docs/formal-verification.md` describes: beside the qualification job,
-//! every formal target is a shard of its own, named by its unit, whose
-//! registered budget, over its workers, is at most the shard limit, the
-//! wall-clock limit of the gate less the time of the merge; and
+//! `docs/formal-verification.md` describes: beside the qualification job and
+//! the comparator part, every formal target is a shard of its own, named by
+//! its unit, whose registered budget, over its workers, is at most the shard
+//! limit, the wall-clock limit of the gate less the time of the merge; and
 //! `cargo xtask formal merge` combines the receipts of these parts of one
 //! commit into the conclusion of the whole gate, with the waivers that hold.
 
@@ -21,7 +21,7 @@ use super::receipt::{self, Merge, Part, Receipt, SCHEMA};
 use super::registry::{self, State, Target};
 use super::run::{self, Gate, Phase};
 use super::toolchain::sha256;
-use super::{base, guard, qualify, waiver};
+use super::{base, comparator, guard, qualify, waiver};
 
 /// The wall-clock limit of the gate, from the start of its first job to the
 /// end of its merge.
@@ -90,17 +90,19 @@ pub fn target(shard: &str) -> Option<&str> {
 }
 
 /// The budget of a run of `shard` in place of the gate's: the gate's and the
-/// extraction margin for the qualification job, and the shard margin for
-/// the shard of a target, which the budget of its target grows.
+/// extraction margin for the qualification job, the comparator's for its part,
+/// and for the shard of a target the shard margin, which its budget grows.
 pub fn budget(shard: &str) -> Duration {
     let qualification = run::GATE_BUDGET + EXTRACTION_MARGIN;
-    [qualification, SHARD_MARGIN][usize::from(target(shard).is_some())]
+    let budget = [qualification, SHARD_MARGIN][usize::from(target(shard).is_some())];
+    [budget, comparator::BUDGET][usize::from(shard == comparator::PHASE)]
 }
 
-/// The shard that `--shard` names: `qualification` or `target/<name>`.
+/// The shard that `--shard` names: `qualification`, `comparator` or `target/<name>`.
 pub fn shard(name: &str) -> Result<String, String> {
-    let valid = name == qualify::PHASE || target(name).is_some_and(|t| !t.is_empty());
-    let invalid = format!("`{name}` is neither {} nor target/<name>", qualify::PHASE);
+    let parts = [qualify::PHASE, comparator::PHASE];
+    let valid = parts.contains(&name) || target(name).is_some_and(|t| !t.is_empty());
+    let invalid = format!("`{name}` is not {} or target/<name>", parts.join(", "));
     valid.then(|| name.to_string()).ok_or(invalid)
 }
 
@@ -118,12 +120,13 @@ pub fn handwritten(gate: &mut Gate) -> Result<Vec<String>, String> {
 }
 
 /// Each unit that the checkout at `root` registers in `layout`, with its
-/// phase: of the qualification, the base round and each formal target.
+/// phase: of the qualification, base round, comparator and formal targets.
 pub fn registered(root: &Path, layout: &Layout) -> Vec<(String, String)> {
     let [_, finish] = run::target_phases(root, layout, &BTreeSet::new(), None, None);
     let (qualification, base) = (qualify::phase(root, layout), base::phase(root, layout));
+    let comparator = comparator::phase(root, layout, None);
     let units = |phase: Phase| (phase.units.into_iter()).map(move |u| (u, phase.name.clone()));
-    Vec::from_iter([qualification, base, finish].into_iter().flat_map(units))
+    Vec::from_iter(([qualification, base, comparator, finish].into_iter()).flat_map(units))
 }
 
 /// The synthetic wall clock of the slowest part, `slowest` seconds, and of
@@ -273,9 +276,9 @@ pub fn merge(root: &Path, layout: &Layout, paths: &[PathBuf], job: Option<Durati
     let registered = registered(root, layout);
     let (units, unaccounted) = outcome::account(&registered, concluded.collect(), None);
     problems.extend(unaccounted);
-    // One receipt of the qualification job and of the shard of each formal target.
+    // One receipt of the qualification job, the comparator and each formal target's shard.
     let mut expected = BTreeSet::from_iter(shards(&targets).into_keys());
-    expected.insert(qualify::PHASE.to_string());
+    expected.extend([qualify::PHASE, comparator::PHASE].map(String::from));
     for part in &expected {
         let count = given.remove(part.as_str()).unwrap_or(0);
         let problem = format!("{count} receipts are of the part {part}, where one is expected");
@@ -461,10 +464,66 @@ pub(crate) mod tests {
         fixture.root().join(path)
     }
 
-    /// The merge of the receipts at `paths` in `fixture`, with 60 s of its
-    /// job before the command.
+    /// The merge of the receipts at `paths` [`with_comparator`] in
+    /// `fixture`, with 60 s of its job before the command.
     pub(crate) fn merge_in(fixture: &Fixture, paths: &[PathBuf]) -> Merge {
-        merge(fixture.root(), LAYOUT, paths, Some(Duration::from_secs(60)))
+        let paths = with_comparator(fixture, paths);
+        merge(
+            fixture.root(),
+            LAYOUT,
+            &paths,
+            Some(Duration::from_secs(60)),
+        )
+    }
+
+    /// `paths`, followed, unless they hold a receipt of the comparator part,
+    /// by the receipt of that part beside each receipt of the qualification
+    /// job among them, as the job writes it: of the commit, tree, gate
+    /// inputs, trigger and image of that receipt, and with the units of the
+    /// comparator that the checkout registers, `VERIFIED`.
+    pub(crate) fn with_comparator(fixture: &Fixture, paths: &[PathBuf]) -> Vec<PathBuf> {
+        let read = |path: &PathBuf| serde_json::from_slice::<Receipt>(&fs::read(path).ok()?).ok();
+        let shard = |path: &&PathBuf| read(path).and_then(|receipt| receipt.shard);
+        let given = |part: &'static str| {
+            let of = move |path: &&PathBuf| shard(path).as_deref() == Some(part);
+            BTreeSet::from_iter(paths.iter().filter(of))
+        };
+        let mut all = paths.to_vec();
+        if !given(comparator::PHASE).is_empty() {
+            return all;
+        }
+        let units = comparator::phase(fixture.root(), LAYOUT, None).units;
+        let unit = |name: &String| {
+            let (phase, status, reason) = (comparator::PHASE.to_string(), Status::Verified, None);
+            (
+                name.clone(),
+                Unit {
+                    phase,
+                    status,
+                    reason,
+                },
+            )
+        };
+        for path in given(qualify::PHASE) {
+            let job = read(path).expect("a receipt");
+            let part = Receipt {
+                schema: SCHEMA,
+                status: Status::Verified,
+                complete: true,
+                trigger: job.trigger,
+                shard: Some(comparator::PHASE.to_string()),
+                image: job.image,
+                seconds: 600.0,
+                commit: job.commit,
+                tree: job.tree,
+                inputs: job.inputs,
+                units: BTreeMap::from_iter(units.iter().map(unit)),
+                ..Receipt::default()
+            };
+            let name = path.file_stem().expect("a file name").to_string_lossy();
+            all.push(write(fixture, &format!("{name}-comparator"), &part));
+        }
+        all
     }
 
     /// The units of a target `t` without mutants.
@@ -494,6 +553,61 @@ pub(crate) mod tests {
         )
     }
 
+    /// The path of the receipt of the comparator part that [`with_comparator`]
+    /// writes beside the receipt `name` of the qualification job.
+    fn comparator_of(fixture: &Fixture, name: &str) -> PathBuf {
+        fixture
+            .root()
+            .join(format!("artifacts/parts/{name}-comparator.json"))
+    }
+
+    #[test]
+    fn the_comparator_is_a_part_of_every_merge() {
+        let target = r#"[{"name": "a", "module": "A", "proof_modules": ["Krepi.Proofs.A"]}]"#;
+        let fixture = checkout("merge-comparator", target);
+        let statements = serde_json::json!({"schema": 1, "hash": "0".repeat(40), "statements": [
+            {"name": "Krepi.Statements.S", "theorem": "Krepi.Proofs.A.s", "module": "Krepi.Proofs.A", "state": "proved"},
+            {"name": "Krepi.Statements.R", "theorem": "Krepi.Proofs.R.r", "module": "Krepi.Proofs.R", "state": "proved"},
+            {"name": "Krepi.Statements.P", "theorem": "Krepi.Proofs.A.p", "module": "Krepi.Proofs.A", "state": "planned"},
+        ]});
+        fixture.write(LAYOUT.statements, &statements.to_string());
+        fixture.commit_all();
+        // Its units are those of the proved statements of the formal target
+        // that lists their module, and one for the others.
+        let registered = registered(fixture.root(), LAYOUT).into_iter();
+        let units = Vec::from_iter(registered.filter(|(_, phase)| phase == comparator::PHASE));
+        let unit = |name: &str| (name.to_string(), comparator::PHASE.to_string());
+        assert_eq!(units, [unit("comparator"), unit("comparator/a")]);
+        let q = write(&fixture, "q", &qualification(&fixture));
+        let t = write(
+            &fixture,
+            "t",
+            &receipt(&fixture, "target/a", &units_of("a")),
+        );
+        let names = ["comparator".to_string(), "comparator/a".to_string()];
+        let c = write(&fixture, "c", &receipt(&fixture, comparator::PHASE, &names));
+        let paths = [q.clone(), c, t.clone()];
+        verified(&merge(fixture.root(), LAYOUT, &paths, None));
+        // Without its receipt, or with one that misses a unit, the merge has
+        // no conclusion.
+        let merged = merge(fixture.root(), LAYOUT, &[q.clone(), t.clone()], None);
+        let missing = |unit: &str| format!("the unit {unit} has no conclusion");
+        let none = "0 receipts are of the part comparator, where one is expected";
+        let problems = [
+            missing("comparator"),
+            missing("comparator/a"),
+            none.to_string(),
+        ];
+        no_conclusion(&merged, &problems);
+        let c = write(
+            &fixture,
+            "c",
+            &receipt(&fixture, comparator::PHASE, &names[1..]),
+        );
+        let merged = merge(fixture.root(), LAYOUT, &[q, c, t], None);
+        no_conclusion(&merged, &[missing("comparator")]);
+    }
+
     #[test]
     fn receipts_that_agree_but_are_not_of_the_commit_checked_out_give_no_conclusion() {
         let fixture = checkout("merge-elsewhere", r#"[{"name": "a"}]"#);
@@ -511,7 +625,9 @@ pub(crate) mod tests {
         let (c1, t1) = (rev(&fixture, "HEAD"), rev(&fixture, "HEAD^{tree}"));
         let merged = merge_in(&fixture, &[q.clone(), t.clone()]);
         let (at, head) = ((c0.as_str(), t0.as_str()), (c1.as_str(), t1.as_str()));
-        no_conclusion(&merged, &[elsewhere(&q, at, head), elsewhere(&t, at, head)]);
+        let c = comparator_of(&fixture, "q");
+        let problems = [&q, &t, &c].map(|path| elsewhere(path, at, head));
+        no_conclusion(&merged, &problems);
         assert_eq!(merged.commit.as_deref(), Some(c1.as_str()));
     }
 
@@ -590,7 +706,8 @@ pub(crate) mod tests {
         );
         let merged = merge_in(&fixture, &[q.clone(), t]);
         let (at, head) = ((c0.as_str(), t0.as_str()), (c1.as_str(), t1.as_str()));
-        no_conclusion(&merged, &[elsewhere(&q, at, head)]);
+        let c = comparator_of(&fixture, "q");
+        no_conclusion(&merged, &[elsewhere(&q, at, head), elsewhere(&c, at, head)]);
     }
 
     #[test]
@@ -712,12 +829,13 @@ pub(crate) mod tests {
         let mut units = qualification_units(fixture.root());
         units.sort();
         assert_eq!(keys, units);
-        assert_eq!(merged.parts.len(), 1);
+        assert_eq!(merged.parts.len(), 2);
         let bytes = fs::read(&q).expect("the receipt");
         assert_eq!(merged.parts[0].sha256, Some(sha256(&bytes)));
         // A shard where the registry has no formal target.
         let x = write(&fixture, "x", &receipt(&fixture, "target/x", &[]));
-        let merged = super::merge(fixture.root(), LAYOUT, &[q, x], None);
+        let paths = with_comparator(&fixture, &[q, x]);
+        let merged = super::merge(fixture.root(), LAYOUT, &paths, None);
         let problem = "target/x is not a part of verification/targets.json";
         no_conclusion(&merged, &[problem.to_string()]);
     }
@@ -741,7 +859,7 @@ pub(crate) mod tests {
         verified(&merged);
         assert_eq!(
             Vec::from_iter(merged.parts.iter().map(|p| p.superseded)),
-            [false, true, false]
+            [false, true, false, false]
         );
         // Two receipts of one part and of the same attempt.
         let merged = merge_in(&fixture, &[q, first.clone(), first]);
@@ -752,8 +870,13 @@ pub(crate) mod tests {
         no_conclusion(&merged, &problems.map(String::from));
     }
 
-    /// The exit of `cargo xtask formal merge` in `fixture` for `paths`.
+    /// The exit of `cargo xtask formal merge` in `fixture` for `paths`
+    /// [`with_comparator`].
     pub(crate) fn exit(fixture: &Fixture, paths: &[&PathBuf]) -> ExitCode {
+        let paths = with_comparator(
+            fixture,
+            &Vec::from_iter(paths.iter().map(|p| p.to_path_buf())),
+        );
         let args = Vec::from_iter(paths.iter().map(|path| path.to_str().expect("UTF-8")));
         let matches = cli("").try_get_matches_from(["merge"].into_iter().chain(args));
         command(fixture.root(), LAYOUT, &matches.expect("the command line"))
@@ -827,8 +950,12 @@ pub(crate) mod tests {
                 format!("{count} receipts are of the part qualification, where one is expected");
             Vec::from_iter(units.chain([part]))
         };
+        // Without it, the comparator part is missing too.
         let merged = merge_in(&fixture, std::slice::from_ref(&t));
-        no_conclusion(&merged, &problems("has no conclusion", 0));
+        let mut missing = problems("has no conclusion", 0);
+        let comparator = "0 receipts are of the part comparator, where one is expected";
+        missing.insert(missing.len() - 1, comparator.to_string());
+        no_conclusion(&merged, &missing);
         let merged = merge_in(&fixture, &[q.clone(), q, t]);
         no_conclusion(&merged, &problems("has 2 conclusions", 2));
     }
@@ -876,7 +1003,10 @@ pub(crate) mod tests {
         let shown = old.display();
         let merged = merge_in(&fixture, &[old.clone(), write(&fixture, "t", &shard)]);
         let schema = format!("{shown}: schema 4 where 5 is expected");
-        no_conclusion(&merged, &[schema, none("qualification")]);
+        no_conclusion(
+            &merged,
+            &[schema, none("comparator"), none("qualification")],
+        );
         // A receipt of schema 5 without a shard.
         let mut unnamed = shard;
         unnamed.shard = None;
@@ -1292,6 +1422,7 @@ pub(crate) mod tests {
             [
                 (Some(13_372_738_764), false, Some(false)),
                 (Some(13_372_738_765), true, Some(true)),
+                (None, false, None),
                 (None, false, None),
             ]
         );

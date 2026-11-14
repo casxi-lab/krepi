@@ -15,6 +15,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::Layout;
+use super::comparator;
 use super::inventory::{self, Inventory};
 use super::lean;
 use super::outcome::{self, Class, Conclusion, Site, Status, Verdict, word};
@@ -133,7 +134,7 @@ pub(crate) struct Context<'a> {
     /// Reads the bytes available on the file system of a path:
     /// [`process::disk_available`], or a reading that a test gives.
     pub free: fn(&Path) -> Option<u64>,
-    /// The shard of the run, `qualification` or `target/<name>`, if any.
+    /// The shard of the run, if any: `qualification`, `comparator` or `target/<name>`.
     pub shard: Option<&'a str>,
 }
 
@@ -1185,14 +1186,19 @@ fn alone(shard: Option<&str>, named: bool, generate: bool) -> bool {
 }
 
 /// The phases of a run of `targets` with `context`, the guard on a pull
-/// request first: a run of targets [`alone`] has only their extraction and
-/// phase, and the qualification job every phase but that of the targets.
+/// request first: the comparator part has only its phase, a run of targets
+/// [`alone`] only their extraction and phase, and the qualification job
+/// every phase but that of the targets.
 fn phases<'a>(
     context: &Context<'a>,
     targets: &BTreeSet<String>,
     generate: Option<Vec<String>>,
 ) -> Vec<Phase<'a>> {
     let (root, layout, shard) = (context.root, context.layout, context.shard);
+    if shard == Some(comparator::PHASE) {
+        let runs = (context.var)(comparator::RUNS);
+        return vec![comparator::phase(root, layout, runs)];
+    }
     let alone = alone(shard, !targets.is_empty(), generate.is_some());
     let mut phases = Vec::from_iter(guard::phase(context.var).filter(|_| !alone));
     let [extraction, finish] = target_phases(root, layout, targets, generate, shard);
@@ -1846,6 +1852,29 @@ pub(crate) mod tests {
         gate_with(&context, run, &targets, phases, Box::new(io::sink()))
     }
 
+    /// Runs the comparator part of `fixture` in `layout` as `cargo xtask
+    /// formal run --shard comparator` does, with `runs` in the variable of
+    /// its runs directory, if given, into a new run directory, and writes its
+    /// receipt.
+    pub(crate) fn comparator_part(fixture: &Fixture, layout: &Layout, runs: Option<&Path>) -> Done {
+        let runs = runs.map(|runs| runs.display().to_string());
+        let var = |name: &str| runs.clone().filter(|_| name == comparator::RUNS);
+        let shard = Some(comparator::PHASE);
+        let context = Context {
+            layout,
+            ..shard_context(fixture.root(), shard, &var, plenty)
+        };
+        let run = RunDir::create(fixture.root()).expect("create the run directory");
+        let phases = phases(&context, &BTreeSet::new(), None);
+        gate_with(
+            &context,
+            run,
+            &BTreeSet::new(),
+            phases,
+            Box::new(io::sink()),
+        )
+    }
+
     /// The phases of the shard `shard` of the checkout `root`, as [`command`]
     /// puts them together outside a pull request.
     pub(crate) fn shard_phases<'a>(root: &'a Path, shard: &'a str) -> Vec<Phase<'a>> {
@@ -2103,10 +2132,44 @@ pub(crate) mod tests {
             merge::SHARD_MARGIN,
             merge::budget(qualify::PHASE),
             merge::budget("target/t"),
+            comparator::BUDGET,
         ];
         for budget in budgets {
             assert_ne!(budget, mutants::RUN_BUDGET);
         }
+        assert_eq!(merge::budget(comparator::PHASE), comparator::BUDGET);
+    }
+
+    #[test]
+    fn the_comparator_shard_runs_its_phase_alone() {
+        let fixture = merge::tests::checkout("comparator-shard", "[]");
+        // On a pull request as elsewhere, it has neither the guard nor any
+        // other phase.
+        let event = |name: &str| match name {
+            "GITHUB_EVENT_NAME" => Some("pull_request".to_string()),
+            "GITHUB_EVENT_PATH" => Some("event.json".to_string()),
+            _ => None,
+        };
+        let shard = Some(comparator::PHASE);
+        let context = shard_context(fixture.root(), shard, &event, plenty);
+        let phases = phases(&context, &BTreeSet::new(), None).into_iter();
+        assert_eq!(
+            Vec::from_iter(phases.map(|phase| phase.name)),
+            ["comparator"]
+        );
+        // Without a proved statement it has no unit and runs nothing.
+        let done = comparator_part(&fixture, &Layout::PRODUCTION, None);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        let receipt = done.written();
+        assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
+        assert_eq!(receipt.shard.as_deref(), Some("comparator"));
+        assert_eq!(receipt.trigger.mode, Mode::Manual);
+        assert_eq!(receipt.targets, Vec::<String>::new());
+        assert_eq!(receipt.budgets.gate_seconds, 1_800);
+        assert_eq!(Vec::from_iter(receipt.phases.keys()), ["comparator"]);
+        assert_eq!(receipt.phases["comparator"].budget_seconds, 1_800);
+        assert!(receipt.phases["comparator"].ran && receipt.units.is_empty());
+        assert!(!done.sites().contains(&Site::Comparator));
     }
 
     #[test]

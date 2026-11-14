@@ -12,7 +12,7 @@ use time::{Date, Month, UtcDateTime};
 
 use super::receipt::{Merge, Receipt, Waived};
 use super::registry::{State, Target};
-use super::{Layout, base, guard, lean, merge, mutants, outcome::Status};
+use super::{Layout, base, comparator, guard, lean, merge, mutants, outcome::Status};
 
 /// The waiver record: schema 1 and its waivers.
 #[derive(Debug, Deserialize)]
@@ -102,10 +102,11 @@ pub fn left_out(layout: &Layout, targets: &[Target], waived: &BTreeSet<String>) 
 /// Concludes `merged`, whose status, units, problems and waiver date are
 /// set, with the `waivers`, `targets` and `statements` of the checkout and
 /// its `kept` receipts: the units and parts of the targets of the waivers
-/// that hold, and the `base/<theorem>` of each statement in a module that
-/// they leave out, are recorded and not required. It passes when it has no
-/// problem, every other unit is `VERIFIED` and no other part has a failure,
-/// and is then `REJECTED` when it used a waiver.
+/// that hold, their units of the comparator included, and the
+/// `base/<theorem>` of each statement in a module that they leave out, are
+/// recorded and not required. It passes when it has no problem, every other
+/// unit is `VERIFIED` and no other part has a failure, and is then
+/// `REJECTED` when it used a waiver.
 pub fn conclude(
     merged: &mut Merge,
     layout: &Layout,
@@ -119,9 +120,10 @@ pub fn conclude(
     // The target of each unit that is not VERIFIED and part with a failure.
     let left = left_out(layout, targets, &waived);
     let modules = BTreeMap::from_iter(statements.iter().map(|s| (base::unit(&s.theorem), s)));
+    let of = |u: &str| (u.strip_prefix(comparator::PHASE)?.strip_prefix('/')).map(String::from);
     let owner = |unit: &String| match modules.get(unit) {
         Some(statement) => left.get(&statement.module).cloned(),
-        None => merge::target(mutants::owner(unit)).map(String::from),
+        None => (merge::target(mutants::owner(unit)).map(String::from)).or_else(|| of(unit)),
     };
     let units = (merged.units.iter()).filter(|(_, unit)| unit.status != Status::Verified);
     let parts = (kept.iter()).filter(|receipt| !receipt.failures.is_empty());

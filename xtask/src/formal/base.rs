@@ -114,7 +114,7 @@ pub fn read(path: &Path) -> Result<String, String> {
 }
 
 /// Writes `text` to `path`, with its directories.
-fn write(path: &Path, text: &str) -> Result<(), String> {
+pub(super) fn write(path: &Path, text: &str) -> Result<(), String> {
     let at = |error: std::io::Error| format!("{}: {error}", path.display());
     fs::create_dir_all(path.parent().unwrap_or(path)).map_err(at)?;
     fs::write(path, text).map_err(at)
@@ -498,7 +498,7 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     //! The base round runs after the qualification of the case `arithmetic`
     //! in a fixture of `fixture.rs`, whose stand-ins answer for Lake, `lean`
     //! and `leanchecker`, with a statement side, two proof files, the
@@ -524,8 +524,8 @@ mod tests {
 
     const LAYOUT: Layout = Layout::PRODUCTION;
 
-    const S: &str = "Krepi.Statements.Counter.S";
-    const T: &str = "Krepi.Proofs.Counter.t";
+    pub(crate) const S: &str = "Krepi.Statements.Counter.S";
+    pub(crate) const T: &str = "Krepi.Proofs.Counter.t";
 
     /// The proof of `S`, whose theorem starts at line 9.
     const COUNTER: &str = "module\n\npublic import Krepi.Statements.Counter\n\n\
@@ -570,7 +570,7 @@ mod tests {
     /// The base fixture: the qualification of `arithmetic`, the captured
     /// specification and statements, [`COUNTER`], [`MAIN`], empty
     /// registries and the statement `S`.
-    fn base(label: &str) -> Fixture {
+    pub(crate) fn base(label: &str) -> Fixture {
         let fixture = fixture::qualification(label, &json!([arithmetic()]));
         for path in ["Krepi/Spec/Counter.lean", "Krepi/Statements/Counter.lean"] {
             fixture.write(&format!("verification/{path}"), captured(path));
@@ -585,7 +585,7 @@ mod tests {
 
     /// Writes `statements.json` with `statements`, as name, theorem and
     /// state, each in the module of its theorem; [`run`] records the hash.
-    fn register(fixture: &Fixture, statements: &[(&str, &str, &str)]) {
+    pub(crate) fn register(fixture: &Fixture, statements: &[(&str, &str, &str)]) {
         let statements: Vec<Value> = (statements.iter())
             .map(|(name, theorem, state)| {
                 let (module, _) = theorem.rsplit_once('.').expect("a theorem in a module");
@@ -615,7 +615,7 @@ mod tests {
 
     /// Commits what changed, with the statement hash of the commit in
     /// `statements.json`.
-    fn hashed(fixture: &mut Fixture) {
+    pub(crate) fn hashed(fixture: &mut Fixture) {
         if !Fixture::git(fixture, &["status", "--porcelain"]).is_empty() {
             fixture.commit_all();
         }
@@ -643,7 +643,7 @@ mod tests {
     }
 
     /// Makes the audit report `axioms` for `theorem`, or no line for `none`.
-    fn axioms(fixture: &Fixture, theorem: &str, axioms: &str) {
+    pub(crate) fn axioms(fixture: &Fixture, theorem: &str, axioms: &str) {
         fixture.write(&format!("artifacts/lake/axioms/{theorem}"), axioms);
     }
 
@@ -668,7 +668,7 @@ mod tests {
     }
 
     /// The project of the stage of the base round of `done`.
-    fn stage(done: &Done) -> PathBuf {
+    pub(crate) fn stage(done: &Done) -> PathBuf {
         done.run.path.join("work/base/stage/verification")
     }
 
@@ -1819,7 +1819,7 @@ mod tests {
 
     /// Writes the target registry `targets`, a JSON list, and an empty
     /// registry of models.
-    fn targets(fixture: &Fixture, targets: &Value) {
+    pub(crate) fn targets(fixture: &Fixture, targets: &Value) {
         let file = json!({"schema": 2, "specifications": [], "targets": targets});
         fixture.write(LAYOUT.registry, &format!("{file}\n"));
         fixture.write(LAYOUT.models, "{\"schema\": 1, \"models\": []}\n");
@@ -1923,7 +1923,7 @@ mod tests {
 
     /// Writes the receipt of `done` as the part `name` of a merge, with the
     /// image of a run in CI.
-    fn part(fixture: &Fixture, name: &str, done: &Done) -> PathBuf {
+    pub(crate) fn part(fixture: &Fixture, name: &str, done: &Done) -> PathBuf {
         let mut receipt = done.written();
         let image = format!("ghcr.io/casxi-lab/krepi-formal@sha256:{}", "a".repeat(64));
         receipt.image.get_or_insert_default().reference = Some(image);
@@ -1955,7 +1955,8 @@ mod tests {
         let job = run::tests::gate_shard(&fixture, "qualification", job, run::tests::plenty);
         let shard = run::tests::shard_phases(root, "target/t");
         let shard = run::tests::gate_shard(&fixture, "target/t", shard, run::tests::plenty);
-        for done in [&whole, &job, &shard] {
+        let compared = run::tests::comparator_part(&fixture, &LAYOUT, None);
+        for done in [&whole, &job, &shard, &compared] {
             let receipt = done.written();
             let conclusion = (receipt.status, receipt.complete);
             assert_eq!(
@@ -1977,16 +1978,20 @@ mod tests {
         };
         assert!(stage(&shard).contains_key(Path::new("Proofs/Main.lean")));
         assert_eq!(stage(&shard), stage(&whole));
-        // The receipts of the parts merge into the units of the whole run.
-        let parts = [part(&fixture, "q", &job), part(&fixture, "t", &shard)];
-        let merged = merge::merge(root, &LAYOUT, &parts, Some(Duration::ZERO));
+        // The receipts of the parts merge into the units of the whole run,
+        // and the unit of the comparator part, which a whole run does not have.
+        let parts = [("q", &job), ("t", &shard), ("c", &compared)];
+        let parts = parts.map(|(name, done)| part(&fixture, name, done));
+        let mut merged = merge::merge(root, &LAYOUT, &parts, Some(Duration::ZERO));
         assert_eq!(merged.problems, Vec::<String>::new());
         assert_eq!((merged.status, merged.complete), (Status::Verified, true));
+        let unit = merged.units.remove("comparator").map(|unit| unit.status);
+        assert_eq!(unit, Some(Status::Verified));
         assert_eq!(merged.units, whole.receipt.units);
     }
 
     /// The receipt of the qualification job of `fixture`.
-    fn job(fixture: &Fixture) -> Done {
+    pub(crate) fn job(fixture: &Fixture) -> Done {
         let phases = run::tests::shard_phases(fixture.root(), "qualification");
         run::tests::gate_shard(fixture, "qualification", phases, run::tests::plenty)
     }
@@ -2146,17 +2151,28 @@ mod tests {
         let (job, root) = (job(&fixture), fixture.root());
         let shard = run::tests::shard_phases(root, "target/t");
         let shard = run::tests::gate_shard(&fixture, "target/t", shard, run::tests::plenty);
-        let written = [&job, &shard].map(|done| done.written());
+        let compared = run::tests::comparator_part(&fixture, &LAYOUT, None);
+        let written = [&job, &shard, &compared].map(|done| done.written());
         let conclusions = written
             .each_ref()
             .map(|receipt| (receipt.status, receipt.complete));
-        let expected = [(Status::Verified, true), (Status::Rejected, true)];
+        let expected = [
+            (Status::Verified, true),
+            (Status::Rejected, true),
+            (Status::Verified, true),
+        ];
         assert_eq!(conclusions, expected, "{:?}", job.failures());
         assert!(written[0].proof_targets.is_empty());
         assert!(!stage(&job).join("Krepi/Proofs/Counter.lean").exists());
+        // The comparator part does not check the statement either.
+        let scoped = "the base round did not audit and verify Krepi.Proofs.Counter.t: SCOPED";
+        let compared_t = fixture::status(&compared, "comparator/t");
+        assert_eq!(compared_t, (Status::Scoped, Some(scoped)));
+        assert!(commands(&compared, "comparator/t").is_empty());
         // The merge records the units of the target and its statement, does
         // not require them and passes, and its conclusion stays REJECTED.
-        let parts = [part(&fixture, "q", &job), part(&fixture, "t", &shard)];
+        let parts = [("q", &job), ("t", &shard), ("c", &compared)];
+        let parts = parts.map(|(name, done)| part(&fixture, name, done));
         let merged = merge::merge(root, &LAYOUT, &parts, Some(Duration::ZERO));
         assert_eq!(merged.problems, Vec::<String>::new());
         let conclusion = (merged.status, merged.complete, merged.passes);
@@ -2168,7 +2184,8 @@ mod tests {
         let statement = &merged.units[&unit(T)];
         let statement = (statement.status, statement.reason.as_deref());
         assert_eq!(statement, (Status::Scoped, Some(reason)));
-        let exit = merge::tests::exit(&fixture, &[&parts[0], &parts[1]]);
+        assert_eq!(merged.units["comparator/t"].status, Status::Scoped);
+        let exit = merge::tests::exit(&fixture, &[&parts[0], &parts[1], &parts[2]]);
         assert_eq!(exit, ExitCode::SUCCESS);
     }
 }

@@ -249,9 +249,10 @@ fn aeneas(root: &str) -> String {
 /// `artifacts/lake/statements/<statement>`, else the name without its last
 /// component when that file exists, and `true`. A
 /// heartbeat copy is counted ten heartbeats per line at each inserted line.
-/// `leanchecker` passes. The range printer `Ranges.lean`, keyed `ranges`,
-/// prints for each module that it names a range on the line of each theorem
-/// of its file, and their count.
+/// `leanchecker` passes, and so does `lake comparator`, keyed `comparator`,
+/// whose configuration is its third argument. The range printer
+/// `Ranges.lean`, keyed `ranges`, prints for each module that it names a
+/// range on the line of each theorem of its file, and their count.
 const LAKE: &str = r##"lake='@ROOT@/artifacts/lake'
 mkdir -p "$lake"
 echo "$PWD $*" >> "$lake/calls"
@@ -263,6 +264,7 @@ case "$PWD $1 $2 $3" in
   */base/stage/*" env lean "*) key=audit ;;
   */base/stage/*" env leanchecker "*) key=leanchecker-$4 ;;
   */targets/*" env lean "*) key=audit ;;
+  *" comparator --config "*) key=comparator ;;
   *" build "*) for argument; do key=$argument; done ;;
   *) key=Audit ;;
 esac
@@ -306,6 +308,7 @@ case $key in
       echo "{\"severity\":\"information\",\"data\":\"$data\",\"pos\":{\"line\":$line,\"column\":0}}"
     done ;;
   leanchecker-*) ;;
+  comparator) echo 'Your solution is okay!' ;;
   ranges)
     for module in $(sed -n 's/^#krepi_declaration_ranges //p' Ranges.lean); do
       count=0
