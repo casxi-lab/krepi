@@ -24,7 +24,7 @@ use super::receipt::{self, Budgets, Failure, Mode, Receipt, Trigger};
 use super::registry::{self, State, Target};
 use super::toolchain::environment::{self, Installation, RunDirs, Tool};
 use super::toolchain::{self, Manifest};
-use super::{base, classify, externals, extract, guard, merge, mutants, qualify, storage};
+use super::{base, classify, externals, extract, guard, merge, mutants, qualify, storage, waiver};
 use crate::manifests;
 use crate::repo::{self, Entry, Tree};
 
@@ -173,6 +173,9 @@ pub struct Gate {
     /// The hand-written module files of the Lake project, which the base
     /// round finds and the stages of the targets hold too.
     pub(super) handwritten: Vec<String>,
+    /// What the waivers that hold leave out of the base round, which the
+    /// qualification job finds when it extracts.
+    pub(super) waived: waiver::LeftOut,
     /// Whether the run keeps its work directory and what it extracted.
     pub(super) keep: bool,
     progress: Box<dyn Write>,
@@ -403,14 +406,16 @@ impl Git for Gate {
     }
 }
 
-/// The receipt of a run that has not done anything yet.
+/// The receipt of a run that has not done anything yet, of the mode that
+/// [`receipt::mode`] gives unless it is scoped, and failed by its error.
 fn blank(context: &Context, targets: &BTreeSet<String>, run: &str, directory: &str) -> Receipt {
+    let (mode, status) = (receipt::mode(context.var), Status::ToolFailure);
     Receipt {
         schema: receipt::SCHEMA,
         command: receipt::COMMAND.to_string(),
         trigger: Trigger {
             mode: if targets.is_empty() || context.shard.is_some() {
-                Mode::Manual
+                mode.clone().unwrap_or_default()
             } else {
                 Mode::Scoped
             },
@@ -435,6 +440,7 @@ fn blank(context: &Context, targets: &BTreeSet<String>, run: &str, directory: &s
             gate_seconds: context.budget.unwrap_or(GATE_BUDGET).as_secs(),
             receipt_margin_seconds: RECEIPT_MARGIN.as_secs(),
         },
+        failures: Vec::from_iter(mode.err().map(|message| Failure { status, message })),
         ..Receipt::default()
     }
 }
@@ -479,6 +485,7 @@ pub(crate) fn execute(
         budgets: BTreeMap::new(),
         inventory: None,
         handwritten: Vec::new(),
+        waived: waiver::LeftOut::new(),
         keep: context.keep,
         progress,
         #[cfg(test)]
@@ -836,7 +843,8 @@ pub fn target_project(gate: &Gate, name: &str) -> PathBuf {
 /// the selected planned ones; and `targets`, after it, which concludes the
 /// selected formal ones and their mutants, the source mutants of `generate`
 /// in a run that generates them. The first stops on another registry in the
-/// export; the shard of a target extracts its target alone.
+/// export; the shard of a target extracts its target alone, and the
+/// qualification job no target of a waiver that holds.
 pub(super) fn target_phases<'a>(
     root: &Path,
     layout: &Layout,
@@ -859,7 +867,8 @@ pub(super) fn target_phases<'a>(
     let formal = Vec::from_iter(all.iter().filter(|t| pick(t, State::Formal)).cloned());
     let planned = Vec::from_iter(all.iter().filter(|t| pick(t, State::Planned)).cloned());
     let units = |targets: &[Target]| Vec::from_iter(targets.iter().map(|t| target_unit(&t.name)));
-    let budget = |targets: &[Target]| Duration::from_secs(targets.iter().map(|t| t.budget).sum());
+    let sum = |targets: &[Target]| (targets.iter().map(|t| t.budget)).fold(0, u64::saturating_add);
+    let budget = |targets: &[Target]| Duration::from_secs(sum(targets));
     let mut finish = units(&formal);
     finish.extend(
         formal
@@ -877,9 +886,15 @@ pub(super) fn target_phases<'a>(
     ];
     let bodies: [Body<'a>; 2] = [
         Box::new(move |gate| {
-            let (_, text) = read?;
+            let (registered, text) = read?;
             if base::read(&gate.source().join(path))? != text {
                 return Err(format!("{path} differs from the one read at the start"));
+            }
+            if margin {
+                let waivers = waiver::read(&gate.source(), &gate.layout, &registered)?;
+                let waived = waiver::holding(&waivers, &waiver::today(SystemTime::now())?);
+                all.retain(|target| !waived.contains(&target.name));
+                gate.waived = waiver::left_out(&gate.layout, &registered, &waived);
             }
             (all.iter()).try_for_each(|t| extract_target(gate, t, chosen.contains(&t.name)))
         }),
@@ -1890,6 +1905,63 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_qualification_job_leaves_out_the_targets_of_a_waiver_that_holds_when_it_extracts() {
+        let fixture = with_targets("waived-job", &two_targets(1_800, 1));
+        let job = |fixture: &Fixture| {
+            let done = gate_shard(fixture, "qualification", qualification_job(fixture), plenty);
+            let charon = (done.receipt.commands.iter()).any(|c| c.site == Site::Charon);
+            (done.written(), charon)
+        };
+        // An expired waiver leaves nothing out.
+        waiver::tests::waive(&fixture, "t", "2000-01-01");
+        let (receipt, charon) = job(&fixture);
+        assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
+        assert_eq!(Vec::from_iter(receipt.proof_targets.keys()), ["t"]);
+        assert!(charon);
+        // A waiver that holds leaves its target out of the extraction.
+        waiver::tests::waive(&fixture, "t", "9999-12-31");
+        let (receipt, charon) = job(&fixture);
+        assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
+        assert!(receipt.proof_targets.is_empty() && !charon);
+        assert!(receipt.phases["extraction"].ran);
+        // A record that breaks its rules stops the extraction.
+        fixture.write(
+            Layout::PRODUCTION.waivers,
+            "{\"schema\": 2, \"waivers\": []}\n",
+        );
+        fixture.commit_all();
+        let done = gate_shard(
+            &fixture,
+            "qualification",
+            qualification_job(&fixture),
+            plenty,
+        );
+        let receipt = done.written();
+        assert_eq!(
+            (receipt.status, receipt.complete),
+            (Status::ToolFailure, false)
+        );
+        let stopped =
+            "the phase extraction stopped: verification/waivers.json: schema 2 where 1 is expected";
+        assert_eq!(done.failures(), [stopped]);
+        assert!(receipt.proof_targets.is_empty() && !receipt.phases["base"].ran);
+    }
+
+    #[test]
+    fn a_whole_run_and_the_shard_of_a_waived_target_extract_it() {
+        let fixture = with_targets("waived-run", &two_targets(1_800, 1));
+        waiver::tests::waive(&fixture, "t", "9999-12-31");
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(Vec::from_iter(done.receipt.proof_targets.keys()), ["t"]);
+        assert_eq!(fixture::status(&done, "target/t"), (Status::Verified, None));
+        let phases = shard_phases(fixture.root(), "target/t");
+        let done = gate_shard(&fixture, "target/t", phases, plenty);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(Vec::from_iter(done.receipt.proof_targets.keys()), ["t"]);
+    }
+
+    #[test]
     fn the_shard_of_a_target_runs_its_extraction_and_its_phase_alone() {
         let fixture = with_targets("target-shard", &two_targets(1_800, 1));
         let phases = shard_phases(fixture.root(), "target/t");
@@ -1930,6 +2002,17 @@ pub(crate) mod tests {
         assert_eq!(phases, [Some("targets")]);
         let stage = done.run.path.join("work/targets/t/stage/verification");
         assert!(stage.join("Krepi/Proofs/T.lean").is_file());
+    }
+
+    #[test]
+    fn the_budgets_of_the_target_phases_saturate_instead_of_overflowing() {
+        let fixture = with_targets("saturated-budgets", &two_targets(u64::MAX, 0));
+        // The extraction adds the budget of the planned target to the largest.
+        let named = BTreeSet::from(["t", "p"].map(String::from));
+        let [extraction, finish] =
+            target_phases(fixture.root(), &Layout::PRODUCTION, &named, None, None);
+        let most = Duration::from_secs(u64::MAX);
+        assert_eq!((extraction.budget, finish.budget), (most, most));
     }
 
     #[test]
@@ -3582,6 +3665,46 @@ pub(crate) mod tests {
             &done,
             "image: the snapshot pins no image or another than the job's",
         );
+    }
+
+    #[test]
+    fn the_trigger_variable_gives_the_mode_of_whole_runs_and_shards_but_not_of_named_targets() {
+        let weekly = |name: &str| (name == receipt::TRIGGER).then(|| "WEEKLY".to_string());
+        let blank_of = |shard: Option<&str>, targets: &[&str]| {
+            let context = shard_context(Path::new("."), shard, &weekly, plenty);
+            let targets = BTreeSet::from_iter(targets.iter().map(|name| name.to_string()));
+            blank(&context, &targets, "run", "directory")
+        };
+        let runs = [
+            (None, &[][..]),
+            (Some("qualification"), &[]),
+            (Some("target/t"), &["t"]),
+        ];
+        for (shard, targets) in runs {
+            let receipt = blank_of(shard, targets);
+            assert_eq!(receipt.trigger.mode, Mode::Weekly);
+            assert_eq!(receipt.failures, []);
+        }
+        assert_eq!(blank_of(None, &["t"]).trigger.mode, Mode::Scoped);
+    }
+
+    #[test]
+    fn an_unknown_trigger_is_a_tool_failure_before_the_phases() {
+        let fixture = Fixture::new("trigger");
+        let done = on_the_ci_host(&fixture, other_uid(), &[(receipt::TRIGGER, "REQUIRED")]);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(done.written().trigger.mode, Mode::Required);
+        // The mode of a run of named targets is no value of the variable.
+        let done = on_the_ci_host(&fixture, other_uid(), &[(receipt::TRIGGER, "SCOPED")]);
+        assert_eq!(done.code, ExitCode::FAILURE);
+        let receipt = done.written();
+        let found = (receipt.status, receipt.complete, receipt.trigger.mode);
+        assert_eq!(found, (Status::ToolFailure, false, Mode::Manual));
+        let not = "KREPI_FORMAL_TRIGGER is \"SCOPED\", not REQUIRED, FORCED_FULL or WEEKLY";
+        assert_eq!(done.failures(), [not]);
+        let stopped = Some("a failure before the phases stopped the run");
+        assert_eq!(fixture::status(&done, "u1"), (Status::NotRun, stopped));
+        assert!(!receipt.phases["checks"].ran);
     }
 
     #[test]

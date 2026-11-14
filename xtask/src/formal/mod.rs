@@ -28,6 +28,7 @@ pub mod run;
 pub mod storage;
 pub mod toolchain;
 pub mod vectors;
+pub mod waiver;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -98,6 +99,9 @@ pub struct Layout {
     /// The directory of the reviewed tool patches, relative to the
     /// repository root.
     pub tooling: &'static str,
+    /// The waiver record, relative to the repository root, or none in a
+    /// layout to which no waiver applies.
+    pub waivers: &'static str,
 }
 
 impl Layout {
@@ -126,6 +130,7 @@ impl Layout {
         toolchain: "verification/toolchain.json",
         image_pin: "verification/image-pin.json",
         tooling: "verification/tooling",
+        waivers: "verification/waivers.json",
     };
 
     /// The layout of the calibration target: its workspace, Lake project and
@@ -142,6 +147,7 @@ impl Layout {
         open: "",
         mutants: "verification/qualification/calibration/mutants",
         shards: "verification/qualification/calibration/shards.json",
+        waivers: "",
         ..Layout::PRODUCTION
     };
 }
@@ -165,7 +171,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "check",
-        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, that the target registry and verification/axioms.json keep their rules, with every key of a target in the inventory, that the registries hold nothing that the gate does not support, that every survivor of the lists of survivors has a class, and that the shard plan and the budget of each shard keep their rules; --write first writes the file, and --calibration checks the calibration target",
+        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, that the target registry, verification/axioms.json and the waiver record verification/waivers.json keep their rules, with every key of a target in the inventory, that the registries hold nothing that the gate does not support, that every survivor of the lists of survivors has a class, and that the shard plan and the budget of each shard keep their rules; --write first writes the file, and --calibration checks the calibration target",
         subcommands: &[],
     },
     Command {
@@ -180,7 +186,12 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "merge",
-        about: "Merge RECEIPT..., the receipts of the qualification job and of the shard of each formal target of the commit checked out, into the conclusion of the whole gate, and write its record and summary; --calibration merges those of the calibration target",
+        about: "Merge RECEIPT..., the receipts of the qualification job and of the shard of each formal target of the commit checked out, into the conclusion of the whole gate with the waivers of verification/waivers.json that hold, which passes when every unit and part outside them is VERIFIED, and write its record and summary; --calibration merges those of the calibration target",
+        subcommands: &[],
+    },
+    Command {
+        name: "receipt",
+        about: "Judge RECORD, the record of a merge, by default artifacts/formal/merge/record.json, against the checkout: CURRENT when it has the gate inputs of the clean checkout, the pinned image and one conclusion for each registered unit, and is complete and VERIFIED, and WAIVED when it only passes within waivers that hold; --require-fresh also requires a run of CI without planned statements or waivers",
         subcommands: &[],
     },
     Command {
@@ -238,6 +249,7 @@ fn cli() -> clap::Command {
         .subcommand(mutants::cli(about("mutants")).arg(keep()))
         .subcommand(paths::cli(about("impact")))
         .subcommand(merge::cli(about("merge")))
+        .subcommand(receipt::cli(about("receipt")))
         .subcommand(vectors::cli(about("vectors")))
         .subcommand(canary::cli(about("canary")))
 }
@@ -293,6 +305,7 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
         }
         Some(("impact", matches)) => paths::command(root, &Layout::PRODUCTION, matches),
         Some(("merge", matches)) => merge::command(root, layout(matches), matches),
+        Some(("receipt", matches)) => receipt::command(root, &Layout::PRODUCTION, matches),
         Some(("guard", matches)) => guard::command(root, &Layout::PRODUCTION, matches),
         Some(("toolchain-check", matches)) => {
             let path = |name| matches.get_one::<PathBuf>(name).expect("a required option");
@@ -455,6 +468,21 @@ mod tests {
         assert_eq!(name, "merge");
         assert_eq!(receipts, [PathBuf::from("a.json"), PathBuf::from("b.json")]);
         assert!(matches.get_flag("calibration"));
+        for (args, record, fresh) in [
+            (&["receipt"][..], None, false),
+            (&["receipt", "--require-fresh"], None, true),
+            (
+                &["receipt", "r.json", "--require-fresh"],
+                Some("r.json"),
+                true,
+            ),
+        ] {
+            let matches = read(args).expect("a valid command line");
+            let (name, matches) = matches.subcommand().expect("a subcommand");
+            let found = matches.get_one::<PathBuf>("RECORD").cloned();
+            let found = (name, found, matches.get_flag("require-fresh"));
+            assert_eq!(found, ("receipt", record.map(PathBuf::from), fresh));
+        }
         for args in [
             &["run", "--shard"][..],
             &["run", "--shard", "base"],
@@ -466,6 +494,9 @@ mod tests {
             &["merge"],
             &["merge", "--keep"],
             &["merge", "--frobnicate"],
+            &["receipt", "a", "b"],
+            &["receipt", "--calibration"],
+            &["run", "--reuse"],
         ] {
             let error = read(args).expect_err("a usage error");
             assert_eq!(error.exit_code(), 2, "{args:?}: {error}");
@@ -563,6 +594,7 @@ mod tests {
             layout.axioms.to_string(),
             layout.tcb.to_string(),
             layout.shards.to_string(),
+            layout.waivers.to_string(),
             format!("{}/LICENSE-Apache-2.0", layout.tooling),
         ]
         .into_iter()
@@ -581,6 +613,7 @@ mod tests {
             layout.statements,
             layout.axioms,
             layout.tcb,
+            layout.waivers,
         ] {
             assert!(
                 path.starts_with(&format!("{}/", layout.project)),
@@ -644,8 +677,10 @@ mod tests {
             [paths, names, tools]
         };
         assert_eq!(shared(&layout), shared(&production));
-        // No contract describes the calibration, whose survivors are its own.
+        // No contract describes the calibration, whose survivors are its own,
+        // and no waiver applies to it.
         assert!(layout.open.is_empty() && !production.open.is_empty());
+        assert!(layout.waivers.is_empty() && !production.waivers.is_empty());
         let own = format!("{}/", layout.qualification);
         assert!(layout.mutants.starts_with(&own) && !production.mutants.starts_with(&own));
     }

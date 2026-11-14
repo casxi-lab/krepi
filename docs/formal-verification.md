@@ -19,9 +19,10 @@ The registries `verification/targets.json`, `verification/models.json` and
 `verification/legacy.json` exist, and so do the open obligations
 `verification/open.json`, the statement registry
 `verification/statements.json`, the registry of library axioms
-`verification/axioms.json` and the registry of the trusted base
-`verification/tcb.json`: no target, model, statement, library axiom or
-trusted item is registered. The pinned tools exist: the tool manifest
+`verification/axioms.json`, the registry of the trusted base
+`verification/tcb.json` and the waiver record `verification/waivers.json`
+([waivers](#waivers)): no target, model, statement, library axiom,
+trusted item or waiver is registered. The pinned tools exist: the tool manifest
 `verification/toolchain.json`, the reviewed Aeneas patch, the recipe of the
 image that holds the tools, the workflows that build and publish it, the
 pin of the published image, `verification/image-pin.json`, and
@@ -43,9 +44,11 @@ On a pull request, a first phase records the
 `--shard`, `cargo xtask formal run` runs one part of the gate, the
 qualification job or the shard of one formal target, and
 `cargo xtask formal merge` combines the receipts of the parts of a commit
-into the conclusion of the whole gate
-([shards and merge](#shards-and-merge)); CI runs the gate as these parts
-and merges them ([CI job](#ci-job)). The
+into the conclusion of the whole gate, with the [waivers](#waivers) that
+hold ([shards and merge](#shards-and-merge)); CI runs the gate as these parts
+and merges them ([CI job](#ci-job)). `cargo xtask formal receipt` says
+whether the record of a merge is current for the checkout, and whether it
+is fresh ([current and fresh records](#current-and-fresh-records)). The
 [calibration target](#calibration-target), a crate with the shapes of the
 first kernel targets and its proofs, runs through the same phases with
 `cargo xtask formal run --calibration`, in the workflow
@@ -125,12 +128,13 @@ never moved into the trusted boundary to close a gap.
 | `verification/statements.json` | The statement hash, and each statement with its theorem and state ([statements and proofs](#statements-and-proofs)) | Present, empty |
 | `verification/axioms.json` | The axioms of the Aeneas Lean library that target theorems may use, each with its source and reason ([base round](#base-round)) | Present, empty |
 | `verification/tcb.json` | Items of the trusted base: native decisions and patterns of generated axioms, whose classification comes later ([base round](#base-round)) | Present, empty |
+| `verification/waivers.json` | The waiver record: each waiver of registered targets with its reason, scope, expiry and author ([waivers](#waivers)) | Present, empty |
 | `verification/legacy.json` | Kept empty: production functions without a proof are listed in `open.json` ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty by design |
 | `verification/open.json` | The open obligations of the production code, generated from the `Open obligations` tables of the contracts of the components ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
 | `verification/qualification/calibration/` | The [calibration target](#calibration-target): a workspace with a root package and a member, its Lake project with its statements and proofs, its registries and shard plan, and the lists of survivors of its source mutants in `mutants/` | Present |
 | `verification/mutants/` | The list of survivors of the source mutants of each target that has one, `<target>.json` ([source mutants and survivors](#source-mutants-and-survivors)) | Absent until a list is written |
-| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `mutants`, `vectors`, `canary`, `impact` and `merge` present, the others planned |
+| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `mutants`, `vectors`, `canary`, `impact`, `merge` and `receipt` present, the others planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
 `artifacts/formal/` directory, and the Lake build directory
@@ -176,7 +180,9 @@ The job of the toolchain canary keeps its trees, downloads and records
 below `artifacts/canary/`, and its image build, as the image workflows do,
 below `artifacts/image/` ([toolchain canary](#toolchain-canary)).
 `cargo xtask formal merge` writes its record and summary to
-`artifacts/formal/merge/` ([shards and merge](#shards-and-merge)). In CI,
+`artifacts/formal/merge/` ([shards and merge](#shards-and-merge)), where
+`cargo xtask formal receipt` reads the record by default
+([current and fresh records](#current-and-fresh-records)). In CI,
 the jobs of the gate pack the `logs/` of their runs into
 `artifacts/formal/logs.tar.gz`, and the merge job downloads the artifacts
 of the parts below `artifacts/formal/parts/`: a single artifact into that
@@ -667,21 +673,22 @@ The commands of `cargo xtask formal` follow the design of the gate.
 `cargo xtask formal toolchain-check`, `cargo xtask formal run`,
 `cargo xtask formal guard`, `cargo xtask formal check`,
 `cargo xtask formal mutants`, `cargo xtask formal vectors`,
-`cargo xtask formal canary`, `cargo xtask formal impact` and
-`cargo xtask formal merge` exist; the others are planned.
+`cargo xtask formal canary`, `cargo xtask formal impact`,
+`cargo xtask formal merge` and `cargo xtask formal receipt` exist; the
+others are planned.
 
 | Command | Purpose |
 | --- | --- |
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
 | `cargo xtask formal run [--target NAME]... [--shard NAME] [--calibration] [--keep]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets, `--shard` only the qualification job or the shard of a formal target ([shards and merge](#shards-and-merge)), `--calibration` runs in the layout of the [calibration target](#calibration-target), and `--keep` keeps the work directory of the run ([layout](#layout)). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run of the whole gate has |
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs, sources and registries ([guard](#guard)) |
-| `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
-| `cargo xtask formal receipt [--require-fresh]` (planned) | Says whether a receipt is current for the checkout: the same gate inputs and image, one conclusion for each unit, complete and `VERIFIED`; `--require-fresh` also requires a run of the whole gate from a clean checkout without planned statements |
+| `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)) and of the waiver record ([waivers](#waivers)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its job fetched and built: `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from the outcomes of the steps of the job ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
 | `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration, and `--keep` keeps the work directory of the run, as for `run` |
 | `cargo xtask formal impact --base REV` | Lists, one item per line, the merge base of `REV` and `HEAD`, each path changed since with its Git status, without rename detection, the decision, `unaffected` when no changed path lies within a [gate input](#gate-inputs-and-snapshot) and `affected` otherwise, and the registered targets that the change affects, with their states: every target when an input of extraction changed, and otherwise each whose entry in `verification/targets.json` changed and each with a changed file of its `proof_modules`. A registry that cannot be read at the merge base, as after a change of its schema, counts as one without targets, so that every target is listed, after a line `unreadable verification/targets.json at the merge base: <why>`. Paths, names and that reason are printed escaped, so that none splits a line. It decides nothing, and exits with 1 only on a base that is not a revision or when Git or the registry at the head cannot be read |
-| `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
+| `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, which passes when every unit and part outside the [waivers](#waivers) that hold is `VERIFIED`, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
+| `cargo xtask formal receipt [--require-fresh] [RECORD]` | Judges the record of a merge, by default `artifacts/formal/merge/record.json`, against the checkout ([current and fresh records](#current-and-fresh-records)): `CURRENT` when it has the gate inputs of the clean checkout, the pinned image and one conclusion for each registered unit and is complete, `VERIFIED` and passing, and `WAIVED` when it passes only within waivers that still hold; `--require-fresh` also requires the trigger of a run of CI, no planned statement and no waiver. It exits with 0 when the record is current, and fresh when asked, 3 when it is waived, 1 otherwise and 2 on a usage error. It runs no tool and proves nothing |
 
 `cargo xtask check` does not run the gate, which needs the pinned tools;
 its formal step runs `cargo xtask formal check` and
@@ -689,10 +696,10 @@ its formal step runs `cargo xtask formal check` and
 CI runs the gate as its parts and their merge on every pull request to
 `main` and every push to `main` ([CI job](#ci-job)). None of these jobs is
 required: a change is to merge only when a required gate passes on its
-head or a committed waiver record covers the failure, and both are
-planned. On a pull request, the jobs `formal fast` and `formal guard` run
-`cargo xtask formal impact` and `cargo xtask formal guard`, and are not
-required either.
+head, which is planned; the job `formal merge` passes a failure that a
+committed [waiver](#waivers) covers. On a pull request, the jobs
+`formal fast` and `formal guard` run `cargo xtask formal impact` and
+`cargo xtask formal guard`, and are not required either.
 
 ## Gate run
 
@@ -769,8 +776,9 @@ in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
    `--target`; a run extracts these and, for the base round, the formal
    targets that it does not select, so a whole run extracts no planned
    target. The qualification job selects no target and extracts every
-   formal target for the base round; the shard of a target selects its
-   target and extracts no other. A whole run whose registry has no formal
+   formal target for the base round but those of the waivers that hold
+   ([waivers](#waivers)); the shard of a target selects its target and
+   extracts no other. A whole run whose registry has no formal
    target selects and extracts none, and the workspace may then have no
    root package. When the run selects targets, it takes the inventory of
    the exported workspace for their registration checks
@@ -973,11 +981,12 @@ job `formal merge` of the workflow `formal` is the check that the required
 gate (planned) is to use.
 
 - **The qualification job** has the [guard](#guard) on a pull request, the
-  [qualification](#qualification), the extraction of every formal target,
-  whose commands are those of the unit `base`, and the
-  [base round](#base-round); it runs no target. Its budget is 7,800 s: the
-  gate's 7,200 s and 600 s for the extraction, which the budgets of the
-  targets do not grow. Its disk guard counts `qualification` alone.
+  [qualification](#qualification), the extraction of every formal target
+  but those of the [waivers](#waivers) that hold, whose commands are those
+  of the unit `base`, and the [base round](#base-round); it runs no target.
+  Its budget is 7,800 s: the gate's 7,200 s and 600 s for the extraction,
+  which the budgets of the targets do not grow. Its disk guard counts
+  `qualification` alone.
 - **The shard of a target** has the extraction of that formal target, whose
   commands are those of its unit, and the phase `targets` for it: its
   build, type check, audit, declaration ranges and registered
@@ -988,14 +997,17 @@ gate (planned) is to use.
   registered budget of its target, which its extraction shares. Its disk
   guard counts the unit of its target alone. A shard of a planned or
   unknown target is a tool failure before the phases.
-- **The receipt of a part** names its part in `shard` and is `MANUAL`,
-  never `SCOPED`; it is complete by the rule of a run of the whole gate
-  over its own units ([results](#results)).
+- **The receipt of a part** names its part in `shard` and has the mode
+  that `KREPI_FORMAL_TRIGGER` gives ([receipt](#receipt)), `MANUAL`
+  without it, never `SCOPED`; it is complete by the rule of a run of the
+  whole gate over its own units ([results](#results)).
 
 `cargo xtask formal merge [--calibration] RECEIPT...` runs on the host in a
 checkout of the commit of the receipts; it pulls no image and runs no proof
-tool. It reads the registry, `statements.json` and the qualification cases
-of the checkout, those of the calibration target with `--calibration`.
+tool. It reads the registry, `statements.json`, the qualification cases and
+the waiver record of the checkout, those of the calibration target, which
+has no waiver record, with `--calibration`, and judges the
+[waivers](#waivers) on the UTC date of the clock of its host.
 Where it is given the receipts of several attempts of one part, only that
 of the latest attempt counts and the others are listed as superseded; a
 receipt without a numeric attempt counts as the earliest, and two receipts
@@ -1003,13 +1015,24 @@ of one part and one attempt are two receipts of the part. It gives the
 conclusion of the whole gate only when:
 
 1. every receipt can be read and parses, has schema 5 and a part, and its
-   commit and tree are those of the checkout, whose gate inputs are clean
-   and whose registry, `statements.json` and qualification cases can be
-   read;
-2. every receipt names one and the same image;
-3. one receipt is of the qualification job and one of the shard of each
+   commit and tree are those of the checkout, whose gate inputs are clean,
+   whose registry, `statements.json` and qualification cases can be read
+   and keep their rules and whose waiver record, where it can be read,
+   keeps its rules (a missing or unreadable record has no
+   [waivers](#waivers)), and the clock of the host gives a date from
+   1970-01-01 to 9999-12-31;
+2. each receipt of the commit started from the gate inputs of the
+   checkout, its `inputs.before` ([receipt](#receipt)), which its commit
+   and tree imply, so that this only guards against a receipt without them;
+3. every receipt names one and the same image;
+4. every receipt has one and the same trigger: the mode, `ref` and
+   `run_id` of its `trigger`, whatever its event and attempt;
+5. one receipt is of the qualification job and one of the shard of each
    formal target, and none is of another part;
-4. each unit that the checkout registers, of the qualification, of the base
+6. the receipt of the qualification job, unless it has a failure, has
+   extracted every formal target but those of the waivers that hold on the
+   date of the merge, as its `proof_targets` list them;
+7. each unit that the checkout registers, of the qualification, of the base
    round and of each formal target with its registered mutants, has exactly
    one conclusion among the receipts, and no receipt concludes another
    unit.
@@ -1017,14 +1040,33 @@ conclusion of the whole gate only when:
 When a condition fails, the merge gives no conclusion: it is `TOOL_FAILURE`
 and not complete, with each problem. Otherwise its status is that of a run
 of the whole gate with the failures of the receipts and the merged units,
-and it is complete when every receipt is: a target that the proofs reject,
-whose mutants did not run, makes it `REJECTED` and not complete, and a part
-that the disk guard refused makes it `TOOL_FAILURE` and not complete, where
-that run itself is `NOT_RUN`. With no formal target in the registry, the
-receipt of the qualification job alone is merged. Each run whose job names
-its image compares that reference with the pin of its snapshot, so the
-merge records the image that the receipts name and does not compare it
-with the pin.
+`SCOPED` in place of `VERIFIED` when a unit is `SCOPED`, and it is complete
+when every receipt is: a target that the proofs reject, whose mutants did
+not run, makes it `REJECTED` and not complete, and a part that the disk
+guard refused makes it `TOOL_FAILURE` and not complete, where that run
+itself is `NOT_RUN`. With no formal target in the registry, the receipt of
+the qualification job alone is merged. Each run whose job names its image
+compares that reference with the pin of its snapshot, so the merge records
+the image that the receipts name and does not compare it with the pin.
+
+The units of the targets of the waivers that hold on the date of the merge,
+with their registered mutants and the `base/<theorem>` of each statement
+in a proof module of these targets that the base round leaves out, and the
+parts of the shards of these targets are recorded and not required. A
+statement in a module that the base round leaves out only because the
+module imports what a waiver leaves out stays required: its `SCOPED`
+`base/<theorem>` fails the merge ([waivers](#waivers)). The merge passes
+when it has no problem, every other unit is `VERIFIED` and no other part
+has a failure. A waiver is used when a unit of its targets is not
+`VERIFIED` or a part of them has a failure, and a merge that passes with a
+used waiver is `REJECTED`: a waiver only lets the merge pass. A merge
+whose units are all `VERIFIED` and whose parts have no failure is
+`VERIFIED`, with its waivers unused. A merge without a waiver that holds
+passes only when every unit is `VERIFIED` and no part has a failure. A
+waiver that expires after the qualification job and before the merge
+leaves a target out of the job that no waiver covers at the merge, which
+gives no conclusion; running the merge again does not help, the gate must
+run again.
 
 The synthetic wall clock is the `seconds` of the slowest part and the
 seconds of the merge, from the start of its job, which the job gives in
@@ -1038,21 +1080,33 @@ limit is 3,600 s, 300 s of which are the merge's, so the registered budget
 of a shard is at most 3,300 s
 ([shard plan and disk guard](#shard-plan-and-disk-guard)). A synthetic wall
 clock above 2,880 s, 80% of the limit, is flagged in the record and the
-summary.
+summary, and so is each part whose `seconds` are above 2,880 s, or whose
+cgroup memory peak is above 13,372,738,764 B, 80% of the 16,715,923,456 B
+of memory of the runner of CI. The flags change no conclusion.
 
 The merge writes `artifacts/formal/merge/record.json` and its summary
-`summary.md`, prints the summary, and exits with 0 for a complete
-`VERIFIED` conclusion and 1 otherwise, with 2 on a usage error, or with 120
-when it cannot write them, the record then on standard error. The record
-has schema 1 and the form of a receipt ([receipt](#receipt)):
+`summary.md`, prints the summary, and exits with 0 when it passes and 1
+otherwise, with 2 on a usage error, or with 120 when it cannot write them,
+the record then on standard error. The summary has the conclusion and the
+synthetic wall clock, the trigger, that the merge passes when it is not
+`VERIFIED`, each waiver that holds, each flag and each problem; the
+trigger, the shards and the waivers are escaped, so that none splits a
+line. The record has schema 2 and the form of a receipt
+([receipt](#receipt)):
 
 | Field | Content |
 | --- | --- |
-| `schema` | `1` |
+| `schema` | `2` |
 | `status`, `complete` | The conclusion, as above |
+| `passes` | Whether the merge passes, as above |
 | `commit`, `tree` | Those of the checkout, or `null` when they cannot be read |
+| `inputs` | The object of each gate input of the checkout, as `inputs.before` of a receipt, or `null` when it cannot be read |
 | `image` | The one image that the receipts name, or `null` |
-| `parts` | Each receipt given, in order: `receipt`, its path; `sha256`, of its bytes, or `null`; and when it parses, `shard`, `run_id`, `attempt`, `superseded`, `status`, `complete` and `seconds` |
+| `trigger`, `ref`, `run_id` | The one mode, `ref` and `run_id` of the triggers of the receipts, or `null` |
+| `planned_statements` | The number of planned statements of `statements.json`, or `null` when it cannot be read |
+| `waiver_date` | The UTC date on which the merge judged the waivers, or `null` when the clock gives none |
+| `waivers` | Each waiver that holds on that date: `waiver`, its entry of the waiver record, and `used`, whether the merge used it |
+| `parts` | Each receipt given, in order: `receipt`, its path; `sha256`, of its bytes, or `null`; and when it parses, `shard`, `run_id`, `attempt`, `superseded`, `status`, `complete`, `seconds` and the `cgroup_memory_peak` of its `resources`; `over_seconds`, whether its `seconds` are above 2,880 s; and `over_memory`, whether its peak is above 13,372,738,764 B, or `null` without a peak |
 | `units` | Each registered unit with its phase, status and reason |
 | `slowest_part_seconds`, `merge_seconds`, `merge_from`, `wall_clock_seconds`, `over_80_percent` | The synthetic wall clock: the slowest part, the merge from its `job` or its `command`, their sum and whether it is above 2,880 s |
 | `problems` | Each condition that fails |
@@ -1061,12 +1115,39 @@ For example, with values that are only an illustration:
 
 ```json
 {
-  "schema": 1,
+  "schema": 2,
   "status": "VERIFIED",
   "complete": true,
+  "passes": true,
   "commit": "cccccccccccccccccccccccccccccccccccccccc",
   "tree": "dddddddddddddddddddddddddddddddddddddddd",
+  "inputs": {
+    "kernel": {
+      "mode": "040000",
+      "type": "tree",
+      "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "xtask": null
+  },
   "image": "ghcr.io/o/r@sha256:9999999999999999999999999999999999999999999999999999999999999999",
+  "trigger": "REQUIRED",
+  "ref": "refs/pull/7/merge",
+  "run_id": "123",
+  "planned_statements": 0,
+  "waiver_date": "2026-11-13",
+  "waivers": [
+    {
+      "waiver": {
+        "reason": "The proofs wait for a fix of the tool.",
+        "scope": [
+          "t"
+        ],
+        "expires": "2026-12-01",
+        "author": "someone"
+      },
+      "used": false
+    }
+  ],
   "parts": [
     {
       "receipt": "artifacts/parts/qualification/receipt.json",
@@ -1077,7 +1158,10 @@ For example, with values that are only an illustration:
       "superseded": false,
       "status": "VERIFIED",
       "complete": true,
-      "seconds": 1095.7
+      "seconds": 1095.7,
+      "cgroup_memory_peak": 10429386752,
+      "over_seconds": false,
+      "over_memory": false
     }
   ],
   "units": {
@@ -1095,6 +1179,124 @@ For example, with values that are only an illustration:
   "problems": []
 }
 ```
+
+`cargo xtask formal receipt` judges a record against a checkout
+([current and fresh records](#current-and-fresh-records)).
+
+### Waivers
+
+`verification/waivers.json`, the waiver record, is a gate input with
+schema 1 and a list `waivers`, and is committed empty. Each waiver has
+
+- `reason`, why the targets that it covers may stay unverified;
+- `scope`, the names of the registered targets that it covers;
+- `expires`, the last UTC date on which it holds, as `YYYY-MM-DD`;
+- `author`, the author of the pull request that adds it.
+
+A waiver holds on each date up to its expiry, that date included; dates
+in this form sort as text in the order of the calendar.
+`cargo xtask formal check` refuses a record of another schema or with an
+unknown field, and a waiver with a blank reason or author, an empty scope,
+a name in it that `verification/targets.json` does not register, or an
+expiry that is not a date of the calendar in that form. A planned target
+may be named, and a name may repeat. A record that is missing or cannot
+be read has no waivers, and the layout of the
+[calibration target](#calibration-target) has no record.
+
+The qualification job reads the record of its export when its extraction
+starts, with the UTC date of the clock of the host, and leaves the formal
+targets of the waivers that hold then out of the extraction and of the
+[base round](#base-round). A record that breaks its rules, or a clock that
+reads before 1970-01-01 or after 9999-12-31, stops the extraction as a
+tool failure. The base round leaves out the proof modules of those targets
+that no other formal target lists, and every hand-written module that
+imports a module left out, or a generated module of such a target,
+`KrepiGen.<module>.<file>`, unless a target that the job extracted lists
+it: such a module of a target fails the build, as the import of any
+missing module does. The round neither builds nor checks a statement
+whose module is left out: its `base/<theorem>` is `SCOPED`, with the
+reason that the waiver of the target leaves the module out of the base
+round, and is a unit of that target when the module is one of its proof
+modules. A waiver of a target that proves a registered statement in one of
+its proof modules that the round leaves out is therefore always used: the
+round leaves the statement unchecked, so a merge that passes is `REJECTED`,
+never `VERIFIED`, and `cargo xtask formal receipt` calls its record `WAIVED`
+at best, not `CURRENT`, even when the shard of the target is `VERIFIED`;
+once the waiver has expired, the record is not current
+([current and fresh records](#current-and-fresh-records)). The
+[source rules](#source-rules) still apply to every tracked Lean file, those
+left out included. The shard of a waived target runs as any other. A run
+without `--shard`, the shard of a target, the calibration target and the
+[toolchain canary](#toolchain-canary) do not read the record.
+
+`cargo xtask formal merge` reads the record of the checkout and judges it
+on the UTC date of the clock of its host; a record that breaks its rules,
+or a clock that gives no date, leaves the merge without a conclusion
+([shards and merge](#shards-and-merge)). The units of the targets of the
+waivers that hold then, their parts and the `base/<theorem>` of each
+statement in a proof module of theirs that the base round leaves out are
+recorded and not required: the merge passes over their failures, records
+each waiver that holds and whether it used it, and stays `REJECTED` when
+it used one. A waiver covers no unit of the qualification, not the unit
+`base`, and no `base/<theorem>` of a module that the base round leaves
+out only because the module imports what a waiver leaves out: that unit
+is `SCOPED` and fails the merge.
+
+`cargo xtask formal receipt` calls a record that passes with a used waiver
+`WAIVED`, not `CURRENT`, and only while each waiver that it used holds on
+the UTC date of the clock of its host; with `--require-fresh` it refuses
+every record that holds a waiver, used or not, even one that has expired
+since ([current and fresh records](#current-and-fresh-records)).
+
+### Current and fresh records
+
+`cargo xtask formal receipt [--require-fresh] [RECORD]` judges the record
+of a merge, by default `artifacts/formal/merge/record.json`, against the
+checkout, in the production layout. It runs no tool and proves nothing. A
+record that cannot be read, that does not parse or whose `schema` is not 2
+([shards and merge](#shards-and-merge)) is not current. A record is
+`CURRENT` when
+
+1. its `inputs` are the objects of the gate inputs of the commit checked
+   out ([gate inputs and snapshot](#gate-inputs-and-snapshot)), and the
+   gate inputs of the checkout are clean. The commit and the tree are not
+   compared, so the record of a head is current for every commit with the
+   same gate inputs, such as the merge of its pull request into `main`; a
+   change outside the gate inputs, such as below `tools/` or
+   `.github/scripts/`, leaves the record current;
+2. its `image` is the reference that the image pin of the checkout names
+   ([image pin](#image-pin));
+3. each unit that the checkout registers, of the qualification, of the
+   base round and of each formal target with its registered mutants, has
+   exactly one conclusion among its `units`, and it concludes no other
+   unit;
+4. it has no problem, is `VERIFIED` and complete, and passes.
+
+A record that fails only the last condition, because it is not `VERIFIED`
+or not complete, and passes with a waiver that it used, passed the merge
+only through its waivers ([waivers](#waivers)). It is `WAIVED` when each
+waiver that it used still holds on the UTC date of the clock of the host,
+and not current otherwise, or when the clock gives no date.
+
+With `--require-fresh`, a current record must also be fresh: its trigger
+is `REQUIRED`, `FORCED_FULL` or `WEEKLY` with a `run_id`, the mode of a run
+of CI, so that neither a run of named targets, which is `SCOPED`, nor a run
+without `KREPI_FORMAL_TRIGGER`, which is `MANUAL`, is fresh; its
+`planned_statements` are 0; and it holds no waiver. A run of the gate
+starts only from clean gate inputs ([gate run](#gate-run)), so a
+`VERIFIED` record is of a run from a clean checkout. With
+`--require-fresh` no record is `WAIVED`.
+
+The command prints `formal receipt:` and the verdict, `CURRENT`,
+`CURRENT and fresh`, `WAIVED`, `CURRENT, not fresh` or `not CURRENT`; a
+line `commit` with the commit of the record; a line `trigger` with its
+mode, `ref` and `run_id`, `none` for each that it lacks; a line for each
+waiver that the record holds, as the summary of the merge writes it; and a
+line for each reason against the record, each condition that fails. The
+values of the record and the reasons are escaped, so that none splits a
+line. It exits with 0 when the record is current, and fresh when
+`--require-fresh` is given, with 3 when it is waived, with 1 otherwise and
+with 2 on a usage error. No job of CI runs it.
 
 ### Extraction
 
@@ -1331,7 +1533,8 @@ the phase. Then it
    [source rule](#source-rules);
 3. creates the stage `work/base/stage/` as the qualification creates the
    stage of a case: the project files of the export, its module files below
-   `verification/Krepi/` whose paths name modules, so that no file that
+   `verification/Krepi/` whose paths name modules but those that the
+   [waivers](#waivers) leave out, so that no file that
    step 2 rejects for its form reaches the root, the two links to the
    installation, and, for each
    qualification case with a proof whose generated code built, the
@@ -1387,16 +1590,16 @@ failure otherwise ([results](#results)).
 
 **Audit.** `Audit.lean` is not a module. It imports the root, sets
 `pp.privateNames`, states `example : S := t` for the theorem `t` of each
-proved statement `S`, and runs a program that, for each own module, prints
-a marker, runs `#print axioms` on each theorem constant of the module that
-is not private, not an internal detail and not the theorem of a planned
-statement, prints the module that declares each of its native-decision
-axioms, and prints the line at which each theorem's declaration range
-starts; it then prints, for each proved statement, the module that defines
-`S` and whether the type of `t` in the environment is the constant `S`
-itself. The `example` alone would not show that: elaborating `t` against
-`S` may insert a coercion, apply an instance or fill an argument that the
-proofs declare.
+proved statement `S` of a module in the stage, and runs a program that,
+for each own module, prints a marker, runs `#print axioms` on each theorem
+constant of the module that is not private, not an internal detail and not
+the theorem of a planned statement, prints the module that declares each
+of its native-decision axioms, and prints the line at which each theorem's
+declaration range starts; it then prints, for each proved statement, the
+module that defines `S` and whether the type of `t` in the environment is
+the constant `S` itself. The `example` alone would not show that:
+elaborating `t` against `S` may insert a coercion, apply an instance or
+fill an argument that the proofs declare.
 The list of theorems is Lean's, so it holds the theorems that Lean
 generates, such as `injEq` and `congr_eq` lemmas, and theorems that a
 metaprogram adds. The round rejects
@@ -1508,7 +1711,8 @@ its own problems, and when the build failed or `leanchecker` reported a
 declaration that the kernel rejects, and `VERIFIED` otherwise; the other
 audited theorems get their status in the receipt the same way. A tool
 failure among the round's commands forces `base` and each of its
-theorems.
+theorems. A `base/<theorem>` whose module a waiver leaves out is
+`SCOPED` ([waivers](#waivers)).
 
 ### Source rules
 
@@ -1792,11 +1996,12 @@ its checks, or of a phase, the closing steps still run; an error of the
 start ends the run without the second snapshot, and a panic of the run
 outside a phase ends it without any later command. The receipt is written in every case. It
 is a tool failure as well when the gate inputs are not clean at the start,
-when a name given with `--target` is not in `verification/targets.json`
-or the target of a shard is not a formal target of it, and when a
-registered unit has no conclusion or more than one, or a conclusion is
-given for a unit that is not registered. After any failure
-before the phases, the refusal of the disk guard included, no phase
+when `KREPI_FORMAL_TRIGGER` names no mode of a job of CI
+([receipt](#receipt)), when a name given with `--target` is not in
+`verification/targets.json` or the target of a shard is not a formal
+target of it, and when a registered unit has no conclusion or more than
+one, or a conclusion is given for a unit that is not registered. After any
+failure before the phases, the refusal of the disk guard included, no phase
 runs, and after a phase stops no later phase runs; every registered unit
 without a conclusion is then `NOT_RUN`. A run of named targets is
 `SCOPED` and is never complete. A run of the whole gate, or of a part
@@ -1824,7 +2029,7 @@ keys; times are seconds, rounded to milliseconds.
 | `command` | `cargo xtask formal run` |
 | `status` | `VERIFIED`, `REJECTED`, `STALE`, `TOOL_FAILURE`, `BUDGET`, `NOT_RUN` or `SCOPED` |
 | `complete` | Whether the run is complete, as defined above |
-| `trigger` | `mode`, `MANUAL` for a run of the whole gate or of a part and `SCOPED` for a run of named targets, with `REQUIRED`, `FORCED_FULL` and `WEEKLY` kept for the jobs of CI; `event`, `ref`, `run_id` and `attempt`, from `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`, or `null` |
+| `trigger` | `mode`: `SCOPED` for a run of named targets; for a run of the whole gate or of a part, the mode that `KREPI_FORMAL_TRIGGER`, the variable through which a job of CI gives the trigger of its run, names, `REQUIRED`, `FORCED_FULL` or `WEEKLY`, and `MANUAL` when it is unset or empty, or when it holds any other value, `SCOPED` and `MANUAL` included, which is a tool failure before the phases ([results](#results)); `event`, `ref`, `run_id` and `attempt`, from `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`, or `null` |
 | `targets` | The names given with `--target`, sorted, or the target of the shard of a target; empty for a run of the whole gate and for the qualification job |
 | `shard` | The part of a run with `--shard`, `qualification` or `target/<name>`, or `null` |
 | `host` | `linux-aarch64` or `darwin-arm64`, or `null` on another host |
@@ -2276,7 +2481,8 @@ a whole run extracts no planned target and records none, so a
 hand-written module that imports the generated definitions of a planned
 target fails the base build of such a run. The shard of a target
 extracts its target alone, and the qualification job every formal target
-as commands of `base` ([shards and merge](#shards-and-merge)). The phase
+but those of the [waivers](#waivers) that hold, as commands of `base`
+([shards and merge](#shards-and-merge)). The phase
 has the budgets of the targets that it extracts, or 600 s in the
 qualification job, and the gate's budget grows by those of the selected
 targets alone. For each target, in `work/targets/<name>/`, it

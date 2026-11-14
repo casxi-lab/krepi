@@ -95,7 +95,7 @@ check. [Testing](docs/conventions/testing.md#entry-points) describes it.
 When a command lands, this page and [testing](docs/conventions/testing.md)
 describe what it runs. Do not write a command into a document before it works.
 A command that does not exist yet, such as `cargo xtask docs check` (planned)
-or `cargo xtask formal receipt` (planned), carries the marker `(planned)` right
+or `cargo xtask docs index` (planned), carries the marker `(planned)` right
 after its code span. The documentation check rejects any other mention
 of a command that `cargo xtask` does not provide, a mention outside code, and
 the marker once the command exists.
@@ -191,7 +191,8 @@ convention states. Do not edit generated definitions, introduce unproved
 wrappers or weaken contracts to hide failures.
 
 Once the required proof gate runs in CI, a kernel change merges only when the
-gate passes on its head or a committed waiver record covers the failure. A red
+gate passes on its head or a waiver committed in `verification/waivers.json`
+covers the failure ([waivers](docs/formal-verification.md#waivers)). A red
 gate is never merged over.
 
 ## Porting from the prototype tree
