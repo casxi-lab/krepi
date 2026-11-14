@@ -2126,7 +2126,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_waived_target_whose_proofs_fail_passes_the_merge_with_its_statement_unchecked() {
+    fn a_waived_target_whose_proofs_fail_passes_the_merge_and_the_hard_gates_with_its_statement_unchecked()
+     {
         // The target proves the statement `S` in its proof module, which
         // builds neither in its stage nor in that of the base round.
         let mut fixture = base("waived-merge");
@@ -2170,13 +2171,27 @@ pub(crate) mod tests {
         assert_eq!(compared_t, (Status::Scoped, Some(scoped)));
         assert!(commands(&compared, "comparator/t").is_empty());
         // The merge records the units of the target and its statement, does
-        // not require them and passes, and its conclusion stays REJECTED.
+        // not require them and passes, and so does each hard gate over the
+        // audit, the replay of the base round and the comparator; its
+        // conclusion stays REJECTED.
         let parts = [("q", &job), ("t", &shard), ("c", &compared)];
         let parts = parts.map(|(name, done)| part(&fixture, name, done));
         let merged = merge::merge(root, &LAYOUT, &parts, Some(Duration::ZERO));
         assert_eq!(merged.problems, Vec::<String>::new());
         let conclusion = (merged.status, merged.complete, merged.passes);
         assert_eq!(conclusion, (Status::Rejected, true, true));
+        let gates = merged.gates;
+        let gates = [gates.axioms, gates.leanchecker, gates.comparator];
+        assert_eq!(gates, [true, true, true]);
+        let audits = commands(&job, PHASE)
+            .into_iter()
+            .filter(|c| c.site == Site::AxiomAudit);
+        let audit = Vec::from_iter(audits.map(|c| (c.argv.last().cloned(), c.class)));
+        assert_eq!(audit[0], (Some(lean::AUDIT.to_string()), Class::Passed));
+        let audit = commands(&shard, "target/t")
+            .into_iter()
+            .find(|c| c.site == Site::AxiomAudit);
+        assert_eq!(audit.map(|c| c.class), Some(Class::NotRun));
         assert!(merged.waivers[0].used);
         assert_eq!(merged.units["target/t"].status, Status::Rejected);
         let reason =

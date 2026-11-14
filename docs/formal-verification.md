@@ -45,8 +45,10 @@ On a pull request, a first phase records the
 qualification job, the [comparator](#comparator) part after it or the
 shard of one formal target, and
 `cargo xtask formal merge` combines the receipts of the parts of a commit
-into the conclusion of the whole gate, with the [waivers](#waivers) that
-hold ([shards and merge](#shards-and-merge)); CI runs the gate as these parts
+into the conclusion of the whole gate and of its three hard gates, the axiom
+audits, the replay of `leanchecker` and the comparator, with the
+[waivers](#waivers) that hold ([shards and merge](#shards-and-merge)); CI
+runs the gate as these parts
 and merges them ([CI job](#ci-job)). `cargo xtask formal receipt` says
 whether the record of a merge is current for the checkout, and whether it
 is fresh ([current and fresh records](#current-and-fresh-records)). The
@@ -688,7 +690,7 @@ others are planned.
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its job fetched and built: `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from the outcomes of the steps of the job ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
 | `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration, and `--keep` keeps the work directory of the run, as for `run` |
 | `cargo xtask formal impact --base REV` | Lists, one item per line, the merge base of `REV` and `HEAD`, each path changed since with its Git status, without rename detection, the decision, `unaffected` when no changed path lies within a [gate input](#gate-inputs-and-snapshot) and `affected` otherwise, and the registered targets that the change affects, with their states: every target when an input of extraction changed, and otherwise each whose entry in `verification/targets.json` changed and each with a changed file of its `proof_modules`. A registry that cannot be read at the merge base, as after a change of its schema, counts as one without targets, so that every target is listed, after a line `unreadable verification/targets.json at the merge base: <why>`. Paths, names and that reason are printed escaped, so that none splits a line. It decides nothing, and exits with 1 only on a base that is not a revision or when Git or the registry at the head cannot be read |
-| `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job, of the comparator part and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, which passes when every unit and part outside the [waivers](#waivers) that hold is `VERIFIED`, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
+| `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job, of the comparator part and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, which passes when every unit and part outside the [waivers](#waivers) that hold is `VERIFIED`, and of its three hard gates, the axiom audits, the replay of `leanchecker` and the comparator, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
 | `cargo xtask formal receipt [--require-fresh] [RECORD]` | Judges the record of a merge, by default `artifacts/formal/merge/record.json`, against the checkout ([current and fresh records](#current-and-fresh-records)): `CURRENT` when it has the gate inputs of the clean checkout, the pinned image and one conclusion for each registered unit and is complete, `VERIFIED` and passing, and `WAIVED` when it passes only within waivers that still hold; `--require-fresh` also requires the trigger of a run of CI, no planned statement and no waiver. It exits with 0 when the record is current, and fresh when asked, 3 when it is waived, 1 otherwise and 2 on a usage error. It runs no tool and proves nothing |
 
 `cargo xtask check` does not run the gate, which needs the pinned tools;
@@ -1087,8 +1089,29 @@ leaves a target out of the job that no waiver covers at the merge, which
 gives no conclusion; running the merge again does not help, the gate must
 run again.
 
-The synthetic wall clock is the `seconds` of the slowest part and the
-seconds of the merge, from the start of its job, which the job gives in
+The merge also judges three hard gates, each from its own entries among the
+kept receipts and over the same waivers: an entry holds when it passed or
+is `VERIFIED`, or when it is of a target of a waiver that holds, as above.
+Every gate fails when the merge has a problem.
+
+- **`axioms`** passes when the receipts have at least one audit, a command
+  of the base round or of the shard of a target that checks `Audit.lean`
+  (the runs that count heartbeats are no audit), and each audit and each
+  unit `base`, `base/<theorem>` and `target/<name>`, without the units of
+  mutants, holds.
+- **`leanchecker`** passes when the receipts have exactly one replay with
+  `leanchecker`, that of the base round with `--fresh`, and it passed; it
+  is a command of the unit `base`, which no waiver covers.
+- **`comparator`** passes when each unit `comparator` and
+  `comparator/<target>` holds, and so without such a unit.
+
+A gate that passes says only that its own entries hold: a merge whose
+other units or parts fail does not pass, whatever its gates.
+
+The comparator part runs in the job of the qualification part, after it, so
+that job takes the `seconds` of both parts. The synthetic wall clock is the
+`seconds` of the slowest job and the seconds of the merge, from the start
+of its job, which the job gives in
 `KREPI_FORMAL_MERGE_STARTED` as Unix seconds (the merge jobs of CI take
 the start of the runner's worker process, else that of their first step),
 to the end of the command; it
@@ -1099,25 +1122,30 @@ limit is 3,600 s, 300 s of which are the merge's, so the registered budget
 of a shard is at most 3,300 s
 ([shard plan and disk guard](#shard-plan-and-disk-guard)). A synthetic wall
 clock above 2,880 s, 80% of the limit, is flagged in the record and the
-summary, and so is each part whose `seconds` are above 2,880 s, or whose
-cgroup memory peak is above 13,372,738,764 B, 80% of the 16,715,923,456 B
-of memory of the runner of CI. The flags change no conclusion.
+summary, and so is each part whose job's `seconds` are above 2,880 s, its
+own for the shard of a target and the comparator part, and the sum of both
+parts for the qualification part, or whose cgroup memory peak is above
+13,372,738,764 B, 80% of the 16,715,923,456 B of memory of the runner of CI.
+The flags change no conclusion.
 
 The merge writes `artifacts/formal/merge/record.json` and its summary
 `summary.md`, prints the summary, and exits with 0 when it passes and 1
 otherwise, with 2 on a usage error, or with 120 when it cannot write them,
 the record then on standard error. The summary has the conclusion and the
-synthetic wall clock, the trigger, that the merge passes when it is not
+synthetic wall clock, the trigger, a line
+`- checks: axioms pass, leanchecker pass, comparator pass` with `fail` for
+each hard gate that fails, that the merge passes when it is not
 `VERIFIED`, each waiver that holds, each flag and each problem; the
-trigger, the shards and the waivers are escaped, so that none splits a
-line. The record has schema 2 and the form of a receipt
+trigger, the shards, the waivers and the problems are escaped, so that none
+splits a line. The record has schema 3 and the form of a receipt
 ([receipt](#receipt)):
 
 | Field | Content |
 | --- | --- |
-| `schema` | `2` |
+| `schema` | `3` |
 | `status`, `complete` | The conclusion, as above |
 | `passes` | Whether the merge passes, as above |
+| `gates` | Whether each hard gate passes: `axioms`, `leanchecker` and `comparator`, as above |
 | `commit`, `tree` | Those of the checkout, or `null` when they cannot be read |
 | `inputs` | The object of each gate input of the checkout, as `inputs.before` of a receipt, or `null` when it cannot be read |
 | `image` | The one image that the receipts name, or `null` |
@@ -1125,19 +1153,25 @@ line. The record has schema 2 and the form of a receipt
 | `planned_statements` | The number of planned statements of `statements.json`, or `null` when it cannot be read |
 | `waiver_date` | The UTC date on which the merge judged the waivers, or `null` when the clock gives none |
 | `waivers` | Each waiver that holds on that date: `waiver`, its entry of the waiver record, and `used`, whether the merge used it |
-| `parts` | Each receipt given, in order: `receipt`, its path; `sha256`, of its bytes, or `null`; and when it parses, `shard`, `run_id`, `attempt`, `superseded`, `status`, `complete`, `seconds` and the `cgroup_memory_peak` of its `resources`; `over_seconds`, whether its `seconds` are above 2,880 s; and `over_memory`, whether its peak is above 13,372,738,764 B, or `null` without a peak |
+| `parts` | Each receipt given, in order: `receipt`, its path; `sha256`, of its bytes, or `null`; and when it parses, `shard`, `run_id`, `attempt`, `superseded`, `status`, `complete`, `seconds` and the `cgroup_memory_peak` of its `resources`; `over_seconds`, whether the `seconds` of its job are above 2,880 s, as above; and `over_memory`, whether its peak is above 13,372,738,764 B, or `null` without a peak |
 | `units` | Each registered unit with its phase, status and reason |
-| `slowest_part_seconds`, `merge_seconds`, `merge_from`, `wall_clock_seconds`, `over_80_percent` | The synthetic wall clock: the slowest part, the merge from its `job` or its `command`, their sum and whether it is above 2,880 s |
+| `axioms` | Each theorem that the base round of the qualification job audited, with the axioms that the audit reported for it, the report of the gate `axioms` |
+| `slowest_part_seconds`, `merge_seconds`, `merge_from`, `wall_clock_seconds`, `over_80_percent` | The synthetic wall clock: the slowest job, the merge from its `job` or its `command`, their sum and whether it is above 2,880 s |
 | `problems` | Each condition that fails |
 
 For example, with values that are only an illustration:
 
 ```json
 {
-  "schema": 2,
+  "schema": 3,
   "status": "VERIFIED",
   "complete": true,
   "passes": true,
+  "gates": {
+    "axioms": true,
+    "leanchecker": true,
+    "comparator": true
+  },
   "commit": "cccccccccccccccccccccccccccccccccccccccc",
   "tree": "dddddddddddddddddddddddddddddddddddddddd",
   "inputs": {
@@ -1189,6 +1223,13 @@ For example, with values that are only an illustration:
       "status": "VERIFIED",
       "reason": null
     }
+  },
+  "axioms": {
+    "Krepi.Proofs.Counter.t": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ]
   },
   "slowest_part_seconds": 1095.7,
   "merge_seconds": 62.0,
@@ -1259,7 +1300,11 @@ each waiver that holds and whether it used it, and stays `REJECTED` when
 it used one. A waiver covers no unit of the qualification, not the unit
 `base`, and no `base/<theorem>` of a module that the base round leaves
 out only because the module imports what a waiver leaves out: that unit
-is `SCOPED` and fails the merge.
+is `SCOPED` and fails the merge. The hard gates of the merge pass over the
+commands and units of the same targets in the same way, so the merge and
+its three gates can pass while the record is `REJECTED`; the replay of
+`leanchecker`, a command of the unit `base`, is never covered
+([shards and merge](#shards-and-merge)).
 
 `cargo xtask formal receipt` calls a record that passes with a used waiver
 `WAIVED`, not `CURRENT`, and only while each waiver that it used holds on
@@ -1272,8 +1317,9 @@ since ([current and fresh records](#current-and-fresh-records)).
 `cargo xtask formal receipt [--require-fresh] [RECORD]` judges the record
 of a merge, by default `artifacts/formal/merge/record.json`, against the
 checkout, in the production layout. It runs no tool and proves nothing. A
-record that cannot be read, that does not parse or whose `schema` is not 2
-([shards and merge](#shards-and-merge)) is not current. A record is
+record that cannot be read, that does not parse or whose `schema` is not 3
+([shards and merge](#shards-and-merge)), such as a record of schema 2,
+which has no hard gates, is not current. A record is
 `CURRENT` when
 
 1. its `inputs` are the objects of the gate inputs of the commit checked
@@ -1286,7 +1332,8 @@ record that cannot be read, that does not parse or whose `schema` is not 2
 2. its `image` is the reference that the image pin of the checkout names
    ([image pin](#image-pin));
 3. each unit that the checkout registers, of the qualification, of the
-   base round and of each formal target with its registered mutants, has
+   base round, of the comparator and of each formal target with its
+   registered mutants, has
    exactly one conclusion among its `units`, and it concludes no other
    unit;
 4. it has no problem, is `VERIFIED` and complete, and passes.

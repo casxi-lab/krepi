@@ -1028,11 +1028,17 @@ no proof tool and is not part of the check: the job `formal merge` of
 workflow `formal calibration` run it on the runner with the receipts of
 the parts of their run. Its unit tests run in the `test` step above, on
 the Git repositories of the tests of `cargo xtask formal run` with
-receipts that the tests write, one of the comparator part beside each of
-the qualification job unless a test gives its own, and on the receipts of
-runs of the qualification job, of the comparator part and of the shard of
-a target in those repositories; their waivers, too, expire on 2000-01-01
-or 9999-12-31.
+receipts that the tests write, one of the comparator part of no seconds
+beside each of the qualification job unless a test gives its own, those of
+the qualification job with an audit and a replay of its base round that
+passed, and on the receipts of runs of the qualification job, of the
+comparator part and of the shard of a target in those repositories; their
+waivers, too, expire on 2000-01-01 or 9999-12-31. Tests judge the three
+hard gates on the entries of each, on a problem of the merge, on a rejected
+target with and without its waiver, on a statement left out only through
+an import and on the units of mutants; others judge the seconds of the job
+of the qualification and the comparator and the axioms that the record
+reports.
 
 `cargo xtask formal receipt [--require-fresh] [RECORD]` judges the record
 of a merge against the checkout: current, waived, or fresh as well
@@ -1043,7 +1049,8 @@ tests of `cargo xtask formal merge` with an image pin that they commit and
 the records of merges of receipts that the tests write, and on the record
 of a merge of the receipt of a run of named targets; their waivers expire
 on 9999-12-31, and a test edits the expiry recorded in a record to
-2000-01-01.
+2000-01-01. A test writes a current record as a merge of schema 2 wrote
+it, which is not current.
 
 The workflow `formal calibration`, `.github/workflows/formal-calibration.yml`,
 runs the gate on the calibration target in the pinned proof-tool image
