@@ -898,7 +898,7 @@ ignored SIGHUP starts the test executable again in the same way, once with
 SIGHUP ignored.
 
 `cargo xtask formal guard --event PATH` checks a pull request against the
-rules for changes of statements, proofs and sources
+rules for changes of statements, proofs, sources and registries
 ([guard](../formal-verification.md#guard)). Its unit tests run in the
 `test` step above, on Git repositories with a commit for each change and
 with `pull_request` events in the form that GitHub writes; the test of its

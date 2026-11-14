@@ -408,14 +408,14 @@ fn without_modifiers(mut line: &str) -> &str {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use serde_json::json;
 
     use super::*;
 
     /// A registry that keeps every rule: a formal target and a planned one
     /// without obligations and mutants, beside a specification.
-    fn valid() -> Value {
+    pub(crate) fn valid() -> Value {
         json!({
             "schema": 2,
             "specifications": [{

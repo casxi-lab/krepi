@@ -155,7 +155,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "guard",
-        about: "With --event PATH, the JSON of a pull_request event, check the pull request against the rules for changes of statements, proofs and sources",
+        about: "With --event PATH, the JSON of a pull_request event, check the pull request against the rules for changes of statements, proofs, sources and registries",
         subcommands: &[],
     },
     Command {

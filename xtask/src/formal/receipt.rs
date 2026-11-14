@@ -590,6 +590,7 @@ mod tests {
             demoted: paths(&["Krepi.Statements.C.S"]),
             restated: paths(&["Krepi.Statements.C.S", "Krepi.Statements.C.T"]),
             raised: paths(&["verification/Krepi/Proofs/C.lean"]),
+            registry: BTreeMap::new(),
             rules: [
                 "statement-change-needs-spec",
                 "spec-approval",

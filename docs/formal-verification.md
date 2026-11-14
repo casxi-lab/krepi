@@ -662,7 +662,7 @@ The commands of `cargo xtask formal` follow the design of the gate.
 | --- | --- |
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
 | `cargo xtask formal run [--target NAME]... [--shard NAME] [--calibration] [--keep]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets, `--shard` only the qualification job or the shard of a formal target ([shards and merge](#shards-and-merge)), `--calibration` runs in the layout of the [calibration target](#calibration-target), and `--keep` keeps the work directory of the run ([layout](#layout)). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run of the whole gate has |
-| `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs and sources ([guard](#guard)) |
+| `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs, sources and registries ([guard](#guard)) |
 | `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
 | `cargo xtask formal receipt [--require-fresh]` (planned) | Says whether a receipt is current for the checkout: the same gate inputs and image, one conclusion for each unit, complete and `VERIFIED`; `--require-fresh` also requires a run of the whole gate from a clean checkout without planned statements |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
@@ -1522,7 +1522,8 @@ theorem that depends on them fails the audit.
 ### Guard
 
 `cargo xtask formal guard --event PATH`, in `guard.rs`, checks a pull
-request against the rules for changes of statements, proofs and sources.
+request against the rules for changes of statements, proofs, sources and
+registries.
 `PATH` is the JSON of a `pull_request` event as GitHub writes it, the file
 of `GITHUB_EVENT_PATH`; the guard reads `pull_request.base.sha`,
 `pull_request.head.sha`, the names of `pull_request.labels`, and
@@ -3104,8 +3105,8 @@ The job `calibration run` of the workflow `formal calibration` runs it in
 the layout of the calibration.
 The removal of a target, a theorem or a proved function, and any widening
 of the trusted base, are reviewed through the registry rules of the
-[guard](#guard) (planned), and `cargo xtask formal impact --base REV`
-lists the targets that a change affects. A function without a
+[guard](#guard), and `cargo xtask formal impact --base REV` lists the
+targets that a change affects. A function without a
 proof is never trusted by a proof and appears in a target's `unclosed` list
 when reached.
 

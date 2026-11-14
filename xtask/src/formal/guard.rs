@@ -2,7 +2,7 @@
 //! as "Statements and proofs" and "Guard" in `docs/formal-verification.md`
 //! describe them: the statement registry, the statement hash and the import
 //! rule of the statement side, and the rules for pull requests that change
-//! the statement side, the proofs or the sources.
+//! the statement side, the proofs, the sources or the registries.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -16,9 +16,10 @@ use serde_json::Value;
 
 use super::Layout;
 use super::base::read;
-use super::lean::{self, PROJECT_FILES, Token};
+use super::lean::{self, Item, PROJECT_FILES, Token};
 use super::paths::{self, Files, Git, tree_records};
 use super::qualify::is_module;
+use super::registry::{self, Mutant, Target};
 use super::run::Phase;
 use super::toolchain::is_hex;
 use crate::manifests::USER;
@@ -55,7 +56,8 @@ pub enum State {
 /// changed since the merge base, the statements proved there and not at the
 /// head, the statements registered at only one of the merge base and the
 /// head, that is, added, removed or renamed, the files with a new raised
-/// heartbeat limit, and why each rule fails, or `None`.
+/// heartbeat limit, what each registry rule found, which the receipt does not
+/// hold, and why each rule fails, or `None`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Record {
     pub base: String,
@@ -70,6 +72,8 @@ pub struct Record {
     pub demoted: Vec<String>,
     pub restated: Vec<String>,
     pub raised: Vec<String>,
+    #[serde(skip)]
+    pub registry: BTreeMap<String, Vec<String>>,
     pub rules: BTreeMap<String, Option<String>>,
 }
 
@@ -79,8 +83,9 @@ type Rule = fn(&Record, &BTreeMap<&str, Option<&str>>) -> Option<String>;
 /// The phases of the proof work that `Phase` names.
 const PHASES: [&str; 3] = ["statement", "proof", "rewrite"];
 
-/// The rules of the guard, by name; later checks add rows.
-const RULES: [(&str, Rule); 6] = [
+/// The rules of the guard, by name; later checks add rows. The last rows are
+/// the classes of registry changes, in the order of [`CLASSES`].
+const RULES: [(&str, Rule); 24] = [
     ("statement-change-needs-spec", |record, _| {
         let side = named("it changes", &record.statement_side);
         let changes = [side, named("it no longer proves", &record.demoted)];
@@ -131,7 +136,232 @@ const RULES: [(&str, Rule); 6] = [
         let restated = restated.filter(|_| !record.labels.contains("spec"));
         restated.map(|it| format!("{it} without the label spec"))
     }),
+    ("registry-target-removed", class::<0>),
+    ("registry-theorem-removed", class::<1>),
+    ("registry-mutant-removed", class::<2>),
+    ("registry-proves-narrowed", class::<3>),
+    ("registry-formal-made-planned", class::<4>),
+    ("registry-unconstrained-added", class::<5>),
+    ("registry-opaque-added", class::<6>),
+    ("registry-trusted-axiom-added", class::<7>),
+    ("registry-model-added", class::<8>),
+    ("registry-obligation-changed", class::<9>),
+    ("registry-start-from-changed", class::<10>),
+    ("registry-mutant-file-changed", class::<11>),
+    ("registry-mutant-find-changed", class::<12>),
+    ("registry-mutant-replace-changed", class::<13>),
+    ("registry-mutant-renamed", class::<14>),
+    ("registry-mutant-fails-grown", class::<15>),
+    ("registry-trusted-reason-changed", class::<16>),
+    ("registry-unreadable", class::<17>),
 ];
+
+/// The registries that the guard compares at one commit: the targets by
+/// name, the names of the models and the items of the trusted base; at the
+/// head, also why a changed registry cannot be read on either side.
+#[derive(Debug, Clone, Default)]
+struct Registries {
+    targets: BTreeMap<String, Target>,
+    models: Vec<String>,
+    tcb: Vec<Item>,
+    unreadable: Vec<String>,
+}
+
+impl Registries {
+    /// Reads `text`, the registry `path` of `layout`; an empty text, of the
+    /// side that lacks the file, is an empty registry.
+    fn read(&mut self, path: &str, text: &str, layout: &Layout) -> Result<(), String> {
+        if text.is_empty() {
+            return Ok(());
+        } else if path == layout.registry {
+            self.targets = paths::targets(text)?;
+        } else if path == layout.models {
+            let json: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
+            let models = json["models"].as_array().filter(|_| json["schema"] == 1);
+            let models = models.ok_or("not a model registry of schema 1")?;
+            self.models = Vec::from_iter(models.iter().map(|model| model["name"].to_string()));
+        } else {
+            self.tcb = lean::load_tcb(text)?;
+        }
+        Ok(())
+    }
+}
+
+/// The registries at the merge base and at the head.
+type Sides = [Registries; 2];
+
+/// Values by key, each key with the set of its values.
+type Multimap = BTreeMap<String, BTreeSet<String>>;
+
+/// The values of `kind` at the merge base and at the head that a class of
+/// registry changes compares: those of each target by its name, of each
+/// mutant by `<target>/<mutant>`, and the reason of each trusted item.
+fn of(sides: &Sides, kind: &str) -> [Multimap; 2] {
+    sides.each_ref().map(|side| {
+        let mut found = Multimap::new();
+        for (_, key, values) in facts(side).into_iter().filter(|(of, ..)| *of == kind) {
+            found.entry(key).or_default().extend(values);
+        }
+        found
+    })
+}
+
+/// `field` of each of `items`.
+fn each<T>(items: &[T], field: fn(&T) -> &String) -> Vec<String> {
+    items.iter().map(|item| field(item).clone()).collect()
+}
+
+/// The values of each kind that the registries `side` give, by key; a
+/// planned target has the empty value of the kind `planned`.
+fn facts(side: &Registries) -> Vec<(&'static str, String, Vec<String>)> {
+    let targets = Vec::from_iter(side.targets.keys().cloned());
+    let models = ("models", "models.json".to_string(), side.models.clone());
+    let mut facts = vec![("targets", "targets.json".to_string(), targets), models];
+    for item in &side.tcb {
+        let (key, reason) = match item.clone() {
+            Item::NativeDecision {
+                file,
+                declaration,
+                reason,
+            } => (format!("native-decision {file} {declaration}"), reason),
+            Item::AxiomPattern { prefix, reason } => (format!("axiom-pattern {prefix}"), reason),
+        };
+        facts.push(("trusted", "tcb.json".to_string(), vec![key.clone()]));
+        facts.push(("reasons", format!("{key} in tcb.json"), vec![reason]));
+    }
+    for (name, t) in &side.targets {
+        let planned = (t.state == registry::State::Planned).then(String::new);
+        let theorems = t.obligations.iter().flat_map(|o| o.theorems.clone());
+        let obligations = t.obligations.iter().map(|o| {
+            let mut o = o.clone();
+            o.theorems.sort();
+            format!("{o:?}")
+        });
+        let values = [
+            ("planned", Vec::from_iter(planned)),
+            ("theorems", theorems.collect()),
+            ("mutants", each(&t.mutants, |m| &m.name)),
+            ("proves", t.proves.clone()),
+            ("unconstrained", t.unconstrained.clone()),
+            ("opaque", each(&t.opaque, |o| &o.pattern)),
+            ("trusted", each(&t.trusted_axioms, |a| &a.name)),
+            ("models", Vec::from_iter(t.models.clone())),
+            ("obligations", obligations.collect()),
+            ("start_from", t.start_from.clone()),
+        ];
+        facts.extend(values.map(|(kind, values)| (kind, name.clone(), values)));
+        for m in &t.mutants {
+            let (key, edit) = (format!("{name}/{}", m.name), [&m.file, &m.find, &m.replace]);
+            let edit = ["file", "find", "replace"].into_iter().zip(edit);
+            facts.extend(edit.map(|(kind, value)| (kind, key.clone(), vec![value.clone()])));
+            facts.push(("fails", key, m.fails.clone()));
+        }
+        let axioms = t.trusted_axioms.iter().map(|a| (&a.name, Some(&a.reason)));
+        for (key, why) in axioms.chain(t.opaque.iter().map(|o| (&o.pattern, o.reason.as_ref()))) {
+            let key = format!("{key} in {name}");
+            facts.push(("reasons", key, Vec::from_iter(why.cloned())));
+        }
+    }
+    facts
+}
+
+/// Each value of a key of `before` that `after` lacks, as `<value> in <key>`,
+/// or the key alone for the empty value.
+fn missing(before: &Multimap, after: &Multimap) -> Vec<String> {
+    let mut missing = Vec::new();
+    for (key, values) in before {
+        let kept = |value: &&String| after.get(key).is_some_and(|kept| kept.contains(*value));
+        let at = |v: &String| String::from(format!("{v} in {key}").trim_start_matches(" in "));
+        missing.extend(values.iter().filter(|value| !kept(value)).map(at));
+    }
+    missing
+}
+
+/// The values of `kind` that the head lacks.
+fn lost(sides: &Sides, kind: &str) -> Vec<String> {
+    let [before, after] = of(sides, kind);
+    missing(&before, &after)
+}
+
+/// The values of `kind` that the merge base lacks.
+fn gained(sides: &Sides, kind: &str) -> Vec<String> {
+    let [before, after] = of(sides, kind);
+    missing(&after, &before)
+}
+
+/// The values of `kind` that the head adds to a key of the merge base.
+fn grown(sides: &Sides, kind: &str) -> Vec<String> {
+    let [before, mut after] = of(sides, kind);
+    after.retain(|key, _| before.contains_key(key));
+    missing(&after, &before)
+}
+
+/// The keys of `kind` of both sides with other values.
+fn changed(sides: &Sides, kind: &str) -> Vec<String> {
+    let [before, after] = of(sides, kind);
+    let other = |(key, values): &(&String, &BTreeSet<String>)| {
+        after.get(*key).is_some_and(|after| after != *values)
+    };
+    Vec::from_iter(before.iter().filter(other).map(|(key, _)| key.clone()))
+}
+
+/// The mutants of a target of both sides that the head renames: a name of
+/// the merge base that the head lacks, while the head has a new name with
+/// the same file, pattern and replacement.
+fn renamed([base, head]: &Sides) -> Vec<String> {
+    let mut found = Vec::new();
+    for (name, before) in &base.targets {
+        let Some(after) = head.targets.get(name) else {
+            continue;
+        };
+        let named = |target: &Target, m: &Mutant| target.mutants.iter().any(|o| o.name == m.name);
+        for old in before.mutants.iter().filter(|m| !named(after, m)) {
+            let edit = |m: &&Mutant| {
+                !named(before, m)
+                    && (&m.file, &m.find, &m.replace) == (&old.file, &old.find, &old.replace)
+            };
+            let new = after.mutants.iter().filter(edit);
+            found.extend(new.map(|new| format!("{name}/{} to {}", old.name, new.name)));
+        }
+    }
+    found
+}
+
+/// What a class of registry changes finds from the registries at the merge
+/// base and at the head.
+type Class = fn(&Sides) -> Vec<String>;
+
+/// The classes of registry changes, each with the start of its reason; each
+/// fails, as a statement change does, without the label `spec`.
+const CLASSES: [(&str, Class); 18] = [
+    ("it removes the targets", |s| lost(s, "targets")),
+    ("it removes the theorems", |s| lost(s, "theorems")),
+    ("it removes the mutants", |s| lost(s, "mutants")),
+    ("it removes from proves", |s| lost(s, "proves")),
+    ("it makes planned the targets", |s| grown(s, "planned")),
+    ("it adds the unconstrained", |s| gained(s, "unconstrained")),
+    ("it adds the cut points", |s| gained(s, "opaque")),
+    ("it adds the trusted axioms", |s| gained(s, "trusted")),
+    ("it adds the models", |s| gained(s, "models")),
+    ("it changes obligations of", |s| changed(s, "obligations")),
+    ("it changes start_from of", |s| changed(s, "start_from")),
+    ("it changes the file of", |s| changed(s, "file")),
+    ("it changes the pattern of", |s| changed(s, "find")),
+    ("it changes the replacement of", |s| changed(s, "replace")),
+    ("it renames the mutants", renamed),
+    ("it adds to fails", |s| grown(s, "fails")),
+    ("it changes the reasons of", |s| changed(s, "reasons")),
+    ("it cannot read", |s| s[1].unreadable.clone()),
+];
+
+/// The rule of the class `C` of [`CLASSES`]: it fails on what the class
+/// found unless the pull request has the label `spec`.
+fn class<const C: usize>(record: &Record, _: &BTreeMap<&str, Option<&str>>) -> Option<String> {
+    let rule = RULES[RULES.len() - CLASSES.len() + C].0;
+    let found = named(CLASSES[C].0, record.registry.get(rule)?);
+    let found = found.filter(|_| !record.labels.contains("spec"));
+    found.map(|found| format!("{found} without the label spec"))
+}
 
 /// `what` and the items of `list`, when it has any.
 fn named<T: std::borrow::Borrow<str>>(what: &str, list: &[T]) -> Option<String> {
@@ -307,40 +537,48 @@ fn check(git: &mut dyn Git, text: &str, layout: &Layout, work: &Path) -> Result<
     let (Some(base), Some(head), Some(labels)) = (sha("base"), sha("head"), labels) else {
         return Err("the event has no pull request with commits and labels".to_string());
     };
-    let mut output = |args: &[&str]| -> Result<String, String> {
-        Ok(String::from_utf8_lossy(&git.git(args, None)?).into_owned())
-    };
-    let merge_base = output(&["merge-base", base, head])?.trim().to_string();
-    let diff = ["diff", "--name-status", "--no-renames", "-z"];
-    let changed = output(&[&diff[..], &[merge_base.as_str(), head]].concat())?;
+    let change = paths::since_merge_base(git, base, head)?;
     let mut record = Record {
         base: base.to_string(),
         head: head.to_string(),
-        merge_base: merge_base.clone(),
+        merge_base: change.merge_base.clone(),
         ai_proof: labels.contains("ai-proof"),
         labels,
         ..Record::default()
     };
     let proofs = format!("{}/{}/", layout.project, layout.proofs.replace('.', "/"));
     let workspaces = [layout.kernel, USER].map(|workspace| format!("{workspace}/"));
-    let mut changes = changed.split_terminator('\0');
-    while let (Some(status), Some(path)) = (changes.next(), changes.next()) {
+    let registries = [layout.registry, layout.models, layout.tcb];
+    let mut sides = Sides::default();
+    for path in change.paths.iter().map(|(_, path)| path.as_str()) {
         let proof = path.starts_with(&proofs) && path.ends_with(".lean");
-        let (side, registry) = (statement_side(path, layout), path == layout.statements);
+        let (side, statements) = (statement_side(path, layout), path == layout.statements);
         let source = workspaces.iter().any(|dir| path.starts_with(dir)) && path.ends_with(".rs");
         record.statement_side.extend(side.then(|| path.to_string()));
         record.proofs.extend(proof.then(|| path.to_string()));
         record.sources.extend(source.then(|| path.to_string()));
-        if !(side || proof || registry) {
+        let registry = registries.contains(&path);
+        if !(side || proof || statements || registry) {
             continue;
         }
         // The file at the merge base and at the head, where it exists.
-        let mut text = |commit: &str, absent: &str| match status == absent {
-            true => Ok(String::new()),
-            false => output(&["cat-file", "blob", &format!("{commit}:{path}")]),
-        };
-        let (before, after) = (text(&merge_base, "A")?, text(head, "D")?);
+        let [before, after] = change.texts(git, path)?;
         if registry {
+            // A registry that cannot be read on one side is compared on
+            // neither, and fails its own rule.
+            let read = |at: usize| {
+                let (mut read, text) = (sides[at].clone(), [&before, &after][at]);
+                let at = ["the merge base", "the head"][at];
+                let read = read.read(path, text, layout).map(|()| read);
+                read.map_err(|error| format!("{path} at {at}: {error}"))
+            };
+            match [0, 1].map(read) {
+                [Ok(base), Ok(head)] => sides = [base, head],
+                read => sides[1]
+                    .unreadable
+                    .extend(read.into_iter().filter_map(Result::err)),
+            }
+        } else if statements {
             let entries = |text: &str| {
                 let file = (!text.is_empty()).then(|| load_statements(text, layout));
                 let file = file.transpose();
@@ -361,6 +599,9 @@ fn check(git: &mut dyn Git, text: &str, layout: &Layout, work: &Path) -> Result<
             record.raised.push(path.to_string());
         }
     }
+    let rules = RULES[RULES.len() - CLASSES.len()..].iter().zip(CLASSES);
+    let found = rules.map(|((rule, _), (_, class))| (rule.to_string(), class(&sides)));
+    record.registry = found.filter(|(_, found)| !found.is_empty()).collect();
     (record.statement_hash, _) = statement_hash(git, head, layout, work)?;
     let fields = fields(pull["body"].as_str().unwrap_or_default());
     let rules = (RULES.iter()).map(|(name, rule)| (name.to_string(), rule(&record, &fields)));
@@ -464,6 +705,8 @@ pub fn command(root: &Path, layout: &Layout, matches: &ArgMatches) -> ExitCode {
 mod tests {
     use std::collections::BTreeSet;
     use std::process::Command;
+
+    use serde_json::json;
 
     use super::*;
     use crate::formal::fixture::Fixture;
@@ -621,6 +864,71 @@ mod tests {
         );
         assert_eq!(record.statement_side, [path]);
         record
+    }
+
+    /// The registries of [`registered`], at their paths: the valid target
+    /// registry of the tests of the registry, with a trusted axiom and an
+    /// unconstrained function in its formal target `table`, no model and an
+    /// item of the trusted base.
+    fn registries() -> [(&'static str, Value); 3] {
+        let mut targets = registry::tests::valid();
+        let table = &mut targets["targets"][0];
+        let axiom = json!({"name": "Krepi.Axioms.clock", "reason": "Time is not modelled."});
+        table["trusted_axioms"] = json!([axiom]);
+        table["unconstrained"] = json!(["krepi_kernel::table::raw"]);
+        let models = json!({"schema": 1, "models": []});
+        let item =
+            json!({"kind": "axiom-pattern", "prefix": "KrepiGen.Table.", "reason": "Generated."});
+        let tcb = json!({"schema": 1, "items": [item]});
+        [
+            (LAYOUT.registry, targets),
+            (LAYOUT.models, models),
+            (LAYOUT.tcb, tcb),
+        ]
+    }
+
+    /// Writes `registries` in their form of [`registered`] and commits them;
+    /// returns the commit.
+    fn commit_registries(fixture: &Fixture, registries: &[(&str, Value)]) -> String {
+        for (path, value) in registries {
+            fixture.write(path, &format!("{value:#}\n"));
+        }
+        fixture.commit_all();
+        head_of(fixture)
+    }
+
+    /// A fixture whose base commit, which it returns, holds [`registries`].
+    fn registered(label: &str) -> (Fixture, String) {
+        let fixture = project(label);
+        let base = commit_registries(&fixture, &registries());
+        (fixture, base)
+    }
+
+    /// Commits `edit` of [`registries`] on the base of [`registered`] and
+    /// checks that exactly the rules `expected` fail, with their reasons,
+    /// without the label `spec`, and that none fails with it and its
+    /// approval.
+    fn registry_change(label: &str, edit: impl FnOnce(&mut [Value; 3]), expected: &[(&str, &str)]) {
+        let (mut fixture, base) = registered(label);
+        let mut values = registries().map(|(_, value)| value);
+        edit(&mut values);
+        let paths = registries().map(|(path, _)| path);
+        commit_registries(&fixture, &Vec::from_iter(paths.into_iter().zip(values)));
+        let record = guard(&mut fixture, &base, &[], None);
+        assert_eq!(failed(&record), expected, "{label}");
+        let hash = hash(&mut fixture, &LAYOUT);
+        let labelled = guard(&mut fixture, &base, &["spec"], Some(&approval(&hash)));
+        assert_eq!(failed(&labelled), [], "{label}");
+    }
+
+    /// The formal target `table` of the target registry of `registries`.
+    fn table(registries: &mut [Value; 3]) -> &mut Value {
+        &mut registries[0]["targets"][0]
+    }
+
+    /// The list `field` of `value`.
+    fn list<'a>(value: &'a mut Value, field: &str) -> &'a mut Vec<Value> {
+        value[field].as_array_mut().expect("a list")
     }
 
     /// The statement hash of the head of `fixture` in `layout`.
@@ -1382,6 +1690,335 @@ mod tests {
     }
 
     #[test]
+    fn removing_a_target_without_the_spec_label_fails() {
+        // The planned target has no theorem, mutant or proved key to lose.
+        let why = "it removes the targets slots in targets.json without the label spec";
+        registry_change(
+            "target-removed",
+            |r| list(&mut r[0], "targets").truncate(1),
+            &[("registry-target-removed", why)],
+        );
+    }
+
+    #[test]
+    fn removing_an_obligation_theorem_without_the_spec_label_fails() {
+        let theorem = "Krepi.Proofs.Table.lookup_refines";
+        let why = format!("it removes the theorems {theorem} in table without the label spec");
+        registry_change(
+            "theorem-removed",
+            |r| list(&mut table(r)["obligations"][0], "theorems").retain(|t| t != theorem),
+            &[
+                (
+                    "registry-obligation-changed",
+                    "it changes obligations of table without the label spec",
+                ),
+                ("registry-theorem-removed", &why),
+            ],
+        );
+    }
+
+    #[test]
+    fn removing_a_mutant_without_the_spec_label_fails() {
+        registry_change(
+            "mutant-removed",
+            |r| table(r)["mutants"] = json!([]),
+            &[(
+                "registry-mutant-removed",
+                "it removes the mutants bound in table without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn narrowing_proves_without_the_spec_label_fails() {
+        registry_change(
+            "proves-narrowed",
+            |r| table(r)["proves"] = json!([]),
+            &[(
+                "registry-proves-narrowed",
+                "it removes from proves kernel/src/table.rs#lookup in table without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn making_a_formal_target_planned_without_the_spec_label_fails() {
+        registry_change(
+            "made-planned",
+            |r| table(r)["state"] = json!("planned"),
+            &[(
+                "registry-formal-made-planned",
+                "it makes planned the targets table without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn adding_an_unconstrained_function_without_the_spec_label_fails() {
+        registry_change(
+            "unconstrained-added",
+            |r| list(table(r), "unconstrained").push(json!("krepi_kernel::table::other")),
+            &[(
+                "registry-unconstrained-added",
+                "it adds the unconstrained krepi_kernel::table::other in table without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn adding_an_opaque_cut_point_without_the_spec_label_fails() {
+        let cut = json!({"pattern": "krepi_kernel::table::write", "source": "s", "reason": "r"});
+        registry_change(
+            "opaque-added",
+            |r| list(table(r), "opaque").push(cut),
+            &[(
+                "registry-opaque-added",
+                "it adds the cut points krepi_kernel::table::write in table without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn adding_a_trusted_axiom_without_the_spec_label_fails() {
+        // `sorryAx` among the trusted axioms of a target, and a new item of
+        // the trusted base.
+        let axiom = json!({"name": "sorryAx", "reason": "Not proved yet."});
+        registry_change(
+            "trusted-axiom-added",
+            |r| list(table(r), "trusted_axioms").push(axiom),
+            &[(
+                "registry-trusted-axiom-added",
+                "it adds the trusted axioms sorryAx in table without the label spec",
+            )],
+        );
+        let item = json!({
+            "kind": "native-decision",
+            "file": "verification/Krepi/Proofs/Table.lean",
+            "declaration": "Krepi.Proofs.Table.lookup_bound",
+            "reason": "Decided by evaluation."
+        });
+        let why = "it adds the trusted axioms native-decision verification/Krepi/Proofs/Table.lean \
+                   Krepi.Proofs.Table.lookup_bound in tcb.json without the label spec";
+        registry_change(
+            "trusted-item-added",
+            |r| list(&mut r[2], "items").push(item),
+            &[("registry-trusted-axiom-added", why)],
+        );
+    }
+
+    #[test]
+    fn adding_a_model_without_the_spec_label_fails() {
+        // A model of the model registry, and the models of a target.
+        registry_change(
+            "model-added",
+            |r| list(&mut r[1], "models").push(json!({"name": "clock"})),
+            &[(
+                "registry-model-added",
+                "it adds the models \"clock\" in models.json without the label spec",
+            )],
+        );
+        registry_change(
+            "target-models-added",
+            |r| table(r)["models"] = json!("verification/models/table"),
+            &[(
+                "registry-model-added",
+                "it adds the models verification/models/table in table without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn changing_an_obligation_without_the_spec_label_fails() {
+        registry_change(
+            "obligation-changed",
+            |r| table(r)["obligations"][0]["statement"] = json!("Krepi.Statements.Table.other"),
+            &[(
+                "registry-obligation-changed",
+                "it changes obligations of table without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn changing_start_from_without_the_spec_label_fails() {
+        registry_change(
+            "start-from-changed",
+            |r| list(table(r), "start_from").push(json!("krepi_kernel::table::insert")),
+            &[(
+                "registry-start-from-changed",
+                "it changes start_from of table without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn changing_the_file_of_a_mutant_without_the_spec_label_fails() {
+        registry_change(
+            "mutant-file-changed",
+            |r| table(r)["mutants"][0]["file"] = json!("kernel/src/other.rs"),
+            &[(
+                "registry-mutant-file-changed",
+                "it changes the file of table/bound without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn changing_the_pattern_of_a_mutant_without_the_spec_label_fails() {
+        registry_change(
+            "mutant-find-changed",
+            |r| table(r)["mutants"][0]["find"] = json!("index < 5"),
+            &[(
+                "registry-mutant-find-changed",
+                "it changes the pattern of table/bound without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn changing_the_replacement_of_a_mutant_without_the_spec_label_fails() {
+        registry_change(
+            "mutant-replace-changed",
+            |r| table(r)["mutants"][0]["replace"] = json!("index < 3"),
+            &[(
+                "registry-mutant-replace-changed",
+                "it changes the replacement of table/bound without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn renaming_a_mutant_without_the_spec_label_fails() {
+        // The old name is removed as well.
+        registry_change(
+            "mutant-renamed",
+            |r| table(r)["mutants"][0]["name"] = json!("bound2"),
+            &[
+                (
+                    "registry-mutant-removed",
+                    "it removes the mutants bound in table without the label spec",
+                ),
+                (
+                    "registry-mutant-renamed",
+                    "it renames the mutants table/bound to bound2 without the label spec",
+                ),
+            ],
+        );
+    }
+
+    #[test]
+    fn adding_a_theorem_to_the_fails_of_a_mutant_without_the_spec_label_fails() {
+        let theorem = json!("Krepi.Proofs.Table.lookup_refines");
+        registry_change(
+            "fails-grown",
+            |r| list(&mut table(r)["mutants"][0], "fails").push(theorem),
+            &[(
+                "registry-mutant-fails-grown",
+                "it adds to fails Krepi.Proofs.Table.lookup_refines in table/bound \
+                 without the label spec",
+            )],
+        );
+    }
+
+    #[test]
+    fn changing_the_reason_of_a_trusted_item_without_the_spec_label_fails() {
+        // Of a trusted axiom, of a cut point and of an item of the trusted
+        // base.
+        let rule = "registry-trusted-reason-changed";
+        let why = |item: &str| format!("it changes the reasons of {item} without the label spec");
+        let axiom = why("Krepi.Axioms.clock in table");
+        registry_change(
+            "axiom-reason",
+            |r| table(r)["trusted_axioms"][0]["reason"] = json!("Another."),
+            &[(rule, &axiom)],
+        );
+        let cut = why("krepi_kernel::table::hardware::read in table");
+        registry_change(
+            "opaque-reason",
+            |r| table(r)["opaque"][0]["reason"] = json!("Another."),
+            &[(rule, &cut)],
+        );
+        let item = why("axiom-pattern KrepiGen.Table. in tcb.json");
+        registry_change(
+            "item-reason",
+            |r| r[2]["items"][0]["reason"] = json!("Another."),
+            &[(rule, &item)],
+        );
+    }
+
+    #[test]
+    fn a_reformatted_registry_needs_no_spec() {
+        // Another order of the targets, of the theorems of an obligation and
+        // of the fields, and a default written out.
+        let (mut fixture, base) = registered("reformatted");
+        let [(path, mut targets), ..] = registries();
+        list(&mut targets, "targets").reverse();
+        let table = &mut targets["targets"][1];
+        list(&mut table["obligations"][0], "theorems").reverse();
+        table["state"] = json!("formal");
+        fixture.write(path, &targets.to_string());
+        fixture.commit_all();
+        let record = guard(&mut fixture, &base, &[], None);
+        assert_eq!(
+            (failed(&record), &record.registry),
+            (vec![], &BTreeMap::new())
+        );
+    }
+
+    #[test]
+    fn tightening_the_registry_needs_no_spec() {
+        // A planned target made formal, fewer trusted axioms, unconstrained
+        // functions, cut points and items of the trusted base, and a key more
+        // in proves.
+        let (mut fixture, base) = registered("tightened");
+        let mut values = registries();
+        let targets = &mut values[0].1;
+        targets["targets"][1]["state"] = json!("formal");
+        let table = &mut targets["targets"][0];
+        for field in ["trusted_axioms", "unconstrained", "opaque"] {
+            table[field] = json!([]);
+        }
+        list(table, "proves").push(json!("kernel/src/table.rs#insert"));
+        values[2].1["items"] = json!([]);
+        commit_registries(&fixture, &values);
+        let record = guard(&mut fixture, &base, &[], None);
+        assert_eq!(
+            (failed(&record), &record.registry),
+            (vec![], &BTreeMap::new())
+        );
+    }
+
+    #[test]
+    fn an_unreadable_registry_needs_the_spec_label() {
+        // A head that is not JSON, and a merge base of another schema.
+        let rule = "registry-unreadable";
+        let why = |side: &str, error: &str| {
+            format!(
+                "it cannot read verification/targets.json at {side}: {error} without the label spec"
+            )
+        };
+        let (mut fixture, base) = registered("unreadable");
+        commit(&fixture, &[(LAYOUT.registry, "{")]);
+        let error = registry::parse("{").expect_err("not JSON");
+        let record = guard(&mut fixture, &base, &[], None);
+        assert_eq!(failed(&record), [(rule, why("the head", &error).as_str())]);
+        let hash = hash(&mut fixture, &LAYOUT);
+        let labelled = guard(&mut fixture, &base, &["spec"], Some(&approval(&hash)));
+        assert_eq!(failed(&labelled), []);
+        let other = r#"{"schema": 3, "targets": []}"#;
+        let base = commit(&fixture, &[(LAYOUT.registry, other)]);
+        commit_registries(&fixture, &registries()[..1]);
+        let record = guard(&mut fixture, &base, &[], None);
+        let error = "schema 3 where 2 is expected";
+        assert_eq!(
+            failed(&record),
+            [(rule, why("the merge base", error).as_str())]
+        );
+        let labelled = guard(&mut fixture, &base, &["spec"], Some(&approval(&hash)));
+        assert_eq!(failed(&labelled), []);
+    }
+
+    #[test]
     fn the_pull_request_template_holds_the_guard_fields() {
         let template = include_str!("../../../.github/pull_request_template.md");
         let given = fields(template);
@@ -1567,6 +2204,17 @@ mod tests {
             "{:?}",
             done.failures()
         );
+        // A registry that cannot be read fails its rule and stops nothing.
+        let base = commit(&fixture, &[(LAYOUT.registry, r#"{"schema": 3}"#)]);
+        let head = commit(
+            &fixture,
+            &[(LAYOUT.registry, r#"{"schema": 2, "targets": []}"#)],
+        );
+        fixture.write("artifacts/event.json", &event(&base, &head, &[], None));
+        let done = run::tests::gate(&fixture, &[], Vec::from_iter(super::phase(&var)));
+        assert_eq!(done.receipt.status, Status::Verified);
+        let guarded = done.receipt.guard.expect("the guard is recorded");
+        assert!(guarded.rules["registry-unreadable"].is_some());
     }
 
     #[test]
