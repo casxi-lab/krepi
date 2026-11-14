@@ -1,6 +1,6 @@
 //! The receipt of `cargo xtask formal run`, schema 5, and the record of
-//! `cargo xtask formal merge`, as "Receipt" and "Shards and merge" in
-//! `docs/formal-verification.md` document them.
+//! `cargo xtask formal merge`, schema 2, as "Receipt" and "Shards and merge"
+//! in `docs/formal-verification.md` document them.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -12,6 +12,7 @@ use super::paths::Snapshot;
 use super::process::LimitBy;
 use super::qualify::Expect;
 use super::registry::State;
+use super::waiver::Waiver;
 
 pub const SCHEMA: u32 = 5;
 
@@ -48,7 +49,7 @@ pub struct Receipt {
     pub failures: Vec<Failure>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Mode {
     Required,
@@ -238,7 +239,7 @@ pub struct Failure {
 }
 
 /// The schema of the record of `cargo xtask formal merge`.
-pub const MERGE_SCHEMA: u32 = 1;
+pub const MERGE_SCHEMA: u32 = 2;
 
 /// The record of a merge; its fields are written in this order.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -246,9 +247,18 @@ pub struct Merge {
     pub schema: u32,
     pub status: Status,
     pub complete: bool,
+    pub passes: bool,
     pub commit: Option<String>,
     pub tree: Option<String>,
+    pub inputs: Option<Snapshot>,
     pub image: Option<String>,
+    pub trigger: Option<Mode>,
+    #[serde(rename = "ref")]
+    pub reference: Option<String>,
+    pub run_id: Option<String>,
+    pub planned_statements: Option<u64>,
+    pub waiver_date: Option<String>,
+    pub waivers: Vec<Waived>,
     pub parts: Vec<Part>,
     pub units: BTreeMap<String, Unit>,
     pub slowest_part_seconds: f64,
@@ -261,7 +271,8 @@ pub struct Merge {
 
 /// A receipt that a merge was given, by its path: the SHA-256 of the file
 /// and, when it parses, its shard, the run and attempt of its job, whether a
-/// later attempt supersedes it, its status, completeness and seconds.
+/// later attempt supersedes it, its status, completeness, seconds and cgroup
+/// memory peak, and whether these are above the limits that the merge flags.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Part {
     pub receipt: String,
@@ -273,6 +284,30 @@ pub struct Part {
     pub status: Option<Status>,
     pub complete: bool,
     pub seconds: f64,
+    pub cgroup_memory_peak: Option<u64>,
+    pub over_seconds: bool,
+    pub over_memory: Option<bool>,
+}
+
+/// A waiver that held on the date of a merge, and whether the merge used
+/// it: a unit of its targets is not `VERIFIED`, or a part of them has a
+/// failure.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Waived {
+    pub waiver: Waiver,
+    pub used: bool,
+}
+
+impl Waived {
+    /// The line of the waiver, its texts escaped: its targets, expiry and
+    /// author, whether the merge used it, and its reason.
+    pub fn line(&self) -> String {
+        let w = &self.waiver;
+        let texts = [&w.scope.join(", "), &w.expires, &w.author, &w.reason];
+        let [scope, expires, author, reason] = texts.map(|text| text.escape_debug().to_string());
+        let used = ["unused", "used"][usize::from(self.used)];
+        format!("waiver of {scope} until {expires} by {author}, {used}: {reason}")
+    }
 }
 
 /// `duration` in seconds, rounded to milliseconds, as the receipt writes
@@ -895,9 +930,28 @@ mod tests {
             schema: MERGE_SCHEMA,
             status: Status::Verified,
             complete: true,
+            passes: true,
             commit: Some("c".repeat(40)),
             tree: Some("d".repeat(40)),
+            inputs: Some(BTreeMap::from([
+                ("kernel".to_string(), entry("040000", "tree", 'a')),
+                ("xtask".to_string(), None),
+            ])),
             image: Some(format!("ghcr.io/o/r@sha256:{}", "9".repeat(64))),
+            trigger: Some(Mode::Required),
+            reference: Some("refs/pull/7/merge".to_string()),
+            run_id: Some("123".to_string()),
+            planned_statements: Some(0),
+            waiver_date: Some("2026-11-13".to_string()),
+            waivers: vec![Waived {
+                waiver: Waiver {
+                    reason: "The proofs wait for a fix of the tool.".to_string(),
+                    scope: vec!["t".to_string()],
+                    expires: "2026-12-01".to_string(),
+                    author: "someone".to_string(),
+                },
+                used: false,
+            }],
             parts: vec![Part {
                 receipt: "artifacts/parts/qualification/receipt.json".to_string(),
                 sha256: Some("e".repeat(64)),
@@ -908,6 +962,9 @@ mod tests {
                 status: Some(Status::Verified),
                 complete: true,
                 seconds: 1_095.7,
+                cgroup_memory_peak: Some(10_429_386_752),
+                over_seconds: false,
+                over_memory: Some(false),
             }],
             units: BTreeMap::from([(
                 "base".to_string(),
@@ -924,7 +981,8 @@ mod tests {
             over_80_percent: false,
             problems: Vec::new(),
         };
-        let (c, d, e, nine) = (
+        let (a, c, d, e, nine) = (
+            "a".repeat(40),
             "c".repeat(40),
             "d".repeat(40),
             "e".repeat(64),
@@ -932,12 +990,39 @@ mod tests {
         );
         let expected = format!(
             r#"{{
-  "schema": 1,
+  "schema": 2,
   "status": "VERIFIED",
   "complete": true,
+  "passes": true,
   "commit": "{c}",
   "tree": "{d}",
+  "inputs": {{
+    "kernel": {{
+      "mode": "040000",
+      "type": "tree",
+      "oid": "{a}"
+    }},
+    "xtask": null
+  }},
   "image": "ghcr.io/o/r@sha256:{nine}",
+  "trigger": "REQUIRED",
+  "ref": "refs/pull/7/merge",
+  "run_id": "123",
+  "planned_statements": 0,
+  "waiver_date": "2026-11-13",
+  "waivers": [
+    {{
+      "waiver": {{
+        "reason": "The proofs wait for a fix of the tool.",
+        "scope": [
+          "t"
+        ],
+        "expires": "2026-12-01",
+        "author": "someone"
+      }},
+      "used": false
+    }}
+  ],
   "parts": [
     {{
       "receipt": "artifacts/parts/qualification/receipt.json",
@@ -948,7 +1033,10 @@ mod tests {
       "superseded": false,
       "status": "VERIFIED",
       "complete": true,
-      "seconds": 1095.7
+      "seconds": 1095.7,
+      "cgroup_memory_peak": 10429386752,
+      "over_seconds": false,
+      "over_memory": false
     }}
   ],
   "units": {{
@@ -970,6 +1058,14 @@ mod tests {
         assert_eq!(render(&merged), expected);
         let back: Merge = serde_json::from_str(&expected).expect("the record reads back");
         assert_eq!(back, merged);
+        let line = "waiver of t until 2026-12-01 by someone, unused: The proofs wait for a fix of the tool.";
+        assert_eq!(merged.waivers[0].line(), line);
+        // Its texts are escaped, so that none splits a line.
+        let mut waived = merged.waivers[0].clone();
+        (waived.waiver.author, waived.used) = ("a\nb".to_string(), true);
+        waived.waiver.reason = "two\nlines".to_string();
+        let line = "waiver of t until 2026-12-01 by a\\nb, used: two\\nlines";
+        assert_eq!(waived.line(), line);
     }
 
     #[test]

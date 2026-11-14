@@ -129,10 +129,10 @@ sha2 = { version = "=0.11.1", default-features = false }
 tar = { version = "=0.4.46", default-features = false }
 # `cargo xtask formal check` requires the expiry of each waiver of
 # `verification/waivers.json` to be a date of the calendar, and the
-# qualification job of `cargo xtask formal run` judges whether a waiver
-# holds on the UTC date of the Unix time of the host's clock. Only the date
-# types of the core are used, so the standard-library support of the
-# default feature is left out.
+# qualification job of `cargo xtask formal run` and
+# `cargo xtask formal merge` judge whether a waiver holds on the UTC date of
+# the Unix time of the host's clock. Only the date types of the core are
+# used, so the standard-library support of the default feature is left out.
 time = { version = "=0.3.55", default-features = false }
 # Manifests and Cargo configuration files are parsed into tables, which
 # `serde` defines, and `suites.toml`, the extraction configuration of

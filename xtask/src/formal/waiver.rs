@@ -1,17 +1,18 @@
-//! The waiver record `verification/waivers.json` and what its waivers leave
-//! out of the base round, as "Waivers" in `docs/formal-verification.md`
-//! describes them.
+//! The waiver record `verification/waivers.json`, what its waivers leave
+//! out of the base round and how they conclude a merge, as "Waivers" in
+//! `docs/formal-verification.md` describes them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use time::{Date, Month, UtcDateTime};
 
+use super::receipt::{Merge, Receipt, Waived};
 use super::registry::{State, Target};
-use super::{Layout, lean};
+use super::{Layout, base, guard, lean, merge, mutants, outcome::Status};
 
 /// The waiver record: schema 1 and its waivers.
 #[derive(Debug, Deserialize)]
@@ -22,7 +23,7 @@ struct File {
 }
 
 /// A waiver of the targets of `scope` through the UTC date `expires`.
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Waiver {
     pub reason: String,
@@ -96,6 +97,43 @@ pub fn left_out(layout: &Layout, targets: &[Target], waived: &BTreeSet<String>) 
         modules.extend((own.cloned().chain(generated)).map(|m| (m, target.name.clone())));
     }
     modules
+}
+
+/// Concludes `merged`, whose status, units, problems and waiver date are
+/// set, with the `waivers`, `targets` and `statements` of the checkout and
+/// its `kept` receipts: the units and parts of the targets of the waivers
+/// that hold, and the `base/<theorem>` of each statement in a module that
+/// they leave out, are recorded and not required. It passes when it has no
+/// problem, every other unit is `VERIFIED` and no other part has a failure,
+/// and is then `REJECTED` when it used a waiver.
+pub fn conclude(
+    merged: &mut Merge,
+    layout: &Layout,
+    kept: &[&Receipt],
+    waivers: &[Waiver],
+    targets: &[Target],
+    statements: &[guard::Statement],
+) {
+    let holds = |w: &&Waiver| merged.waiver_date.as_ref().is_some_and(|d| *d <= w.expires);
+    let waived = BTreeSet::from_iter(waivers.iter().filter(holds).flat_map(|w| w.scope.clone()));
+    // The target of each unit that is not VERIFIED and part with a failure.
+    let left = left_out(layout, targets, &waived);
+    let modules = BTreeMap::from_iter(statements.iter().map(|s| (base::unit(&s.theorem), s)));
+    let owner = |unit: &String| match modules.get(unit) {
+        Some(statement) => left.get(&statement.module).cloned(),
+        None => merge::target(mutants::owner(unit)).map(String::from),
+    };
+    let units = (merged.units.iter()).filter(|(_, unit)| unit.status != Status::Verified);
+    let parts = (kept.iter()).filter(|receipt| !receipt.failures.is_empty());
+    let parts = parts.map(|receipt| owner(&receipt.shard.clone().unwrap_or_default()));
+    let failing = Vec::from_iter(units.map(|(unit, _)| owner(unit)).chain(parts));
+    let covered = |owner: &Option<String>| owner.as_ref().is_some_and(|o| waived.contains(o));
+    merged.passes = merged.problems.is_empty() && failing.iter().all(covered);
+    let used = |w: &Waiver| (w.scope.iter()).any(|name| failing.contains(&Some(name.clone())));
+    let held = (waivers.iter().filter(holds)).map(|w| (w.clone(), used(w)));
+    merged.waivers = Vec::from_iter(held.map(|(waiver, used)| Waived { waiver, used }));
+    let rejected = merged.passes && merged.waivers.iter().any(|waived| waived.used);
+    merged.status = [merged.status, Status::Rejected][usize::from(rejected)];
 }
 
 /// Whether `text` is a date of the calendar written `YYYY-MM-DD`, as the

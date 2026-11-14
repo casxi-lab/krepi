@@ -1901,6 +1901,17 @@ mod tests {
         files.map(|entry| file(entry.path())).collect()
     }
 
+    /// Writes the receipt of `done` as the part `name` of a merge, with the
+    /// image of a run in CI.
+    fn part(fixture: &Fixture, name: &str, done: &Done) -> PathBuf {
+        let mut receipt = done.written();
+        let image = format!("ghcr.io/casxi-lab/krepi-formal@sha256:{}", "a".repeat(64));
+        receipt.image.get_or_insert_default().reference = Some(image);
+        let path = format!("artifacts/parts/{name}.json");
+        fixture.write(&path, &receipt::render(&receipt));
+        fixture.root().join(path)
+    }
+
     #[test]
     fn the_shards_list_the_hand_written_modules_as_the_base_round_and_merge_into_the_units_of_a_whole_run()
      {
@@ -1946,17 +1957,8 @@ mod tests {
         };
         assert!(stage(&shard).contains_key(Path::new("Proofs/Main.lean")));
         assert_eq!(stage(&shard), stage(&whole));
-        // The receipts of the parts, with the image of a run in CI, merge
-        // into the units of the whole run.
-        let part = |name: &str, done: &Done| {
-            let mut receipt = done.written();
-            let image = format!("ghcr.io/casxi-lab/krepi-formal@sha256:{}", "a".repeat(64));
-            receipt.image.get_or_insert_default().reference = Some(image);
-            let path = format!("artifacts/parts/{name}.json");
-            fixture.write(&path, &receipt::render(&receipt));
-            root.join(path)
-        };
-        let parts = [part("q", &job), part("t", &shard)];
+        // The receipts of the parts merge into the units of the whole run.
+        let parts = [part(&fixture, "q", &job), part(&fixture, "t", &shard)];
         let merged = merge::merge(root, &LAYOUT, &parts, Some(Duration::ZERO));
         assert_eq!(merged.problems, Vec::<String>::new());
         assert_eq!((merged.status, merged.complete), (Status::Verified, true));
@@ -2092,5 +2094,57 @@ mod tests {
                 (Status::Scoped, Some(reason.as_str()))
             );
         }
+    }
+
+    #[test]
+    fn a_waived_target_whose_proofs_fail_passes_the_merge_with_its_statement_unchecked() {
+        // The target proves the statement `S` in its proof module, which
+        // builds neither in its stage nor in that of the base round.
+        let mut fixture = base("waived-merge");
+        run::tests::root_package(&fixture, "krepi-kernel", "");
+        let target = json!({
+            "name": "t", "module": "T", "start_from": ["crate::f"],
+            "proof_modules": ["Krepi.Proofs.Counter"],
+            "obligations": [{"id": "s", "theorems": [T]}],
+        });
+        targets(&fixture, &json!([target]));
+        let error = "error: Krepi/Proofs/Counter.lean:9:22: unsolved goals";
+        let failing = fixture::failing("Krepi.Proofs.Counter", &[error], 1);
+        lake_script(&fixture, "+Krepi", &failing);
+        let build = format!("if [ -f Krepi/Proofs/Counter.lean ]; then\n{failing}fi\n");
+        lake_script(&fixture, "build", &build);
+        hashed(&mut fixture);
+        // Without a waiver, the base round fails.
+        assert_eq!(status(&job(&fixture), PHASE).0, Status::Rejected);
+        // With one, the qualification job leaves the target out, and only
+        // its shard fails.
+        waiver::tests::waive(&fixture, "t", "9999-12-31");
+        let (job, root) = (job(&fixture), fixture.root());
+        let shard = run::tests::shard_phases(root, "target/t");
+        let shard = run::tests::gate_shard(&fixture, "target/t", shard, run::tests::plenty);
+        let written = [&job, &shard].map(|done| done.written());
+        let conclusions = written
+            .each_ref()
+            .map(|receipt| (receipt.status, receipt.complete));
+        let expected = [(Status::Verified, true), (Status::Rejected, true)];
+        assert_eq!(conclusions, expected, "{:?}", job.failures());
+        assert!(written[0].proof_targets.is_empty());
+        assert!(!stage(&job).join("Krepi/Proofs/Counter.lean").exists());
+        // The merge records the units of the target and its statement, does
+        // not require them and passes, and its conclusion stays REJECTED.
+        let parts = [part(&fixture, "q", &job), part(&fixture, "t", &shard)];
+        let merged = merge::merge(root, &LAYOUT, &parts, Some(Duration::ZERO));
+        assert_eq!(merged.problems, Vec::<String>::new());
+        let conclusion = (merged.status, merged.complete, merged.passes);
+        assert_eq!(conclusion, (Status::Rejected, true, true));
+        assert!(merged.waivers[0].used);
+        assert_eq!(merged.units["target/t"].status, Status::Rejected);
+        let reason =
+            "its module Krepi.Proofs.Counter is left out of the base round by the waiver of t";
+        let statement = &merged.units[&unit(T)];
+        let statement = (statement.status, statement.reason.as_deref());
+        assert_eq!(statement, (Status::Scoped, Some(reason)));
+        let exit = merge::tests::exit(&fixture, &[&parts[0], &parts[1]]);
+        assert_eq!(exit, ExitCode::SUCCESS);
     }
 }

@@ -1015,8 +1015,8 @@ and fake tools of the tests of `cargo xtask formal run`.
 
 `cargo xtask formal merge [--calibration] RECEIPT...` merges the receipts
 of the qualification job and of the shard of each formal target of the
-commit checked out into the conclusion of the whole gate, and writes its
-record and summary below `artifacts/formal/merge/`
+commit checked out into the conclusion of the whole gate, with the waivers
+that hold, and writes its record and summary below `artifacts/formal/merge/`
 ([shards and merge](../formal-verification.md#shards-and-merge)). It runs
 no proof tool and is not part of the check: the job `formal merge` of
 `.github/workflows/formal.yml` and the job `calibration merge` of the
@@ -1025,7 +1025,8 @@ the parts of their run. Its
 unit tests run in the `test` step above, on the Git repositories of the
 tests of `cargo xtask formal run` with receipts that the tests write, and
 on the receipts of runs of the qualification job and of the shard of a
-target in those repositories.
+target in those repositories; their waivers, too, expire on 2000-01-01 or
+9999-12-31.
 
 The workflow `formal calibration`, `.github/workflows/formal-calibration.yml`,
 runs the gate on the calibration target in the pinned proof-tool image
@@ -1263,7 +1264,7 @@ to an exact version in the manifest of the crate that uses it:
 | `xtask/Cargo.toml` | `signal-hook` without default features | MIT OR Apache-2.0 | The handler that lets SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop `cargo xtask check`, `cargo xtask formal run`, `cargo xtask formal mutants` and `cargo xtask formal vectors`; the emulation of their default action with which the formal commands then end, whereas the check exits with 128 plus the signal number; and the names of the signals in the output of the check |
 | `xtask/Cargo.toml` | `sha2` without default features | MIT OR Apache-2.0 | The SHA-256 digests of the images that `cargo xtask image` writes into `images.json` and that `cargo xtask suite` checks before it boots them and `cargo xtask release-assets` before it writes them into `SHA256SUMS`, and of the receipts and transcripts of its runs, of the Aeneas patch and the Lake lock that `cargo xtask formal toolchain-check` compares with `verification/toolchain.json`, and of the output files of the commands of `cargo xtask formal run`, `cargo xtask formal mutants` and `cargo xtask formal vectors`, of the receipt that a list of survivors names, the Lean files that Aeneas writes in the former and the `versions.json` of the proof-tool image, of each receipt that `cargo xtask formal merge` is given, and of the Lean archives, the channel manifest and the Lake lock of Aeneas main, which `cargo xtask formal canary` writes into the derived tool manifest |
 | `xtask/Cargo.toml` | `tar` without default features | MIT OR Apache-2.0 | Unpacking the tar archive of the gate inputs that `git archive` writes for `cargo xtask formal run` and `cargo xtask formal mutants` |
-| `xtask/Cargo.toml` | `time` without default features | MIT OR Apache-2.0 | The calendar dates that `cargo xtask formal check` requires of the expiry of each waiver of `verification/waivers.json`, and the UTC date of the Unix time of the host's clock on which the qualification job of `cargo xtask formal run` judges whether a waiver holds |
+| `xtask/Cargo.toml` | `time` without default features | MIT OR Apache-2.0 | The calendar dates that `cargo xtask formal check` requires of the expiry of each waiver of `verification/waivers.json`, and the UTC date of the Unix time of the host's clock on which the qualification job of `cargo xtask formal run` and `cargo xtask formal merge` judge whether a waiver holds |
 | `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `suites.toml`, `toolchains.toml`, `rust-toolchain.toml`, Charon's `rust-toolchain`, `verification/extraction.toml`, the compile-fail cases of the `subset` step, the `vectors` blocks of the contracts, and Charon's `charon/Cargo.toml` and the channel manifest of a nightly that `cargo xtask formal canary` reads |
 | `xtask/Cargo.toml` | `walkdir` | MIT OR Unlicense | The listing of the tool installation that `cargo xtask formal run` takes at the start and at the end of a phase and of the run, without following symbolic links, and the copy of the package of a target for each of its mutants |
 | `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step, and the YAML loader with which that step reads the actions that the steps of a workflow use, `cargo xtask run-record` reads the limits of the jobs of a workflow and the unit tests of the check read the committed workflows, and the YAML emitter with which a unit test of the check compares the steps of the shard and merge jobs of the two formal workflows |
