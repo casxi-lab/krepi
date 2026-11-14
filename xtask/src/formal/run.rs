@@ -859,7 +859,8 @@ pub(super) fn target_phases<'a>(
     let formal = Vec::from_iter(all.iter().filter(|t| pick(t, State::Formal)).cloned());
     let planned = Vec::from_iter(all.iter().filter(|t| pick(t, State::Planned)).cloned());
     let units = |targets: &[Target]| Vec::from_iter(targets.iter().map(|t| target_unit(&t.name)));
-    let budget = |targets: &[Target]| Duration::from_secs(targets.iter().map(|t| t.budget).sum());
+    let sum = |targets: &[Target]| (targets.iter().map(|t| t.budget)).fold(0, u64::saturating_add);
+    let budget = |targets: &[Target]| Duration::from_secs(sum(targets));
     let mut finish = units(&formal);
     finish.extend(
         formal
@@ -1930,6 +1931,17 @@ pub(crate) mod tests {
         assert_eq!(phases, [Some("targets")]);
         let stage = done.run.path.join("work/targets/t/stage/verification");
         assert!(stage.join("Krepi/Proofs/T.lean").is_file());
+    }
+
+    #[test]
+    fn the_budgets_of_the_target_phases_saturate_instead_of_overflowing() {
+        let fixture = with_targets("saturated-budgets", &two_targets(u64::MAX, 0));
+        // The extraction adds the budget of the planned target to the largest.
+        let named = BTreeSet::from(["t", "p"].map(String::from));
+        let [extraction, finish] =
+            target_phases(fixture.root(), &Layout::PRODUCTION, &named, None, None);
+        let most = Duration::from_secs(u64::MAX);
+        assert_eq!((extraction.budget, finish.budget), (most, most));
     }
 
     #[test]
