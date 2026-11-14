@@ -1077,6 +1077,330 @@ fn the_calibration_shard_and_merge_run_the_steps_of_those_of_formal() {
     assert!(jobs["shard"]["if"].as_str().is_some());
 }
 
+/// The step of `job` named `name`.
+fn step_named<'a>(job: &'a Yaml, name: &str) -> &'a Yaml {
+    let mut steps = job["steps"].as_vec().into_iter().flatten();
+    let found = steps.find(|step| step["name"].as_str() == Some(name));
+    found.unwrap_or_else(|| panic!("a step {name}"))
+}
+
+/// The names of the steps of `job`, in their order.
+fn step_names(job: &Yaml) -> Vec<&str> {
+    (job["steps"].as_vec().into_iter().flatten())
+        .map(|step| step["name"].as_str().unwrap_or_default())
+        .collect()
+}
+
+/// The step that runs the comparator part and those that remove its
+/// container and check its challenges.
+const COMPARATOR_STEP: &str = "Run the comparator in its own container";
+const COMPARATOR_REMOVAL: &str = "Remove the container of the comparator";
+const CHALLENGES_STEP: &str = "Check that the comparator rejects the fixed challenges";
+/// The security options that the container of the comparator leaves
+/// unconfined, which the sandbox of `lake comparator` needs.
+const UNCONFINED: [&str; 3] = [
+    "seccomp=unconfined",
+    "apparmor=unconfined",
+    "systempaths=unconfined",
+];
+
+#[test]
+fn the_comparator_runs_after_the_gate_in_a_container_of_its_own() {
+    use crate::formal::{comparator, run::RECEIPT_MARGIN};
+    let formal = workflow(FORMAL);
+    let calibration = workflow(CALIBRATION);
+    let gate = &formal["jobs"]["gate"];
+    let run = &calibration["jobs"]["calibration"];
+    // The gate keeps its stage, and the comparator runs on it after the
+    // container of the gate is removed; its own container is removed after
+    // it within a minute.
+    assert!(script_with_id(gate, "gate").contains("formal run --shard qualification --keep"));
+    let rows = run["strategy"]["matrix"]["include"]
+        .as_vec()
+        .expect("the matrix");
+    assert_eq!(rows[0]["key"].as_str(), Some("run"));
+    assert_eq!(
+        rows[0]["args"].as_str(),
+        Some("--shard qualification --keep")
+    );
+    for job in [gate, run] {
+        let names = step_names(job);
+        let at = |name: &str| names.iter().position(|step| *step == name);
+        let gate = names
+            .iter()
+            .position(|step| step.starts_with("Run the gate"));
+        let gate = gate.expect("the step of the gate");
+        assert_eq!(at("Remove the container of the gate"), Some(gate + 1));
+        assert_eq!(at(COMPARATOR_STEP), Some(gate + 2));
+        assert_eq!(at(COMPARATOR_REMOVAL), Some(gate + 3));
+        let removal = step_named(job, COMPARATOR_REMOVAL);
+        assert_eq!(removal["timeout-minutes"].as_i64(), Some(1));
+        let always = removal["if"].as_str().unwrap_or_default();
+        assert!(always.contains("always()"), "{always}");
+    }
+    // It runs unless the run was cancelled or the probe of the gate failed,
+    // under the deadline of the part and its receipt, which `deadline.sh`
+    // kills a minute later and the step ends a minute after that.
+    let step = step_named(gate, COMPARATOR_STEP);
+    assert_eq!(step["id"].as_str(), Some("comparator"));
+    assert_eq!(
+        step["if"].as_str(),
+        Some("${{ !cancelled() && steps.probe.outcome == 'success' }}")
+    );
+    let deadline = (comparator::BUDGET + RECEIPT_MARGIN).as_secs().div_ceil(60);
+    assert_eq!(deadline, 35);
+    assert_eq!(step["timeout-minutes"].as_i64(), Some(37));
+    let script = step["run"].as_str().expect("a script");
+    let lines: Vec<String> = (logical_lines(script).iter())
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    let last = lines.last().expect("a command");
+    let start = format!("exec bash {DEADLINE} --stop-commands {deadline}m 1m docker run --rm ");
+    assert!(last.starts_with(&start), "{last}");
+    assert!(
+        last.ends_with("xtask/target/debug/xtask\" formal run --shard comparator"),
+        "{last}"
+    );
+    // Unprivileged user namespaces are allowed on the runner, and the
+    // container has the flags of the gate and the unconfined options; the
+    // sandbox sees the stage through a second mount of the runs directory,
+    // which the variable of the part names, and a read-only system Git
+    // configuration that marks the packages of the image as safe.
+    let runs = format!(
+        "--volume \"$GITHUB_WORKSPACE/{}:/krepi-runs\" --env {}=/krepi-runs",
+        crate::formal::run::RUNS,
+        comparator::RUNS
+    );
+    for text in [
+        "\"${gate_flags[@]}\" \"${relaxed[@]}\"",
+        "--user \"$(id -u):$(id -g)\"",
+        "--volume \"$GITHUB_WORKSPACE:$GITHUB_WORKSPACE\" --workdir \"$GITHUB_WORKSPACE\"",
+        &runs,
+        "--volume \"$RUNNER_TEMP/gitconfig:/etc/gitconfig:ro\"",
+        "--env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT",
+        "--env KREPI_FORMAL_IMAGE=\"$IMAGE\"",
+    ] {
+        assert!(last.contains(text), "{text}");
+    }
+    let trimmed: Vec<&str> = script.lines().map(str::trim).collect();
+    let sysctl = "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0";
+    let relaxed = [
+        "relaxed=(--security-opt seccomp=unconfined --security-opt apparmor=unconfined",
+        "--tmpfs /run/user --security-opt systempaths=unconfined)",
+    ];
+    let gitconfig = r#"printf '[safe]\n\tdirectory = *\n' > "$RUNNER_TEMP/gitconfig""#;
+    for text in [sysctl, relaxed[0], relaxed[1], gitconfig] {
+        assert!(trimmed.contains(&text), "{text}");
+    }
+    // Before it, a probe of the same container fails the step unless the
+    // container runs as another user than root, on a read-only root file
+    // system, without capabilities, new privileges or a network.
+    let probe = (lines.iter()).position(|line| line.contains("<<'PROBE'"));
+    let probe = probe.expect("the probe");
+    let flags =
+        "docker run --rm -i \"${gate_flags[@]}\" \"${relaxed[@]}\" --user \"$(id -u):$(id -g)\"";
+    assert!(lines[probe].contains(flags), "{}", lines[probe]);
+    let body = &lines[probe + 1..];
+    let end = body.iter().position(|line| line.trim() == "PROBE");
+    let body = &body[..end.expect("the end of the probe")];
+    for check in [
+        r#"[ "$(id -u)" != 0 ] || fail "the container runs as root""#,
+        r#"*) fail "the root file system is not read-only" ;;"#,
+        r#"grep -q '^CapBnd:[[:space:]]*0*$' /proc/self/status || fail "capabilities are left""#,
+        r#"grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/self/status || fail "new privileges are allowed""#,
+        r#"[ "$(ls /sys/class/net)" = lo ] || fail "the container has a network""#,
+    ] {
+        assert!(body.iter().any(|line| line.trim() == check), "{check}");
+    }
+    assert_eq!(
+        body.last().map(|line| line.trim()),
+        Some("exit \"$status\"")
+    );
+    // The calibration runs the same steps on its run row, with the flag of
+    // its layout.
+    let own = step_named(run, COMPARATOR_STEP);
+    assert_eq!(
+        own["if"].as_str(),
+        Some("${{ !cancelled() && matrix.key == 'run' && steps.probe.outcome == 'success' }}")
+    );
+    assert_eq!(own["timeout-minutes"], step["timeout-minutes"]);
+    let copied = own["run"].as_str().expect("a script");
+    assert_eq!(copied.matches(" --calibration").count(), 1);
+    assert_eq!(copied.replace(" --calibration", ""), script);
+    assert!(copied.contains("formal run --calibration --shard comparator"));
+    let removal = |job: &Yaml| step_named(job, COMPARATOR_REMOVAL)["run"].clone();
+    assert_eq!(removal(run), removal(gate));
+    // The unconfined options are in these steps and in the measurement of
+    // the comparator alone.
+    let mut unconfined = Vec::new();
+    for (path, document) in workflows() {
+        for (key, job) in jobs(&document) {
+            for step in job["steps"].as_vec().into_iter().flatten() {
+                let text = step["run"].as_str().unwrap_or_default();
+                if UNCONFINED.iter().any(|option| text.contains(option)) {
+                    let name = step["name"].as_str().unwrap_or_default().to_string();
+                    unconfined.push((path.clone(), key.to_string(), name));
+                }
+            }
+        }
+    }
+    unconfined.sort();
+    let measured = "Run lake comparator in each mode and container setting";
+    assert_eq!(
+        unconfined,
+        [
+            (CALIBRATION, "calibration", COMPARATOR_STEP),
+            (MEASURE, "comparator", measured),
+            (FORMAL, "gate", COMPARATOR_STEP),
+        ]
+        .map(|(path, key, name)| (path.to_string(), key.to_string(), name.to_string()))
+    );
+}
+
+/// The messages of Lake for a challenge whose statement is not that of the
+/// solution, and for a challenge that does not permit an axiom that the
+/// solution uses, `propext`.
+const STATEMENT_MISMATCH: &str = "Challenge and solution theorem statement do not match";
+const ILLEGAL_AXIOM: &str = "Illegal axiom detected: 'propext'";
+
+#[test]
+fn the_calibration_checks_that_the_comparator_rejects_its_fixed_challenges() {
+    use crate::formal::comparator::PHASE;
+    let calibration = workflow(CALIBRATION);
+    let run = &calibration["jobs"]["calibration"];
+    // On the run row, after the comparator, unless the run was cancelled,
+    // and before the summary and the upload.
+    let names = step_names(run);
+    let at = |name: &str| names.iter().position(|step| *step == name);
+    let removal = at(COMPARATOR_REMOVAL).expect("the removal");
+    assert_eq!(at(CHALLENGES_STEP), Some(removal + 1));
+    let summary = at("Summarize the receipt and compress the logs");
+    assert_eq!(summary, Some(removal + 2));
+    let step = step_named(run, CHALLENGES_STEP);
+    assert_eq!(
+        step["if"].as_str(),
+        Some("${{ !cancelled() && matrix.key == 'run' }}")
+    );
+    assert_eq!(step["timeout-minutes"].as_i64(), Some(1));
+    let script = step["run"].as_str().expect("a script");
+    let units = [
+        format!("{PHASE}-negative/axiom"),
+        format!("{PHASE}-negative/statement"),
+    ];
+    let expected = format!("'[\"{}\",\"{}\"]'", units[0], units[1]);
+    for text in [
+        &expected,
+        &format!("{PHASE}/calibration"),
+        STATEMENT_MISMATCH,
+        ILLEGAL_AXIOM,
+        "PROOF_FAILURE",
+        "VERIFIED",
+        "echo \"::stop-commands::$token\"",
+    ] {
+        assert!(script.contains(text), "{text}");
+    }
+    // The script on receipts of the calibration, where jq is on the path as
+    // on the runners; elsewhere the rest of the test has nothing to run.
+    let jq = std::process::Command::new("jq")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .status();
+    if !jq.is_ok_and(|status| status.success()) {
+        eprintln!("skipped: jq is not on the path");
+        return;
+    }
+    let command = |unit: &str, class: &str, log: &str| {
+        format!(r#"{{"unit": "{unit}", "class": "{class}", "stderr": {{"path": "logs/{log}"}}}}"#)
+    };
+    let good = format!(
+        r#"{{"shard": "comparator", "units": {{"comparator/calibration": {{"status": "VERIFIED"}}}},
+        "commands": [{}, {}, {}]}}"#,
+        command("comparator/calibration", "PASSED", "1.stderr"),
+        command(&units[1], "PROOF_FAILURE", "2.stderr"),
+        command(&units[0], "PROOF_FAILURE", "3.stderr"),
+    );
+    let logs = [
+        ("1.stderr", String::new()),
+        ("2.stderr", format!("error: {STATEMENT_MISMATCH}\n")),
+        ("3.stderr", format!("note\nerror: {ILLEGAL_AXIOM}\n")),
+    ];
+    let judge = |receipt: &str, logs: &[(&str, String)]| {
+        let scratch = crate::scratch::Scratch::temporary("challenges");
+        scratch.write("script.sh", script);
+        scratch.write(
+            "artifacts/formal/runs/q/receipt.json",
+            r#"{"shard": "qualification", "commands": []}"#,
+        );
+        scratch.write("artifacts/formal/runs/c/receipt.json", receipt);
+        for (name, text) in logs {
+            scratch.write(&format!("artifacts/formal/runs/c/logs/{name}"), text);
+        }
+        let output = std::process::Command::new("bash")
+            .args(["--noprofile", "--norc", "-eo", "pipefail", "script.sh"])
+            .current_dir(&scratch.0)
+            .env("GITHUB_STEP_SUMMARY", scratch.0.join("summary.md"))
+            .output()
+            .expect("run the script");
+        let summary = std::fs::read_to_string(scratch.0.join("summary.md")).unwrap_or_default();
+        (output.status.code(), summary)
+    };
+    let (code, summary) = judge(&good, &logs);
+    assert_eq!(code, Some(0), "{summary}");
+    for line in [
+        "- `comparator/calibration`: VERIFIED",
+        "- `comparator-negative/statement`: PROOF_FAILURE",
+        &format!("    error: {STATEMENT_MISMATCH}"),
+        "- `comparator-negative/axiom`: PROOF_FAILURE",
+        &format!("    error: {ILLEGAL_AXIOM}"),
+    ] {
+        assert!(
+            summary.lines().any(|found| found == line),
+            "{line}: {summary}"
+        );
+    }
+    // Each failure fails the step: another class, a log without the message,
+    // another unit of the calibration, another or a missing challenge, and
+    // no receipt of the comparator.
+    let other_log = [&logs[..2], &[("3.stderr", "error: other\n".to_string())]].concat();
+    let failed = [
+        (
+            good.replacen("\"PROOF_FAILURE\"", "\"TOOL_FAILURE\"", 1),
+            &logs[..],
+            "- FAILED: comparator-negative/statement is TOOL_FAILURE, not PROOF_FAILURE",
+        ),
+        (
+            good.clone(),
+            &other_log[..],
+            "- FAILED: the error log of comparator-negative/axiom does not hold: Illegal axiom \
+             detected: 'propext'",
+        ),
+        (
+            good.replace("\"VERIFIED\"", "\"REJECTED\""),
+            &logs[..],
+            "- FAILED: the unit comparator/calibration is not VERIFIED",
+        ),
+        (
+            good.replace(&units[0], "comparator-negative/other"),
+            &logs[..],
+            "- FAILED: the challenges ran as the commands of \
+             [\"comparator-negative/other\",\"comparator-negative/statement\"]",
+        ),
+        (
+            good.replace("\"comparator\"", "\"target/calibration\""),
+            &logs[..],
+            "- FAILED: the comparator left 0 receipts, not one",
+        ),
+    ];
+    for (receipt, logs, line) in failed {
+        let (code, summary) = judge(&receipt, logs);
+        assert_eq!(code, Some(1), "{summary}");
+        assert!(
+            summary.lines().any(|found| found == line),
+            "{line}: {summary}"
+        );
+    }
+}
+
 /// The script that runs a main command of a step under its deadline.
 const DEADLINE: &str = ".github/scripts/deadline.sh";
 /// The main commands of the jobs of the lines, as `cargo xtask <command>`.

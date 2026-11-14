@@ -1,7 +1,8 @@
 # The proof gate in CI, in parts of one commit. On the head of every pull
 # request to main and on every push to main, the job `formal run`, the
 # qualification job, runs `cargo xtask formal run --shard qualification` in
-# the pinned proof-tool image; beside it, the job `formal shard <name>`
+# the pinned proof-tool image and then the comparator part on the stage
+# that it kept; beside it, the job `formal shard <name>`
 # runs the shard of each formal target of the head's registry; after them,
 # the job `formal merge` combines their receipts on the runner into the
 # conclusion of the gate. The job `formal planned` runs the gate on the
@@ -42,22 +43,18 @@ env:
   HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
-  # The deadline of the qualification job is the gate's 7,200 s and 600 s
-  # for the extraction of every formal target, that of the shard of a target
-  # 300 s and the budget of its target, and that of a run of the planned
-  # targets the 7,200 s and their budgets; then each has the 300 s of its
-  # receipt. The step of the qualification job has the minutes of its
-  # deadline and receipt, rounded up, and one more as a backstop; that of a
-  # shard or of the planned targets two more, as `deadline.sh` kills its
-  # command a minute after its deadline. The qualification job has 15
-  # minutes for the steps before its gate step and the backstop of that
-  # step, and the minutes of the deadline and the receipt; a shard and the
-  # job of the planned targets 15 minutes before their step, the step and 3
-  # minutes after it. Every formal target is a shard of its own, named by
-  # its unit, whose registered budget per worker may be at most the shard
-  # limit, 3,300 s, as `cargo xtask formal check` requires; a job of the
-  # hosted runners ends after 360 minutes. Target names are checked before
-  # they are passed on.
+  # The deadline of the shard of a target is 300 s and the budget of its
+  # target, and that of a run of the planned targets the gate's 7,200 s and
+  # their budgets; then each has the 300 s of its receipt. The step of a
+  # shard or of the planned targets has the minutes of its deadline and
+  # receipt, rounded up, and two more, as `deadline.sh` kills its command a
+  # minute after its deadline; their job 15 minutes before the step, the
+  # step and 3 minutes after it. Every formal target is a shard of its own,
+  # named by its unit, whose registered budget per worker may be at most
+  # the shard limit, 3,300 s, as `cargo xtask formal check` requires; a job
+  # of the hosted runners ends after 360 minutes. Target names are checked
+  # before they are passed on. The limits of the qualification job do not
+  # depend on the registry and are written in it.
   limits:
     name: formal limits
     if: github.event_name != 'workflow_dispatch'
@@ -66,8 +63,6 @@ jobs:
     permissions:
       contents: read
     outputs:
-      gate: ${{ steps.limits.outputs.gate }}
-      job: ${{ steps.limits.outputs.job }}
       shards: ${{ steps.limits.outputs.shards }}
       planned: ${{ steps.limits.outputs.planned }}
       planned-gate: ${{ steps.limits.outputs.planned-gate }}
@@ -85,7 +80,6 @@ jobs:
         timeout-minutes: 1
         run: |
           gate_budget=7200
-          extraction_margin=600
           shard_margin=300
           receipt_margin=300
           shard_limit=3300
@@ -98,7 +92,6 @@ jobs:
               "$registry"
           }
           minutes() { echo $(( (gate_budget + $1 + receipt_margin + 59) / 60 )); }
-          gate=$(minutes "$extraction_margin")
           planned=$(minutes "$(budgets planned)")
           names=$(jq -r '[.targets[] | select(.state == "planned") | .name] | join(" ")' "$registry")
           # One shard for each formal target, with the budgets of its
@@ -115,27 +108,32 @@ jobs:
             exit 1
           fi
           {
-            echo "gate=$((gate + 1))"
-            echo "job=$((15 + gate))"
             echo "shards=$shards"
             echo "planned=$names"
             echo "planned-gate=$((planned + 2))"
             echo "planned-job=$((15 + planned + 2 + 3))"
           } | tee -a "$GITHUB_OUTPUT"
-          if [ $((15 + gate)) -gt 360 ] || [ $((15 + planned + 2 + 3)) -gt 360 ]; then
+          if [ $((15 + planned + 2 + 3)) -gt 360 ]; then
             echo "the registered budgets need a job longer than 360 minutes" >&2
             exit 1
           fi
 
-  # The qualification job: `cargo xtask formal run --shard qualification`
-  # (the guard phase, the qualification, the extraction of every formal
-  # target and the base round), whose receipt is one part of the merge.
+  # The qualification job: `cargo xtask formal run --shard qualification
+  # --keep` (the guard phase, the qualification, the extraction of every
+  # formal target and the base round), which keeps the stage of its base
+  # round, and then the comparator part, `cargo xtask formal run --shard
+  # comparator`, on that stage in a container of its own; each receipt is
+  # one part of the merge. The deadline of the gate is its 7,200 s and 600 s
+  # for the extraction of every formal target, that of the comparator its
+  # 1,800 s; then each has the 300 s of its receipt. Each step has the
+  # minutes of its deadline and receipt and two more, and the job 15
+  # minutes before the gate step, the two steps and 3 minutes after them.
   gate:
     name: formal run
     needs: limits
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: ${{ fromJSON(needs.limits.outputs.job) }}
+    timeout-minutes: 192
     permissions:
       contents: read
     concurrency:
@@ -242,14 +240,13 @@ jobs:
           echo "== the probe passed; prepare ended $(date -u +%FT%TZ)" \
             | tee -a artifacts/formal/job.txt
 
-      # The gate ends by its own deadline; the step's limit is a backstop one
-      # minute after it and its receipt, from the job `formal limits`. The
-      # receipt is the gate's verdict, so the step fails whenever the gate
-      # does, `REJECTED` included.
+      # The gate ends by its own deadline; the step's limit is a backstop two
+      # minutes after it and its receipt. The receipt is the gate's verdict,
+      # so the step fails whenever the gate does, `REJECTED` included.
       - name: Run the gate in the image
         id: gate
         if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
-        timeout-minutes: ${{ fromJSON(needs.limits.outputs.gate) }}
+        timeout-minutes: 137
         run: |
           read -r -a gate_flags <<< "$GATE_FLAGS"
           echo "== gate started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
@@ -260,7 +257,7 @@ jobs:
             --env GITHUB_EVENT_NAME --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
             --env GITHUB_EVENT_PATH="$GITHUB_WORKSPACE/artifacts/formal/event.json" \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard qualification || status=$?
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard qualification --keep || status=$?
           echo "== gate ended $(date -u +%FT%TZ) with exit status $status" \
             | tee -a artifacts/formal/job.txt
           exit "$status"
@@ -272,6 +269,70 @@ jobs:
             echo "removed the container of the gate"
           else
             echo "no container of the gate is left"
+          fi
+
+      # The comparator part on the stage that the gate kept, also when the
+      # gate failed: `lake comparator` runs in a sandbox of bubblewrap, which
+      # needs unprivileged user namespaces on the runner and, in the
+      # container, seccomp and AppArmor unconfined, an empty /run/user and
+      # the system paths unmasked. The container keeps the other flags of the
+      # gate, which a probe checks first. The sandbox sees the stage through
+      # a second mount of the runs directory outside /home, which
+      # KREPI_FORMAL_RUNS names; it clears the environment, so Git there
+      # reads only /etc/gitconfig, which marks the packages of the image,
+      # which belong to root, as safe. `deadline.sh` stops the part at the
+      # deadline of the part and its receipt and kills it a minute later.
+      - name: Run the comparator in its own container
+        id: comparator
+        if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
+        timeout-minutes: 37
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          relaxed=(--security-opt seccomp=unconfined --security-opt apparmor=unconfined
+            --tmpfs /run/user --security-opt systempaths=unconfined)
+          printf '[safe]\n\tdirectory = *\n' > "$RUNNER_TEMP/gitconfig"
+          mkdir -p artifacts/formal/runs
+          echo "== probe: docker run $GATE_FLAGS ${relaxed[*]} --user $(id -u):$(id -g)" \
+            | tee -a artifacts/formal/job.txt
+          docker run --rm -i "${gate_flags[@]}" "${relaxed[@]}" --user "$(id -u):$(id -g)" \
+            "$IMAGE" bash -s 2>&1 <<'PROBE' | tee -a artifacts/formal/job.txt
+          status=0
+          fail() { echo "FAILED: $*"; status=1; }
+          echo "user: $(id)"
+          [ "$(id -u)" != 0 ] || fail "the container runs as root"
+          root=$(awk '$2 == "/" { line = $0 } END { print line }' /proc/self/mounts)
+          echo "root file system: $root"
+          case ",$(echo "$root" | awk '{ print $4 }')," in
+            *,ro,*) ;;
+            *) fail "the root file system is not read-only" ;;
+          esac
+          grep -E '^(CapBnd|CapEff|NoNewPrivs):' /proc/self/status
+          grep -q '^CapBnd:[[:space:]]*0*$' /proc/self/status || fail "capabilities are left"
+          grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/self/status || fail "new privileges are allowed"
+          echo "network interfaces: $(ls /sys/class/net)"
+          [ "$(ls /sys/class/net)" = lo ] || fail "the container has a network"
+          exit "$status"
+          PROBE
+          echo "== comparator started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
+          exec bash .github/scripts/deadline.sh --stop-commands 35m 1m \
+            docker run --rm --name "formal-comparator-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" "${relaxed[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$GITHUB_WORKSPACE/artifacts/formal/runs:/krepi-runs" --env KREPI_FORMAL_RUNS=/krepi-runs \
+            --volume "$RUNNER_TEMP/gitconfig:/etc/gitconfig:ro" \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            --env KREPI_FORMAL_IMAGE="$IMAGE" \
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard comparator
+
+      - name: Remove the container of the comparator
+        if: always()
+        timeout-minutes: 1
+        run: |
+          if docker rm --force "formal-comparator-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1; then
+            echo "removed the container of the comparator"
+          else
+            echo "no container of the comparator is left"
           fi
 
       - name: Summarize the receipt

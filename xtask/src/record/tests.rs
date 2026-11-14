@@ -510,14 +510,15 @@ fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
     };
     // The fixture has the measurement jobs beside the gate. The committed
     // workflow of the gate has the jobs of the limits and of the planned
-    // targets, and its gates take their limits from the first: expressions,
-    // which give no limit; the measurement jobs have a workflow of their own.
+    // targets: the qualification job has a limit of its own, the planned
+    // targets take theirs from the first, an expression, which gives no
+    // limit; the measurement jobs have a workflow of their own.
     for (text, names) in [
         (
             FORMAL,
             [&measured(Some(30))[..], &gates(Some(195), None)].concat(),
         ),
-        (committed.as_str(), gates(None, Some(5)).to_vec()),
+        (committed.as_str(), gates(Some(192), Some(5)).to_vec()),
         (measure.as_str(), measured(Some(45)).to_vec()),
     ] {
         let limits = limits(text).expect("the workflow reads");

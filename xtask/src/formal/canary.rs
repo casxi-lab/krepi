@@ -1873,7 +1873,7 @@ mod tests {
         let xtask = "\"$IMAGE\" \"$GITHUB_WORKSPACE/xtask/target/debug/xtask\" formal run";
         let (whole, part) = (
             format!("{xtask} || status=$?"),
-            format!("{xtask} --shard qualification || status=$?"),
+            format!("{xtask} --shard qualification --keep || status=$?"),
         );
         let has = |workflow, line: &str| {
             let lines = step(workflow, gate, &[]);
