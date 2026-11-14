@@ -22,8 +22,8 @@ krepi-tools = { path = "../tools" }
 # `cargo xtask release-assets`, `cargo xtask usage`, `cargo xtask formal run`,
 # `cargo xtask formal guard`, `cargo xtask formal toolchain-check`,
 # `cargo xtask formal check`, `cargo xtask formal vectors`,
-# `cargo xtask formal canary` and `cargo xtask formal merge`, with their
-# help, usage and error texts, as
+# `cargo xtask formal canary`, `cargo xtask formal merge` and
+# `cargo xtask formal receipt`, with their help, usage and error texts, as
 # the host tooling crate reads its command lines. They are defined with the
 # builder, so the derive macros are left out. Their texts are plain and do
 # not depend on the terminal, so colour and wrapping to the terminal width
@@ -52,7 +52,8 @@ libc = { version = "=0.2.191", default-features = false }
 # summary,
 # the receipt of `cargo xtask formal run` is written, and
 # read back by its tests and by `cargo xtask formal merge`, which writes its
-# record, through the derive macros of `serde`, the
+# record, which `cargo xtask formal receipt` reads, through the derive
+# macros of `serde`, the
 # manifests and subset steps, `cargo xtask formal run` and
 # `cargo xtask formal check` read the output of `cargo metadata`, the
 # qualification cases, the statement, axiom, trusted-base and model
@@ -79,7 +80,8 @@ serde_json = { version = "=1.0.154", default-features = false, features = ["pres
 # the receipt of `cargo xtask formal run`, whose paths are strings, is
 # written through types that derive `Serialize` and, for its tests, the
 # canary and `cargo xtask formal merge`, `Deserialize`, and so are the
-# record of a merge and the record of the images of `cargo xtask image`;
+# record of a merge, which `cargo xtask formal receipt` reads, and the
+# record of the images of `cargo xtask image`;
 # `cargo xtask suite` reads `suites.toml` and `cargo xtask run-record` a run
 # with its jobs and `cargo xtask release-assets` a run and
 # `cargo xtask usage` the data of a month into such types. So only the
@@ -130,9 +132,11 @@ tar = { version = "=0.4.46", default-features = false }
 # `cargo xtask formal check` requires the expiry of each waiver of
 # `verification/waivers.json` to be a date of the calendar, and the
 # qualification job of `cargo xtask formal run` and
-# `cargo xtask formal merge` judge whether a waiver holds on the UTC date of
-# the Unix time of the host's clock. Only the date types of the core are
-# used, so the standard-library support of the default feature is left out.
+# `cargo xtask formal merge` judge whether a waiver holds, and
+# `cargo xtask formal receipt` whether the waivers that a record used still
+# hold, on the UTC date of the Unix time of the host's clock. Only the date
+# types of the core are used, so the standard-library support of the
+# default feature is left out.
 time = { version = "=0.3.55", default-features = false }
 # Manifests and Cargo configuration files are parsed into tables, which
 # `serde` defines, and `suites.toml`, the extraction configuration of

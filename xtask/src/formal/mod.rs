@@ -190,6 +190,11 @@ pub const COMMANDS: &[Command] = &[
         subcommands: &[],
     },
     Command {
+        name: "receipt",
+        about: "Judge RECORD, the record of a merge, by default artifacts/formal/merge/record.json, against the checkout: CURRENT when it has the gate inputs of the clean checkout, the pinned image and one conclusion for each registered unit, and is complete and VERIFIED, and WAIVED when it only passes within waivers that hold; --require-fresh also requires a run of CI without planned statements or waivers",
+        subcommands: &[],
+    },
+    Command {
         name: "vectors",
         about: "Replay the test vectors of DOMAIN/COMPONENT, or of each component whose contract names a replay, through its specification with the pinned Lean, and compare the results line by line with those that its host tests wrote",
         subcommands: &[],
@@ -244,6 +249,7 @@ fn cli() -> clap::Command {
         .subcommand(mutants::cli(about("mutants")).arg(keep()))
         .subcommand(paths::cli(about("impact")))
         .subcommand(merge::cli(about("merge")))
+        .subcommand(receipt::cli(about("receipt")))
         .subcommand(vectors::cli(about("vectors")))
         .subcommand(canary::cli(about("canary")))
 }
@@ -299,6 +305,7 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
         }
         Some(("impact", matches)) => paths::command(root, &Layout::PRODUCTION, matches),
         Some(("merge", matches)) => merge::command(root, layout(matches), matches),
+        Some(("receipt", matches)) => receipt::command(root, &Layout::PRODUCTION, matches),
         Some(("guard", matches)) => guard::command(root, &Layout::PRODUCTION, matches),
         Some(("toolchain-check", matches)) => {
             let path = |name| matches.get_one::<PathBuf>(name).expect("a required option");
@@ -461,6 +468,21 @@ mod tests {
         assert_eq!(name, "merge");
         assert_eq!(receipts, [PathBuf::from("a.json"), PathBuf::from("b.json")]);
         assert!(matches.get_flag("calibration"));
+        for (args, record, fresh) in [
+            (&["receipt"][..], None, false),
+            (&["receipt", "--require-fresh"], None, true),
+            (
+                &["receipt", "r.json", "--require-fresh"],
+                Some("r.json"),
+                true,
+            ),
+        ] {
+            let matches = read(args).expect("a valid command line");
+            let (name, matches) = matches.subcommand().expect("a subcommand");
+            let found = matches.get_one::<PathBuf>("RECORD").cloned();
+            let found = (name, found, matches.get_flag("require-fresh"));
+            assert_eq!(found, ("receipt", record.map(PathBuf::from), fresh));
+        }
         for args in [
             &["run", "--shard"][..],
             &["run", "--shard", "base"],
@@ -472,6 +494,9 @@ mod tests {
             &["merge"],
             &["merge", "--keep"],
             &["merge", "--frobnicate"],
+            &["receipt", "a", "b"],
+            &["receipt", "--calibration"],
+            &["run", "--reuse"],
         ] {
             let error = read(args).expect_err("a usage error");
             assert_eq!(error.exit_code(), 2, "{args:?}: {error}");

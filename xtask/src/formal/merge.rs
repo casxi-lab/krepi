@@ -117,6 +117,15 @@ pub fn handwritten(gate: &mut Gate) -> Result<Vec<String>, String> {
     Ok(base::handwritten(&layout, &source, &tracked, &[])?.0)
 }
 
+/// Each unit that the checkout at `root` registers in `layout`, with its
+/// phase: of the qualification, the base round and each formal target.
+pub fn registered(root: &Path, layout: &Layout) -> Vec<(String, String)> {
+    let [_, finish] = run::target_phases(root, layout, &BTreeSet::new(), None, None);
+    let (qualification, base) = (qualify::phase(root, layout), base::phase(root, layout));
+    let units = |phase: Phase| (phase.units.into_iter()).map(move |u| (u, phase.name.clone()));
+    Vec::from_iter([qualification, base, finish].into_iter().flat_map(units))
+}
+
 /// The synthetic wall clock of the slowest part, `slowest` seconds, and of
 /// the merge, rounded to milliseconds, and whether it is above [`FLAG`].
 fn wall_clock(slowest: f64, merge: f64) -> (f64, bool) {
@@ -259,14 +268,9 @@ pub fn merge(root: &Path, layout: &Layout, paths: &[PathBuf], job: Option<Durati
     let targets = read(layout.registry).and_then(registry);
     let targets = targets.map_err(|problem| problems.push(problem));
     let targets = targets.map_or_else(|()| Vec::new(), |registry| registry.targets);
-    let [_, finish] = run::target_phases(root, layout, &BTreeSet::new(), None, None);
-    let (qualification, base) = (qualify::phase(root, layout), base::phase(root, layout));
-    let mut registered = Vec::new();
-    for Phase { name, units, .. } in [qualification, base, finish] {
-        registered.extend(units.into_iter().map(|unit| (unit, name.clone())));
-    }
     let concluded = receipts.iter().flat_map(|(_, receipt)| &receipt.units);
     let concluded = concluded.map(|(unit, u)| (unit.clone(), (u.status, u.reason.clone())));
+    let registered = registered(root, layout);
     let (units, unaccounted) = outcome::account(&registered, concluded.collect(), None);
     problems.extend(unaccounted);
     // One receipt of the qualification job and of the shard of each formal target.
@@ -356,18 +360,18 @@ pub(crate) mod tests {
     use crate::formal::run::tests::register;
     use crate::formal::waiver::tests::waive;
 
-    const LAYOUT: &Layout = &Layout::PRODUCTION;
+    pub(crate) const LAYOUT: &Layout = &Layout::PRODUCTION;
 
     /// The image that the receipts of the tests name, but where a test
     /// changes it.
-    fn image(digit: char) -> String {
+    pub(crate) fn image(digit: char) -> String {
         let digest = digit.to_string().repeat(64);
         format!("ghcr.io/casxi-lab/krepi-formal@sha256:{digest}")
     }
 
     /// A checkout with one qualification case, no proved statement and the
     /// registry of `targets`, a JSON list, committed.
-    fn checkout(label: &str, targets: &str) -> Fixture {
+    pub(crate) fn checkout(label: &str, targets: &str) -> Fixture {
         let fixture = fixture::qualification(label, &serde_json::json!([fixture::arithmetic()]));
         let hash = "0".repeat(40);
         let statements = format!("{{\"schema\": 1, \"hash\": \"{hash}\", \"statements\": []}}\n");
@@ -390,7 +394,7 @@ pub(crate) mod tests {
     /// A complete `VERIFIED` receipt of `shard` at the head of `fixture`,
     /// of 600 s and the image `image('a')`, that started from the gate
     /// inputs of the head and concludes each of `units`.
-    fn receipt(fixture: &Fixture, shard: &str, units: &[String]) -> Receipt {
+    pub(crate) fn receipt(fixture: &Fixture, shard: &str, units: &[String]) -> Receipt {
         let unit = |name: &String| {
             let (phase, status, reason) = ("p".to_string(), Status::Verified, None);
             (
@@ -432,7 +436,7 @@ pub(crate) mod tests {
     /// extracted every formal target of its registry but those of the
     /// waivers that hold today, as the job does, and none when the registry
     /// cannot be read.
-    fn qualification(fixture: &Fixture) -> Receipt {
+    pub(crate) fn qualification(fixture: &Fixture) -> Receipt {
         let units = qualification_units(fixture.root());
         let mut job = receipt(fixture, qualify::PHASE, &units);
         let text = fs::read_to_string(fixture.root().join(LAYOUT.registry));
@@ -451,7 +455,7 @@ pub(crate) mod tests {
     }
 
     /// Writes `receipt` below the ignored `artifacts/parts/` of `fixture`.
-    fn write(fixture: &Fixture, name: &str, receipt: &Receipt) -> PathBuf {
+    pub(crate) fn write(fixture: &Fixture, name: &str, receipt: &Receipt) -> PathBuf {
         let path = format!("artifacts/parts/{name}.json");
         fixture.write(&path, &receipt::render(receipt));
         fixture.root().join(path)
@@ -459,12 +463,12 @@ pub(crate) mod tests {
 
     /// The merge of the receipts at `paths` in `fixture`, with 60 s of its
     /// job before the command.
-    fn merge_in(fixture: &Fixture, paths: &[PathBuf]) -> Merge {
+    pub(crate) fn merge_in(fixture: &Fixture, paths: &[PathBuf]) -> Merge {
         merge(fixture.root(), LAYOUT, paths, Some(Duration::from_secs(60)))
     }
 
     /// The units of a target `t` without mutants.
-    fn units_of(target: &str) -> Vec<String> {
+    pub(crate) fn units_of(target: &str) -> Vec<String> {
         vec![format!("target/{target}")]
     }
 
@@ -1017,7 +1021,7 @@ pub(crate) mod tests {
     /// The receipts of the qualification job and of the shard of `a`, whose
     /// target the proofs reject and which has no mutants, so that it is
     /// complete, as a run of it is.
-    fn rejected(fixture: &Fixture) -> [PathBuf; 2] {
+    pub(crate) fn rejected(fixture: &Fixture) -> [PathBuf; 2] {
         let mut shard = receipt(fixture, "target/a", &units_of("a"));
         shard.status = Status::Rejected;
         shard.units.get_mut("target/a").expect("the unit").status = Status::Rejected;

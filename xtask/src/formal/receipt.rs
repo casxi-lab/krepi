@@ -1,18 +1,25 @@
-//! The receipt of `cargo xtask formal run`, schema 5, and the record of
+//! The receipt of `cargo xtask formal run`, schema 5, the record of
 //! `cargo xtask formal merge`, schema 2, as "Receipt" and "Shards and merge"
-//! in `docs/formal-verification.md` document them.
+//! in `docs/formal-verification.md` document them, and
+//! `cargo xtask formal receipt`, which judges a record against the checkout,
+//! as "Current and fresh records" there describes.
 
-use std::collections::BTreeMap;
-use std::time::Duration;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::time::{Duration, SystemTime};
 
+use clap::{ArgMatches, value_parser};
 use serde::{Deserialize, Serialize};
 
-use super::outcome::{Class, Site, Status, word};
-use super::paths::Snapshot;
+use super::outcome::{self, Class, Site, Status, word};
+use super::paths::{self, Snapshot};
 use super::process::LimitBy;
 use super::qualify::Expect;
 use super::registry::State;
-use super::waiver::Waiver;
+use super::waiver::{self, Waiver};
+use super::{Layout, guard, merge, toolchain};
 
 pub const SCHEMA: u32 = 5;
 
@@ -322,17 +329,150 @@ pub fn render<T: Serialize>(receipt: &T) -> String {
     text.expect("a receipt has string keys and finite numbers") + "\n"
 }
 
+/// The words and the exit code of a verdict of `cargo xtask formal receipt`.
+pub type Verdict = (&'static str, u8);
+
+/// The command line of `cargo xtask formal receipt`, with `about`.
+pub fn cli(about: &'static str) -> clap::Command {
+    let record = clap::arg!([RECORD] "The record, by default artifacts/formal/merge/record.json");
+    let record = record.value_parser(value_parser!(PathBuf));
+    let fresh = clap::arg!(--"require-fresh" "Also require a fresh record, of a run of CI");
+    let command = clap::Command::new("receipt").about(about);
+    command.args([record, fresh])
+}
+
+/// `cargo xtask formal receipt` in `root`: judges the merge record that
+/// `matches` names, or `record.json` of [`merge::DIR`], prints its summary
+/// and exits with the code of the verdict.
+pub fn command(root: &Path, layout: &Layout, matches: &ArgMatches) -> ExitCode {
+    let path = matches.get_one::<PathBuf>("RECORD").cloned();
+    let path = path.unwrap_or(root.join(merge::DIR).join("record.json"));
+    let text = fs::read_to_string(&path);
+    let text = text.map_err(|error| format!("cannot read {}: {error}", path.display()));
+    let record = text.and_then(|text| read(&text));
+    let ((words, code), reasons) = match &record {
+        Ok(record) => judge(root, layout, record, matches.get_flag("require-fresh")),
+        Err(reason) => (("not CURRENT", 1), vec![reason.clone()]),
+    };
+    print!("{}", summary(&record.unwrap_or_default(), words, &reasons));
+    ExitCode::from(code)
+}
+
+/// The summary of the verdict `words` on `record`: the commit and trigger
+/// of the record, each waiver that it recorded and each of the `reasons`
+/// against it, escaped.
+fn summary(record: &Merge, words: &str, reasons: &[String]) -> String {
+    let text = |t: &Option<String>| t.as_deref().unwrap_or("none").escape_debug().to_string();
+    let mode = (record.trigger).map_or("none".to_string(), |mode| word(&mode));
+    let [commit, refname, run] = [&record.commit, &record.reference, &record.run_id].map(text);
+    let head = format!("formal receipt: {words}\ncommit {commit}\ntrigger {mode} {refname} {run}");
+    let waivers = record.waivers.iter().map(|waived| waived.line());
+    let reasons = (reasons.iter()).map(|reason| reason.escape_debug().to_string());
+    let lines = waivers.chain(reasons).map(|line| format!("- {line}\n"));
+    format!("{head}\n{}", String::from_iter(lines))
+}
+
+/// The merge record `text`, or why it is none of schema [`MERGE_SCHEMA`].
+fn read(text: &str) -> Result<Merge, String> {
+    let not = |error: serde_json::Error| format!("the record does not parse: {error}");
+    let value: serde_json::Value = serde_json::from_str(text).map_err(not)?;
+    let schema = &value["schema"];
+    let other = format!("the record has schema {schema} where {MERGE_SCHEMA} is expected");
+    (*schema == MERGE_SCHEMA).then_some(()).ok_or(other)?;
+    serde_json::from_value(value).map_err(not)
+}
+
+/// The verdict on the merge `record` for the checkout `root` in `layout`,
+/// with `--require-fresh` when `fresh`, by its words and exit code, and each
+/// reason against it.
+pub fn judge(root: &Path, layout: &Layout, record: &Merge, fresh: bool) -> (Verdict, Vec<String>) {
+    // The record has the gate inputs, the pinned image and the units of the
+    // checkout, whose gate inputs are clean.
+    let (inputs, mut git) = (paths::gate_inputs(layout), guard::Standalone(root));
+    let mut reasons = Vec::new();
+    let head = paths::snapshot(&mut git, &inputs).and_then(|(_, _, snapshot)| {
+        let changes = paths::changes(&mut git, &inputs)?.join(", ");
+        let dirty = format!("the gate inputs of the checkout are not clean: {changes}");
+        reasons.extend((!changes.is_empty()).then_some(dirty));
+        let theirs = record.inputs.clone().unwrap_or_default();
+        let all = BTreeSet::from_iter(theirs.keys().chain(snapshot.keys()));
+        let other = (all.into_iter()).filter(|input| theirs.get(*input) != snapshot.get(*input));
+        let other = Vec::from_iter(other.map(String::as_str)).join(", ");
+        let differ = format!("the gate inputs {other} of the record are not those of the checkout");
+        reasons.extend((!other.is_empty()).then_some(differ));
+        Ok(())
+    });
+    reasons.extend((head.err()).map(|error| format!("cannot read the checkout: {error}")));
+    let pin = fs::read_to_string(root.join(layout.image_pin)).ok();
+    let pinned = (pin.as_deref().and_then(toolchain::image_pin)).map(|(_, reference)| reference);
+    let none = |value: &Option<String>| value.clone().unwrap_or("none".to_string());
+    let (image, pin) = (none(&record.image), none(&pinned));
+    let image = format!("the image {image} of the record is not the pinned image {pin}");
+    reasons.extend((pinned.is_none() || pinned != record.image).then_some(image));
+    let units = (record.units.iter()).map(|(unit, u)| (unit.clone(), (u.status, u.reason.clone())));
+    reasons.extend(outcome::account(&merge::registered(root, layout), units.collect(), None).1);
+    // It concludes VERIFIED, complete and passing; or else it is waived when
+    // that is the only reason against it, and it passes within the waivers
+    // that it used, which still hold.
+    let (status, problems) = (word(&record.status), record.problems.iter());
+    let not = |holds: bool| ["not ", ""][usize::from(holds)];
+    let (complete, passing) = (not(record.complete), not(record.passes));
+    let concluded = format!("the record is {status}, {complete}complete and {passing}passing");
+    let verified = record.status == Status::Verified && record.complete && record.passes;
+    reasons.extend((!verified).then_some(concluded));
+    reasons.extend(problems.map(|problem| format!("the record has the problem: {problem}")));
+    let current = reasons.is_empty();
+    let used = Vec::from_iter(record.waivers.iter().filter(|w| w.used).map(|w| &w.waiver));
+    let today = waiver::today(SystemTime::now());
+    reasons.extend(today.clone().err().filter(|_| !used.is_empty()));
+    let expired = (used.iter()).filter(|w| today.as_ref().is_ok_and(|today| *today > w.expires));
+    let expired = expired.map(|w| (w.scope.join(", "), &w.expires));
+    reasons.extend(expired.map(|(s, on)| format!("the used waiver of {s} expired on {on}")));
+    let waived = !verified && record.passes && !used.is_empty() && reasons.len() == 1;
+    // A fresh record is of a run of CI without planned statements or waivers.
+    if fresh {
+        let modes = [Mode::Required, Mode::ForcedFull, Mode::Weekly];
+        let ci = modes.map(Some).contains(&record.trigger) && record.run_id.is_some();
+        let mode = (record.trigger).map_or("none".to_string(), |mode| word(&mode));
+        let without = [" without a run ID", ""][usize::from(record.run_id.is_some())];
+        let trigger = format!("the record has the trigger {mode}{without}, not one of CI");
+        reasons.extend((!ci).then_some(trigger));
+        let planned = serde_json::Value::from(record.planned_statements);
+        let planned = format!("the record has planned_statements {planned} where 0 is required");
+        reasons.extend((record.planned_statements != Some(0)).then_some(planned));
+        for Waived { waiver: w, .. } in &record.waivers {
+            let (scope, date) = (w.scope.join(", "), &w.expires);
+            let left = format!("the record left out {scope} under the waiver until {date}");
+            reasons.push(left);
+        }
+    }
+    let verdict = match (current, fresh) {
+        (true, false) => ("CURRENT", 0),
+        (true, true) if reasons.is_empty() => ("CURRENT and fresh", 0),
+        (true, true) => ("CURRENT, not fresh", 1),
+        (false, false) if waived => ("WAIVED", 3),
+        _ => ("not CURRENT", 1),
+    };
+    (verdict, reasons)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
+    use serde_json::json;
+
     use super::*;
     use crate::formal::base::{Hash, Heartbeats, Leanchecker, Record, Theorem};
+    use crate::formal::fixture::Fixture;
     use crate::formal::guard::State;
     use crate::formal::lean::Kind;
+    use crate::formal::merge::tests as merging;
     use crate::formal::outcome::conventions::SITES;
     use crate::formal::outcome::word;
     use crate::formal::paths::Entry;
+    use crate::formal::run::tests::{gate, register, root_package};
+    use crate::formal::waiver::tests::waive;
 
     fn entry(mode: &str, kind: &str, digit: char) -> Option<Entry> {
         Some(Entry {
@@ -1073,5 +1213,336 @@ mod tests {
         assert_eq!(seconds(Duration::from_micros(1_234_567)), 1.235);
         assert_eq!(seconds(Duration::from_secs(7_200)), 7_200.0);
         assert_eq!(seconds(Duration::ZERO), 0.0);
+    }
+
+    /// Commits the pin of the image `merging::image(digit)` in `fixture`.
+    fn pin(fixture: &Fixture, digit: char) {
+        let (repository, digest) = (
+            "ghcr.io/casxi-lab/krepi-formal",
+            digit.to_string().repeat(64),
+        );
+        let pin = json!({"schema": 1, "repository": repository, "digest": format!("sha256:{digest}"),
+            "revision": "0".repeat(40)});
+        fixture.write(Layout::PRODUCTION.image_pin, &format!("{pin}\n"));
+        fixture.commit_all();
+    }
+
+    /// The checkout `label` with the formal target `a`, the pin of the image
+    /// `merging::image('a')` and a waiver of `a` until `expires`, if given.
+    fn pinned(label: &str, expires: Option<&str>) -> Fixture {
+        let fixture = merging::checkout(label, r#"[{"name": "a"}]"#);
+        pin(&fixture, 'a');
+        if let Some(expires) = expires {
+            waive(&fixture, "a", expires);
+        }
+        fixture
+    }
+
+    /// The record of the merge of the `VERIFIED` receipts of the
+    /// qualification job and of the shard of `a` at the head of `fixture`,
+    /// with the trigger `mode` of the run `run`.
+    fn merged(fixture: &Fixture, mode: Mode, run: Option<&str>) -> Merge {
+        let job = merging::qualification(fixture);
+        let shard = merging::receipt(fixture, "target/a", &merging::units_of("a"));
+        let paths = [("q", job), ("t", shard)].map(|(name, mut part)| {
+            (part.trigger.mode, part.trigger.run_id) = (mode, run.map(String::from));
+            merging::write(fixture, name, &part)
+        });
+        merging::merge_in(fixture, &paths)
+    }
+
+    /// The verdict on `record` in `fixture`, with `--require-fresh` when
+    /// `fresh`.
+    fn judged(fixture: &Fixture, record: &Merge, fresh: bool) -> (Verdict, Vec<String>) {
+        judge(fixture.root(), &Layout::PRODUCTION, record, fresh)
+    }
+
+    /// The verdict `words` with its exit code `code` and exactly `reasons`.
+    fn verdict(words: &'static str, code: u8, reasons: &[&str]) -> (Verdict, Vec<String>) {
+        let reasons = Vec::from_iter(reasons.iter().map(|reason| reason.to_string()));
+        ((words, code), reasons)
+    }
+
+    /// The status, completeness and whether `record` passes.
+    fn conclusion(record: &Merge) -> (Status, bool, bool) {
+        (record.status, record.complete, record.passes)
+    }
+
+    #[test]
+    fn require_fresh_refuses_a_checkout_with_a_valid_waiver() {
+        let fixture = pinned("receipt-waiver-fresh", Some("9999-12-31"));
+        let mut record = merged(&fixture, Mode::ForcedFull, Some("1"));
+        assert_eq!(conclusion(&record), (Status::Verified, true, true));
+        assert!(!record.waivers[0].used);
+        assert_eq!(judged(&fixture, &record, false), verdict("CURRENT", 0, &[]));
+        let left = "the record left out a under the waiver until 9999-12-31";
+        let not_fresh = verdict("CURRENT, not fresh", 1, &[left]);
+        assert_eq!(judged(&fixture, &record, true), not_fresh);
+        // A waiver that has expired since still left its target out of the
+        // base round of the run.
+        record.waivers[0].waiver.expires = "2000-01-01".to_string();
+        assert_eq!(judged(&fixture, &record, false), verdict("CURRENT", 0, &[]));
+        let left = "the record left out a under the waiver until 2000-01-01";
+        let not_fresh = verdict("CURRENT, not fresh", 1, &[left]);
+        assert_eq!(judged(&fixture, &record, true), not_fresh);
+    }
+
+    #[test]
+    fn a_changed_gate_input_makes_the_record_not_current() {
+        let fixture = pinned("receipt-inputs", None);
+        let record = merged(&fixture, Mode::Manual, None);
+        assert_eq!(judged(&fixture, &record, false), verdict("CURRENT", 0, &[]));
+        // Paths outside the gate inputs do not count.
+        fixture.write("tools/notes.txt", "a tool\n");
+        fixture.write(".github/scripts/notes.txt", "a script\n");
+        fixture.commit_all();
+        assert_eq!(judged(&fixture, &record, false), verdict("CURRENT", 0, &[]));
+        fixture.write("verification/notes.txt", "a change\n");
+        fixture.commit_all();
+        let other = "the gate inputs verification of the record are not those of the checkout";
+        assert_eq!(
+            judged(&fixture, &record, false),
+            verdict("not CURRENT", 1, &[other])
+        );
+    }
+
+    #[test]
+    fn an_image_other_than_the_pinned_one_makes_the_record_not_current() {
+        let fixture = merging::checkout("receipt-image", r#"[{"name": "a"}]"#);
+        let (a, b) = (merging::image('a'), merging::image('b'));
+        // Without a pin, no image is the pinned one.
+        let record = merged(&fixture, Mode::Manual, None);
+        let none = format!("the image {a} of the record is not the pinned image none");
+        assert_eq!(
+            judged(&fixture, &record, false),
+            verdict("not CURRENT", 1, &[&none])
+        );
+        pin(&fixture, 'b');
+        let record = merged(&fixture, Mode::Manual, None);
+        assert_eq!(conclusion(&record), (Status::Verified, true, true));
+        let other = format!("the image {a} of the record is not the pinned image {b}");
+        assert_eq!(
+            judged(&fixture, &record, false),
+            verdict("not CURRENT", 1, &[&other])
+        );
+    }
+
+    #[test]
+    fn a_registered_unit_without_a_conclusion_makes_the_record_not_current() {
+        let fixture = pinned("receipt-units", None);
+        let mut record = merged(&fixture, Mode::Manual, None);
+        let unit = record.units.remove("target/a").expect("the unit");
+        let missing = "the unit target/a has no conclusion";
+        assert_eq!(
+            judged(&fixture, &record, false),
+            verdict("not CURRENT", 1, &[missing])
+        );
+        // A conclusion of a unit that the checkout does not register.
+        record.units.insert("target/b".to_string(), unit);
+        let unregistered = "the unit target/b has a conclusion but is not registered";
+        assert_eq!(
+            judged(&fixture, &record, false),
+            verdict("not CURRENT", 1, &[missing, unregistered])
+        );
+    }
+
+    #[test]
+    fn require_fresh_refuses_a_record_with_a_planned_statement() {
+        let fixture = merging::checkout("receipt-planned", r#"[{"name": "a"}]"#);
+        let statements = json!({"schema": 1, "hash": "0".repeat(40), "statements": [
+            {"name": "Krepi.Statements.P", "theorem": "Krepi.Proofs.P.p", "module": "Krepi.Proofs.P", "state": "planned"},
+        ]});
+        fixture.write(Layout::PRODUCTION.statements, &statements.to_string());
+        pin(&fixture, 'a');
+        let record = merged(&fixture, Mode::Required, Some("1"));
+        assert_eq!(record.planned_statements, Some(1));
+        assert_eq!(judged(&fixture, &record, false), verdict("CURRENT", 0, &[]));
+        let planned = "the record has planned_statements 1 where 0 is required";
+        let not_fresh = verdict("CURRENT, not fresh", 1, &[planned]);
+        assert_eq!(judged(&fixture, &record, true), not_fresh);
+    }
+
+    #[test]
+    fn require_fresh_refuses_a_record_of_named_targets() {
+        // The receipt of a run of the named target `demo`, which is SCOPED,
+        // merges into a record without a conclusion.
+        let fixture = Fixture::new("receipt-named");
+        register(&fixture, r#"[{"name": "demo"}]"#);
+        root_package(&fixture, "krepi-kernel", "");
+        let done = gate(&fixture, &["demo"], Vec::new());
+        let named = merging::write(&fixture, "demo", &done.written());
+        let record = merging::merge_in(&fixture, &[named]);
+        let found = (record.trigger, record.status);
+        assert_eq!(found, (Some(Mode::Scoped), Status::ToolFailure));
+        let (found, reasons) = judged(&fixture, &record, true);
+        assert_eq!(found, ("not CURRENT", 1));
+        let scoped = "the record has the trigger SCOPED without a run ID, not one of CI";
+        assert!(reasons.iter().any(|reason| reason == scoped), "{reasons:?}");
+        // Parts of the mode SCOPED are refused by the trigger alone.
+        let fixture = pinned("receipt-scoped", None);
+        let record = merged(&fixture, Mode::Scoped, Some("1"));
+        assert_eq!(judged(&fixture, &record, false), verdict("CURRENT", 0, &[]));
+        let scoped = "the record has the trigger SCOPED, not one of CI";
+        let not_fresh = verdict("CURRENT, not fresh", 1, &[scoped]);
+        assert_eq!(judged(&fixture, &record, true), not_fresh);
+    }
+
+    #[test]
+    fn a_current_record_is_fresh_only_with_the_trigger_of_a_run_of_ci() {
+        let fixture = pinned("receipt-fresh", None);
+        for mode in [Mode::Required, Mode::ForcedFull, Mode::Weekly] {
+            let record = merged(&fixture, mode, Some("7"));
+            assert_eq!(judged(&fixture, &record, false), verdict("CURRENT", 0, &[]));
+            let fresh = verdict("CURRENT and fresh", 0, &[]);
+            assert_eq!(judged(&fixture, &record, true), fresh);
+        }
+        for (mode, run, reason) in [
+            (Mode::Required, None, "REQUIRED without a run ID"),
+            (Mode::Manual, Some("7"), "MANUAL"),
+        ] {
+            let record = merged(&fixture, mode, run);
+            let reason = format!("the record has the trigger {reason}, not one of CI");
+            let not_fresh = verdict("CURRENT, not fresh", 1, &[&reason]);
+            assert_eq!(judged(&fixture, &record, true), not_fresh);
+        }
+    }
+
+    #[test]
+    fn a_rejected_record_within_waivers_that_hold_today_is_waived() {
+        let fixture = pinned("receipt-waived", Some("9999-12-31"));
+        let record = merging::merge_in(&fixture, &merging::rejected(&fixture));
+        assert_eq!(conclusion(&record), (Status::Rejected, true, true));
+        let rejected = "the record is REJECTED, complete and passing";
+        let waived = verdict("WAIVED", 3, &[rejected]);
+        assert_eq!(judged(&fixture, &record, false), waived);
+        // Never with --require-fresh.
+        let manual = "the record has the trigger MANUAL without a run ID, not one of CI";
+        let left = "the record left out a under the waiver until 9999-12-31";
+        let not = verdict("not CURRENT", 1, &[rejected, manual, left]);
+        assert_eq!(judged(&fixture, &record, true), not);
+        // Not once the waiver that it used has expired.
+        let mut expired = record.clone();
+        expired.waivers[0].waiver.expires = "2000-01-01".to_string();
+        let gone = "the used waiver of a expired on 2000-01-01";
+        let not = verdict("not CURRENT", 1, &[rejected, gone]);
+        assert_eq!(judged(&fixture, &expired, false), not);
+        // Nor when it is not current otherwise, or does not pass.
+        let mut stale = record.clone();
+        stale.units.remove("target/a");
+        let missing = "the unit target/a has no conclusion";
+        let not = verdict("not CURRENT", 1, &[missing, rejected]);
+        assert_eq!(judged(&fixture, &stale, false), not);
+        let mut failing = record;
+        failing.passes = false;
+        let not = verdict(
+            "not CURRENT",
+            1,
+            &["the record is REJECTED, complete and not passing"],
+        );
+        assert_eq!(judged(&fixture, &failing, false), not);
+    }
+
+    #[test]
+    fn a_record_with_problems_is_not_current() {
+        let fixture = pinned("receipt-problems", None);
+        let mut record = merged(&fixture, Mode::Manual, None);
+        (record.status, record.complete) = (Status::ToolFailure, false);
+        (record.passes, record.problems) = (false, vec!["a problem".to_string()]);
+        let reasons = [
+            "the record is TOOL_FAILURE, not complete and not passing",
+            "the record has the problem: a problem",
+        ];
+        assert_eq!(
+            judged(&fixture, &record, false),
+            verdict("not CURRENT", 1, &reasons)
+        );
+    }
+
+    #[test]
+    fn a_record_of_another_schema_or_that_cannot_be_read_is_not_current() {
+        let record = Merge {
+            schema: MERGE_SCHEMA,
+            ..Merge::default()
+        };
+        assert_eq!(read(&render(&record)), Ok(record.clone()));
+        let mut value = serde_json::to_value(&record).expect("JSON");
+        value["schema"] = 1.into();
+        let other = "the record has schema 1 where 2 is expected".to_string();
+        assert_eq!(read(&value.to_string()), Err(other));
+        value.as_object_mut().expect("an object").remove("schema");
+        let none = "the record has schema null where 2 is expected".to_string();
+        assert_eq!(read(&value.to_string()), Err(none));
+        value["schema"] = 2.into();
+        value.as_object_mut().expect("an object").remove("passes");
+        let error = read(&value.to_string()).expect_err("a missing field");
+        assert!(
+            error.starts_with("the record does not parse: missing field `passes`"),
+            "{error}"
+        );
+        let error = read("{").expect_err("no JSON");
+        assert!(error.starts_with("the record does not parse: "), "{error}");
+    }
+
+    #[test]
+    fn a_checkout_with_unclean_gate_inputs_is_not_current() {
+        let fixture = pinned("receipt-unclean", None);
+        let record = merged(&fixture, Mode::Manual, None);
+        fixture.write("verification/x", "");
+        let dirty = "the gate inputs of the checkout are not clean: ?? verification/x";
+        assert_eq!(
+            judged(&fixture, &record, false),
+            verdict("not CURRENT", 1, &[dirty])
+        );
+        fs::remove_file(fixture.root().join("verification/x")).expect("remove the file");
+        assert_eq!(judged(&fixture, &record, false), verdict("CURRENT", 0, &[]));
+        // A head without a commit.
+        let branch = fixture.git(&["symbolic-ref", "HEAD"]).trim().to_string();
+        fixture.git(&["symbolic-ref", "HEAD", "refs/heads/unborn"]);
+        let (found, reasons) = judged(&fixture, &record, false);
+        fixture.git(&["symbolic-ref", "HEAD", &branch]);
+        assert_eq!(found, ("not CURRENT", 1));
+        let unread = |reason: &String| reason.starts_with("cannot read the checkout: ");
+        assert!(reasons.len() == 1 && unread(&reasons[0]), "{reasons:?}");
+    }
+
+    #[test]
+    fn formal_receipt_prints_its_summary_and_exits_with_its_verdict() {
+        let fixture = pinned("receipt-command", Some("9999-12-31"));
+        let run = |args: &[&str]| {
+            let matches = cli("").try_get_matches_from(["receipt"].iter().chain(args));
+            super::command(
+                fixture.root(),
+                &Layout::PRODUCTION,
+                &matches.expect("arguments"),
+            )
+        };
+        // The record that `formal merge` writes, at the default path.
+        assert_eq!(run(&[]), ExitCode::FAILURE);
+        let [q, t] = merging::rejected(&fixture);
+        assert_eq!(merging::exit(&fixture, &[&q, &t]), ExitCode::SUCCESS);
+        assert_eq!(run(&[]), ExitCode::from(3));
+        assert_eq!(run(&["--require-fresh"]), ExitCode::FAILURE);
+        // A record by its path.
+        let current = merged(&fixture, Mode::Weekly, Some("7"));
+        let path = fixture.root().join("artifacts/current.json");
+        fs::write(&path, render(&current)).expect("write the record");
+        let path = path.to_str().expect("UTF-8");
+        assert_eq!(run(&[path]), ExitCode::SUCCESS);
+        assert_eq!(run(&[path, "--require-fresh"]), ExitCode::FAILURE);
+        // The values of the record and the reasons are escaped.
+        let mut record = current;
+        record.reference = Some("refs/pull/7/merge\nx".to_string());
+        let commit = record.commit.clone().expect("the commit");
+        let reasons = ["two\nlines".to_string()];
+        assert_eq!(
+            summary(&record, "not CURRENT", &reasons),
+            format!(
+                "formal receipt: not CURRENT\ncommit {commit}\ntrigger WEEKLY refs/pull/7/merge\\nx 7\n\
+                - waiver of a until 9999-12-31 by someone, unused: The proofs wait for a fix of the tool.\n\
+                - two\\nlines\n"
+            )
+        );
+        let none = "formal receipt: not CURRENT\ncommit none\ntrigger none none none\n";
+        assert_eq!(summary(&Merge::default(), "not CURRENT", &[]), none);
     }
 }

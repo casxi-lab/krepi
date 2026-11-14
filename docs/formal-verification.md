@@ -46,7 +46,9 @@ qualification job or the shard of one formal target, and
 `cargo xtask formal merge` combines the receipts of the parts of a commit
 into the conclusion of the whole gate, with the [waivers](#waivers) that
 hold ([shards and merge](#shards-and-merge)); CI runs the gate as these parts
-and merges them ([CI job](#ci-job)). The
+and merges them ([CI job](#ci-job)). `cargo xtask formal receipt` says
+whether the record of a merge is current for the checkout, and whether it
+is fresh ([current and fresh records](#current-and-fresh-records)). The
 [calibration target](#calibration-target), a crate with the shapes of the
 first kernel targets and its proofs, runs through the same phases with
 `cargo xtask formal run --calibration`, in the workflow
@@ -132,7 +134,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
 | `verification/qualification/calibration/` | The [calibration target](#calibration-target): a workspace with a root package and a member, its Lake project with its statements and proofs, its registries and shard plan, and the lists of survivors of its source mutants in `mutants/` | Present |
 | `verification/mutants/` | The list of survivors of the source mutants of each target that has one, `<target>.json` ([source mutants and survivors](#source-mutants-and-survivors)) | Absent until a list is written |
-| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `mutants`, `vectors`, `canary`, `impact` and `merge` present, the others planned |
+| `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `mutants`, `vectors`, `canary`, `impact`, `merge` and `receipt` present, the others planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
 `artifacts/formal/` directory, and the Lake build directory
@@ -178,7 +180,9 @@ The job of the toolchain canary keeps its trees, downloads and records
 below `artifacts/canary/`, and its image build, as the image workflows do,
 below `artifacts/image/` ([toolchain canary](#toolchain-canary)).
 `cargo xtask formal merge` writes its record and summary to
-`artifacts/formal/merge/` ([shards and merge](#shards-and-merge)). In CI,
+`artifacts/formal/merge/` ([shards and merge](#shards-and-merge)), where
+`cargo xtask formal receipt` reads the record by default
+([current and fresh records](#current-and-fresh-records)). In CI,
 the jobs of the gate pack the `logs/` of their runs into
 `artifacts/formal/logs.tar.gz`, and the merge job downloads the artifacts
 of the parts below `artifacts/formal/parts/`: a single artifact into that
@@ -669,8 +673,9 @@ The commands of `cargo xtask formal` follow the design of the gate.
 `cargo xtask formal toolchain-check`, `cargo xtask formal run`,
 `cargo xtask formal guard`, `cargo xtask formal check`,
 `cargo xtask formal mutants`, `cargo xtask formal vectors`,
-`cargo xtask formal canary`, `cargo xtask formal impact` and
-`cargo xtask formal merge` exist; the others are planned.
+`cargo xtask formal canary`, `cargo xtask formal impact`,
+`cargo xtask formal merge` and `cargo xtask formal receipt` exist; the
+others are planned.
 
 | Command | Purpose |
 | --- | --- |
@@ -678,12 +683,12 @@ The commands of `cargo xtask formal` follow the design of the gate.
 | `cargo xtask formal run [--target NAME]... [--shard NAME] [--calibration] [--keep]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the named targets, `--shard` only the qualification job or the shard of a formal target ([shards and merge](#shards-and-merge)), `--calibration` runs in the layout of the [calibration target](#calibration-target), and `--keep` keeps the work directory of the run ([layout](#layout)). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run of the whole gate has |
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs, sources and registries ([guard](#guard)) |
 | `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)) and of the waiver record ([waivers](#waivers)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
-| `cargo xtask formal receipt [--require-fresh]` (planned) | Says whether a receipt is current for the checkout: the same gate inputs and image, one conclusion for each unit, complete and `VERIFIED`; `--require-fresh` also requires a run of the whole gate from a clean checkout without planned statements |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its job fetched and built: `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from the outcomes of the steps of the job ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
 | `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration, and `--keep` keeps the work directory of the run, as for `run` |
 | `cargo xtask formal impact --base REV` | Lists, one item per line, the merge base of `REV` and `HEAD`, each path changed since with its Git status, without rename detection, the decision, `unaffected` when no changed path lies within a [gate input](#gate-inputs-and-snapshot) and `affected` otherwise, and the registered targets that the change affects, with their states: every target when an input of extraction changed, and otherwise each whose entry in `verification/targets.json` changed and each with a changed file of its `proof_modules`. A registry that cannot be read at the merge base, as after a change of its schema, counts as one without targets, so that every target is listed, after a line `unreadable verification/targets.json at the merge base: <why>`. Paths, names and that reason are printed escaped, so that none splits a line. It decides nothing, and exits with 1 only on a base that is not a revision or when Git or the registry at the head cannot be read |
 | `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, which passes when every unit and part outside the [waivers](#waivers) that hold is `VERIFIED`, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
+| `cargo xtask formal receipt [--require-fresh] [RECORD]` | Judges the record of a merge, by default `artifacts/formal/merge/record.json`, against the checkout ([current and fresh records](#current-and-fresh-records)): `CURRENT` when it has the gate inputs of the clean checkout, the pinned image and one conclusion for each registered unit and is complete, `VERIFIED` and passing, and `WAIVED` when it passes only within waivers that still hold; `--require-fresh` also requires the trigger of a run of CI, no planned statement and no waiver. It exits with 0 when the record is current, and fresh when asked, 3 when it is waived, 1 otherwise and 2 on a usage error. It runs no tool and proves nothing |
 
 `cargo xtask check` does not run the gate, which needs the pinned tools;
 its formal step runs `cargo xtask formal check` and
@@ -1168,6 +1173,9 @@ For example, with values that are only an illustration:
 }
 ```
 
+`cargo xtask formal receipt` judges a record against a checkout
+([current and fresh records](#current-and-fresh-records)).
+
 ### Waivers
 
 `verification/waivers.json`, the waiver record, is a gate input with
@@ -1220,6 +1228,62 @@ it used one. A waiver covers no unit of the qualification, not the unit
 `base`, and no `base/<theorem>` of a module that the base round leaves
 out only because the module imports what a waiver leaves out: that unit
 is `SCOPED` and fails the merge.
+
+`cargo xtask formal receipt` calls a record that passes with a used waiver
+`WAIVED`, not `CURRENT`, and only while each waiver that it used holds on
+the UTC date of the clock of its host; with `--require-fresh` it refuses
+every record that holds a waiver, used or not, even one that has expired
+since ([current and fresh records](#current-and-fresh-records)).
+
+### Current and fresh records
+
+`cargo xtask formal receipt [--require-fresh] [RECORD]` judges the record
+of a merge, by default `artifacts/formal/merge/record.json`, against the
+checkout, in the production layout. It runs no tool and proves nothing. A
+record that cannot be read, that does not parse or whose `schema` is not 2
+([shards and merge](#shards-and-merge)) is not current. A record is
+`CURRENT` when
+
+1. its `inputs` are the objects of the gate inputs of the commit checked
+   out ([gate inputs and snapshot](#gate-inputs-and-snapshot)), and the
+   gate inputs of the checkout are clean. The commit and the tree are not
+   compared, so the record of a head is current for every commit with the
+   same gate inputs, such as the merge of its pull request into `main`; a
+   change outside the gate inputs, such as below `tools/` or
+   `.github/scripts/`, leaves the record current;
+2. its `image` is the reference that the image pin of the checkout names
+   ([image pin](#image-pin));
+3. each unit that the checkout registers, of the qualification, of the
+   base round and of each formal target with its registered mutants, has
+   exactly one conclusion among its `units`, and it concludes no other
+   unit;
+4. it has no problem, is `VERIFIED` and complete, and passes.
+
+A record that fails only the last condition, because it is not `VERIFIED`
+or not complete, and passes with a waiver that it used, passed the merge
+only through its waivers ([waivers](#waivers)). It is `WAIVED` when each
+waiver that it used still holds on the UTC date of the clock of the host,
+and not current otherwise, or when the clock gives no date.
+
+With `--require-fresh`, a current record must also be fresh: its trigger
+is `REQUIRED`, `FORCED_FULL` or `WEEKLY` with a `run_id`, the mode of a run
+of CI, so that neither a run of named targets, which is `SCOPED`, nor a run
+without `KREPI_FORMAL_TRIGGER`, which is `MANUAL`, is fresh; its
+`planned_statements` are 0; and it holds no waiver. A run of the gate
+starts only from clean gate inputs ([gate run](#gate-run)), so a
+`VERIFIED` record is of a run from a clean checkout. With
+`--require-fresh` no record is `WAIVED`.
+
+The command prints `formal receipt:` and the verdict, `CURRENT`,
+`CURRENT and fresh`, `WAIVED`, `CURRENT, not fresh` or `not CURRENT`; a
+line `commit` with the commit of the record; a line `trigger` with its
+mode, `ref` and `run_id`, `none` for each that it lacks; a line for each
+waiver that the record holds, as the summary of the merge writes it; and a
+line for each reason against the record, each condition that fails. The
+values of the record and the reasons are escaped, so that none splits a
+line. It exits with 0 when the record is current, and fresh when
+`--require-fresh` is given, with 3 when it is waived, with 1 otherwise and
+with 2 on a usage error. No job of CI runs it.
 
 ### Extraction
 
