@@ -2150,6 +2150,8 @@ a tool, and each broken rule is a problem:
 - no two targets have the same name or module, and no theorem is registered
   twice, by the obligations of one target or of two, or by a target and a
   specification;
+- a target name is made of lowercase letters, digits and hyphens and
+  starts with a letter or a digit;
 - a target with a `module` has at least one root in `start_from`;
 - a formal target has at least one obligation and at least one mutant, and
   every obligation has at least one theorem; a planned target needs neither
@@ -2172,11 +2174,9 @@ a tool, and each broken rule is a problem:
 `cargo xtask formal check` also checks the shard plan
 ([shard plan and disk guard](#shard-plan-and-disk-guard)).
 
-A target name is made of lowercase letters, digits and hyphens and starts
-with a letter or a digit. `cargo xtask formal check` does not check it: the
-job `formal limits` of the workflow `formal` ([CI job](#ci-job)) fails on
-another name before the names reach a gate, and on a shard whose
-registered budget per worker is more than the shard limit.
+The job `formal limits` of the workflow `formal` ([CI job](#ci-job)) also
+fails on another target name before the names reach a gate, and on a shard
+whose registered budget per worker is more than the shard limit.
 
 The targets of the registry run in two phases of the gate. The phase
 `extraction`, before the base round, extracts the targets that the run
