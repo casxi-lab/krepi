@@ -1178,18 +1178,6 @@ mod tests {
     }
 
     #[test]
-    fn the_committed_registries_parse() {
-        let statements = include_str!("../../../verification/statements.json");
-        let statements = load_statements(statements, &LAYOUT).expect("the statements parse");
-        assert!(statements.statements.is_empty());
-        assert_eq!(statements.hash.len(), 40);
-        let axioms = lean::load_axioms(include_str!("../../../verification/axioms.json"));
-        assert_eq!(axioms, Ok(BTreeSet::new()));
-        let tcb = lean::load_tcb(include_str!("../../../verification/tcb.json"));
-        assert_eq!(tcb, Ok(Vec::new()));
-    }
-
-    #[test]
     fn a_statement_registry_with_a_bad_entry_is_refused() {
         let hash = "0123456789abcdef0123456789abcdef01234567";
         let file = |hash: &str, entries: &[String]| {

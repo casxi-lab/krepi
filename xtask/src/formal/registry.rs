@@ -504,10 +504,6 @@ pub(crate) mod tests {
                 ("table".to_string(), (State::Formal, 900))
             ]))
         );
-        let committed = include_str!("../../../verification/targets.json");
-        assert_eq!(states(committed), Ok(BTreeMap::new()));
-        let committed = parse(committed).expect("the committed registry");
-        assert_eq!(rules(&committed), Vec::<String>::new());
     }
 
     #[test]
@@ -870,13 +866,6 @@ pub(crate) mod tests {
             unsupported(r#"{"name": "a", "state": "planned", "exclude": ["k::f"]}"#),
             ["target a: exclude is not supported yet"]
         );
-        // The committed registries register nothing that the gate refuses.
-        let (registry, problems) = check(
-            include_str!("../../../verification/targets.json"),
-            include_str!("../../../verification/models.json"),
-        )
-        .expect("the committed registries");
-        assert_eq!((registry.targets.len(), problems), (0, Vec::new()));
     }
 
     #[test]

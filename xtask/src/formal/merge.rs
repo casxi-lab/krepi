@@ -1163,10 +1163,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_committed_registries_keep_the_shard_limit() {
-        let production = targets(include_str!("../../../verification/targets.json"));
-        assert_eq!(budget_problems(&production), Vec::<String>::new());
-        assert!(shards(&production).is_empty());
+    fn the_calibration_registry_keeps_the_shard_limit() {
         let calibration = targets(include_str!(
             "../../../verification/qualification/calibration/targets.json"
         ));

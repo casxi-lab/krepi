@@ -764,4 +764,210 @@ mod tests {
             );
         }
     }
+
+    /// The texts of the six registries of the production layout that
+    /// `cargo xtask formal check` and the gate read.
+    struct Registries<'a> {
+        statements: &'a str,
+        axioms: &'a str,
+        tcb: &'a str,
+        targets: &'a str,
+        models: &'a str,
+        waivers: &'a str,
+    }
+
+    /// The problems that `cargo xtask formal check` and the gate report
+    /// when they read `registries`, whatever they register: the statements
+    /// and the trusted base as the guard reads them, the library axioms as
+    /// the base round reads them and with the rule of their source and
+    /// reason, the targets with their static rules, the shard limit and what
+    /// the gate does not support yet, and the waivers of the registered
+    /// targets, of none when the targets cannot be read, as `formal check`
+    /// reads them. What the check and the gate compare with the rest of the
+    /// tree is left out.
+    fn problems(registries: &Registries) -> Vec<String> {
+        let mut problems = Vec::new();
+        let statements = guard::load_statements(registries.statements, &Layout::PRODUCTION);
+        problems.extend(statements.err());
+        problems.extend(lean::load_axioms(registries.axioms).err());
+        match registry::axiom_rules(registries.axioms) {
+            Ok(found) => problems.extend(found),
+            Err(error) => problems.push(error),
+        }
+        problems.extend(lean::load_tcb(registries.tcb).err());
+        let targets = match registry::check(registries.targets, registries.models) {
+            Ok((registry, found)) => {
+                problems.extend(found);
+                registry.targets
+            }
+            Err(error) => {
+                problems.push(error);
+                Vec::new()
+            }
+        };
+        problems.extend(waiver::parse(Some(registries.waivers), &targets).err());
+        problems
+    }
+
+    #[test]
+    fn the_committed_registries_have_no_problem() {
+        let layout = Layout::PRODUCTION;
+        let paths = [
+            layout.statements,
+            layout.axioms,
+            layout.tcb,
+            layout.registry,
+            layout.models,
+            layout.waivers,
+        ];
+        let included = [
+            "verification/statements.json",
+            "verification/axioms.json",
+            "verification/tcb.json",
+            "verification/targets.json",
+            "verification/models.json",
+            "verification/waivers.json",
+        ];
+        // The production layout names the six files that the test includes.
+        assert_eq!(paths, included);
+        let committed = Registries {
+            statements: include_str!("../../../verification/statements.json"),
+            axioms: include_str!("../../../verification/axioms.json"),
+            tcb: include_str!("../../../verification/tcb.json"),
+            targets: include_str!("../../../verification/targets.json"),
+            models: include_str!("../../../verification/models.json"),
+            waivers: include_str!("../../../verification/waivers.json"),
+        };
+        assert_eq!(problems(&committed), Vec::<String>::new());
+    }
+
+    #[test]
+    fn registries_that_register_entries_have_no_problem_either() {
+        // Entries that a pull request may register: a planned statement, a
+        // library axiom, an item of the trusted base, a planned and a formal
+        // target, and a waiver of the planned target.
+        let theorem = "Krepi.Proofs.Table.lookup_in_bounds";
+        let statements = serde_json::json!({
+            "schema": 1,
+            "hash": "0123456789abcdef0123456789abcdef01234567",
+            "statements": [{
+                "name": "Krepi.Statements.Table.lookup_in_bounds",
+                "theorem": theorem,
+                "module": "Krepi.Proofs.Table",
+                "state": "planned"
+            }]
+        });
+        let axioms = serde_json::json!({"schema": 1, "axioms": [{
+            "name": "Aeneas.Std.Lib.assumed",
+            "source": "the Aeneas library of the pinned commit",
+            "reason": "the library states it without a proof"
+        }]});
+        let tcb = serde_json::json!({"schema": 1, "items": [{
+            "kind": "axiom-pattern",
+            "prefix": "KrepiGen.Table.External.",
+            "reason": "the external items of the table"
+        }]});
+        let targets = serde_json::json!({"schema": 2, "specifications": [], "targets": [
+            {"name": "slots", "state": "planned"},
+            {
+                "name": "table",
+                "module": "Table",
+                "start_from": ["krepi_kernel::table::lookup"],
+                "obligations": [{"id": "lookup", "theorems": [theorem]}],
+                "mutants": [{
+                    "name": "bound",
+                    "file": "kernel/src/table.rs",
+                    "find": "index < len",
+                    "replace": "index <= len",
+                    "fails": [theorem]
+                }]
+            }
+        ]});
+        let waivers = |scope: &str| {
+            let waiver = serde_json::json!({
+                "reason": "the proofs wait for a fix of the tool",
+                "scope": [scope],
+                "expires": "2026-12-31",
+                "author": "someone"
+            });
+            serde_json::json!({"schema": 1, "waivers": [waiver]}).to_string()
+        };
+        let texts = [statements, axioms, tcb, targets].map(|text| text.to_string());
+        let registries = |waivers| Registries {
+            statements: &texts[0],
+            axioms: &texts[1],
+            tcb: &texts[2],
+            targets: &texts[3],
+            models: r#"{"schema": 1, "models": []}"#,
+            waivers,
+        };
+        let (planned, absent) = (waivers("slots"), waivers("absent"));
+        assert_eq!(problems(&registries(&planned)), Vec::<String>::new());
+        // The same registries with a waiver of a target that they do not
+        // register: the check reads the waivers with the targets.
+        let refused = r#"waiver 0: "absent" is no registered target"#;
+        assert_eq!(problems(&registries(&absent)), [refused]);
+        // Each registry that breaks a rule is refused on its own; the
+        // waivers of registries whose targets cannot be read name no
+        // registered target.
+        let mut over: serde_json::Value = serde_json::from_str(&texts[3]).expect("JSON");
+        over["targets"][1]["budget"] = serde_json::json!(3_301);
+        let over = over.to_string();
+        let axiom = |name: &str, source: &str| {
+            let axiom = serde_json::json!({"name": name, "source": source, "reason": "r"});
+            serde_json::json!({"schema": 1, "axioms": [axiom]}).to_string()
+        };
+        let (native, sourceless) = (axiom("A._native.d.ax_1_1", "s"), axiom("A.ax", " "));
+        let hashless = r#"{"schema": 1, "hash": "0", "statements": []}"#;
+        let shard = "shard target/table: its registered budget of 3301 s is 3301 s per worker, \
+                     more than the shard limit of 3300 s";
+        let unregistered = r#"waiver 0: "slots" is no registered target"#;
+        let broken = [
+            (
+                Registries {
+                    statements: hashless,
+                    ..registries(&planned)
+                },
+                vec!["the hash 0 does not name a Git tree"],
+            ),
+            (
+                Registries {
+                    axioms: &native,
+                    ..registries(&planned)
+                },
+                vec!["A._native.d.ax_1_1 is the axiom of a native decision"],
+            ),
+            (
+                Registries {
+                    axioms: &sourceless,
+                    ..registries(&planned)
+                },
+                vec!["axiom A.ax has no source"],
+            ),
+            (
+                Registries {
+                    tcb: r#"{"schema": 2, "items": []}"#,
+                    ..registries(&planned)
+                },
+                vec!["schema 2 where 1 is expected"],
+            ),
+            (
+                Registries {
+                    targets: &over,
+                    ..registries(&planned)
+                },
+                vec![shard],
+            ),
+            (
+                Registries {
+                    models: "[]",
+                    ..registries(&planned)
+                },
+                vec!["not a model registry of schema 1", unregistered],
+            ),
+        ];
+        for (registries, expected) in broken {
+            assert_eq!(problems(&registries), expected);
+        }
+    }
 }
