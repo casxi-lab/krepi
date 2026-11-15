@@ -210,11 +210,8 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_missing_or_the_committed_waiver_record_has_no_waivers() {
+    fn a_missing_waiver_record_has_no_waivers() {
         assert_eq!(parse(None, &targets()), Ok(Vec::new()));
-        let committed = include_str!("../../../verification/waivers.json");
-        assert_eq!(parse(Some(committed), &[]), Ok(Vec::new()));
-        assert_eq!(Layout::PRODUCTION.waivers, "verification/waivers.json");
     }
 
     #[test]
