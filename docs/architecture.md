@@ -34,6 +34,8 @@ HW    CPUs, MMU, GIC, timers, platform protection
 | Read-only image service | The read-only system image: its manifest and the files that it lists, each block checked against the hash tree of its file whenever it is read, and the execute right of the files that the manifest marks executable; the contents of installed packages, checked in the same way against the roots recorded when they were installed | Only the sessions of its mounts fail; it holds no state beyond its caches |
 | File system service | One writable volume, its commits and its quotas | Only the sessions of its mounts fail; writes that were not committed are lost, and recovery returns the last commit |
 | Block driver | Granted MMIO, IRQ and DMA buffers; ranges of blocks, each granted to one client, so that only the updater writes the A/B slots and the approval records | The device is stopped and in-flight operations drained before memory is reclaimed |
+| Display driver | The registers, interrupts and scan-out DMA of one display engine, its display device service and the buffers of that service | Only the outputs of its engine are affected; holders reconnect when it restarts, and the scan-out is stopped and drained before its buffers are reclaimed |
+| Input driver | One USB host controller with its DMA; or one USB HID device, one I2C keyboard or one GPIO key, with its input device service and the reserved stop key registered to it | Only the devices that it drives stop delivering events; a host controller is stopped and drained before memory is reclaimed |
 | Workers | Private heap and stack, an input snapshot, limited file, stream and result rights | Each non-cooperative job runs in a process that can be killed as a whole |
 | Process service | The process IDs, parent relations, exit statuses, process groups and sessions of one POSIX environment, and the creation right and quota from which it creates every process of that environment | Every process of the environment is destroyed with it; other environments continue |
 | Linux process | An unmodified Linux program and the compatibility runtime that loading places in its address space, with the authority of that process only | Only that process is affected, also when the program damages its runtime |
@@ -118,9 +120,13 @@ the CPUs, the DMA of trusted drivers ([devices and DMA](#devices-and-dma)),
 the firmware when it answers a mailbox request in the buffer of that
 request, and the firmware in its reserved memory. A scan-out that the
 firmware leaves running reads only memory that the device tree reserves or
-leaves out of its memory nodes, until the display driver stops it or takes
-it over; other memory that it may read stays quarantined. Before it turns
-the caches on, the entry code invalidates by address the data cache lines
+leaves out of its memory nodes, until the driver of the BCM2712 display
+engine stops it or takes it over; other memory that it may read stays
+quarantined. When that driver starts, it tells the firmware through the
+mailbox service that the firmware display is done and turns off any pixel
+valve that is still running, before it grants any buffer to a holder.
+Before it turns the caches on, the entry code invalidates by address the
+data cache lines
 from the start of the image to the end of the boot bundle, which is the
 whole image, and then the instruction cache of its CPU; it relies on no
 other cache state that the firmware leaves. The kernel cannot check the
@@ -1114,14 +1120,18 @@ Ethernet interrupt source that krepi does not own.
   therefore part of the trusted base as a whole process, with its code, its
   data and its grants, and is trusted only to let its devices reach the DMA
   buffers that it holds; otherwise it counts as an untrusted driver. On the
-  Pi 5 these are the display driver, the drivers of the USB host
-  controller, the SD host and Ethernet, and the component that sets the
-  inbound windows of PCIe and enables bus mastering; on QEMU virt they are
-  the VirtIO block driver once it uses DMA buffers and, if QEMU virt shows
-  its display through a VirtIO device, the driver of that device. Drivers
-  that do not program DMA, such as those of the UARTs and GPIO, are not
-  part of it. Each of these drivers is held to an executable specification
-  of its own; for one that runs before that specification is complete, the
+  Pi 5 these are the display drivers, the drivers of the USB host
+  controllers, of the SD host controller for storage and of RP1 Ethernet,
+  and the component that sets the inbound windows of PCIe and enables bus
+  mastering; on a Compute Module 5 with wireless they also include the
+  driver of the SD host controller that reaches the Wi-Fi chip; on QEMU
+  virt they are the VirtIO block driver once it uses DMA buffers and the
+  driver of the VirtIO GPU device that shows the development display.
+  Drivers that do not program DMA, such as those of the UARTs and GPIO,
+  the class drivers of USB HID devices, the I2C keyboard driver and the
+  GPIO key driver, are not part of it. Each of these drivers is held to an
+  executable specification of its own; for one that runs before that
+  specification is complete, the
   release declaration says how far it is checked. Running a driver in EL0
   gives only partial isolation against CPU faults. At first the only DMA is
   that of the VirtIO block device on QEMU virt, through a fixed region that
@@ -1158,27 +1168,74 @@ Ethernet interrupt source that krepi does not own.
   mappings; the buffers stay with the service, the scan-out goes on and the
   last frame stays on the display. The display driver holds the DMA
   authority of these buffers and stops the scan-out of a buffer, or moves
-  it to another one, before the buffer is reclaimed. On the Pi 5 the
-  registers of the HVS, the pixel valves and HDMI are mapped to the display
-  driver, and a page that HDMI shares with another block is granted whole
-  to it; the driver programs the scan-out addresses, and the register
-  writes of each frame do not go through the kernel. Its completion and
-  vertical blanking interrupts each have a binding, it sets the HDMI and
-  HVS clocks of a mode through the mailbox service, and it never takes a
-  scan-out buffer from the firmware. The holders only write pixels, program
-  no DMA and are not part of the trusted base.
+  it to another one, before the buffer is reclaimed. Each display engine
+  has a driver of its own, which runs one display device service: on the
+  BCM2712 one for the HVS with its pixel valves and both HDMI outputs, on
+  RP1 one for each DSI output in use, and on QEMU virt one for the VirtIO
+  GPU device. On the BCM2712 the registers of the HVS, the pixel valves and
+  HDMI are mapped to the driver of the BCM2712 engine, and a page that HDMI
+  shares with another block is granted whole to it; the driver programs
+  the scan-out addresses, and the register writes of each frame do not go
+  through the kernel. Its completion and vertical blanking interrupts each
+  have a binding, it sets the HDMI and HVS clocks of a mode through the
+  mailbox service, and it never takes a scan-out buffer from the firmware;
+  an RP1 DSI driver takes its clocks from RP1. The display drivers cover
+  RP1 DSI panels, whose control side channel on RP1 I2C and GPIO goes
+  through the domain that holds those registers, and BCM2712 HDMI outputs;
+  they do not drive panels on RP1 SPI or DPI. Clients and the display
+  server render on the CPU, nothing is rendered on the GPU, and each output
+  scans out one plane. The output enumeration of a service states the
+  transforms that the scan-out hardware of each output can apply: the HVS
+  can rotate by 180 degrees and mirror, RP1 DSI can apply none; the
+  display server applies, when it composes, any rotation that the hardware
+  of an output cannot. Where a
+  device raises no vertical blanking interrupt, the service generates
+  vertical blanking events from a timer at the refresh rate of the mode.
+  The holders only write pixels, program no DMA and are not part of the
+  trusted base.
+- **Input.** The driver of a USB host controller programs DMA; the class
+  driver of each USB HID device runs in a process of its own, takes the
+  reports from the host controller driver with the time at which their
+  interrupt was taken, and runs the input device service of that device. A
+  keyboard on an RP1 I2C bus signals with an RP1 GPIO interrupt or is
+  polled. The input drivers cover USB HID keyboards on the RP1 USB host
+  controllers, directly or through one hub, and keyboards on RP1 I2C. The
+  reserved stop key is either a usage of a keyboard, recognized by the
+  class driver of that keyboard, or a separate RP1 GPIO line, whose edges
+  the domain that holds the GPIO registers forwards to a GPIO key driver
+  that does not depend on USB. The driver that recognizes its long press
+  reports it straight to the root. Keyboards scanned through RP1
+  GPIO and keyboards on the BCM2712 USB 2.0 port are not covered.
+- **Development display.** On QEMU virt the development display is a
+  VirtIO GPU device with 2D commands on the VirtIO-mmio transport; on the
+  Pi 5 it is a monitor on HDMI0.
+- **Connections.** On a Compute Module 5 with wireless the device connects
+  over Wi-Fi through the CYW43455 chip on the module: the BCM2712 reaches
+  the chip through an SD host controller, and the Wi-Fi driver loads the
+  firmware of the chip. On the Pi 5 the Wi-Fi chip stays off. Bluetooth is
+  not supported, and the Bluetooth part of the chip stays off. USB device
+  mode, on the BCM2712 USB 2.0 controller, is not supported on any board
+  until the device brings the port of that controller out to its users;
+  until then that port is used only to boot and recover a board over USB.
+  RP1 Ethernet
+  connects a Pi 5 or a development board to a development or test-bench
+  network; where a board brings Ethernet out only to a service port, only
+  a test bench uses it, including to boot the device over the network
+  before krepi runs.
 - **Not covered here.** These rules do not state the operations and errors
   of device grants, interrupt bindings and DMA buffers, how the time at
   which an interrupt was taken reaches the driver, the list of mailbox
   tags, how display and input device services pass events to their holders
-  and the rest of their interfaces, the forms of the display and input
-  drivers, the inbound windows, bus mastering and first interrupt
-  configuration of PCIe, the management of the shared registers of RP1,
+  and the rest of their interfaces, the protocol between a USB host
+  controller driver and its class drivers, the inbound windows, bus
+  mastering and first interrupt configuration of PCIe, the management of
+  the shared registers of RP1,
   the programming of an IOMMU, or the policy of power, frequency and
   temperature. The devices and DMA and the boot and platform domains
   ([subject domains](domains/README.md#domains)) state them, and the
   [trusted boundary](formal-verification.md#trusted-boundary) lists what a
-  release declaration trusts.
+  release declaration trusts. The network stack and the protocols between
+  the device and a computer are outside these rules.
 
 ## Floating-point state
 
@@ -1232,9 +1289,6 @@ each layer is organized and what remains trusted.
 These questions are being decided and the rules they produce will be stated on
 this page when they are made:
 
-- the GUI, display and input stack with its rendering path, and the
-  connections the device offers (Ethernet, Wi-Fi and Bluetooth, USB device
-  mode);
 - power management: battery, charging, backlight, sleep and saving before a
   low-battery shutdown.
 
