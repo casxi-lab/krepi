@@ -10,6 +10,7 @@ specifications:
   - Krepi.Spec.Fdt.Cpus
   - Krepi.Spec.Fdt.Plan
   - Krepi.Spec.Fdt.Boot
+  - Krepi.Spec.Fdt.Witnesses
 ---
 
 # Device-tree specification
@@ -46,7 +47,8 @@ way in `Stp` below
 [`verification/Krepi/SpecTests/Fdt/`](../../../../verification/Krepi/SpecTests/Fdt/),
 on trees that `Builder` there writes, with their planned theorems in
 `Krepi.Proofs.Fdt.Stp`; `Replay` there replays the vectors. The witnesses
-follow in a further module.
+that the specification is not vacuous are theorems of `Witnesses` below
+`Krepi/Spec/Fdt`, most of them proved there ([Witnesses](#witnesses)).
 
 ## Widths and quantifiers
 
@@ -534,6 +536,98 @@ discovery reads of a QEMU virt tree, makes the discovery fail.
 | [FDT-R09](requirements.md#fdt-r09) | Rejected: `TranslationRejectsTwoWindows` | A map of two windows that both hold the request | `AmbiguousMapping` |
 | [FDT-R10](requirements.md#fdt-r10) | Accepted: `SeedsDoNotReachResults` | Two QEMU virt trees that differ only in the seeds of `/chosen` | The same memory map and the same boot memory map |
 | [FDT-R10](requirements.md#fdt-r10) | Rejected: `ChosenDeviceTypeIsRead` | A QEMU virt tree whose `/chosen` has a `device_type` that is not UTF-8 | `BadString` |
+
+
+### Witnesses
+
+[`Witnesses.lean`](../../../../verification/Krepi/Spec/Fdt/Witnesses.lean):
+the theorems that witness that the specification is not vacuous
+([specifications](../../../formal-verification.md#specifications)). For each
+frozen function of the entry table, lines 90 to 99, one input on which it
+succeeds, with the value that it gives; for each error that the contract
+gives that function, one input on which it fails with that error. The errors
+of a function are those of its error order, of the rows of the error table
+that name it, and of the entries that it calls at the step where it calls
+them; a lookup of a fixed path, such as `/reserved-memory` or `/cpus`, fails
+with `AmbiguousMapping` on two siblings of that name, by rule 3. The value
+types of line 99 and the constants of line 100 are read through the
+functions and have no witness of their own. The expected values are literals
+worked out from the contract, never computed by the specification.
+
+The parse reads bytes that a small encoder of the module writes, each input
+below 200 bytes. The entries on a tree read trees of records, written in
+preorder by `outline`, and every one of them passes the check of
+`Fdt.WellFormed` (`treesWellFormed`); a node is reached through its path
+(`atPath`). The other entries take literal spans, maps, topologies and the
+Pi 5 boot memory that the success witness of the Pi 5 discovery gives.
+
+Each witness is an equation, `f x = .ok v` or `f x = .error e`, or for a
+node entry `atPath t path f = some r`, and the module proves it by
+`decide +kernel`: the kernel evaluates both sides. Lean core decides no
+equality of `Except`, so the module decides it with a local instance that no
+statement mentions; it uses no `native_decide`, `sorry` or axiom, and the
+audit of each of its theorems lists no axiom but `propext`,
+`Classical.choice` and `Quot.sound`. The module builds in about 22 s.
+
+| Line | Functions | Success | Rejection | Unreachable branches |
+| --- | ---: | ---: | ---: | ---: |
+| 90 | 1 | 1 | 14 | 4 |
+| 91 | 15 | 15 | 30 | 2 |
+| 92 | 4 | 4 | 10, 1 planned | 1 |
+| 93 | 8 | 8 | 14, 1 planned | 2 |
+| 94 | 1 | 1 | 3 | 1 |
+| 95 | 8 | 8, 1 planned | 6 | 0 |
+| 96 | 6 | 6 | 17 | 1 |
+| 97 | 3 | 3 | 21 | 1 |
+| 98 | 11 | 11 | 0 | 0 |
+| 99 | 3 | 3 | 3 | 0 |
+| Total | 60 | 60, 1 planned | 118, 2 planned | 12, all planned |
+
+Three witnesses are planned propositions of the module, with their
+theorems in `Krepi.Proofs.Fdt.Witnesses`: in a module of Lean 4.35.0 neither
+`String.startsWith` nor `String.toUTF8` has a body that the kernel can
+unfold. The memory discovery decides with the first whether a child of the
+root other than `memory` is a memory node, so a witness that needs
+`/reserved-memory` cannot be evaluated; the `compatible` lists of `/psci`
+are written with the second, so neither can the success of
+`Fdt::discover_cpus`. The inputs of the proved witnesses avoid both.
+
+| Planned witness | Function | Input and result |
+| --- | --- | --- |
+| `DiscoverMemoryAmbiguousMapping` | `Fdt::discover_memory` | Two siblings `reserved-memory`: `AmbiguousMapping` |
+| `DiscoverPi5BootMemoryAmbiguousMapping` | `Fdt::discover_pi5_boot_memory` | The same in a Pi 5 hand-over tree: `AmbiguousMapping` |
+| `DiscoverCpusOk` | `Fdt::discover_cpus` | QEMU virt with two CPUs and `/psci` over HVC: the topology `QemuHvc` with 2 CPUs |
+
+An error branch that no input of its entry reaches has no witness. For each,
+a planned proposition states that the entry, or the step of it where the
+branch lies, never takes it; the error of the branch is witnessed through
+another branch where the function has one. These are the checks that the
+[readings of the contract](#readings-of-the-contract) keep at their place in
+the order.
+
+| Statement | Branch | Reason |
+| --- | --- | --- |
+| `HeaderNoOverflow` | `Fdt::parse`, step 1: the end of a block, `Overflow` | Offsets and sizes are 32-bit words |
+| `ReservationEntriesFit` | `Fdt::parse`, step 2: an entry past the tree, `Overflow` | The map starts at a 32-bit offset and holds at most 129 entries of 16 bytes |
+| `TokensNoOverflow` | `Fdt::parse`, step 3: the end of a property value, `Overflow` | A value starts within a block of at most 2 MiB and its length is a 32-bit word |
+| `ReservationFuelSuffices` | `Fdt::parse`, step 2: out of fuel, `LimitExceeded` | The limit or the terminator ends the map first |
+| `ClimbRangesNoBadTree` | `Node::translate_reg`: the `ranges` of a bus without a parent, `BadTree` | The climb reads the `ranges` of a bus only when it has a parent |
+| `TranslateRegFuelSuffices` | `Node::translate_reg`: out of fuel, `LimitExceeded` | No node of a well-formed tree lies deeper than `MAX_DEPTH - 1` |
+| `DiscoverMemoryNoBadTree` | `Fdt::discover_memory`: no root, `BadTree` | A well-formed tree has a root, and each node whose `reg` is read has a parent |
+| `DiscoverPi5BootMemoryNoBadTree` | `Fdt::discover_pi5_boot_memory`: no root, `BadTree` | As for the memory discovery |
+| `RamBytesFit` | `Fdt::discover_pi5_boot_memory`: the sum of the RAM ranges, `Overflow` | The ranges are disjoint and end within 64 bits |
+| `FindAvailableNoLimitExceeded` | `Pi5BootMemory::find_available`: out of fuel, `LimitExceeded` | Each candidate after the first passes an exclusion for good |
+| `WindowTranslationNoOverflow` | `AddressMap::to_parent` and `to_child`, and so `Node::translate_reg`: the translated span, `Overflow` | It lies inside the target side of a window of a well-formed map |
+| `BankBytesFit` | `MemoryPlan::all_ram`, `new` and `from_pi5`, step 4: the sum, `Overflow` | The banks are disjoint and end within 64 bits |
+
+The two variants of the specification that reject every input or accept
+every input are refuted by two theorems of the module, each a conjunction
+over the 27 functions that can fail. `notAlwaysRejecting` gives an input on
+which each succeeds, from the success witnesses; that of
+`Fdt::discover_cpus` is the planned `DiscoverCpusOk`, so it is left out of
+the conjunction. `notAlwaysSucceeding` gives an input on which each fails,
+from the rejection witnesses. The other 33 functions return a value for
+every input and have no error.
 
 ## Design decisions
 
