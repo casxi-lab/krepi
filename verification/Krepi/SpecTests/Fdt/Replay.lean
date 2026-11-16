@@ -1,8 +1,8 @@
 module
 
-public import Krepi.Spec.Fdt.Pi5
+public import Krepi.Spec.Fdt.Plan
 public import Krepi.Spec.Fdt.Cpus
-public meta import Krepi.Spec.Fdt.Pi5
+public meta import Krepi.Spec.Fdt.Plan
 public meta import Krepi.Spec.Fdt.Cpus
 
 /-!
@@ -23,7 +23,8 @@ by `,`. A case that asks nothing gives `result=ok` or `result=err`; one that
 asks `error` gives `result=ok`, or names the error of a rejection; one that
 asks fields or queries gives each as `<field>=<value>` or
 `<query>(<argument>)=<value>` in the order of the ask, or names the error of a
-rejection. A query that fails gives `Error::<variant>` as its value.
+rejection, `Error::<variant>` or `PlanError::<variant>`. A query that fails
+gives `Error::<variant>` as its value.
 
 - `entry=parse` asks nothing, `error` or `total_size`; a case that asks
   entries on the tree, `discover_memory` once and `reg`, `ranges` and
@@ -50,6 +51,16 @@ rejection. A query that fails gives `Error::<variant>` as its value.
   argument and then `interrupts=<bytes>` asks nothing;
   `entry=logical_id profile=<profile> mpidr=<value>` asks `id`, `-` for none.
   A profile is `QemuHvc`, `QemuSmc` or `Pi5`.
+- `entry=all_ram ram=<spans> boot=<spans> firmware=<regions>` and
+  `entry=MemoryPlan::new` with `window=<span>` before them, and
+  `entry=from_pi5` with the arguments of `discover_pi5_boot_memory` and then
+  `window=<span> more=<spans>`, ask the fields `ram`, `managed`, `boot`,
+  `firmware`, `reservations` and `available`, lists of spans;
+  `described_bytes`, `managed_bytes` and `available_bytes`, the sum of the
+  usable ranges, in hexadecimal; and the queries `contains_ram(<span>)`,
+  `is_available(<span>)` and `permits_backing(<span>)`, `true` or `false`,
+  and `available_count(<span>)`, the number of usable ranges that hold the
+  span, in decimal. A firmware reservation is `<span>/<flag>`.
 
 An entry on a tree first parses the bytes, and an entry on a node also finds
 the node, and reports the error of either as the output.
@@ -123,6 +134,23 @@ def span (s : String) : Option Span :=
   | [start, size] => do pure ⟨← number64 start, ← number64 size⟩
   | _ => none
 
+/-- A list of spans joined by `,`, or `-` for none. -/
+def spans (s : String) : Option (List Span) :=
+  if s == "-" then some [] else (splitOnChar ',' s).mapM span
+
+/-- A reserved region `<span>/<flag>`, with the flag `no-map`, `reusable` or
+`none`. -/
+def region (s : String) : Option ReservedRegion :=
+  match splitOnChar '/' s with
+  | [sp, "no-map"] => (span sp).map (⟨·, true, false⟩)
+  | [sp, "reusable"] => (span sp).map (⟨·, false, true⟩)
+  | [sp, "none"] => (span sp).map (⟨·, false, false⟩)
+  | _ => none
+
+/-- A list of reserved regions joined by `,`, or `-` for none. -/
+def regions (s : String) : Option (List ReservedRegion) :=
+  if s == "-" then some [] else (splitOnChar ',' s).mapM region
+
 /-- A query `<name>(<argument>)`: its name and its argument. -/
 def query (s : String) : Option (String × String) :=
   match s.toList.span (· != '(') with
@@ -185,19 +213,25 @@ def errorText (e : Error) : String := "result=err error=Error::" ++ e.name
 /-- The output of a success with its fields. -/
 def okText (fs : List String) : String := String.join ("result=ok" :: fs.map (" " ++ ·))
 
-/-- The output of a case whose entry gave `result`: a case that asks nothing
-gives `result=ok` or `result=err`; one that asks `error` gives `result=ok` or
-the error; one that asks fields and queries gives the error, or each of them
-with the value that `answer` gives it. -/
-def outcome {α} (result : Except Error α) (ask : List String) (answer : α → String → Option String) :
-    String :=
+/-- The output of a case whose entry gave `result`, whose error `name` writes
+as `<type>::<variant>`: a case that asks nothing gives `result=ok` or
+`result=err`; one that asks `error` gives `result=ok` or the error; one that
+asks fields and queries gives the error, or each of them with the value that
+`answer` gives it. -/
+def outcomeAs {ε α} (name : ε → String) (result : Except ε α) (ask : List String)
+    (answer : α → String → Option String) : String :=
   match result with
-  | .error e => if ask.isEmpty then "result=err" else errorText e
+  | .error e => if ask.isEmpty then "result=err" else "result=err error=" ++ name e
   | .ok v =>
     if ask.isEmpty || ask == ["error"] then "result=ok"
     else match ask.mapM fun a => (answer v a).map (a ++ "=" ++ ·) with
       | some answers => okText answers
       | none => "result=malformed ask"
+
+/-- `outcomeAs` for an entry whose error is an `Error`. -/
+def outcome {α} (result : Except Error α) (ask : List String) (answer : α → String → Option String) :
+    String :=
+  outcomeAs (fun e => "Error::" ++ e.name) result ask answer
 
 /-! ## Answers -/
 
@@ -246,6 +280,31 @@ def topologyAnswer (t : CpuTopology) : String → Option String
     let ("affinity", i) ← query q | none
     let i ← number64 i
     pure ((t.affinity i).elim "-" (hex ·.toNat))
+
+/-- The fields and queries of a boot memory map. -/
+def planAnswer (p : MemoryPlan) : String → Option String
+  | "ram" => some (spansText p.ram)
+  | "managed" => some (spansText p.managedBanks)
+  | "boot" => some (spansText p.bootRanges)
+  | "firmware" => some (spansText p.firmwareRanges)
+  | "reservations" => some (spansText p.reservations)
+  | "available" => some (spansText p.availableRanges)
+  | "described_bytes" => some (hex p.describedBytes.toNat)
+  | "managed_bytes" => some (hex p.managedBytes.toNat)
+  | "available_bytes" => some (hex (sumSizes p.availableRanges).toNat)
+  | q => do
+    let (name, arg) ← query q
+    let s ← span arg
+    match name with
+    | "contains_ram" => some (boolText (p.containsRam s))
+    | "is_available" => some (boolText (p.isAvailable s))
+    | "permits_backing" => some (boolText (p.permitsBacking s))
+    | "available_count" => some (toString (p.availableRanges.filter (·.holds s)).length)
+    | _ => none
+
+/-- The output of a case of a boot memory map, whose error is a `PlanError`. -/
+def planOutcome (result : Except PlanError MemoryPlan) (ask : List String) : String :=
+  outcomeAs (fun e => "PlanError::" ++ e.name) result ask planAnswer
 
 /-! ## Cases -/
 
@@ -302,11 +361,18 @@ def treeCase (t : Fdt) (entry : String) (fs : List (String × String)) (ask : Li
     String := Id.run do
   match entry with
   | "discover_memory" => return outcome t.discoverMemory ask memoryAnswer
-  | "discover_pi5_boot_memory" | "find_available" =>
+  | "discover_pi5_boot_memory" | "find_available" | "from_pi5" =>
     let some dtbAddress := (field fs "dtb_address").bind number64 | return "result=malformed dtb_address"
     let some image := (field fs "image").bind span | return "result=malformed image"
     let memory := t.discoverPi5BootMemory dtbAddress image
     if entry == "discover_pi5_boot_memory" then return outcome memory ask pi5Answer
+    if entry == "from_pi5" then
+      let some window := (field fs "window").bind span | return "result=malformed window"
+      let some more := (field fs "more").bind spans | return "result=malformed more"
+      let plan : Except String MemoryPlan := match memory with
+        | .error e => .error ("Error::" ++ e.name)
+        | .ok m => (MemoryPlan.fromPi5 m window more).mapError ("PlanError::" ++ ·.name)
+      return outcomeAs id plan ask planAnswer
     let some size := (field fs "size").bind number64 | return "result=malformed size"
     let some alignment := (field fs "alignment").bind number64 | return "result=malformed alignment"
     let some minimum := (field fs "minimum").bind number64 | return "result=malformed minimum"
@@ -353,7 +419,22 @@ def valueCase (entry : String) (fs : List (String × String)) (ask : List String
     let mpidr ← (field fs "mpidr").bind number64
     pure <| outcome (.ok (p.logicalId mpidr) : Except Error _) ask fun v a =>
       if a == "id" then some (v.elim "-" (toString ·.toNat)) else none
+  | "all_ram" =>
+    let ram ← (field fs "ram").bind spans
+    let boot ← (field fs "boot").bind spans
+    let firmware ← (field fs "firmware").bind regions
+    pure <| planOutcome (MemoryPlan.allRam ram boot firmware) ask
+  | "MemoryPlan::new" =>
+    let window ← (field fs "window").bind span
+    let ram ← (field fs "ram").bind spans
+    let boot ← (field fs "boot").bind spans
+    let firmware ← (field fs "firmware").bind regions
+    pure <| planOutcome (MemoryPlan.new window ram boot firmware) ask
   | _ => none
+
+/-- The entries without a tree. -/
+def valueEntries : List String :=
+  ["cells_u64", "Reg::new", "AddressMap::new", "logical_id", "all_ram", "MemoryPlan::new"]
 
 /-- One case. -/
 def runCase (fs : List (String × String)) : String := Id.run do
@@ -361,7 +442,7 @@ def runCase (fs : List (String × String)) : String := Id.run do
   let ask := match field fs "ask" with
     | some "" | none => []
     | some a => splitOnChar ',' a
-  if ["cells_u64", "Reg::new", "AddressMap::new", "logical_id"].contains entry then
+  if valueEntries.contains entry then
     return (valueCase entry fs ask).getD "result=malformed input"
   let some dtbText := field fs "dtb" | return "result=malformed dtb"
   let some dtb := hexBytes dtbText | return "result=malformed dtb"
@@ -1368,5 +1449,211 @@ after it are not part of the string. -/
   limit=0x10000000 \
   ask=span,is_available(0x480000+0x8000)" ==
   "result=ok span=0x480000+0x8000 is_available(0x480000+0x8000)=true"
+
+
+-- `fdt-pi5-platform-1.1`: the boot memory map of the 8 GB model through `from_pi5` keeps its
+-- 3 banks, excludes the pages of the image and of the tree and manages no high page.
+#guard replay
+  "entry=from_pi5 \
+  dtb=\
+  d00dfeed00000142000000480000010c0000002800000011000000100000000000000036\
+  000000c40000000000000000000000000008000000000000000000000000000000000000\
+  00000001000000000000000300000004000000000000000200000003000000040000000f\
+  0000000200000003000000230000001b72617370626572727970692c352d6d6f64656c2d\
+  62006272636d2c62636d323731320000000000016d656d6f727940300000000000000003\
+  00000007000000266d656d6f727900000000000300000030000000320000000000000000\
+  000000003fc00000000000004000000000000000c0000000000000010000000000000001\
+  0000000000000002000000020000000923616464726573732d63656c6c73002373697a65\
+  2d63656c6c7300636f6d70617469626c65006465766963655f747970650072656700 \
+  dtb_address=0x200000 \
+  image=0x80000+0x20000 \
+  window=0x0+0x8000000 \
+  more=- \
+  ask=ram,boot,permits_backing(0x0+0x1000),permits_backing(0x80000+0x1000),\
+  permits_backing(0x200000+0x1000),permits_backing(0x400000+0x1000),\
+  is_available(0x3fc00000+0x1000),is_available(0x100000000+0x1000),\
+  permits_backing(0x100000000+0x1000)" ==
+  "result=ok ram=0x0+0x3fc00000,0x40000000+0xc0000000,0x100000000+0x100000000 \
+  boot=0x80000+0x20000,0x200000+0x1000 permits_backing(0x0+0x1000)=false \
+  permits_backing(0x80000+0x1000)=false permits_backing(0x200000+0x1000)=false \
+  permits_backing(0x400000+0x1000)=true is_available(0x3fc00000+0x1000)=false \
+  is_available(0x100000000+0x1000)=true permits_backing(0x100000000+0x1000)=false"
+
+-- `fdt-pi5-platform-2.1`: the discovery accepts a reservation entry on the tree, and `from_pi5`
+-- fails with `PlanError::Overlap`.
+#guard replay
+  "entry=from_pi5 \
+  dtb=\
+  d00dfeed0000012200000048000000ec0000002800000011000000100000000000000036\
+  000000a40000000000200000000000000002000000000000000000000000000000000000\
+  00000001000000000000000300000004000000000000000200000003000000040000000f\
+  0000000200000003000000230000001b72617370626572727970692c352d6d6f64656c2d\
+  62006272636d2c62636d323731320000000000016d656d6f727940300000000000000003\
+  00000007000000266d656d6f727900000000000300000010000000320000000000000000\
+  000000020000000000000002000000020000000923616464726573732d63656c6c730023\
+  73697a652d63656c6c7300636f6d70617469626c65006465766963655f74797065007265\
+  6700 \
+  dtb_address=0x200000 \
+  image=0x80000+0x20000 \
+  window=0x0+0x8000000 \
+  more=- \
+  ask=error" ==
+  "result=err error=PlanError::Overlap"
+
+-- `platform-1.1`: banks of the 8 GB shape keep their hole and their high RAM, and the pages of
+-- the boot storage and of the firmware reservations are excluded.
+#guard replay
+  "entry=MemoryPlan::new \
+  window=0x0+0x8000000 \
+  ram=0x0+0x3fc00000,0x40000000+0xc0000000,0x100000000+0x100000000 \
+  boot=0x80000+0x38000,0x200000+0x13ad4 \
+  firmware=0x0+0x80000/no-map,0x3fd231e0+0x3e/no-map \
+  ask=boot,firmware,is_available(0x213000+0x1000),permits_backing(0x213000+0x1000),\
+  is_available(0x3fc00000+0x1000),permits_backing(0x3fc00000+0x1000),\
+  is_available(0x80000+0x1000),permits_backing(0x80000+0x1000),\
+  is_available(0x100000000+0x1000),permits_backing(0x100000000+0x1000),\
+  permits_backing(0x214000+0x1000)" ==
+  "result=ok boot=0x80000+0x38000,0x200000+0x14000 firmware=0x0+0x80000,0x3fd23000+0x1000 \
+  is_available(0x213000+0x1000)=false permits_backing(0x213000+0x1000)=false \
+  is_available(0x3fc00000+0x1000)=false permits_backing(0x3fc00000+0x1000)=false \
+  is_available(0x80000+0x1000)=false permits_backing(0x80000+0x1000)=false \
+  is_available(0x100000000+0x1000)=true permits_backing(0x100000000+0x1000)=false \
+  permits_backing(0x214000+0x1000)=true"
+
+-- `platform-2.1`: the managed window, the reservations by whole pages and the backing of the
+-- two ranges that the page allocator of the test allocates.
+#guard replay
+  "entry=MemoryPlan::new \
+  window=0x100000+0x5000 \
+  ram=0x0+0x8000000 \
+  boot=0x80000+0x38000 \
+  firmware=0x101fff+0x2/no-map \
+  ask=managed,reservations,permits_backing(0x100000+0x1000),permits_backing(0x103000+0x2000)" ==
+  "result=ok managed=0x100000+0x5000 reservations=0x80000+0x38000,0x101000+0x2000 \
+  permits_backing(0x100000+0x1000)=true permits_backing(0x103000+0x2000)=true"
+
+-- `platform-3.1`: a QEMU prefix of boot storage is reserved, and RAM above 4 GiB stays described.
+#guard replay
+  "entry=MemoryPlan::new \
+  window=0x40000000+0x8000000 \
+  ram=0x40000000+0x100100000 \
+  boot=0x40000000+0x300000 \
+  firmware=- \
+  ask=permits_backing(0x40000000+0x1000),permits_backing(0x40300000+0x1000),\
+  is_available(0x100000000+0x1000),permits_backing(0x48000000+0x1000)" ==
+  "result=ok permits_backing(0x40000000+0x1000)=false permits_backing(0x40300000+0x1000)=true \
+  is_available(0x100000000+0x1000)=true permits_backing(0x48000000+0x1000)=false"
+
+-- `platform-4.5`: a window of 128 MiB and one page fails with `ArenaTooLarge`.
+#guard replay
+  "entry=MemoryPlan::new \
+  window=0x0+0x8001000 \
+  ram=0x0+0x8000000 \
+  boot=0x80000+0x38000 \
+  firmware=- \
+  ask=error" ==
+  "result=err error=PlanError::ArenaTooLarge"
+
+-- `platform-5.4`: banks that hold no page of the image fail with `OutsideRam`.
+#guard replay
+  "entry=MemoryPlan::new \
+  window=0x0+0x8000000 \
+  ram=0x0+0x1000,0x2000+0x1000 \
+  boot=0x80000+0x38000 \
+  firmware=- \
+  ask=error" ==
+  "result=err error=PlanError::OutsideRam"
+
+-- `platform-6.1`: no range is held across two adjacent banks or across a hole.
+#guard replay
+  "entry=MemoryPlan::new \
+  window=0x0+0x200000 \
+  ram=0x0+0x200000,0x200000+0x200000,0x800000+0x100000 \
+  boot=0x80000+0x38000 \
+  firmware=- \
+  ask=contains_ram(0x1ff000+0x2000),is_available(0x3ff000+0x402000)" ==
+  "result=ok contains_ram(0x1ff000+0x2000)=false is_available(0x3ff000+0x402000)=false"
+
+-- `platform-7.5`: boot storage whose pages end beyond 64 bits fails with `Overflow`.
+#guard replay
+  "entry=MemoryPlan::new \
+  window=0x0+0x8000000 \
+  ram=0x0+0x8000000 \
+  boot=0x80000+0x38000,0xfffffffffffffffe+0x1 \
+  firmware=- \
+  ask=error" ==
+  "result=err error=PlanError::Overflow"
+
+-- `platform-8.1`: a firmware reservation on a page of boot storage fails with `Overlap`,
+-- although they share no byte.
+#guard replay
+  "entry=MemoryPlan::new \
+  window=0x0+0x8000000 \
+  ram=0x0+0x8000000 \
+  boot=0x80001+0x1 \
+  firmware=0x80fff+0x1/no-map \
+  ask=error" ==
+  "result=err error=PlanError::Overlap"
+
+-- `platform-9.1`: overlapping and `reusable` firmware reservations stay excluded by whole pages.
+#guard replay
+  "entry=MemoryPlan::new \
+  window=0x0+0x8000000 \
+  ram=0x0+0x8000000 \
+  boot=0x80000+0x38000,0x200000+0x13ad4 \
+  firmware=0x400001+0x1/reusable,0x400fff+0x2/no-map \
+  ask=is_available(0x400000+0x2000),permits_backing(0x402000+0x1000)" ==
+  "result=ok is_available(0x400000+0x2000)=false permits_backing(0x402000+0x1000)=true"
+
+-- `platform-10.5`: three spans of boot storage that are all the image fail with `Overlap`,
+-- where the prototype gave `Capacity`.
+#guard replay
+  "entry=MemoryPlan::new \
+  window=0x0+0x8000000 \
+  ram=0x0+0x8000000 \
+  boot=0x80000+0x38000,0x80000+0x38000,0x80000+0x38000 \
+  firmware=- \
+  ask=error" ==
+  "result=err error=PlanError::Overlap"
+
+-- `platform-11.1`: unsorted banks of the 8 GB model: the managed bytes and the bytes of the
+-- usable ranges, the managed bytes less the pages of the reservations.
+#guard replay
+  "entry=all_ram \
+  ram=0x100000000+0x100000000,0x0+0x3fc00000,0x40000000+0xc0000000 \
+  boot=0x80000+0x38000,0x200000+0x13ad4 \
+  firmware=0x0+0x80000/no-map,0x40002001+0x1000/no-map,0x40003000+0x1/no-map \
+  ask=managed_bytes,managed,permits_backing(0x1fffff000+0x1000),\
+  permits_backing(0xfffff000+0x2000),available_bytes" ==
+  "result=ok managed_bytes=0x1ffc00000 managed=0x0+0x3fc00000,0x40000000+0xc0000000,\
+  0x100000000+0x100000000 permits_backing(0x1fffff000+0x1000)=true \
+  permits_backing(0xfffff000+0x2000)=false available_bytes=0x1ffb32000"
+
+-- `platform-12.1`: the partial pages of a bank are not managed.
+#guard replay
+  "entry=all_ram \
+  ram=0x1+0x5000,0x10001+0x8 \
+  boot=0x1000+0x1000 \
+  firmware=- \
+  ask=managed,available" ==
+  "result=ok managed=0x1000+0x4000 available=0x2000+0x3000"
+
+-- `platform-13.15`: page 14, past the reservations of pages 5 to 13, lies in one usable range.
+#guard replay
+  "entry=all_ram \
+  ram=0x0+0x18000,0x20000+0x18000 \
+  boot=0x0+0x1000 \
+  firmware=0x9000+0x5000/no-map,0x5000+0x7000/no-map,0x16000+0xc000/no-map,0x28001+0x1/no-map \
+  ask=available_count(0xe000+0x1000)" ==
+  "result=ok available_count(0xe000+0x1000)=1"
+
+-- `platform-13.41`: page 40, one byte of which is reserved, lies in no usable range.
+#guard replay
+  "entry=all_ram \
+  ram=0x0+0x18000,0x20000+0x18000 \
+  boot=0x0+0x1000 \
+  firmware=0x9000+0x5000/no-map,0x5000+0x7000/no-map,0x16000+0xc000/no-map,0x28001+0x1/no-map \
+  ask=available_count(0x28000+0x1000)" ==
+  "result=ok available_count(0x28000+0x1000)=0"
 
 end Krepi.SpecTests.Fdt.Replay

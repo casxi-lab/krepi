@@ -8,6 +8,8 @@ specifications:
   - Krepi.Spec.Fdt.Discovery
   - Krepi.Spec.Fdt.Pi5
   - Krepi.Spec.Fdt.Cpus
+  - Krepi.Spec.Fdt.Plan
+  - Krepi.Spec.Fdt.Boot
 ---
 
 # Device-tree specification
@@ -21,23 +23,22 @@ bound that the contract gives. The modules lie below
 [`verification/Krepi/Spec/Fdt/`](../../../../verification/Krepi/Spec/Fdt/) and
 import Lean core alone.
 
-This part covers the parse, the node access, the address translation, the
-memory discovery, the Pi 5 boot memory and the CPU nodes: the entries of the
-rows of `Fdt::parse`, of the node access, of `Fdt::discover_memory`, of
-`Fdt::discover_pi5_boot_memory`, of `Pi5BootMemory::find_available`, of
-`Fdt::discover_cpus` and of the translation in the
-[entry table](contract.md#entry-points), with the functions of `Span`, the
-value types that they use and the limits. The boot memory map and the
-publication of the shared results follow in further modules of the same
-directory, with the invariants, the properties, the specification tests and
-the witnesses.
+The modules cover every row of the [entry table](contract.md#entry-points):
+the parse, the node access, the address translation, the memory discovery,
+the Pi 5 boot memory, the CPU nodes and the boot memory map, with the
+functions of `Span`, the value types and the limits; and the publication of
+the shared results that the [state fields](contract.md#state-fields) name.
+The invariants, the properties, the specification tests and the witnesses
+follow in further modules.
 
 ## Widths and quantifiers
 
 The component writes no state ([check and execute](contract.md#check-and-execute)):
 every entry is a function of its arguments, and a failure returns one error
-and nothing else, since a result is an `Except Error α`, which holds either a
-value or an error. The modification set of every entry is empty.
+and nothing else, since a result is an `Except Error α` or an
+`Except PlanError α`, which holds either a value or an error. The
+modification set of every entry is empty. The shared results of the boot are
+the state of `Boot`, whose transactions each change one field, once.
 
 Each entry is stated for all of its inputs at their machine widths:
 
@@ -56,10 +57,17 @@ Each entry is stated for all of its inputs at their machine widths:
 | The `interrupts` given to `CpuTopology::validate_qemu_timers` | `ByteArray` | Every byte string |
 | A CPU profile | `CpuProfile`, three constructors | Each profile |
 | A Pi 5 boot memory, a memory map, a CPU topology given to their queries | `Pi5BootMemory`, `MemoryMap`, `CpuTopology` | Every value, also one that no discovery returns |
+| The RAM banks, the boot storage and the further boot storage `more` given to the boot memory map, and its managed window | `List Span`, `Span` | Every list of every length, every span |
+| The firmware reservations given to the boot memory map | `List ReservedRegion` | Every list of every length |
+| A range given to `MemoryPlan::contains_ram`, `is_available` and `permits_backing` | `Span` | Every span; one that is empty or whose end leaves 64 bits lies in no bank |
+| `MemoryPlan::described_bytes` and `managed_bytes` | `UInt64` | $[0, 2^{64})$; at most 16 GiB for a map that an entry built |
+| A boot memory map given to its queries | `MemoryPlan` | Every value, also one that no entry builds |
+| The boot state and the boot token | `BootState`, `BootToken` | Every state; the token of the boot CPU |
 
 Inside a definition, arithmetic is on `Nat`, which does not wrap. Each sum
 that the contract checks against 64 bits is compared with $2^{64}$ before it
-is used (`checkedAdd`, `Span.new`, `Span.Valid`, `alignUp`), as the checked
+is used (`checkedAdd`, `Span.new`, `Span.Valid`, `alignUp`, and in the boot
+memory map `checkPlanSpan`, `pagesOf` and `admitBank`), as the checked
 arithmetic of the implementation does, and a width check of one cell compares
 with $2^{32}$. Offsets inside a tree stay below `MAX_BLOB_SIZE` and need no
 check. A count is computed on `Nat` and is below the number of nodes of the
@@ -71,9 +79,10 @@ specification by construction, which is why the vector `fdt-parser-6` only
 checks that the entries return. A tree that the parse did not build, such as
 a value written by hand, is still an input of the node entries and the
 discoveries, and a `Pi5BootMemory` or a `CpuTopology` that no discovery
-returned is still an input of their queries: they return for these as well,
-and the results that the contract fixes are those on trees that the parse
-accepted and on the values that the discoveries returned.
+returned is still an input of their queries, and so is a `MemoryPlan` that
+no entry built: they return for these as well, and the results that the
+contract fixes are those on trees that the parse accepted and on the values
+that the discoveries and the entries of the boot memory map returned.
 
 ## Model
 
@@ -276,6 +285,86 @@ error order.
   `status`, its `method` and its `compatible`, which must be one of the
   byte lists of `PSCI_COMPATIBLE`.
 
+### Plan
+
+[`Plan.lean`](../../../../verification/Krepi/Spec/Fdt/Plan.lean): the
+[boot memory map](contract.md#boot-memory-map) and the eight steps of its
+error order in
+[rejection and error priority](contract.md#rejection-and-error-priority).
+
+- **Limits.** `MemoryPlan.PAGE_SIZE`, 4 KiB; `MAX_BANKS`, 32;
+  `MAX_BOOT_SPANS`, 4; `MAX_FIRMWARE`, 128; `MAX_WINDOW_BYTES`, 128 MiB; and
+  `MAX_RAM_BYTES`, 16 GiB, all in the namespace `MemoryPlan`.
+- **The value.** `MemoryPlan` holds the RAM banks sorted by their start, the
+  managed banks in address order, and the pages of the boot storage and of
+  the firmware reservations, each in input order; `MemoryPlan::ram`,
+  `managed_banks`, `boot_ranges` and `firmware_ranges` give them, and
+  `reservations` gives the pages of the boot storage and then those of the
+  firmware reservations. The flags of a firmware reservation are not kept:
+  every page of every reservation is excluded.
+- **Spans and pages.** `checkPlanSpan` checks a span: size 0,
+  `InvalidRange`, then its end beyond 64 bits, `Overflow`. `pagesOf` rounds
+  a checked span outward to whole pages, and its end rounded up beyond
+  64 bits fails with `Overflow`.
+- **Banks.** `addBank` checks one bank in input order, `checkPlanSpan` and
+  then `Overlap` with an earlier bank; `sortByStart` sorts the banks by
+  insertion; `admitBank` takes them in address order: the sum, `Overflow`,
+  then above 16 GiB, `ArenaTooLarge`, then the start rounded up to a page,
+  `Overflow`, and the complete pages of the bank as its managed bank.
+- **Boot storage and firmware reservations.** `addBoot` checks the pages of
+  one span of boot storage, then that one bank holds them, `OutsideRam`,
+  then that they share no page with earlier boot storage, `Overlap`;
+  `addFirmware` checks the pages of one firmware reservation, then that they
+  share no page with the boot storage, `Overlap`.
+- **The entries.** `MemoryPlan.allRam` runs steps 2 to 7 in order: the
+  three capacities, `Capacity`, before any span is read; the banks; their
+  managed pages and `Alignment` when there are none; the boot storage; the
+  firmware reservations. `MemoryPlan.new` checks the window, step 1, runs
+  `allRam` and then checks that one bank holds the window, step 8, and
+  manages only the window. `MemoryPlan.fromPi5` is `MemoryPlan.new` with the
+  RAM ranges of a Pi 5 boot memory, the boot storage of its image, its tree
+  and the further spans `more`, and its reserved regions.
+- **Queries.** `MemoryPlan.containsRam` holds when a range is nonempty, ends
+  within 64 bits and one bank holds it; `MemoryPlan.isAvailable` when, in
+  addition, no reservation touches it; `MemoryPlan.permitsBacking` when a
+  managed bank holds it and it is available. `describedBytes` and
+  `managedBytes` sum the banks and the managed banks with `sumSizes`.
+- **Usable ranges.** `MemoryPlan.availableRanges` walks each managed bank
+  with `usableFrom`: a cursor inside a reservation moves to the furthest end
+  of the reservations that hold it; otherwise the range from the cursor to
+  the nearest start of a reservation above it, or to the end of the bank, is
+  usable. The cursor only moves forward, and `2 * R + 2` steps suffice for
+  `R` reservations.
+
+### Boot
+
+[`Boot.lean`](../../../../verification/Krepi/Spec/Fdt/Boot.lean): the three
+shared fields of the [state fields](contract.md#state-fields), written as
+transactions that publish each field once and hold the boot token.
+
+- **The token.** `BootToken` is the right to publish a shared field.
+  In this release one executor, the boot CPU, runs every transaction before
+  the secondary CPUs start, so it holds the token, `BootToken.bootCpu`.
+- **The state.** `BootState` holds the bytes of the hand-over tree, the boot
+  memory map and the CPU topology, each of the last two none until it is
+  published, and whether the first secondary CPU has started. Reading a
+  field needs no token; `BootState.tree` parses the hand-over bytes.
+- **The hand-over.** `BootState.coldEntry` is the state at the cold entry,
+  with the bytes that the firmware or the loader wrote before it and nothing
+  built: the bytes are published there, and no transaction writes them
+  again.
+- **The publications.** `BootState.publishPlan` runs the entry of a
+  `PlanBuild`, `MemoryPlan::all_ram`, `new` or `from_pi5`, and
+  `BootState.publishTopology` runs `Fdt::discover_cpus` on the tree of the
+  hand-over bytes. Each is enabled only while its field is none and no
+  secondary CPU has started, and gives none otherwise; at the return of its
+  entry it publishes the result, or gives the error of the entry and no
+  state, so the state stays as it was.
+- **The start of the secondary CPUs.** `BootState.startSecondaries` is
+  enabled once both results are published and before the secondary CPUs
+  have started; from then on no publication is enabled, and every CPU only
+  reads the fields.
+
 ## Design decisions
 
 ### Readings of the contract
@@ -319,6 +408,21 @@ reading follows the prototype and names the place.
 | `/psci`: its `status`, then its `method`, then its `compatible`; the `compatible`, a list of strings, is compared as bytes with the three lists, each string with its NUL, so any other value, also one that is not UTF-8, fails with `BadProperty`. The properties that fail as `Node::string_property` does are those that hold one string: `device_type`, `status`, the `compatible` of a CPU node, `enable-method` and `method` | Step 6, lines 346 to 349, and lines 580 to 584 | `Node::string_property` rejects a byte after the first NUL, lines 206 to 209, so it cannot read a list; the order and the comparison of the prototype: `src/fdt/cpus.rs`, lines 129 to 142 |
 | `CpuTopology::validate_qemu_timers` accepts exactly the bytes of the records of the profile; the flags `((1 << count) - 1) << 8 \| 4` are a 32-bit cell, computed at that width | Lines 590 to 596; the error table, line 265 | A topology of the discovery has 1, 2 or 4 CPUs, for which the shift is exact |
 | A count, a logical ID, the index of `CpuTopology::affinity` and an affinity are 64-bit values | The entry table, lines 92 and 95, which gives no width | The width of the target's addresses and sizes, as for the values of the first part |
+| A span that the boot memory map takes, the managed window, a RAM bank and the span of boot storage or of a firmware reservation whose pages it takes, fails with `InvalidRange` for size 0 and then with `Overflow` for an end beyond 64 bits | Steps 1, 3, 6 and 7 of the order of the boot memory map, lines 367, 371, 376 and 379, "`InvalidRange` or `Overflow`"; the error table, lines 274 and 275 | The order of the prototype, which the contract adopts: `range` in `src/platform/mod.rs`, lines 28 to 34, through `PhysRange::new` in `src/memory/types.rs`, lines 29 to 35 |
+| The pages of a span run from its start rounded down to its end rounded up to 4 KiB; when the end rounded up leaves 64 bits, `Overflow` | "rounded outward to whole pages", lines 523 and 526; "its rounding to pages ... leaves 64 bits", line 275 | The prototype adds `PAGE_SIZE - 1` to the end with a checked addition, `covering_pages` in `src/platform/memory.rs`, lines 204 to 213, which fails exactly when the end rounded up is $2^{64}$ |
+| The three capacities of step 2 are checked before any bank, span or reservation is read, and all give `Capacity` | Step 2, lines 369 and 370 | The order of the prototype: `all_ram` in `src/platform/memory.rs`, lines 67 to 74 |
+| Step 4 takes the banks one at a time in address order: for each, the sum so far, `Overflow`, then above 16 GiB, `ArenaTooLarge`, then the rounding of its start, `Overflow`. Exactly 16 GiB is accepted. The sum leaves 64 bits for no disjoint banks, so its check stays at its place in the order and a theorem states that the entry never returns `Overflow` from it | Step 4, lines 373 and 374; "at most 16 GiB", lines 516 and 517 | The order of the prototype: `all_ram` in `src/platform/memory.rs`, lines 94 to 111 |
+| Two RAM banks overlap when they share an address; adjacent banks do not overlap and stay separate | Lines 515 and 516; step 3, lines 371 and 372 | The meaning of `Span.touches` above; the prototype compares with `overlaps` in `src/memory/types.rs`, lines 58 to 60 |
+| The banks are sorted by their start with an insertion sort; the order is unique, since disjoint nonempty banks have distinct starts | Lines 515 and 516, 711 and 712, and 744 and 745 | The contract fixes the result, not the sort |
+| A span of boot storage, and the managed window of `MemoryPlan::new`, lie inside one bank when one bank as given holds them, not only its managed pages | "lies with its pages inside one RAM bank", lines 523 and 524; "inside one bank", lines 543 and 544; the error table, line 279 | The prototype compares with the banks, `contains_ram` in `src/platform/memory.rs`, lines 51, 117 and 188 to 190; the vector `platform-7` fails boot storage `0x1+0x1` in the bank `0x1+0x2000` with `OutsideRam` |
+| The managed window must start and end on pages, and fails with `ArenaTooLarge` only above 128 MiB | Step 1, lines 367 and 368; "a span of whole pages, at most 128 MiB long", lines 543 and 544 | The prototype checks both ends, `new` in `src/platform/memory.rs`, lines 44 to 49 |
+| `MemoryPlan::from_pi5` gives the boot storage in the order image, tree and then the spans of `more`; more than two spans in `more` fail with `Capacity` at step 2 | Lines 545 to 547; Work bounds, lines 716 and 717, "at most 4 spans of boot storage" | The contract names the image, the tree and `more` in this order; the prototype had no `more` and passed the image and the tree, `from_pi5` in `src/platform/memory.rs`, lines 145 to 152 |
+| A query of the boot memory map takes a span, and a span that is empty or whose end leaves 64 bits lies in no bank, so `contains_ram`, `is_available` and `permits_backing` are false for it; otherwise a bank holds a range when it holds all its addresses | The queries, lines 533 to 536, which give neither the type of a range nor its result for these spans; the queries are in no error order, so they do not fail | The page-tables component converts the spans of the boot memory map into nonempty physical ranges whose end fits in 64 bits, the page-tables contract, lines 67 to 71; the prototype's queries took that type, `src/memory/types.rs`, lines 21 to 35 |
+| The usable ranges are maximal: in each managed bank, each runs from an address that no reservation holds to the nearest start of a reservation above it, or to the end of the bank | Lines 536 to 538, which do not say maximal; Work bounds, lines 718 and 719, at most one range for each managed bank and each reservation | Ranges that ended anywhere else would exceed that bound; the prototype yields these ranges, `src/platform/memory/available.rs`, lines 21 to 53 |
+| `MemoryPlan::described_bytes` and `managed_bytes` are 64-bit values; the managed bytes of `MemoryPlan::new` are those of its window | Lines 539 and 540, and 542 to 544 | A map of the entries holds at most 16 GiB in its banks, so the sums fit |
+| The three shared fields are a boot state whose transactions hold the boot token and publish each field once: the bytes of the hand-over tree at the cold entry; the boot memory map and the CPU topology at the return of the entry that builds them, while the field is none and no secondary CPU has started. A transaction that is not enabled gives none; one whose entry fails gives the error of the entry and leaves the state unchanged | State fields, lines 764, 766 and 767; check and execute, lines 660 to 665 | The fields are published once and never change, and the component writes no state of its own, line 639, so only their publication is a transaction; in this release one executor, the boot CPU, holds the token |
+| The secondary CPUs start only once the boot memory map and the CPU topology are both published | Lines 766 and 767, "Once, before the secondary CPUs start" and "before the first secondary CPU starts" | The start of the secondary CPUs reads the topology, and afterwards every CPU reads the boot memory map |
+| The CPU topology is published from the tree of the hand-over bytes | Lines 764 and 767; the parse reads the bytes of the hand-over tree, line 90 | The board's boot code parses the hand-over tree; the boot memory map takes its inputs from the board, lines 511 to 513, so its publication takes the arguments of its entry |
 
 ### Vector notation
 
@@ -346,6 +450,13 @@ and the replay reads it so.
 | `entry=discover_cpus dtb=<bytes> profile=<profile> ask=count,profile,affinity(<i>)` | A profile is `QemuHvc`, `QemuSmc` or `Pi5`; `count` is decimal, `affinity(<i>)` hexadecimal or `-` for none | `fdt-cpus-1` to `fdt-cpus-4` |
 | `entry=validate_qemu_timers dtb=<bytes> profile=<profile> interrupts=<bytes> ask=` | The topology of `discover_cpus` on the tree checks the records: `result=ok` or `result=err` | `fdt-cpus-6` |
 | `entry=logical_id profile=<profile> mpidr=<value> ask=id` | `id` is the logical ID in decimal, `-` for none | `fdt-cpus-5` |
+| `entry=all_ram ram=<spans> boot=<spans> firmware=<regions> ask=...` | The boot memory map of `MemoryPlan::all_ram`; a firmware reservation is a reserved region, `<span>/<flag>`; an error is `PlanError::<variant>` | `platform-11` to `platform-13` |
+| `entry=MemoryPlan::new window=<span> ram=<spans> boot=<spans> firmware=<regions> ask=...` | The boot memory map of `MemoryPlan::new`, so named because `new` names several entries | `platform-1` to `platform-10` |
+| `entry=from_pi5 dtb=<bytes> dtb_address=<address> image=<span> window=<span> more=<spans> ask=...` | `MemoryPlan::from_pi5` on the Pi 5 boot memory of the arguments of `discover_pi5_boot_memory`; an error of the discovery is an `Error`, one of the boot memory map a `PlanError` | `fdt-pi5-platform-1`, `fdt-pi5-platform-2` |
+| The fields `ram`, `managed`, `boot`, `firmware`, `reservations` and `available` of a boot memory map | Lists of spans: the banks, the managed banks, the pages of the boot storage, of the firmware reservations, both in that order, and the usable ranges | `fdt-pi5-platform-1`, `platform-1`, `platform-2`, `platform-10` to `platform-12` |
+| The fields `described_bytes`, `managed_bytes` and `available_bytes` | Hexadecimal; `available_bytes` is the sum of the sizes of the usable ranges | `platform-11` |
+| The queries `contains_ram(<span>)`, `is_available(<span>)` and `permits_backing(<span>)` of a boot memory map | `true` or `false` | `fdt-pi5-platform-1`, `platform-1` to `platform-3`, `platform-6`, `platform-9` to `platform-11` |
+| The query `available_count(<span>)` | The number of usable ranges that hold the span, in decimal, the output of the oracle of the test | `platform-13` |
 
 The vector `fdt-parser-8` places the tree at an odd host address. The parse
 reads the bytes one at a time (lines 141 to 143), so the address is no input
@@ -361,40 +472,104 @@ writes the span that the rule of lines 549 to 554 gives, computed by hand: in
 of the size asked, and the span at or above the end of the tree is
 `0x201000+0x1000`, since the tree, at `0x200000`, ends below `0x201000`; in
 `fdt-pi5-selection-3`, the span that starts at `0x480000` is
-`0x480000+0x8000`.
+`0x480000+0x8000`. In `fdt-pi5-platform-1`, whose test asserts the first
+boot range, the field `boot` holds the image and then the pages of the tree,
+`0x200000+0x1000`, since the tree is shorter than a page; in `platform-10`,
+whose test asserts the numbers of banks and of reservations, the fields
+`ram` and `reservations` hold the 32 banks and the 130 page ranges.
+
+### Vector disposition
+
+The component has 55 of the 90 vectors of
+[legacy test vectors](contract.md#legacy-test-vectors); the other 35, of the
+Pi 5 device bindings, are replayed by the components that the contract
+names and have no line in the vector file. Of the 55:
+
+| Disposition | Vectors | Reason |
+| --- | --- | --- |
+| Replayed, 48 | `fdt-parser-1` to `-6` and `-9`, `fdt-translation-1` to `-5`, `fdt-discovery-1` to `-6`, `fdt-cpus-1` to `-6`, `fdt-pi5-1` to `-4`, `fdt-pi5-boundaries-1`, `-3` to `-5`, `fdt-pi5-selection-1` to `-3`, `fdt-pi5-platform-1` and `-2`, `platform-1`, `platform-3` to `platform-10`, `platform-12` and `platform-13` | Every case is a line of the vector file |
+| Replayed with a large input, 1 | `fdt-pi5-boundaries-2` | Its second case is a tree longer than 128 KiB, a line of the vector file that the generator of the file builds; the representative case of the replay module is the first |
+| Replayed in part, 4 | `fdt-parser-7`, `fdt-parser-8`, `platform-2`, `platform-11` | `fdt-parser-7`: its two cases of the padding bound call a function internal to the parse, which no entry reaches with them, as the row of the contract states. `fdt-parser-8`: the odd host address is no input of the specification, which reads bytes one at a time. `platform-2`: its three cases of the page allocator, two allocations and the free bytes, go through the page ownership table of the page-tables component, whose vectors cover them; the boot memory map that it takes is replayed. `platform-11`: the comparison of the usable bytes with the free bytes of a page allocator goes through the same table; the case compares them instead with the managed bytes less `0x80000`, `0x38000`, `0x14000` and `0x2000`, the difference that the row writes |
+| Not applicable, 2 | `fdt-pi5-firmware-1`, `fdt-pi5-firmware-2` | Their inputs are the trees that the Raspberry Pi firmware ships and trees merged from them, device-tree files outside the prototype tree that the repository does not hold, lines 845 to 848; the requirements that they evidence have other vectors and the specification tests |
+
+The comments of the vector file name the cases that are not applicable. The
+replay module checks one representative case of each vector of the file, and
+the whole file is replayed through the same `replay` by the driver of
+`cargo xtask formal vectors`.
 
 ## Contract correspondence
 
+Each row of the [entry table](contract.md#entry-points), lines 90 to 100,
+and the Lean definitions that state its entries, below `Krepi.Spec.Fdt`:
+
+| Line | Entries | Lean |
+| --- | --- | --- |
+| 90 | `fdt::Fdt::parse` | `Fdt.parse`, with `header`, `block`, `reservationMap`, `reservationsFrom`, `structureNodes`, `walkTokens`, `decodeToken` and `Walk.place` |
+| 91 | `Fdt::nodes`, `find_node`, `reservations` and `total_size`; `Node::name`, `parent`, `property`, `string_property`, `enabled`, `address_cells`, `size_cells`, `reg`, `ranges`, `dma_ranges` and `translate_reg` | `Fdt.nodes`, `Fdt.findNode` with `Fdt.descend`, `Fdt.reservations`, `Fdt.totalSize`; `Node.name`, `Node.parent`, `Node.property`, `Node.stringProperty`, `Node.enabled`, `Node.addressCells`, `Node.sizeCells`, `Node.reg`, `Node.ranges`, `Node.dmaRanges` and `Node.translateReg` with `climbRanges` |
+| 92 | `Fdt::discover_memory`, and `MemoryMap` with `ram`, `reserved` and `dynamic` | `Fdt.discoverMemory`, with `pushReserved`, `ramOfChild`, `addRam`, `Fdt.reservedMemory`, `reservedMemoryBinding`, `reservedOfChild` and `addReservedSpan`; `MemoryMap`, `MemoryMap.ram`, `MemoryMap.reserved`, `MemoryMap.dynamic` |
+| 93 | `Fdt::discover_pi5_boot_memory`, and `Pi5BootMemory` with `ram`, `reserved`, `dynamic`, `dtb`, `image`, `ram_bytes` and `is_available` | `Fdt.discoverPi5BootMemory`, with `checkPi5Compatible` and `compatibleEntries`; `Pi5BootMemory`, `Pi5BootMemory.ram`, `Pi5BootMemory.reserved`, `Pi5BootMemory.dynamic`, `Pi5BootMemory.dtb`, `Pi5BootMemory.image`, `Pi5BootMemory.ramBytes`, `Pi5BootMemory.isAvailable` |
+| 94 | `Pi5BootMemory::find_available` | `Pi5BootMemory.findAvailable`, with `searchRanges`, `searchRange`, `alignUp` and `isPowerOfTwo` |
+| 95 | `Fdt::discover_cpus`, and `CpuTopology` with `count`, `profile`, `affinity` and `validate_qemu_timers`; `CpuProfile::logical_id`, `affinity_shift` and `conduit` | `Fdt.discoverCpus`, with `cpuOfChild` and `idsComplete`; `CpuTopology`, `CpuTopology.count`, `CpuTopology.profile`, `CpuTopology.affinity`, `CpuTopology.validateQemuTimers`; `CpuProfile.logicalId`, `CpuProfile.affinityShift`, `CpuProfile.conduit` |
+| 96 | `cells_u64`, `Reg::new`, and `AddressMap::new`, `kind`, `to_parent` and `to_child` | `cellsU64`, `Reg.new` with `regEntry`, `AddressMap.new` with `window`, `AddressMap.kind`, `AddressMap.toParent` and `AddressMap.toChild` with `AddressMap.translate` and `throughWindows`; the entries of a `Reg` are its list `Reg.entries` |
+| 97 | `MemoryPlan::all_ram`, `new` and `from_pi5` | `MemoryPlan.allRam`, with `addBank`, `sortByStart`, `admitBank`, `addBoot`, `addFirmware`, `checkPlanSpan` and `pagesOf`; `MemoryPlan.new`; `MemoryPlan.fromPi5` |
+| 98 | `MemoryPlan::managed_banks`, `ram`, `reservations`, `boot_ranges`, `firmware_ranges`, `described_bytes`, `managed_bytes`, `contains_ram`, `is_available`, `permits_backing` and `available_ranges` | `MemoryPlan.managedBanks`, `MemoryPlan.ram`, `MemoryPlan.reservations`, `MemoryPlan.bootRanges`, `MemoryPlan.firmwareRanges`, `MemoryPlan.describedBytes`, `MemoryPlan.managedBytes`, `MemoryPlan.containsRam`, `MemoryPlan.isAvailable`, `MemoryPlan.permitsBacking`, and `MemoryPlan.availableRanges` with `usableFrom` |
+| 99 | `Span::new`, `end` and `contains`; the value types `Fdt`, `Node`, `Span`, `ReservedRegion`, `MemoryMap`, `Pi5BootMemory`, `CpuProfile`, `CpuTopology`, `MemoryPlan`, `Error` and `PlanError` | `Span.new`, `Span.endAddr`, `Span.contains`; `Fdt`, `Node`, `Span` with `Span.Valid`, `ReservedRegion`, `MemoryMap`, `Pi5BootMemory`, `CpuProfile`, `CpuTopology`, `MemoryPlan`, `Error` and `PlanError` |
+| 100 | `MAX_BLOB_SIZE`, `MAX_DEPTH`, `MAX_TOKENS`, `MAX_PROPERTIES`, `MAX_PROPERTY_NAME`, `MAX_RESERVATIONS`, `MAX_MEMORY_REGIONS`, `MAX_RESERVED_REGIONS` and `PI5_MAX_BLOB_SIZE` | The nine constants of the same names |
+
+The rules of the contract and the definitions that state them:
+
 | Contract | Lean, below `Krepi.Spec.Fdt` |
 | --- | --- |
-| `Fdt::parse`, [format and bounds](contract.md#format-and-bounds) | `Fdt.parse` |
-| Step 1 of the error order: the header and the blocks | `header`, `block` |
+| [Format and bounds](contract.md#format-and-bounds) | `Fdt.parse` and the limits of `Basic`; the node access of `Nodes` |
+| [Rejection](contract.md#rejection-and-error-priority), rule 1: no partial result | The result types `Except Error α` and `Except PlanError α` |
+| Rule 2: no panic | Every definition is total; no definition uses `panic!`, `get!` or a partial function |
+| Rule 3: no choice among duplicates | `DuplicateProperty` in `Walk.place`, `AmbiguousMapping` in `Fdt.descend` and `throughWindows`, `BadProperty` for two CPU nodes of one ID in `cpuOfChild`, `Overlap` for RAM ranges that share an address in `addRam` and for RAM banks in `addBank` |
+| The error table, 21 and 7 variants | `Error` and `PlanError`, with `Error.name` and `PlanError.name` |
+| Step 1 of the order of the parse and the entries on a tree: the header and the blocks | `header`, `block` |
 | Step 2: the reservation map | `reservationMap`, `reservationsFrom` |
 | Step 3: the tokens | `structureNodes`, `walkTokens`, `decodeToken`, `Walk.place` |
-| `Fdt::nodes`, `find_node`, `reservations`, `total_size` | `Fdt.nodes`, `Fdt.findNode`, `Fdt.reservations`, `Fdt.totalSize` |
-| `Node::name`, `parent`, `property`, `string_property`, `enabled`, `address_cells`, `size_cells` | `Node.name`, `Node.parent`, `Node.property`, `Node.stringProperty`, `Node.enabled`, `Node.addressCells`, `Node.sizeCells` |
-| `Node::reg`, `ranges`, `dma_ranges`, `translate_reg` | `Node.reg`, `Node.ranges`, `Node.dmaRanges`, `Node.translateReg` |
-| `cells_u64`, `Reg::new`, `AddressMap::new`, `kind`, `to_parent`, `to_child` | `cellsU64`, `Reg.new`, `AddressMap.new`, `AddressMap.kind`, `AddressMap.toParent`, `AddressMap.toChild` |
-| Step 7 of the error order: translation | `cellsU64`, `Reg.new` with `regEntry`, `AddressMap.new` with `window`, `AddressMap.translate` with `throughWindows` |
-| Step 8: `Fdt::find_node` | `Fdt.findNode`, `Fdt.descend` |
-| `Fdt::discover_memory`, `MemoryMap` with `ram`, `reserved` and `dynamic`, [memory discovery](contract.md#memory-discovery) | `Fdt.discoverMemory`, `MemoryMap`, `MemoryMap.ram`, `MemoryMap.reserved`, `MemoryMap.dynamic` |
-| Step 4: `Fdt::discover_memory` | `Fdt.discoverMemory` with `pushReserved`, `ramOfChild`, `addRam`, `Fdt.reservedMemory`, `reservedMemoryBinding`, `reservedOfChild` and `addReservedSpan` |
-| `Fdt::discover_pi5_boot_memory`, `Pi5BootMemory` with `ram`, `reserved`, `dynamic`, `dtb`, `image`, `ram_bytes` and `is_available` | `Fdt.discoverPi5BootMemory`, `Pi5BootMemory`, `Pi5BootMemory.ram`, `Pi5BootMemory.reserved`, `Pi5BootMemory.dynamic`, `Pi5BootMemory.dtb`, `Pi5BootMemory.image`, `Pi5BootMemory.ramBytes`, `Pi5BootMemory.isAvailable` |
-| Step 5: `Fdt::discover_pi5_boot_memory` | `Fdt.discoverPi5BootMemory` with `checkPi5Compatible` and `compatibleEntries` |
-| `Pi5BootMemory::find_available`, [boot memory map](contract.md#boot-memory-map) | `Pi5BootMemory.findAvailable` with `searchRanges`, `searchRange`, `alignUp` and `isPowerOfTwo` |
-| Step 8: `Pi5BootMemory::is_available` and `find_available` | `Pi5BootMemory.isAvailable`; `Pi5BootMemory.findAvailable`, whose `Overflow` comes from `alignUp` |
-| `Fdt::discover_cpus`, `CpuTopology` with `count`, `profile`, `affinity` and `validate_qemu_timers`, and `CpuProfile::logical_id`, `affinity_shift` and `conduit`, [CPU nodes](contract.md#cpu-nodes) | `Fdt.discoverCpus`, `CpuTopology`, `CpuTopology.count`, `CpuTopology.profile`, `CpuTopology.affinity`, `CpuTopology.validateQemuTimers`, `CpuProfile.logicalId`, `CpuProfile.affinityShift`, `CpuProfile.conduit` |
-| Step 6: `Fdt::discover_cpus` | `Fdt.discoverCpus` with `cpuOfChild` and `idsComplete` |
-| `Span::new`, `end`, `contains`, the value type `Span` and [the term](contract.md#terms) | `Span.new`, `Span.endAddr`, `Span.contains`, `Span`, `Span.Valid` |
-| The value types `Fdt`, `Node`, `ReservedRegion`, `MemoryMap`, `Pi5BootMemory`, `CpuProfile`, `CpuTopology`, `Error`, `PlanError` | `Fdt`, `Node`, `ReservedRegion`, `MemoryMap`, `Pi5BootMemory`, `CpuProfile`, `CpuTopology`, `Error`, `PlanError` |
-| The nine limits | `MAX_BLOB_SIZE`, `MAX_DEPTH`, `MAX_TOKENS`, `MAX_PROPERTIES`, `MAX_PROPERTY_NAME`, `MAX_RESERVATIONS`, `MAX_MEMORY_REGIONS`, `MAX_RESERVED_REGIONS`, `PI5_MAX_BLOB_SIZE` |
-| [Rejection](contract.md#rejection-and-error-priority), rule 1: no partial result | The result type `Except Error α` |
-| Rule 2: no panic | Every definition is total; no definition uses `panic!`, `get!` or a partial function |
-| Rule 3: no choice among duplicates | `DuplicateProperty` in `Walk.place`, `AmbiguousMapping` in `Fdt.descend` and `throughWindows`, `BadProperty` for two CPU nodes of one ID in `cpuOfChild`, `Overlap` for RAM ranges that share an address in `addRam` |
-| [Check and execute](contract.md#check-and-execute) | Every entry is a function of its arguments; a `Reg` and an `AddressMap` hold only checked spans; the discoveries build their result while they check and return it only when every check passed |
-| [Work bounds](contract.md#work-bounds) | The fuel of each loop: `MAX_RESERVATIONS + 1`, `MAX_TOKENS`, the size of a block, `MAX_DEPTH`, and `Q + 3` candidates in each RAM range of the selection; the memory discovery and the CPU discovery walk lists of nodes, the memory discovery twice |
+| Step 4: `Fdt::discover_memory` | `Fdt.discoverMemory` and the definitions of line 92 above |
+| Step 5: `Fdt::discover_pi5_boot_memory` | `Fdt.discoverPi5BootMemory` |
+| Step 6: `Fdt::discover_cpus` | `Fdt.discoverCpus` |
+| Step 7: translation | `cellsU64`, `Reg.new` with `regEntry`, `AddressMap.new` with `window`, `AddressMap.translate` with `throughWindows` |
+| Step 8: `Fdt::find_node`, `Pi5BootMemory::is_available` and `find_available` | `Fdt.findNode`; `Pi5BootMemory.isAvailable`; `Pi5BootMemory.findAvailable`, whose `Overflow` comes from `alignUp` |
+| The order of the boot memory map, steps 1 and 8 | `MemoryPlan.new`: `checkPlanSpan`, the alignment and the size of the window; then `MemoryPlan.containsRam` of the window |
+| Steps 2 to 7 of the boot memory map | `MemoryPlan.allRam`: the capacities; `addBank`; `admitBank`; `Alignment`; `addBoot`; `addFirmware` |
+| [Memory discovery](contract.md#memory-discovery) | `Discovery` and `Pi5` |
+| [Boot memory map](contract.md#boot-memory-map) | `Plan`, and `Pi5BootMemory.findAvailable` |
+| [CPU nodes](contract.md#cpu-nodes) | `Cpus` |
+| [Address translation](contract.md#address-translation) | `Translate` |
+| [Check and execute](contract.md#check-and-execute) | Every entry is a function of its arguments; a `Reg`, an `AddressMap` and a `MemoryPlan` hold only checked spans; the discoveries and the entries of the boot memory map build their result while they check and return it only when every check passed |
+| [Work bounds](contract.md#work-bounds) | The fuel of each loop: `MAX_RESERVATIONS + 1`, `MAX_TOKENS`, the size of a block, `MAX_DEPTH`, `Q + 3` candidates in each RAM range of the selection, and `2 * R + 2` steps in each managed bank of `MemoryPlan.availableRanges`; the memory discovery and the CPU discovery walk lists of nodes, the memory discovery twice; the boot memory map folds over its at most 32 banks, 4 spans and 128 reservations, which step 2 bounds before they are read, and sorts the banks once |
+| [Determinism](contract.md#determinism) | Every definition is a function; the banks sorted by `sortByStart`, the boot storage and the firmware reservations in input order, and the usable ranges in address order |
+| [State fields](contract.md#state-fields), lines 764, 766 and 767 | `BootState`, `BootToken`, `BootState.coldEntry`, `BootState.publishPlan` with `PlanBuild`, `BootState.publishTopology`, `BootState.startSecondaries` |
+| State fields, line 765: the per-CPU values of the boot CPU | The values `Fdt`, `Node`, `MemoryMap` and `Pi5BootMemory` that the entries return, which no transaction holds |
 
 ## Requirement correspondence
+
+Each requirement of the [requirements](requirements.md), the definitions that
+state it, and its evidence on the specification: the cases of the
+[vector file](../../../../verification/vectors/boot-platform/fdt.vectors)
+that [`Krepi.SpecTests.Fdt.Replay`](../../../../verification/Krepi/SpecTests/Fdt/Replay.lean)
+answers, and the specification tests, one input that the specification must
+accept and one that it must reject for each requirement, which are planned
+with the invariants and the properties in further modules. No theorem is
+registered yet. The last row is the section of liveness, time and
+performance of the requirements, which has no ID.
+
+| Requirement | Stated by | Vectors | Not stated by the specification |
+| --- | --- | --- | --- |
+| [FDT-R01](requirements.md#fdt-r01) | `Fdt.parse` with the limits of `Basic` | `fdt-parser-1` to `-9` | - |
+| [FDT-R02](requirements.md#fdt-r02) | The result types `Except Error α` and `Except PlanError α`; the order of the checks in each entry; rule 3 in `Walk.place`, `Fdt.descend`, `throughWindows`, `cpuOfChild`, `addRam` and `addBank` | `fdt-parser-1`, `fdt-parser-6`, and every case that names an error | That no input reads outside the bytes it was given, a property of the code, which the refinement proof of the target relates to the specification |
+| [FDT-R03](requirements.md#fdt-r03) | `Fdt.discoverMemory` | `fdt-discovery-1` to `-6`, `fdt-parser-7`, `fdt-pi5-boundaries-5`, `fdt-pi5-selection-3` | - |
+| [FDT-R04](requirements.md#fdt-r04) | `reservedOfChild`, `MemoryMap.dynamic`, `Pi5BootMemory.dynamic` | `fdt-discovery-4`, `fdt-pi5-2`, `fdt-pi5-4` | The shipped trees of `fdt-pi5-firmware-1`, which the repository does not hold |
+| [FDT-R05](requirements.md#fdt-r05) | `Fdt.discoverPi5BootMemory`, `Pi5BootMemory.isAvailable`, `Pi5BootMemory.findAvailable` | `fdt-pi5-1` to `-4`, `fdt-pi5-boundaries-1` to `-5`, `fdt-pi5-selection-1` to `-3` | Where the firmware leaves the tree and the layout of the image, which the board support of the Pi 5 states |
+| [FDT-R06](requirements.md#fdt-r06) | `MAX_MEMORY_REGIONS` in `addRam`, `Pi5BootMemory.ramBytes`; `MemoryPlan.MAX_BANKS` and `MAX_RAM_BYTES` in `MemoryPlan.allRam`, and `MemoryPlan.fromPi5` | `fdt-pi5-platform-1`, the 8 GB model; `platform-1` and `platform-11`, its banks; the other four models are inputs of the specification tests | The ranges that the firmware of the 1, 2, 4 and 16 GB models hands over, which the contract infers |
+| [FDT-R07](requirements.md#fdt-r07) | `MemoryPlan.allRam`, `MemoryPlan.new`, `MemoryPlan.fromPi5`, the queries and `MemoryPlan.availableRanges` | `fdt-pi5-platform-1` and `-2`, `platform-1` to `platform-13`, of which `platform-2` and `platform-11` in part | The mapping and the allocation of the usable ranges, which the page-tables component covers |
+| [FDT-R08](requirements.md#fdt-r08) | `Fdt.discoverCpus`, `CpuProfile.logicalId`, `CpuTopology.validateQemuTimers` | `fdt-cpus-1` to `-6` | That the CPUs start, which the multicore domain shows |
+| [FDT-R09](requirements.md#fdt-r09) | `Translate`: `cellsU64`, `Reg.new`, `AddressMap.new`, `AddressMap.kind`, `toParent`, `toChild`, `Node.reg`, `Node.ranges`, `Node.dmaRanges`, `Node.translateReg` | `fdt-translation-1` to `-5`, `fdt-discovery-2` | The tagged addresses of PCI, which the PCIe and RP1 links cover |
+| [FDT-R10](requirements.md#fdt-r10) | Every entry is a function of its arguments; `Fdt.discoverMemory` reads of `/chosen` only its `device_type` | Every case: the replay gives one output for each input | The three cold boots of QEMU virt, which the QEMU boot suite runs |
+| [Liveness, time and performance](requirements.md#liveness-time-and-performance) | Every definition is total and ends by structural recursion on a measure that the contract bounds: the reservation map on fuel `MAX_RESERVATIONS + 1`; the tokens on fuel `MAX_TOKENS`; a string on the bytes up to the end of its block; `Node::translate_reg` on fuel `MAX_DEPTH`; `find_available` on the list of RAM ranges and on fuel `Q + 3` in each; `available_ranges` on the list of managed banks and on fuel `2 * R + 2` in each; the discoveries and the boot memory map on lists of nodes, ranges, banks, spans and reservations; the transactions of the boot state are single steps. No definition waits or takes a lock | Every case returns | The time of an entry, which no test bounds |
 
 ### FDT-R01
 
@@ -408,23 +583,25 @@ answers the cases of `fdt-parser-1` to `fdt-parser-9` in the
 [vector file](../../../../verification/vectors/boot-platform/fdt.vectors)
 through it. The statements that each limit accepts an input at the limit and
 rejects one 1 above it with the error of the contract are stated with the
-properties of the component; no theorem is registered yet.
+properties of the component.
 
 ### FDT-R02
 
 [FDT-R02](requirements.md#fdt-r02), rejection without partial results: an
-entry returns `Except Error α`, so a failure carries one error and no value,
-and every definition is total, so no input makes an entry panic. The error
-orders of steps 1 to 8 are the order of the checks in each definition; the
-discoveries build their result while they check and return it only at the
-end, so a failure leaves nothing of it. Duplicates are rejected, never
-chosen: two properties of one name in `Walk.place`, two sibling nodes on a
-path in `Fdt.descend`, two windows that hold a request in `throughWindows`,
-RAM ranges that share an address in `addRam`, and two CPU nodes of one
-logical ID in `cpuOfChild`. The vectors `fdt-parser-1` and `fdt-parser-6`
-replay the prefixes and the single-byte changes of the minimal tree, the
-latter with the memory discovery and the node entries on every accepted
-tree. No theorem is registered yet.
+entry returns `Except Error α`, or `Except PlanError α` for the boot memory
+map, so a failure carries one error and no value, and every definition is
+total, so no input makes an entry panic. The error orders of the parse and
+the entries on a tree, steps 1 to 8, and the eight steps of the boot memory
+map are the order of the checks in each definition; the discoveries and the
+entries of the boot memory map build their result while they check and
+return it only at the end, so a failure leaves nothing of it. Duplicates are
+rejected, never chosen: two properties of one name in `Walk.place`, two
+sibling nodes on a path in `Fdt.descend`, two windows that hold a request in
+`throughWindows`, RAM ranges that share an address in `addRam`, RAM banks
+that share an address in `addBank`, and two CPU nodes of one logical ID in
+`cpuOfChild`. The vectors `fdt-parser-1` and `fdt-parser-6` replay the
+prefixes and the single-byte changes of the minimal tree, the latter with
+the memory discovery and the node entries on every accepted tree.
 
 ### FDT-R03
 
@@ -440,7 +617,7 @@ outside every RAM range is kept like any other. The capacities are
 `MAX_MEMORY_REGIONS` in `addRam` and `MAX_RESERVED_REGIONS` in
 `pushReserved`. The replay answers the cases of `fdt-discovery-1` to
 `fdt-discovery-6`, `fdt-parser-7`, `fdt-pi5-boundaries-5` and
-`fdt-pi5-selection-3`. No theorem is registered yet.
+`fdt-pi5-selection-3`.
 
 ### FDT-R04
 
@@ -452,8 +629,7 @@ to reject the tree; a disabled one is skipped, and a child with `reg` and
 `size` is static. `Pi5BootMemory::dynamic` is that of its memory map. The
 replay answers the cases of `fdt-discovery-4`, `fdt-pi5-2` and `fdt-pi5-4`
 with the outputs of the contract; `fdt-pi5-firmware-1`, whose input lies
-outside the repository, has no line in the vector file. No theorem is
-registered yet.
+outside the repository, has no line in the vector file.
 
 ### FDT-R05
 
@@ -470,17 +646,42 @@ bridges two RAM ranges or a hole. The replay answers the cases of
 `fdt-pi5-1` to `fdt-pi5-4`, `fdt-pi5-boundaries-1` to
 `fdt-pi5-boundaries-5` and `fdt-pi5-selection-1` to `fdt-pi5-selection-3`;
 `fdt-pi5-firmware-2`, whose input lies outside the repository, has no line.
-No theorem is registered yet.
 
 ### FDT-R06
 
 [FDT-R06](requirements.md#fdt-r06), every RAM model of the Pi 5: the 1 to 3
-RAM ranges of every model fit `MAX_MEMORY_REGIONS` in
-`Fdt.discoverMemory`, and their sum, at most 16 GiB less 4 MiB, is
-`Pi5BootMemory::ram_bytes`, computed with `checkedAdd`. The part of the
-requirement that the boot memory map holds, through `MemoryPlan::all_ram`
-and `from_pi5`, is specified with the boot memory map. No theorem is
-registered yet.
+RAM ranges of every model fit `MAX_MEMORY_REGIONS` in `Fdt.discoverMemory`
+and the 32 banks of `MemoryPlan.allRam`, and their sum, at most 16 GiB less
+4 MiB, is `Pi5BootMemory::ram_bytes`, computed with `checkedAdd`, and fits
+the 16 GiB that `admitBank` admits. `MemoryPlan.fromPi5` builds the boot
+memory map of a Pi 5 boot memory, whose usable ranges leave out the hole
+below 1 GiB, since `MemoryPlan.availableRanges` stays inside each managed
+bank. The replay answers `fdt-pi5-platform-1`, the three measured ranges of
+the 8 GB model through `discover_pi5_boot_memory` and `from_pi5`, and
+`platform-1` and `platform-11`, the same banks given to `new` and to
+`all_ram`. The trees of the inferred ranges of the 1, 2, 4 and 16 GB models
+are inputs of the specification tests.
+
+### FDT-R07
+
+[FDT-R07](requirements.md#fdt-r07), the boot memory map, is `Plan`:
+`MemoryPlan.allRam` with 1 to 32 banks of at most 16 GiB together, which
+`addBank` keeps disjoint and separate even where they are adjacent, sorted
+by `sortByStart`, and their complete pages as managed banks in `admitBank`;
+1 to 4 spans of boot storage, each rounded outward to pages by `pagesOf`,
+inside one bank and on pages of its own in `addBoot`; at most 128 firmware
+reservations, rounded outward, none on a page of boot storage in
+`addFirmware`; `MemoryPlan.new`, which manages a window of whole pages, at
+most 128 MiB, inside one bank; and `MemoryPlan.fromPi5`. The usable ranges
+of `MemoryPlan.availableRanges` leave out every page of every reservation,
+`reusable` ones included, since `addFirmware` keeps no flag, and lie each
+inside one managed bank. The replay answers the cases of
+`fdt-pi5-platform-1` and `-2` and of `platform-1` to `platform-13`, with the
+change of `platform-10`, where three spans of boot storage that are all the
+image fail with `Overlap`; `platform-2` and `platform-11` are replayed in
+part, as [vector disposition](#vector-disposition) states. Boot storage of 4
+spans accepted and of 5 refused with `Capacity` is an input of the
+specification tests.
 
 ### FDT-R08
 
@@ -493,7 +694,7 @@ on the Pi 5 of every CPU, and `/psci` with the conduit of the profile and a
 `compatible` of `PSCI_COMPATIBLE`; `CpuProfile.logicalId`, which masks the
 flag bits of `MPIDR_EL1`; and `CpuTopology.validateQemuTimers`, which accepts
 only the timer records of QEMU virt for the admitted CPUs. The replay answers
-the cases of `fdt-cpus-1` to `fdt-cpus-6`. No theorem is registered yet.
+the cases of `fdt-cpus-1` to `fdt-cpus-6`.
 
 ### FDT-R09
 
@@ -503,7 +704,7 @@ own cells on the child side, none of them inherited from an ancestor further
 up; `cellsU64` that never drops a cell; the kinds of a map; the one window
 that holds the whole request; and separate maps for CPU addresses and the
 addresses of devices. The replay answers the cases of `fdt-translation-1` to
-`fdt-translation-5`. No theorem is registered yet.
+`fdt-translation-5` and `fdt-discovery-2`.
 
 ### FDT-R10
 
@@ -515,9 +716,9 @@ values of the seeds that QEMU writes into `/chosen` do not decide whether it
 accepts a tree; its result holds them as the values of their properties.
 `Fdt.discoverMemory` reads of `/chosen` only its `device_type`, as it does of
 every child of the root, so the seeds reach none of the RAM ranges, the
-reserved regions and the number of dynamic reservations.
-`MemoryPlan::all_ram` is specified with the boot memory map. No theorem is
-registered yet.
+reserved regions and the number of dynamic reservations, and
+`MemoryPlan.allRam` takes only values, the RAM ranges, the boot storage and
+the reserved regions, so the seeds reach no boot memory map either.
 
 ## Dependencies
 
