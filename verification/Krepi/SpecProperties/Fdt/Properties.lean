@@ -143,7 +143,9 @@ A small encoder of device trees in the format of chapter 5 of DTSpec v0.4,
 from which the limits are stated: a header of version 17, compatible with
 16; the reservation map at offset 40 with its terminator; the structure block
 right after it, ended by the end token; and the strings block right after
-that, with every property name once, in order. -/
+that, with every property name once, in order. The builder of the
+specification tests, `Krepi.SpecTests.Fdt.Builder`, writes its trees through
+this encoder, so the two share one encoding. -/
 
 /-- The bytes of a 64-bit big-endian word, the low 64 bits of `n`. -/
 def be64 (n : Nat) : List UInt8 := be32 (n / 2 ^ 32) ++ be32 n

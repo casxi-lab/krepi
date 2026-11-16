@@ -40,7 +40,13 @@ with its theorem below
 [`verification/Krepi/Proofs/Fdt/`](../../../../verification/Krepi/Proofs/Fdt/),
 whose proof is planned: it is `sorry` until a proof pull request proves it
 ([statements and proofs](../../../formal-verification.md#statements-and-proofs)).
-The specification tests and the witnesses follow in further modules.
+The specification tests, for each requirement one input that the
+specification must accept and one that it must reject, are stated the same
+way in `Stp` below
+[`verification/Krepi/SpecTests/Fdt/`](../../../../verification/Krepi/SpecTests/Fdt/),
+on trees that `Builder` there writes, with their planned theorems in
+`Krepi.Proofs.Fdt.Stp`; `Replay` there replays the vectors. The witnesses
+follow in a further module.
 
 ## Widths and quantifiers
 
@@ -458,7 +464,8 @@ with the definitions that they need: the path of a node, the RAM ranges that
 the rules of the discovery give, the values that the discoveries leave
 unread, the spans that `find_available` may give, the two sides of a window,
 and a small encoder of device trees, `BuiltTree`, from which the limits are
-stated.
+stated and through which the builder of the specification tests writes its
+trees.
 
 | Property | States | Requirements |
 | --- | --- | --- |
@@ -470,6 +477,63 @@ stated.
 | `UnreadValuesIgnored` | Two trees that differ only in the values of `/chosen` other than its `device_type`, when that is not `memory`, and in the values of a dynamic reservation other than its `status` and flags, give the same memory map, Pi 5 boot memory and CPU topology | [FDT-R04](requirements.md#fdt-r04), [FDT-R10](requirements.md#fdt-r10) |
 | `AffinityRoundTrip` | For every CPU of a supported topology, `logical_id` of its affinity with any flag bits is its index, and flag bits outside the affinity fields never change a logical ID | [FDT-R08](requirements.md#fdt-r08) |
 | `TranslationThroughOneWindow` | For a well-formed map and a nonempty request within the width of its side: an absent map translates nothing; an empty one gives the request; a map of windows succeeds exactly when one window and no other shares an address with the request and holds all of it, and then gives the span at the request's offset in that window | [FDT-R09](requirements.md#fdt-r09) |
+
+### Builder
+
+[`Builder.lean`](../../../../verification/Krepi/SpecTests/Fdt/Builder.lean):
+the builder of the trees of the specification tests, with the operations of
+the builder of the prototype's tests: begin and end a node; add a property
+with a value, cells, a string, a list of strings or no value; add a
+no-operation token or a raw word; write over the last bytes of the structure
+block, such as the padding after a property value; add a reservation entry;
+finish the tree, padded with zero bytes to a larger `totalsize` where one is
+asked; and write a word or bytes into a finished tree or invert one of its
+bytes. `minimal` is the tree of the helper of that name of those tests. The
+builder writes through the encoder of `Properties`, `BuiltTree`, so the tests
+and the limits of `ParseLimitsExact` share one encoding, and it checks
+nothing: the parse decides about every tree that it writes. It lies on the
+statement side, since the tests are stated with it.
+
+### Specification tests
+
+[`Stp.lean`](../../../../verification/Krepi/SpecTests/Fdt/Stp.lean): for each
+requirement, one input that the specification must accept, with the result
+that it must give, and one that it must reject, with the error that it must
+give. Each test is a proposition, registered in `statements.json` with its
+theorem in `Krepi.Proofs.Fdt.Stp`, the name of the test with a lower-case
+first letter, whose proof is planned. The expected results are literals
+worked out from the requirements and the contract, never computed by the
+specification. Every input is below 1 KiB but the two trees of FDT-R05, which
+are the limit of 128 KiB itself.
+
+FDT-R02 and FDT-R10 have no rejection of their own: no total function panics,
+and every function gives one result for one input. Their rejecting tests take
+the rest of each requirement: a prefix of a valid tree is rejected, and a
+broken `device_type` of `/chosen`, the one value of `/chosen` that the memory
+discovery reads of a QEMU virt tree, makes the discovery fail.
+
+| Requirement | Test | Input | Result |
+| --- | --- | --- | --- |
+| [FDT-R01](requirements.md#fdt-r01) | Accepted: `ParseAcceptsNameAtLimit` | The root with a property whose name has exactly `MAX_PROPERTY_NAME`, 64, bytes, with each punctuation character of property names, and the `model` of QEMU virt with the bytes `0, 0, 2` in its padding | The tree of 187 bytes: the root with both properties, the value of `model` its 17 bytes without the padding |
+| [FDT-R01](requirements.md#fdt-r01) | Rejected: `ParseRejectsNameAboveLimit` | The same tree with a name of 65 bytes | `BadString` |
+| [FDT-R02](requirements.md#fdt-r02) | Accepted: `EntriesReturnOnChangedByte` | `minimal` with one byte inverted: the size `0x20_0000` of its RAM range becomes `0xdf_0000` | The parse accepts it, and the memory discovery gives that one RAM range |
+| [FDT-R02](requirements.md#fdt-r02) | Rejected: `ParseRejectsPrefix` | `minimal` without its last byte | `Truncated` |
+| [FDT-R03](requirements.md#fdt-r03) | Accepted: `DiscoveryAcceptsMaxRamRanges` | 32 RAM ranges in cells of one, and a reservation entry in the hole between the first two | The 32 ranges in tree order; the entry kept as a reserved region with `no-map` |
+| [FDT-R03](requirements.md#fdt-r03) | Rejected: `DiscoveryRejectsExcessRamRanges` | The same tree with 33 RAM ranges | `LimitExceeded` |
+| [FDT-R04](requirements.md#fdt-r04) | Accepted: `DiscoveryRecordsDynamicReservations` | Children of `/reserved-memory` with `size` and without `reg`: one of one cell below `#size-cells` 2 with `reusable` and `alloc-ranges` of 3 bytes, one of two cells with `no-map`, and a disabled one | 2 dynamic reservations and no reserved region |
+| [FDT-R04](requirements.md#fdt-r04) | Rejected: `DiscoveryRejectsEmptyStaticReservation` | A child with `size` and a `reg` of size 0, which is static | `EmptyRegion` |
+| [FDT-R05](requirements.md#fdt-r05) | Accepted: `Pi5AcceptsTreeAtLimit` | The hand-over tree of the 8 GB model with `atf@0` and the region of 62 bytes in the hole, padded to exactly 128 KiB | The Pi 5 boot memory: the three ranges, both reserved regions, the tree's 128 KiB, the image, and `ram_bytes` of 8 GiB less 4 MiB |
+| [FDT-R05](requirements.md#fdt-r05) | Rejected: `Pi5RejectsTreeAboveLimit` | The same tree padded to 128 KiB and 1 byte, which the parse accepts | `LimitExceeded` |
+| [FDT-R06](requirements.md#fdt-r06) | Accepted: `Pi5ModelsBuildBootMemoryMaps` | The hand-over trees of the 1, 2, 4, 8 and 16 GB models with `atf@0` | For each, its RAM ranges, `ram_bytes` of its installed size less 4 MiB, and a boot memory map of `all_ram` whose usable ranges leave out the hole |
+| [FDT-R06](requirements.md#fdt-r06) | Rejected: `BootMemoryMapRejectsRamAboveCapacity` | A hand-over tree of the same shape with 32 GB | The discovery gives `ram_bytes` of 32 GiB less 4 MiB, and `all_ram` fails with `ArenaTooLarge` |
+| [FDT-R07](requirements.md#fdt-r07) | Accepted: `AllRamAcceptsMaxBootStorage` | One bank, 4 spans of boot storage, one of them off its page, and one `reusable` firmware reservation | The map with each span rounded outward to pages, and usable ranges that leave out all of them |
+| [FDT-R07](requirements.md#fdt-r07) | Rejected: `AllRamRejectsExcessBootStorage` | The same with a fifth span of boot storage | `Capacity` |
+| [FDT-R08](requirements.md#fdt-r08) | Accepted: `CpusAcceptsQemuPair` | QEMU virt with two CPUs, CPU 0 without an `enable-method`, and the timer records for two CPUs | A topology of the profile `QemuHvc` with 2 CPUs, and the records accepted |
+| [FDT-R08](requirements.md#fdt-r08) | Rejected: `CpusRejectsRepeatedId` | The same tree with the `reg` 0 for both CPUs | `BadProperty` |
+| [FDT-R09](requirements.md#fdt-r09) | Accepted: `TranslateRegThroughBus` | A device below a bus of 1 address cell and 1 size cell with a `ranges` and a `dma-ranges` | Its `reg` in the cells of the bus, translated through the `ranges` to `[0xfd00_1000, 0xfd00_1200)` |
+| [FDT-R09](requirements.md#fdt-r09) | Rejected: `TranslationRejectsTwoWindows` | A map of two windows that both hold the request | `AmbiguousMapping` |
+| [FDT-R10](requirements.md#fdt-r10) | Accepted: `SeedsDoNotReachResults` | Two QEMU virt trees that differ only in the seeds of `/chosen` | The same memory map and the same boot memory map |
+| [FDT-R10](requirements.md#fdt-r10) | Rejected: `ChosenDeviceTypeIsRead` | A QEMU virt tree whose `/chosen` has a `device_type` that is not UTF-8 | `BadString` |
 
 ## Design decisions
 
@@ -658,26 +722,27 @@ state it, and its evidence on the specification: the cases of the
 [vector file](../../../../verification/vectors/boot-platform/fdt.vectors)
 that [`Krepi.SpecTests.Fdt.Replay`](../../../../verification/Krepi/SpecTests/Fdt/Replay.lean)
 answers; the registered statements of [invariants](#invariants) and
-[properties](#properties), whose theorems are planned; and the specification
-tests, one input that the specification must accept and one that it must
-reject for each requirement, which follow in a further module. The last row
+[properties](#properties), whose theorems are planned; and the
+[specification tests](#specification-tests), one input that the
+specification must accept and one that it must reject for each requirement,
+whose theorems in `Krepi.Proofs.Fdt.Stp` are planned. The last row
 is the section of liveness, time and performance of the requirements, which
 has no ID. The statements of the boot state serve the
 [state fields](contract.md#state-fields), which no requirement observes.
 
-| Requirement | Stated by | Registered statements | Vectors | Not stated by the specification |
-| --- | --- | --- | --- | --- |
-| [FDT-R01](requirements.md#fdt-r01) | `Fdt.parse` with the limits of `Basic` | `ParseWellFormed`, `ParseLimitsExact`, `CheckFdtWellFormed` | `fdt-parser-1` to `-9` | - |
-| [FDT-R02](requirements.md#fdt-r02) | The result types `Except Error α` and `Except PlanError α`; the order of the checks in each entry; rule 3 in `Walk.place`, `Fdt.descend`, `throughWindows`, `cpuOfChild`, `addRam` and `addBank` | `PrefixesRejected`, `NoChoiceAmongDuplicates`, `TranslationThroughOneWindow` | `fdt-parser-1`, `fdt-parser-6`, and every case that names an error | That no input reads outside the bytes it was given, a property of the code, which the refinement proof of the target relates to the specification |
-| [FDT-R03](requirements.md#fdt-r03) | `Fdt.discoverMemory` | `DiscoverMemoryWellFormed`, `NoChoiceAmongDuplicates`, `CheckMemoryMapWellFormed` | `fdt-discovery-1` to `-6`, `fdt-parser-7`, `fdt-pi5-boundaries-5`, `fdt-pi5-selection-3` | - |
-| [FDT-R04](requirements.md#fdt-r04) | `reservedOfChild`, `MemoryMap.dynamic`, `Pi5BootMemory.dynamic` | `UnreadValuesIgnored` | `fdt-discovery-4`, `fdt-pi5-2`, `fdt-pi5-4` | The shipped trees of `fdt-pi5-firmware-1`, which the repository does not hold |
-| [FDT-R05](requirements.md#fdt-r05) | `Fdt.discoverPi5BootMemory`, `Pi5BootMemory.isAvailable`, `Pi5BootMemory.findAvailable` | `DiscoverPi5BootMemoryConsistent`, `DiscoverPi5BootMemoryWellFormed`, `FindAvailableWellFormed`, `FindAvailableLowest`, `CheckPi5BootMemoryConsistent` | `fdt-pi5-1` to `-4`, `fdt-pi5-boundaries-1` to `-5`, `fdt-pi5-selection-1` to `-3` | Where the firmware leaves the tree and the layout of the image, which the board support of the Pi 5 states |
-| [FDT-R06](requirements.md#fdt-r06) | `MAX_MEMORY_REGIONS` in `addRam`, `Pi5BootMemory.ramBytes`; `MemoryPlan.MAX_BANKS` and `MAX_RAM_BYTES` in `MemoryPlan.allRam`, and `MemoryPlan.fromPi5` | `DiscoverPi5BootMemoryConsistent`, `AllRamWellFormed`, `FromPi5WellFormed`, `UsableRangesExact` | `fdt-pi5-platform-1`, the 8 GB model; `platform-1` and `platform-11`, its banks; the other four models are inputs of the specification tests | The ranges that the firmware of the 1, 2, 4 and 16 GB models hands over, which the contract infers |
-| [FDT-R07](requirements.md#fdt-r07) | `MemoryPlan.allRam`, `MemoryPlan.new`, `MemoryPlan.fromPi5`, the queries and `MemoryPlan.availableRanges` | `AllRamWellFormed`, `MemoryPlanNewWellFormed`, `FromPi5WellFormed`, `AvailableRangesWellFormed`, `UsableRangesExact`, `NoChoiceAmongDuplicates`, `CheckMemoryPlanWellFormed` | `fdt-pi5-platform-1` and `-2`, `platform-1` to `platform-13`, of which `platform-2` and `platform-11` in part | The mapping and the allocation of the usable ranges, which the page-tables component covers |
-| [FDT-R08](requirements.md#fdt-r08) | `Fdt.discoverCpus`, `CpuProfile.logicalId`, `CpuTopology.validateQemuTimers` | `DiscoverCpusSupported`, `AffinityRoundTrip`, `NoChoiceAmongDuplicates`, `CheckCpuTopologySupported` | `fdt-cpus-1` to `-6` | That the CPUs start, which the multicore domain shows |
-| [FDT-R09](requirements.md#fdt-r09) | `Translate`: `cellsU64`, `Reg.new`, `AddressMap.new`, `AddressMap.kind`, `toParent`, `toChild`, `Node.reg`, `Node.ranges`, `Node.dmaRanges`, `Node.translateReg` | `SpanNewWellFormed`, `RegNewWellFormed`, `AddressMapNewWellFormed`, `NodeRegWellFormed`, `NodeRangesWellFormed`, `NodeDmaRangesWellFormed`, `ToParentWellFormed`, `ToChildWellFormed`, `TranslateRegWellFormed`, `TranslationThroughOneWindow`, `CheckRegWellFormed`, `CheckAddressMapWellFormed` | `fdt-translation-1` to `-5`, `fdt-discovery-2` | The tagged addresses of PCI, which the PCIe and RP1 links cover |
-| [FDT-R10](requirements.md#fdt-r10) | Every entry is a function of its arguments; `Fdt.discoverMemory` reads of `/chosen` only its `device_type` when that is not `memory` | `UnreadValuesIgnored`; `ColdEntryFromHandOver`, `PublishPlanFromHandOver`, `PublishTopologyFromHandOver` and `StartSecondariesFromHandOver`, by which the published topology stays that of the hand-over bytes | Every case: the replay gives one output for each input | The three cold boots of QEMU virt, which the QEMU boot suite runs |
-| [Liveness, time and performance](requirements.md#liveness-time-and-performance) | Every definition is total and ends by structural recursion on a measure that the contract bounds: the reservation map on fuel `MAX_RESERVATIONS + 1`; the tokens on fuel `MAX_TOKENS`; a string on the bytes up to the end of its block; `Node::translate_reg` on fuel `MAX_DEPTH`; `find_available` on the list of RAM ranges and on fuel `Q + 3` in each; `available_ranges` on the list of managed banks and on fuel `2 * R + 2` in each; the discoveries and the boot memory map on lists of nodes, ranges, banks, spans and reservations; the transactions of the boot state are single steps. No definition waits or takes a lock | None: every definition is total by structural recursion, which Lean checks, so termination needs no statement | Every case returns | The time of an entry, which no test bounds |
+| Requirement | Stated by | Registered statements | Specification tests | Vectors | Not stated by the specification |
+| --- | --- | --- | --- | --- | --- |
+| [FDT-R01](requirements.md#fdt-r01) | `Fdt.parse` with the limits of `Basic` | `ParseWellFormed`, `ParseLimitsExact`, `CheckFdtWellFormed` | `ParseAcceptsNameAtLimit`, `ParseRejectsNameAboveLimit` | `fdt-parser-1` to `-9` | - |
+| [FDT-R02](requirements.md#fdt-r02) | The result types `Except Error α` and `Except PlanError α`; the order of the checks in each entry; rule 3 in `Walk.place`, `Fdt.descend`, `throughWindows`, `cpuOfChild`, `addRam` and `addBank` | `PrefixesRejected`, `NoChoiceAmongDuplicates`, `TranslationThroughOneWindow` | `EntriesReturnOnChangedByte`, `ParseRejectsPrefix` | `fdt-parser-1`, `fdt-parser-6`, and every case that names an error | That no input reads outside the bytes it was given, a property of the code, which the refinement proof of the target relates to the specification |
+| [FDT-R03](requirements.md#fdt-r03) | `Fdt.discoverMemory` | `DiscoverMemoryWellFormed`, `NoChoiceAmongDuplicates`, `CheckMemoryMapWellFormed` | `DiscoveryAcceptsMaxRamRanges`, `DiscoveryRejectsExcessRamRanges` | `fdt-discovery-1` to `-6`, `fdt-parser-7`, `fdt-pi5-boundaries-5`, `fdt-pi5-selection-3` | - |
+| [FDT-R04](requirements.md#fdt-r04) | `reservedOfChild`, `MemoryMap.dynamic`, `Pi5BootMemory.dynamic` | `UnreadValuesIgnored` | `DiscoveryRecordsDynamicReservations`, `DiscoveryRejectsEmptyStaticReservation` | `fdt-discovery-4`, `fdt-pi5-2`, `fdt-pi5-4` | The shipped trees of `fdt-pi5-firmware-1`, which the repository does not hold |
+| [FDT-R05](requirements.md#fdt-r05) | `Fdt.discoverPi5BootMemory`, `Pi5BootMemory.isAvailable`, `Pi5BootMemory.findAvailable` | `DiscoverPi5BootMemoryConsistent`, `DiscoverPi5BootMemoryWellFormed`, `FindAvailableWellFormed`, `FindAvailableLowest`, `CheckPi5BootMemoryConsistent` | `Pi5AcceptsTreeAtLimit`, `Pi5RejectsTreeAboveLimit` | `fdt-pi5-1` to `-4`, `fdt-pi5-boundaries-1` to `-5`, `fdt-pi5-selection-1` to `-3` | Where the firmware leaves the tree and the layout of the image, which the board support of the Pi 5 states |
+| [FDT-R06](requirements.md#fdt-r06) | `MAX_MEMORY_REGIONS` in `addRam`, `Pi5BootMemory.ramBytes`; `MemoryPlan.MAX_BANKS` and `MAX_RAM_BYTES` in `MemoryPlan.allRam`, and `MemoryPlan.fromPi5` | `DiscoverPi5BootMemoryConsistent`, `AllRamWellFormed`, `FromPi5WellFormed`, `UsableRangesExact` | `Pi5ModelsBuildBootMemoryMaps`, `BootMemoryMapRejectsRamAboveCapacity` | `fdt-pi5-platform-1`, the 8 GB model; `platform-1` and `platform-11`, its banks; the other four models only in the specification tests | The ranges that the firmware of the 1, 2, 4 and 16 GB models hands over, which the contract infers |
+| [FDT-R07](requirements.md#fdt-r07) | `MemoryPlan.allRam`, `MemoryPlan.new`, `MemoryPlan.fromPi5`, the queries and `MemoryPlan.availableRanges` | `AllRamWellFormed`, `MemoryPlanNewWellFormed`, `FromPi5WellFormed`, `AvailableRangesWellFormed`, `UsableRangesExact`, `NoChoiceAmongDuplicates`, `CheckMemoryPlanWellFormed` | `AllRamAcceptsMaxBootStorage`, `AllRamRejectsExcessBootStorage` | `fdt-pi5-platform-1` and `-2`, `platform-1` to `platform-13`, of which `platform-2` and `platform-11` in part | The mapping and the allocation of the usable ranges, which the page-tables component covers |
+| [FDT-R08](requirements.md#fdt-r08) | `Fdt.discoverCpus`, `CpuProfile.logicalId`, `CpuTopology.validateQemuTimers` | `DiscoverCpusSupported`, `AffinityRoundTrip`, `NoChoiceAmongDuplicates`, `CheckCpuTopologySupported` | `CpusAcceptsQemuPair`, `CpusRejectsRepeatedId` | `fdt-cpus-1` to `-6` | That the CPUs start, which the multicore domain shows |
+| [FDT-R09](requirements.md#fdt-r09) | `Translate`: `cellsU64`, `Reg.new`, `AddressMap.new`, `AddressMap.kind`, `toParent`, `toChild`, `Node.reg`, `Node.ranges`, `Node.dmaRanges`, `Node.translateReg` | `SpanNewWellFormed`, `RegNewWellFormed`, `AddressMapNewWellFormed`, `NodeRegWellFormed`, `NodeRangesWellFormed`, `NodeDmaRangesWellFormed`, `ToParentWellFormed`, `ToChildWellFormed`, `TranslateRegWellFormed`, `TranslationThroughOneWindow`, `CheckRegWellFormed`, `CheckAddressMapWellFormed` | `TranslateRegThroughBus`, `TranslationRejectsTwoWindows` | `fdt-translation-1` to `-5`, `fdt-discovery-2` | The tagged addresses of PCI, which the PCIe and RP1 links cover |
+| [FDT-R10](requirements.md#fdt-r10) | Every entry is a function of its arguments; `Fdt.discoverMemory` reads of `/chosen` only its `device_type` when that is not `memory` | `UnreadValuesIgnored`; `ColdEntryFromHandOver`, `PublishPlanFromHandOver`, `PublishTopologyFromHandOver` and `StartSecondariesFromHandOver`, by which the published topology stays that of the hand-over bytes | `SeedsDoNotReachResults`, `ChosenDeviceTypeIsRead` | Every case: the replay gives one output for each input | The three cold boots of QEMU virt, which the QEMU boot suite runs |
+| [Liveness, time and performance](requirements.md#liveness-time-and-performance) | Every definition is total and ends by structural recursion on a measure that the contract bounds: the reservation map on fuel `MAX_RESERVATIONS + 1`; the tokens on fuel `MAX_TOKENS`; a string on the bytes up to the end of its block; `Node::translate_reg` on fuel `MAX_DEPTH`; `find_available` on the list of RAM ranges and on fuel `Q + 3` in each; `available_ranges` on the list of managed banks and on fuel `2 * R + 2` in each; the discoveries and the boot memory map on lists of nodes, ranges, banks, spans and reservations; the transactions of the boot state are single steps. No definition waits or takes a lock | None: every definition is total by structural recursion, which Lean checks, so termination needs no statement | None | Every case returns | The time of an entry, which no test bounds |
 
 ### FDT-R01
 
@@ -692,7 +757,9 @@ answers the cases of `fdt-parser-1` to `fdt-parser-9` in the
 through it. `ParseLimitsExact` states that each of the six limits accepts a
 built tree at the limit and rejects one 1 above it with the error of the
 contract, and `ParseWellFormed` that every tree that the parse accepts keeps
-all of them (`Fdt.WellFormed`).
+all of them (`Fdt.WellFormed`). The specification tests
+`ParseAcceptsNameAtLimit` and `ParseRejectsNameAboveLimit` take the limit of
+a property name, 64 bytes, on a tree with the padding that QEMU leaves.
 
 ### FDT-R02
 
@@ -714,7 +781,11 @@ the memory discovery and the node entries on every accepted tree.
 `PrefixesRejected` states that every prefix of every accepted tree shorter
 than its `totalsize` fails with `Truncated`; `NoChoiceAmongDuplicates` that
 paths, CPU nodes, RAM ranges and banks are never chosen among, and
-`TranslationThroughOneWindow` the same of the windows of a map.
+`TranslationThroughOneWindow` the same of the windows of a map. The
+specification test `EntriesReturnOnChangedByte` changes one byte of
+`minimal` and states what the parse and the memory discovery return, and
+`ParseRejectsPrefix` rejects a prefix of `minimal`, the rejection that the
+requirement has besides its rule that nothing panics.
 
 ### FDT-R03
 
@@ -733,7 +804,9 @@ outside every RAM range is kept like any other. The capacities are
 `fdt-pi5-selection-3`. `DiscoverMemoryWellFormed` states that the memory map
 of a well-formed tree keeps `MemoryMap.WellFormed`, and
 `NoChoiceAmongDuplicates` that its RAM ranges are all the spans of the
-enabled memory nodes in tree order.
+enabled memory nodes in tree order. The specification tests
+`DiscoveryAcceptsMaxRamRanges` and `DiscoveryRejectsExcessRamRanges` take 32
+and 33 RAM ranges, the first with a reserved region in a hole.
 
 ### FDT-R04
 
@@ -748,7 +821,11 @@ with the outputs of the contract; `fdt-pi5-firmware-1`, whose input lies
 outside the repository, has no line in the vector file.
 `UnreadValuesIgnored` states that the values of a dynamic reservation other
 than its `status` and flags, its `size` among them, whatever its cells, do
-not reach the results of the discoveries.
+not reach the results of the discoveries. The specification test
+`DiscoveryRecordsDynamicReservations` counts dynamic reservations with a
+`size` of one and of two cells and ignores a disabled one, and
+`DiscoveryRejectsEmptyStaticReservation` reads the `reg` of a child with
+`reg` and `size` as a static region.
 
 ### FDT-R05
 
@@ -768,7 +845,10 @@ bridges two RAM ranges or a hole. The replay answers the cases of
 `DiscoverPi5BootMemoryConsistent` and `DiscoverPi5BootMemoryWellFormed`
 state the checks of its result, `FindAvailableWellFormed` and
 `FindAvailableLowest` those of the selection: its span is available and has
-the lowest aligned start in the first RAM range that has one.
+the lowest aligned start in the first RAM range that has one. The
+specification tests `Pi5AcceptsTreeAtLimit` and `Pi5RejectsTreeAboveLimit`
+take the hand-over tree of the 8 GB model at exactly 128 KiB and at 1 byte
+more.
 
 ### FDT-R06
 
@@ -782,8 +862,11 @@ below 1 GiB, since `MemoryPlan.availableRanges` stays inside each managed
 bank. The replay answers `fdt-pi5-platform-1`, the three measured ranges of
 the 8 GB model through `discover_pi5_boot_memory` and `from_pi5`, and
 `platform-1` and `platform-11`, the same banks given to `new` and to
-`all_ram`. The trees of the inferred ranges of the 1, 2, 4 and 16 GB models
-are inputs of the specification tests. `AllRamWellFormed` and
+`all_ram`. The specification test `Pi5ModelsBuildBootMemoryMaps` takes the
+hand-over trees of the inferred ranges of the 1, 2, 4 and 16 GB models and
+of the measured ranges of the 8 GB model through `discover_pi5_boot_memory`
+and `all_ram`, and `BootMemoryMapRejectsRamAboveCapacity` a tree of the same
+shape with 32 GB, which the boot memory map refuses. `AllRamWellFormed` and
 `FromPi5WellFormed` state that every boot memory map holds at most 32 banks
 of at most 16 GiB together, `DiscoverPi5BootMemoryConsistent` that
 `ram_bytes` is the exact sum of the RAM ranges, and `UsableRangesExact` that
@@ -807,8 +890,9 @@ inside one managed bank. The replay answers the cases of
 change of `platform-10`, where three spans of boot storage that are all the
 image fail with `Overlap`; `platform-2` and `platform-11` are replayed in
 part, as [vector disposition](#vector-disposition) states. Boot storage of 4
-spans accepted and of 5 refused with `Capacity` is an input of the
-specification tests. `AllRamWellFormed`, `MemoryPlanNewWellFormed` and
+spans accepted and of 5 refused with `Capacity` are the specification tests
+`AllRamAcceptsMaxBootStorage` and `AllRamRejectsExcessBootStorage`.
+`AllRamWellFormed`, `MemoryPlanNewWellFormed` and
 `FromPi5WellFormed` state `MemoryPlan.WellFormed` of every map that the
 entries build, `AvailableRangesWellFormed` and `UsableRangesExact` that the
 usable ranges are exactly the managed banks without the reservations, in
@@ -829,7 +913,10 @@ only the timer records of QEMU virt for the admitted CPUs. The replay answers
 the cases of `fdt-cpus-1` to `fdt-cpus-6`. `DiscoverCpusSupported` states the
 counts of a topology, `AffinityRoundTrip` that the affinity of each CPU gives
 back its logical ID whatever the flag bits, and `NoChoiceAmongDuplicates`
-that no two CPU nodes of an accepted `/cpus` have one `reg`.
+that no two CPU nodes of an accepted `/cpus` have one `reg`. The
+specification test `CpusAcceptsQemuPair` takes two CPUs of QEMU virt, the
+first without an `enable-method`, with their timer records, and
+`CpusRejectsRepeatedId` the same tree with one ID twice.
 
 ### FDT-R09
 
@@ -843,7 +930,10 @@ addresses of devices. The replay answers the cases of `fdt-translation-1` to
 `Span::new`, `Reg::new`, `AddressMap::new`, the node entries and the
 translations state what each gives, and `TranslationThroughOneWindow` that a
 translation succeeds exactly through the one window that holds the whole
-request, at the request's offset in it.
+request, at the request's offset in it. The specification test
+`TranslateRegThroughBus` reads a `reg` in the cells of its bus and
+translates it through the bus's `ranges`, not its `dma-ranges`, and
+`TranslationRejectsTwoWindows` refuses a request that two windows hold.
 
 ### FDT-R10
 
@@ -860,15 +950,21 @@ and `MemoryPlan.allRam` takes only values, the RAM ranges, the boot storage
 and the reserved regions, so the seeds reach no boot memory map either.
 `UnreadValuesIgnored` states this of the memory map, the Pi 5 boot memory
 and the CPU topology; the boot state publishes only the topology of the
-hand-over bytes (`BootState.FromHandOver`).
+hand-over bytes (`BootState.FromHandOver`). The specification test
+`SeedsDoNotReachResults` boots two QEMU virt trees that differ only in their
+seeds to the same memory map and boot memory map, and
+`ChosenDeviceTypeIsRead` makes the memory discovery fail through a broken
+`device_type` of `/chosen`, the one value of it that the discovery reads
+there, the rejection that the requirement has besides its rule that results
+are functions of their inputs.
 
 ## Dependencies
 
 - Lean core of the Lean version in `verification/lean-toolchain`; the modules
-  of the specification, of its invariants and of its properties import
-  neither Mathlib nor the Aeneas library nor generated definitions. The
-  proof modules below `Krepi.Proofs.Fdt` also import Mathlib, so that the
-  gate counts the heartbeats of their theorems.
+  of the specification, of its invariants, of its properties and of its
+  tests import neither Mathlib nor the Aeneas library nor generated
+  definitions. The proof modules below `Krepi.Proofs.Fdt` also import
+  Mathlib, so that the gate counts the heartbeats of their theorems.
 - The [requirements](requirements.md) and the [contract](contract.md) of the
   component, and, as the contract cites them, the format of chapter 5, the
   names of sections 2.2.1 and 2.2.4 and the nodes of sections 3.4, 3.5, 3.7
