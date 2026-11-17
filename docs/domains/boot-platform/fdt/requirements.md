@@ -311,10 +311,11 @@ of the translation give their expected outputs.
 
 **The same result on every boot.** The results of the parse, of the
 discoveries and of the boot memory map are functions of the bytes of the
-tree and of the arguments; no entry reads `/chosen`, where QEMU virt writes
-new random seeds at every boot. The criterion: three cold boots of QEMU
-virt, each in a new QEMU process, give the same results of the parse and of
-the boot memory map.
+tree and of the arguments; no entry reads a value of `/chosen` other than
+its `device_type` and, when that is `memory`, its `status`, so the new
+random seeds that QEMU virt writes into `/chosen` at every boot reach no
+result. The criterion: three cold boots of QEMU virt, each in a new QEMU
+process, give the same results of the parse and of the boot memory map.
 
 - **Examples.** None: no feature document describes the component.
 - **Entry points.** `Fdt::parse`, `Fdt::discover_memory` and

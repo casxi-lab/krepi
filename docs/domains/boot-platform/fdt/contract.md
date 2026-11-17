@@ -46,7 +46,13 @@ the component.
   `#size-cells` of a node give the number of cells of the addresses and sizes
   in the `reg` of its children.
 - **Span.** The value `Span`: the addresses `[start, start + size)`, where
-  `start + size` fits in 64 bits.
+  `start + size` fits in 64 bits. `Span::new(start, size)` fails with
+  `Overflow` when `start + size` leaves 64 bits and accepts an empty span;
+  `Span::end` gives `start + size`, or `Overflow`; `Span::contains(other)`
+  fails with `Overflow` when `other` and then the span itself end beyond
+  64 bits, and otherwise holds when `other` lies inside the span.
+- **Touch.** Two spans touch when both are nonempty and share an address.
+  Spans are disjoint when they share no address.
 - **RAM range.** A span of the `reg` of an enabled memory node that is a
   child of the root. The boot memory map calls the RAM ranges it keeps its
   **RAM banks**.
@@ -59,8 +65,9 @@ the component.
   allocate a pool, such as the `linux,cma` node of the Raspberry Pi trees.
 - **Boot storage.** The spans that hold what the kernel needs while it
   boots: the image with its BSS and stacks, the device tree, and the boot
-  bundle where the board loads it apart from the image. The board gives
-  them as a table of at most 4 spans.
+  bundle, the read-only segment of the image that the symbols of its link
+  bound, as a span of its own. The board gives them as a table of at most
+  4 spans.
 - **Firmware reservation.** A reserved region as the boot memory map takes
   it.
 - **Boot memory map.** The value `MemoryPlan`: the RAM banks, sorted by
@@ -153,15 +160,16 @@ with version 16 or 17, and checks all of it before it returns a tree:
   token as the last token, where the block ends. No-operation tokens may
   appear between any two tokens. At most `MAX_TOKENS` tokens are read, the
   end token included.
-- **Names.** A node name is a NUL-terminated UTF-8 string of letters,
-  digits and `,._+-@`, empty only for the root, followed by zero bytes up to
-  the next multiple of 4. A property name, read from the strings block at
-  the offset that its token gives, is a NUL-terminated UTF-8 string of 1 to
-  `MAX_PROPERTY_NAME` bytes of letters, digits and `,._+?#-`. The limit is
-  above the 31 characters of section 2.2.4 of DTSpec v0.4, because vendor
-  property names reach 32 characters in the Pi 5 tree. No property name
-  occurs twice in one node, and no node holds more than `MAX_PROPERTIES`
-  properties.
+- **Names.** A node name is a NUL-terminated UTF-8 string of ASCII letters
+  and digits and `,._+-@`, the characters of Table 2.1 of DTSpec v0.4,
+  empty only for the root, followed by zero bytes up to the next multiple
+  of 4. A property name, read from the strings block at the offset that its
+  token gives, is a NUL-terminated UTF-8 string of 1 to `MAX_PROPERTY_NAME`
+  bytes of ASCII letters and digits and `,._+?#-`, the characters of Table
+  2.2. The limit is above the 31 characters of section 2.2.4 of DTSpec
+  v0.4, because vendor property names reach 32 characters in the Pi 5
+  tree. No property name occurs twice in one node, and no node holds more
+  than `MAX_PROPERTIES` properties.
 - **Depth.** No node lies deeper than `MAX_DEPTH - 1`: a path from the root
   holds at most `MAX_DEPTH` nodes, the root included.
 - **Property padding.** The value of a property is exactly its declared
@@ -205,8 +213,8 @@ The node access reads only a tree that the parse accepted:
   or none; `parent` gives the parent node, and none for the root.
 - `Node::string_property(name)` gives a value that holds one NUL-terminated
   UTF-8 string, and fails with `BadString` for a value without a NUL or
-  with a string that is not UTF-8, and with `BadProperty` for a byte after
-  the NUL.
+  whose bytes before the first NUL are not UTF-8, and then with
+  `BadProperty` for a byte after that NUL.
 - `Node::enabled` reads `status` as `string_property` does, with its
   errors. It is true when `status` is absent or `okay`, the value of an
   operational device in section 2.3.4 of DTSpec v0.4, or `ok`, which that
@@ -285,6 +293,14 @@ tree. An entry that calls another, such as `discover_pi5_boot_memory` with
 `discover_memory`, reports the error of the callee at the step where it
 calls it.
 
+Some checks of these orders cannot fail on the inputs that reach them:
+the ends of the blocks, of the reservation entries before the end of the
+tree and of the property values, whose offsets and lengths are 32-bit
+words; the translated span, which lies in a window that `AddressMap::new`
+checked; and the sums of the RAM ranges and of the RAM banks, which are
+disjoint spans within 64 bits. They keep their place in the orders, as in
+the prototype tree.
+
 The parse and the entries on a tree:
 
 1. `Fdt::parse`: fewer than 40 bytes, `Truncated`; the magic, `BadMagic`;
@@ -292,9 +308,11 @@ The parse and the entries on a tree:
    `LimitExceeded`; fewer bytes than `totalsize`, `Truncated`; the
    versions, `UnsupportedVersion`; the alignment of the structure block and
    of the reservation map, `BadAlignment`; the structure block and then the
-   strings block within the tree, `BadLayout`, `Overflow` or `Truncated`;
-   a structure block shorter than 12 bytes or a reservation map inside the
-   header, then intersecting blocks, `BadLayout`.
+   strings block within the tree: its start inside the header,
+   `BadLayout`, its end beyond 64 bits, `Overflow`, then its end past the
+   tree, `Truncated`; a structure block shorter than 12 bytes or a
+   reservation map inside the header, then intersecting blocks,
+   `BadLayout`.
 2. The reservation map, entry by entry: an entry past the tree,
    `Overflow` or `Truncated`; on a block, `BadLayout`; then, unless it is
    the terminator, more than `MAX_RESERVATIONS` entries, `LimitExceeded`;
@@ -312,17 +330,20 @@ The parse and the entries on a tree:
    `BadString`; then the padding after the value past the end of the block,
    `Truncated`. Then its place in the tree: `BadTree`, the depth
    `LimitExceeded`, the properties of its node `LimitExceeded`, then
-   `DuplicateProperty`. More than `MAX_TOKENS` tokens without the end
-   token, `LimitExceeded`.
+   `DuplicateProperty`. After `MAX_TOKENS` tokens, no-operation tokens
+   included, of which none is the end token, `LimitExceeded`, without
+   reading another token.
 4. `Fdt::discover_memory`: the entries of the reservation map, in order,
    as reserved regions, `LimitExceeded` beyond `MAX_RESERVED_REGIONS`; the
-   children of the root, in tree order: `device_type`, `status`, the
-   binding of an enabled memory node `BadProperty`, its `reg`, and each of
-   its ranges `EmptyRegion`, `Overlap` or `LimitExceeded`; no RAM range,
-   `NoMemory`; the lookup of `/reserved-memory`, its binding `BadProperty`
-   and its `status`; its children, in tree order: `status`, the flags
-   `BadProperty`, neither `reg` nor `size` `MissingProperty`, the `reg`,
-   and each of its spans `EmptyRegion` or `LimitExceeded`.
+   children of the root, in tree order: `device_type`; for a memory node,
+   by name or by `device_type`, its `status`, then the binding of an
+   enabled one `BadProperty`, its whole `reg`, and then each of its ranges
+   `EmptyRegion`, `Overlap` or `LimitExceeded`; no RAM range, `NoMemory`;
+   the lookup of `/reserved-memory`, two siblings of that name
+   `AmbiguousMapping`, its binding `BadProperty` and its `status`; its
+   children, in tree order: `status`, the flags `BadProperty`, neither
+   `reg` nor `size` `MissingProperty`, its whole `reg`, and then each of
+   its spans `EmptyRegion` or `LimitExceeded`.
 5. `Fdt::discover_pi5_boot_memory`: `totalsize` above `PI5_MAX_BLOB_SIZE`,
    `LimitExceeded`; the address of the tree, `BadAlignment`; the address
    cells of the root, a value that is not 4 bytes `BadProperty`, then a
@@ -335,18 +356,24 @@ The parse and the entries on a tree:
    the image on the tree, `Overlap`; `discover_memory`; the tree, then the
    image, outside every single RAM range, `Unmapped`; the sum of the RAM
    ranges, `Overflow`.
-6. `Fdt::discover_cpus`: `/cpus` absent, `MissingProperty`; disabled or
-   with size cells other than 0, `BadProperty`; its address cells,
+6. `Fdt::discover_cpus`: `/cpus` absent, `MissingProperty`, or two
+   siblings of that name, `AmbiguousMapping`; its `status`, disabled, then
+   size cells other than 0, `BadProperty`; its address cells,
    `UnsupportedCells`; each child of `/cpus` in tree order: first its
    `device_type`, `BadString` or `BadProperty`, and a child whose
    `device_type` is not `cpu` is skipped; then, for a CPU node, disabled or
    another model, `BadProperty`; no `reg`, `MissingProperty`; its value,
-   `UnsupportedCells` or `BadProperty`; its ID, `BadProperty`; its
-   `enable-method`, `BadProperty`; then the set of IDs, `BadProperty`;
-   `/psci` absent, `MissingProperty`; its binding, `BadProperty`. Each
-   string property of these steps, such as `status`, `compatible` and
-   `method`, fails as `Node::string_property` does, `BadString` or
-   `BadProperty`, at its step.
+   `UnsupportedCells` or `BadProperty`; its ID, a value that is not
+   `id << affinity_shift` for an ID below 4, or the ID of an earlier CPU
+   node, `BadProperty`; its `enable-method`, `BadProperty`; then the number
+   and the set of IDs, `BadProperty`; `/psci` absent, `MissingProperty`, or
+   two siblings of that name, `AmbiguousMapping`; its `status`, then its
+   `method`, then its `compatible`, `BadProperty`. Each property of these
+   steps that holds one string, `device_type`, `status`, the `compatible`
+   of a CPU node, `enable-method` and `method`, fails as
+   `Node::string_property` does, `BadString` or `BadProperty`, at its step;
+   the `compatible` of `/psci`, a list of strings, is compared as bytes
+   with the lists of [CPU nodes](#cpu-nodes).
 7. Translation: `cells_u64`, the number of cells `UnsupportedCells`, then
    the length `BadProperty`. `Reg::new`, the cells `UnsupportedCells`, the
    length `BadProperty`, then each entry `Overflow`. `AddressMap::new`, the
@@ -356,28 +383,43 @@ The parse and the entries on a tree:
    identity map the target width `Overflow`; the windows in order, a second
    window that holds the request `AmbiguousMapping`, a window that holds
    part of it `Unmapped`, the translated span `Overflow`; no window that
-   holds it, `Unmapped`.
+   holds it, `Unmapped`. `Node::reg`: the root, `BadTree`; no `reg`,
+   `MissingProperty`; the address cells, then the size cells, of the
+   parent, `BadProperty`; then `Reg::new`. `Node::ranges` and
+   `dma_ranges`: the root, `BadTree`; the address cells of the node, of its
+   parent and the size cells of the node, `BadProperty`; then
+   `AddressMap::new`. `Node::translate_reg`: the root, `BadTree`; then each
+   bus from the nearest, its `ranges` and the translation of the span
+   through them; the end of the result, `Overflow`.
 8. `Fdt::find_node`: the path, `BadPath`; each component, `AmbiguousMapping`.
    `Pi5BootMemory::is_available`: `EmptyRegion`, then `Overflow`.
-   `Pi5BootMemory::find_available`: a size of 0 or an empty bound,
-   `EmptyRegion`; the alignment, `BadAlignment`; then `Overflow`.
+   `Pi5BootMemory::find_available`: a size of 0 or a minimum at or above
+   the limit, `EmptyRegion`; an alignment that is not a power of two,
+   `BadAlignment`; then, in the order of the RAM ranges and of the
+   candidates in each, a start aligned up beyond 64 bits, `Overflow`: the
+   greater of the start of the range and the minimum, or the end of the
+   furthest span that a candidate touches. A candidate whose end leaves 64
+   bits or passes the bound ends the search in its range without an error.
 
 The boot memory map:
 
-1. `MemoryPlan::new` only: the managed window, `InvalidRange` or
-   `Overflow`; its alignment, `Alignment`; above 128 MiB, `ArenaTooLarge`.
+1. `MemoryPlan::new` only: the managed window, of size 0 `InvalidRange`,
+   then its end beyond 64 bits `Overflow`; its ends not on pages,
+   `Alignment`; above 128 MiB, `ArenaTooLarge`.
 2. The numbers of RAM banks, boot storage spans and firmware reservations,
-   `Capacity`.
-3. Each RAM bank in input order: `InvalidRange` or `Overflow`, then
-   `Overlap` with an earlier bank.
-4. The RAM banks in address order: the sum `Overflow`, then above 16 GiB
-   `ArenaTooLarge`, then the rounding of the start of the bank `Overflow`.
+   `Capacity`, before any of them is read.
+3. Each RAM bank in input order: of size 0 `InvalidRange`, then its end
+   beyond 64 bits `Overflow`, then `Overlap` with an earlier bank.
+4. The RAM banks in address order, one at a time: the sum of the banks so
+   far `Overflow`, then above 16 GiB `ArenaTooLarge`, then the start of the
+   bank rounded up to a page `Overflow`.
 5. No complete page in any bank, `Alignment`.
-6. Each boot storage span in input order: its pages `InvalidRange` or
-   `Overflow`; outside every single bank, `OutsideRam`; a page shared with
-   earlier boot storage, `Overlap`.
-7. Each firmware reservation in input order: its pages `InvalidRange` or
-   `Overflow`; a page shared with boot storage, `Overlap`.
+6. Each boot storage span in input order: its pages, of size 0
+   `InvalidRange`, then its end beyond 64 bits and then its end rounded up
+   to a page beyond 64 bits `Overflow`; outside every single bank,
+   `OutsideRam`; a page shared with earlier boot storage, `Overlap`.
+7. Each firmware reservation in input order: its pages as in step 6; a
+   page shared with boot storage, `Overlap`.
 8. `MemoryPlan::new` only: the managed window outside every single bank,
    `OutsideRam`.
 
@@ -422,11 +464,12 @@ describe them:
   only that form, counts the node in `MemoryMap::dynamic` and goes on: a
   dynamic reservation is no reserved region and no error, its `size` is not
   read, so the number of its cells is no reason to reject it, and its
-  `alloc-ranges` are not read either. The kernel allocates no pool for it.
-  The Pi 5 trees hold such a node, `linux,cma`, with a `size` of one cell
-  below a `#size-cells` of 2, as the Raspberry Pi device tree source writes
-  it for older firmware; because the tree is accepted with it, no boot
-  configuration has to disable the node.
+  `alloc-ranges` are not read either, nor is any other value of the node
+  but its `status`, `no-map` and `reusable`. The kernel allocates no pool
+  for it. The Pi 5 trees hold such a node, `linux,cma`, with a `size` of
+  one cell below a `#size-cells` of 2, as the Raspberry Pi device tree
+  source writes it for older firmware; because the tree is accepted with
+  it, no boot configuration has to disable the node.
 - **Reserved regions and RAM.** A reserved region need not lie in a RAM
   range: one in a hole between banks, or outside RAM, is accepted and kept
   like any other. An entry of the reservation map may overlap a span of
@@ -458,9 +501,9 @@ lie inside one RAM range, and `ram_bytes` is the sum of the RAM ranges.
 `Pi5BootMemory::is_available(span)` is true for a nonempty span inside one
 RAM range that touches neither the tree nor the image nor any reserved
 region, `reusable` ones included. The answer describes memory; it is no
-ownership. These queries know only the image and the tree: boot storage
-beyond them, such as a boot bundle that the board loads apart from the
-image, is excluded only by the boot memory map.
+ownership. These queries know only the image and the tree as the board
+gives them: further boot storage, such as the boot bundle when the board
+gives it as a span of its own, is excluded only by the boot memory map.
 
 A shipped tree is parsed like any other, but its memory node is the
 placeholder of the Raspberry Pi tree, `/memory@0` with `reg` `[0,
@@ -519,7 +562,7 @@ reserved regions of the discovery as firmware reservations:
   without a complete page contributes none, and at least one bank has one
   (`Alignment`).
 - **Boot storage.** 1 to 4 spans: the image with its BSS and stacks, the
-  tree, the boot bundle where the board loads it apart from the image, and
+  tree, the boot bundle, a segment of the image in a span of its own, and
   one more. Each is rounded outward to whole pages, lies with
   its pages inside one RAM bank (`OutsideRam`) and shares no page with
   another span of boot storage (`Overlap`).
@@ -534,17 +577,24 @@ reserved regions of the discovery as firmware reservations:
   `is_available(range)` when one bank contains it and no reservation
   touches it; `permits_backing(range)` when a managed bank contains it and
   it is available. `available_ranges` gives the usable ranges: the managed
-  banks without the union of the reservations, in address order, each
-  inside one bank, so that no usable range bridges two banks or a hole.
-  `described_bytes` is the sum of the banks and `managed_bytes` that of the
-  managed banks.
+  banks without the union of the reservations, in address order; each is a
+  maximal range of whole pages inside one managed bank, from an address
+  that no reservation holds to the nearest start of a reservation above it
+  or to the end of its bank, so that no usable range bridges two banks or
+  a hole. `described_bytes` is the sum of the banks and `managed_bytes`
+  that of the managed banks. The queries take a span; a span of size 0, or
+  one whose end leaves 64 bits, lies in no bank, so `contains_ram`,
+  `is_available` and `permits_backing` are false for it. A bank contains a
+  range when it holds every address of it.
 
 `MemoryPlan::new(window, ram, boot, firmware)` builds the same map but
 manages only `window`: a span of whole pages, at most 128 MiB long, inside
 one bank, for a board or a test that manages a part of RAM.
 `MemoryPlan::from_pi5(memory, window, more)` is `new` with the RAM ranges,
-the image, the tree, the further boot storage `more` of the board and the
-reserved regions of a Pi 5 boot memory.
+the boot storage of the image, the tree and then the further spans `more`
+of the board, such as the boot bundle, in this order, and the reserved
+regions of a Pi 5 boot memory; more than two further spans fail with
+`Capacity`.
 
 `Pi5BootMemory::find_available(size, alignment, minimum, limit)` selects a
 span of `size` bytes, aligned to `alignment`, a power of two, within
@@ -748,10 +798,14 @@ bytes of the tree and of the arguments of the entry:
   aligned start in the first range that has a span.
 - Duplicates and ambiguities are rejected, never chosen among
   ([Rejection and error priority](#rejection-and-error-priority)).
-- No entry reads `/chosen`. QEMU virt writes new random values into the
-  `kaslr-seed` and `rng-seed` of `/chosen` at every boot, by default, so its
-  trees differ from boot to boot in those bytes, while the results of the
-  parse, of the discoveries and of the boot memory map stay the same.
+- No entry reads a value of `/chosen` other than its `device_type` and,
+  when that is `memory`, its `status`: the memory discovery reads the
+  `device_type` of every child of the root and the `status` of each memory
+  node, which a `device_type` of `memory` makes it. QEMU virt writes new
+  random values into the `kaslr-seed` and `rng-seed` of `/chosen` at every
+  boot, by default, so its trees differ from boot to boot in those bytes,
+  while the results of the parse, of the discoveries and of the boot memory
+  map stay the same.
 
 The specification of the component leaves no choice open, so the section
 cites no entry of the register of
@@ -764,7 +818,11 @@ cites no entry of the register of
 | The bytes of the hand-over tree | Shared, read-only | No writer while the kernel runs: the firmware or QEMU's loader writes them before the entry of the image, and the boot memory map keeps their pages as boot storage, so that no allocation reuses them | The hand-over, before the cold entry | Once, before the kernel reads them; they never change afterwards |
 | The tree `Fdt`, its `Node` values, a `MemoryMap` and a `Pi5BootMemory` | Per-CPU, of the boot CPU | The boot CPU, which builds them while it boots | - | `none`: their single owner never changes |
 | The boot memory map, a `MemoryPlan` | Shared, immutable once built | The boot CPU builds it; afterwards every CPU only reads it | The return of the entry that builds it | Once, before the secondary CPUs start; it never changes afterwards |
-| The CPU topology, a `CpuTopology` | Shared, immutable once built | The boot CPU builds it; the start of the secondary CPUs reads it | The return of `discover_cpus` | Once, before the first secondary CPU starts; it never changes afterwards |
+| The CPU topology, a `CpuTopology` | Shared, immutable once built | The boot CPU builds it; the start of the secondary CPUs reads it | The return of `discover_cpus` on the tree of the hand-over bytes | Once, before the first secondary CPU starts; it never changes afterwards |
+
+The boot CPU publishes the boot memory map and the CPU topology, each
+once, before it starts the first secondary CPU, and no CPU writes them
+afterwards.
 
 ## Testing obligations
 
@@ -785,13 +843,18 @@ cites no entry of the register of
   hand-over tree with the inferred RAM ranges of the model, as
   [Memory discovery](#memory-discovery) lists them, and with `atf@0`, and
   holds the RAM ranges, `ram_bytes`, which is the installed size less
-  4 MiB, and the boot memory map of `MemoryPlan::all_ram`, whose usable
-  ranges leave out the hole. The 8 GB model is covered by the vector
-  `fdt-pi5-platform-1`, a tree with its three ranges through
-  `discover_pi5_boot_memory` and `MemoryPlan::from_pi5`.
+  4 MiB, and the boot memory map of `MemoryPlan::all_ram` with those
+  ranges, the image and the tree as boot storage and the reserved regions
+  as firmware reservations, whose usable ranges leave out the hole. The
+  8 GB model is covered by the vector `fdt-pi5-platform-1`, a tree with
+  its three ranges through `discover_pi5_boot_memory` and
+  `MemoryPlan::from_pi5`.
 - A tree with the three ranges and the two reserved regions of the 8 GB
   hand-over tree is accepted, and the region of 62 bytes, which lies in the
-  hole, is kept and excluded.
+  hole, is kept and excluded. The test may give that region as an entry of
+  the reservation map, as the table of the limits in
+  [Format and bounds](#format-and-bounds) infers, or as a child of
+  `/reserved-memory`; either is accepted and kept.
 - Dynamic reservations: trees with an enabled child of `/reserved-memory`
   that has a `size` of one cell, of two cells, with and without
   `alloc-ranges`, are accepted with one dynamic reservation and no reserved
@@ -835,8 +898,13 @@ this component and of the Pi 5 device bindings next to it: the tests of
 in all. Of them, 55 test this component; 35 test the Pi 5 device bindings,
 which are not part of it, and are frozen here with the component that
 receives them. Their expected outputs are those that the test bodies
-assert. The vectors are not yet in a file of the repository, so the
-section holds no `vectors` block.
+assert. The vectors are in the vector file that the block below names,
+one line for each case; the replay is named once the host tests write
+their results.
+
+```vectors
+vectors = "verification/vectors/boot-platform/fdt.vectors"
+```
 
 A vector of this page is one test function. The vector file is to hold one
 line for each case of it through an entry of this page, with the id
@@ -885,6 +953,48 @@ require:
   file holds one case for each generated input, with the output
   `result=err`, `result=returned`, or the output of the independent model
   of the test for that input.
+- A case of the parse asks nothing, which gives `result=ok` or
+  `result=err`, or `error`, with which a rejection also names its error. A
+  case of the parse that asks entries on the tree, `discover_memory` and
+  `reg`, `ranges` and `dma_ranges` of every node, calls them when the tree
+  is accepted and gives `result=returned` once they have returned. An
+  entry whose result is one value asks it under a name: `value` of
+  `string_property`, the string or `-` for none, and `span` of
+  `translate_reg`. The queries of a value that an entry returns, such as
+  `to_parent(<span>)` of an address map, give the value of the query or
+  `Error::<variant>` when it fails.
+- An entry without a tree names its arguments by the parameters of its
+  rule section: `cells_u64` with `bytes` and `cells`, and `Reg::new` and
+  `AddressMap::new`, so named because `new` names several entries, with
+  `bytes`, where `-` is an absent property, and the cells. A `Reg` gives
+  `entries`, its spans, and `end(<i>)`, `Span::end` of its entry `i`,
+  counted from 0; an address map gives `kind`, `Absent`, `Identity` or
+  `Windows`; `cells_u64` gives `value`; `logical_id` gives `id`, `-` for
+  none. A profile is `QemuHvc`, `QemuSmc` or `Pi5`. `find_available` takes
+  the arguments of `discover_pi5_boot_memory` and then its own, and gives
+  `span`; `validate_qemu_timers` takes the profile of `discover_cpus` and
+  then `interrupts`. A query of a Pi 5 boot memory is
+  `is_available(<span>)`, `true` or `false`. `total_size` of the parse,
+  the number of dynamic reservations, a count and a logical ID are
+  decimal; `ram_bytes`, an affinity and the arguments of `find_available`
+  are hexadecimal, also where a test writes them in decimal. A case asks
+  each field that its test asserts whole, also where the test asserts only
+  a part of it, such as the number of RAM ranges. Where a row states a
+  property of the span that `find_available` selects rather than the span,
+  the case gives the span that the rule of the selection fixes.
+- An entry of the boot memory map takes its arguments by the parameters of
+  its rule: `all_ram` with `ram`, `boot` and `firmware`, and
+  `MemoryPlan::new`, so named because `new` names several entries, with
+  `window` before them; a firmware reservation is a reserved region.
+  `from_pi5` takes the arguments of `discover_pi5_boot_memory` and then
+  `window` and `more`. A boot memory map gives the fields `ram`, `managed`,
+  `boot`, `firmware`, `reservations` and `available`, lists of spans;
+  `described_bytes`, `managed_bytes` and `available_bytes`, the sum of the
+  sizes of the usable ranges, in hexadecimal; and the queries
+  `contains_ram(<span>)`, `is_available(<span>)` and
+  `permits_backing(<span>)`, `true` or `false`, and
+  `available_count(<span>)`, the number of usable ranges that hold the
+  span, in decimal.
 - The tables below name an error without its type where the row leaves no
   doubt: an error of the rows of `src/platform/tests.rs` is a `PlanError`,
   and an error of every other row of this component is an `Error`; a row
@@ -919,14 +1029,14 @@ root with `#address-cells` and `#size-cells` of 2 and one node
 | `fdt-parser-5` | `rejects_unbalanced_tree_trailing_tokens_and_excess_depth` | A root without its end node, `BadTree`; one end node too many, `BadTree`; an end token followed by another end token, `BadTree`; a root with 32 nested children, 33 nodes on a path, `LimitExceeded` | `Fdt::parse` |
 | `fdt-parser-6` | `header_and_structure_single_byte_corruptions_do_not_panic` | Property: for each byte of the minimal tree, the tree with that byte inverted (XOR `0xff`) is parsed and, when accepted, its memory is discovered and `reg`, `ranges` and `dma_ranges` of every node are read; every call returns, `result=returned`. That no input panics holds of the specification by construction, so the replay checks only that the entries return | `Fdt::parse`, `Fdt::discover_memory`, `Node::reg`, `ranges` and `dma_ranges` |
 | `fdt-parser-7` | `qemu_property_padding_residue_is_not_payload_or_a_token` | A tree minimized from the QEMU 11.1.2 tree of the machine `virt`: the root `model` `linux,dummy-virt`, 17 bytes, with the padding bytes `00 00 02`, and `memory@40000000` whose `device_type` padding holds `0x73`, with `reg` `0x40000000+0x8000000`. Accepted; the root `model` reads `linux,dummy-virt`; RAM `0x40000000+0x8000000`. Of the padding bound, which the parse computes internally: a value that ends at byte 5 of a block of 5 bytes, `Truncated`; of a block of 8 bytes, the next token at byte 8 | `Fdt::parse`, `Fdt::find_node`, `Node::string_property`, `Fdt::discover_memory`. The two cases of the padding bound: not applicable, they call a function internal to the parse, which no entry reaches with them: a block of 5 bytes is not a multiple of 4, one of 8 bytes is shorter than the 12 bytes of the smallest structure block, and the value of a property starts at least at byte 12 of its block, so it never ends at byte 5; only the host tests of the module hold them, and the vector file has no line for them |
-| `fdt-parser-8` | `accepts_unaligned_host_bytes_and_compatible_future_version` | The minimal tree with version 18 and last compatible version 17, at an odd host address: accepted, and the memory discovery succeeds | `Fdt::parse`, `Fdt::discover_memory` |
+| `fdt-parser-8` | `accepts_unaligned_host_bytes_and_compatible_future_version` | The minimal tree with version 18 and last compatible version 17, at an odd host address: accepted, and the memory discovery succeeds. The odd host address is no input of the vector file: the parse reads the bytes one at a time, so the file holds the bytes alone | `Fdt::parse`, `Fdt::discover_memory` |
 | `fdt-parser-9` | `vendor_property_names_and_symbol_tables_remain_bounded` | A node `__symbols__` with 334 and with 512 properties, accepted; with 513, `LimitExceeded`. A root property named `snps,parkmode-disable-fsls-quirk`, 32 bytes, and one of 64 bytes of `x`, accepted; one of 65 bytes, `BadString` | `Fdt::parse` |
 
 `src/fdt/tests/translation.rs`, 5 vectors.
 
 | Vector | Test | Expected output | Entry |
 | --- | --- | --- | --- |
-| `fdt-translation-1` | `translation_is_recursive_and_dma_is_separate` | `/bus` with 1 and 1 cells, `ranges` from child 0 to parent `0x200000000`, size `0x10000`, and `dma-ranges` from 0 to `0x300000000`, size `0x10000`; `/bus/bridge` with 1 and 1 cells and `ranges` from 0 to `0x1000`, size `0x1000`; `/bus/bridge/serial@20` with `reg` `0x20+0x10`: `translate_reg` gives `0x200001020+0x10`; the `dma-ranges` of `/bus` take `0x1020+0x10` to the parent as `0x300001020+0x10` and back | `Fdt::find_node`, `Node::reg`, `translate_reg` and `dma_ranges`, `AddressMap::to_parent` and `to_child` |
+| `fdt-translation-1` | `translation_is_recursive_and_dma_is_separate` | `/bus` with 1 and 1 cells, `ranges` from child 0 to parent `0x200000000`, size `0x10000`, and `dma-ranges` from 0 to `0x300000000`, size `0x10000`; `/bus/bridge` with 1 and 1 cells and `ranges` from 0 to `0x1000`, size `0x1000`; `/bus/bridge/serial@20` with `reg` `0x20+0x10`: `translate_reg` gives `0x200001020+0x10`; the `dma-ranges` of `/bus` take `0x1020+0x10` to the parent as `0x300001020+0x10` and back. The argument of `translate_reg` is the first span of the `reg` of `serial@20`, whose value the test does not assert, so the vector file gives that span as the argument `span` and holds no case of `Node::reg` | `Fdt::find_node`, `Node::reg`, `translate_reg` and `dma_ranges`, `AddressMap::to_parent` and `to_child` |
 | `fdt-translation-2` | `identity_and_absent_are_distinct_and_width_checked` | With 2, 2 and 2 cells, an absent map is of the kind `Absent` and fails `0x100000000+0x1000` with `Unmapped`; an empty map is of the kind `Identity` and gives the same span; an empty map with 1 parent address cell and 1 size cell fails the same span with `Overflow` | `AddressMap::new`, `kind` and `to_parent` |
 | `fdt-translation-3` | `windows_refuse_crossing_unmapped_and_ambiguous_requests` | With 1 child cell, 2 parent cells and 1 size cell, windows from 0 to `0x100000000` and from `0x1000` to `0x200000000`, each of size `0x1000`: `0xff0+0x20`, `Unmapped`; `0x4000+0x1`, `Unmapped`. Windows from 0 to `0x100000000` and from 0 to `0x200000000`: `0x4+0x4`, `AmbiguousMapping` | `AddressMap::new` and `to_parent` |
 | `fdt-translation-4` | `numeric_cells_and_pci_tags_cannot_truncate` | Cells `0x12`, `0x34567890` as 2 cells, `0x1234567890`; 3 cells, `UnsupportedCells`; an empty map with 3 child cells, `UnsupportedCells`; a `reg` of 3 address cells, `UnsupportedCells`; a `reg` `0xffffffffffffffff+0x1` with 2 and 2 cells, `Overflow`; a window from 0 to `0xffffffffffffffff` of size 2, with 1, 2 and 1 cells, `Overflow`; a `reg` of 7 bytes with 1 and 1 cells, `BadProperty`; a map of 7 bytes with 1, 1 and 1 cells, `BadProperty` | `cells_u64`, `Reg::new`, `AddressMap::new` |
@@ -1026,7 +1136,7 @@ component. Their default RAM is `0x0+0x8000000`, their image
 | Vector | Test | Expected output | Entry |
 | --- | --- | --- | --- |
 | `platform-1` | `pi5_shaped_banks_keep_holes_high_ram_and_page_exclusions` | `new` with the window `0x0+0x8000000`, the three RAM ranges of the 8 GB model, the image and the tree, and `atf@0` and `0x3fd231e0+0x3e/no-map`, in the hole: boot ranges `0x80000+0x38000` and `0x200000+0x14000`; firmware ranges `0x0+0x80000` and `0x3fd23000+0x1000`; the pages at `0x213000`, `0x3fc00000` and `0x80000` are neither available nor permit backing; `0x100000000+0x1000` is available and does not permit backing; `0x214000+0x1000` permits backing | `MemoryPlan::new`, `boot_ranges`, `firmware_ranges`, `is_available` and `permits_backing` |
-| `platform-2` | `allocator_consumes_the_same_rounded_boot_and_firmware_exclusions` | `new` with the window `0x100000+0x5000`, the default RAM, the image, and `0x101fff+0x2/no-map`; a page allocator over the managed bank and the reservations allocates one page at `0x100000` and then two pages at `0x103000`, each permitted for backing, and has no free byte left | `MemoryPlan::new`, `managed_banks`, `reservations` and `permits_backing`; the allocations through the [page ownership](../../memory/page-tables/contract.md#page-ownership) table of the page-tables component |
+| `platform-2` | `allocator_consumes_the_same_rounded_boot_and_firmware_exclusions` | `new` with the window `0x100000+0x5000`, the default RAM, the image, and `0x101fff+0x2/no-map`; a page allocator over the managed bank and the reservations allocates one page at `0x100000` and then two pages at `0x103000`, each permitted for backing, and has no free byte left | `MemoryPlan::new`, `managed_banks`, `reservations` and `permits_backing`. The three cases of the page allocator, the allocation of one page at `0x100000` and of two pages at `0x103000` and the free bytes left, 0: not applicable, allocation goes through the [page ownership](../../memory/page-tables/contract.md#page-ownership) table of the page-tables component, whose own vectors cover it; the vector file holds the case of `new` with its managed bank, its reservations and the backing of the two ranges, and no line for these three |
 | `platform-3` | `qemu_prefix_is_reserved_without_truncating_installed_ram` | `new` with the window `0x40000000+0x8000000`, RAM `0x40000000+0x100100000`, 4,097 MiB, and boot storage `0x40000000+0x300000`: `0x40000000+0x1000` does not permit backing, `0x40300000+0x1000` does; `0x100000000+0x1000` is available; `0x48000000+0x1000` does not permit backing | `MemoryPlan::new`, `is_available` and `permits_backing` |
 | `platform-4` | `rejects_empty_overflowing_unaligned_and_oversized_mapping_windows` | `new` with the default RAM and the image and the window `0x0+0x0`, `InvalidRange`; `0xffffffffffffffff+0x1`, `Overflow`; `0x1+0x1000` and `0x0+0x1001`, `Alignment`; `0x0+0x8001000`, `ArenaTooLarge` | `MemoryPlan::new` |
 | `platform-5` | `rejects_invalid_overlapping_or_missing_ram_banks` | `new` with the window of the default RAM and the image, and the banks: the default RAM with `0x0+0x0`, `InvalidRange`; with `0xffffffffffffffff+0x1`, `Overflow`; with `0x1000+0x1000`, `Overlap`; `0x0+0x1000` and `0x2000+0x1000`, `OutsideRam` | `MemoryPlan::new` |
@@ -1035,7 +1145,7 @@ component. Their default RAM is `0x0+0x8000000`, their image
 | `platform-8` | `rejects_firmware_on_boot_pages_even_without_byte_overlap` | Boot storage `0x80001+0x1` and the firmware reservation `0x80fff+0x1/no-map`, `Overlap`. With the image, the firmware reservations `0x0+0x0`, `InvalidRange`; `0xffffffffffffffff+0x1` and `0xfffffffffffffffe+0x1`, `Overflow` | `MemoryPlan::new` |
 | `platform-9` | `overlapping_and_reusable_firmware_reservations_stay_excluded` | The image and the tree, and the reservations `0x400001+0x1/reusable` and `0x400fff+0x2/no-map`: `0x400000+0x2000` is not available; `0x402000+0x1000` permits backing | `MemoryPlan::new`, `is_available` and `permits_backing` |
 | `platform-10` | `exact_capacity_is_supported_and_excess_input_is_rejected` | 32 banks, the default RAM and 31 banks of one page at `i * 0x10000000` for `i` from 1 to 31, the image and the tree, and 128 firmware reservations `0x400000+0x1/no-map`: accepted, with 32 RAM banks and 130 reservations; `0x400000+0x1000` does not permit backing. `Capacity` for no bank; for no boot storage; for 33 banks; for 129 firmware reservations. For three spans of boot storage that are all the image, the prototype gave `Capacity`; this contract expects `Overlap`, since 4 spans fit and the second shares the pages of the first (behaviour change) | `MemoryPlan::new`, `ram`, `reservations` and `permits_backing` |
-| `platform-11` | `full_ram_registers_all_bank_pages_and_reservation_union` | `all_ram` with the three RAM ranges of the 8 GB model in the order `0x100000000+0x100000000`, `0x0+0x3fc00000`, `0x40000000+0xc0000000`, the image and the tree, and `atf@0`, `0x40002001+0x1000/no-map` and `0x40003000+0x1/no-map`: managed bytes 8 GiB less 4 MiB in 3 managed banks; `0x1fffff000+0x1000` permits backing, `0xfffff000+0x2000` does not; the usable ranges hold the managed bytes less `0x80000`, `0x38000`, `0x14000` and `0x2000`, as many bytes as a page allocator over the managed banks and the reservations has free | `MemoryPlan::all_ram`, `managed_bytes`, `managed_banks`, `permits_backing`, `reservations` and `available_ranges`; the free bytes through the [page ownership](../../memory/page-tables/contract.md#page-ownership) table of the page-tables component |
+| `platform-11` | `full_ram_registers_all_bank_pages_and_reservation_union` | `all_ram` with the three RAM ranges of the 8 GB model in the order `0x100000000+0x100000000`, `0x0+0x3fc00000`, `0x40000000+0xc0000000`, the image and the tree, and `atf@0`, `0x40002001+0x1000/no-map` and `0x40003000+0x1/no-map`: managed bytes 8 GiB less 4 MiB in 3 managed banks; `0x1fffff000+0x1000` permits backing, `0xfffff000+0x2000` does not; the usable ranges hold the managed bytes less `0x80000`, `0x38000`, `0x14000` and `0x2000`, as many bytes as a page allocator over the managed banks and the reservations has free | `MemoryPlan::all_ram`, `managed_bytes`, `managed_banks`, `permits_backing`, `reservations` and `available_ranges`. The comparison with the free bytes of a page allocator: not applicable, it goes through the [page ownership](../../memory/page-tables/contract.md#page-ownership) table of the page-tables component; the vector file compares the bytes of the usable ranges, as `available_bytes`, with the managed bytes less the four sizes that the row writes |
 | `platform-12` | `partial_bank_pages_are_not_managed_and_total_ram_is_bounded` | `all_ram` with the banks `0x1+0x5000` and `0x10001+0x8` and the boot storage `0x1000+0x1000`: managed banks `0x1000+0x4000`; usable ranges `0x2000+0x3000`. One bank of 16 GiB and 1 byte with the image, `ArenaTooLarge` | `MemoryPlan::all_ram`, `managed_banks` and `available_ranges` |
 | `platform-13` | `available_iterator_matches_page_oracle_across_unsorted_overlapping_exclusions` | Property: `all_ram` with the banks of 24 pages at page 0 and at page 32, the boot storage of page 0, and the regions of pages 9 to 13, 5 to 11 and 22 to 33 and of the byte 1 of page 40; for each page from 0 to 59, the number of usable ranges that contain it is 1 when a bank holds the page, the page is not page 0 and no region touches it, and 0 otherwise. One case per page, whose output is the count of the model | `MemoryPlan::all_ram`, `available_ranges` |
 
