@@ -46,12 +46,18 @@ evidence, is in the [requirements](requirements.md). The
 - **Cells.** Big-endian 32-bit words. The `#address-cells` and
   `#size-cells` of a node give the number of cells of the addresses and sizes
   in the `reg` of its children.
-- **Span.** The value `Span`: the addresses `[start, start + size)`, where
-  `start + size` fits in 64 bits. `Span::new(start, size)` fails with
-  `Overflow` when `start + size` leaves 64 bits and accepts an empty span;
+- **Span.** The value `Span`: a start and a size, the addresses
+  `[start, start + size)`. A value may be any pair of 64-bit numbers, also
+  one whose end `start + size` leaves 64 bits. `Span::new(start, size)`
+  refuses such a pair with `Overflow` and accepts an empty span. The entries
+  that take a span refuse one whose end leaves 64 bits at the step that
+  checks it, with `Overflow`, or `PlanError::Overflow` in the boot memory
+  map, and the queries of the boot memory map hold for no such span.
   `Span::end` gives `start + size`, or `Overflow`; `Span::contains(other)`
   fails with `Overflow` when `other` and then the span itself end beyond
-  64 bits, and otherwise holds when `other` lies inside the span.
+  64 bits, and otherwise holds when `other` lies inside the span, which
+  differs from the prototype tree on such spans
+  ([Behaviour changes](#behaviour-changes)).
 - **Touch.** Two spans touch when both are nonempty and share an address.
   Spans are disjoint when they share no address.
 - **RAM range.** A span of the `reg` of an enabled memory node that is a
@@ -881,10 +887,23 @@ afterwards.
 ## Open obligations
 
 The module `fdt` has no `unsafe` code and no assembly, and its targets are
-to cover it, so its only open obligation is the board's: forming the slice
-of the hand-over tree from the address where the firmware leaves it
-([Extractability](#extractability)). Each board forms that slice in its
-board crate; the row of the Pi 5 board is added with its board crate.
+to cover it, so the only obligation that no target closes is the board's:
+forming the slice of the hand-over tree from the address where the firmware
+leaves it ([Extractability](#extractability)). Each board forms that slice
+in its board crate; the row of the Pi 5 board is added with its board
+crate.
+
+The target of the module has one open obligation of its own, which the
+target closes and the table therefore does not list. The entry table names
+the functions that give iterators, `Fdt::nodes`, `Fdt::reservations`, the
+entries of a `Reg` and `MemoryPlan::available_ranges`, but not the iterator
+types, so the roots of the target hold no `next`. The `next` of each
+iterator type joins the roots once the implementation names the types, and
+before the implementation merges, so that the refinement proof relates what
+each iteration gives to the list of the specification
+([proof path](proof.md#premises)). It is carried by the implementation,
+which names the types and adds their `next` to the roots, and by the
+refinement proof of the target.
 
 | Obligation | Kind | Verified state | Carrier | Stage |
 | --- | --- | --- | --- | --- |
@@ -911,7 +930,10 @@ A vector of this page is one test function. The vector file is to hold one
 line for each case of it through an entry of this page, with the id
 `<vector>.<n>`, `n` counting those cases from 1, so that a vector of this
 page corresponds to the lines of the file whose ids start with its id; a
-case that its row marks not applicable has no line. Six vectors are
+case that its row marks not applicable has no line. A row may also mark
+one comparison of its expected output not applicable and name, in its
+Entry column, a literal comparison that the vector file makes in its place;
+the expected output of the row stays as the test asserts it. Six vectors are
 ignored tests whose input is a device-tree file outside the prototype tree:
 they freeze the name of the test and its expected output, and their inputs
 stay outside this repository.
@@ -1013,6 +1035,12 @@ where the prototype gave `Capacity`, because boot storage may hold 4 spans
 ([Boot memory map](#boot-memory-map)). The renaming of the prototype's
 `platform::Error` to `PlanError` changes no output. The limits and every
 other step of the error orders are those of the prototype.
+
+`Span::contains` checks the ends of both spans before it compares them
+([Terms](#terms)). Where the argument starts before the span and either of
+them ends beyond 64 bits, it fails with `Overflow`; the prototype compared
+the starts first and gave `false` without an error. No vector calls
+`Span::contains`.
 
 ### Parsing and translation
 
