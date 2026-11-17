@@ -74,8 +74,8 @@ hand-over tree are those of FDT-R03 and FDT-R05.
 - **Entry points.** `fdt::Fdt::parse` (planned).
 - **Contract.** [Format and bounds](contract.md#format-and-bounds),
   [Rejection and error priority](contract.md#rejection-and-error-priority).
-- **Specification.** None: no specification covers the component.
-- **Proof path.** None: no target is registered for the component.
+- **Specification.** [FDT-R01](specification.md#fdt-r01) of the specification.
+- **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests of the module `fdt` (planned) that replay the
   vectors `fdt-parser-1` to `fdt-parser-9` and the tests of each limit
   that the [testing obligations](contract.md#testing-obligations) list. They
@@ -102,8 +102,8 @@ that step.
 - **Contract.**
   [Rejection and error priority](contract.md#rejection-and-error-priority),
   [Check and execute](contract.md#check-and-execute).
-- **Specification.** None: no specification covers the component.
-- **Proof path.** None: no target is registered for the component.
+- **Specification.** [FDT-R02](specification.md#fdt-r02) of the specification.
+- **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay the property vectors
   `fdt-parser-1` and `fdt-parser-6`, the vectors whose expected output is
   an error, and the tests of the errors that no vector reaches and of the
@@ -133,8 +133,8 @@ with the region of 62 bytes in the hole between two ranges kept.
 - **Entry points.** `Fdt::discover_memory` and the `MemoryMap` that it
   returns (planned).
 - **Contract.** [Memory discovery](contract.md#memory-discovery).
-- **Specification.** None: no specification covers the component.
-- **Proof path.** None: no target is registered for the component.
+- **Specification.** [FDT-R03](specification.md#fdt-r03) of the specification.
+- **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay `fdt-discovery-1` to
   `fdt-discovery-6`, `fdt-parser-7`, `fdt-pi5-boundaries-5` and
   `fdt-pi5-selection-3`, and the tests of 32 RAM ranges and of the 8 GB
@@ -162,8 +162,8 @@ the [testing obligations](contract.md#testing-obligations) pass.
   `Fdt::discover_pi5_boot_memory` and `Pi5BootMemory::dynamic` (planned).
 - **Contract.** [Memory discovery](contract.md#memory-discovery),
   [Behaviour changes](contract.md#behaviour-changes).
-- **Specification.** None: no specification covers the component.
-- **Proof path.** None: no target is registered for the component.
+- **Specification.** [FDT-R04](specification.md#fdt-r04) of the specification.
+- **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay these vectors and the tests of
   the testing obligations. The vector `fdt-pi5-firmware-1` needs the
   shipped trees, which lie outside the repository; its other vectors and
@@ -189,8 +189,8 @@ accepted and one of 1 byte more fails with `LimitExceeded`.
   `Pi5BootMemory::is_available` and `find_available` (planned).
 - **Contract.** [Memory discovery](contract.md#memory-discovery),
   [Boot memory map](contract.md#boot-memory-map).
-- **Specification.** None: no specification covers the component.
-- **Proof path.** None: no target is registered for the component.
+- **Specification.** [FDT-R05](specification.md#fdt-r05) of the specification.
+- **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay `fdt-pi5-1` to `fdt-pi5-4`,
   `fdt-pi5-boundaries-1` to `fdt-pi5-boundaries-5`, `fdt-pi5-selection-1`
   to `fdt-pi5-selection-3` and `fdt-pi5-firmware-2`, the last on merged
@@ -220,8 +220,8 @@ measured ranges.
 - **Contract.** [Memory discovery](contract.md#memory-discovery),
   [Boot memory map](contract.md#boot-memory-map),
   [Testing obligations](contract.md#testing-obligations).
-- **Specification.** None: no specification covers the component.
-- **Proof path.** None: no target is registered for the component.
+- **Specification.** [FDT-R06](specification.md#fdt-r06) of the specification.
+- **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
 - **Evidence.** The four host tests of the testing obligations and the
   vector `fdt-pi5-platform-1`. They show that trees of these shapes are
   accepted and fit the capacities. They do not show the shapes that the
@@ -247,8 +247,8 @@ accepted and of 5 fails with `Capacity`.
 - **Entry points.** `MemoryPlan::all_ram`, `new` and `from_pi5`, and its
   queries and `available_ranges` (planned).
 - **Contract.** [Boot memory map](contract.md#boot-memory-map).
-- **Specification.** None: no specification covers the component.
-- **Proof path.** None: no target is registered for the component.
+- **Specification.** [FDT-R07](specification.md#fdt-r07) of the specification.
+- **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay `platform-1` to `platform-13`,
   `fdt-pi5-platform-1`, `fdt-pi5-platform-2` and `fdt-pi5-firmware-2`, and
   the test of the capacity of boot storage of the
@@ -277,8 +277,8 @@ the CPU nodes give their expected outputs.
   `affinity` and `validate_qemu_timers`, and `CpuProfile::logical_id`
   (planned).
 - **Contract.** [CPU nodes](contract.md#cpu-nodes).
-- **Specification.** None: no specification covers the component.
-- **Proof path.** None: no target is registered for the component.
+- **Specification.** [FDT-R08](specification.md#fdt-r08) of the specification.
+- **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay `fdt-cpus-1` to `fdt-cpus-6`.
   They show the checks on trees that the tests build. They do not show that
   the CPUs start, which the multicore domain shows.
@@ -300,8 +300,8 @@ of the translation give their expected outputs.
   `translate_reg` (planned).
 - **Contract.** [Address translation](contract.md#address-translation),
   [Format and bounds](contract.md#format-and-bounds).
-- **Specification.** None: no specification covers the component.
-- **Proof path.** None: no target is registered for the component.
+- **Specification.** [FDT-R09](specification.md#fdt-r09) of the specification.
+- **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay `fdt-translation-1` to
   `fdt-translation-5` and `fdt-discovery-2`. They show the translation on
   these maps. They do not show the tagged addresses of PCI, which the
@@ -311,17 +311,18 @@ of the translation give their expected outputs.
 
 **The same result on every boot.** The results of the parse, of the
 discoveries and of the boot memory map are functions of the bytes of the
-tree and of the arguments; no entry reads `/chosen`, where QEMU virt writes
-new random seeds at every boot. The criterion: three cold boots of QEMU
-virt, each in a new QEMU process, give the same results of the parse and of
-the boot memory map.
+tree and of the arguments; no entry reads a value of `/chosen` other than
+its `device_type` and, when that is `memory`, its `status`, so the new
+random seeds that QEMU virt writes into `/chosen` at every boot reach no
+result. The criterion: three cold boots of QEMU virt, each in a new QEMU
+process, give the same results of the parse and of the boot memory map.
 
 - **Examples.** None: no feature document describes the component.
 - **Entry points.** `Fdt::parse`, `Fdt::discover_memory` and
   `MemoryPlan::all_ram` (planned), as the boot code of QEMU virt calls them.
 - **Contract.** [Determinism](contract.md#determinism).
-- **Specification.** None: no specification covers the component.
-- **Proof path.** None: no target is registered for the component.
+- **Specification.** [FDT-R10](specification.md#fdt-r10) of the specification.
+- **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
 - **Evidence.** The case of the QEMU boot suite that the
   [testing obligations](contract.md#testing-obligations) name, on the QEMU
   virt configuration. It shows that the seeds do not reach the results on

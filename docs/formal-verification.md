@@ -21,8 +21,11 @@ The registries `verification/targets.json`, `verification/models.json` and
 `verification/statements.json`, the registry of library axioms
 `verification/axioms.json`, the registry of the trusted base
 `verification/tcb.json` and the waiver record `verification/waivers.json`
-([waivers](#waivers)): no target, model, statement, library axiom,
-trusted item or waiver is registered. The pinned tools exist: the tool manifest
+([waivers](#waivers)). One specification is registered, that of the
+device-tree component, with its planned statements and a planned target
+whose code does not exist yet ([specifications](#specifications)); no
+formal target, model, library axiom, trusted item or waiver is
+registered. The pinned tools exist: the tool manifest
 `verification/toolchain.json`, the reviewed Aeneas patch, the recipe of the
 image that holds the tools, the workflows that build and publish it, the
 pin of the published image, `verification/image-pin.json`, and
@@ -33,12 +36,16 @@ Aeneas and Charon sources ([tools](#tools)).
 them, applies their rules, runs its phases and writes a receipt. Its phases
 are the [qualification](#qualification) of the tools on the code shapes of
 the qualification crate, with the three proofs about them; the extraction
-of the [proof targets](#proof-targets), none of which is registered; the
+of the [proof targets](#proof-targets), of which only a planned one is
+registered, which a whole run does not extract; the
 [base round](#base-round), which builds, audits and replays krepi's own
-Lean: today the qualification proofs and the definitions that they use;
-and the targets, which build and audit the proofs of each target in a
-stage of its own and then build each of its registered
-[mutants](#mutants) in a stage of its own, which its proofs must reject.
+Lean: today the qualification proofs and the definitions that they use,
+and the specification of the device tree with its properties, its tests
+and the theorems that witness it, where the theorems of planned statements
+are built but not audited; and the targets, which build and audit the
+proofs of each target in a stage of its own and then build each of its
+registered [mutants](#mutants) in a stage of its own, which its proofs
+must reject.
 On a pull request, a first phase records the
 [guard](#guard), which `cargo xtask formal guard` runs on its own. With
 `--shard`, `cargo xtask formal run` runs one part of the gate, the
@@ -64,8 +71,8 @@ against the targets and the open obligations
 ([legacy inventory and admission](#legacy-inventory-and-admission)), and
 `cargo xtask formal vectors` compares a component's frozen test vectors
 through its specification with the results of its host tests
-([test vectors](#test-vectors)), though no contract names vectors yet; the
-formal step of `cargo xtask check` runs both, the second in the pinned
+([test vectors](#test-vectors)), though no contract names a replay module
+yet; the formal step of `cargo xtask check` runs both, the second in the pinned
 image ([vectors in CI](#vectors-in-ci)). `cargo xtask formal impact` lists
 the targets that a change affects ([commands](#commands)). A
 weekly toolchain canary runs the gate with the tools of Aeneas main through
@@ -82,9 +89,9 @@ each formal target and their merge; four jobs judge the conclusion and
 each hard gate in the record of the merge, and with `formal fast` and
 `formal guard` they are the six checks of the gate, which the rules of
 `main` require. On a push to `main`, a job reviews the record of the merged
-head ([CI job](#ci-job)). Everything else on this page is planned:
-specifications, statements and targets of the kernel and the other
-commands of `cargo xtask formal`.
+head ([CI job](#ci-job)). Everything else on this page is planned: the
+proofs of the registered statements, the formal targets of the kernel,
+further specifications and the other commands of `cargo xtask formal`.
 They are set up by porting the tooling of the CAS project and the
 prototype tree, and this page changes with them. Nothing about the kernel
 is proved.
@@ -123,17 +130,19 @@ never moved into the trusted boundary to close a gap.
 | `verification/image-pin.json` | The published image that the CI jobs of the gate and the formal step of `cargo xtask check` run, by its digest ([image pin](#image-pin)) | Present |
 | `verification/lakefile.toml`, `lean-toolchain`, `lake-manifest.json` | The Lake project of the hand-written Lean and of the generated definitions, with the Lean toolchain and the packages of the Lake lock of the Aeneas Lean library ([qualification](#qualification)), and the library `KrepiRoot` of the root module that the [base round](#base-round) writes | Present |
 | `verification/extraction.toml` | How Charon compiles each extracted crate ([extraction](#extraction)) | Present |
-| `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there, where it has one | Planned |
+| `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there, where it has one | Present |
+| `verification/Krepi/SpecProperties/` | The invariants and the cross-cutting properties of the specifications, stated on them as statements ([specifications](#specifications)) | Present |
+| `verification/Krepi/SpecTests/` | The specification tests, stated as statements, the builders of their inputs and the replay of the frozen test vectors of each component ([test vectors](#test-vectors)) | Present |
 | `verification/Krepi/Statements/` | Statements: the propositions that registered theorems prove ([statements and proofs](#statements-and-proofs)) | Planned |
-| `verification/Krepi/Proofs/` | Proofs of statements and refinement proofs of production targets; the only directory of the Lake project outside the statement side ([statements and proofs](#statements-and-proofs)) | Planned |
+| `verification/Krepi/Proofs/` | Proofs of statements and refinement proofs of production targets; the only directory of the Lake project outside the statement side ([statements and proofs](#statements-and-proofs)) | Present |
 | `verification/Krepi/Models/` | Lean models of items that proofs reach without extracting them, and their differential check | Planned |
 | `verification/Krepi/Qualification/` | Proofs about the qualification shapes | Present |
 | `verification/Krepi/Qualification/Models/` | Definitions that the reviewed external declarations of three qualification cases use; they are not models ([qualification](#qualification)) | Present |
 | `verification/externals/<Module>/` | Reviewed external declarations of a target or a qualification case (`FunsExternal.lean`, `TypesExternal.lean`), named by its `models` field | Present for qualification cases |
-| `verification/targets.json` | The proof target registry | Present, empty |
+| `verification/targets.json` | The proof target registry | Present |
 | `verification/shards.json` | The shard plan: for the qualification and for each target, the disk peak, the seconds and the cgroup memory peak that a run of CI measured, with the run and its commit; the disk guard of a run reads it ([shard plan and disk guard](#shard-plan-and-disk-guard)) | Present |
 | `verification/models.json` | The model registry ([models](#models)); `cargo xtask formal check` refuses a registered model | Present, empty |
-| `verification/statements.json` | The statement hash, and each statement with its theorem and state ([statements and proofs](#statements-and-proofs)) | Present, empty |
+| `verification/statements.json` | The statement hash, and each statement with its theorem and state ([statements and proofs](#statements-and-proofs)) | Present |
 | `verification/axioms.json` | The axioms of the Aeneas Lean library that target theorems may use, each with its source and reason ([base round](#base-round)) | Present, empty |
 | `verification/tcb.json` | Items of the trusted base: native decisions and patterns of generated axioms, whose classification comes later ([base round](#base-round)) | Present, empty |
 | `verification/waivers.json` | The waiver record: each waiver of registered targets with its reason, scope, expiry and author ([waivers](#waivers)) | Present, empty |
@@ -142,6 +151,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
 | `verification/qualification/calibration/` | The [calibration target](#calibration-target): a workspace with a root package and a member, its Lake project with its statements and proofs, its registries and shard plan, and the lists of survivors of its source mutants in `mutants/` | Present |
 | `verification/mutants/` | The list of survivors of the source mutants of each target that has one, `<target>.json` ([source mutants and survivors](#source-mutants-and-survivors)) | Absent until a list is written |
+| `verification/vectors/` | The frozen test vectors of the components whose contracts name them, one file for each component ([test vectors](#test-vectors)) | Present |
 | `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `mutants`, `vectors`, `canary`, `impact`, `merge` and `receipt` present, the others planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
@@ -3329,8 +3339,9 @@ compares the results, line by line, with those that the component's Rust
 host tests wrote. The two sides are independent: the host tests run the
 code, the replay runs the specification, and both answer the vectors that
 the legacy tree froze
-([independent evidence](conventions/testing.md#independent-evidence)). No
-contract names vectors yet.
+([independent evidence](conventions/testing.md#independent-evidence)). The
+contract of the device-tree component names its vector file, and no
+contract names a replay module yet.
 
 ### Contract block
 
@@ -3536,7 +3547,8 @@ Lake project that decides what the statements mean:
 
 - every tracked hand-written `.lean` file below `verification/` outside
   `verification/Krepi/Proofs/` and the calibration project: the
-  specifications below `Krepi/Spec`, the statements below
+  specifications below `Krepi/Spec`, their properties and tests below
+  `Krepi/SpecProperties` and `Krepi/SpecTests`, the statements below
   `Krepi/Statements`, the models, the qualification proofs with their
   definitions, and the reviewed external declarations below `externals/`;
 - the registry of library axioms, `verification/axioms.json`;
@@ -3603,7 +3615,8 @@ that later Git commands of the shell use the repository's index again:
     ':(exclude,glob)verification/lakefile.*' \
     ':(exclude)verification/lean-toolchain' \
     ':(exclude)verification/lake-manifest.json'
-  git rm -r --cached --quiet --ignore-unmatch -- verification/Krepi/Proofs
+  git rm -r --cached --quiet --ignore-unmatch -- verification/Krepi/Proofs \
+    verification/qualification/calibration
   git write-tree
 )
 ```
@@ -3822,9 +3835,11 @@ in a checkout are not evidence; only a run of the gate produces receipts.
 
 ## Limitations
 
-- No specification, statement or target is registered; the whole kernel is
-  unverified, and the base round checks only the qualification proofs and
-  the definitions that they use.
+- No formal target is registered: the one specification, that of the
+  device-tree component, has a planned target and planned statements, so
+  the whole kernel is unverified, and the base round checks the
+  qualification proofs, the definitions that they use and that
+  specification with the theorems that witness it.
 - Proofs cover only registered targets. Code outside them, including code
   ported from the legacy tree, is unverified until a target proves it.
 - Sequential refinement does not cover concurrency, weak memory, `unsafe`
