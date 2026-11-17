@@ -598,8 +598,11 @@ rule of the same entry, and states the error of the step: `priorityStep1` to
 `priorityStep8` for the parse and the entries on a tree, and
 `priorityPlanStep1` to `priorityPlanStep7` for the boot memory map. Steps 1
 and 2 of the parse and steps 1 to 7 of the boot memory map pair a rule of
-the step with one of a later step; the parse ends at step 3, and steps 4 to
-8 are each the order of one entry, so their witnesses pair two rules of the
+the step with one of a later step. The parse ends at step 3; steps 4 to 6
+are each the order of one entry, and steps 7 and 8 hold the orders of
+several. An entry that calls another reports the error of the callee at the
+step where it calls it, so the later rules of an entry of steps 3 to 8 lie
+in the same step, and the witnesses of these steps pair two rules of the
 step, the earlier first. Step 8 of the boot memory map, the last check of
 `MemoryPlan::new`, has no later rule and no witness of this kind. With the
 earlier rule repaired, each of these inputs fails with the error of the
@@ -1085,11 +1088,10 @@ topology of the hand-over bytes (`BootState.FromHandOver`). The
 specification test `SeedsDoNotReachResults` boots two QEMU virt trees that
 differ only in their seeds to the same memory map and boot memory map, and
 states that the trees of their parse differ at most in values that no rule
-reads, and
-`ChosenDeviceTypeIsRead` makes the memory discovery fail through a broken
-`device_type` of `/chosen`, the one value of it that the discovery reads
-there, the rejection that the requirement has besides its rule that results
-are functions of their inputs.
+reads, and `ChosenDeviceTypeIsRead` makes the memory discovery fail through
+a broken `device_type` of `/chosen`, the one value of it that the discovery
+reads there, the rejection that the requirement has besides its rule that
+results are functions of their inputs.
 
 ## Dependencies
 
