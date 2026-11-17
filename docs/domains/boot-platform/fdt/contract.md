@@ -17,8 +17,9 @@ the Pi 5 devices, its interrupt controller and timer, its UART, the PCIe
 link to RP1, RP1 and the SD card, are not part of the component: the
 components that use them read the tree through its node access and
 translation. The observable behaviour that these rules serve, with its
-evidence, is in the [requirements](requirements.md), the other document of
-the component.
+evidence, is in the [requirements](requirements.md). The
+[specification](specification.md) states these rules in Lean, and the
+[proof path](proof.md) plans the proof of the code against it.
 
 ## Terms
 

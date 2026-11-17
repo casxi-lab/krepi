@@ -151,6 +151,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
 | `verification/qualification/calibration/` | The [calibration target](#calibration-target): a workspace with a root package and a member, its Lake project with its statements and proofs, its registries and shard plan, and the lists of survivors of its source mutants in `mutants/` | Present |
 | `verification/mutants/` | The list of survivors of the source mutants of each target that has one, `<target>.json` ([source mutants and survivors](#source-mutants-and-survivors)) | Absent until a list is written |
+| `verification/vectors/` | The frozen test vectors of the components whose contracts name them, one file for each component ([test vectors](#test-vectors)) | Present |
 | `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `mutants`, `vectors`, `canary`, `impact`, `merge` and `receipt` present, the others planned |
 
 Generated Lean, extraction outputs, logs and receipts go to the ignored
