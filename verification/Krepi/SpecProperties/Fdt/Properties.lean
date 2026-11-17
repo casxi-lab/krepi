@@ -22,9 +22,10 @@ a theorem below `Krepi.Proofs.Fdt` proves, drawn from its requirements
 5. `FindAvailableLowest`: the span of `Pi5BootMemory::find_available` is
    available and has the lowest aligned start in the first RAM range that
    has one, and none means that no range has one (FDT-R05).
-6. `UnreadValuesIgnored`: the values of `/chosen` but its `device_type`, and
-   those of a dynamic reservation but its `status` and flags, do not reach
-   the results of the discoveries (FDT-R04, FDT-R10).
+6. `UnreadValuesIgnored`: the values of `/chosen` but its `device_type` and,
+   when that is `memory`, its `status`, and those of a dynamic reservation
+   but its `status` and flags, do not reach the results of the discoveries
+   (FDT-R04, FDT-R10).
 7. `AffinityRoundTrip`: the logical ID of the affinity of a CPU of a topology
    is that CPU, whatever the flag bits of `MPIDR_EL1` (FDT-R08).
 8. `TranslationThroughOneWindow`: a translation succeeds exactly through the
@@ -61,7 +62,7 @@ def Node.path (n : Node) : String :=
 
 /-- The spans of the `reg` of each enabled child of `root` whose name is a
 memory name, in tree order: the RAM ranges that the rules of the discovery
-give, lines 441 to 450 of the contract. -/
+give, lines 448 to 457 of the contract. -/
 def Fdt.memoryNodeSpans (t : Fdt) (root : Node) : List Span :=
   let enabled (n : Node) : Bool := match n.enabled with
     | .ok b => b
@@ -80,20 +81,22 @@ def NodeRecord.value (r : NodeRecord) (name : String) : Option ByteArray :=
 record of index `i` of `t` unread, by the rules of the contract:
 
 - a property of `/chosen`, the child of the root named `chosen`, other than
-  its `device_type`, when that `device_type` is not `memory`: the discovery
-  of memory reads the `device_type` of each child of the root and nothing
-  else of a child that is no memory node (lines 441 to 445 and 801 to 804 of
-  the contract);
+  its `device_type` and, when that `device_type` is `memory`, its `status`:
+  the discovery of memory reads the `device_type` of each child of the root
+  and the `status` of each memory node, which a `device_type` of `memory`
+  makes `/chosen`; it skips such a `/chosen` when it is disabled and fails
+  with `BadProperty` on its name when it is enabled, so it reads nothing
+  else of it (lines 448 to 453 and 808 to 811 of the contract);
 - a property of a dynamic reservation, a child of `/reserved-memory` with
   `size` and without `reg`, other than its `status`, `no-map` and
   `reusable`: the discovery checks only that form and counts the node
-  (lines 462 to 468). -/
+  (lines 469 to 475). -/
 def unreadByDiscoveries (t : Fdt) (i : Nat) (name : String) : Bool :=
   match t.records[i]? with
   | none => false
   | some r =>
     (r.parent == some 0 && r.name == "chosen" && name != "device_type" &&
-        r.value "device_type" != some ("memory".toByteArray.push 0)) ||
+        (r.value "device_type" != some ("memory".toByteArray.push 0) || name != "status")) ||
       match (r.parent.bind fun p => t.records[p]?) with
       | some parent =>
         parent.name == "reserved-memory" && parent.parent == some 0 &&
@@ -116,8 +119,8 @@ def Fdt.SameExceptValues (free : Nat → String → Bool) (t t' : Fdt) : Prop :=
 /-- Whether `s` is a span that `find_available(size, alignment, minimum,
 limit)` may give from the RAM range `r` of `m`: of `size` bytes, at a
 multiple of `alignment`, within `[minimum, limit)` and 64 bits, inside `r`,
-and touching none of the image, the tree and the reserved regions (lines 599
-to 604 of the contract). -/
+and touching none of the image, the tree and the reserved regions (lines 606
+to 611 of the contract). -/
 def Pi5BootMemory.Fits (m : Pi5BootMemory) (size alignment minimum limit : UInt64)
     (r s : Span) : Prop :=
   s.size = size ∧ s.start.toNat % alignment.toNat = 0 ∧ minimum.toNat ≤ s.start.toNat ∧
@@ -143,9 +146,10 @@ A small encoder of device trees in the format of chapter 5 of DTSpec v0.4,
 from which the limits are stated: a header of version 17, compatible with
 16; the reservation map at offset 40 with its terminator; the structure block
 right after it, ended by the end token; and the strings block right after
-that, with every property name once, in order. The builder of the
-specification tests, `Krepi.SpecTests.Fdt.Builder`, writes its trees through
-this encoder, so the two share one encoding. -/
+that, the names of the tree in their order, each with its NUL and as often
+as the tree lists it. The builder of the specification tests,
+`Krepi.SpecTests.Fdt.Builder`, writes its trees through this encoder, so
+the two share one encoding. -/
 
 /-- The bytes of a 64-bit big-endian word, the low 64 bits of `n`. -/
 def be64 (n : Nat) : List UInt8 := be32 (n / 2 ^ 32) ++ be32 n
@@ -240,7 +244,7 @@ limits of the parse, `totalsize`, the nodes on a path, the tokens, the
 properties of a node, the bytes of a property name and the reservation
 entries, a tree at the limit is accepted and one 1 above it fails with the
 error of the contract: `LimitExceeded`, and `BadString` for a property name
-(lines 163 to 172 of the contract). That every accepted tree lies within the
+(lines 170 to 179 of the contract). That every accepted tree lies within the
 limits is `ParseWellFormed`. -/
 def ParseLimitsExact : Prop :=
   (∃ t, Fdt.parse (treeOfSize MAX_BLOB_SIZE.toNat) = .ok t) ∧
@@ -265,7 +269,7 @@ def PrefixesRejected : Prop :=
 
 /-- **No choice among duplicates** (FDT-R02, with FDT-R03, FDT-R07 and
 FDT-R08): where an entry looks for one item and finds two, it rejects the
-input and never picks one (rule 3, lines 239 to 246 of the contract).
+input and never picks one (rule 3, lines 246 to 253 of the contract).
 
 - **Paths.** On a well-formed tree, two nodes of one path make the lookup of
   that path fail with `AmbiguousMapping`, and a node that the lookup finds is
@@ -306,7 +310,7 @@ reservation, so none bridges two banks or a hole; every address of a managed
 bank that no reservation holds lies in a usable range; and each usable range
 starts at the start of its bank or at the end of a reservation and ends at
 the end of its bank or at the start of a reservation, so it is maximal
-(lines 576 to 588 and 768 and 769 of the contract). -/
+(lines 583 to 595 and 775 and 776 of the contract). -/
 def UsableRangesExact : Prop :=
   ∀ p : MemoryPlan, p.WellFormed →
     (∀ r ∈ p.availableRanges,
@@ -324,7 +328,7 @@ def UsableRangesExact : Prop :=
 that `Pi5BootMemory::find_available` gives is available, fits the request in
 a RAM range, no RAM range before it in tree order has a span that fits, and
 no span that fits in its range starts lower; none means that no RAM range has
-a span that fits (lines 599 to 604 of the contract). -/
+a span that fits (lines 606 to 611 of the contract). -/
 def FindAvailableLowest : Prop :=
   ∀ (m : Pi5BootMemory) (size alignment minimum limit : UInt64),
     (∀ s, m.findAvailable size alignment minimum limit = .ok (some s) →
@@ -337,10 +341,12 @@ def FindAvailableLowest : Prop :=
 
 /-- **Values that no rule reads do not reach the results** (FDT-R10, FDT-R04).
 Two trees that differ only in values that the discoveries leave unread
-(`unreadByDiscoveries`), such as the seeds that QEMU virt writes into
-`/chosen` at every boot and the `size` of a dynamic reservation, whatever
-its cells, give the same memory map, Pi 5 boot memory and CPU topology, and
-so the same boot memory map. -/
+(`unreadByDiscoveries`): every value of `/chosen` but its `device_type` and,
+when that is `memory`, its `status`, such as the seeds that QEMU virt writes
+into `/chosen` at every boot; and every value of a dynamic reservation but
+its `status` and flags, such as its `size`, whatever its cells. They give
+the same memory map, Pi 5 boot memory and CPU topology, and so the same boot
+memory map. -/
 def UnreadValuesIgnored : Prop :=
   ∀ t t' : Fdt, t.WellFormed → t.SameExceptValues (unreadByDiscoveries t) t' →
     t.discoverMemory = t'.discoverMemory ∧
@@ -351,7 +357,7 @@ def UnreadValuesIgnored : Prop :=
 /-- **The affinity of a CPU gives back its logical ID** (FDT-R08). For every
 CPU of a supported topology, `CpuProfile::logical_id` of its affinity with
 any flag bits of `MPIDR_EL1` is its index; and flag bits outside the
-affinity fields never change a logical ID (lines 635 to 639 of the
+affinity fields never change a logical ID (lines 642 to 646 of the
 contract). -/
 def AffinityRoundTrip : Prop :=
   (∀ (t : CpuTopology) (i flags : UInt64), t.Supported → i < t.count →
@@ -367,7 +373,7 @@ absent map translates nothing; an empty one gives the request itself, and
 does so within the width of the other side; and a map of windows succeeds
 exactly when one window, and no other, shares an address with the request
 and that window holds all of it, and then gives the span of the request's
-size at the request's offset in that window (lines 666 to 673 of the
+size at the request's offset in that window (lines 673 to 680 of the
 contract). Two windows that hold the request, or one that holds part of it,
 make it fail. -/
 def TranslationThroughOneWindow : Prop :=

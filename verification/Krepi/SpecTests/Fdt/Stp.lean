@@ -433,23 +433,26 @@ def qemuBoot (chosen : List (String × List UInt8)) :
 the same results of the parse and of the boot memory map", here two boots
 whose trees differ only in the seeds of `/chosen`: both give the same memory
 map, one RAM range and nothing reserved, and the same boot memory map, the
-page of the tree and the image as boot storage. The trees that the parse
-gives differ only in the values of the seeds, which no rule reads. -/
+page of the tree and the image as boot storage. The parse accepts both
+trees, and the trees that it gives differ at most in values that no rule
+reads (`unreadByDiscoveries`), here the seeds. -/
 def SeedsDoNotReachResults : Prop :=
-  ∀ chosen ∈ [seedsA, seedsB],
+  (∀ chosen ∈ [seedsA, seedsB],
     qemuBoot chosen =
       .ok (⟨[qemuBank], [], 0⟩,
         .ok { ram := [qemuBank], managed := [qemuBank],
-              boot := [⟨0x4000_0000, 0x1000⟩, QEMU_IMAGE], firmware := [] })
+              boot := [⟨0x4000_0000, 0x1000⟩, QEMU_IMAGE], firmware := [] })) ∧
+  ∃ t t', Fdt.parse (qemuTree seedsA) = .ok t ∧ Fdt.parse (qemuTree seedsB) = .ok t' ∧
+    t.SameExceptValues (unreadByDiscoveries t) t'
 
 /-- **FDT-R10, rejected.** The criterion, the same results on three cold
 boots, has no rejection, and the results are functions of their inputs by
-construction; this test takes the requirement's rule that no entry reads
-`/chosen`, but for its `device_type`, which the memory discovery reads of
-every child of the root. The tree of `seedsA` with a `device_type` of
-`/chosen` that is not UTF-8, the bytes `0xff, 0`, fails with `BadString`:
-the results depend on that value of `/chosen`, and not on its seeds
-(`SeedsDoNotReachResults`). -/
+construction; this test takes the requirement's rule that no entry reads a
+value of `/chosen` other than its `device_type` and, when that is `memory`,
+its `status`: the memory discovery reads the `device_type` of every child of
+the root. The tree of `seedsA` with a `device_type` of `/chosen` that is not
+UTF-8, the bytes `0xff, 0`, fails with `BadString`: the results depend on
+that value of `/chosen`, and not on its seeds (`SeedsDoNotReachResults`). -/
 def ChosenDeviceTypeIsRead : Prop :=
   (Fdt.parse (qemuTree (seedsA ++ [("device_type", [0xff, 0])]))).bind Fdt.discoverMemory =
     .error .badString
