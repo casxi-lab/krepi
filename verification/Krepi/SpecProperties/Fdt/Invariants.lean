@@ -100,7 +100,7 @@ are more than the path holds, so the fuel does not cut it short. -/
 def Fdt.depth (t : Fdt) (i : Nat) : Nat := t.depthFrom (i + 1) i
 
 /-- The rules of the node of index `i` of a tree, whose record is `r`
-(format and bounds, lines 150 to 167 of the contract): the root, first,
+(format and bounds, lines 157 to 175 of the contract): the root, first,
 has no parent and the empty name; every other node has a parent before it
 and a name that is not empty; the characters of the name; the depth; at most
 `MAX_PROPERTIES` properties, no two of one name; and each property name of 1
@@ -120,8 +120,8 @@ def Fdt.NodeWellFormed (t : Fdt) (i : Nat) (r : NodeRecord) : Prop :=
 `MAX_BLOB_SIZE`; at most `MAX_RESERVATIONS` reservation entries, each
 nonempty, within 64 bits and disjoint from the others; and at least one and
 at most `MAX_TOKENS` nodes, each of which keeps the rules of its node
-(`Fdt.NodeWellFormed`). These are the rules of format and bounds, lines 132
-to 167 of the contract, that the parse checks before it returns a tree. -/
+(`Fdt.NodeWellFormed`). These are the rules of format and bounds, lines 139
+to 175 of the contract, that the parse checks before it returns a tree. -/
 def Fdt.WellFormed (t : Fdt) : Prop :=
   HEADER_SIZE ≤ t.totalSize.toNat ∧ t.totalSize ≤ MAX_BLOB_SIZE ∧
   t.reservations.length ≤ MAX_RESERVATIONS.toNat ∧
@@ -158,8 +158,8 @@ def Fdt.checkWellFormed (t : Fdt) : Bool :=
 
 /-- **Structural invariant of a `Reg`**, read in `cells` address cells: at
 least one entry, and each within the width of its address. `Reg::new`
-checks every entry before it gives one, lines 603 to 607 of the contract,
-and the entries of a `Reg` read only what it checked, lines 649 to 652. -/
+checks every entry before it gives one, lines 653 to 657 of the contract,
+and the entries of a `Reg` read only what it checked, lines 699 to 702. -/
 def Reg.WellFormed (r : Reg) (cells : UInt32) : Prop :=
   r.entries ≠ [] ∧ ∀ s ∈ r.entries, s.WithinWidth cells
 
@@ -176,7 +176,7 @@ def Window.WellFormed (w : Window) (childCells parentCells : UInt32) : Prop :=
 
 /-- **Structural invariant of an address map.** Child and parent address
 cells of 1 or 2 and at most 2 size cells, and every window well-formed: the
-rules that `AddressMap::new` checks at construction, lines 609 to 615 of the
+rules that `AddressMap::new` checks at construction, lines 659 to 665 of the
 contract. -/
 def AddressMap.WellFormed (m : AddressMap) : Prop :=
   (m.childCells = 1 ∨ m.childCells = 2) ∧ (m.parentCells = 1 ∨ m.parentCells = 2) ∧
@@ -198,7 +198,7 @@ ranges, each nonempty and within 64 bits, no two sharing an address; at most
 `MAX_RESERVED_REGIONS` reserved regions, each nonempty and within 64 bits,
 none with both `no-map` and `reusable`; and a number of dynamic reservations
 that is at most the number of nodes a tree may have, so that it fits its
-width. The rules of memory discovery, lines 396 to 427 of the contract. -/
+width. The rules of memory discovery, lines 439 to 472 of the contract. -/
 def MemoryMap.WellFormed (m : MemoryMap) : Prop :=
   m.ram ≠ [] ∧ m.ram.length ≤ MAX_MEMORY_REGIONS.toNat ∧
   (∀ s ∈ m.ram, s.Nonempty) ∧ m.ram.Pairwise (fun a b => a.touches b = false) ∧
@@ -220,7 +220,7 @@ def MemoryMap.checkWellFormed (m : MemoryMap) : Bool :=
 within 64 bits, at a multiple of 8 and at most `PI5_MAX_BLOB_SIZE` long; the
 image nonempty, within 64 bits and sharing no address with the tree; the
 tree and the image each inside one RAM range; and `ram_bytes` the exact sum
-of the RAM ranges. The hand-over checks of lines 445 to 457 of the
+of the RAM ranges. The hand-over checks of lines 490 to 500 of the
 contract. -/
 def Pi5BootMemory.Consistent (m : Pi5BootMemory) : Prop :=
   m.dtb.Valid ∧ m.dtb.start.toNat % 8 = 0 ∧ m.dtb.size ≤ PI5_MAX_BLOB_SIZE ∧
@@ -238,7 +238,7 @@ def Pi5BootMemory.checkConsistent (m : Pi5BootMemory) : Bool :=
 /-! ## The CPU topology -/
 
 /-- **Functional invariant of a CPU topology.** 1, 2 or 4 CPUs, and 4 on the
-Pi 5: the counts of lines 578 and 579 of the contract, for which the timer
+Pi 5: the counts of lines 628 and 629 of the contract, for which the timer
 flags of `validate_qemu_timers` are exact. -/
 def CpuTopology.Supported (t : CpuTopology) : Prop :=
   (t.count = 1 ∨ t.count = 2 ∨ t.count = 4) ∧ (t.profile = .pi5 → t.count = 4)
@@ -286,8 +286,8 @@ def MemoryPlan.checkWellFormed (p : MemoryPlan) : Bool :=
 
 /-- The usable ranges `rs` of a boot memory map well-formed as a table: each
 nonempty, within 64 bits and on pages; in address order and disjoint; and at
-most one for each managed bank and each reservation (Work bounds, lines 718
-and 719 of the contract). -/
+most one for each managed bank and each reservation (Work bounds, lines 768
+and 769 of the contract). -/
 def MemoryPlan.UsableWellFormed (p : MemoryPlan) (rs : List Span) : Prop :=
   (∀ r ∈ rs, r.Nonempty ∧ r.OnPages) ∧ rs.Pairwise (fun a b => a.endNat ≤ b.start.toNat) ∧
   rs.length ≤ p.managed.length + p.reservations.length
@@ -296,7 +296,7 @@ def MemoryPlan.UsableWellFormed (p : MemoryPlan) (rs : List Span) : Prop :=
 
 /-- **Structural invariant of the boot state.** The published boot memory
 map, if any, is well-formed: what every CPU reads once it is published,
-line 766 of the contract. -/
+line 820 of the contract. -/
 def BootState.WellFormed (s : BootState) : Prop :=
   ∀ p, s.plan = some p → p.WellFormed
 
@@ -309,8 +309,8 @@ def BootState.checkWellFormed (s : BootState) : Bool :=
 /-- **Functional invariant of the boot state: the topology of the hand-over.**
 The published CPU topology, if any, is what `Fdt::discover_cpus` gives for
 the tree of the hand-over bytes with one of the profiles: the topology is
-built from the bytes that the firmware or the loader handed over, lines 764
-and 767 of the contract. -/
+built from the bytes that the firmware or the loader handed over, lines 818
+and 821 of the contract. -/
 def BootState.FromHandOver (s : BootState) : Prop :=
   ∀ t, s.topology = some t → ∃ profile, (s.tree.bind fun f => f.discoverCpus profile) = .ok t
 
@@ -327,7 +327,7 @@ def BootState.checkFromHandOver (s : BootState) : Bool :=
 /-- **Functional invariant of the boot state: the order of the start.** Once
 the secondary CPUs have started, the boot memory map and the CPU topology
 are both published: each is published before the secondary CPUs start,
-lines 766 and 767 of the contract. -/
+lines 820 to 825 of the contract. -/
 def BootState.StartOrder (s : BootState) : Prop :=
   s.secondaries = true → s.plan.isSome = true ∧ s.topology.isSome = true
 

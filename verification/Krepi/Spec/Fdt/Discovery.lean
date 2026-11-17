@@ -67,9 +67,10 @@ def Node.flag (n : Node) (name : String) : Except Error Bool :=
   | none => .ok false
   | some value => if value.size = 0 then .ok true else .error .badProperty
 
-/-- A memory name: `memory`, or a name that starts with `memory@`. -/
+/-- A memory name: `memory`, or a name that starts with `memory@`, that is,
+whose UTF-8 bytes begin with those of `memory@`. -/
 def isMemoryName (name : String) : Bool :=
-  name == "memory" || name.startsWith "memory@"
+  name == "memory" || "memory@".toByteArray.toList.isPrefixOf name.toByteArray.toList
 
 /-! ## RAM -/
 

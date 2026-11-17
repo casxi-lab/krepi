@@ -61,7 +61,7 @@ def Node.path (n : Node) : String :=
 
 /-- The spans of the `reg` of each enabled child of `root` whose name is a
 memory name, in tree order: the RAM ranges that the rules of the discovery
-give, lines 399 to 408 of the contract. -/
+give, lines 441 to 450 of the contract. -/
 def Fdt.memoryNodeSpans (t : Fdt) (root : Node) : List Span :=
   let enabled (n : Node) : Bool := match n.enabled with
     | .ok b => b
@@ -82,18 +82,18 @@ record of index `i` of `t` unread, by the rules of the contract:
 - a property of `/chosen`, the child of the root named `chosen`, other than
   its `device_type`, when that `device_type` is not `memory`: the discovery
   of memory reads the `device_type` of each child of the root and nothing
-  else of a child that is no memory node (lines 399 to 403 and 751 of the
-  contract);
+  else of a child that is no memory node (lines 441 to 445 and 801 to 804 of
+  the contract);
 - a property of a dynamic reservation, a child of `/reserved-memory` with
   `size` and without `reg`, other than its `status`, `no-map` and
   `reusable`: the discovery checks only that form and counts the node
-  (lines 419 to 423). -/
+  (lines 462 to 468). -/
 def unreadByDiscoveries (t : Fdt) (i : Nat) (name : String) : Bool :=
   match t.records[i]? with
   | none => false
   | some r =>
     (r.parent == some 0 && r.name == "chosen" && name != "device_type" &&
-        r.value "device_type" != some ("memory".toUTF8.push 0)) ||
+        r.value "device_type" != some ("memory".toByteArray.push 0)) ||
       match (r.parent.bind fun p => t.records[p]?) with
       | some parent =>
         parent.name == "reserved-memory" && parent.parent == some 0 &&
@@ -116,8 +116,8 @@ def Fdt.SameExceptValues (free : Nat → String → Bool) (t t' : Fdt) : Prop :=
 /-- Whether `s` is a span that `find_available(size, alignment, minimum,
 limit)` may give from the RAM range `r` of `m`: of `size` bytes, at a
 multiple of `alignment`, within `[minimum, limit)` and 64 bits, inside `r`,
-and touching none of the image, the tree and the reserved regions (lines 549
-to 554 of the contract). -/
+and touching none of the image, the tree and the reserved regions (lines 599
+to 604 of the contract). -/
 def Pi5BootMemory.Fits (m : Pi5BootMemory) (size alignment minimum limit : UInt64)
     (r s : Span) : Prop :=
   s.size = size ∧ s.start.toNat % alignment.toNat = 0 ∧ minimum.toNat ≤ s.start.toNat ∧
@@ -171,7 +171,7 @@ def nameOffsets (offset : Nat) : List String → List Nat
 
 /-- The token of an item, the names of the tree at `offsets`. -/
 def Item.bytes (offsets : List Nat) : Item → List UInt8
-  | .beginNode name => be32 1 ++ padTo4 (name.toUTF8.toList ++ [0])
+  | .beginNode name => be32 1 ++ padTo4 (name.toByteArray.toList ++ [0])
   | .property name value => be32 3 ++ be32 value.length ++ be32 (offsets.getD name 0) ++ padTo4 value
   | .endNode => be32 2
   | .nop => be32 4
@@ -188,7 +188,7 @@ shorter, with `totalsize` the length of the whole. -/
 def BuiltTree.bytes (b : BuiltTree) (size : Nat) : ByteArray :=
   let map := b.reservations.flatMap (fun e => be64 e.1 ++ be64 e.2) ++ List.replicate 16 0
   let structure_ := b.items.flatMap (Item.bytes (nameOffsets 0 b.names)) ++ be32 9
-  let strings := b.names.flatMap fun name => name.toUTF8.toList ++ [0]
+  let strings := b.names.flatMap fun name => name.toByteArray.toList ++ [0]
   let structStart := 40 + map.length
   let stringsStart := structStart + structure_.length
   let natural := stringsStart + strings.length
@@ -240,7 +240,7 @@ limits of the parse, `totalsize`, the nodes on a path, the tokens, the
 properties of a node, the bytes of a property name and the reservation
 entries, a tree at the limit is accepted and one 1 above it fails with the
 error of the contract: `LimitExceeded`, and `BadString` for a property name
-(lines 156 to 160 of the contract). That every accepted tree lies within the
+(lines 163 to 172 of the contract). That every accepted tree lies within the
 limits is `ParseWellFormed`. -/
 def ParseLimitsExact : Prop :=
   (∃ t, Fdt.parse (treeOfSize MAX_BLOB_SIZE.toNat) = .ok t) ∧
@@ -265,7 +265,7 @@ def PrefixesRejected : Prop :=
 
 /-- **No choice among duplicates** (FDT-R02, with FDT-R03, FDT-R07 and
 FDT-R08): where an entry looks for one item and finds two, it rejects the
-input and never picks one (rule 3, lines 231 to 238 of the contract).
+input and never picks one (rule 3, lines 239 to 246 of the contract).
 
 - **Paths.** On a well-formed tree, two nodes of one path make the lookup of
   that path fail with `AmbiguousMapping`, and a node that the lookup finds is
@@ -306,7 +306,7 @@ reservation, so none bridges two banks or a hole; every address of a managed
 bank that no reservation holds lies in a usable range; and each usable range
 starts at the start of its bank or at the end of a reservation and ends at
 the end of its bank or at the start of a reservation, so it is maximal
-(lines 533 to 541 and 718 and 719 of the contract). -/
+(lines 576 to 588 and 768 and 769 of the contract). -/
 def UsableRangesExact : Prop :=
   ∀ p : MemoryPlan, p.WellFormed →
     (∀ r ∈ p.availableRanges,
@@ -324,7 +324,7 @@ def UsableRangesExact : Prop :=
 that `Pi5BootMemory::find_available` gives is available, fits the request in
 a RAM range, no RAM range before it in tree order has a span that fits, and
 no span that fits in its range starts lower; none means that no RAM range has
-a span that fits (lines 549 to 554 of the contract). -/
+a span that fits (lines 599 to 604 of the contract). -/
 def FindAvailableLowest : Prop :=
   ∀ (m : Pi5BootMemory) (size alignment minimum limit : UInt64),
     (∀ s, m.findAvailable size alignment minimum limit = .ok (some s) →
@@ -351,7 +351,7 @@ def UnreadValuesIgnored : Prop :=
 /-- **The affinity of a CPU gives back its logical ID** (FDT-R08). For every
 CPU of a supported topology, `CpuProfile::logical_id` of its affinity with
 any flag bits of `MPIDR_EL1` is its index; and flag bits outside the
-affinity fields never change a logical ID (lines 585 to 589 of the
+affinity fields never change a logical ID (lines 635 to 639 of the
 contract). -/
 def AffinityRoundTrip : Prop :=
   (∀ (t : CpuTopology) (i flags : UInt64), t.Supported → i < t.count →
@@ -367,7 +367,7 @@ absent map translates nothing; an empty one gives the request itself, and
 does so within the width of the other side; and a map of windows succeeds
 exactly when one window, and no other, shares an address with the request
 and that window holds all of it, and then gives the span of the request's
-size at the request's offset in that window (lines 616 to 623 of the
+size at the request's offset in that window (lines 666 to 673 of the
 contract). Two windows that hold the request, or one that holds part of it,
 make it fail. -/
 def TranslationThroughOneWindow : Prop :=

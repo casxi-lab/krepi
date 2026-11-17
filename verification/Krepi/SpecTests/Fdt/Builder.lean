@@ -43,7 +43,7 @@ value. -/
 def cellBytes (values : List Nat) : List UInt8 := values.flatMap be32
 
 /-- The bytes of a NUL-terminated string. -/
-def stringBytes (s : String) : List UInt8 := s.toUTF8.toList ++ [0]
+def stringBytes (s : String) : List UInt8 := s.toByteArray.toList ++ [0]
 
 /-- Bytes as a `ByteArray`. -/
 def bytesOf (bytes : List UInt8) : ByteArray := ⟨bytes.toArray⟩

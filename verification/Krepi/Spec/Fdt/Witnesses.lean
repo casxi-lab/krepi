@@ -15,28 +15,17 @@ read through these functions and have no witness of their own. Every expected
 value is a literal worked out from the contract, never computed by the
 specification.
 
-Each witness on a small input is proved here by `decide +kernel`: the kernel
-evaluates both sides. Lean core decides no equality of `Except`, so the
-module states each witness as an equation `f x = .ok v` or `f x = .error e`
-and decides it with a local instance that compares the constructors and
-their payloads; the instance appears in no statement. A witness whose input
-the kernel cannot evaluate here is a definition of this module, a proposition
-that a planned theorem below `Krepi.Proofs.Fdt.Witnesses` proves:
+Each witness is proved here by `decide +kernel`: the kernel evaluates both
+sides. Lean core decides no equality of `Except`, so the module states each
+witness as an equation `f x = .ok v` or `f x = .error e` and decides it with
+a local instance that compares the constructors and their payloads; the
+instance appears in no statement.
 
-- `String.startsWith` and `String.toUTF8` have no body that a module of Lean
-  4.35.0 imports, so the kernel evaluates neither: the memory discovery
-  decides with the first whether a child of the root other than `memory` is a
-  memory node, and the `compatible` lists of `/psci` and the builder of the
-  specification tests write their bytes with the second. The inputs here
-  therefore give the root no child other than `memory` where a discovery
-  reads its children, and are written with `String.toByteArray`, which
-  `String.toUTF8` equals.
-
-The parse reads the inputs of its witnesses as bytes, which a small encoder
-of this module writes. The witnesses of the entries on a tree read trees of
-records written in preorder (`outline`), each of which the check of the
-structural invariant of trees accepts (`treesWellFormed`), the invariant that
-every tree of the parse has.
+The parse reads the inputs of its witnesses as bytes, which the builder of
+the specification tests writes (`Krepi.SpecTests.Fdt.Builder`). The witnesses
+of the entries on a tree read trees of records written in preorder
+(`outline`), each of which the check of the structural invariant of trees
+accepts (`treesWellFormed`), the invariant that every tree of the parse has.
 
 Error branches that no input of an entry reaches have no witness; for each,
 a proposition below states that the entry never takes it, with its reason,
@@ -66,49 +55,29 @@ local instance instDecidableEqExcept {ε α : Type} [DecidableEq ε] [DecidableE
 The bytes of a device tree for the parse, and trees of records, property
 values, maps, boot memory and topologies for the entries that take them. -/
 
-/-- The UTF-8 bytes of a string and its NUL. -/
-def nul (s : String) : List UInt8 := s.toByteArray.toList ++ [0]
-
-/-- A device tree of version 17, compatible with 16: the header, the
-reservation map at offset 40 with the entries `map` and its terminator, the
-structure block `str` with the end token appended, and the strings block
-`strs`, with `totalsize` the length of the whole. -/
-def dtb (map : List (Nat × Nat)) (str strs : List UInt8) : ByteArray :=
-  let m := map.flatMap (fun e => be64 e.1 ++ be64 e.2) ++ List.replicate 16 0
-  let s := str ++ be32 9
-  bytesOf (be32 0xd00d_feed ++ be32 (40 + m.length + s.length + strs.length) ++
-    be32 (40 + m.length) ++ be32 (40 + m.length + s.length) ++ be32 40 ++ be32 17 ++
-    be32 16 ++ be32 0 ++ be32 strs.length ++ be32 s.length ++ m ++ s ++ strs)
-
-/-- A begin-node token with its name, padded with zero bytes. -/
-def beginTok (name : String) : List UInt8 := be32 1 ++ padTo4 (nul name)
-
-/-- An end-node token. -/
-def endTok : List UInt8 := be32 2
-
-/-- A property token whose name is at `offset` of the strings block, with its
-value, padded with zero bytes. -/
-def propTok (offset : Nat) (value : List UInt8) : List UInt8 :=
-  be32 3 ++ be32 value.length ++ be32 offset ++ padTo4 value
-
 /-- The root alone, 72 bytes. -/
-def rootBytes : ByteArray := dtb [] (beginTok "" ++ endTok) []
+def rootBytes : ByteArray := (Builder.empty.beginNode "" |>.endNode).finish
+
+/-- The root alone after the reservation entries `map`, each an address and a
+size. -/
+def reservedRoot (map : List (Nat × Nat)) : ByteArray :=
+  (map.foldl (fun b e => b.reserve e.1 e.2) Builder.empty |>.beginNode "" |>.endNode).finish
 
 /-- 118 bytes: a reservation entry `[0x1000, 0x3000)`, and the root with the
 property `a` of the value `1` and a child `a`. -/
 def richBytes : ByteArray :=
-  dtb [(0x1000, 0x2000)] (beginTok "" ++ propTok 0 [1] ++ beginTok "a" ++ endTok ++ endTok)
-    (nul "a")
+  (Builder.empty.reserve 0x1000 0x2000 |>.beginNode "" |>.property "a" [1] |>.beginNode "a"
+    |>.endNode |>.endNode).finish
 
 /-- The tree of `richBytes`. -/
 def richTree : Fdt :=
   ⟨118, [⟨0x1000, 0x2000⟩], #[⟨"", none, [("a", bytesOf [1])]⟩, ⟨"a", some 0, []⟩]⟩
 
 /-- A property value: a NUL-terminated string. -/
-def str (s : String) : ByteArray := bytesOf (nul s)
+def str (s : String) : ByteArray := bytesOf (stringBytes s)
 
 /-- A property value: the NUL-terminated strings `ss`, in order. -/
-def strs (ss : List String) : ByteArray := bytesOf (ss.flatMap nul)
+def strs (ss : List String) : ByteArray := bytesOf (ss.flatMap stringBytes)
 
 /-- A property value: big-endian cells. -/
 def cells (values : List Nat) : ByteArray := bytesOf (cellBytes values)
@@ -177,7 +146,7 @@ def accessTree : Fdt := outline [
     ("ranges", cells [0xffff_ffff, 0xffff_f000, 0, 0, 0x2000]),
     ("dma-ranges", cells [0xffff_ffff, 0xffff_f000, 0, 0, 0x2000])]),
   (1, "off", [("status", str "disabled")]),
-  (1, "nul", [("status", bytesOf (nul "okay" ++ [0x78]))]),
+  (1, "nul", [("status", bytesOf (stringBytes "okay" ++ [0x78]))]),
   (1, "big", [("reg", cells [0xffff_ffff, 0xffff_ffff, 0, 2])]),
   (1, "twin", []),
   (1, "twin", [])]
@@ -396,44 +365,44 @@ theorem parseBadAlignment : Fdt.parse (setWord rootBytes 8 58) = .error .badAlig
 
 /-- A reservation entry from `2 ^ 64 - 1` of 1 byte, whose end leaves 64 bits. -/
 theorem parseOverflow :
-    Fdt.parse (dtb [(0xffff_ffff_ffff_ffff, 1)] (beginTok "" ++ endTok) []) = .error .overflow := by
+    Fdt.parse (reservedRoot [(0xffff_ffff_ffff_ffff, 1)]) = .error .overflow := by
   decide +kernel
 
 /-- A reservation entry of size 0 at `0x1000`. -/
 theorem parseEmptyRegion :
-    Fdt.parse (dtb [(0x1000, 0)] (beginTok "" ++ endTok) []) = .error .emptyRegion := by
+    Fdt.parse (reservedRoot [(0x1000, 0)]) = .error .emptyRegion := by
   decide +kernel
 
 /-- Two reservation entries that share `[0x1800, 0x2000)`. -/
 theorem parseOverlap :
-    Fdt.parse (dtb [(0x1000, 0x1000), (0x1800, 0x1000)] (beginTok "" ++ endTok) []) =
-      .error .overlap := by
+    Fdt.parse (reservedRoot [(0x1000, 0x1000), (0x1800, 0x1000)]) = .error .overlap := by
   decide +kernel
 
 /-- A token 5 in the root. -/
 theorem parseBadToken :
-    Fdt.parse (dtb [] (beginTok "" ++ be32 5 ++ endTok) []) = .error .badToken := by
+    Fdt.parse (Builder.empty.beginNode "" |>.word 5 |>.endNode).finish = .error .badToken := by
   decide +kernel
 
 /-- A root with the name `a`. -/
-theorem parseBadTree : Fdt.parse (dtb [] (beginTok "a" ++ endTok) []) = .error .badTree := by
+theorem parseBadTree :
+    Fdt.parse (Builder.empty.beginNode "a" |>.endNode).finish = .error .badTree := by
   decide +kernel
 
 /-- A child named `a b`, whose space is no character of a node name. -/
 theorem parseBadString :
-    Fdt.parse (dtb [] (beginTok "" ++ beginTok "a b" ++ endTok ++ endTok) []) =
+    Fdt.parse (Builder.empty.beginNode "" |>.beginNode "a b" |>.endNode |>.endNode).finish =
       .error .badString := by
   decide +kernel
 
 /-- A child named `a` with a byte 1 in the padding after its name. -/
 theorem parseBadPadding :
-    Fdt.parse (dtb [] (beginTok "" ++ be32 1 ++ [0x61, 0, 1, 0] ++ endTok ++ endTok) []) =
-      .error .badPadding := by
+    Fdt.parse (Builder.empty.beginNode "" |>.beginNode "a" |>.overwrite [0x61, 0, 1, 0]
+      |>.endNode |>.endNode).finish = .error .badPadding := by
   decide +kernel
 
 /-- Two properties `a` in the root. -/
 theorem parseDuplicateProperty :
-    Fdt.parse (dtb [] (beginTok "" ++ propTok 0 [] ++ propTok 0 [] ++ endTok) (nul "a")) =
+    Fdt.parse (Builder.empty.beginNode "" |>.flag "a" |>.flag "a" |>.endNode).finish =
       .error .duplicateProperty := by
   decide +kernel
 
@@ -727,11 +696,11 @@ theorem discoverMemoryOverlap :
 /-- The root alone: no RAM range. -/
 theorem discoverMemoryNoMemory : rootTree.discoverMemory = .error .noMemory := by decide +kernel
 
-/-- **Planned.** Two siblings `reserved-memory`: the lookup of
-`/reserved-memory` meets both. The kernel cannot evaluate here whether
-`reserved-memory` is a memory name (`String.startsWith`). -/
-def DiscoverMemoryAmbiguousMapping : Prop :=
-  reservedTwinsTree.discoverMemory = .error .ambiguousMapping
+/-- Two siblings `reserved-memory`: the lookup of `/reserved-memory` meets
+both. -/
+theorem discoverMemoryAmbiguousMapping :
+    reservedTwinsTree.discoverMemory = .error .ambiguousMapping := by
+  decide +kernel
 
 /-! ## `Fdt::discover_pi5_boot_memory`, its readers and `is_available` -/
 
@@ -819,10 +788,10 @@ theorem discoverPi5BootMemoryNoMemory :
     pi5NoMemoryTree.discoverPi5BootMemory 0x10_0000 image = .error .noMemory := by
   decide +kernel
 
-/-- **Planned.** Two siblings `reserved-memory`, as in
-`DiscoverMemoryAmbiguousMapping`. -/
-def DiscoverPi5BootMemoryAmbiguousMapping : Prop :=
-  pi5ReservedTwinsTree.discoverPi5BootMemory 0x10_0000 image = .error .ambiguousMapping
+/-- Two siblings `reserved-memory`, as in `discoverMemoryAmbiguousMapping`. -/
+theorem discoverPi5BootMemoryAmbiguousMapping :
+    pi5ReservedTwinsTree.discoverPi5BootMemory 0x10_0000 image = .error .ambiguousMapping := by
+  decide +kernel
 
 /-- `Pi5BootMemory::is_available`: true for a span of the RAM range that
 touches nothing, false for one on the image. -/
@@ -869,11 +838,10 @@ theorem findAvailableOverflow :
 
 /-! ## `Fdt::discover_cpus` and the topology -/
 
-/-- **Planned.** QEMU virt with two CPUs, CPU 0 without an `enable-method`,
-and `/psci` over HVC: the topology `qemuPair`. The kernel cannot evaluate here
-the `compatible` lists of `/psci` (`String.toUTF8`). -/
-def DiscoverCpusOk : Prop :=
-  qemuPairTree.discoverCpus .qemuHvc = .ok qemuPair
+/-- QEMU virt with two CPUs, CPU 0 without an `enable-method`, and `/psci`
+over HVC: the topology `qemuPair`. -/
+theorem discoverCpusOk : qemuPairTree.discoverCpus .qemuHvc = .ok qemuPair := by
+  decide +kernel
 
 /-- No `/cpus`. -/
 theorem discoverCpusMissingProperty : rootTree.discoverCpus .qemuHvc = .error .missingProperty := by
@@ -1369,9 +1337,7 @@ theorem exists_of_atPath {β : Type} {t : Fdt} {path : String} {f : Node → β}
   · cases h
 
 /-- **The variant that rejects every input is refuted.** Each frozen function
-that can fail succeeds on an input, by the success witnesses above.
-`Fdt::discover_cpus` is the exception: its success witness is the planned
-`DiscoverCpusOk`. -/
+that can fail succeeds on an input, by the success witnesses above. -/
 theorem notAlwaysRejecting :
     (∃ b t, Fdt.parse b = .ok t) ∧
     (∃ t : Fdt, ∃ p r, t.findNode p = .ok r) ∧
@@ -1387,6 +1353,7 @@ theorem notAlwaysRejecting :
     (∃ t : Fdt, ∃ a i r, t.discoverPi5BootMemory a i = .ok r) ∧
     (∃ m : Pi5BootMemory, ∃ s r, m.isAvailable s = .ok r) ∧
     (∃ m : Pi5BootMemory, ∃ z a lo hi r, m.findAvailable z a lo hi = .ok r) ∧
+    (∃ t : Fdt, ∃ p r, t.discoverCpus p = .ok r) ∧
     (∃ t : CpuTopology, ∃ b, t.validateQemuTimers b = .ok ()) ∧
     (∃ b c r, cellsU64 b c = .ok r) ∧
     (∃ b ac sc r, Reg.new b ac sc = .ok r) ∧
@@ -1410,7 +1377,8 @@ theorem notAlwaysRejecting :
     (exists_of_atPath translateRegOk).elim fun n h => ⟨n, _, _, h⟩,
     ⟨_, _, discoverMemoryOk⟩, ⟨_, _, _, _, discoverPi5BootMemoryOk⟩,
     ⟨_, _, _, pi5IsAvailableOk.1⟩, ⟨_, _, _, _, _, _, findAvailableOk.1⟩,
-    ⟨_, _, validateQemuTimersOk⟩, ⟨_, _, _, cellsU64Ok⟩, ⟨_, _, _, _, regNewOk⟩,
+    ⟨_, _, _, discoverCpusOk⟩, ⟨_, _, validateQemuTimersOk⟩, ⟨_, _, _, cellsU64Ok⟩,
+    ⟨_, _, _, _, regNewOk⟩,
     ⟨_, _, _, _, _, addressMapNewOk⟩, ⟨_, _, _, toParentOk⟩, ⟨_, _, _, toChildOk⟩,
     ⟨_, _, _, _, allRamOk⟩, ⟨_, _, _, _, _, newOk⟩, ⟨_, _, _, _, fromPi5Ok⟩,
     ⟨_, _, _, spanNewOk⟩, ⟨_, _, spanEndOk⟩, ⟨_, _, _, spanContainsOk.1⟩⟩

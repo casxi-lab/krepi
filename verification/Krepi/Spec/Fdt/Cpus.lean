@@ -122,7 +122,7 @@ bytes of its NUL-terminated strings: `arm,psci-0.2`; `arm,psci-1.0`,
 def PSCI_COMPATIBLE : List (List UInt8) :=
   [["arm,psci-0.2"], ["arm,psci-1.0", "arm,psci-0.2"],
     ["arm,psci-1.0", "arm,psci-0.2", "arm,psci"]].map
-    fun names => names.flatMap fun s => s.toUTF8.toList ++ [0]
+    fun names => names.flatMap fun s => s.toByteArray.toList ++ [0]
 
 /-- One child of `/cpus`, whose address cells are `cells`, after the IDs `ids`
 of the CPU nodes before it. First its `device_type`, with the errors of

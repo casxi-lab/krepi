@@ -417,24 +417,6 @@
       "state": "planned"
     },
     {
-      "name": "Krepi.Spec.Fdt.Witnesses.DiscoverMemoryAmbiguousMapping",
-      "theorem": "Krepi.Proofs.Fdt.Witnesses.discoverMemoryAmbiguousMapping",
-      "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
-    },
-    {
-      "name": "Krepi.Spec.Fdt.Witnesses.DiscoverPi5BootMemoryAmbiguousMapping",
-      "theorem": "Krepi.Proofs.Fdt.Witnesses.discoverPi5BootMemoryAmbiguousMapping",
-      "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
-    },
-    {
-      "name": "Krepi.Spec.Fdt.Witnesses.DiscoverCpusOk",
-      "theorem": "Krepi.Proofs.Fdt.Witnesses.discoverCpusOk",
-      "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
-    },
-    {
       "name": "Krepi.Spec.Fdt.Witnesses.HeaderNoOverflow",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.headerNoOverflow",
       "module": "Krepi.Proofs.Fdt.Witnesses",
