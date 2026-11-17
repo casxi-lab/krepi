@@ -3614,7 +3614,8 @@ that later Git commands of the shell use the repository's index again:
     ':(exclude,glob)verification/lakefile.*' \
     ':(exclude)verification/lean-toolchain' \
     ':(exclude)verification/lake-manifest.json'
-  git rm -r --cached --quiet --ignore-unmatch -- verification/Krepi/Proofs
+  git rm -r --cached --quiet --ignore-unmatch -- verification/Krepi/Proofs \
+    verification/qualification/calibration
   git write-tree
 )
 ```
