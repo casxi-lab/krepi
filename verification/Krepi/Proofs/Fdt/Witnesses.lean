@@ -53,6 +53,9 @@ public theorem translateRegFuelSuffices : TranslateRegFuelSuffices := by
 public theorem windowTranslationNoOverflow : WindowTranslationNoOverflow := by
   sorry
 
+public theorem cpuRegNoUnsupportedCells : CpuRegNoUnsupportedCells := by
+  sorry
+
 public theorem findAvailableNoLimitExceeded : FindAvailableNoLimitExceeded := by
   sorry
 

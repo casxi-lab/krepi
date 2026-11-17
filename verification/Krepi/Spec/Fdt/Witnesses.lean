@@ -27,6 +27,11 @@ of the entries on a tree read trees of records written in preorder
 (`outline`), each of which the check of the structural invariant of trees
 accepts (`treesWellFormed`), the invariant that every tree of the parse has.
 
+For each step of the two error orders of the contract, one more witness
+gives an input that breaks a rule of that step and a later rule, and states
+the error of the step (`priorityStep1` to `priorityStep8`, `priorityPlanStep1`
+to `priorityPlanStep7`).
+
 Error branches that no input of an entry reaches have no witness; for each,
 a proposition below states that the entry never takes it, with its reason,
 and a planned theorem proves it. The two variants of the specification that
@@ -322,6 +327,36 @@ def cpuTypeWithoutNulTree : Fdt :=
 /-- Two siblings `cpus`. -/
 def cpusTwinsTree : Fdt := cpusTree cpusCells [(1, "cpus", cpusCells)]
 
+/-- `memoryTree` with `/reserved-memory` and its children: `linux,cma`, a
+dynamic reservation with `reusable` and a `size` of one cell below a
+`#size-cells` of 2; `pool`, a dynamic reservation with `no-map` and a `size`
+of two cells; `off`, a disabled one; and `atf@0`, a static region with
+`no-map`. -/
+def dynamicTree : Fdt :=
+  outline [(0, "", cells22), memoryLine [ramReg], reservedLine,
+    (2, "linux,cma", [("reusable", ByteArray.empty), ("size", cells [0x400_0000])]),
+    (2, "pool", [("no-map", ByteArray.empty), ("size", cells [0, 0x10_0000])]),
+    (2, "off", [("status", str "disabled"), ("size", cells [0x1000])]),
+    (2, "atf@0", [("no-map", ByteArray.empty), ("reg", cells [0, 0, 0, 0x8_0000])])]
+  [⟨0x1000, 0x1000⟩]
+
+/-- A Pi 5 hand-over tree with the dynamic reservation `linux,cma` below
+`/reserved-memory`. -/
+def pi5DynamicTree : Fdt :=
+  pi5Tree (more := [memoryLine [ramReg], reservedLine,
+    (2, "linux,cma", [("reusable", ByteArray.empty), ("size", cells [0x400_0000])])])
+
+/-- Two memory nodes; the second has a range that shares `[0, 0x1000)` with
+the first and then one from `2 ^ 64 - 1`, whose end leaves 64 bits. -/
+def priorityMemoryTree : Fdt :=
+  outline [(0, "", cells22),
+    (1, "memory@0", [("device_type", str "memory"), ("reg", cells [0, 0, 0, 0x1000])]),
+    (1, "memory@1", [("device_type", str "memory"),
+      ("reg", cells [0, 0, 0, 0x1000, 0xffff_ffff, 0xffff_ffff, 0, 0x10])])]
+
+/-- A `/cpus` of 1 size cell and 3 address cells. -/
+def priorityCpusTree : Fdt := cpusTree [("#address-cells", cells [3]), ("#size-cells", cells [1])]
+
 /-- Every tree of records of the witnesses, the planned ones included, passes
 the check of the structural invariant of trees. -/
 theorem treesWellFormed :
@@ -329,7 +364,8 @@ theorem treesWellFormed :
       noRegTree, threeCellsTree, wideRamTree, emptyRamTree, overlapRamTree, reservedTwinsTree,
       pi5Tree, pi5LargeTree, pi5ShortCellsTree, pi5OneCellTree, pi5NoCompatibleTree,
       pi5NotUtf8Tree, pi5NoMemoryTree, pi5ReservedTwinsTree, qemuPairTree, cpusDisabledTree,
-      cpusThreeCellsTree, cpuTypeWithoutNulTree, cpusTwinsTree].all Fdt.checkWellFormed = true := by
+      cpusThreeCellsTree, cpuTypeWithoutNulTree, cpusTwinsTree, dynamicTree, pi5DynamicTree,
+      priorityMemoryTree, priorityCpusTree].all Fdt.checkWellFormed = true := by
   decide +kernel
 
 /-! ## `Fdt::parse` -/
@@ -654,6 +690,12 @@ theorem memoryMapReservedOk :
 theorem memoryMapDynamicOk : memoryTree.discoverMemory.map MemoryMap.dynamic = .ok 0 := by
   decide +kernel
 
+/-- `MemoryMap::dynamic`: the two enabled dynamic reservations of
+`dynamicTree`, whatever the cells of their `size`; the disabled one and the
+static `atf@0` are not counted. -/
+theorem memoryMapDynamicTwo : dynamicTree.discoverMemory.map MemoryMap.dynamic = .ok 2 := by
+  decide +kernel
+
 /-- 33 RAM ranges, above `MAX_MEMORY_REGIONS`. -/
 theorem discoverMemoryLimitExceeded : ram33Tree.discoverMemory = .error .limitExceeded := by
   decide +kernel
@@ -722,6 +764,12 @@ theorem pi5ReservedOk :
 
 /-- `Pi5BootMemory::dynamic`. -/
 theorem pi5DynamicOk : pi5Result.map Pi5BootMemory.dynamic = .ok 0 := by decide +kernel
+
+/-- `Pi5BootMemory::dynamic`: the dynamic reservation `linux,cma` of
+`pi5DynamicTree`. -/
+theorem pi5DynamicOne :
+    (pi5DynamicTree.discoverPi5BootMemory 0x10_0000 image).map Pi5BootMemory.dynamic = .ok 1 := by
+  decide +kernel
 
 /-- `Pi5BootMemory::dtb`: `totalsize` bytes from the address of the tree. -/
 theorem pi5DtbOk : pi5Result.map Pi5BootMemory.dtb = .ok ⟨0x10_0000, 0x1000⟩ := by decide +kernel
@@ -1223,6 +1271,111 @@ theorem spanContainsOverflow :
     (⟨0x1000, 0x1000⟩ : Span).contains ⟨0xffff_ffff_ffff_fff0, 0x10⟩ = .error .overflow := by
   decide +kernel
 
+/-! ## Error priority
+
+For each step of the two error orders of the contract, one input that breaks
+a rule of that step and a later rule of the same entry, and gives the error
+of the step: the error of the later rule is the one that the input gives once
+the earlier rule is repaired. The steps are those of the order of the parse
+and the entries on a tree, 1 to 8, and of the order of the boot memory map,
+1 to 7; its step 8, the last check of `MemoryPlan::new`, has no later rule. -/
+
+/-- Step 1: a `version` of 16, `UnsupportedVersion`, before the reservation
+entry of size 0 of step 2, `EmptyRegion`. -/
+theorem priorityStep1 :
+    Fdt.parse (setWord (reservedRoot [(0x1000, 0)]) 20 16) = .error .unsupportedVersion := by
+  decide +kernel
+
+/-- Step 2: two reservation entries that share `[0x1800, 0x2000)`, `Overlap`,
+before the token 5 of step 3, `BadToken`. -/
+theorem priorityStep2 :
+    Fdt.parse (Builder.empty.reserve 0x1000 0x1000 |>.reserve 0x1800 0x1000 |>.beginNode ""
+      |>.word 5 |>.endNode).finish = .error .overlap := by
+  decide +kernel
+
+/-- Step 3: the encoding of a token before its place in the tree; a property
+named `a b` after the child `a` of the root fails on its name, `BadString`,
+before its place after a child, `BadTree`. -/
+theorem priorityStep3 :
+    Fdt.parse (Builder.empty.beginNode "" |>.beginNode "a" |>.endNode |>.flag "a b"
+      |>.endNode).finish = .error .badString := by
+  decide +kernel
+
+/-- Step 4: the whole `reg` of a memory node before its ranges; the second
+range of `memory@1` leaves 64 bits, `Overflow`, before its first range,
+which shares an address with that of `memory@0`, `Overlap`. -/
+theorem priorityStep4 : priorityMemoryTree.discoverMemory = .error .overflow := by
+  decide +kernel
+
+/-- Step 5: an empty image, `EmptyRegion`, before the memory discovery of a
+tree without RAM, `NoMemory`. -/
+theorem priorityStep5 :
+    pi5NoMemoryTree.discoverPi5BootMemory 0x10_0000 ⟨0x20_0000, 0⟩ = .error .emptyRegion := by
+  decide +kernel
+
+/-- Step 6: the size cells of `/cpus`, 1, `BadProperty`, before its 3
+address cells, `UnsupportedCells`. -/
+theorem priorityStep6 : priorityCpusTree.discoverCpus .qemuHvc = .error .badProperty := by
+  decide +kernel
+
+/-- Step 7: the windows of a translation in order; the first two hold the
+request, `AmbiguousMapping` at the second, before the third, which holds part
+of it, `Unmapped`. -/
+theorem priorityStep7 :
+    (AddressMap.new (some (cells [0, 0x2000, 0x100, 0, 0x3000, 0x100, 0x10, 0x1000, 0x10])) 1 1 1).bind
+      (·.toParent ⟨0x18, 0x10⟩) = .error .ambiguousMapping := by
+  decide +kernel
+
+/-- Step 8: a selection of size 0, `EmptyRegion`, before its alignment of 3,
+`BadAlignment`. -/
+theorem priorityStep8 : pi5Memory.findAvailable 0 3 0 0x1000 = .error .emptyRegion := by
+  decide +kernel
+
+/-- Step 1 of the boot memory map: a managed window of size 0, `InvalidRange`,
+before the missing RAM bank of step 2, `Capacity`. -/
+theorem priorityPlanStep1 : MemoryPlan.new ⟨0, 0⟩ [] boot firmware = .error .invalidRange := by
+  decide +kernel
+
+/-- Step 2: 33 RAM banks, `Capacity`, before the first of them, of size 0, in
+step 3, `InvalidRange`. -/
+theorem priorityPlanStep2 :
+    MemoryPlan.allRam (⟨0, 0⟩ :: (List.range 32).map fun i =>
+      ⟨UInt64.ofNat ((i + 1) * 0x10000), 0x1000⟩) boot firmware = .error .capacity := by
+  decide +kernel
+
+/-- Step 3: a bank that shares `[0x1000, 0x2000)` with an earlier one,
+`Overlap`, before the 16 GiB and 4 KiB of the banks in step 4,
+`ArenaTooLarge`. -/
+theorem priorityPlanStep3 :
+    MemoryPlan.allRam [⟨0, 0x4_0000_0000⟩, ⟨0x1000, 0x1000⟩] boot firmware = .error .overlap := by
+  decide +kernel
+
+/-- Step 4: a bank of 16 GiB and 4 KiB, `ArenaTooLarge`, before the boot
+storage outside every bank of step 6, `OutsideRam`. -/
+theorem priorityPlanStep4 :
+    MemoryPlan.allRam [⟨0, 0x4_0000_1000⟩] [⟨0x8_0000_0000, 0x10⟩] [] = .error .arenaTooLarge := by
+  decide +kernel
+
+/-- Step 5: a bank without a complete page, `Alignment`, before the boot
+storage outside every bank of step 6, `OutsideRam`. -/
+theorem priorityPlanStep5 :
+    MemoryPlan.allRam [⟨1, 0x800⟩] [⟨0x10_0000, 0x10⟩] [] = .error .alignment := by
+  decide +kernel
+
+/-- Step 6: boot storage outside every bank, `OutsideRam`, before the firmware
+reservation on its page in step 7, `Overlap`. -/
+theorem priorityPlanStep6 :
+    MemoryPlan.allRam [⟨0, 0x800_0000⟩] [⟨0x1000_0000, 0x10⟩] [⟨⟨0x1000_0000, 1⟩, true, false⟩] =
+      .error .outsideRam := by
+  decide +kernel
+
+/-- Step 7: a firmware reservation on a page of the boot storage, `Overlap`,
+before the managed window outside every bank of step 8, `OutsideRam`. -/
+theorem priorityPlanStep7 :
+    MemoryPlan.new ⟨0x1000_0000, 0x1000⟩ [⟨0, 0x800_0000⟩] [⟨0x8_0000, 0x3_8000⟩]
+      [⟨⟨0x8_0000, 1⟩, true, false⟩] = .error .overlap := by
+  decide +kernel
+
 
 /-! ## Unreachable error branches
 
@@ -1241,7 +1394,11 @@ def HeaderNoOverflow : Prop := ∀ input, header input ≠ .error .overflow
 /-- **Planned.** No entry of the reservation map runs past 64 bits, so its
 `Overflow` of an entry past the tree is never reached: the map starts at a
 32-bit offset and the parse reads at most `MAX_RESERVATIONS + 1` entries of 16
-bytes. -/
+bytes. The entry `k`, from 0, starts at `reserveStart + 16 * k`, and the end
+`cursor + 16` that step 2 checks with `checkedAdd` is therefore at most
+`reserveStart + 16 * (MAX_RESERVATIONS + 1)`, which this states to be below
+`2 ^ 64`, so that check never fails. The other `Overflow` of the step, the
+end of the span of an entry, is reached (`parseOverflow`). -/
 def ReservationEntriesFit : Prop :=
   ∀ input h, header input = .ok h →
     h.layout.reserveStart + 16 * (MAX_RESERVATIONS.toNat + 1) < 2 ^ 64
@@ -1272,7 +1429,9 @@ def DiscoverPi5BootMemoryNoBadTree : Prop :=
 
 /-- **Planned.** The sum of the RAM ranges of a memory discovery fits in 64
 bits, so the Pi 5 discovery never fails with `Overflow` at that sum: the
-ranges are disjoint spans that end within 64 bits. -/
+ranges are disjoint spans that end within 64 bits. The discovery adds them
+one at a time with `checkedAdd`, and each partial sum is at most the sum of
+all of them, which this bounds, so no addition fails. -/
 def RamBytesFit : Prop :=
   ∀ (t : Fdt) (m : MemoryMap), t.discoverMemory = .ok m → spansBytes m.ram < 2 ^ 64
 
@@ -1296,6 +1455,16 @@ def WindowTranslationNoOverflow : Prop :=
     s.WithinWidth (if reverse then m.parentCells else m.childCells) →
     m.translate s reverse ≠ .error .overflow
 
+/-- **Planned.** A CPU node never fails with `UnsupportedCells` at its `reg`:
+step 6 reads that value in the address cells of `/cpus`, which it has checked
+to be 1 or 2 before it reads any child, and `cells_u64` fails with
+`UnsupportedCells` only for more than 2 cells. The `UnsupportedCells` of
+`discover_cpus` is that of the address cells of `/cpus`
+(`discoverCpusUnsupportedCells`). -/
+def CpuRegNoUnsupportedCells : Prop :=
+  ∀ (profile : CpuProfile) (cells : UInt32) (ids : List UInt64) (n : Node),
+    (cells = 1 ∨ cells = 2) → cpuOfChild profile cells ids n ≠ .error .unsupportedCells
+
 /-- **Planned.** `Pi5BootMemory::find_available` never runs out of its fuel:
 each candidate after the first lies past every exclusion that an earlier one
 touched, so `Q + 3` candidates for `Q` reserved regions end the search of a
@@ -1307,7 +1476,9 @@ def FindAvailableNoLimitExceeded : Prop :=
 /-- **Planned.** The banks that pass step 3 of the boot memory map hold fewer
 than `2 ^ 64` bytes, so the sum of step 4 never fails with `Overflow` in
 `all_ram`, `new` or `from_pi5`: they are disjoint spans that end within 64
-bits. -/
+bits. Step 4 adds the sorted banks one at a time, and each partial sum is at
+most the sum of all of them, which this bounds, so its check of the sum
+never fails. -/
 def BankBytesFit : Prop :=
   ∀ ram banks : List Span, ram.foldlM addBank [] = .ok banks →
     spansBytes (sortByStart banks) < 2 ^ 64
