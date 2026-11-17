@@ -1,7 +1,7 @@
 ---
 targets:
   - fdt
-planned: none
+planned: []
 ---
 
 # Device-tree proof path
@@ -39,7 +39,7 @@ target take the invariants that they establish as hypotheses
 | Name | `fdt`, in the state `planned` |
 | Module | `Fdt`, the namespace of the generated definitions |
 | Feature | None: no feature document describes the component, whose requirements list no feature, and a feature ID is that of a feature document ([documentation](../../../conventions/documentation.md#location-and-identity)) |
-| Entries | The 11 rows of the [entry table](contract.md#entry-points), lines 97 to 107 of the contract: one target, not split |
+| Entries | The 11 rows of the [entry table](contract.md#entry-points), lines 104 to 114 of the contract: one target, not split |
 | Roots | The 60 functions that the rows name, below |
 | Budget | The default of 1,800 s ([cluster and budget](#cluster-and-budget)) |
 
@@ -47,25 +47,25 @@ The roots are the full paths of the functions that the rows of the entry
 table name, in the crate `krepi_kernel` of the root package and its module
 `fdt` ([extractability](contract.md#extractability)). A short name in a row
 is a function of the nearest type named before it in the same row, so
-`ram` of line 99 is `MemoryMap::ram` and `ram` of line 100 is
+`ram` of line 106 is `MemoryMap::ram` and `ram` of line 107 is
 `Pi5BootMemory::ram`. `cells_u64`, which no type precedes, is a function of
 the module, as the contract calls it, `cells_u64(bytes, cells)`. The value
-types of line 106 and the constants of line 107 are not roots: the
+types of line 113 and the constants of line 114 are not roots: the
 extraction reaches them through the functions that use them.
 
 | Line | Functions | Roots |
 | ---: | ---: | --- |
-| 97 | 1 | `krepi_kernel::fdt::Fdt::parse` |
-| 98 | 15 | `krepi_kernel::fdt::Fdt::nodes`, `krepi_kernel::fdt::Fdt::find_node`, `krepi_kernel::fdt::Fdt::reservations`, `krepi_kernel::fdt::Fdt::total_size`, `krepi_kernel::fdt::Node::name`, `krepi_kernel::fdt::Node::parent`, `krepi_kernel::fdt::Node::property`, `krepi_kernel::fdt::Node::string_property`, `krepi_kernel::fdt::Node::enabled`, `krepi_kernel::fdt::Node::address_cells`, `krepi_kernel::fdt::Node::size_cells`, `krepi_kernel::fdt::Node::reg`, `krepi_kernel::fdt::Node::ranges`, `krepi_kernel::fdt::Node::dma_ranges`, `krepi_kernel::fdt::Node::translate_reg` |
-| 99 | 4 | `krepi_kernel::fdt::Fdt::discover_memory`, `krepi_kernel::fdt::MemoryMap::ram`, `krepi_kernel::fdt::MemoryMap::reserved`, `krepi_kernel::fdt::MemoryMap::dynamic` |
-| 100 | 8 | `krepi_kernel::fdt::Fdt::discover_pi5_boot_memory`, `krepi_kernel::fdt::Pi5BootMemory::ram`, `krepi_kernel::fdt::Pi5BootMemory::reserved`, `krepi_kernel::fdt::Pi5BootMemory::dynamic`, `krepi_kernel::fdt::Pi5BootMemory::dtb`, `krepi_kernel::fdt::Pi5BootMemory::image`, `krepi_kernel::fdt::Pi5BootMemory::ram_bytes`, `krepi_kernel::fdt::Pi5BootMemory::is_available` |
-| 101 | 1 | `krepi_kernel::fdt::Pi5BootMemory::find_available` |
-| 102 | 8 | `krepi_kernel::fdt::Fdt::discover_cpus`, `krepi_kernel::fdt::CpuTopology::count`, `krepi_kernel::fdt::CpuTopology::profile`, `krepi_kernel::fdt::CpuTopology::affinity`, `krepi_kernel::fdt::CpuTopology::validate_qemu_timers`, `krepi_kernel::fdt::CpuProfile::logical_id`, `krepi_kernel::fdt::CpuProfile::affinity_shift`, `krepi_kernel::fdt::CpuProfile::conduit` |
-| 103 | 6 | `krepi_kernel::fdt::cells_u64`, `krepi_kernel::fdt::Reg::new`, `krepi_kernel::fdt::AddressMap::new`, `krepi_kernel::fdt::AddressMap::kind`, `krepi_kernel::fdt::AddressMap::to_parent`, `krepi_kernel::fdt::AddressMap::to_child` |
-| 104 | 3 | `krepi_kernel::fdt::MemoryPlan::all_ram`, `krepi_kernel::fdt::MemoryPlan::new`, `krepi_kernel::fdt::MemoryPlan::from_pi5` |
-| 105 | 11 | `krepi_kernel::fdt::MemoryPlan::managed_banks`, `krepi_kernel::fdt::MemoryPlan::ram`, `krepi_kernel::fdt::MemoryPlan::reservations`, `krepi_kernel::fdt::MemoryPlan::boot_ranges`, `krepi_kernel::fdt::MemoryPlan::firmware_ranges`, `krepi_kernel::fdt::MemoryPlan::described_bytes`, `krepi_kernel::fdt::MemoryPlan::managed_bytes`, `krepi_kernel::fdt::MemoryPlan::contains_ram`, `krepi_kernel::fdt::MemoryPlan::is_available`, `krepi_kernel::fdt::MemoryPlan::permits_backing`, `krepi_kernel::fdt::MemoryPlan::available_ranges` |
-| 106 | 3 | `krepi_kernel::fdt::Span::new`, `krepi_kernel::fdt::Span::end`, `krepi_kernel::fdt::Span::contains` |
-| 107 | 0 | None: the nine constants |
+| 104 | 1 | `krepi_kernel::fdt::Fdt::parse` |
+| 105 | 15 | `krepi_kernel::fdt::Fdt::nodes`, `krepi_kernel::fdt::Fdt::find_node`, `krepi_kernel::fdt::Fdt::reservations`, `krepi_kernel::fdt::Fdt::total_size`, `krepi_kernel::fdt::Node::name`, `krepi_kernel::fdt::Node::parent`, `krepi_kernel::fdt::Node::property`, `krepi_kernel::fdt::Node::string_property`, `krepi_kernel::fdt::Node::enabled`, `krepi_kernel::fdt::Node::address_cells`, `krepi_kernel::fdt::Node::size_cells`, `krepi_kernel::fdt::Node::reg`, `krepi_kernel::fdt::Node::ranges`, `krepi_kernel::fdt::Node::dma_ranges`, `krepi_kernel::fdt::Node::translate_reg` |
+| 106 | 4 | `krepi_kernel::fdt::Fdt::discover_memory`, `krepi_kernel::fdt::MemoryMap::ram`, `krepi_kernel::fdt::MemoryMap::reserved`, `krepi_kernel::fdt::MemoryMap::dynamic` |
+| 107 | 8 | `krepi_kernel::fdt::Fdt::discover_pi5_boot_memory`, `krepi_kernel::fdt::Pi5BootMemory::ram`, `krepi_kernel::fdt::Pi5BootMemory::reserved`, `krepi_kernel::fdt::Pi5BootMemory::dynamic`, `krepi_kernel::fdt::Pi5BootMemory::dtb`, `krepi_kernel::fdt::Pi5BootMemory::image`, `krepi_kernel::fdt::Pi5BootMemory::ram_bytes`, `krepi_kernel::fdt::Pi5BootMemory::is_available` |
+| 108 | 1 | `krepi_kernel::fdt::Pi5BootMemory::find_available` |
+| 109 | 8 | `krepi_kernel::fdt::Fdt::discover_cpus`, `krepi_kernel::fdt::CpuTopology::count`, `krepi_kernel::fdt::CpuTopology::profile`, `krepi_kernel::fdt::CpuTopology::affinity`, `krepi_kernel::fdt::CpuTopology::validate_qemu_timers`, `krepi_kernel::fdt::CpuProfile::logical_id`, `krepi_kernel::fdt::CpuProfile::affinity_shift`, `krepi_kernel::fdt::CpuProfile::conduit` |
+| 110 | 6 | `krepi_kernel::fdt::cells_u64`, `krepi_kernel::fdt::Reg::new`, `krepi_kernel::fdt::AddressMap::new`, `krepi_kernel::fdt::AddressMap::kind`, `krepi_kernel::fdt::AddressMap::to_parent`, `krepi_kernel::fdt::AddressMap::to_child` |
+| 111 | 3 | `krepi_kernel::fdt::MemoryPlan::all_ram`, `krepi_kernel::fdt::MemoryPlan::new`, `krepi_kernel::fdt::MemoryPlan::from_pi5` |
+| 112 | 11 | `krepi_kernel::fdt::MemoryPlan::managed_banks`, `krepi_kernel::fdt::MemoryPlan::ram`, `krepi_kernel::fdt::MemoryPlan::reservations`, `krepi_kernel::fdt::MemoryPlan::boot_ranges`, `krepi_kernel::fdt::MemoryPlan::firmware_ranges`, `krepi_kernel::fdt::MemoryPlan::described_bytes`, `krepi_kernel::fdt::MemoryPlan::managed_bytes`, `krepi_kernel::fdt::MemoryPlan::contains_ram`, `krepi_kernel::fdt::MemoryPlan::is_available`, `krepi_kernel::fdt::MemoryPlan::permits_backing`, `krepi_kernel::fdt::MemoryPlan::available_ranges` |
+| 113 | 3 | `krepi_kernel::fdt::Span::new`, `krepi_kernel::fdt::Span::end`, `krepi_kernel::fdt::Span::contains` |
+| 114 | 0 | None: the nine constants |
 
 **Iterators.** `Fdt::nodes`, `Fdt::reservations`, the entries of a `Reg`
 and `MemoryPlan::available_ranges` give iterators, whose types the contract
@@ -74,9 +74,15 @@ walk it, and a root that only returns an iterator does not reach it: no
 function of the module walks the usable ranges, so the `next` of the
 iterator of `available_ranges` is reached by no root. Its refinement
 theorem needs that `next` to state the ranges that the iteration gives, as
-`MemoryPlan.availableRanges` lists them, so the `next` of each iterator
-type joins `start_from` when the implementation names the types. That
-changes the roots of the target, which is reviewed as a change of a
+`MemoryPlan.availableRanges` lists them. This is an open obligation of the
+target, which the contract records in its
+[open obligations](contract.md#open-obligations): the `next` of each
+iterator type joins `start_from` once the implementation names the types,
+and before the implementation merges. Its carriers are the implementation,
+which names the types and adds their `next` to the roots, and the
+refinement proof of the target, which proves each `next` against the
+representation of an iterator by its list ([premises](#premises)). The new
+roots change the roots of the target, which is reviewed as a change of a
 statement ([guard](../../../formal-verification.md#guard)).
 
 **Obligations.** One for each root: its refinement theorem states that, for
@@ -110,6 +116,7 @@ true of every value that another module holds.
 | A `Pi5BootMemory` keeps `Pi5BootMemory.Consistent` | `Fdt::discover_pi5_boot_memory` (`DiscoverPi5BootMemoryConsistent`) | No entry changes it | `is_available` and `find_available`, which exclude the image and the tree (`FindAvailableNoLimitExceeded`); `MemoryPlan::from_pi5` |
 | A `CpuTopology` keeps `CpuTopology.Supported` | `Fdt::discover_cpus` (`DiscoverCpusSupported`) | No entry changes it | `CpuTopology::affinity` and `validate_qemu_timers`; the start of the secondary CPUs in the boot code |
 | A `MemoryPlan` keeps `MemoryPlan.WellFormed` | `MemoryPlan::all_ram`, `new` and `from_pi5` (`AllRamWellFormed`, `MemoryPlanNewWellFormed`, `FromPi5WellFormed`) | The publication of the boot memory map, which keeps it unchanged (`PublishPlanWellFormed`, `PublishTopologyWellFormed`, `StartSecondariesWellFormed`) | The queries; `described_bytes` and `managed_bytes`, whose sums fit 64 bits; `available_ranges` (`AvailableRangesWellFormed`, `UsableRangesExact`); the kernel direct map and the page ownership table of the [page-tables](../../memory/page-tables/contract.md) component |
+| An iterator of the module stands for a list of the specification: its calls of `next` give the items of that list in order, and then none. The nodes are those of `Fdt.nodes`, the reservation entries those of `Fdt.reservations`, the entries of a `Reg` those of `Reg.entries`, and the usable ranges those of `MemoryPlan.availableRanges` | The functions that give the iterators, `Fdt::nodes`, `Fdt::reservations`, `Reg::new` and `Node::reg`, and `MemoryPlan::available_ranges`, whose refinement theorems relate the iterator that each gives to its list | Each `next`, which advances only the iterator's own cursor over checked bytes or values and does not fail ([check and execute](contract.md#check-and-execute)), and gives the head of the rest of the list | The functions that walk an iterator, such as `Fdt::find_node` and the discoveries over the nodes and `Fdt::discover_memory` over the entries of a `Reg`; the callers of `available_ranges`, the kernel direct map and the page ownership table of the page-tables component, to which `UsableRangesExact` and `AvailableRangesWellFormed` carry over |
 | The bytes of the hand-over tree do not change while the kernel runs | The firmware or the loader of QEMU, before the cold entry; the board, which forms the slice of the tree ([open obligations](contract.md#open-obligations)) | The boot memory map, which keeps their pages as boot storage ([state fields](contract.md#state-fields)) | Every tree of the hand-over bytes, and the CPU topology that the boot publishes from it (`BootState.FromHandOver`) |
 
 ### Compile-time guards
@@ -162,7 +169,7 @@ Estimates for the budget:
 
 - The statements of the specification: the proofs of its 41 statements of
   invariants and 8 properties about 7,000 lines (4,500 to 11,000), and of
-  its 20 specification tests about 600 lines (300 to 1,500); the 12
+  its 20 specification tests about 600 lines (300 to 1,500); the 13
   statements of unreachable branches are not estimated apart, and the
   proofs of all of them about 8,000 lines (5,000 to 14,000). The witnesses
   are proved in the specification.
@@ -218,8 +225,10 @@ The target is to add no item to the boundary:
 
 The target leaves open what the contract lists in
 [open obligations](contract.md#open-obligations): the forming of the slice
-of the hand-over tree by each board. It cuts no function, and it reaches no
-function of another component.
+of the hand-over tree by each board, and, until the implementation names
+its iterator types, the `next` of each of them, which then joins the roots
+([iterators](#fdt)). It cuts no function, and it reaches no function of
+another component.
 
 ## Mutants
 
@@ -233,35 +242,35 @@ function that it names fail.
 
 | Name | Line | Source change | Must fail |
 | --- | ---: | --- | --- |
-| `parse-depth-off-by-one` | 97 | The depth check admits a node at depth `MAX_DEPTH`, a path of 33 nodes | Refinement of `Fdt::parse` |
-| `parse-name-padding-unchecked` | 97 | The zero check of the padding after a node name is dropped, so a nonzero byte there gives no `BadPadding` | Refinement of `Fdt::parse` |
-| `parse-reservation-overlap-unchecked` | 97 | The comparison of a reservation entry with the earlier entries is dropped, so overlapping entries give no `Overlap` | Refinement of `Fdt::parse` |
-| `find-node-first-sibling` | 98 | A path component that matches two siblings gives the first of them instead of `AmbiguousMapping` | Refinement of `Fdt::find_node` |
-| `enabled-rejects-ok` | 98 | `enabled` is true only for `okay`, not for `ok` | Refinement of `Node::enabled` |
-| `address-cells-inherited` | 98 | An absent `#address-cells` takes the value of the parent instead of 2 | Refinement of `Node::address_cells` |
-| `memory-overlap-unchecked` | 99 | A RAM range is not compared with the earlier ranges, so overlapping ranges give no `Overlap` | Refinement of `Fdt::discover_memory` |
-| `memory-ranges-off-by-one` | 99 | The count of RAM ranges admits `MAX_MEMORY_REGIONS + 1` ranges | Refinement of `Fdt::discover_memory` |
-| `dynamic-not-counted` | 99 | An enabled child of `/reserved-memory` with `size` and without `reg` is not counted | Refinement of `Fdt::discover_memory` |
-| `pi5-size-off-by-one` | 100 | The size check admits a hand-over tree of `PI5_MAX_BLOB_SIZE + 1` bytes | Refinement of `Fdt::discover_pi5_boot_memory` |
-| `pi5-image-on-tree-unchecked` | 100 | The check that the image shares no address with the tree is dropped | Refinement of `Fdt::discover_pi5_boot_memory` |
-| `is-available-ignores-tree` | 100 | `is_available` leaves the span of the tree out of its exclusions | Refinement of `Pi5BootMemory::is_available` |
-| `find-available-unaligned` | 101 | After a candidate that touches an exclusion, the next candidate starts at the end of that exclusion without aligning it up | Refinement of `Pi5BootMemory::find_available` |
-| `find-available-touch-at-end` | 101 | A candidate that ends exactly at the start of an exclusion is taken to touch it | Refinement of `Pi5BootMemory::find_available` |
-| `cpus-repeated-id-accepted` | 102 | A CPU node with the ID of an earlier CPU node is accepted | Refinement of `Fdt::discover_cpus` |
-| `logical-id-unmasked` | 102 | `logical_id` reads the ID without masking the bits outside the affinity fields | Refinement of `CpuProfile::logical_id` |
-| `cells-high-cell-dropped` | 103 | `cells_u64` of two cells keeps only the low cell | Refinement of `cells_u64` |
-| `translate-first-window` | 103 | A request that two windows hold translates through the first instead of failing with `AmbiguousMapping` | Refinement of `AddressMap::to_parent` |
-| `reg-low-4gib-unchecked` | 103 | `Reg::new` does not check that a span of one address cell ends within the first 4 GiB | Refinement of `Reg::new` |
-| `plan-boot-storage-off-by-one` | 104 | The capacity check admits 5 spans of boot storage | Refinement of `MemoryPlan::all_ram` |
-| `plan-boot-storage-inward` | 104 | A span of boot storage is rounded inward to whole pages instead of outward | Refinement of `MemoryPlan::all_ram` |
-| `plan-window-outside-ram` | 104 | `new` does not check that one bank holds the managed window | Refinement of `MemoryPlan::new` |
-| `available-ranges-past-reservation` | 105 | A usable range ends at the end of the next reservation instead of its start | Refinement of `MemoryPlan::available_ranges` |
-| `permits-backing-all-banks` | 105 | `permits_backing` looks for a bank instead of a managed bank | Refinement of `MemoryPlan::permits_backing` |
-| `managed-bytes-of-banks` | 105 | `managed_bytes` sums the banks instead of the managed banks | Refinement of `MemoryPlan::managed_bytes` |
-| `span-new-wraps` | 106 | `Span::new` accepts a span whose end leaves 64 bits | Refinement of `Span::new` |
-| `span-contains-end-off-by-one` | 106 | `contains` holds also when its argument ends one byte after the span | Refinement of `Span::contains` |
-| `max-property-name-off-by-one` | 107 | `MAX_PROPERTY_NAME` is 65 | Refinement of `Fdt::parse` |
-| `max-blob-size-off-by-one` | 107 | `MAX_BLOB_SIZE` is 2 MiB and 1 byte | Refinement of `Fdt::parse` |
+| `parse-depth-off-by-one` | 104 | The depth check admits a node at depth `MAX_DEPTH`, a path of 33 nodes | Refinement of `Fdt::parse` |
+| `parse-name-padding-unchecked` | 104 | The zero check of the padding after a node name is dropped, so a nonzero byte there gives no `BadPadding` | Refinement of `Fdt::parse` |
+| `parse-reservation-overlap-unchecked` | 104 | The comparison of a reservation entry with the earlier entries is dropped, so overlapping entries give no `Overlap` | Refinement of `Fdt::parse` |
+| `find-node-first-sibling` | 105 | A path component that matches two siblings gives the first of them instead of `AmbiguousMapping` | Refinement of `Fdt::find_node` |
+| `enabled-rejects-ok` | 105 | `enabled` is true only for `okay`, not for `ok` | Refinement of `Node::enabled` |
+| `address-cells-inherited` | 105 | An absent `#address-cells` takes the value of the parent instead of 2 | Refinement of `Node::address_cells` |
+| `memory-overlap-unchecked` | 106 | A RAM range is not compared with the earlier ranges, so overlapping ranges give no `Overlap` | Refinement of `Fdt::discover_memory` |
+| `memory-ranges-off-by-one` | 106 | The count of RAM ranges admits `MAX_MEMORY_REGIONS + 1` ranges | Refinement of `Fdt::discover_memory` |
+| `dynamic-not-counted` | 106 | An enabled child of `/reserved-memory` with `size` and without `reg` is not counted | Refinement of `Fdt::discover_memory` |
+| `pi5-size-off-by-one` | 107 | The size check admits a hand-over tree of `PI5_MAX_BLOB_SIZE + 1` bytes | Refinement of `Fdt::discover_pi5_boot_memory` |
+| `pi5-image-on-tree-unchecked` | 107 | The check that the image shares no address with the tree is dropped | Refinement of `Fdt::discover_pi5_boot_memory` |
+| `is-available-ignores-tree` | 107 | `is_available` leaves the span of the tree out of its exclusions | Refinement of `Pi5BootMemory::is_available` |
+| `find-available-unaligned` | 108 | After a candidate that touches an exclusion, the next candidate starts at the end of that exclusion without aligning it up | Refinement of `Pi5BootMemory::find_available` |
+| `find-available-touch-at-end` | 108 | A candidate that ends exactly at the start of an exclusion is taken to touch it | Refinement of `Pi5BootMemory::find_available` |
+| `cpus-repeated-id-accepted` | 109 | A CPU node with the ID of an earlier CPU node is accepted | Refinement of `Fdt::discover_cpus` |
+| `logical-id-unmasked` | 109 | `logical_id` reads the ID without masking the bits outside the affinity fields | Refinement of `CpuProfile::logical_id` |
+| `cells-high-cell-dropped` | 110 | `cells_u64` of two cells keeps only the low cell | Refinement of `cells_u64` |
+| `translate-first-window` | 110 | A request that two windows hold translates through the first instead of failing with `AmbiguousMapping` | Refinement of `AddressMap::to_parent` |
+| `reg-low-4gib-unchecked` | 110 | `Reg::new` does not check that a span of one address cell ends within the first 4 GiB | Refinement of `Reg::new` |
+| `plan-boot-storage-off-by-one` | 111 | The capacity check admits 5 spans of boot storage | Refinement of `MemoryPlan::all_ram` |
+| `plan-boot-storage-inward` | 111 | A span of boot storage is rounded inward to whole pages instead of outward | Refinement of `MemoryPlan::all_ram` |
+| `plan-window-outside-ram` | 111 | `new` does not check that one bank holds the managed window | Refinement of `MemoryPlan::new` |
+| `available-ranges-past-reservation` | 112 | A usable range ends at the end of the next reservation instead of its start | Refinement of `MemoryPlan::available_ranges` |
+| `permits-backing-all-banks` | 112 | `permits_backing` looks for a bank instead of a managed bank | Refinement of `MemoryPlan::permits_backing` |
+| `managed-bytes-of-banks` | 112 | `managed_bytes` sums the banks instead of the managed banks | Refinement of `MemoryPlan::managed_bytes` |
+| `span-new-wraps` | 113 | `Span::new` accepts a span whose end leaves 64 bits | Refinement of `Span::new` |
+| `span-contains-end-off-by-one` | 113 | `contains` holds also when its argument ends one byte after the span | Refinement of `Span::contains` |
+| `max-property-name-off-by-one` | 114 | `MAX_PROPERTY_NAME` is 65 | Refinement of `Fdt::parse` |
+| `max-blob-size-off-by-one` | 114 | `MAX_BLOB_SIZE` is 2 MiB and 1 byte | Refinement of `Fdt::parse` |
 
 ### Specification mutations
 
@@ -379,11 +388,20 @@ registered as formal.
 - **Steps.** The [work bounds](contract.md#work-bounds) bound the steps of
   each entry; the refinement theorems show that each function returns, and
   no theorem states the number of its steps or its time.
-- **The bytes of `/chosen`.** `UnreadValuesIgnored` states that values of
-  `/chosen` and of dynamic reservations that no entry reads leave the
-  results unchanged, for trees of records; no theorem states it for the
-  bytes of two trees, whose offsets differ with the lengths of those
-  values.
+- **The bytes of `/chosen`.** `UnreadValuesIgnored` states that the values
+  of `/chosen` other than its `device_type` and, when that is `memory`, its
+  `status`, and those of a dynamic reservation other than its `status` and
+  flags, leave the results unchanged, for trees of records; no theorem
+  states it for the bytes of two trees, whose offsets differ with the
+  lengths of those values.
+- **The pages of the hand-over bytes.** The premise that the bytes of the
+  hand-over tree do not change while the kernel runs rests on the published
+  boot memory map, which keeps their pages as boot storage
+  ([state fields](contract.md#state-fields)). The boot state holds those
+  bytes but not their address, so no registered theorem relates the
+  published map to their pages. The board's boot code, which gives the span
+  of the tree to the boot memory map as boot storage, carries it, and a
+  proof that composes that boot code with this target is to state it.
 - **The trees of the node witnesses.** The witnesses of the node entries
   read trees of records that pass the check of `Fdt.WellFormed`; no theorem
   states that each is the parse of some bytes.
