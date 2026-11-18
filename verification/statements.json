@@ -931,6 +931,150 @@
       "theorem": "Krepi.Proofs.PageTables.Allocation.bootOwnersMatchDirectMap",
       "module": "Krepi.Proofs.PageTables.Allocation",
       "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.DescriptorsFollowKindRows",
+      "theorem": "Krepi.Proofs.PageTables.Stp.descriptorsFollowKindRows",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.DescriptorKeepsOnlyItsBits",
+      "theorem": "Krepi.Proofs.PageTables.Stp.descriptorKeepsOnlyItsBits",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.MapPageThenLookup",
+      "theorem": "Krepi.Proofs.PageTables.Stp.mapPageThenLookup",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.MapPageRefusesMappedPage",
+      "theorem": "Krepi.Proofs.PageTables.Stp.mapPageRefusesMappedPage",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.EightGibOfBlocksInNineTables",
+      "theorem": "Krepi.Proofs.PageTables.Stp.eightGibOfBlocksInNineTables",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.BlockBeyondNineTablesRefused",
+      "theorem": "Krepi.Proofs.PageTables.Stp.blockBeyondNineTablesRefused",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.UnmapAndResetFollowContract",
+      "theorem": "Krepi.Proofs.PageTables.Stp.unmapAndResetFollowContract",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.UnmapRefusesUnmappedPage",
+      "theorem": "Krepi.Proofs.PageTables.Stp.unmapRefusesUnmappedPage",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.DirectMapCountsOfPi5Models",
+      "theorem": "Krepi.Proofs.PageTables.Stp.directMapCountsOfPi5Models",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.DirectMapOmitsExcludedPages",
+      "theorem": "Krepi.Proofs.PageTables.Stp.directMapOmitsExcludedPages",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.KernelMapGivesKindsAndGuard",
+      "theorem": "Krepi.Proofs.PageTables.Stp.kernelMapGivesKindsAndGuard",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.KernelMapRefusesSharedPage",
+      "theorem": "Krepi.Proofs.PageTables.Stp.kernelMapRefusesSharedPage",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.PlansFollowContractOrder",
+      "theorem": "Krepi.Proofs.PageTables.Stp.plansFollowContractOrder",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.KernelFillRefusesValidEntry",
+      "theorem": "Krepi.Proofs.PageTables.Stp.kernelFillRefusesValidEntry",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.OwnershipOfBoardShapes",
+      "theorem": "Krepi.Proofs.PageTables.Stp.ownershipOfBoardShapes",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.OwnershipRefusesOverlappingBanks",
+      "theorem": "Krepi.Proofs.PageTables.Stp.ownershipRefusesOverlappingBanks",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.AllocationTakesWindowAndGeneration",
+      "theorem": "Krepi.Proofs.PageTables.Stp.allocationTakesWindowAndGeneration",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.ReleaseRefusesStaleReceipt",
+      "theorem": "Krepi.Proofs.PageTables.Stp.releaseRefusesStaleReceipt",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.ReservationPublishesAfterZeroing",
+      "theorem": "Krepi.Proofs.PageTables.Stp.reservationPublishesAfterZeroing",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.CancelRefusesAttemptedReservation",
+      "theorem": "Krepi.Proofs.PageTables.Stp.cancelRefusesAttemptedReservation",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.CapacitiesAtTheirLimits",
+      "theorem": "Krepi.Proofs.PageTables.Stp.capacitiesAtTheirLimits",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.CapacitiesRefuseOneMore",
+      "theorem": "Krepi.Proofs.PageTables.Stp.capacitiesRefuseOneMore",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.CopyIsPrivateAndOrdered",
+      "theorem": "Krepi.Proofs.PageTables.Stp.copyIsPrivateAndOrdered",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.SpecTests.PageTables.CopyRefusesPrivateLeaf",
+      "theorem": "Krepi.Proofs.PageTables.Stp.copyRefusesPrivateLeaf",
+      "module": "Krepi.Proofs.PageTables.Stp",
+      "state": "planned"
     }
   ]
 }
