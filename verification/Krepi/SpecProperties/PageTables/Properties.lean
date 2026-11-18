@@ -26,11 +26,12 @@ sentences of its contract that they restate:
 5. `PlansPublishInOrder`: every plan of a map zeroes a new table once and
    writes it completely, its entries in index order and each new table under
    it before its `Zero`, before the one store of its table descriptor that
-   makes it reachable, with a `Fence` before that store, and ends with
-   `Sync`; the plan of an unmap stores the invalid entry and then
-   invalidates; the plan of a copy zeroes the target's tables in use, stores
-   every valid entry of the source into the target's table of the same index
-   in index order, and ends with `Sync` (PGT-R04, PGT-R07, PGT-R12).
+   makes it reachable, with a `Fence` before that store, writes the valid
+   entries of the root and of level 2 tables in the form that the walk reads,
+   and ends with `Sync`; the plan of an unmap stores the invalid entry and
+   then invalidates; the plan of a copy zeroes the target's tables in use,
+   stores every valid entry of the source into the target's table of the same
+   index in index order, and ends with `Sync` (PGT-R04, PGT-R07, PGT-R12).
 6. `TablesInUseCounted`: the tables in use of a well-formed set are the root
    and one table for each element of $G$ and of $P$ (PGT-R03, PGT-R05,
    PGT-R11).
@@ -188,7 +189,11 @@ def WxPremises (txns : List Txn) : Prop :=
 /-! ## Plans -/
 
 /-- The table of the pool at `base` that a table descriptor `d` with no
-attribute points at, by its address alone. -/
+attribute points at, by its address alone. The walk follows every valid root
+entry, and every valid entry of a level 2 table other than a block, by its
+address (`Tables.walk2`, `Tables.walk`); a well-formed set holds no other
+form of these entries and `Plan.inOrder` admits none, so that from such a set
+the tables that it reads as reached are those that the walk reaches. -/
 def poolChild? (N : Nat) (base d : UInt64) : Option Nat :=
   let a := (outputAddress d).toNat
   if isPlainTableDescriptor d && base.toNat ≤ a && (a - base.toNat) / PAGE_SIZE < N then
@@ -205,6 +210,14 @@ that a plan builds is reached once a table descriptor points at it. -/
 def Pool.reached (p : Pool N) (base : UInt64) : List Nat :=
   let level2 := p.children base 0
   0 :: level2 ++ level2.flatMap (p.children base)
+
+/-- Whether an entry `d` of the root, or with `level2` of a level 2 table, has
+a form that the walk reads as the contract writes it: invalid; a block, in a
+level 2 table; or a table descriptor with no attribute. The walk follows any
+other valid entry of the root, and any other valid entry of a level 2 table,
+by its address alone, as a table descriptor (`Tables.walk2`, `Tables.walk`). -/
+def walkedAsWritten (level2 : Bool) (d : UInt64) : Bool :=
+  !isValid d || (level2 && typeBits d == BLOCK) || isPlainTableDescriptor d
 
 /-- Whether a step writes table `t`: a `Zero` or a `Store` of it. -/
 def Step.writes (t : Nat) : Step → Bool
@@ -245,6 +258,12 @@ of `Write plans and publication` (lines 406 to 429):
 - a store of a table descriptor into a reached table points at a table not
   yet reached, which with the tables under it the plan has zeroed and
   written before a `Fence` that comes before the store;
+- every valid entry that the plan stores into the root, and every valid
+  entry other than a block that it stores into a level 2 table, is a table
+  descriptor with no attribute, the form that the walk follows
+  (`walkedAsWritten`): an entry of a reached level 2 table when the plan
+  stores it, and an entry of a new table when the plan stores its table
+  descriptor into the root;
 - no step is `Invalidate`, and a plan that makes an entry valid ends with
   `Sync`.
 
@@ -265,8 +284,11 @@ def Plan.inOrder (base : UInt64) : Plan → PlanState N → Bool
     | .store t i d =>
       let child := poolChild? N base d
       let since := st.steps.takeWhile (· != .zero t)
+      (t != 0 || walkedAsWritten false d) &&
+      (!(st.pool.children base 0).contains t || walkedAsWritten true d) &&
       (match child with
-        | some c => st.zeroed.contains c && !st.sealed.contains c
+        | some c => st.zeroed.contains c && !st.sealed.contains c &&
+          (t != 0 || (List.range ENTRIES).all fun j => walkedAsWritten true (st.pool.get c j))
         | none => true) &&
       (if reached.contains t then
         !st.zeroed.contains t && !isValid (st.pool.get t i) &&
@@ -718,12 +740,14 @@ well-formed set:
   index order, and a new table under another new table completely before the
   `Zero` of the other, as the example of new tables and the rule of maps
   order them; they write only invalid entries of the tables that a walk
-  reaches; and they end with `Sync` (lines 406 to 425 and 452 to 454), as
-  `Plan.inOrder` checks. The rest of the rule of maps, the leaves in address
-  order from one table to the next and in the tables that the set holds, and
-  one 2 MiB slot after the other under a level 2 table that the set holds
-  (lines 413 to 418), is given for the plans of the specification test
-  `PlansFollowContractOrder`;
+  reaches, and each valid entry of the root and each valid entry of a level
+  2 table other than a block as a table descriptor with no attribute, the
+  form that the walk follows; and they end with `Sync` (lines 406 to 425 and
+  452 to 454), as `Plan.inOrder` checks. The rest of the rule of maps, the
+  leaves in address order from one table to the next and in the tables that
+  the set holds, and one 2 MiB slot after the other under a level 2 table
+  that the set holds (lines 413 to 418), is given for the plans of the
+  specification test `PlansFollowContractOrder`;
 - the plan of `unmap_page` is `Store(t, i, 0)` of the leaf of $v$ and then
   `Invalidate(v)` (lines 430 to 432);
 - the plan of `clone_kernel_from` is a `Zero` of every table in use of the
