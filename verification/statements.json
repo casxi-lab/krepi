@@ -420,79 +420,79 @@
       "name": "Krepi.Spec.Fdt.Witnesses.HeaderNoOverflow",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.headerNoOverflow",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.ReservationEntriesFit",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.reservationEntriesFit",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.TokensNoOverflow",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.tokensNoOverflow",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.ReservationFuelSuffices",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.reservationFuelSuffices",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.DiscoverMemoryNoBadTree",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.discoverMemoryNoBadTree",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.DiscoverPi5BootMemoryNoBadTree",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.discoverPi5BootMemoryNoBadTree",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.RamBytesFit",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.ramBytesFit",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.ClimbRangesNoBadTree",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.climbRangesNoBadTree",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.TranslateRegFuelSuffices",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.translateRegFuelSuffices",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.WindowTranslationNoOverflow",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.windowTranslationNoOverflow",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.CpuRegNoUnsupportedCells",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.cpuRegNoUnsupportedCells",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.FindAvailableNoLimitExceeded",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.findAvailableNoLimitExceeded",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.BankBytesFit",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.bankBytesFit",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckTablesWellFormed",
