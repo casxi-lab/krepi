@@ -8,6 +8,8 @@ specifications:
   - Krepi.Spec.PageTables.Boot
   - Krepi.Spec.PageTables.Ownership
   - Krepi.Spec.PageTables.Tokens
+  - Krepi.Spec.PageTables.Witnesses.TableSets
+  - Krepi.Spec.PageTables.Witnesses.PageOwnership
 ---
 
 # Page-tables specification
@@ -47,8 +49,11 @@ way in `Stp` below
 [`verification/Krepi/SpecTests/PageTables/`](../../../../verification/Krepi/SpecTests/PageTables/),
 with their planned theorems in `Krepi.Proofs.PageTables.Stp`
 ([Specification tests](#specification-tests)). The witnesses that the
-specification is not vacuous are specified by a further module, which this
-page will describe.
+specification is not vacuous are two further modules below
+[`verification/Krepi/Spec/PageTables/Witnesses/`](../../../../verification/Krepi/Spec/PageTables/Witnesses/),
+split along the seam of the entry table: `TableSets` for the table sets,
+rows 102 to 107, and `PageOwnership` for the page ownership table,
+rows 108 to 112 ([Witnesses](#witnesses)).
 [`Krepi.SpecTests.PageTables.Replay`](../../../../verification/Krepi/SpecTests/PageTables/Replay.lean)
 replays the cases of the
 [vector file](../../../../verification/vectors/memory/page-tables.vectors)
@@ -668,6 +673,125 @@ exclusions of [PGT-R11](requirements.md#pgt-r11).
 | [PGT-R12](requirements.md#pgt-r12) | Accepted: `CopyIsPrivateAndOrdered` | `pt-07`: a source of three pages and a target with a page of its own | The plan of the copy, step by step; 6 tables in use and the source's descriptors; later writes to either set leave the other unchanged | "the frozen vectors hold, and the plan of the copy equals the order of the contract" |
 | [PGT-R12](requirements.md#pgt-r12) | Rejected: `CopyRefusesPrivateLeaf` | `pt-12`: a source with a `KernelPrivateReadWrite` leaf | `InvalidDescriptor` | "the frozen vectors hold" |
 
+### Witnesses
+
+[`Witnesses/TableSets.lean`](../../../../verification/Krepi/Spec/PageTables/Witnesses/TableSets.lean)
+and
+[`Witnesses/PageOwnership.lean`](../../../../verification/Krepi/Spec/PageTables/Witnesses/PageOwnership.lean):
+the theorems that witness that the specification is not vacuous
+([specifications](../../../formal-verification.md#specifications)), split
+into two modules along the seam of the entry table. For each frozen function
+of rows 102 to 112, one input on which it succeeds, with the value that it
+gives; for each error that the contract gives that function, one input on
+which it fails with that error. The functions are counted, not the rows: 28,
+of which 17 can fail. The value type `Kind` of row 102 is read through
+`descriptor`, whose witness takes every kind, and has no witness of its own;
+the adapter of row 113 is excluded. The expected values are literals worked
+out from the contract, never computed by the specification. Where the
+contract gives one error for several rules, the witness of that error is a
+conjunction with one input for each rule, for instance the eight rules of
+`TableBacking` of `clone_kernel_from`.
+
+The modules import the specification alone, `TableSets` the module `Boot`
+and `PageOwnership` the module `Ownership`, so they write their inputs
+themselves: the pools of the sets entry by entry, as the tests of the
+prototype write storage directly; the layouts by their ranges; the tables of
+page ownership as literals of their state; and the boot memory maps as the
+values that `MemoryPlan::all_ram` of the fdt specification gives, which
+`plansBuilt` states. A set or a table of page ownership is an input as its
+type admits it, any pool with any record and any counter, as `pt-08`,
+`pt-13` and `own-01` write them; the boot memory map of `direct_map` is an
+input as the fdt entries build it, since the fdt contract gives it no other
+constructor. A success of a write entry on a set is stated as its record of the
+tables in use and its plan (`outcome`): the write phase changes no table of
+the pool ([widths and quantifiers](#widths-and-quantifiers)), and the
+kernel compares two pools of 512 entries a table too slowly for a witness.
+
+Each witness is an equation, `f x = .ok v` or `f x = .error e`, or for a set
+`outcome (f x) = .ok v`, and the module proves it by `decide +kernel`, with
+a local instance that decides the equality of `Except` values and that no
+statement mentions; `Tables::new` is stated for every storage and proved by
+`rfl`. The modules use no `native_decide`, `sorry` or axiom. `TableSets`
+builds in 5 to 11 s and `PageOwnership` in about 3 s, no declaration of
+either above 1 s.
+
+| Line | Functions | Success | Rejection | Priority pairs | Unreachable branches |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 102 | 9 | 9 | 10 | 8 | 0 |
+| 103 | 3 | 3 | 4 | 10 | 1 |
+| 104 | 1 | 1 | 5 | 6 | 0 |
+| 105 | 1 | 1 | 5 | 6 | 0 |
+| 106 | 1 | 1 | 4 | 4 | 0 |
+| 107 | 2 | 2 | 10 | 15 | 2 |
+| 108 | 1 | 1 | 4 | 5 | 0 |
+| 109 | 2 | 2 | 7 | 5 | 2 |
+| 110 | 3 | 3 | 9 | 7 | 2 |
+| 111 | 2 | 2 | 7 | 5 | 0 |
+| 112 | 3 | 3 | 3 | 2 | 0 |
+| Total | 28 | 28 | 68 | 73 | 5 statements, all planned |
+
+The two statements of the page ownership table each cover a branch of
+rows 109 and 110, so the column counts them at both lines.
+
+**Error priority.** For each step of the error orders of the contract, one
+more witness gives an input that breaks a rule of that step and a later
+rule of the same entry, and states the error of the step; each is a
+conjunction over the entries that have both rules, so the 73 pairs are 33
+theorems. The orders are those of
+[errors of table sets](contract.md#errors-of-table-sets) for the entries on
+one address, `priorityStep1` to `priorityStep6`, and for `kernel_map` and
+`direct_map`, `priorityMapStep1` to `priorityMapStep8`; that of
+[copying the kernel tables](contract.md#copying-the-kernel-tables),
+`priorityCloneStep1` to `priorityCloneStep7`; and those of
+[page ownership](contract.md#page-ownership) for `Ownership::new`,
+`priorityNewStep1` to `priorityNewStep4`, for `choose` and `reserve`,
+`priorityChooseStep1` to `priorityChooseStep5`, and for the receipts of
+`publish`, `cancel`, `release` and `validate`, `priorityReceiptStep1` to
+`priorityReceiptStep3`. Two rules of one error are not told apart, so a step
+is paired with the next rule of another error: the pool of an entry on one
+address with its physical address, or with `NotMapped` where it has none;
+the walk with `OutOfTables` or `NotMapped`. `priorityMapStep6` and
+`priorityMapStep8` take the leaves and the ranges in address order, a range
+of `kernel_map` given later in its layout but lower in address being checked
+first; `priorityCloneStep6` takes the walk of the copy entry by entry, each
+table under its entry before the next entry. The last check of each order,
+`OutOfTables`, the record of tables not reached, the capacity of the
+extents of `Ownership::new`, `MetadataExhausted` and `OutOfMemory` of the
+scan and `InvalidAllocation`, has no later rule; the two rules of
+`PhysRange::new` cannot be broken by one input, since a range of length 0
+ends at its start. With the earlier rule repaired, each of these inputs
+fails with the error of the later rule, so each witness tells the order of
+the contract from the reverse one.
+
+`assignRechecks` gives `assign` choices that `choose` does not give on the
+table, outside the requirement of its row: the reading of the contract keeps
+the checks of `choose` in `assign` ([readings](#readings-of-the-contract)),
+and the three refusals show which. They are not errors that the contract
+gives `assign`, whose one error is `ZeroFailed`.
+
+An error branch that no input of its entry reaches has no witness. For each,
+a planned proposition states the fact that keeps the entry from it, and a
+theorem of the same name with a lower-case first letter below
+`Krepi.Proofs.PageTables.Witnesses` proves it; the error of the branch is
+witnessed through another branch of the same entry.
+
+| Statement | Branch | Reason |
+| --- | --- | --- |
+| `DirectMapRangesOnPages` | `direct_map`: a usable range off a page, `Alignment` | The managed banks and the reservations of a boot memory map that the fdt entries build are whole pages, so are its usable ranges; the `Alignment` of `direct_map` is that of `base` |
+| `DirectMapRangesApart` | `direct_map`: a leaf that an earlier usable range shares, `AlreadyMapped` | Those usable ranges are disjoint parts of disjoint banks; the `AlreadyMapped` of `direct_map` is that of the walk |
+| `CloneTargetWidthChecked` | `clone_kernel_from`: the width at the check of the target pool, `AddressWidth` | It is the width that the check of the source pool accepted |
+| `TakeAcceptsChoice` | `assign` and `reserve`: the checks of the taking of a choice of `choose` on the same table, `GenerationExhausted`, `OutOfMemory` and `MetadataExhausted` | On a table that the entries build the free extents are disjoint, so the extent that holds the chosen range and its room are those that `choose` found, and the counter is unchanged (`Built`) |
+| `HighPlacementNoOverflow` | `choose` and `reserve`: the rounding of a high placement, `AddressOverflow` | Its start is the end of a part less the request, rounded down, so its range ends inside an extent; the rounding overflows only for a low placement |
+
+The two variants of the specification that reject every input or accept
+every input are refuted in each module by two theorems, each a conjunction
+over the functions of its rows that can fail, 9 of the table sets and 8 of
+the page ownership table: `notAlwaysRejecting` gives an input on which each
+succeeds, from the success witnesses, and `notAlwaysSucceeding` an input on
+which each fails, from the rejection witnesses. The other 11 functions
+return a value for every input and have no error. Every success, rejection
+and priority witness is proved in its module; none is planned.
+
 ## Design decisions
 
 ### Readings of the contract
@@ -1250,4 +1374,6 @@ the abstract mapping, $G$, $P$ and the record of the source;
   direct map reads: `Boot.lean` imports `Krepi.Spec.Fdt.Plan`.
 - Lean core. No module of the specification imports Mathlib, the Aeneas
   library or a generated module. `Ownership.lean` imports `Basic.lean` only,
-  and `Tokens.lean` imports `Boot.lean` and `Ownership.lean`.
+  and `Tokens.lean` imports `Boot.lean` and `Ownership.lean`. The witness
+  modules import `Boot.lean` and `Ownership.lean` and no module of
+  `SpecProperties` or `SpecTests`.
