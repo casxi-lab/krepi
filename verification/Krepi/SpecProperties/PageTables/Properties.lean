@@ -23,10 +23,11 @@ sentences of its contract that they restate:
 4. `KernelTablesOnlyFilled`: a plan for one of the kernel tables writes only
    invalid entries and holds no `Invalidate`, and no transaction changes a
    valid entry of the kernel tables (PGT-R04, PGT-R07).
-5. `PlansPublishInOrder`: every plan writes a new table completely before
-   the one store of its table descriptor that makes it reachable, a table
-   under another new table first, with a `Fence` before that store, and ends
-   with `Sync`; the plan of an unmap stores the invalid entry and then
+5. `PlansPublishInOrder`: every plan of a map zeroes a new table once and
+   writes it completely, its entries in index order and each new table under
+   it before its `Zero`, before the one store of its table descriptor that
+   makes it reachable, with a `Fence` before that store, and ends with
+   `Sync`; the plan of an unmap stores the invalid entry and then
    invalidates; the plan of a copy zeroes the target's tables in use, stores
    every valid entry of the source into the target's table of the same index
    in index order, and ends with `Sync` (PGT-R04, PGT-R07, PGT-R12).
@@ -205,16 +206,24 @@ def Pool.reached (p : Pool N) (base : UInt64) : List Nat :=
   let level2 := p.children base 0
   0 :: level2 ++ level2.flatMap (p.children base)
 
+/-- Whether a step writes table `t`: a `Zero` or a `Store` of it. -/
+def Step.writes (t : Nat) : Step → Bool
+  | .zero u => u == t
+  | .store u _ _ => u == t
+  | _ => false
+
 /-- The state of the check of the order of a plan: the pool so far, the
 tables that the plan has zeroed, those written since the last `Fence`, the
-tables whose table descriptor the plan has stored, which it has sealed, and
-whether a store has made an entry valid. -/
+tables whose table descriptor the plan has stored, which it has sealed,
+whether a store has made an entry valid, and the steps so far, the latest
+first. -/
 structure PlanState (N : Nat) where
   pool : Pool N
   zeroed : List Nat
   dirty : List Nat
   sealed : List Nat
   valid : Bool
+  steps : List Step
 
 /-- Whether a plan, executed from the pool of a set at `base`, keeps the order
 of `Write plans and publication` (lines 406 to 429):
@@ -222,30 +231,40 @@ of `Write plans and publication` (lines 406 to 429):
 - a reached table is never zeroed and takes only stores into invalid
   entries, and a table that the plan zeroed takes no step once it is
   reached;
-- a table that is not reached is zeroed before the plan stores into it, and
-  takes no step once the plan has stored its table descriptor, so that the
-  plan writes it completely before that store;
+- a table is zeroed at most once; a table that is not reached is zeroed
+  before the plan stores into it, takes its stores in increasing order of
+  their indices, and takes no step once the plan has stored its table
+  descriptor, so that the plan writes it completely before that store;
 - every table descriptor of a table of the pool that the plan stores points
   at a table that the plan has zeroed and whose table descriptor it has not
-  stored before, so that a table under another new table is built first and
-  a new table has one store of its table descriptor;
+  stored before, so that a new table has one store of its table descriptor;
+- a table descriptor stored into a table that is not reached points at a
+  table that took no step after the `Zero` of the table that it is stored
+  into, so that a new table under another new table is complete before the
+  `Zero` of the other (lines 409 to 412 and 418 to 421);
 - a store of a table descriptor into a reached table points at a table not
   yet reached, which with the tables under it the plan has zeroed and
   written before a `Fence` that comes before the store;
 - no step is `Invalidate`, and a plan that makes an entry valid ends with
-  `Sync`. -/
+  `Sync`.
+
+The rest of the rule of maps, the leaves in address order from one table to
+the next and in the tables that the set holds, and one 2 MiB slot after the
+other under a level 2 table that the set holds (lines 413 to 418), is given
+for the plans of the specification test `PlansFollowContractOrder`. -/
 def Plan.inOrder (base : UInt64) : Plan → PlanState N → Bool
   | [], st => !st.valid
   | [.sync], _ => true
   | step :: rest, st =>
     let reached := st.pool.reached base
-    let next := { st with pool := step.exec st.pool }
+    let next := { st with pool := step.exec st.pool, steps := step :: st.steps }
     match step with
     | .zero t =>
-      !reached.contains t && !st.sealed.contains t &&
+      !reached.contains t && !st.zeroed.contains t &&
         Plan.inOrder base rest { next with zeroed := t :: st.zeroed, dirty := t :: st.dirty }
     | .store t i d =>
       let child := poolChild? N base d
+      let since := st.steps.takeWhile (· != .zero t)
       (match child with
         | some c => st.zeroed.contains c && !st.sealed.contains c
         | none => true) &&
@@ -255,7 +274,14 @@ def Plan.inOrder (base : UInt64) : Plan → PlanState N → Bool
           | some c => !reached.contains c &&
             (c :: st.pool.children base c).all fun u => st.zeroed.contains u && !st.dirty.contains u
           | none => true
-      else st.zeroed.contains t && !st.sealed.contains t) &&
+      else
+        st.zeroed.contains t && !st.sealed.contains t &&
+          (since.all fun s => match s with
+            | .store u j _ => u != t || j < i
+            | _ => true) &&
+          match child with
+          | some c => since.all fun s => !s.writes c
+          | none => true) &&
         Plan.inOrder base rest
           { next with dirty := if reached.contains t then st.dirty else t :: st.dirty,
                       sealed := match child with
@@ -269,7 +295,7 @@ def Plan.inOrder (base : UInt64) : Plan → PlanState N → Bool
 /-- Whether a plan keeps the order of `Write plans and publication` from the
 pool of a set at `base`. -/
 def Plan.publishesInOrder (plan : Plan) (base : UInt64) (p : Pool N) : Bool :=
-  plan.inOrder base ⟨p, [], [], [], false⟩
+  plan.inOrder base ⟨p, [], [], [], false, []⟩
 
 /-- Whether a plan, executed on the pool `p`, writes only entries that are
 invalid when it writes them and holds no `Invalidate`: each `Store` writes
@@ -685,13 +711,19 @@ def KernelTablesOnlyFilled : Prop :=
 /-- **The plans publish in order** (PGT-R07, PGT-R04, PGT-R12). On a
 well-formed set:
 
-- the plans of `map_page`, `map_block`, `kernel_map` and `direct_map` write
-  a new table completely before the one store of its table descriptor that
-  makes it reachable, and nothing into it after that store, with a `Fence`
-  before that store, a table built under another new table first, before the
-  store of its table descriptor into that table, write only invalid entries
-  of the tables that a walk reaches, and end with `Sync` (lines 406 to 425
-  and 452 to 454), as `Plan.inOrder` checks;
+- the plans of `map_page`, `map_block`, `kernel_map` and `direct_map` zero
+  a new table once and write it completely before the one store of its table
+  descriptor that makes it reachable, and nothing into it after that store,
+  with a `Fence` before that store; they write the entries of a new table in
+  index order, and a new table under another new table completely before the
+  `Zero` of the other, as the example of new tables and the rule of maps
+  order them; they write only invalid entries of the tables that a walk
+  reaches; and they end with `Sync` (lines 406 to 425 and 452 to 454), as
+  `Plan.inOrder` checks. The rest of the rule of maps, the leaves in address
+  order from one table to the next and in the tables that the set holds, and
+  one 2 MiB slot after the other under a level 2 table that the set holds
+  (lines 413 to 418), is given for the plans of the specification test
+  `PlansFollowContractOrder`;
 - the plan of `unmap_page` is `Store(t, i, 0)` of the leaf of $v$ and then
   `Invalidate(v)` (lines 430 to 432);
 - the plan of `clone_kernel_from` is a `Zero` of every table in use of the
