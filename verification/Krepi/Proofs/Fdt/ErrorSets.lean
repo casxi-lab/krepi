@@ -23,12 +23,13 @@ one step of its `do` block at a time, without evaluating it:
   extended below by each such lemma);
 - the lists of errors of the reads, cells, spans, regions, maps, the node
   access and the steps of the discoveries (`u32At_errs` to
-  `reservedMemoryBinding_errs`);
+  `checkPi5Compatible_errs`);
 - the walks of the unreachable branches: the header and the tokens never fail
   with `Overflow` (`header_errs`, `walkTokens_errs`, with `header_bounds`),
   and the discoveries of a well-formed tree and the climb of a translation
   never fail with `BadTree` (`discoverMemory_errs`, `discoverPi5_errs`,
-  `climbRanges_errs`).
+  `climbRanges_errs`, with `child_parent` and `findNode_root` for the nodes
+  that they read).
 
 Every step of `errs_auto` unifies at reducible transparency, and the calls
 are tried last: a lemma about a call unified with a whole `do` block can
@@ -158,10 +159,6 @@ theorem u32At_errs (b : ByteArray) (i : Nat) : ErrsIn (· ∈ [Error.truncated])
   unfold u32At
   errs_auto
 
-theorem u64At_errs (b : ByteArray) (i : Nat) : ErrsIn (· ∈ [Error.truncated]) (u64At b i) := by
-  unfold u64At
-  errs_auto
-
 theorem cString_errs (b : ByteArray) (s : Nat) : ErrsIn (· ∈ [Error.badString]) (cString b s) := by
   unfold cString
   errs_auto
@@ -205,7 +202,6 @@ theorem alignUp_errs (a b : Nat) : ErrsIn (· ∈ [Error.overflow]) (alignUp a b
   errs_auto
 
 macro_rules | `(tactic| errs_leaf) => `(tactic| errs_by (u32At_errs _ _))
-macro_rules | `(tactic| errs_leaf) => `(tactic| errs_by (u64At_errs _ _))
 macro_rules | `(tactic| errs_leaf) => `(tactic| errs_by (cString_errs _ _))
 macro_rules | `(tactic| errs_leaf) => `(tactic| errs_by (paddedEnd_errs _ _ _))
 macro_rules | `(tactic| errs_leaf) => `(tactic| errs_by (checkedAdd_errs _ _))
