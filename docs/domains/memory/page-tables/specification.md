@@ -978,11 +978,11 @@ reservation keeps its name, as the test keeps the value that it gets back.
   receipt is the output of `assign`, with `true` when the callback succeeds
   and `false` when it fails; a request that `choose` refuses asks for no
   zeroing and has no `assign` ([behaviour changes](contract.md#legacy-test-vectors),
-  lines 992 to 995). The staged `initialize` with its callback is
+  lines 1006 to 1009). The staged `initialize` with its callback is
   `Reservation::initialized` with the outcome of the callback.
 - The assertions of `own-07`, `own-11` and `own-24` on the counts of failed
-  requests and of failed zeroings of the table have no case (lines 996 to
-  998); the count of failures of a reservation is the reservation's and has
+  requests and of failed zeroings of the table have no case (lines 1010 to
+  1012); the count of failures of a reservation is the reservation's and has
   its cases.
 - A table that the test unwraps is a case, `ok`, as every unwrapped call. The
   tests' helper `range(start, bytes)`, which unwraps `PhysRange::new`, writes
@@ -1018,7 +1018,7 @@ these modules answer 47, in 9,382 cases; 6 do not apply.
 | --- | --- | --- |
 | Replayed, 44 | `pt-01` to `pt-16`, `pt-18`, `pt-21`, `dm-01` to `dm-03`, `own-01` to `own-11`, `own-16` to `own-21` and `own-23` to `own-28` | Every case is a line of the vector file; the 7 GiB of `own-21` are two extents, so its cases take no more than the others |
 | Replayed with a large input, 3 | `pt-17`, `dm-04`, `own-22` | `pt-17`: 4,103 cases, the 4,096 calls of its loop each a case whose earlier calls are a `map_blocks` item. `dm-04`: the property vector of its row, 4,097 lines by the rule of the row. `own-22`: the property vector of its row, 801 lines, whose earlier steps are a `mixed_steps` item. The generator of the file takes the expected outputs of the three from models of the rules of the contract that do not use the specification, for `own-22` a model of each page of each bank as busy or free, and checks them against the literals of the rows |
-| Not applicable, 6 | `pt-19`, `pt-20`, `own-12` to `own-15` | `pt-19` and `pt-20`: the direct map never changes after boot, so the sealing of a page, with the split and merge of its block, is not carried ([behaviour changes](contract.md#legacy-test-vectors), lines 1002 to 1004). `own-12` to `own-15`: the kernel has no byte heap (line 1005); the failure of a page request of `own-15` is in `own-07` and `own-28` |
+| Not applicable, 6 | `pt-19`, `pt-20`, `own-12` to `own-15` | `pt-19` and `pt-20`: the direct map never changes after boot, so the sealing of a page, with the split and merge of its block, is not carried ([behaviour changes](contract.md#legacy-test-vectors), lines 1016 to 1018). `own-12` to `own-15`: the kernel has no byte heap (line 1019); the failure of a page request of `own-15` is in `own-07` and `own-28` |
 
 The comments of the vector file name the vectors that are not applicable.
 The replay module checks one representative case of each vector of the file,

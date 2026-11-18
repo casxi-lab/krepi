@@ -886,6 +886,20 @@ obligations of the contracts that add them, carried by the proof of
 contexts, user copies and the private VM, by release 0.2; the table below
 lists the obligations of the code of this page.
 
+The target of the page-table logic has one open obligation of its own,
+which the target closes and the table therefore does not list.
+`kernel_map`, `direct_map` and `clone_kernel_from` give their plans by
+iterators of the core
+([write plans and publication](#write-plans-and-publication)), and the
+entry table names these functions but not the iterator types, so the roots
+of the target hold no `next`. The `next` of each plan iterator type joins
+the roots once the implementation names the types, and before the
+implementation merges, so that the refinement proof relates the steps that
+each iteration gives to the plan of the specification
+([proof path](proof.md#page-tables)). It is carried by the implementation,
+which names the types and adds their `next` to the roots, and by the
+refinement proof of the target.
+
 | Obligation | Kind | Verified state | Carrier | Stage |
 | --- | --- | --- | --- | --- |
 | `kernel/arch/src/mmu.rs#store_descriptor` (planned) | `unsafe` | Writes the translation tables that the page-table logic describes: one descriptor of a write plan | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
