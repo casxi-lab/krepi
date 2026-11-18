@@ -1075,6 +1075,36 @@
       "theorem": "Krepi.Proofs.PageTables.Stp.copyRefusesPrivateLeaf",
       "module": "Krepi.Proofs.PageTables.Stp",
       "state": "planned"
+    },
+    {
+      "name": "Krepi.Spec.PageTables.Witnesses.TableSets.DirectMapRangesOnPages",
+      "theorem": "Krepi.Proofs.PageTables.Witnesses.TableSets.directMapRangesOnPages",
+      "module": "Krepi.Proofs.PageTables.Witnesses.TableSets",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Spec.PageTables.Witnesses.TableSets.DirectMapRangesApart",
+      "theorem": "Krepi.Proofs.PageTables.Witnesses.TableSets.directMapRangesApart",
+      "module": "Krepi.Proofs.PageTables.Witnesses.TableSets",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Spec.PageTables.Witnesses.TableSets.CloneTargetWidthChecked",
+      "theorem": "Krepi.Proofs.PageTables.Witnesses.TableSets.cloneTargetWidthChecked",
+      "module": "Krepi.Proofs.PageTables.Witnesses.TableSets",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Spec.PageTables.Witnesses.PageOwnership.TakeAcceptsChoice",
+      "theorem": "Krepi.Proofs.PageTables.Witnesses.PageOwnership.takeAcceptsChoice",
+      "module": "Krepi.Proofs.PageTables.Witnesses.PageOwnership",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Spec.PageTables.Witnesses.PageOwnership.HighPlacementNoOverflow",
+      "theorem": "Krepi.Proofs.PageTables.Witnesses.PageOwnership.highPlacementNoOverflow",
+      "module": "Krepi.Proofs.PageTables.Witnesses.PageOwnership",
+      "state": "planned"
     }
   ]
 }
