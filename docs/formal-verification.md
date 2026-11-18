@@ -21,11 +21,11 @@ The registries `verification/targets.json`, `verification/models.json` and
 `verification/statements.json`, the registry of library axioms
 `verification/axioms.json`, the registry of the trusted base
 `verification/tcb.json` and the waiver record `verification/waivers.json`
-([waivers](#waivers)). One specification is registered, that of the
-device-tree component, with its planned statements and a planned target
-whose code does not exist yet ([specifications](#specifications)); no
-formal target, model, library axiom, trusted item or waiver is
-registered. The pinned tools exist: the tool manifest
+([waivers](#waivers)). Two specifications are registered, those of the
+device-tree and page-tables components, each with its planned statements
+and a planned target whose code does not exist yet
+([specifications](#specifications)); no formal target, model, library
+axiom, trusted item or waiver is registered. The pinned tools exist: the tool manifest
 `verification/toolchain.json`, the reviewed Aeneas patch, the recipe of the
 image that holds the tools, the workflows that build and publish it, the
 pin of the published image, `verification/image-pin.json`, and
@@ -36,13 +36,13 @@ Aeneas and Charon sources ([tools](#tools)).
 them, applies their rules, runs its phases and writes a receipt. Its phases
 are the [qualification](#qualification) of the tools on the code shapes of
 the qualification crate, with the three proofs about them; the extraction
-of the [proof targets](#proof-targets), of which only a planned one is
+of the [proof targets](#proof-targets), of which only two planned ones are
 registered, which a whole run does not extract; the
 [base round](#base-round), which builds, audits and replays krepi's own
 Lean: today the qualification proofs and the definitions that they use,
-and the specification of the device tree with its properties, its tests
-and the theorems that witness it, where the theorems of planned statements
-are built but not audited; and the targets, which build and audit the
+and the specifications of the device tree and of the page tables with
+their properties, their tests and the theorems that witness them, where the
+theorems of planned statements are built but not audited; and the targets, which build and audit the
 proofs of each target in a stage of its own and then build each of its
 registered [mutants](#mutants) in a stage of its own, which its proofs
 must reject.
@@ -3340,8 +3340,8 @@ host tests wrote. The two sides are independent: the host tests run the
 code, the replay runs the specification, and both answer the vectors that
 the legacy tree froze
 ([independent evidence](conventions/testing.md#independent-evidence)). The
-contract of the device-tree component names its vector file, and no
-contract names a replay module yet.
+contracts of the device-tree and page-tables components name their vector
+files, and no contract names a replay module yet.
 
 ### Contract block
 
@@ -3835,11 +3835,11 @@ in a checkout are not evidence; only a run of the gate produces receipts.
 
 ## Limitations
 
-- No formal target is registered: the one specification, that of the
-  device-tree component, has a planned target and planned statements, so
-  the whole kernel is unverified, and the base round checks the
-  qualification proofs, the definitions that they use and that
-  specification with the theorems that witness it.
+- No formal target is registered: the two specifications, those of the
+  device-tree and page-tables components, each have a planned target and
+  planned statements, so the whole kernel is unverified, and the base round
+  checks the qualification proofs, the definitions that they use and those
+  specifications with the theorems that witness them.
 - Proofs cover only registered targets. Code outside them, including code
   ported from the legacy tree, is unverified until a target proves it.
 - Sequential refinement does not cover concurrency, weak memory, `unsafe`
