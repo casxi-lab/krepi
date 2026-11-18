@@ -23,11 +23,13 @@ sentences of its contract that they restate:
 4. `KernelTablesOnlyFilled`: a plan for one of the kernel tables writes only
    invalid entries and holds no `Invalidate`, and no transaction changes a
    valid entry of the kernel tables (PGT-R04, PGT-R07).
-5. `PlansPublishInOrder`: every plan writes a new table before the one store
-   that makes it reachable, with a `Fence` before that store, and ends with
-   `Sync`; the plan of an unmap stores the invalid entry and then
-   invalidates; the plan of a copy zeroes, stores and ends with `Sync`
-   (PGT-R04, PGT-R07, PGT-R12).
+5. `PlansPublishInOrder`: every plan writes a new table completely before
+   the one store of its table descriptor that makes it reachable, a table
+   under another new table first, with a `Fence` before that store, and ends
+   with `Sync`; the plan of an unmap stores the invalid entry and then
+   invalidates; the plan of a copy zeroes the target's tables in use, stores
+   every valid entry of the source into the target's table of the same index
+   in index order, and ends with `Sync` (PGT-R04, PGT-R07, PGT-R12).
 6. `TablesInUseCounted`: the tables in use of a well-formed set are the root
    and one table for each element of $G$ and of $P$ (PGT-R03, PGT-R05,
    PGT-R11).
@@ -164,8 +166,9 @@ that W^X rests on, for a list of transactions:
 
 - `kernel_map` and `direct_map` run at most once each (line 112);
 - the boot memory map is well-formed, and each `ReadExecute` range of the
-  layout lies in a span of its boot storage, the kernel image (lines 209 to
-  218 and 525);
+  layout lies in a span of its boot storage: the contract names the span of
+  the kernel image, and any span of boot storage suffices (lines 209 to 218
+  and 525);
 - a fill maps an executable kind only at a page of the text, and a page of
   the text only with `ReadExecute`: "the executable pages come only from the
   image and the boot bundle", and "the text has one kind in every set that
@@ -203,22 +206,34 @@ def Pool.reached (p : Pool N) (base : UInt64) : List Nat :=
   0 :: level2 ++ level2.flatMap (p.children base)
 
 /-- The state of the check of the order of a plan: the pool so far, the
-tables that the plan has zeroed, those written since the last `Fence`, and
+tables that the plan has zeroed, those written since the last `Fence`, the
+tables whose table descriptor the plan has stored, which it has sealed, and
 whether a store has made an entry valid. -/
 structure PlanState (N : Nat) where
   pool : Pool N
   zeroed : List Nat
   dirty : List Nat
+  sealed : List Nat
   valid : Bool
 
 /-- Whether a plan, executed from the pool of a set at `base`, keeps the order
-of `Write plans and publication` (lines 406 to 429): a reached table is never
-zeroed and takes only stores into invalid entries; a table that is not reached
-is zeroed before the plan stores into it; a store into a reached table of a
-table descriptor points at a table not yet reached, which with the tables
-under it the plan has zeroed and written before a `Fence` that comes before
-the store; no step is `Invalidate`; and a plan that makes an entry valid ends
-with `Sync`. -/
+of `Write plans and publication` (lines 406 to 429):
+
+- a reached table is never zeroed and takes only stores into invalid
+  entries, and a table that the plan zeroed takes no step once it is
+  reached;
+- a table that is not reached is zeroed before the plan stores into it, and
+  takes no step once the plan has stored its table descriptor, so that the
+  plan writes it completely before that store;
+- every table descriptor of a table of the pool that the plan stores points
+  at a table that the plan has zeroed and whose table descriptor it has not
+  stored before, so that a table under another new table is built first and
+  a new table has one store of its table descriptor;
+- a store of a table descriptor into a reached table points at a table not
+  yet reached, which with the tables under it the plan has zeroed and
+  written before a `Fence` that comes before the store;
+- no step is `Invalidate`, and a plan that makes an entry valid ends with
+  `Sync`. -/
 def Plan.inOrder (base : UInt64) : Plan → PlanState N → Bool
   | [], st => !st.valid
   | [.sync], _ => true
@@ -227,18 +242,25 @@ def Plan.inOrder (base : UInt64) : Plan → PlanState N → Bool
     let next := { st with pool := step.exec st.pool }
     match step with
     | .zero t =>
-      !reached.contains t &&
+      !reached.contains t && !st.sealed.contains t &&
         Plan.inOrder base rest { next with zeroed := t :: st.zeroed, dirty := t :: st.dirty }
     | .store t i d =>
+      let child := poolChild? N base d
+      (match child with
+        | some c => st.zeroed.contains c && !st.sealed.contains c
+        | none => true) &&
       (if reached.contains t then
-        !isValid (st.pool.get t i) &&
-          match poolChild? N base d with
+        !st.zeroed.contains t && !isValid (st.pool.get t i) &&
+          match child with
           | some c => !reached.contains c &&
             (c :: st.pool.children base c).all fun u => st.zeroed.contains u && !st.dirty.contains u
           | none => true
-      else st.zeroed.contains t) &&
+      else st.zeroed.contains t && !st.sealed.contains t) &&
         Plan.inOrder base rest
           { next with dirty := if reached.contains t then st.dirty else t :: st.dirty,
+                      sealed := match child with
+                        | some c => c :: st.sealed
+                        | none => st.sealed,
                       valid := st.valid || isValid d }
     | .fence => Plan.inOrder base rest { next with dirty := [] }
     | .sync => Plan.inOrder base rest next
@@ -247,7 +269,7 @@ def Plan.inOrder (base : UInt64) : Plan → PlanState N → Bool
 /-- Whether a plan keeps the order of `Write plans and publication` from the
 pool of a set at `base`. -/
 def Plan.publishesInOrder (plan : Plan) (base : UInt64) (p : Pool N) : Bool :=
-  plan.inOrder base ⟨p, [], [], false⟩
+  plan.inOrder base ⟨p, [], [], [], false⟩
 
 /-- Whether a plan, executed on the pool `p`, writes only entries that are
 invalid when it writes them and holds no `Invalidate`: each `Store` writes
@@ -389,9 +411,12 @@ def AfterNew : Prop :=
       s.usedTables = 1
 
 /-- `reset`: $M' = \emptyset$, $G' = P' = \emptyset$ (line 323), and the root
-alone in use with every entry 0 (PGT-R04). -/
+alone in use with every entry 0 (PGT-R04), for a set of any record of
+tables in use, also 0 (lines 745 and 746), whose tables not in use are zero
+(line 679). -/
 def AfterReset : Prop :=
-  ∀ (r : Region) (N : Nat) (s : Tables r N) (base : UInt64) (bits : UInt8), s.WellFormed base bits →
+  ∀ (r : Region) (N : Nat) (s : Tables r N) (base : UInt64),
+    (∀ t, s.used ≤ t → t < N → s.table t = Table.zero) →
     let s' := s.reset.1.apply s.reset.2
     (∀ v l, ¬ s'.M base v l) ∧ (∀ g, ¬ s'.G base g) ∧ (∀ b, ¬ s'.P base b) ∧
       s'.usedTables = 1 ∧ ∀ i, s'.entry 0 i = 0
@@ -441,11 +466,19 @@ def AfterUnmapPage : Prop :=
 /-- `clone_kernel_from(S)`: requires every entry of $M_S$ a page of
 `ReadExecute`, `ReadOnly`, `ReadWrite` or `Device` below
 $2^{\mathrm{bits}}$; then $M' = M_S$, $G' = G_S$, $P' = P_S$, in the tables
-of the indices that $S$ uses (line 327). The source is an argument, which
-the entry does not write. -/
+of the indices that $S$ uses (line 327): "each table descriptor pointing at
+the target's table of the same index" (lines 272 to 274), so the walk of
+every address reaches in the copy the level 2 table, and the level 3 table,
+of the index that it reaches in the source, and the copy has the record of
+the source. The target is one whose tables not in use are zero (line 679),
+as the plan of the copy takes it (lines 445 to 448); the source is an
+argument, which the entry does not write. The entries are compared by the
+tables that the walk reaches, not by their values, since an invalid entry
+of the source is not copied, whatever its other bits. -/
 def AfterCloneKernelFrom : Prop :=
   ∀ (r : Region) (N : Nat) (target source : Tables r N) (sourceBase base : UInt64) (bits : UInt8)
-    (s₁ : Tables r N) (plan : Plan), target.WellFormed base bits →
+    (s₁ : Tables r N) (plan : Plan),
+    (∀ t, target.used ≤ t → t < N → target.table t = Table.zero) →
     target.cloneKernelFrom source sourceBase base bits = .ok (s₁, plan) →
     let s' := s₁.apply plan
     (∀ v l, source.M sourceBase v l →
@@ -453,6 +486,10 @@ def AfterCloneKernelFrom : Prop :=
     (∀ v l, s'.M base v l ↔ source.M sourceBase v l) ∧
     (∀ g, s'.G base g ↔ source.G sourceBase g) ∧
     (∀ b, s'.P base b ↔ source.P sourceBase b) ∧
+    (∀ v t2, (∃ e, s'.walk2 base v = .ok (some (t2, e))) ↔
+      ∃ e, source.walk2 sourceBase v = .ok (some (t2, e))) ∧
+    (∀ v t2 t3, (∃ d, s'.walk base v = .ok (.level3 t2 t3 d)) ↔
+      ∃ d, source.walk sourceBase v = .ok (.level3 t2 t3 d)) ∧
     s'.usedTables = source.usedTables
 
 /-- `kernel_map(L)`: requires every page of every range of $L$ outside
@@ -502,16 +539,18 @@ def AfterDirectMap : Prop :=
       ∃ p, usablePage B p = true ∧ blockForm B p = false ∧
         b = blk (DIRECT_BASE ||| UInt64.ofNat p))
 
-/-- `Ownership::new(a, banks, X)`: requires the checks of the initialization;
-then $O(q)$ is the owner of the exclusions of $X$ that touch $q$, by the
-order firmware, image, boot storage, for every managed page $q$ that one
-touches, and free for every other; $g = 1$ (line 340). -/
+/-- `Ownership::new(a, banks, X)`: requires the checks of the initialization,
+the last of them the extents that the banks, split by the exclusions, need
+against the capacity (lines 561 to 566); then $O(q)$ is the owner of the
+exclusions of $X$ that touch $q$, by the order firmware, image, boot
+storage, for every managed page $q$ that one touches, and free for every
+other; $g = 1$ (line 340). -/
 def AfterOwnershipNew : Prop :=
   ∀ (E X : Nat) (arena : UInt64) (banks : List PhysRange) (exclusions : List Exclusion)
     (t : Ownership E X), Ownership.new arena banks exclusions = .ok t →
     arena ≠ 0 ∧ banks ≠ [] ∧ (∀ b ∈ banks, b.onPages = true) ∧
     banks.Pairwise (fun a b => a.overlaps b = false) ∧ banks.length ≤ E ∧
-    exclusions.length ≤ X ∧
+    exclusions.length ≤ X ∧ t.extents.length ≤ E ∧
     (∀ q, q % PAGE_SIZE = 0 → (∃ b ∈ banks, b.holdsPage q = true) →
       t.ownerOf q = some ((firstExcluder exclusions q).elim .free .excluded)) ∧
     t.counter = .next 1
@@ -648,13 +687,20 @@ well-formed set:
 
 - the plans of `map_page`, `map_block`, `kernel_map` and `direct_map` write
   a new table completely before the one store of its table descriptor that
-  makes it reachable, with a `Fence` before that store, a table built under
-  another new table first, write only invalid entries of the tables that a
-  walk reaches, and end with `Sync` (lines 406 to 425 and 452 to 454);
+  makes it reachable, and nothing into it after that store, with a `Fence`
+  before that store, a table built under another new table first, before the
+  store of its table descriptor into that table, write only invalid entries
+  of the tables that a walk reaches, and end with `Sync` (lines 406 to 425
+  and 452 to 454), as `Plan.inOrder` checks;
 - the plan of `unmap_page` is `Store(t, i, 0)` of the leaf of $v$ and then
   `Invalidate(v)` (lines 430 to 432);
-- the plan of `clone_kernel_from` is `Zero` steps, then `Store` steps, then
-  `Sync` (lines 440 to 451). -/
+- the plan of `clone_kernel_from` is a `Zero` of every table in use of the
+  target, in index order, then a `Store` of every valid entry of every table
+  in use of the source into the target's table of the same index, in the
+  order of the tables and of the entries of each, a leaf as it is and a
+  table descriptor pointing at the target's table of the index that it
+  points at in the source, and `Sync` last, with no `Fence` (lines 440 to
+  451). -/
 def PlansPublishInOrder : Prop :=
   (∀ (r : Region) (N : Nat) (s : Tables r N) (v p : UInt64) (k : Kind) (base : UInt64) (bits : UInt8)
     (s' : Tables r N) (plan : Plan), s.WellFormed base bits →
@@ -675,9 +721,17 @@ def PlansPublishInOrder : Prop :=
   ∀ (r : Region) (N : Nat) (target source : Tables r N) (sourceBase base : UInt64) (bits : UInt8)
     (s : Tables r N) (plan : Plan),
     target.cloneKernelFrom source sourceBase base bits = .ok (s, plan) →
-    ∃ zeros stores, plan = zeros ++ stores ++ [.sync] ∧
-      (∀ step ∈ zeros, ∃ t, step = .zero t) ∧
-      ∀ step ∈ stores, ∃ t i d, step = .store t i d
+    ∃ stores : List (Nat × Nat × UInt64),
+      plan = (List.range (min target.used N)).map Step.zero ++
+        stores.map (fun x => Step.store x.1 x.2.1 x.2.2) ++ [.sync] ∧
+      stores.Pairwise (fun a b => a.1 < b.1 ∨ (a.1 = b.1 ∧ a.2.1 < b.2.1)) ∧
+      (∀ x ∈ stores, x.1 < source.used ∧ x.2.1 < ENTRIES ∧
+        isValid (source.entry x.1 x.2.1) = true ∧
+        if x.1 ∈ source.level3Tables sourceBase then x.2.2 = source.entry x.1 x.2.1
+        else ∃ c, source.child? sourceBase (source.entry x.1 x.2.1) = some c ∧
+          x.2.2 = tableDescriptor (tableAddress base c)) ∧
+      ∀ t i, t < source.used → i < ENTRIES → isValid (source.entry t i) = true →
+        ∃ d, (t, i, d) ∈ stores
 
 /-! ## 6. The tables in use -/
 

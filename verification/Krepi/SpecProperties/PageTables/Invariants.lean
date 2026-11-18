@@ -208,7 +208,9 @@ def Extent.InBank (e : Extent) (banks : List PhysRange) : Prop :=
 boundary, and the banks are in address order and do not overlap (lines 550
 to 552); at most `E` extents, free and held together (lines 639 and 640),
 each a range of whole pages in the bank that it names (lines 88 and 89),
-in address order and disjoint (line 808); at most `X` exclusion records
+in address order (line 808) and disjoint, since an extent records its pages
+with one owner and every managed page has exactly one (line 535); at most
+`X` exclusion records
 (lines 645 to 649); and a counter that has given no generation 0, since it
 starts at 1 (line 621). -/
 def Ownership.WellFormed (t : Ownership E X) : Prop :=
