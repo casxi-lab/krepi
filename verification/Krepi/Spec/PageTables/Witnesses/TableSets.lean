@@ -23,10 +23,12 @@ witness as an equation `f x = .ok v` or `f x = .error e` and decides it with
 a local instance that compares the constructors and their payloads; the
 instance appears in no statement. Where an error has several rules, its
 witness is a conjunction with one input for each rule that the contract names,
-an input that breaks that rule alone: for the entries on one address, a pool
-that ends above $2^{\mathrm{bits}}$ is the pool of 4 tables at `BASE` at the
-width 32, whose walk is sound, so the input also tells the check of the pool
-from a check after the walk and from none.
+an input that breaks that rule alone, a rule counting where the arguments that
+it reads pass the rules that check them: a pool that ends above
+$2^{\mathrm{bits}}$ is the pool of 4 tables at `BASE` at the width 32, whose
+walk is sound, for the entries on one address and for the source of
+`clone_kernel_from`, whose target pool is then at `0x8000_0000`, so the input
+also tells the check of the pool from a check after the walk and from none.
 
 The inputs are written here, since the module imports the specification
 alone: the pools by their descriptors, entry by entry, as the tests of the
@@ -402,14 +404,14 @@ theorem cloneKernelFromAddressWidth :
         .error .addressWidth := by
   decide +kernel
 
-/-- `clone_kernel_from`, each rule of `TableBacking`: the source pool and the
-target pool at `HIGH_BASE`; pools that overlap; a record of no table and one of
-5 tables; a table descriptor that points at table 2 with a record of 2 tables;
-two root entries on table 1, which the walk reaches twice; and a record of 4
-tables, one of which the walk does not reach. -/
+/-- `clone_kernel_from`, each rule of `TableBacking`: the source pool at `BASE`
+at the width 32, which ends above $2^{32}$, with the target pool at
+`0x8000_0000`, and the target pool at `HIGH_BASE`; pools that overlap; a record
+of no table and one of 5 tables; a table descriptor that points at table 2
+with a record of 2 tables; two root entries on table 1, which the walk reaches
+twice; and a record of 4 tables, one of which the walk does not reach. -/
 theorem cloneKernelFromTableBacking :
-    (emptySet .lower 4).cloneKernelFrom pageSet HIGH_BASE TARGET_BASE BITS =
-        .error .tableBacking ∧
+    (emptySet .lower 4).cloneKernelFrom pageSet BASE 0x8000_0000 32 = .error .tableBacking ∧
       (emptySet .lower 4).cloneKernelFrom pageSet BASE HIGH_BASE BITS = .error .tableBacking ∧
       (emptySet .lower 4).cloneKernelFrom pageSet BASE 0x1_0000_2000 BITS =
         .error .tableBacking ∧
@@ -709,12 +711,12 @@ theorem priorityStep2 :
   decide +kernel
 
 /-- Step 3: the pool, `TableBacking`, before the physical address off a page
-or of a block, `Alignment`, with the pool at `HIGH_BASE`; and before an
-address without a page or a block, `NotMapped`, with the pool of 4 tables at
-`BASE` at the width 32, which ends above $2^{32}$ and whose walk is sound. -/
+or of a block, `Alignment`, and before an address without a page or a block,
+`NotMapped`, with the pool of 4 tables at `BASE` at the width 32, which ends
+above $2^{32}$ and whose walk is sound. -/
 theorem priorityStep3 :
-    heldSet.mapPage 0x4000_1000 0x1 .readWrite HIGH_BASE BITS = .error .tableBacking ∧
-      heldSet.mapBlock 0x4040_0000 0x1000 HIGH_BASE BITS = .error .tableBacking ∧
+    heldSet.mapPage 0x4000_1000 0x1 .readWrite BASE 32 = .error .tableBacking ∧
+      heldSet.mapBlock 0x4040_0000 0x1000 BASE 32 = .error .tableBacking ∧
       heldSet.unmapPage 0x4000_1000 BASE 32 = .error .tableBacking ∧
       heldSet.lookupPage 0x4000_1000 BASE 32 = .error .tableBacking ∧
       heldSet.lookupBlock 0x4040_0000 BASE 32 = .error .tableBacking := by
@@ -829,17 +831,18 @@ theorem priorityCloneStep1 :
       .error .alignment := by
   decide +kernel
 
-/-- Step 2: the width 31, `AddressWidth`, before the source pool at
-`HIGH_BASE`, `TableBacking`. -/
+/-- Step 2: the width 31, `AddressWidth`, before the source pool at `BASE`,
+which ends above $2^{32}$, `TableBacking`, with the target pool at
+`0x8000_0000`. -/
 theorem priorityCloneStep2 :
-    (emptySet .lower 4).cloneKernelFrom pageSet HIGH_BASE TARGET_BASE 31 =
+    (emptySet .lower 4).cloneKernelFrom pageSet BASE 0x8000_0000 31 =
       .error .addressWidth := by
   decide +kernel
 
-/-- Step 3: the source pool at `HIGH_BASE`, `TableBacking`, before the target
-base off a page, `Alignment`. -/
+/-- Step 3: the source pool at `BASE` at the width 32, `TableBacking`, before
+the target base `0x8000_0001`, off a page, `Alignment`. -/
 theorem priorityCloneStep3 :
-    (emptySet .lower 4).cloneKernelFrom pageSet HIGH_BASE 0x1_0000_4001 BITS =
+    (emptySet .lower 4).cloneKernelFrom pageSet BASE 0x8000_0001 32 =
       .error .tableBacking := by
   decide +kernel
 
