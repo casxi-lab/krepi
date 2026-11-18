@@ -15,9 +15,9 @@ The parse of the trees of `ParseLimitsExact` at the limits of `totalsize`, the
 nodes on a path, the bytes of a property name, the reservation entries and
 the tokens, and 1 above each. The header and the reservation map are
 evaluated by the lemmas of `Krepi.Proofs.Fdt.ParseBuilt`; the walk of a small
-structure block (the depth and the name) is a kernel decision on the byte
-arrays of its lists, and the walk of the `MAX_TOKENS` tokens is
-`walkTokens_iter` over the no-operations.
+structure block (the size, the depth, the name and the reservations) is a
+kernel decision on the byte arrays of its lists, and the walk of the
+`MAX_TOKENS` tokens is `walkTokens_iter` over the no-operations.
 -/
 
 @[expose] public section

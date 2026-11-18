@@ -12,7 +12,7 @@ about the CPU nodes, whose type is exactly that statement: that a topology
 of the discovery has a supported count and that the affinity of each of its
 CPUs gives back its logical ID.
 
-Every theorem here is proved, with two lemmas that later proofs may share:
+Every theorem here is proved, with two local lemmas:
 `supported_of_idsComplete`, the count of a set of IDs that `idsComplete`
 accepts is supported, and `or_and_mask`, flag bits outside the affinity
 fields leave the affinity fields of a value unchanged. Mathlib is imported
@@ -25,7 +25,7 @@ open Krepi.Spec.Fdt Krepi.SpecProperties.Fdt
 
 /-- The topology of a profile and a set of IDs that `idsComplete` accepts has
 a supported count. -/
-public theorem supported_of_idsComplete {profile : CpuProfile} {ids : List UInt64}
+theorem supported_of_idsComplete {profile : CpuProfile} {ids : List UInt64}
     (h : idsComplete profile ids = true) :
     CpuTopology.Supported ⟨profile, UInt64.ofNat ids.length⟩ := by
   unfold idsComplete at h
@@ -42,7 +42,7 @@ public theorem supported_of_idsComplete {profile : CpuProfile} {ids : List UInt6
 
 /-- Flag bits outside the affinity fields leave the affinity fields of a value
 unchanged. -/
-public theorem or_and_mask (a b : UInt64) (hb : b &&& AFFINITY_MASK = 0) :
+theorem or_and_mask (a b : UInt64) (hb : b &&& AFFINITY_MASK = 0) :
     (a ||| b) &&& AFFINITY_MASK = a &&& AFFINITY_MASK := by
   have : (a ||| b) &&& AFFINITY_MASK = (a &&& AFFINITY_MASK) ||| (b &&& AFFINITY_MASK) :=
     UInt64.toBitVec_inj.1 (by simp [BitVec.and_or_distrib_right])
