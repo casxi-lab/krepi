@@ -1,7 +1,7 @@
 module
 
-public import Krepi.Spec.PageTables.Map
-public meta import Krepi.Spec.PageTables.Map
+public import Krepi.Spec.PageTables.Boot
+public meta import Krepi.Spec.PageTables.Boot
 
 /-!
 # Replay of the page-tables vectors
@@ -15,13 +15,19 @@ contract's `Legacy test vectors` section, in its canonical form, so that
 The expected outputs are the literals of the vector file; nothing here
 computes them.
 
-An input is four fields separated by single spaces:
+An input is fields separated by single spaces:
 
 - `sets=` the sets of the test, `-` for none, or `<name>:<region>:<N>`
   joined by `,`: a set of region `lower` or `upper` and capacity `N`, made by
   `Tables::new` from storage that is zero; `<name>:<region>:<N>:<record>` is
   a set on zero storage whose record of tables in use is `<record>`, as a
   test that writes the storage directly makes it;
+- for a test of the direct map, `memory=` the boot memory map that the test
+  builds with the fdt specification, `MemoryPlan::new` with the fields
+  `window=`, `ram=`, `boot=` and `firmware=`, or `MemoryPlan::all_ram` with
+  the last three: a span is `<start>+<size>`, a list of spans is joined by
+  `,` and `-` when empty, and a firmware reservation is its span, `/` and
+  its flag, `no-map`, `reusable` or `none`;
 - `do=` the earlier calls of the test, `-` for none, joined by `;`, run in
   order before the call, their outputs dropped;
 - `call=` the call of the case;
@@ -32,22 +38,39 @@ A call is `<entry>(<arguments>)`, the arguments joined by `,`:
 `map_page(set,v,p,kind,base,bits)`, `map_block(set,v,p,base,bits)`,
 `unmap_page(set,v,base,bits)`, `lookup_page(set,v,base,bits)`,
 `lookup_block(set,v,base,bits)`, `used(set)`, `reset(set)`,
-`clone_kernel_from(target,source,source_base,base,bits)` and
-`descriptor(kind,address)`; and two writes of a test, which are not entries:
-`set_entry(set,table,index,descriptor)` writes an entry of the storage and
-`set_used(set,record)` the record of tables in use. A write entry that
+`clone_kernel_from(target,source,source_base,base,bits)`,
+`descriptor(kind,address)` and `direct_map(set,base,bits)`, which maps the
+boot memory map of `memory=` into an upper set; and the forms of a test that
+are not one entry: `set_entry(set,table,index,descriptor)` writes an entry of
+the storage, `set_used(set,record)` the record of tables in use,
+`map_blocks(set,v,p,count,base,bits)` is the `count` calls
+`map_block(set,v+0x200000*i,p+0x200000*i,base,bits)` for `i` from 0 to
+`count - 1`, in this order, the first loop of `pt-17`, and
+`translate_block(set,pa,base,bits)` is the check of `dm-04` of the 2 MiB
+block at the physical address `pa` of a direct map. A write entry that
 succeeds has its plan executed on the pool of its set at once, as its caller
 does.
 
 The output of a call is `ok`, followed by its fields, or `err=<error>`:
 `unmap_page` gives `page=<address>`, `lookup_page`, `lookup_block` and
-`descriptor` give `descriptor=<descriptor>`, and `used` gives `used=<count>`.
+`descriptor` give `descriptor=<descriptor>`, `used` gives `used=<count>`, and
+`direct_map` gives `bytes=<bytes> blocks=<count> pages=<count>`, the counts
+of its plan (`Plan.counts`); `map_blocks` gives `ok` when every call
+succeeds and the first error otherwise. `translate_block` gives `map=block`
+when the lookup of its block slot gives a block that translates the block to
+itself, `map=pages absent=<addresses>` when the lookups of its pages give
+pages that translate each to itself or `NotMapped`, with the addresses of
+the latter joined by `,` or `-`, `map=none` when every page is `NotMapped`,
+and `map=wrong page=<address>` for the first page that translates otherwise,
+each translation with AP[2], AP[1] and nG 0 and PXN and UXN 1. A call
+followed by `.` and the name of a field of its output gives that field
+alone, `<field>=<value>`, as the line of a property vector writes it.
 Then each item of `ask=` gives `<item>=<value>`: `unchanged(set)` whether the
 set, its pool and its record, is the one from before the call;
 `zero(set)` whether every entry of its pool is 0; and
 `entry(set,table,index)` the entry. An input that names an unknown set,
-entry or kind, or two sets of different regions or capacities for a copy,
-gives `malformed`.
+entry or kind, two sets of different regions or capacities for a copy, or a
+boot memory map that the fdt specification refuses, gives `malformed`.
 -/
 
 @[expose] public section
@@ -122,6 +145,55 @@ def parseCall (s : String) : Option (String × List String) :=
     | _ => none
   | _ => none
 
+/-- A span `<start>+<size>` of the boot memory map. -/
+def span (s : String) : Option Krepi.Spec.Fdt.Span :=
+  match splitOnChar '+' s with
+  | [start, size] => do pure ⟨← number64 start, ← number64 size⟩
+  | _ => none
+
+/-- A list of spans joined by `,`, or `-` for none. -/
+def spans (s : String) : Option (List Krepi.Spec.Fdt.Span) :=
+  if s == "-" then some [] else (splitOnChar ',' s).mapM span
+
+/-- A firmware reservation `<span>/<flag>`, with the flag `no-map`, `reusable`
+or `none`. -/
+def reservation (s : String) : Option Krepi.Spec.Fdt.ReservedRegion :=
+  match splitOnChar '/' s with
+  | [sp, "no-map"] => (span sp).map (⟨·, true, false⟩)
+  | [sp, "reusable"] => (span sp).map (⟨·, false, true⟩)
+  | [sp, "none"] => (span sp).map (⟨·, false, false⟩)
+  | _ => none
+
+/-- A list of firmware reservations joined by `,`, or `-` for none. -/
+def reservations (s : String) : Option (List Krepi.Spec.Fdt.ReservedRegion) :=
+  if s == "-" then some [] else (splitOnChar ',' s).mapM reservation
+
+/-- The boot memory map of the fields of an input: none without `memory=`;
+the value of `MemoryPlan::new` or `MemoryPlan::all_ram` of the fdt
+specification on the fields; nothing for a field that cannot be read or a
+boot memory map that the specification refuses. -/
+def memory (fs : List (String × String)) : Option (Option Krepi.Spec.Fdt.MemoryPlan) :=
+  let built (m : Except Krepi.Spec.Fdt.PlanError Krepi.Spec.Fdt.MemoryPlan) := m.toOption.map some
+  match field fs "memory" with
+  | none => some none
+  | some "MemoryPlan::new" => do
+    built (Krepi.Spec.Fdt.MemoryPlan.new (← span (← field fs "window"))
+      (← spans (← field fs "ram")) (← spans (← field fs "boot"))
+      (← reservations (← field fs "firmware")))
+  | some "MemoryPlan::all_ram" => do
+    built (Krepi.Spec.Fdt.MemoryPlan.allRam (← spans (← field fs "ram"))
+      (← spans (← field fs "boot")) (← reservations (← field fs "firmware")))
+  | some _ => none
+
+/-- A call and the field of its output that it names after a `.`, if it names
+one: `direct_map(s,0x80000,40).bytes` is the call `direct_map(s,0x80000,40)`
+and the field `bytes`. -/
+def projection (s : String) : String × Option String :=
+  match s.toList.reverse.span (· != '.') with
+  | (name, '.' :: ')' :: call) =>
+    (String.ofList (')' :: call).reverse, some (String.ofList name.reverse))
+  | _ => (s, none)
+
 /-! ## Writing the output -/
 
 /-- A number as `0x` and lowercase hexadecimal digits. -/
@@ -185,9 +257,53 @@ the plan executed on its pool. -/
 def written (r : Region) (n : Nat) (s : Tables r n) (plan : Plan) : AnySet :=
   ⟨r, n, s.apply plan⟩
 
-/-- Runs one call on the sets: the sets after it and its output, or none for a
-malformed call. -/
-def runCall (env : Env) (call : String) : Option (Env × String) := do
+/-- The `count` calls `map_block(set, v + 0x200000 i, p + 0x200000 i, base, bits)`
+from `i`, each on the set that the calls before it left: the set after them
+and the first error, if one fails. -/
+def mapBlocks (s : Tables r n) (v p base : UInt64) (bits : UInt8) :
+    (count i : Nat) → Tables r n × Option TableError
+  | 0, _ => (s, none)
+  | count + 1, i =>
+    let step := UInt64.ofNat (i * BLOCK_SIZE)
+    match s.mapBlock (v + step) (p + step) base bits with
+    | .ok (s', plan) => mapBlocks (s'.apply plan) v p base bits count (i + 1)
+    | .error e =>
+      ((mapBlocks s v p base bits count (i + 1)).1, some e)
+
+/-- Whether a leaf of the direct map has the permissions of `dm-04`: AP[2],
+AP[1] and nG 0, and PXN and UXN 1. -/
+def directPermissions (d : UInt64) : Bool :=
+  d &&& (0x40 ||| 0x80 ||| 0x800) == 0 && d &&& (2 ^ 53 ||| 2 ^ 54) == (2 ^ 53 ||| 2 ^ 54)
+
+/-- How the pages of the 2 MiB block at the physical address `pa` translate in
+a direct map, as the test of `dm-04` reads them: the block slot through
+`lookup_block`; otherwise each page through `lookup_page`, `NotMapped` for an
+absent page. -/
+def translateBlock (s : Tables r n) (pa base : UInt64) (bits : UInt8) : String :=
+  match s.lookupBlock (DIRECT_BASE ||| pa) base bits with
+  | .ok d =>
+    if outputAddress d == pa && directPermissions d then "map=block"
+    else "map=wrong page=" ++ hex pa.toNat
+  | .error _ =>
+    let pages := (List.range ENTRIES).map fun i => UInt64.ofNat (pa.toNat + i * PAGE_SIZE)
+    let rec go : List UInt64 → List UInt64 → Bool → String
+      | [], absent, mapped =>
+        if !mapped then "map=none"
+        else "map=pages absent=" ++
+          if absent.isEmpty then "-" else ",".intercalate (absent.reverse.map (hex ·.toNat))
+      | q :: rest, absent, mapped =>
+        match s.lookupPage (DIRECT_BASE ||| q) base bits with
+        | .ok d =>
+          if outputAddress d == q && directPermissions d then go rest absent true
+          else "map=wrong page=" ++ hex q.toNat
+        | .error .notMapped => go rest (q :: absent) mapped
+        | .error _ => "map=wrong page=" ++ hex q.toNat
+    go pages [] false
+
+/-- Runs one call on the sets, with the boot memory map `memory` of the input:
+the sets after it and its output, or none for a malformed call. -/
+def runCall (memory : Option Krepi.Spec.Fdt.MemoryPlan) (env : Env) (call : String) :
+    Option (Env × String) := do
   let (entry, args) ← parseCall call
   match entry, args with
   | "map_page", [name, v, p, k, base, bits] => do
@@ -237,6 +353,26 @@ def runCall (env : Env) (call : String) : Option (Env × String) := do
   | "set_used", [name, record] => do
     let ⟨r, n, s⟩ ← env.get? name
     pure (env.put name ⟨r, n, { s with used := ← number record }⟩, "ok")
+  | "direct_map", [name, base, bits] => do
+    let a ← env.get? name
+    let s ← a.as? .upper a.n
+    match s.directMap (← memory) (← number64 base) (← number8 bits) with
+    | .ok (s', plan) =>
+      let c := plan.counts
+      pure (env.put name (written .upper a.n s' plan),
+        s!"ok bytes={hex c.bytes} blocks={c.blocks} pages={c.pages}")
+    | .error e => pure (env, err e)
+  | "map_blocks", [name, v, p, count, base, bits] => do
+    let ⟨r, n, s⟩ ← env.get? name
+    let v ← number64 v
+    let p ← number64 p
+    let count ← number count
+    if 2 ^ 64 < v.toNat + count * BLOCK_SIZE || 2 ^ 64 < p.toNat + count * BLOCK_SIZE then failure
+    let (s', e) := mapBlocks s v p (← number64 base) (← number8 bits) count 0
+    pure (env.put name ⟨r, n, s'⟩, match e with | some e => err e | none => "ok")
+  | "translate_block", [name, pa, base, bits] => do
+    let ⟨_, _, s⟩ ← env.get? name
+    pure (env, translateBlock s (← number64 pa) (← number64 base) (← number8 bits))
   | _, _ => none
 
 /-- Whether every entry of every table of a pool is 0. -/
@@ -251,11 +387,24 @@ def query (before after : Env) (item : String) : Option String := do
   | "entry", [name, t, i] => pure (hex ((← after.get? name).set.entry (← number t) (← number i)).toNat)
   | _, _ => none
 
+/-- The field `name` of the output of a call, `<name>=<value>`; an error stays
+as it is. -/
+def project (out name : String) : Option String :=
+  match splitOnChar ' ' out with
+  | "ok" :: fs => fs.find? fun f => (name ++ "=").toList.isPrefixOf f.toList
+  | _ => some out
+
 /-- The output of a case. -/
 def runCase (fs : List (String × String)) : Option String := do
+  let memory ← memory fs
   let env ← (items ',' (← field fs "sets")).mapM declare
-  let env ← (items ';' (← field fs "do")).foldlM (fun env c => (·.1) <$> runCall env c) env
-  let (after, out) ← runCall env (← field fs "call")
+  let env ← (items ';' (← field fs "do")).foldlM
+    (fun env c => (·.1) <$> runCall memory env c) env
+  let (call, name) := projection (← field fs "call")
+  let (after, out) ← runCall memory env call
+  let out ← match name with
+    | some name => project out name
+    | none => pure out
   let asked ← (items ';' (← field fs "ask")).mapM fun item => do
     pure (item ++ "=" ++ (← query env after item))
   pure (" ".intercalate (out :: asked))
@@ -362,5 +511,133 @@ are not part of the string. -/
   do=map_page(source,0x0,0x10000000000,ReadOnly,0x100000000,48) \
   call=clone_kernel_from(target,source,0x100000000,0x100003000,40) ask=zero(target)" ==
   "err=InvalidDescriptor zero(target)=true"
+
+
+-- `pt-11.10`: after `unmap_page` in the first set, the second set still maps its private
+-- stack page.
+#guard replay
+  "sets=first:lower:6,second:lower:6 \
+  do=map_page(first,0x20001000,0x41000000,KernelPrivateReadWrite,0x100000000,40);\
+  lookup_page(first,0x20001000,0x100000000,40);\
+  lookup_page(first,0x20000000,0x100000000,40);\
+  map_page(second,0x20001000,0x42000000,KernelPrivateReadWrite,0x100007000,40);\
+  lookup_page(second,0x20001000,0x100007000,40);\
+  lookup_page(second,0x20000000,0x100007000,40);\
+  lookup_page(first,0x20001000,0x100000000,40);\
+  lookup_page(second,0x20001000,0x100007000,40);\
+  unmap_page(first,0x20001000,0x100000000,40) \
+  call=lookup_page(second,0x20001000,0x100007000,40) ask=-" ==
+  "ok descriptor=0x60000042000f07"
+
+-- `pt-12.3`: a source leaf of `KernelPrivateReadWrite` is `InvalidDescriptor`, and the
+-- target is unchanged.
+#guard replay
+  "sets=source:lower:3,target:lower:3 \
+  do=map_page(source,0x20001000,0x41000000,KernelPrivateReadWrite,0x100000000,40);\
+  map_page(target,0x40000000,0x40000000,ReadWrite,0x100004000,40) \
+  call=clone_kernel_from(target,source,0x100000000,0x100004000,40) ask=unchanged(target)" ==
+  "err=InvalidDescriptor unchanged(target)=true"
+
+-- `pt-13.3`: a set whose storage and record are 0 maps a page after `reset`.
+#guard replay
+  "sets=s:lower:3:0 do=reset(s);used(s);\
+  map_page(s,0x20001000,0x41000000,KernelPrivateReadWrite,0x100000000,40) \
+  call=lookup_page(s,0x20001000,0x100000000,40) ask=-" ==
+  "ok descriptor=0x60000041000f07"
+
+-- `pt-14.12`: an upper set maps `DIRECT_BASE` and keeps every bit of the output address.
+#guard replay
+  "sets=lower:lower:3,upper:upper:3 do=map_page(upper,0x0,0x0,ReadWrite,0x100000000,40);\
+  map_page(upper,0x1000,0x0,ReadWrite,0x100000000,40);\
+  map_page(upper,0x7ffffff000,0x0,ReadWrite,0x100000000,40);\
+  map_page(lower,0xffffff8000000000,0x0,ReadWrite,0x100000000,40);\
+  map_page(lower,0xffffff8000001000,0x0,ReadWrite,0x100000000,40);\
+  map_page(lower,0xfffffffffffff000,0x0,ReadWrite,0x100000000,40);\
+  map_page(lower,0x8000000000,0x0,ReadWrite,0x100000000,40);\
+  map_page(upper,0x8000000000,0x0,ReadWrite,0x100000000,40);\
+  map_page(lower,0xffffff7ffffff000,0x0,ReadWrite,0x100000000,40);\
+  map_page(upper,0xffffff7ffffff000,0x0,ReadWrite,0x100000000,40);\
+  map_page(upper,0xffffff8000000000,0x100000000,ReadWrite,0x100000000,40) \
+  call=lookup_page(upper,0xffffff8000000000,0x100000000,40) ask=-" ==
+  "ok descriptor=0x60000100000707"
+
+-- `pt-15.2`: a block is `ReadWrite` with bits 1 and 0 `0b01`, global and execute-never.
+#guard replay
+  "sets=s:upper:3 do=map_block(s,0xffffff8100000000,0x100000000,0x100000000,40) \
+  call=lookup_block(s,0xffffff8100000000,0x100000000,40) ask=-" ==
+  "ok descriptor=0x60000100000705"
+
+-- `pt-16.15`: after `unmap_page`, the level 3 table stays, so the block slot is not free
+-- of tables.
+#guard replay
+  "sets=s:lower:3 do=map_page(s,0x0,0x0,ReadOnly,0x100000000,40);\
+  map_block(s,0x0,0x0,0x100000000,40);used(s);map_block(s,0x1000,0x0,0x100000000,40);\
+  used(s);map_block(s,0x200000,0x1000,0x100000000,40);used(s);\
+  map_block(s,0x200000,0x10000000000,0x100000000,40);used(s);\
+  map_block(s,0x8000000000,0x0,0x100000000,40);used(s);\
+  map_block(s,0x40000000,0x0,0x100000000,40);used(s);unmap_page(s,0x0,0x100000000,40) \
+  call=map_block(s,0x0,0x0,0x100000000,40) ask=-" ==
+  "err=AlreadyMapped"
+
+-- `pt-17.4103`: after the 4,096 blocks of the loop, the nine tables are in use, so the
+-- next block is `OutOfTables`.
+#guard replay
+  "sets=s:upper:9 do=map_blocks(s,0xffffff8000000000,0x0,4096,0x100000000,40);used(s);\
+  lookup_block(s,0xffffff8000000000,0x100000000,40);\
+  lookup_block(s,0xffffff803fe00000,0x100000000,40);\
+  lookup_block(s,0xffffff8040000000,0x100000000,40);\
+  lookup_block(s,0xffffff8100000000,0x100000000,40);\
+  lookup_block(s,0xffffff81ffe00000,0x100000000,40) \
+  call=map_block(s,0xffffff8200000000,0x200000000,0x100000000,40) ask=-" ==
+  "err=OutOfTables"
+
+-- `pt-18.3`: a source with a block is `InvalidDescriptor`, and the target is unchanged.
+#guard replay
+  "sets=source:upper:3,target:upper:3 \
+  do=map_block(source,0xffffff8000000000,0x0,0x100000000,40);\
+  map_page(target,0xffffff8000001000,0x1000,ReadOnly,0x100004000,40) \
+  call=clone_kernel_from(target,source,0x100000000,0x100004000,40) ask=unchanged(target)" ==
+  "err=InvalidDescriptor unchanged(target)=true"
+
+-- `pt-21.1`: the descriptor of `UserDevice` is Device memory, read and write at EL0, never
+-- executable, not global.
+#guard replay
+  "sets=- do=- call=descriptor(UserDevice,0x0) ask=-" ==
+  "ok descriptor=0x60000000000c43"
+
+-- `dm-01.1`: the reservation and the boot page break blocks: 6 blocks and 1,021 pages.
+#guard replay
+  "sets=s:upper:8 memory=MemoryPlan::new window=0x0+0x1000000 ram=0x0+0x1000000 \
+  boot=0x80000+0x1000 firmware=0x600fff+0x2/reusable do=- call=direct_map(s,0x80000,40) \
+  ask=-" ==
+  "ok bytes=0xffd000 blocks=6 pages=1021"
+
+-- `dm-02.2`: a block above 4 GiB keeps its output address.
+#guard replay
+  "sets=s:upper:3 memory=MemoryPlan::new window=0x100000000+0x400000 \
+  ram=0x0+0x200000,0x100000000+0x400000 boot=0x80000+0x1000 firmware=- \
+  do=direct_map(s,0x80000,40) call=lookup_block(s,0xffffff8100000000,0x80000,40) ask=-" ==
+  "ok descriptor=0x60000100000705"
+
+-- `dm-03.1`: a map that needs more tables than the pool has fails before any write.
+#guard replay
+  "sets=s:upper:2 memory=MemoryPlan::new window=0x0+0x400000 ram=0x0+0x400000 \
+  boot=0x80000+0x1000 firmware=- do=- call=direct_map(s,0x80000,40) ask=-" ==
+  "err=OutOfTables"
+
+-- `dm-04.1`: the first 2 MiB block of the 8 GiB map is in pages, without the boot page.
+#guard replay
+  "sets=s:upper:16 memory=MemoryPlan::all_ram \
+  ram=0x0+0x3fc00000,0x40000000+0xc0000000,0x100000000+0x100000000 boot=0x80000+0x1000 \
+  firmware=0x1fffff001+0x1/no-map do=direct_map(s,0x80000,40) \
+  call=translate_block(s,0x0,0x80000,40) ask=-" ==
+  "map=pages absent=0x80000"
+
+-- `dm-04.4097`: the bytes of the 8 GiB map.
+#guard replay
+  "sets=s:upper:16 memory=MemoryPlan::all_ram \
+  ram=0x0+0x3fc00000,0x40000000+0xc0000000,0x100000000+0x100000000 boot=0x80000+0x1000 \
+  firmware=0x1fffff001+0x1/no-map do=- call=direct_map(s,0x80000,40).bytes ask=-" ==
+  "bytes=0x1ffbfe000"
 
 end Krepi.SpecTests.PageTables.Replay
