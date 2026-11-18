@@ -168,13 +168,13 @@
       "name": "Krepi.SpecProperties.Fdt.FindAvailableWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Pi5.findAvailableWellFormed",
       "module": "Krepi.Proofs.Fdt.Pi5",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.FindAvailableLowest",
       "theorem": "Krepi.Proofs.Fdt.Pi5.findAvailableLowest",
       "module": "Krepi.Proofs.Fdt.Pi5",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.DiscoverCpusSupported",
@@ -192,31 +192,31 @@
       "name": "Krepi.SpecProperties.Fdt.AllRamWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Plan.allRamWellFormed",
       "module": "Krepi.Proofs.Fdt.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.MemoryPlanNewWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Plan.memoryPlanNewWellFormed",
       "module": "Krepi.Proofs.Fdt.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.FromPi5WellFormed",
       "theorem": "Krepi.Proofs.Fdt.Plan.fromPi5WellFormed",
       "module": "Krepi.Proofs.Fdt.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.AvailableRangesWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Plan.availableRangesWellFormed",
       "module": "Krepi.Proofs.Fdt.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.UsableRangesExact",
       "theorem": "Krepi.Proofs.Fdt.Plan.usableRangesExact",
       "module": "Krepi.Proofs.Fdt.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.ColdEntryWellFormed",
