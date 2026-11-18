@@ -144,25 +144,25 @@
       "name": "Krepi.SpecProperties.Fdt.DiscoverMemoryWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Discovery.discoverMemoryWellFormed",
       "module": "Krepi.Proofs.Fdt.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.DiscoverPi5BootMemoryWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Discovery.discoverPi5BootMemoryWellFormed",
       "module": "Krepi.Proofs.Fdt.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.DiscoverPi5BootMemoryConsistent",
       "theorem": "Krepi.Proofs.Fdt.Discovery.discoverPi5BootMemoryConsistent",
       "module": "Krepi.Proofs.Fdt.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.UnreadValuesIgnored",
       "theorem": "Krepi.Proofs.Fdt.Discovery.unreadValuesIgnored",
       "module": "Krepi.Proofs.Fdt.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.FindAvailableWellFormed",
@@ -294,7 +294,7 @@
       "name": "Krepi.SpecProperties.Fdt.NoChoiceAmongDuplicates",
       "theorem": "Krepi.Proofs.Fdt.Duplicates.noChoiceAmongDuplicates",
       "module": "Krepi.Proofs.Fdt.Duplicates",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.ParseAcceptsNameAtLimit",
