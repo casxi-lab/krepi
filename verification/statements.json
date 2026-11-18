@@ -6,61 +6,61 @@
       "name": "Krepi.SpecProperties.Fdt.CheckFdtWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkFdtWellFormed",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckRegWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkRegWellFormed",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckAddressMapWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkAddressMapWellFormed",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckMemoryMapWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkMemoryMapWellFormed",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckPi5BootMemoryConsistent",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkPi5BootMemoryConsistent",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckCpuTopologySupported",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkCpuTopologySupported",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckMemoryPlanWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkMemoryPlanWellFormed",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckBootStateWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkBootStateWellFormed",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckBootStateFromHandOver",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkBootStateFromHandOver",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckBootStateStartOrder",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkBootStateStartOrder",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.ParseWellFormed",
@@ -222,73 +222,73 @@
       "name": "Krepi.SpecProperties.Fdt.ColdEntryWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Boot.coldEntryWellFormed",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.ColdEntryFromHandOver",
       "theorem": "Krepi.Proofs.Fdt.Boot.coldEntryFromHandOver",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.ColdEntryStartOrder",
       "theorem": "Krepi.Proofs.Fdt.Boot.coldEntryStartOrder",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PublishPlanFromHandOver",
       "theorem": "Krepi.Proofs.Fdt.Boot.publishPlanFromHandOver",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PublishPlanStartOrder",
       "theorem": "Krepi.Proofs.Fdt.Boot.publishPlanStartOrder",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PublishTopologyFromHandOver",
       "theorem": "Krepi.Proofs.Fdt.Boot.publishTopologyFromHandOver",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PublishTopologyStartOrder",
       "theorem": "Krepi.Proofs.Fdt.Boot.publishTopologyStartOrder",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.StartSecondariesFromHandOver",
       "theorem": "Krepi.Proofs.Fdt.Boot.startSecondariesFromHandOver",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.StartSecondariesStartOrder",
       "theorem": "Krepi.Proofs.Fdt.Boot.startSecondariesStartOrder",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PublishPlanWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Boot.publishPlanWellFormed",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PublishTopologyWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Boot.publishTopologyWellFormed",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.StartSecondariesWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Boot.startSecondariesWellFormed",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.NoChoiceAmongDuplicates",
