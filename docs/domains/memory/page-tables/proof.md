@@ -78,8 +78,9 @@ whose type the contract does not name. The adapter calls its `next`, and no
 root of the target does, so the extraction reaches no `next` of a plan. The
 refinement theorems of the three entries need it, to state that the steps
 that the iteration gives are the plan of the specification, `mapPlan` or the
-plan of the copy. This is an obligation of the target, which this page
-records: the `next` of each plan iterator type joins `start_from` once the
+plan of the copy. This is an obligation of the target, which the contract
+records in its [open obligations](contract.md#open-obligations): the `next`
+of each plan iterator type joins `start_from` once the
 implementation names the types, and before the implementation merges. Its
 carriers are the implementation, which names the types and adds their
 `next` to the roots, and the refinement proof of the target, which proves
@@ -128,7 +129,7 @@ premise of a value true of every value that another module holds.
 | A fill of the lower kernel set after boot keeps off the guard pages | The code that fills, as the [guard](contract.md#descriptors-and-attributes) rule states, since `map_page` does not know the guards | `kernel_map` writes no entry of a guard page (`AfterEveryWrite`, the row of `kernel_map`) | The translation fault of an access to a guard, which the QEMU tests show; no registered theorem ([not proved](#not-proved)) |
 | A page ownership table keeps `Ownership.Invariant`: `Ownership.WellFormed`, `Ownership.OneOwner`, `Ownership.HolderRanges`, `Ownership.GenerationsBelowCounter` and `Ownership.FreeExtentsMaximal` | `Ownership::new` (`NewOwnershipWellFormed`, `NewOneOwner`, `NewHolderRanges`, `NewGenerationsBelowCounter`, `NewFreeExtentsMaximal`) | `assign` of a choice of `choose`, `reserve`, `publish`, `cancel` and `release` (the preservation statements and `AssignWellFormed` to `ReleaseWellFormed`) | `choose`, whose scan in address order gives the first fit (`PlacementFirstFit`); `owner` and `stats`; the checks of a receipt, a packet or a reservation, which find one extent; `TakeAcceptsChoice` |
 | The table of the kernel root keeps `Ownership.FreeOrHeldUsable` of its boot memory map: its free and held pages are the pages of the usable ranges | `Ownership::new` on the managed banks of a well-formed boot memory map and one exclusion for each span of its boot storage and each firmware reservation, which the boot wiring gives it (`NewFreeOrHeldUsable`) | The same five write entries | The zeroing of a chosen range through the direct map, which maps its pages; `BootOwnersMatchDirectMap`; the second rule of W^X |
-| The choice that `assign` takes is one of `choose` on the same table, taken under the same token (`Ownership.Chose`), the requirement of its row | The caller, which runs `choose`, its zeroing and `assign` as one transaction under the token of the page ownership table (`Shared.allocate`) | The token: no other entry runs on the table between `choose` and `assign` | The row of `assign` in `AfterEveryWrite` and its preservation statements; a choice outside the requirement is refused by the checks of [check and execute](contract.md#check-and-execute) (`assignRechecks`), which a choice of `choose` passes (`TakeAcceptsChoice`) |
+| The choice that `assign` takes is one of `choose` on the same table, taken under the same token (`Ownership.Chose`), the requirement of its row | The private fields of the choice, which only `choose` builds ([guard 1](#compile-time-guards)); the caller, which runs `choose`, its zeroing and `assign` as one transaction under the token of the page ownership table (`Shared.allocate`) | The token: no other entry runs on the table between `choose` and `assign` | The row of `assign` in `AfterEveryWrite` and its preservation statements, which take it as a hypothesis. The checks of [check and execute](contract.md#check-and-execute) refuse only the three cases that the contract lists, an exhausted counter, a range not inside one free extent and the extents beyond the capacity (`assignRechecks`), which a choice of `choose` passes (`TakeAcceptsChoice`); a choice off page boundaries or of a length that is not whole pages passes them and breaks `Ownership.WellFormed`, so only guard 1 keeps such a choice from `assign` |
 | The outcome that `assign` and `Reservation::initialized` take is true exactly when the zeroing of the range completed | The caller, which zeroes the range through the direct map with `krepi_arch::mmu::zero_frames`, an [open obligation](contract.md#open-obligations) | - | The rule that a page reaches a holder only once its bytes are zero ([page ownership](contract.md#page-ownership)); no registered theorem ([not proved](#not-proved)) |
 | A `PhysRange` keeps its invariant: its length is not 0 and its end fits in 64 bits | `PhysRange::new` | No entry changes a range | `end`, `contains`, `overlaps`, `direct_address` and the entries of the page ownership table, which take their banks, exclusions, windows and receipts as ranges |
 | Each shared field is written under its token, held by one CPU at a time from the first check of an entry to the end of its plan; with one CPU, the executing CPU holds it | The caller ([state fields](contract.md#state-fields)) | - | Every write entry, whose refinement is sequential; the transactions of `Krepi.Spec.PageTables.Tokens` |
@@ -146,11 +147,13 @@ each with a compile-fail case that the `subset` step runs
 ([mechanical checks](../../../conventions/provable-subset.md#mechanical-checks)):
 
 1. **Private fields.** `Tables`, `Ownership`, `PhysRange`, `Reservation`,
-   `Initialized` and the plan iterators keep their fields private to the
+   `Initialized`, the choice that `choose` returns (`Choice` in the
+   specification) and the plan iterators keep their fields private to the
    module, so that only the functions of the premises build them, and a
    value that another module holds keeps the premise of its type: no other
-   module makes a range of length 0, a packet whose zeroing did not
-   complete, or a reservation that hides an attempted zeroing. The case for
+   module makes a range of length 0, a choice that `choose` did not give, a
+   packet whose zeroing did not complete, or a reservation that hides an
+   attempted zeroing. A choice is built only by `choose`. The case for
    each type writes a struct literal of it in another module and expects
    `E0451`. `Allocation` carries no invariant, since `release`, `publish`
    and `validate` check every receipt ([page ownership](contract.md#page-ownership)),
