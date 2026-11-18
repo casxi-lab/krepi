@@ -65,8 +65,8 @@ bits hold.
 - **Entry points.** `page_tables::Kind`, `page_tables::descriptor` and
   `Tables::lookup_page` and `lookup_block` (planned).
 - **Contract.** [Descriptors and attributes](contract.md#descriptors-and-attributes).
-- **Specification.** None: the component has no specification.
-- **Proof path.** None: the component has no proof path.
+- **Specification.** [PGT-R01](specification.md#pgt-r01) of the specification.
+- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `pt-01`, `pt-02`, `pt-06`, `pt-11`,
   `pt-15` and `pt-21` as host tests of the module `page_tables` (planned),
   and a host test of each row of the kind table against bits written from
@@ -94,8 +94,8 @@ after every refusal.
 - **Contract.** [Abstract mapping](contract.md#abstract-mapping),
   [Write plans and publication](contract.md#write-plans-and-publication)
   and [Check and execute](contract.md#check-and-execute).
-- **Specification.** None: the component has no specification.
-- **Proof path.** None: the component has no proof path.
+- **Specification.** [PGT-R02](specification.md#pgt-r02) of the specification.
+- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `pt-01`, `pt-03`, `pt-04`, `pt-05`,
   `pt-13` and `pt-14` as host tests. They show the logic on a pool in host
   memory; they do not show a CPU walking the tables.
@@ -115,8 +115,8 @@ of 9 tables and the refusal of one more with `OutOfTables`.
   and `used` (planned).
 - **Contract.** [Abstract mapping](contract.md#abstract-mapping) and
   [Kernel direct map](contract.md#kernel-direct-map).
-- **Specification.** None: the component has no specification.
-- **Proof path.** None: the component has no proof path.
+- **Specification.** [PGT-R03](specification.md#pgt-r03) of the specification.
+- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `pt-15`, `pt-16` and `pt-17` as host
   tests. They build the descriptors of 8 GiB without touching 8 GiB of RAM.
 
@@ -135,8 +135,8 @@ plan of `unmap_page` equals the order of the contract.
   (planned).
 - **Contract.** [Abstract mapping](contract.md#abstract-mapping) and
   [Write plans and publication](contract.md#write-plans-and-publication).
-- **Specification.** None: the component has no specification.
-- **Proof path.** None: the component has no proof path.
+- **Specification.** [PGT-R04](specification.md#pgt-r04) of the specification.
+- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `pt-05`, `pt-09` and `pt-11` as host
   tests, and the host test of the plans of the
   [contract](contract.md#testing-obligations). They show the logic and the
@@ -168,8 +168,8 @@ of the mapped and the excluded ranges behave as the map says.
 - **Contract.** [Kernel direct map](contract.md#kernel-direct-map),
   [Table pool](contract.md#table-pool) and
   [Check and execute](contract.md#check-and-execute).
-- **Specification.** None: the component has no specification.
-- **Proof path.** None: the component has no proof path.
+- **Specification.** [PGT-R05](specification.md#pgt-r05) of the specification.
+- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `dm-01` to `dm-04` as host tests, `dm-04`
   for the 8 GB model; the host tests of the 1, 2, 4 and 16 GB models and of
   the pool at capacity of the [contract](contract.md#testing-obligations);
@@ -198,8 +198,8 @@ layout whose text and data share a page is refused.
   and `enable` (planned).
 - **Contract.** [Kernel mappings](contract.md#kernel-mappings) and
   [Descriptors and attributes](contract.md#descriptors-and-attributes).
-- **Specification.** None: the component has no specification.
-- **Proof path.** None: the component has no proof path.
+- **Specification.** [PGT-R06](specification.md#pgt-r06) of the specification.
+- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
 - **Evidence.** The QEMU tests and the host test of a shared page of the
   [contract](contract.md#testing-obligations). They show the permissions
   of the kernel's own mappings on QEMU virt with one CPU; they do not show
@@ -223,10 +223,10 @@ order of the contract, written from it.
   `clone_kernel_from`, `kernel_map`, `direct_map` and
   `krepi_arch::mmu::apply` (planned).
 - **Contract.** [Write plans and publication](contract.md#write-plans-and-publication).
-- **Specification.** None: the component has no specification.
-- **Proof path.** None: the component has no proof path; the stores, the
-  barriers and the register writes are
-  [open obligations](contract.md#open-obligations).
+- **Specification.** [PGT-R07](specification.md#pgt-r07) of the specification.
+- **Proof path.** The target `page-tables`, registered as planned
+  ([proof path](proof.md#page-tables)); the stores, the barriers and the
+  register writes are [open obligations](contract.md#open-obligations).
 - **Evidence.** The host tests of the plans; the QEMU tests of PGT-R05 and
   PGT-R06, which run with the tables that the plans built. They show the
   order of the steps and that the tables work on one CPU of QEMU virt; they
@@ -248,8 +248,8 @@ map, and the frozen vectors hold.
 - **Examples.** None: no feature document covers the component.
 - **Entry points.** `Ownership::new`, `owner` and `stats` (planned).
 - **Contract.** [Page ownership](contract.md#page-ownership).
-- **Specification.** None: the component has no specification.
-- **Proof path.** None: the component has no proof path.
+- **Specification.** [PGT-R08](specification.md#pgt-r08) of the specification.
+- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `own-03`, `own-04`, `own-05`, `own-17`,
   `own-18`, `own-19`, `own-21` and `own-22` as host tests, with the
   independent page model of `own-22`, and the host test of each board shape
@@ -274,8 +274,8 @@ criterion: the frozen vectors hold.
   and `stats`, and `krepi_arch::mmu::zero_frames` (planned).
 - **Contract.** [Page ownership](contract.md#page-ownership) and
   [Check and execute](contract.md#check-and-execute).
-- **Specification.** None: the component has no specification.
-- **Proof path.** None: the component has no proof path.
+- **Specification.** [PGT-R09](specification.md#pgt-r09) of the specification.
+- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `own-01`, `own-06` to `own-11`, `own-16`,
   `own-18`, `own-20`, `own-21` and `own-22` as host tests. They model the
   zeroing by the test; the QEMU and board runs that allocate, write, release
@@ -297,8 +297,8 @@ vectors hold.
   `Ownership::publish`, `cancel`, `validate`, `release` and `stats`
   (planned).
 - **Contract.** [Page ownership](contract.md#page-ownership).
-- **Specification.** None: the component has no specification.
-- **Proof path.** None: the component has no proof path.
+- **Specification.** [PGT-R10](specification.md#pgt-r10) of the specification.
+- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `own-23` to `own-28` as host tests. They
   show the bookkeeping of a reservation; they do not show the zeroing on a
   CPU.
@@ -321,8 +321,8 @@ refused.
   and `reserve` (planned).
 - **Contract.** [Table pool](contract.md#table-pool) and
   [Page ownership](contract.md#page-ownership).
-- **Specification.** None: the component has no specification.
-- **Proof path.** None: the component has no proof path.
+- **Specification.** [PGT-R11](specification.md#pgt-r11) of the specification.
+- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
 - **Evidence.** The host tests of the capacities of the
   [contract](contract.md#testing-obligations), and the frozen vectors
   `dm-03`, `own-05` and `own-08`.
@@ -348,8 +348,8 @@ contract.
 - **Contract.** [Copying the kernel tables](contract.md#copying-the-kernel-tables),
   [Abstract mapping](contract.md#abstract-mapping) and
   [Write plans and publication](contract.md#write-plans-and-publication).
-- **Specification.** None: the component has no specification.
-- **Proof path.** None: the component has no proof path.
+- **Specification.** [PGT-R12](specification.md#pgt-r12) of the specification.
+- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `pt-07`, `pt-08`, `pt-10`, `pt-12` and
   `pt-18` as host tests, and the host test of the plans of the
   [contract](contract.md#testing-obligations). They show the copy on sets
