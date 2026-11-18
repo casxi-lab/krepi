@@ -22,7 +22,11 @@ sides. Lean core decides no equality of `Except`, so the module states each
 witness as an equation `f x = .ok v` or `f x = .error e` and decides it with
 a local instance that compares the constructors and their payloads; the
 instance appears in no statement. Where an error has several rules, its
-witness is a conjunction with one input for each rule that the contract names.
+witness is a conjunction with one input for each rule that the contract names,
+an input that breaks that rule alone: for the entries on one address, a pool
+that ends above $2^{\mathrm{bits}}$ is the pool of 4 tables at `BASE` at the
+width 32, whose walk is sound, so the input also tells the check of the pool
+from a check after the walk and from none.
 
 The inputs are written here, since the module imports the specification
 alone: the pools by their descriptors, entry by entry, as the tests of the
@@ -301,11 +305,11 @@ theorem lookupPageAddressWidth :
       heldSet.lookupPage 0x4000_0000 BASE 49 = .error .addressWidth := by
   decide +kernel
 
-/-- `lookup_page`: a pool of 4 tables at `HIGH_BASE`, which ends above
-$2^{40}$; a pool of no table; and a level 2 entry that points outside the
-tables in use. -/
+/-- `lookup_page`: a pool of 4 tables at `BASE` at the width 32, which ends
+above $2^{32}$; a pool of no table; and a level 2 entry that points outside
+the tables in use. -/
 theorem lookupPageTableBacking :
-    heldSet.lookupPage 0x4000_0000 HIGH_BASE BITS = .error .tableBacking ∧
+    heldSet.lookupPage 0x4000_0000 BASE 32 = .error .tableBacking ∧
       (emptySet .lower 0).lookupPage 0x4000_0000 BASE BITS = .error .tableBacking ∧
       badLevel2.lookupPage 0x4000_0000 BASE BITS = .error .tableBacking := by
   decide +kernel
@@ -337,10 +341,11 @@ theorem lookupBlockAddressWidth :
       heldSet.lookupBlock 0x4020_0000 BASE 31 = .error .addressWidth := by
   decide +kernel
 
-/-- `lookup_block`: the pool at `HIGH_BASE`; a root entry that points outside
-the pool; and a level 2 entry that points outside the tables in use. -/
+/-- `lookup_block`: the pool at `BASE` at the width 32; a root entry that
+points outside the pool; and a level 2 entry that points outside the tables
+in use. -/
 theorem lookupBlockTableBacking :
-    heldSet.lookupBlock 0x4020_0000 HIGH_BASE BITS = .error .tableBacking ∧
+    heldSet.lookupBlock 0x4020_0000 BASE 32 = .error .tableBacking ∧
       (badRoot .lower 1).lookupBlock 0x4020_0000 BASE BITS = .error .tableBacking ∧
       badLevel2.lookupBlock 0x4000_0000 BASE BITS = .error .tableBacking := by
   decide +kernel
@@ -462,10 +467,10 @@ theorem mapPageAddressWidth :
       heldSet.mapPage 0x4000_1000 0x100_0000_0000 .readWrite BASE BITS = .error .addressWidth := by
   decide +kernel
 
-/-- `map_page`: the pool at `HIGH_BASE`; a root entry that points outside the
-pool; and a level 2 entry that points outside the tables in use. -/
+/-- `map_page`: the pool at `BASE` at the width 32; a root entry that points
+outside the pool; and a level 2 entry that points outside the tables in use. -/
 theorem mapPageTableBacking :
-    heldSet.mapPage 0x4000_1000 0x1000 .readWrite HIGH_BASE BITS = .error .tableBacking ∧
+    heldSet.mapPage 0x4000_1000 0x1000 .readWrite BASE 32 = .error .tableBacking ∧
       (badRoot .lower 1).mapPage 0x4000_0000 0x1000 .readWrite BASE BITS = .error .tableBacking ∧
       badLevel2.mapPage 0x4000_0000 0x1000 .readWrite BASE BITS = .error .tableBacking := by
   decide +kernel
@@ -507,10 +512,10 @@ theorem mapBlockAddressWidth :
       heldSet.mapBlock 0x4040_0000 0x100_0000_0000 BASE BITS = .error .addressWidth := by
   decide +kernel
 
-/-- `map_block`: the pool at `HIGH_BASE`; a root entry that points outside the
-pool; and a level 2 entry that points outside the tables in use. -/
+/-- `map_block`: the pool at `BASE` at the width 32; a root entry that points
+outside the pool; and a level 2 entry that points outside the tables in use. -/
 theorem mapBlockTableBacking :
-    heldSet.mapBlock 0x4040_0000 0x0 HIGH_BASE BITS = .error .tableBacking ∧
+    heldSet.mapBlock 0x4040_0000 0x0 BASE 32 = .error .tableBacking ∧
       (badRoot .lower 1).mapBlock 0x4040_0000 0x0 BASE BITS = .error .tableBacking ∧
       badLevel2.mapBlock 0x4000_0000 0x0 BASE BITS = .error .tableBacking := by
   decide +kernel
@@ -546,10 +551,10 @@ theorem unmapPageAddressWidth :
       heldSet.unmapPage 0x4000_0000 BASE 49 = .error .addressWidth := by
   decide +kernel
 
-/-- `unmap_page`: the pool at `HIGH_BASE`, and a level 2 entry that points
-outside the tables in use. -/
+/-- `unmap_page`: the pool at `BASE` at the width 32, and a level 2 entry that
+points outside the tables in use. -/
 theorem unmapPageTableBacking :
-    heldSet.unmapPage 0x4000_0000 HIGH_BASE BITS = .error .tableBacking ∧
+    heldSet.unmapPage 0x4000_0000 BASE 32 = .error .tableBacking ∧
       badLevel2.unmapPage 0x4000_0000 BASE BITS = .error .tableBacking := by
   decide +kernel
 
@@ -703,15 +708,16 @@ theorem priorityStep2 :
       heldSet.lookupBlock 0x80_0000_0000 HIGH_BASE BITS = .error .addressWidth := by
   decide +kernel
 
-/-- Step 3: the pool at `HIGH_BASE`, `TableBacking`, before the physical
-address off a page or of a block, `Alignment`, and before an address without
-a page or a block, `NotMapped`. -/
+/-- Step 3: the pool, `TableBacking`, before the physical address off a page
+or of a block, `Alignment`, with the pool at `HIGH_BASE`; and before an
+address without a page or a block, `NotMapped`, with the pool of 4 tables at
+`BASE` at the width 32, which ends above $2^{32}$ and whose walk is sound. -/
 theorem priorityStep3 :
     heldSet.mapPage 0x4000_1000 0x1 .readWrite HIGH_BASE BITS = .error .tableBacking ∧
       heldSet.mapBlock 0x4040_0000 0x1000 HIGH_BASE BITS = .error .tableBacking ∧
-      heldSet.unmapPage 0x4000_1000 HIGH_BASE BITS = .error .tableBacking ∧
-      heldSet.lookupPage 0x4000_1000 HIGH_BASE BITS = .error .tableBacking ∧
-      heldSet.lookupBlock 0x4040_0000 HIGH_BASE BITS = .error .tableBacking := by
+      heldSet.unmapPage 0x4000_1000 BASE 32 = .error .tableBacking ∧
+      heldSet.lookupPage 0x4000_1000 BASE 32 = .error .tableBacking ∧
+      heldSet.lookupBlock 0x4040_0000 BASE 32 = .error .tableBacking := by
   decide +kernel
 
 /-- Step 4: the physical address `0x100_0000_0001` or `0x100_0000_1000`, off a

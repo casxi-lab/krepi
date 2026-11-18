@@ -330,12 +330,18 @@ set of 4 tables succeeds with the usable pages alone: 4 blocks and 506 pages,
 `0x9f_a000` bytes, the 10 MiB of the window less the 6 pages of boot storage
 and firmware. Once its plan has run, `lookup_page` refuses each page of
 `excludedPages` with `NotMapped`, where a direct map that mapped it would
-give a descriptor. -/
+give a descriptor. And of the requirement's "A map that needs more tables
+than the pool has, or a range beyond $2^{39}$, fails before any write", the
+range: on the boot memory map of one bank `[0x7f_ffe0_0000, +4 MiB)` across
+$2^{39}$, `direct_map` fails with `AddressWidth` and gives no plan. -/
 def DirectMapOmitsExcludedPages : Prop :=
   excludedMemory.toOption.map (fun memory =>
       ((newSet .upper 4).directMap memory DM_BASE BITS).map fun (s, plan) =>
         (plan.counts, excludedPages.map fun pa => (s.apply plan).lookupPage (DIRECT_BASE ||| pa) DM_BASE BITS)) =
-    some (.ok (⟨0x9f_a000, 4, 506⟩, List.replicate 8 (.error .notMapped)))
+    some (.ok (⟨0x9f_a000, 4, 506⟩, List.replicate 8 (.error .notMapped))) ∧
+  (Fdt.MemoryPlan.allRam [⟨0x7f_ffe0_0000, 0x40_0000⟩] [⟨0x7f_ffe0_0000, 0x1000⟩] []).toOption.map
+      (fun memory => ((newSet .upper 4).directMap memory DM_BASE BITS).map (·.2)) =
+    some (.error .addressWidth)
 
 /-! ## PGT-R06: kernel mappings of the image -/
 
