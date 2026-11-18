@@ -11,8 +11,9 @@ physical RAM. The component takes the boot memory map of the
 cache and TLB maintenance of the
 [boot](../../boot-platform/boot/contract.md#cache-and-tlb-maintenance)
 component. The observable behaviour that these rules serve, with its
-evidence, is in the [requirements](requirements.md), the other document of
-the component.
+evidence, is in the [requirements](requirements.md). The
+[specification](specification.md) states these rules in Lean, and the
+[proof path](proof.md) plans the proof of the code against it.
 
 ## Terms
 
@@ -184,9 +185,11 @@ bits 8 and 9, nG bit 11 and AF bit 10; every other bit of a leaf is 0.
   without gathering, reordering or early write acknowledgement, and
   execute-never at both levels.
 - **Guard.** An entry that must stay invalid: the page below each stack of
-  the image and every page that a mapping leaves out on purpose. No entry of
-  this page writes a valid descriptor where a guard is, and an access to a
-  guard takes a translation fault.
+  the image and every page that a mapping leaves out on purpose.
+  `kernel_map` writes no entry of a guard page of its layout, and the code
+  that fills an invalid entry of the lower kernel set after boot keeps it
+  off the guard pages, which `map_page` does not know; an access to a guard
+  takes a translation fault.
 - **Kernel and user.** The kernel kinds give EL0 no access and are global,
   except `KernelPrivateReadWrite`, which is tagged with the ASID of its
   address space; the user kinds are tagged with the ASID, and EL1 never
@@ -222,7 +225,9 @@ every alias in every table set together
    read-only or executable only. No VM object carries the execute right
    and `mprotect` cannot add it, so no page of a holder is mapped
    executable; a page that becomes executable at run time comes with the
-   full VM object model.
+   full VM object model. A plan that fills an invalid entry of the lower
+   kernel set after boot maps an executable kind only at a page of the text
+   of the image, and a page of the text only with `ReadExecute`.
 
 ### Kernel mappings
 
@@ -405,6 +410,16 @@ them in order, each completing before the next:
   a new level 2 and a new level 3 table is `Zero(t3)`, `Store(t3, ...)`,
   `Zero(t2)`, `Store(t2, ...)`, `Fence`, `Store(root, ...)`, `Sync`
   ([S6b](../../../conventions/smp.md#s6b-new-translation-tables)).
+- **Maps.** The plans of `kernel_map` and `direct_map` take the leaves in
+  address order, one 1 GiB slot after the other. Under a level 2 table that
+  the set holds, a 2 MiB slot is the `Store` of its block, the `Store` of
+  each of its pages into a level 3 table of the set, or `Zero(t3)`, the
+  `Store` of each page, `Fence` and the `Store` of the table descriptor of
+  the new level 3 table. Under a new level 2 table, each new level 3 table
+  under it comes first, `Zero(t3)` and the `Store` of each of its pages, then
+  `Zero(t2)`, the `Store` of each entry of the level 2 table in index order,
+  `Fence` and the `Store` of its table descriptor into the root. `Sync` ends
+  the plan. On one leaf the plan is that of `map_page` or `map_block`.
 - **New entries.** A plan whose last store makes an entry valid ends with
   `Sync`, before the kernel or EL0 relies on the entry
   ([page tables and published data](../../../conventions/smp.md#page-tables-and-published-data)).
@@ -737,6 +752,12 @@ or the image covers in part, at most 4.
   fail only for capacity, with `MetadataExhausted`, and then restores the
   table from before the entry; since the entries of this page count the
   extents in their checks, their write phases do not fail.
+- `assign` checks the outcome of the zeroing first (`ZeroFailed`), and then
+  that its choice still fits the table, in the order of the checks of
+  `choose`: the generation counter exhausted (`GenerationExhausted`), the
+  range not inside one free extent (`OutOfMemory`), and the extents that it
+  needs (`MetadataExhausted`). A choice of `choose` taken under the same
+  token passes them.
 - A rejected request writes nothing, a counter of failures included.
 - `krepi_arch::mmu::apply` executes a plan that the check of its entry
   fixed and does not fail. `enable` and `zero_frames` check nothing and do
@@ -755,13 +776,14 @@ or the image covers in part, at most 4.
   for each valid entry of the source, at most $512 N$, and one `Sync`.
 - `kernel_map` checks each of at most 16 ranges against the others and each
   page of each range once, and its plan has one `Store` for each page and
-  table, one `Zero` for each new table and one `Fence` for each table
-  descriptor.
+  table, one `Zero` for each new table and at most one `Fence` for each
+  table descriptor, before each store that makes new tables reachable.
 - `direct_map` walks each usable range once in steps of a block or a
   page: at most RAM / 2 MiB blocks and, at the two ends of each range, at
   most 511 pages each. Its plan has one `Store` for each block, page and
-  table descriptor, one `Zero` for each new table, at most 80, and one
-  `Fence` for each table descriptor; it runs to its end at boot.
+  table descriptor, one `Zero` for each new table, at most 80, and at most
+  one `Fence` for each table descriptor, before each store that makes new
+  tables reachable; it runs to its end at boot.
 - `Ownership::new` compares each of at most 32 banks with the others and
   each of at most 132 exclusions with each bank, and writes at most 132
   exclusion records; `choose`, `assign`, `reserve`, `publish`, `cancel`,
@@ -824,7 +846,10 @@ boot contract.
   16 GB from the bank shapes that the fdt contract infers and the exclusions
   of [Table pool](#table-pool), and check every 2 MiB block against an
   independent page model as `dm-04` does, with the counts of tables, blocks
-  and pages of that table. The 8 GB model is the frozen vector `dm-04`.
+  and pages of that table. The frozen vector `dm-04` models the 8 GB board
+  by its banks, with one page of boot storage and one `no-map` page; the
+  counts of the 8 GB model in [Table pool](#table-pool) are those that the
+  prototype measured on the board, which the board runs check.
   These models are not run on a board in release 0.1; only the 8 GB model
   is.
 - A host test builds a direct map that needs exactly the 80 tables of the
@@ -878,9 +903,11 @@ page is one `#[test]` function of the prototype; in the vector file it is
 the lines whose id starts with the id of the vector and a dot, one line for
 each case, `<vector>.<n>` from 1 in the order of the test, where a case is
 one call of an entry that the test makes with the output that it asserts.
-The expected outputs below are the assertions of the test bodies. The vector
-file is the one that the block below names; the replay is named once the
-host tests write their results.
+The expected outputs below are the assertions of the test bodies. Where a
+row says only that a call fails, the vector file gives the error that the
+rules of this page give for its input; the expected output of the row stays
+as the test asserts it. The vector file is the one that the block below
+names; the replay is named once the host tests write their results.
 
 ```vectors
 vectors = "verification/vectors/memory/page-tables.vectors"
@@ -925,7 +952,10 @@ A case of a direct map holds the boot memory map that its test builds:
 `firmware=`, or `memory=MemoryPlan::all_ram` with the last three, in the
 notation of the
 [fdt contract](../../boot-platform/fdt/contract.md#notation). The output of
-`direct_map` is `ok bytes=<bytes> blocks=<count> pages=<count>`. A line of
+`direct_map` is `ok bytes=<bytes> blocks=<count> pages=<count>`. The counts
+are those of its plan: the blocks and the pages that the plan stores, and
+the bytes of both; a line gives them in the order of that output also where
+its row lists them in another. A line of
 `dm-04` for a 2 MiB block is the check of its test of the pages of that
 block, `translate_block(set,pa,base,bits)`, after the `direct_map` of the
 row, and its last line is the field `bytes` of the `direct_map`,
