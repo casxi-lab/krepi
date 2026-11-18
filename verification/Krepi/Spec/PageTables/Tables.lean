@@ -175,13 +175,18 @@ def Tables.lookupPage (s : Tables r N) (v base : UInt64) (bits : UInt8) : Except
 
 /-- `Tables::lookup_block(v, base, bits)`: the block descriptor at the block
 slot `v`, or the error of the first broken rule: the first checks for a block,
-so `v` a multiple of 2 MiB; the root entry, `TableBacking` when it does not
-point at a table in use; `NotMapped` when the level 2 entry of `v` is not a
-block. The walk reads the root entry and the level 2 entry only. -/
+so `v` a multiple of 2 MiB; the walk, `TableBacking` when the root entry, or a
+valid level 2 entry other than a block, does not point at a table in use, as
+for `lookup_page`; `NotMapped` when the level 2 entry of `v` is not a block.
+The walk reads the root entry and the level 2 entry only, and of a table
+descriptor at level 2 only its address. -/
 def Tables.lookupBlock (s : Tables r N) (v base : UInt64) (bits : UInt8) : Except TableError UInt64 := do
   checkEntry r N v BLOCK_SIZE base bits
   match ← s.walk2 base v with
-  | some (_, e2) => if typeBits e2 == BLOCK then pure e2 else throw .notMapped
+  | some (_, e2) =>
+    if typeBits e2 == BLOCK then pure e2
+    else if isValid e2 && (s.child? base e2).isNone then throw .tableBacking
+    else throw .notMapped
   | none => throw .notMapped
 
 /-! ## The abstract mapping -/

@@ -87,17 +87,20 @@ inductive Place where
   deriving DecidableEq, Repr
 
 /-- The walk of a leaf through the set at `base`, with the rules of
-`map_page` and `map_block`: `TableBacking` for a valid root entry, or for a
-page a valid level 2 entry other than a block, that does not point at a table
-in use; `AlreadyMapped` for a block where the level 2 entry is valid, a block
-or a level 3 table, and for a page where a block covers it or its level 3
-entry is valid. Otherwise the place of the leaf. -/
+`map_page` and `map_block`: `TableBacking` for a valid root entry, or a valid
+level 2 entry other than a block, that does not point at a table in use;
+`AlreadyMapped` for a block where the level 2 entry is valid, a block or a
+level 3 table, and for a page where a block covers it or its level 3 entry is
+valid. Otherwise the place of the leaf. -/
 def Tables.place (s : Tables r N) (base : UInt64) (l : MapLeaf) : Except TableError Place := do
   match ← s.walk2 base l.va with
   | none => pure .root
   | some (t2, e2) =>
     match l.form with
-    | .block => if isValid e2 then throw .alreadyMapped else pure (.level2 t2)
+    | .block =>
+      if !isValid e2 then pure (.level2 t2)
+      else if typeBits e2 != BLOCK && (s.child? base e2).isNone then throw .tableBacking
+      else throw .alreadyMapped
     | .page =>
       if !isValid e2 then pure (.level2 t2)
       else if typeBits e2 == BLOCK then throw .alreadyMapped

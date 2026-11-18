@@ -162,6 +162,12 @@ def upperPage : Tables .upper 4 := ⟨⟨(UPPER ++ [Table.zero]).toArray, rfl⟩
 /-- An upper set of 3 tables, all in use, of the tables `UPPER`. -/
 def upperPage3 : Tables .upper 3 := ⟨⟨UPPER.toArray, rfl⟩, 3⟩
 
+/-- An upper set of 4 tables, 2 in use, whose root entry 0 points at table 1
+and whose level 2 entry of the block slot `DIRECT_BASE | 0x20_0000` points at
+table 3, outside the tables in use. -/
+def badLevel2Upper : Tables .upper 4 :=
+  ⟨⟨#[table [(0, 0x1_0000_1003)], table [(1, 0x1_0000_3003)], Table.zero, Table.zero], rfl⟩, 2⟩
+
 /-- The record of the tables in use and the plan of a write entry on a set: the
 write phase changes no table of the pool, which keeps the input's until the
 plan is executed. -/
@@ -331,11 +337,12 @@ theorem lookupBlockAddressWidth :
       heldSet.lookupBlock 0x4020_0000 BASE 31 = .error .addressWidth := by
   decide +kernel
 
-/-- `lookup_block`: the pool at `HIGH_BASE`, and a root entry that points
-outside the pool. -/
+/-- `lookup_block`: the pool at `HIGH_BASE`; a root entry that points outside
+the pool; and a level 2 entry that points outside the tables in use. -/
 theorem lookupBlockTableBacking :
     heldSet.lookupBlock 0x4020_0000 HIGH_BASE BITS = .error .tableBacking ∧
-      (badRoot .lower 1).lookupBlock 0x4020_0000 BASE BITS = .error .tableBacking := by
+      (badRoot .lower 1).lookupBlock 0x4020_0000 BASE BITS = .error .tableBacking ∧
+      badLevel2.lookupBlock 0x4000_0000 BASE BITS = .error .tableBacking := by
   decide +kernel
 
 /-- `lookup_block`: a level 2 entry that points at a level 3 table, one that is
@@ -500,11 +507,12 @@ theorem mapBlockAddressWidth :
       heldSet.mapBlock 0x4040_0000 0x100_0000_0000 BASE BITS = .error .addressWidth := by
   decide +kernel
 
-/-- `map_block`: the pool at `HIGH_BASE`, and a root entry that points outside
-the pool. -/
+/-- `map_block`: the pool at `HIGH_BASE`; a root entry that points outside the
+pool; and a level 2 entry that points outside the tables in use. -/
 theorem mapBlockTableBacking :
     heldSet.mapBlock 0x4040_0000 0x0 HIGH_BASE BITS = .error .tableBacking ∧
-      (badRoot .lower 1).mapBlock 0x4040_0000 0x0 BASE BITS = .error .tableBacking := by
+      (badRoot .lower 1).mapBlock 0x4040_0000 0x0 BASE BITS = .error .tableBacking ∧
+      badLevel2.mapBlock 0x4000_0000 0x0 BASE BITS = .error .tableBacking := by
   decide +kernel
 
 /-- `map_block`: a slot that holds a block, and one that holds a level 3 table,
@@ -643,11 +651,13 @@ theorem directMapAddressWidth :
       (emptySet .upper 4).directMap highPlan 0x8_0000 32 = .error .addressWidth := by
   decide +kernel
 
-/-- `direct_map`: the pool at `HIGH_BASE`, and a root entry that points outside
-the pool. -/
+/-- `direct_map`: the pool at `HIGH_BASE`; a root entry that points outside
+the pool; and, at the block `0x20_0000` of `dmPlan`, a level 2 entry that
+points outside the tables in use. -/
 theorem directMapTableBacking :
     (emptySet .upper 4).directMap dmPlan HIGH_BASE BITS = .error .tableBacking ∧
-      (badRoot .upper 0).directMap dmPlan BASE BITS = .error .tableBacking := by
+      (badRoot .upper 0).directMap dmPlan BASE BITS = .error .tableBacking ∧
+      badLevel2Upper.directMap dmPlan BASE BITS = .error .tableBacking := by
   decide +kernel
 
 /-- `direct_map`: a set that maps the direct address of the usable page

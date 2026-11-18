@@ -90,11 +90,12 @@ def Tables.mapPage (s : Tables r N) (v p : UInt64) (k : Kind) (base : UInt64) (b
 physical block `p` as `ReadWrite` with one level 2 descriptor, or the error of
 the first broken rule: the first checks for a block (`checkEntry`), so `v` a
 multiple of 2 MiB; `p` (`checkPhysical`), a multiple of 2 MiB below
-$2^{\mathrm{bits}}$; the root entry, `TableBacking` when it does not point at a
-table in use; `AlreadyMapped` when the level 2 entry of `v` is valid, a block
-or a level 3 table, so the slot is not free of tables; and last `OutOfTables`
-when the pool has no free table for a new level 2 table. It never turns a
-level 3 table into a block.
+$2^{\mathrm{bits}}$; the walk, `TableBacking` when the root entry, or a valid
+level 2 entry other than a block, does not point at a table in use, as for
+`map_page`; `AlreadyMapped` when the level 2 entry of `v` is valid, a block or
+a level 3 table, so the slot is not free of tables; and last `OutOfTables`
+when the pool has no free table for a new level 2 table. It reads no level 3
+table, and never turns a level 3 table into a block.
 
 The plan of a new level 2 table `t2` is `Zero(t2)`, `Store(t2, ...)` of the
 block, `Fence`, `Store(root, ...)` of the table descriptor of `t2`, `Sync`;
@@ -112,6 +113,7 @@ def Tables.mapBlock (s : Tables r N) (v p base : UInt64) (bits : UInt8) :
       [.zero t2, .store t2 (index2 v) block,
         .fence, .store 0 (index1 v) (tableDescriptor (tableAddress base t2)), .sync])
   | some (t2, e2) =>
+    if isValid e2 && typeBits e2 != BLOCK && (s.child? base e2).isNone then throw .tableBacking
     if isValid e2 then throw .alreadyMapped
     pure (s, [.store t2 (index2 v) block, .sync])
 
