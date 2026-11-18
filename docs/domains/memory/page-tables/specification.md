@@ -598,7 +598,7 @@ extent holds and gives a request.
 | `AfterEveryWrite` | For each of the 14 write entries, on a valid state, a success establishes the `Requires` column of its row and the `After` column between the state before and the state once the plan has run, for `reset` and the target of a copy a set whose tables not in use are zero, and for `clone_kernel_from` with the tables of the indices that the source uses, which the walk of every address reaches in both sets; the two failures that the rows name, a failed zeroing of `assign` and the cancel of an attempted reservation | [PGT-R02](requirements.md#pgt-r02) to [PGT-R06](requirements.md#pgt-r06), [PGT-R08](requirements.md#pgt-r08) to [PGT-R10](requirements.md#pgt-r10), [PGT-R12](requirements.md#pgt-r12) | "Each write entry of a set changes $M$ as its row states once its write plan has been executed" (lines 316 and 317) and "each write entry of the page ownership table changes $O$ and $g$ as its row states" (lines 333 and 334), the rows of lines 322 to 329 and 340 to 345 |
 | `DirectMapUnchangedAfterBoot` | From any shared state with the MMU on, every list of transactions leaves the direct map's set as it was, and the MMU on | [PGT-R05](requirements.md#pgt-r05) | "The boot wiring writes the direct map once, before the MMU is on, and no entry changes it afterwards" (lines 505 and 506); "the field never changes after it" (line 826) |
 | `KernelTablesOnlyFilled` | On a well-formed shared state, every transaction keeps every valid entry of both kernel sets, and its plan for a kernel set writes only entries that are invalid when it writes them and holds no `Invalidate` | [PGT-R04](requirements.md#pgt-r04), [PGT-R07](requirements.md#pgt-r07) | "A plan for one of the kernel tables writes only invalid entries and holds no `Invalidate`; no entry of this page removes or changes a valid entry of the kernel tables" (lines 426 to 429) |
-| `PlansPublishInOrder` | On a well-formed set, the plans of `map_page`, `map_block`, `kernel_map` and `direct_map` zero each new table once and write it completely before the one store of its table descriptor that makes it reachable, and nothing into it after that store, with a `Fence` before that store; they write the entries of a new table in index order and a new table under another new table completely before the `Zero` of the other, fill only invalid entries of reached tables, write each valid entry of the root and each valid entry of a level 2 table other than a block as a table descriptor with no attribute, the form that the walk follows, and end with `Sync` (`Plan.inOrder`); the rest of the rule of maps, the leaves in address order from one table to the next and in the tables that the set holds and one 2 MiB slot after the other under a level 2 table that the set holds, is given for the plans of the specification test `PlansFollowContractOrder`; the plan of `unmap_page` is the store of 0 into the leaf and `Invalidate`; the plan of a copy is a `Zero` of every table in use of the target in index order, a `Store` of every valid entry of every table in use of the source into the target's table of the same index, by table and entry index, a leaf as it is and a table descriptor pointing at the target's table of the index that it points at in the source, and `Sync` | [PGT-R07](requirements.md#pgt-r07), [PGT-R04](requirements.md#pgt-r04), [PGT-R12](requirements.md#pgt-r12) | The rules of new tables, maps, new entries, unmapping and the copy (lines 406 to 425, 430 to 432, 440 to 451) |
+| `PlansPublishInOrder` | On a well-formed set, the plans of `map_page`, `map_block`, `kernel_map` and `direct_map` zero each new table once and write it completely before the one store of its table descriptor that makes it reachable, and nothing into it after that store, with a `Fence` before that store; they write the entries of a new table in index order and a new table under another new table completely before the `Zero` of the other, fill only invalid entries of reached tables, write each valid entry of the root and each valid entry of a level 2 table other than a block as a table descriptor with no attribute, the form that the walk follows, and end with `Sync` (`Plan.inOrder`); the rest of the rule of maps, the leaves in address order from one table to the next and in the tables that the set holds and one 2 MiB slot after the other under a level 2 table that the set holds, is not stated: the specification test `PlansFollowContractOrder` shows it only on sets that hold the root alone, and the plans follow it by their definition; the plan of `unmap_page` is the store of 0 into the leaf and `Invalidate`; the plan of a copy is a `Zero` of every table in use of the target in index order, a `Store` of every valid entry of every table in use of the source into the target's table of the same index, by table and entry index, a leaf as it is and a table descriptor pointing at the target's table of the index that it points at in the source, and `Sync` | [PGT-R07](requirements.md#pgt-r07), [PGT-R04](requirements.md#pgt-r04), [PGT-R12](requirements.md#pgt-r12) | The rules of new tables, maps, new entries, unmapping and the copy (lines 406 to 425, 430 to 432, 440 to 451) |
 | `TablesInUseCounted` | On a well-formed set, the record of the tables in use is 1 and the numbers of the elements of $G$ and of $P$, which `Tables.gSlots` and `Tables.pSlots` list once each | [PGT-R03](requirements.md#pgt-r03), [PGT-R05](requirements.md#pgt-r05), [PGT-R11](requirements.md#pgt-r11) | "$\mathrm{used} = 1 + \|G\| + \|P\|$" (lines 302 and 303); the count of a mapping (lines 687 to 689) |
 | `PlacementFirstFit` | On a well-formed table, a choice is the range that an extent of the scan of its placement gives, the lowest or highest aligned range inside the window, within the capacity, and every earlier extent gives none or one beyond the capacity; `OutOfMemory` means that no extent holds the request, `MetadataExhausted` that every range given needs more extents than the capacity has free | [PGT-R09](requirements.md#pgt-r09), [PGT-R10](requirements.md#pgt-r10) | The placement (lines 574 to 580) and the end of the scan (lines 588 to 590) |
 | `BootOwnersMatchDirectMap` | For every well-formed boot memory map, the table of `Ownership::new` on its managed banks and exclusions has one owner for every managed page, and once `direct_map` of the same map has run on a new set, a page is free exactly when the direct map maps it | [PGT-R08](requirements.md#pgt-r08), [PGT-R05](requirements.md#pgt-r05) | The criterion of [PGT-R08](requirements.md#pgt-r08); "the direct map maps only pages whose owner is free or a holder" (lines 212 and 213); lines 538 to 540 |
@@ -746,16 +746,15 @@ The two statements of the page ownership table each cover a branch of
 rows 114 and 115, so the column counts them at both lines.
 
 **Error priority.** For each step of the error orders of the contract, one
-more witness gives an input that breaks a rule of that step and a later
-rule of the same entry, and states the error of the step; each is a
-conjunction over the entries that have both rules, so the 73 pairs are 33
-theorems. The orders are those of
-[errors of table sets](contract.md#errors-of-table-sets) for the entries on
-one address, `priorityStep1` to `priorityStep6`, and for `kernel_map` and
-`direct_map`, `priorityMapStep1` to `priorityMapStep8`; that of
-[copying the kernel tables](contract.md#copying-the-kernel-tables),
-`priorityCloneStep1` to `priorityCloneStep7`; and those of
-[page ownership](contract.md#page-ownership) for `Ownership::new`,
+more witness gives an input that breaks a rule of that step and a later rule
+of the same entry, and states the error of the step; each is a conjunction
+over the entries that have both rules, so the 73 pairs are 33 theorems. The
+orders are those of [errors of table sets](contract.md#errors-of-table-sets)
+for the entries on one address, `priorityStep1` to `priorityStep6`, and for
+`kernel_map` and `direct_map`, `priorityMapStep1` to `priorityMapStep8`;
+that of [copying the kernel tables](contract.md#copying-the-kernel-tables),
+`priorityCloneStep1` to `priorityCloneStep7`; and those of [page
+ownership](contract.md#page-ownership) for `Ownership::new`,
 `priorityNewStep1` to `priorityNewStep4`, for `choose` and `reserve`,
 `priorityChooseStep1` to `priorityChooseStep5`, and for the receipts of
 `publish`, `cancel`, `release` and `validate`, `priorityReceiptStep1` to
@@ -767,25 +766,24 @@ the walk with `OutOfTables` or `NotMapped`. `priorityMapStep6` and
 of `kernel_map` given later in its layout but lower in address being checked
 first; `priorityCloneStep6` takes the walk of the copy entry by entry, each
 table under its entry before the next entry. The last check of each order,
-`OutOfTables`, the record of tables not reached, the capacity of the
-extents of `Ownership::new`, `MetadataExhausted` and `OutOfMemory` of the
-scan and `InvalidAllocation`, has no later rule; the two rules of
-`PhysRange::new` cannot be broken by one input, since a range of length 0
-ends at its start. With the earlier rule repaired, each of these inputs
-fails with the error of the later rule, so each witness tells the order of
-the contract from the reverse one. An input breaks only the rules of its
-pair, and with both repaired it succeeds. A rule counts where the arguments
-that it reads pass the rules that check them: the walk and what follows from
-it only for an address inside the region and a walk that succeeds, and the
-pool only at a width of 32 to 48. The pool that ends above
-$2^{\mathrm{bits}}$ is that of `BASE` at the width 32, whose walk is sound
-there, for the entries on one address and for the source of
-`clone_kernel_from`, whose target pool is then at `0x8000_0000`, so the pool
-before the physical address, before `NotMapped` and before the base of the
-target also tells the order of the contract from a check of the pool after
-the walk and from no check of the pool; the same pools are the inputs for the
-rule of the pool in the `TableBacking` witnesses of the five entries on one
-address and of `clone_kernel_from`.
+`OutOfTables`, the record of tables not reached, the capacity of the extents
+of `Ownership::new`, `MetadataExhausted` and `OutOfMemory` of the scan and
+`InvalidAllocation`, has no later rule; the two rules of `PhysRange::new`
+cannot be broken by one input, since a range of length 0 ends at its start.
+With the earlier rule repaired, each of these inputs fails with the error of
+the later rule, so each witness tells the order of the contract from the
+reverse one. Each input fails with the error of the earlier rule, with the
+error of the later rule once the earlier is repaired, and succeeds once both
+are, a pool that ends above $2^{\mathrm{bits}}$ being repaired by the width.
+The pool that ends above $2^{\mathrm{bits}}$ is that of `BASE` at the width
+32, whose walk is sound there, for the entries on one address and for the
+source of `clone_kernel_from`, whose target pool is then at `0x8000_0000`;
+so `priorityStep3` and `priorityCloneStep3`, the pool before the physical
+address, before `NotMapped` and before the base of the target, also tell the
+order of the contract from a check of the pool after the walk and from no
+check of the pool. The same pools are the inputs for the rule of the pool in
+the `TableBacking` witnesses of the five entries on one address and of
+`clone_kernel_from`, which tell the check of the pool from no check of it.
 
 `assignRechecks` gives `assign` choices that `choose` does not give on the
 table, outside the requirement of its row, and states the three refusals of
@@ -1304,11 +1302,16 @@ another new table is complete before the `Zero` of the other. Every valid
 entry that a plan stores into the root, and every valid entry other than a
 block that it stores into a level 2 table, is a table descriptor with no
 attribute, the form that the walk follows, so that the tables that the check
-reads as reached are those that the walk reaches. The rest of the rule of
-maps, the leaves in address order from one table to the next and in the
-tables that the set holds, and one 2 MiB slot after the other under a level 2
-table that the set holds, is given for the plans of
-`PlansFollowContractOrder`.
+reads as reached are those that the walk reaches. The rest of the rule of maps (lines 413 to 418), the leaves in address order
+from one table to the next and in the tables that the set holds, and one 2
+MiB slot after the other under a level 2 table that the set holds, is not
+stated here: the specification test `PlansFollowContractOrder` shows it only
+on sets that hold the root alone, within one 1 GiB slot. These orders leave
+the same set, since every new table is complete and fenced before the one
+store of its table descriptor and a leaf in a table that the set holds is one
+store into an invalid entry; the plans of the specification follow them by
+their definition, which the refinement of the target relates to the plans of
+the implementation.
 
 ### PGT-R08
 

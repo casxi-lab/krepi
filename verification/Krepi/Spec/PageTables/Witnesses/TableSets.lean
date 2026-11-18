@@ -23,12 +23,12 @@ witness as an equation `f x = .ok v` or `f x = .error e` and decides it with
 a local instance that compares the constructors and their payloads; the
 instance appears in no statement. Where an error has several rules, its
 witness is a conjunction with one input for each rule that the contract names,
-an input that breaks that rule alone, a rule counting where the arguments that
-it reads pass the rules that check them: a pool that ends above
-$2^{\mathrm{bits}}$ is the pool of 4 tables at `BASE` at the width 32, whose
-walk is sound, for the entries on one address and for the source of
-`clone_kernel_from`, whose target pool is then at `0x8000_0000`, so the input
-also tells the check of the pool from a check after the walk and from none.
+an input that fails with that error and succeeds once that rule is repaired, a
+pool that ends above $2^{\mathrm{bits}}$ being repaired by the width: such a
+pool is the pool of 4 tables at `BASE` at the width 32, whose walk is sound,
+for the entries on one address and for the source of `clone_kernel_from`,
+whose target pool is then at `0x8000_0000`, so the input also tells the check
+of the pool from no check of the pool.
 
 The inputs are written here, since the module imports the specification
 alone: the pools by their descriptors, entry by entry, as the tests of the

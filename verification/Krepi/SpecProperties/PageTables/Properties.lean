@@ -267,10 +267,16 @@ of `Write plans and publication` (lines 406 to 429):
 - no step is `Invalidate`, and a plan that makes an entry valid ends with
   `Sync`.
 
-The rest of the rule of maps, the leaves in address order from one table to
-the next and in the tables that the set holds, and one 2 MiB slot after the
-other under a level 2 table that the set holds (lines 413 to 418), is given
-for the plans of the specification test `PlansFollowContractOrder`. -/
+The rest of the rule of maps (lines 413 to 418), the leaves in address order
+from one table to the next and in the tables that the set holds, and one 2
+MiB slot after the other under a level 2 table that the set holds, is not
+stated here: the specification test `PlansFollowContractOrder` shows it only
+on sets that hold the root alone, within one 1 GiB slot. These orders leave
+the same set, since every new table is complete and fenced before the one
+store of its table descriptor and a leaf in a table that the set holds is
+one store into an invalid entry; the plans of the specification follow them
+by their definition, which the refinement of the target relates to the plans
+of the implementation. -/
 def Plan.inOrder (base : UInt64) : Plan → PlanState N → Bool
   | [], st => !st.valid
   | [.sync], _ => true
@@ -743,11 +749,17 @@ well-formed set:
   reaches, and each valid entry of the root and each valid entry of a level
   2 table other than a block as a table descriptor with no attribute, the
   form that the walk follows; and they end with `Sync` (lines 406 to 425 and
-  452 to 454), as `Plan.inOrder` checks. The rest of the rule of maps, the
-  leaves in address order from one table to the next and in the tables that
-  the set holds, and one 2 MiB slot after the other under a level 2 table
-  that the set holds (lines 413 to 418), is given for the plans of the
-  specification test `PlansFollowContractOrder`;
+  452 to 454), as `Plan.inOrder` checks. The rest of the rule of maps (lines
+  413 to 418), the leaves in address order from one table to the next and in
+  the tables that the set holds, and one 2 MiB slot after the other under a
+  level 2 table that the set holds, is not stated here: the specification
+  test `PlansFollowContractOrder` shows it only on sets that hold the root
+  alone, within one 1 GiB slot. These orders leave the same set, since every
+  new table is complete and fenced before the one store of its table
+  descriptor and a leaf in a table that the set holds is one store into an
+  invalid entry; the plans of the specification follow them by their
+  definition, which the refinement of the target relates to the plans of the
+  implementation;
 - the plan of `unmap_page` is `Store(t, i, 0)` of the leaf of $v$ and then
   `Invalidate(v)` (lines 430 to 432);
 - the plan of `clone_kernel_from` is a `Zero` of every table in use of the
