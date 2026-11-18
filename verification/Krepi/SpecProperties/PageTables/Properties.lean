@@ -162,14 +162,14 @@ def Layout.text (layout : Layout) (q : Nat) : Bool :=
 /-- The rules of the boot wiring and of the fills of the lower kernel set
 that W^X rests on, for a list of transactions:
 
-- `kernel_map` and `direct_map` run at most once each (line 107);
+- `kernel_map` and `direct_map` run at most once each (line 111);
 - the boot memory map is well-formed, and each `ReadExecute` range of the
-  layout lies in a span of its boot storage, the kernel image (lines 201 to
-  208 and 479);
+  layout lies in a span of its boot storage, the kernel image (lines 206 to
+  215 and 510);
 - a fill maps an executable kind only at a page of the text, and a page of
   the text only with `ReadExecute`: "the executable pages come only from the
   image and the boot bundle", and "the text has one kind in every set that
-  maps it" (lines 209 to 213). -/
+  maps it" (lines 216 to 220). -/
 def WxPremises (txns : List Txn) : Prop :=
   (txns.filterMap Txn.layout?).length ≤ 1 ∧ (txns.filterMap Txn.memory?).length ≤ 1 ∧
   (∀ B ∈ txns.filterMap Txn.memory?, B.WellFormed) ∧
@@ -212,7 +212,7 @@ structure PlanState (N : Nat) where
   valid : Bool
 
 /-- Whether a plan, executed from the pool of a set at `base`, keeps the order
-of `Write plans and publication` (lines 380 to 393): a reached table is never
+of `Write plans and publication` (lines 401 to 414): a reached table is never
 zeroed and takes only stores into invalid entries; a table that is not reached
 is zeroed before the plan stores into it; a store into a reached table of a
 table descriptor points at a table not yet reached, which with the tables
@@ -344,15 +344,15 @@ open Krepi.Spec.PageTables
 
 /-- **No mapping is writable and executable** (PGT-R01, PGT-R05, PGT-R06).
 "At no time is a frame mapped writable and executable, counting every alias
-in every table set together" (lines 193 to 195):
+in every table set together" (lines 198 to 200):
 
-- no kind is writable and executable (line 197);
+- no kind is writable and executable (line 202);
 - on every shared state that the transactions reach from the boot under the
-  rules of the boot wiring and the fills (`WxPremises`, lines 201 to 213), no
+  rules of the boot wiring and the fills (`WxPremises`, lines 206 to 220), no
   frame is mapped writable by the lower kernel set or the direct map's set
   and executable by one of them; and so for every copy of the lower kernel
   set that `clone_kernel_from` makes into a target whose tables not in use
-  are zero, counted with them (lines 201 to 204).
+  are zero, counted with them (lines 206 to 209).
 
 The mappings of the address spaces of processes beyond the copy, and
 `UserReadExecute` for the boot bundle, are those of the address-space
@@ -371,24 +371,24 @@ def NoWritableExecutable : Prop :=
 
 /-! ## 2. After every write
 
-Each row of `After mapping` (lines 296 to 298 and 300 to 309) and of `After
-ownership` (lines 313 to 316 and 318 to 325), stated for a success of its
+Each row of `After mapping` (lines 311 to 313 and 315 to 324) and of `After
+ownership` (lines 328 to 331 and 333 to 340), stated for a success of its
 entry on a valid state: the `Requires` column, which the checks of the entry
 establish or which its caller vouches for, and the `After` column, between
 the state before and the state once the plan has run. "A failed entry
-returns an error, changes nothing and returns no plan" (lines 297 and 298,
-314): a result of the specification is an `Except`, whose error carries no
+returns an error, changes nothing and returns no plan" (lines 312 and 313,
+329): a result of the specification is an `Except`, whose error carries no
 state and no plan. -/
 
 /-- `Tables::new`: on storage that is zero in all its $N$ tables,
-$M = \emptyset$, $G = P = \emptyset$, so 1 table in use (line 302). -/
+$M = \emptyset$, $G = P = \emptyset$, so 1 table in use (line 317). -/
 def AfterNew : Prop :=
   ∀ (r : Region) (N : Nat) (base : UInt64),
     let s : Tables r N := Tables.new (Pool.zero N)
     (∀ v l, ¬ s.M base v l) ∧ (∀ g, ¬ s.G base g) ∧ (∀ b, ¬ s.P base b) ∧
       s.usedTables = 1
 
-/-- `reset`: $M' = \emptyset$, $G' = P' = \emptyset$ (line 303), and the root
+/-- `reset`: $M' = \emptyset$, $G' = P' = \emptyset$ (line 318), and the root
 alone in use with every entry 0 (PGT-R04). -/
 def AfterReset : Prop :=
   ∀ (r : Region) (N : Nat) (s : Tables r N) (base : UInt64) (bits : UInt8), s.WellFormed base bits →
@@ -398,7 +398,7 @@ def AfterReset : Prop :=
 
 /-- `map_page(v, p, k)`: requires $v \notin \mathrm{dom}\,M$; then
 $M' = M[v \mapsto (p, k, \mathrm{page})]$, $G' = G \cup \{\mathrm{gib}(v)\}$,
-$P' = P \cup \{\mathrm{blk}(v)\}$ (line 304). -/
+$P' = P \cup \{\mathrm{blk}(v)\}$ (line 319). -/
 def AfterMapPage : Prop :=
   ∀ (r : Region) (N : Nat) (s : Tables r N) (v p : UInt64) (k : Kind) (base : UInt64) (bits : UInt8)
     (s₁ : Tables r N) (plan : Plan), s.WellFormed base bits →
@@ -414,7 +414,7 @@ def AfterMapPage : Prop :=
 $[v, v + 2^{21})$ in $\mathrm{dom}\,M$ and $v \notin P$; then $M'$ adds
 $v + i \mapsto (p + i, \mathrm{ReadWrite}, \mathrm{block})$ for
 $i = 0, 4096, \ldots, 2^{21} - 4096$, $G' = G \cup \{\mathrm{gib}(v)\}$,
-$P' = P$ (line 305). -/
+$P' = P$ (line 320). -/
 def AfterMapBlock : Prop :=
   ∀ (r : Region) (N : Nat) (s : Tables r N) (v p base : UInt64) (bits : UInt8) (s₁ : Tables r N)
     (plan : Plan), s.WellFormed base bits → s.mapBlock v p base bits = .ok (s₁, plan) →
@@ -429,7 +429,7 @@ def AfterMapBlock : Prop :=
 
 /-- `unmap_page(v)`: requires $M(v) = (p, k, \mathrm{page})$; then
 $M' = M \setminus \{v\}$, $G' = G$, $P' = P$, and the entry returns $p$
-(line 306). -/
+(line 321). -/
 def AfterUnmapPage : Prop :=
   ∀ (r : Region) (N : Nat) (s : Tables r N) (v base : UInt64) (bits : UInt8) (plan : Plan)
     (p : UInt64), s.WellFormed base bits → s.unmapPage v base bits = .ok (plan, p) →
@@ -441,7 +441,7 @@ def AfterUnmapPage : Prop :=
 /-- `clone_kernel_from(S)`: requires every entry of $M_S$ a page of
 `ReadExecute`, `ReadOnly`, `ReadWrite` or `Device` below
 $2^{\mathrm{bits}}$; then $M' = M_S$, $G' = G_S$, $P' = P_S$, in the tables
-of the indices that $S$ uses (line 307). The source is an argument, which
+of the indices that $S$ uses (line 322). The source is an argument, which
 the entry does not write. -/
 def AfterCloneKernelFrom : Prop :=
   ∀ (r : Region) (N : Nat) (target source : Tables r N) (sourceBase base : UInt64) (bits : UInt8)
@@ -459,8 +459,8 @@ def AfterCloneKernelFrom : Prop :=
 $\mathrm{dom}\,M$, the ranges pairwise without a common page and without a
 guard page of $L$; then $M'$ adds $v \mapsto (v, k_j, \mathrm{page})$ for
 every page $v$ of range $j$ with kind $k_j$, $G'$ and $P'$ add the slots of
-those pages, and every guard page of $L$ stays outside $\mathrm{dom}\,M'$
-(line 308). -/
+those pages, and the plan writes no entry of a guard page of $L$, so a guard
+page outside $\mathrm{dom}\,M$ stays outside $\mathrm{dom}\,M'$ (line 323). -/
 def AfterKernelMap : Prop :=
   ∀ (N : Nat) (s : Tables .lower N) (layout : Layout) (base : UInt64) (bits : UInt8)
     (s₁ : Tables .lower N) (plan : Plan), s.WellFormed base bits →
@@ -485,7 +485,7 @@ $\mathtt{DIRECT\_BASE} \mid p \mapsto (p, \mathrm{ReadWrite}, \ell(p))$ for
 every page $p$ of a usable range, $\ell(p)$ a block when $\mathrm{blk}(p)$
 and the 2 MiB after it lie in one usable range and a page otherwise; $G'$
 adds the slots of those pages, and $P'$ those of the pages that are mapped
-as pages (line 309). -/
+as pages (line 324). -/
 def AfterDirectMap : Prop :=
   ∀ (N : Nat) (s : Tables .upper N) (B : Krepi.Spec.Fdt.MemoryPlan) (base : UInt64) (bits : UInt8)
     (s₁ : Tables .upper N) (plan : Plan), s.WellFormed base bits →
@@ -505,7 +505,7 @@ def AfterDirectMap : Prop :=
 /-- `Ownership::new(a, banks, X)`: requires the checks of the initialization;
 then $O(q)$ is the owner of the exclusions of $X$ that touch $q$, by the
 order firmware, image, boot storage, for every managed page $q$ that one
-touches, and free for every other; $g = 1$ (line 320). -/
+touches, and free for every other; $g = 1$ (line 335). -/
 def AfterOwnershipNew : Prop :=
   ∀ (E X : Nat) (arena : UInt64) (banks : List PhysRange) (exclusions : List Exclusion)
     (t : Ownership E X), Ownership.new arena banks exclusions = .ok t →
@@ -521,7 +521,7 @@ identity $o$ under the same token, $O(q) = $ free for every page $q$ of $c$,
 all in one free extent; then $O' = O[q \mapsto \mathrm{held}(o, g,
 \mathrm{published}) : q \in c]$, $g' = g + 1$, or exhausted after
 $2^{64} - 1$, and the receipt; when the zeroing failed, `ZeroFailed`,
-$O' = O$, $g' = g$ (line 321). -/
+$O' = O$, $g' = g$ (line 336). -/
 def AfterAssign : Prop :=
   (∀ (E X : Nat) (t : Ownership E X) (c : Choice) (zeroed : Bool) (t' : Ownership E X)
     (a : Allocation), t.Invariant → t.Chose c → t.assign c zeroed = .ok (t', a) →
@@ -536,7 +536,7 @@ def AfterAssign : Prop :=
 
 /-- `reserve(o, m, a, w)`: requires the checks of `choose`; then
 $O' = O[q \mapsto \mathrm{held}(o, g, \mathrm{reserved}) : q \in c]$ for the
-range $c$ that `choose` would give, $g' = g + 1$ (line 322), and the
+range $c$ that `choose` would give, $g' = g + 1$ (line 337), and the
 reservation, not attempted and with no failure. -/
 def AfterReserve : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner pages alignment : UInt64) (p : Placement)
@@ -550,7 +550,7 @@ def AfterReserve : Prop :=
 /-- `publish(o, x)`: requires $x$ from this arena and
 $O(q) = \mathrm{held}(o, x.n, \mathrm{reserved})$ exactly for the pages $q$
 of $x$; then $O' = O[q \mapsto \mathrm{held}(o, x.n, \mathrm{published}) :
-q \in x]$, $g' = g$ (line 323), and the receipt. -/
+q \in x]$, $g' = g$ (line 338), and the receipt. -/
 def AfterPublish : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (x : Initialized) (t' : Ownership E X)
     (a : Allocation), t.Invariant → t.publish owner x = .ok (t', a) →
@@ -567,7 +567,7 @@ def AfterPublish : Prop :=
 $O(q) = \mathrm{held}(o, r.n, \mathrm{reserved})$ exactly for the pages $q$
 of $r$; when no zeroing of $r$ was attempted, $O' = O[q \mapsto \mathrm{free}
 : q \in r]$, $g' = g$; after an attempted zeroing, `ZeroFailed`, $O' = O$,
-$g' = g$, and $r$ is returned (line 324). -/
+$g' = g$, and $r$ is returned (line 339). -/
 def AfterCancel : Prop :=
   (∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (r : Reservation) (t' : Ownership E X),
     t.Invariant → t.cancel owner r = .ok t' →
@@ -584,7 +584,7 @@ def AfterCancel : Prop :=
 /-- `release(o, x)`: requires $x$ from this arena and
 $O(q) = \mathrm{held}(o, x.n, \mathrm{published})$ exactly for the pages
 $q$ of $x$; then $O' = O[q \mapsto \mathrm{free} : q \in x]$, $g' = g$
-(line 325). -/
+(line 340). -/
 def AfterRelease : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (x : Allocation) (t' : Ownership E X),
     t.Invariant → t.release owner x = .ok t' →
@@ -598,13 +598,13 @@ def AfterRelease : Prop :=
 /-- **After every write the abstract mapping changes as the contract says**
 (PGT-R02 to PGT-R06, PGT-R08 to PGT-R10, PGT-R12). "Each write entry of a set
 changes $M$ as its row states once its write plan has been executed" (lines
-296 and 297) and "each write entry of the page ownership table changes $O$
-and $g$ as its row states" (lines 313 and 314), for the 14 write entries of
-lines 327 to 330: the rows of `Tables::new`, `reset`, `map_page`,
+311 and 312) and "each write entry of the page ownership table changes $O$
+and $g$ as its row states" (lines 328 and 329), for the 14 write entries of
+lines 342 to 345: the rows of `Tables::new`, `reset`, `map_page`,
 `map_block`, `unmap_page`, `clone_kernel_from`, `kernel_map`, `direct_map`,
 `Ownership::new`, `assign`, `reserve`, `publish`, `cancel` and `release`. The
 fourth invariant of the page ownership table, that "the firmware, image and
-boot storage pages never change owner" (line 495), is a statement of two
+boot storage pages never change owner" (line 526), is a statement of two
 states that these rows give: each row changes $O$ only on pages that are
 free or held. -/
 def AfterEveryWrite : Prop :=
@@ -616,8 +616,8 @@ def AfterEveryWrite : Prop :=
 
 /-- **The direct map is unchanged after boot** (PGT-R05). "The boot wiring
 writes the direct map once, before the MMU is on, and no entry changes it
-afterwards" (lines 459 and 460), and its descriptors are "read-only after
-boot" and "the field never changes after it" (line 756): from any shared
+afterwards" (lines 490 and 491), and its descriptors are "read-only after
+boot" and "the field never changes after it" (line 804): from any shared
 state with the MMU on, every list of transactions leaves the direct map's
 set as it was, and the MMU on. -/
 def DirectMapUnchangedAfterBoot : Prop :=
@@ -629,7 +629,7 @@ def DirectMapUnchangedAfterBoot : Prop :=
 /-- **The kernel tables are written only with empty entries** (PGT-R04,
 PGT-R07). "A plan for one of the kernel tables writes only invalid entries
 and holds no `Invalidate`; no entry of this page removes or changes a valid
-entry of the kernel tables" (lines 390 to 393): on a well-formed shared
+entry of the kernel tables" (lines 411 to 414): on a well-formed shared
 state, every transaction keeps every valid entry of both kernel sets, and
 its plan for a kernel set writes only entries that are invalid when it
 writes them and holds no `Invalidate`. -/
@@ -650,11 +650,11 @@ well-formed set:
   a new table completely before the one store of its table descriptor that
   makes it reachable, with a `Fence` before that store, a table built under
   another new table first, write only invalid entries of the tables that a
-  walk reaches, and end with `Sync` (lines 380 to 389 and 414 to 416);
+  walk reaches, and end with `Sync` (lines 401 to 410 and 437 to 439);
 - the plan of `unmap_page` is `Store(t, i, 0)` of the leaf of $v$ and then
-  `Invalidate(v)` (lines 394 to 396);
+  `Invalidate(v)` (lines 415 to 417);
 - the plan of `clone_kernel_from` is `Zero` steps, then `Store` steps, then
-  `Sync` (lines 404 to 413). -/
+  `Sync` (lines 425 to 436). -/
 def PlansPublishInOrder : Prop :=
   (∀ (r : Region) (N : Nat) (s : Tables r N) (v p : UInt64) (k : Kind) (base : UInt64) (bits : UInt8)
     (s' : Tables r N) (plan : Plan), s.WellFormed base bits →
@@ -683,10 +683,10 @@ def PlansPublishInOrder : Prop :=
 
 /-- **The tables in use are counted by $G$ and $P$** (PGT-R03, PGT-R05,
 PGT-R11). "The tables that it uses are the root and one table for each
-element of $G$ and of $P$: $\mathrm{used} = 1 + |G| + |P|$" (lines 284 and
-285), and "a mapping needs the root, one level 2 table for each 1 GiB slot
+element of $G$ and of $P$: $\mathrm{used} = 1 + |G| + |P|$" (lines 297 and
+298), and "a mapping needs the root, one level 2 table for each 1 GiB slot
 that it touches and one level 3 table for each 2 MiB slot that it maps in
-part, with pages" (lines 628 to 630): on a well-formed set, the record of
+part, with pages" (lines 672 to 674): on a well-formed set, the record of
 the tables in use is 1 and the numbers of the elements of $G$ and of $P$,
 listed once each by `Tables.gSlots` and `Tables.pSlots`. -/
 def TablesInUseCounted : Prop :=
@@ -704,10 +704,10 @@ part inside the window, and there the lowest aligned start, or, for a high
 placement, the highest aligned start whose range ends inside that part. The
 first extent that holds the range gives it, unless taking the range would
 need more extents than the capacity has free; the scan then goes on" (lines
-524 to 529), so that "a range never spans two banks" (line 530), and the
+559 to 564), so that "a range never spans two banks" (line 565), and the
 scan ends with "`MetadataExhausted` when an extent was passed over for
-capacity and none held the range, and `OutOfMemory` otherwise" (lines 537
-and 538). On a well-formed table, whose extents are in address order:
+capacity and none held the range, and `OutOfMemory` otherwise" (lines 573
+to 575). On a well-formed table, whose extents are in address order:
 
 - a choice is of the owner identity of the request and is the range that an
   extent of the scan gives within the capacity, and every extent before it
@@ -738,8 +738,8 @@ def PlacementFirstFit : Prop :=
 PGT-R05). The criterion of PGT-R08: "for the boot memory map of every board
 shape, every managed page has exactly one owner, the free pages are exactly
 the pages of the direct map"; and "the direct map maps only pages whose
-owner is free or a holder" (line 205). For every well-formed boot memory
-map, the table that `Ownership::new` builds from its managed banks and
+owner is free or a holder" (lines 209 and 210). For every well-formed boot
+memory map, the table that `Ownership::new` builds from its managed banks and
 exclusions records one owner for every managed page, and once `direct_map`
 of the same map has run on a set of `Tables::new` on zero storage, a page is
 free exactly when the direct map maps it. -/

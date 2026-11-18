@@ -5,7 +5,7 @@ public import Krepi.Spec.PageTables.Basic
 /-!
 # Page tables: the page ownership table
 
-`page_tables::Ownership` of the contract's entry table, rows 108 to 112:
+`page_tables::Ownership` of the contract's entry table, rows 112 to 116:
 `Ownership::new`, `choose`, `assign`, `reserve`, `Reservation::initialized`,
 `publish`, `cancel`, `release`, `owner`, `validate` and `stats`, with the
 rules of `Page ownership`, `After ownership`, `Check and execute`,

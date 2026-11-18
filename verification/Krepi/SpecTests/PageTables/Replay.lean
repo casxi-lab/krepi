@@ -517,7 +517,7 @@ def mixedPlacement (s : Nat) : Placement := ⟨if s % 2 == 0 then .high else .lo
 
 /-- Step `s` of the loop of `own-22` on the table `t`, with the live receipts
 `live` in the order of their allocation, a literal transcription of its row
-(contract line 915), which mirrors `src/memory/tests/banks.rs:148-185` of the
+(contract line 1016), which mirrors `src/memory/tests/banks.rs:148-185` of the
 prototype tree: when `s mod 3 ≠ 0` and an allocation is live, the release by
 its owner of the live allocation at position `7 s mod n` of the `n` live ones,
 `released`; otherwise owner 7 allocates `s mod 5 + 1` pages at an alignment

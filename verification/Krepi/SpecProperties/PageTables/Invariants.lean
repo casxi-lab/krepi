@@ -53,8 +53,8 @@ namespace Krepi.Spec.PageTables
 
 /-- A pool of `N` tables at `base` that the contract admits at the width
 `bits`: `base` a multiple of 4 KiB, `bits` from 32 to 48, and at least one
-table, the last ending at or below $2^{\mathrm{bits}}$ (lines 31 to 36 and
-611 and 612). These are the first checks of `checkPool`. -/
+table, the last ending at or below $2^{\mathrm{bits}}$ (lines 35 to 40 and
+654 and 655). These are the first checks of `checkPool`. -/
 def PoolOk (N : Nat) (base : UInt64) (bits : UInt8) : Prop :=
   base.toNat % PAGE_SIZE = 0 ∧ widthOk bits = true ∧ poolFits N base bits = true
 
@@ -93,20 +93,20 @@ def Tables.IsParent (s : Tables r N) (base : UInt64) (t : Nat) : Prop :=
 well-formed.** At `base` and the width `bits`:
 
 - the pool is one that the contract admits (`PoolOk`), and its record
-  holds the root and at most `N` tables (lines 28 to 33 and 611 and 612);
-- every table that is not in use is zero (line 620);
+  holds the root and at most `N` tables (lines 28 to 37 and 654 and 655);
+- every table that is not in use is zero (line 664);
 - every entry of the root is invalid, and so 0, or a table descriptor with
-  no attribute of a table in use (lines 145 to 148);
+  no attribute of a table in use (lines 149 to 152);
 - every entry of a level 2 table is 0, such a table descriptor, or the
   block descriptor of `ReadWrite` at an output address below
-  $2^{\mathrm{bits}}$ (lines 145 to 153);
+  $2^{\mathrm{bits}}$ (lines 149 to 158);
 - every entry of a level 3 table is 0 or the page descriptor of a kind at an
-  output address below $2^{\mathrm{bits}}$, every other bit 0 (lines 145 to
-  153, 167 and 168);
+  output address below $2^{\mathrm{bits}}$, every other bit 0 (lines 149 to
+  158, 172 and 173);
 - the table descriptors of the root and of the level 2 tables reach every
-  table in use but the root exactly once, and the root never (lines 255 and
-  256), so that the tables in use are the root and one table for each
-  element of $G$ and of $P$ (lines 284 and 285).
+  table in use but the root exactly once, and the root never (lines 265 and
+  266), so that the tables in use are the root and one table for each
+  element of $G$ and of $P$ (lines 297 and 298).
 
 These are the rules of the tables that the entries of the contract write,
 and those that `clone_kernel_from` checks of its source. -/
@@ -195,7 +195,7 @@ def Tables.leaves (s : Tables r N) (base : UInt64) : List (Nat × Form × UInt64
 /-! ## The page ownership table -/
 
 /-- A managed page of the table: a page, a multiple of 4 KiB, that lies
-wholly in a managed bank (line 58). -/
+wholly in a managed bank (line 62). -/
 def Ownership.ManagedPage (t : Ownership E X) (q : Nat) : Prop :=
   q % PAGE_SIZE = 0 ∧ ∃ b ∈ t.banks, b.holdsPage q = true
 
@@ -204,13 +204,13 @@ def Extent.InBank (e : Extent) (banks : List PhysRange) : Prop :=
   ∃ b, banks[e.bank]? = some b ∧ b.contains e.range = true
 
 /-- **Structural invariant of a page ownership table.** The arena is not 0
-(line 82); there is at least one bank, every bank starts and ends on a page
-boundary, and the banks are in address order and do not overlap (lines 500
-to 502); at most `E` extents, free and held together (lines 582 and 583),
-each a range of whole pages in the bank that it names (lines 83 and 84),
-in address order and disjoint (line 738); at most `X` exclusion records
-(lines 588 to 592); and a counter that has given no generation 0, since it
-starts at 1 (line 567). -/
+(line 86); there is at least one bank, every bank starts and ends on a page
+boundary, and the banks are in address order and do not overlap (lines 535
+to 537); at most `E` extents, free and held together (lines 624 and 625),
+each a range of whole pages in the bank that it names (lines 87 and 88),
+in address order and disjoint (line 786); at most `X` exclusion records
+(lines 630 to 634); and a counter that has given no generation 0, since it
+starts at 1 (line 606). -/
 def Ownership.WellFormed (t : Ownership E X) : Prop :=
   t.arena ≠ 0 ∧
   t.banks ≠ [] ∧ (∀ b ∈ t.banks, b.onPages = true) ∧
@@ -241,7 +241,7 @@ def Ownership.ownersOf (t : Ownership E X) (q : Nat) : List Owner :=
     ((firstExcluder t.exclusions q).map Owner.excluded).toList
 
 /-- **Functional invariant of a page ownership table: the uniqueness of page
-ownership.** "Every managed page has exactly one owner" (line 489): the table
+ownership.** "Every managed page has exactly one owner" (line 520): the table
 records exactly one owner for each managed page, the holding of one extent
 or, for a page in no extent, that of the exclusion records that touch it, so
 that the owner function $O$ (`Ownership.ownerOf`) gives it. -/
@@ -263,12 +263,12 @@ def Ownership.checkOneOwner (t : Ownership E X) : Bool :=
       t.exclusions.filterMap (·.cut b)) [(b.start.toNat, b.endNat)] == []
 
 /-- **Functional invariant of a page ownership table: the holders.** "The
-pages of one holder generation form one range in one bank, and two holders
-never share a generation" (lines 490 and 491): the pages whose owner is a
-holder of the generation of a held extent are exactly the pages of that
-extent, a range of whole pages in one bank, so they are of that one holder.
-A receipt, a reservation or a packet names such a range (lines 323 to 325
-and 558 to 566). -/
+pages of one holder generation form one range in one bank, the range of one
+extent, and two holders never share a generation" (lines 521 and 522): the
+pages whose owner is a holder of the generation of a held extent are exactly
+the pages of that extent, a range of whole pages in one bank, so they are of
+that one holder. A receipt, a reservation or a packet names such a range
+(lines 338 to 340 and 597 to 605). -/
 def Ownership.HolderRanges (t : Ownership E X) : Prop :=
   ∀ e ∈ t.extents, ∀ o n s, e.holding = .held o n s →
     ∀ q, q % PAGE_SIZE = 0 →
@@ -289,8 +289,8 @@ def Ownership.checkHolderRanges (t : Ownership E X) : Bool :=
 
 /-- **Functional invariant of a page ownership table: the generations.**
 "The generation counter starts at 1, grows by one with each allocation and
-reservation, and is never reused" (lines 567 to 569), and "the generation of
-an allocation is the counter of the table" (line 746): every holder has a
+reservation, and is never reused" (lines 606 to 608), and "the generation of
+an allocation is the counter of the table" (line 794): every holder has a
 generation from 1 that is below the counter, so that the counter gives a
 generation that no holder has. -/
 def Ownership.GenerationsBelowCounter (t : Ownership E X) : Prop :=
@@ -308,9 +308,9 @@ def Ownership.checkGenerationsBelowCounter (t : Ownership E X) : Bool :=
     | none => true
 
 /-- **Functional invariant of a page ownership table: the free runs.** "A
-released extent merges with the free extents next to it in the same bank"
-(lines 566 and 567), and the table uses "one extent for each free run"
-(lines 585 and 586): no free extent ends where a free extent of its bank
+released or cancelled extent merges with the free extents next to it in the
+same bank" (lines 605 and 606), and the table uses "one extent for each free
+run" (lines 627 and 628): no free extent ends where a free extent of its bank
 starts, so that, with `Ownership.OneOwner`, each free extent is a maximal
 run of the free pages of its bank. -/
 def Ownership.FreeExtentsMaximal (t : Ownership E X) : Prop :=
@@ -331,14 +331,14 @@ def Owner.isFreeOrHeld : Owner → Bool
 
 /-- Whether the page at `q` is a page of a usable range of the boot memory
 map `B`: a multiple of 4 KiB whose page lies wholly in one of
-`MemoryPlan.availableRanges` (line 64). -/
+`MemoryPlan.availableRanges` (line 68). -/
 def usablePage (B : Fdt.MemoryPlan) (q : Nat) : Bool :=
   q % PAGE_SIZE == 0 && B.availableRanges.any fun u => u.start.toNat ≤ q && q + PAGE_SIZE ≤ u.endNat
 
 /-- **Functional invariant of the table of the kernel root.** "In the table
 of the kernel root, which the boot wiring builds from the boot memory map,
 the pages that are free or held are exactly the pages of its usable ranges,
-so exactly the pages of the direct map" (lines 492 to 494): for the boot
+so exactly the pages of the direct map" (lines 523 to 525): for the boot
 memory map `B`, a page is free or held exactly when it is a page of a usable
 range of `B`. -/
 def Ownership.FreeOrHeldUsable (t : Ownership E X) (B : Fdt.MemoryPlan) : Prop :=
@@ -366,7 +366,7 @@ def Ownership.Invariant (t : Ownership E X) : Prop :=
 
 /-- `c` is a choice that `choose` gives on the table: the requirement of
 `assign`, "the choice $c$ of `choose` for owner identity $o$, taken under the
-same token" (line 321). -/
+same token" (line 336). -/
 def Ownership.Chose (t : Ownership E X) (c : Choice) : Prop :=
   ∃ owner pages alignment p, t.choose owner pages alignment p = .ok c
 
@@ -374,7 +374,7 @@ def Ownership.Chose (t : Ownership E X) (c : Choice) : Prop :=
 for the boot memory map `B`, by their ranges: the managed banks of `B` as
 physical ranges, in their order, and one exclusion for each span of its boot
 storage and each firmware reservation, in any order, each with an owner
-(lines 67 to 71, 497 and 498). -/
+(lines 71 to 75, 532 and 533). -/
 def BootTableRanges (B : Fdt.MemoryPlan) (banks : List PhysRange) (exclusions : List Exclusion) :
     Prop :=
   banks.map (fun r => (r.start, r.len)) = B.managed.map (fun s => (s.start, s.size)) ∧
@@ -394,7 +394,7 @@ structure Config where
 
 /-- **Structural invariant of the shared state.** Both kernel sets are
 well-formed in their pools, and the page ownership table, once built, is
-well-formed: the fields of lines 755 to 758. -/
+well-formed: the fields of lines 803 to 806. -/
 def Shared.WellFormed (s : Shared E X) (cfg : Config) : Prop :=
   s.lowerKernel.WellFormed cfg.lowerBase cfg.bits ∧
   s.directMap.WellFormed cfg.directBase cfg.bits ∧
@@ -410,8 +410,8 @@ def Shared.checkWellFormed (s : Shared E X) (cfg : Config) : Bool :=
 
 /-- **Functional invariant of the shared state: the offset of the direct
 map.** The direct map is "the mapping of `DIRECT_BASE | pa` to `pa`" (lines
-50 and 51) "as `ReadWrite`" (lines 444 to 446), and it covers RAM below
-$2^{39}$ (line 457): every page of the direct map's set maps
+54 and 55) as `ReadWrite` (lines 467 to 469), and it covers RAM below
+$2^{39}$ (line 488): every page of the direct map's set maps
 `DIRECT_BASE | pa` to a physical page `pa` below $2^{39}$ as `ReadWrite`. -/
 def Shared.DirectMapOffset (s : Shared E X) (cfg : Config) : Prop :=
   ∀ v l, s.directMap.M cfg.directBase v l →
