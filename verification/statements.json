@@ -66,19 +66,19 @@
       "name": "Krepi.SpecProperties.Fdt.ParseWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Parse.parseWellFormed",
       "module": "Krepi.Proofs.Fdt.Parse",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.ParseLimitsExact",
       "theorem": "Krepi.Proofs.Fdt.Parse.parseLimitsExact",
       "module": "Krepi.Proofs.Fdt.Parse",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PrefixesRejected",
       "theorem": "Krepi.Proofs.Fdt.Parse.prefixesRejected",
       "module": "Krepi.Proofs.Fdt.Parse",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.SpanNewWellFormed",
