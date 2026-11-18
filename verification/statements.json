@@ -84,61 +84,61 @@
       "name": "Krepi.SpecProperties.Fdt.SpanNewWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Translate.spanNewWellFormed",
       "module": "Krepi.Proofs.Fdt.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.RegNewWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Translate.regNewWellFormed",
       "module": "Krepi.Proofs.Fdt.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.AddressMapNewWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Translate.addressMapNewWellFormed",
       "module": "Krepi.Proofs.Fdt.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.NodeRegWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Translate.nodeRegWellFormed",
       "module": "Krepi.Proofs.Fdt.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.NodeRangesWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Translate.nodeRangesWellFormed",
       "module": "Krepi.Proofs.Fdt.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.NodeDmaRangesWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Translate.nodeDmaRangesWellFormed",
       "module": "Krepi.Proofs.Fdt.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.ToParentWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Translate.toParentWellFormed",
       "module": "Krepi.Proofs.Fdt.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.ToChildWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Translate.toChildWellFormed",
       "module": "Krepi.Proofs.Fdt.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.TranslateRegWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Translate.translateRegWellFormed",
       "module": "Krepi.Proofs.Fdt.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.TranslationThroughOneWindow",
       "theorem": "Krepi.Proofs.Fdt.Translate.translationThroughOneWindow",
       "module": "Krepi.Proofs.Fdt.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.DiscoverMemoryWellFormed",
@@ -180,13 +180,13 @@
       "name": "Krepi.SpecProperties.Fdt.DiscoverCpusSupported",
       "theorem": "Krepi.Proofs.Fdt.Cpus.discoverCpusSupported",
       "module": "Krepi.Proofs.Fdt.Cpus",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.AffinityRoundTrip",
       "theorem": "Krepi.Proofs.Fdt.Cpus.affinityRoundTrip",
       "module": "Krepi.Proofs.Fdt.Cpus",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.AllRamWellFormed",
