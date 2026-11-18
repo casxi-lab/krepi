@@ -298,17 +298,6 @@ structure Layout where
   bounded : ranges.length ≤ MAX_LAYOUT_RANGES
   deriving DecidableEq
 
-/-- The elements of a list sorted by a key, the earlier of two with one key
-first: each element goes before the first of the sorted rest whose key is not
-below its own. -/
-def sortByKey (key : α → Nat) : List α → List α
-  | [] => []
-  | x :: rest =>
-    let rec insert : List α → List α
-      | [] => [x]
-      | y :: ys => if key x ≤ key y then x :: y :: ys else y :: insert ys
-    insert (sortByKey key rest)
-
 /-- The `count` pages of a range of kind `k` from the address `pa`, each
 mapped at its physical address. -/
 def layoutPages (k : Kind) : (count pa : Nat) → List MapLeaf

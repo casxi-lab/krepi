@@ -15,7 +15,10 @@ states them:
   of the page ownership table (`Page ownership`), each in the order of its
   table;
 - the value type `PhysRange` with `PhysRange::new`, `end`, `contains` and
-  `overlaps` (`Terms`).
+  `overlaps` (`Terms`);
+- `sortByKey`, the stable sort by a key that puts the ranges of the kernel
+  mappings, the usable ranges of the direct map and the banks of the page
+  ownership table in address order.
 
 Machine widths are explicit where a value crosses an entry: addresses,
 lengths, descriptors and `base` are `UInt64`, and the physical width `bits` is
@@ -191,5 +194,18 @@ def PhysRange.contains (r other : PhysRange) : Bool :=
 nonempty, so they do when each starts before the other ends. -/
 def PhysRange.overlaps (r other : PhysRange) : Bool :=
   r.start.toNat < other.endNat && other.start.toNat < r.endNat
+
+/-! ## Lists -/
+
+/-- The elements of a list sorted by a key, the earlier of two with one key
+first: each element goes before the first of the sorted rest whose key is not
+below its own. -/
+def sortByKey (key : α → Nat) : List α → List α
+  | [] => []
+  | x :: rest =>
+    let rec insert : List α → List α
+      | [] => [x]
+      | y :: ys => if key x ≤ key y then x :: y :: ys else y :: insert ys
+    insert (sortByKey key rest)
 
 end Krepi.Spec.PageTables
