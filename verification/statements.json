@@ -300,121 +300,121 @@
       "name": "Krepi.SpecTests.Fdt.ParseAcceptsNameAtLimit",
       "theorem": "Krepi.Proofs.Fdt.Stp.parseAcceptsNameAtLimit",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.ParseRejectsNameAboveLimit",
       "theorem": "Krepi.Proofs.Fdt.Stp.parseRejectsNameAboveLimit",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.EntriesReturnOnChangedByte",
       "theorem": "Krepi.Proofs.Fdt.Stp.entriesReturnOnChangedByte",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.ParseRejectsPrefix",
       "theorem": "Krepi.Proofs.Fdt.Stp.parseRejectsPrefix",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.DiscoveryAcceptsMaxRamRanges",
       "theorem": "Krepi.Proofs.Fdt.Stp.discoveryAcceptsMaxRamRanges",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.DiscoveryRejectsExcessRamRanges",
       "theorem": "Krepi.Proofs.Fdt.Stp.discoveryRejectsExcessRamRanges",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.DiscoveryRecordsDynamicReservations",
       "theorem": "Krepi.Proofs.Fdt.Stp.discoveryRecordsDynamicReservations",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.DiscoveryRejectsEmptyStaticReservation",
       "theorem": "Krepi.Proofs.Fdt.Stp.discoveryRejectsEmptyStaticReservation",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.Pi5AcceptsTreeAtLimit",
       "theorem": "Krepi.Proofs.Fdt.Stp.pi5AcceptsTreeAtLimit",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.Pi5RejectsTreeAboveLimit",
       "theorem": "Krepi.Proofs.Fdt.Stp.pi5RejectsTreeAboveLimit",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.Pi5ModelsBuildBootMemoryMaps",
       "theorem": "Krepi.Proofs.Fdt.Stp.pi5ModelsBuildBootMemoryMaps",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.BootMemoryMapRejectsRamAboveCapacity",
       "theorem": "Krepi.Proofs.Fdt.Stp.bootMemoryMapRejectsRamAboveCapacity",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.AllRamAcceptsMaxBootStorage",
       "theorem": "Krepi.Proofs.Fdt.Stp.allRamAcceptsMaxBootStorage",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.AllRamRejectsExcessBootStorage",
       "theorem": "Krepi.Proofs.Fdt.Stp.allRamRejectsExcessBootStorage",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.CpusAcceptsQemuPair",
       "theorem": "Krepi.Proofs.Fdt.Stp.cpusAcceptsQemuPair",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.CpusRejectsRepeatedId",
       "theorem": "Krepi.Proofs.Fdt.Stp.cpusRejectsRepeatedId",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.TranslateRegThroughBus",
       "theorem": "Krepi.Proofs.Fdt.Stp.translateRegThroughBus",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.TranslationRejectsTwoWindows",
       "theorem": "Krepi.Proofs.Fdt.Stp.translationRejectsTwoWindows",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.SeedsDoNotReachResults",
       "theorem": "Krepi.Proofs.Fdt.Stp.seedsDoNotReachResults",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.ChosenDeviceTypeIsRead",
       "theorem": "Krepi.Proofs.Fdt.Stp.chosenDeviceTypeIsRead",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.HeaderNoOverflow",
