@@ -11,8 +11,9 @@ physical RAM. The component takes the boot memory map of the
 cache and TLB maintenance of the
 [boot](../../boot-platform/boot/contract.md#cache-and-tlb-maintenance)
 component. The observable behaviour that these rules serve, with its
-evidence, is in the [requirements](requirements.md), the other document of
-the component.
+evidence, is in the [requirements](requirements.md). The
+[specification](specification.md) states these rules in Lean, and the
+[proof path](proof.md) plans the proof of the code against it.
 
 ## Terms
 
@@ -26,8 +27,12 @@ the component.
   level 3, 4 KiB. The index of a virtual address at level 1 is its bits 30
   to 38, at level 2 its bits 21 to 29, at level 3 its bits 12 to 20.
 - **Table set.** `page_tables::Tables`: the tables of one region, kept in
-  one pool, with the root at index 0 and the record of the tables in use.
-  A set never holds addresses of the other region.
+  one pool, with the root at index 0 and the record of the tables in use,
+  their number: the tables in use are those of the indices below it, since a
+  new table is the one of the lowest free index and a table returns to the
+  pool only through `reset` and through `clone_kernel_from`
+  ([Table pool](#table-pool)). A set never holds addresses of the other
+  region.
 - **Pool.** The storage of a set: its capacity of $N$ tables at consecutive
   physical addresses from `base`, a multiple of 4 KiB, table $i$ at
   `base` $+ 4096 i$.
@@ -149,15 +154,16 @@ attribute. A page descriptor, at level 3, holds `0b11` and a block
 descriptor, at level 2, holds `0b01` in bits 1 and 0; both hold the output
 address in bits 12 to 47, bits 21 to 47 for a block, and the bits of a kind.
 `page_tables::descriptor` gives the page descriptor of a kind and an output
-address; the block descriptor of `ReadWrite` is its page descriptor with
-bit 1 clear, and no other kind has a block form.
+address, of which it takes bits 12 to 47; the block descriptor of
+`ReadWrite` is its page descriptor with bit 1 clear, and no other kind has a
+block form.
 
 | Kind | EL1 | EL0 | Memory | AP[2:1] | PXN | UXN | AttrIndx | SH | nG | AF | Use |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `ReadExecute` | RO, executable | None, NX | Normal | `0b10` | 0 | 1 | 1 | `0b11` | 0 | 1 | Text of the image |
 | `ReadOnly` | RO, NX | None, NX | Normal | `0b10` | 1 | 1 | 1 | `0b11` | 0 | 1 | Read-only data of the image, the device tree |
 | `ReadWrite` | RW, NX | None, NX | Normal | `0b00` | 1 | 1 | 1 | `0b11` | 0 | 1 | Data, BSS and stacks of the image; the direct map |
-| `KernelPrivateReadWrite` | RW, NX | None, NX | Normal | `0b00` | 1 | 1 | 1 | `0b11` | 1 | 1 | Kernel pages private to one address space |
+| `KernelPrivateReadWrite` | RW, NX | None, NX | Normal | `0b00` | 1 | 1 | 1 | `0b11` | 1 | 1 | Kernel pages private to one address space; no mapping of release 0.1 uses it ([address spaces and ASIDs](../address-space/contract.md#address-spaces-and-asids)) |
 | `Device` | RW, NX | None, NX | Device-nGnRnE | `0b00` | 1 | 1 | 0 | `0b00` | 0 | 1 | Registers of the kernel's devices |
 | `UserReadExecute` | RO, NX | RO, executable | Normal | `0b11` | 1 | 0 | 1 | `0b11` | 1 | 1 | Code of a process |
 | `UserReadOnly` | RO, NX | RO, NX | Normal | `0b11` | 1 | 1 | 1 | `0b11` | 1 | 1 | Read-only data of a process |
@@ -179,9 +185,11 @@ bits 8 and 9, nG bit 11 and AF bit 10; every other bit of a leaf is 0.
   without gathering, reordering or early write acknowledgement, and
   execute-never at both levels.
 - **Guard.** An entry that must stay invalid: the page below each stack of
-  the image and every page that a mapping leaves out on purpose. No entry of
-  this page writes a valid descriptor where a guard is, and an access to a
-  guard takes a translation fault.
+  the image and every page that a mapping leaves out on purpose.
+  `kernel_map` writes no entry of a guard page of its layout, and the code
+  that fills an invalid entry of the lower kernel set after boot keeps it
+  off the guard pages, which `map_page` does not know; an access to a guard
+  takes a translation fault.
 - **Kernel and user.** The kernel kinds give EL0 no access and are global,
   except `KernelPrivateReadWrite`, which is tagged with the ASID of its
   address space; the user kinds are tagged with the ASID, and EL1 never
@@ -205,7 +213,9 @@ every alias in every table set together
    map maps only pages whose owner is free or a holder, `ReadWrite`. The
    image, the device tree, the boot bundle, every other boot storage and
    every firmware reservation have no alias in the direct map
-   ([Kernel direct map](#kernel-direct-map)).
+   ([Kernel direct map](#kernel-direct-map)). The board gives `kernel_map` a
+   layout whose `ReadExecute` ranges lie in the span of boot storage of the
+   kernel image, so the text has no alias in the direct map either.
 3. The executable pages come only from the image and the boot bundle: the
    text of the image through `ReadExecute` in the lower kernel set and its
    copies, and the code of the boot bundle through `UserReadExecute` in an
@@ -215,12 +225,17 @@ every alias in every table set together
    read-only or executable only. No VM object carries the execute right
    and `mprotect` cannot add it, so no page of a holder is mapped
    executable; a page that becomes executable at run time comes with the
-   full VM object model.
+   full VM object model. A plan that fills an invalid entry of the lower
+   kernel set after boot maps an executable kind only at a page of the text
+   of the image, and a page of the text only with `ReadExecute`.
 
 ### Kernel mappings
 
 `kernel_map` writes the lower kernel set from a layout that the board gives:
-at most 16 ranges, each with a kernel kind, and the guard pages.
+at most 16 ranges, each with a kernel kind, and the guard pages. A range of
+a layout is a physical range; the at most 16 ranges and the four kinds below
+are rules of the layout that the board gives, which `kernel_map` does not
+check. A guard page is given by an address in it.
 
 - The image is linked at its load address and runs at it while the MMU is
   turned on, so the lower kernel set maps every range at its physical
@@ -265,18 +280,21 @@ kernel's own tables do.
   entry does not check it. The caller holds the token of the source, that
   of the kernel tables for the lower kernel set, so that no plan writes the
   source during the copy.
-- The entry checks in this order and returns the first error: `base` and
-  `bits` of the source and then of the target (`Alignment`, `AddressWidth`,
-  `TableBacking`, as for every entry); the overlap of the two pools, and a
-  record of the source's tables in use that holds no table or more than
-  $N$ (`TableBacking`); then the walk of the source from its root, entry by
-  entry in index order and each table under its entry before the next
-  entry: a table descriptor with an attribute bit, or a block in its place
-  (`InvalidDescriptor`); one that points at a table outside the tables in
-  use or at a table already reached (`TableBacking`); a leaf of another
-  kind or with an output address at or above $2^{\mathrm{bits}}$
-  (`InvalidDescriptor`); and last a table in use that the walk did not
-  reach (`TableBacking`).
+- The entry checks in this order and returns the first error: `base`, `bits`
+  and the pool of the source, then `base` and the pool of the target
+  (`Alignment`, `AddressWidth`, `TableBacking`, as for every entry; `bits`
+  is one argument for both pools and is checked once); the overlap of the
+  two pools, and a record of the source's tables in use that holds no table
+  or more than $N$ (`TableBacking`); then the walk of the source from its
+  root, which it has reached when it starts, entry by entry in index order
+  and each table under its entry before the next entry: at level 1 or 2, a
+  valid entry that is not a table descriptor without an attribute bit, such
+  as one with an attribute bit or a block in its place
+  (`InvalidDescriptor`), and one that points at a table outside the tables
+  in use or at a table already reached, the root among them
+  (`TableBacking`); a leaf of another kind or with an output address at or
+  above $2^{\mathrm{bits}}$ (`InvalidDescriptor`); and last a table in use
+  that the walk did not reach (`TableBacking`).
 
 ## Abstract mapping
 
@@ -285,7 +303,9 @@ pool. The tables that it uses are the root and one table for each element
 of $G$ and of $P$: $\mathrm{used} = 1 + |G| + |P|$. For a virtual address
 $v$, $\mathrm{blk}(v)$ and $\mathrm{gib}(v)$ are $v$ rounded down to 2 MiB
 and to 1 GiB. A page or a block slot is free when $M$ has no entry for it,
-and a block slot $b$ is also free of tables when $b \notin P$.
+and a block slot $b$ is also free of tables when $b \notin P$. The table
+descriptors of a set reach each of its tables in use but the root exactly
+once, and no other table.
 
 The state of the page ownership table is the owner function $O$ on the
 managed pages ([Page ownership](#page-ownership)) and its generation counter
@@ -305,8 +325,8 @@ returns no plan: $M' = M$, $G' = G$, $P' = P$.
 | `map_block(v, p)` | $v = \mathrm{blk}(v)$, no page of $[v, v + 2^{21})$ in $\mathrm{dom}\,M$ and $v \notin P$ | $M' = M \cup \{v + i \mapsto (p + i, \mathrm{ReadWrite}, \mathrm{block}) : i = 0, 4096, \ldots, 2^{21} - 4096\}$, $G' = G \cup \{\mathrm{gib}(v)\}$, $P' = P$ |
 | `unmap_page(v)` | $M(v) = (p, k, \mathrm{page})$ | $M' = M \setminus \{v\}$, $G' = G$, $P' = P$: an empty table stays in the set; the entry returns $p$ |
 | `clone_kernel_from(S)` | The rules of [copying the kernel tables](#copying-the-kernel-tables): every entry of $M_S$ a page of `ReadExecute`, `ReadOnly`, `ReadWrite` or `Device` below $2^{\mathrm{bits}}$; no `TTBR` and no TLB holds the target | $M' = M_S$, $G' = G_S$, $P' = P_S$, in the tables of the indices that $S$ uses; $S$ is unchanged |
-| `kernel_map(L)` | Every page of every range of $L$ outside $\mathrm{dom}\,M$, the ranges pairwise without a common page and without a guard page of $L$ | $M' = M \cup \{v \mapsto (v, k_j, \mathrm{page}) : v$ a page of range $j$ of $L$ with kind $k_j\}$; $G'$ and $P'$ add the slots of those pages; every guard page of $L$ stays outside $\mathrm{dom}\,M'$ |
-| `direct_map(B)` | Every page of every usable range of $B$ below $2^{39}$, its address outside $\mathrm{dom}\,M$ | $M' = M \cup \{\mathtt{DIRECT\_BASE} \mid p \mapsto (p, \mathrm{ReadWrite}, \ell(p)) : p$ a page of a usable range of $B\}$, where $\ell(p)$ is block when $\mathrm{blk}(p)$ and the 2 MiB after it lie in one usable range and page otherwise; $G'$ and $P'$ add the slots of those pages |
+| `kernel_map(L)` | Every page of every range of $L$ outside $\mathrm{dom}\,M$, the ranges pairwise without a common page and without a guard page of $L$ | $M' = M \cup \{v \mapsto (v, k_j, \mathrm{page}) : v$ a page of range $j$ of $L$ with kind $k_j\}$; $G'$ and $P'$ add the slots of those pages; the plan writes no entry of a guard page of $L$, so a guard page outside $\mathrm{dom}\,M$ stays outside $\mathrm{dom}\,M'$ |
+| `direct_map(B)` | Every page of every usable range of $B$ below $2^{39}$, its address outside $\mathrm{dom}\,M$ | $M' = M \cup \{\mathtt{DIRECT\_BASE} \mid p \mapsto (p, \mathrm{ReadWrite}, \ell(p)) : p$ a page of a usable range of $B\}$, where $\ell(p)$ is block when $\mathrm{blk}(p)$ and the 2 MiB after it lie in one usable range and page otherwise; $G'$ adds the 1 GiB slots of those pages and $P'$ the 2 MiB slots of those mapped as pages |
 
 ### After ownership
 
@@ -338,22 +358,28 @@ changes the bytes of frames and no owner, and `enable` writes registers.
 
 | Error | Rule broken |
 | --- | --- |
-| `Alignment` | A virtual address, a physical address or `base` is not a multiple of 4 KiB; for a block, `v` or `p` not of 2 MiB; a range of a layout does not start or end on a page boundary |
+| `Alignment` | A virtual address, a physical address or `base` is not a multiple of 4 KiB; for a block, and for the block slot of `lookup_block`, `v` or `p` not of 2 MiB; a range of a layout does not start or end on a page boundary |
 | `AddressWidth` | A virtual address outside the region of the set; a physical address at or above $2^{\mathrm{bits}}$; `bits` outside 32 to 48; a usable range that ends above $2^{39}$ |
 | `TableBacking` | A pool of no table, or one that does not end at or below $2^{\mathrm{bits}}$; a table descriptor that points outside the tables in use of the pool; for `clone_kernel_from`, pools that overlap, a table that the walk of the source reaches twice, or a record of the source's tables in use that the walk does not match |
 | `OutOfTables` | The plan needs more tables than the pool has free |
 | `AlreadyMapped` | A page or block slot that the write needs is not free, or not free of tables for a block; two ranges of a layout share a page, or a range covers a guard page |
 | `NotMapped` | `lookup_page` or `unmap_page` at an address without a page leaf, which includes a page of a block; `lookup_block` at a block slot without a block |
-| `InvalidDescriptor` | For `clone_kernel_from`, a table descriptor of the source with an attribute bit or a block in its place, or a leaf of the source of another kind than `ReadExecute`, `ReadOnly`, `ReadWrite` and `Device` or with an output address at or above $2^{\mathrm{bits}}$ |
+| `InvalidDescriptor` | For `clone_kernel_from`, a valid entry of the source at level 1 or 2 that is not a table descriptor without an attribute bit, such as one with an attribute bit or a block in its place, or a leaf of the source of another kind than `ReadExecute`, `ReadOnly`, `ReadWrite` and `Device` or with an output address at or above $2^{\mathrm{bits}}$ |
 
-An entry checks in this order and returns the first error: `base`, `bits`
-and the region of the virtual address (`Alignment`, `AddressWidth`,
-`TableBacking`, in this order); the physical address (`Alignment`, then
-`AddressWidth`); the walk (`TableBacking` for a bad table descriptor, then
-`AlreadyMapped` or `NotMapped`); and `OutOfTables` last. `kernel_map` and
-`direct_map` check their ranges in address order and, for each, alignment,
-width and the free slots; then the tables that the whole plan needs. The
-order of `clone_kernel_from` is in
+An entry checks in this order and returns the first error: the virtual
+address and `base` off their boundaries (`Alignment`), the virtual address
+outside the region of the set or `bits` outside 32 to 48 (`AddressWidth`),
+and the pool (`TableBacking`), in this order; the physical address
+(`Alignment`, then `AddressWidth`); the walk (`TableBacking` for a bad table
+descriptor, then `AlreadyMapped` or `NotMapped`); and `OutOfTables` last.
+`kernel_map` and `direct_map` check their ranges in the order of their
+starts, ranges of one start in the order in which they are given, and, for
+each, the alignment of its ends (`Alignment`), its width (`AddressWidth`)
+and then its leaves one by one in address order: the walk of the leaf
+(`TableBacking`, then `AlreadyMapped`), then a leaf that an earlier range of
+the map covers or, for `kernel_map`, a guard page (`AlreadyMapped`); then
+the tables that the whole plan needs (`OutOfTables`). The order of
+`clone_kernel_from` is in
 [copying the kernel tables](#copying-the-kernel-tables).
 
 ## Write plans and publication
@@ -384,6 +410,16 @@ them in order, each completing before the next:
   a new level 2 and a new level 3 table is `Zero(t3)`, `Store(t3, ...)`,
   `Zero(t2)`, `Store(t2, ...)`, `Fence`, `Store(root, ...)`, `Sync`
   ([S6b](../../../conventions/smp.md#s6b-new-translation-tables)).
+- **Maps.** The plans of `kernel_map` and `direct_map` take the leaves in
+  address order, one 1 GiB slot after the other. Under a level 2 table that
+  the set holds, a 2 MiB slot is the `Store` of its block, the `Store` of
+  each of its pages into a level 3 table of the set, or `Zero(t3)`, the
+  `Store` of each page, `Fence` and the `Store` of the table descriptor of
+  the new level 3 table. Under a new level 2 table, each new level 3 table
+  under it comes first, `Zero(t3)` and the `Store` of each of its pages, then
+  `Zero(t2)`, the `Store` of each entry of the level 2 table in index order,
+  `Fence` and the `Store` of its table descriptor into the root. `Sync` ends
+  the plan. On one leaf the plan is that of `map_page` or `map_block`.
 - **New entries.** A plan whose last store makes an entry valid ends with
   `Sync`, before the kernel or EL0 relies on the entry
   ([page tables and published data](../../../conventions/smp.md#page-tables-and-published-data)).
@@ -399,12 +435,14 @@ them in order, each completing before the next:
 - **No remapping.** No entry replaces a valid entry by another: a change of
   the output address or the kind of a page is an `unmap_page` and then a
   `map_page`, two plans, which is break-before-make.
-- **Reset.** The plan of `reset` is a `Zero` of every table in use; the
-  caller has made the set unreachable before it.
+- **Reset.** The plan of `reset` is a `Zero` of every table in use, in the
+  order of their indices; the caller has made the set unreachable before it.
 - **Copy.** The plan of `clone_kernel_from` is a `Zero` of every table in
-  use of the target, then a `Store` of every valid entry of every table in
-  use of the source into the target's table of the same index, its table
-  descriptors pointing into the target's pool, and `Sync` last. After the
+  use of the target, in the order of their indices, then a `Store` of every
+  valid entry of every table in use of the source into the target's table of
+  the same index, the tables in the order of their indices and the entries
+  of each in the order of theirs, its table descriptors pointing into the
+  target's pool, and `Sync` last, with no `Fence`. After the
   `Zero` steps every table of the target is zero, since its tables not in
   use are zero already ([Table pool](#table-pool)), so an entry that is
   invalid in the source is invalid in the target too. No CPU walks the
@@ -448,6 +486,14 @@ other bits as the cold entry left them, followed by `ISB`.
   that is a multiple of 2 MiB and has at least 2 MiB of its range left, it
   writes a block; elsewhere a page. A usable range never spans two
   banks, so a block never does either.
+- The boot memory map is the value that `MemoryPlan::all_ram`, `new` or
+  `from_pi5` of the
+  [fdt contract](../../boot-platform/fdt/contract.md#boot-memory-map)
+  builds, so its usable ranges start and end on page boundaries, are
+  disjoint and come in address order: the checks of `direct_map` of the
+  alignment of a usable range and of a leaf that an earlier range shares
+  never fail, and its `Alignment` and `AlreadyMapped` come from `base` and
+  from the entries that the set already holds.
 - Nothing else is in the direct map: not the pages of a firmware reservation,
   `no-map` or not and also when it is `reusable`; not the image, the device
   tree, the boot bundle or another boot storage; not a hole between banks;
@@ -487,12 +533,16 @@ objects; the component of each names its owner identities.
 **Invariants.**
 
 - Every managed page has exactly one owner.
-- The pages of one holder generation form one range in one bank, and two
-  holders never share a generation.
+- The pages of one holder generation form one range in one bank, the range
+  of one extent, and two holders never share a generation.
 - In the table of the kernel root, which the boot wiring builds from the
   boot memory map, the pages that are free or held are exactly the pages of
   its usable ranges, so exactly the pages of the direct map.
 - The firmware, image and boot storage pages never change owner.
+- Every generation that a holder has is at least 1 and below the generation
+  counter.
+- The free extents of each bank are its maximal runs of free pages: no free
+  extent ends where a free extent of its bank starts.
 
 **Initialization.** `Ownership::new(arena, banks, exclusions)` takes the
 managed banks and the exclusions of the boot memory map with their owners.
@@ -529,13 +579,16 @@ writing, the range that an allocation takes:
   would need more extents than the capacity has free; the scan then goes on.
 - A range never spans two banks, even adjacent ones, and a window never
   gives access to a hole, an exclusion or another bank.
-- The checks run in this order: the size of the request and of its
-  alignment in bytes (`AddressOverflow`); `pages` 0 (`InvalidSize`); an
-  alignment that is not a power of two, among them 0 (`InvalidAlignment`);
-  the generation counter exhausted (`GenerationExhausted`); the rounding of a
-  start or the end of a range beyond 64 bits (`AddressOverflow`); then
-  `MetadataExhausted` when an extent was passed over for capacity and none
-  held the range, and `OutOfMemory` otherwise.
+- The checks run in this order: the size of the request and that of its
+  alignment in bytes, each $2^{64}$ or more (`AddressOverflow`); `pages` 0
+  (`InvalidSize`); an alignment that is not a power of two, among them 0
+  (`InvalidAlignment`); the generation counter exhausted
+  (`GenerationExhausted`); then the scan, in which a free extent whose start
+  rounded up, or the end of whose range, is $2^{64}$ or more gives
+  `AddressOverflow` when the scan reaches it; then `MetadataExhausted` when
+  an extent was passed over for capacity and none held the range, and
+  `OutOfMemory` otherwise. A high placement rounds down and does not
+  overflow.
 
 **Zeroing before publication.** A page reaches a holder only once its bytes
 are zero, and the core never writes a frame:
@@ -548,8 +601,9 @@ are zero, and the core never writes a frame:
   and returns a `Reservation`; the caller zeroes its range, then
   `Reservation::initialized` with the outcome gives an `Initialized`
   packet, or, after a failure, the same reservation with its count of
-  failures increased and marked as attempted; `publish` turns the packet
-  into a receipt. Other entries may run on the table between the steps.
+  failures, a 64-bit count that stays at $2^{64} - 1$ once there, increased
+  and marked as attempted; `publish` turns the packet into a receipt. Other
+  entries may run on the table between the steps.
 - `cancel` returns an unused reservation to free; after an attempted
   zeroing it is `ZeroFailed` and returns the reservation, whose holder
   completes a zeroing and publishes it. A reservation or packet that its
@@ -563,14 +617,17 @@ zeroing of the reservation was attempted (`ZeroFailed`), then the arena
 (`WrongArena`), the owner identity (`WrongOwner`) and that the reservation
 names a held range of exactly its generation in the reserved state
 (`InvalidAllocation`), in this order; a refused reservation is returned to
-its caller. A released extent merges with the free extents next to it in
-the same bank. The generation counter starts at 1, grows by one with each
-allocation and reservation, and is never reused: after $2^{64} - 1$ the
-table refuses new ones with `GenerationExhausted`.
-`validate` makes the checks of `release` without a write. `owner` gives the
-owner of a page: the owner of the extent that holds it, or, for a page of a
+its caller. A released or cancelled extent merges with the free extents next
+to it in the same bank. The generation counter starts at 1, grows by one
+with each allocation and reservation, and is never reused: after
+$2^{64} - 1$ the table refuses new ones with `GenerationExhausted`.
+`validate` makes the checks of `release` without a write, for a receipt and
+for an initialized packet, with the state that each names: published for a
+receipt and reserved for a packet. `owner` gives the owner of the page that
+holds an address: the owner of the extent that holds it, or, for a page of a
 managed bank in no extent, the first owner in the order firmware, image,
-boot storage among the exclusion records that touch it.
+boot storage among the exclusion records that touch it; a page of no managed
+bank has none.
 
 **Statistics.** `stats` gives the managed bytes, those of the free and
 held pages, without the excluded ones; the free and allocated bytes, where
@@ -588,8 +645,9 @@ its first bank, around the image and the device tree, and one in each of
 the other two. Apart from the extents it keeps at most 132 exclusion
 records, another constant of the core: the 4 spans of boot storage and the
 128 firmware reservations that the boot memory map admits at most; more
-exclusions fail the initialization with `MetadataExhausted`, and the
-records never change after it.
+exclusions fail the initialization with `MetadataExhausted`, and the records
+never change after it. The bounds of 16 GiB and 32 banks are those of the
+boot memory map, and `Ownership::new` does not check them.
 
 | Error | Rule broken |
 | --- | --- |
@@ -610,9 +668,10 @@ records never change after it.
 
 - A pool holds $N \geq 1$ tables, at a `base` that is a multiple of 4 KiB,
   ending at or below $2^{\mathrm{bits}}$. Every entry on a set other than
-  `new`, `reset` and `used` takes `base` and `bits` as arguments, as the
-  prototype does, and checks them first ([errors](#errors-of-table-sets));
-  `new` and `reset` check nothing ([Check and execute](#check-and-execute)).
+  `new`, `reset` and `used` takes `base`, a 64-bit address, and `bits`, an
+  8-bit width, as arguments, as the prototype does, and checks them first
+  ([errors](#errors-of-table-sets)); `new` and `reset` check nothing
+  ([Check and execute](#check-and-execute)).
 - A new table is the one of the lowest free index, zeroed by its plan, and
   a table returns to the pool only through `reset` and through
   `clone_kernel_from`, which empties its target first: `unmap_page` leaves
@@ -681,9 +740,10 @@ or the image covers in part, at most 4.
 - `kernel_map` and `direct_map` check every range and the tables that the
   whole plan needs before the first write: a map that does not fit fails
   with `OutOfTables` and leaves the set as it was, with no step executed.
-- `Tables::new` and `reset` check nothing and do not fail; `new` relies on
-  its caller for storage that is zero, and `reset` for the unreachability
-  of the set.
+- `Tables::new` and `reset` check nothing and do not fail; `new` takes the
+  storage as it is and relies on its caller for storage that is zero, and
+  `reset` takes a set of any record of tables in use, also 0, and relies on
+  its caller for the unreachability of the set.
 - `choose`, `owner`, `validate`, `stats`, `lookup_page`, `lookup_block`,
   `used`, `descriptor` and `direct_address` write nothing.
 - `Ownership::new`, `assign`, `reserve`, `publish`, `cancel` and `release`
@@ -692,6 +752,12 @@ or the image covers in part, at most 4.
   fail only for capacity, with `MetadataExhausted`, and then restores the
   table from before the entry; since the entries of this page count the
   extents in their checks, their write phases do not fail.
+- `assign` checks the outcome of the zeroing first (`ZeroFailed`), and then
+  that its choice still fits the table, in the order of the checks of
+  `choose`: the generation counter exhausted (`GenerationExhausted`), the
+  range not inside one free extent (`OutOfMemory`), and the extents that it
+  needs (`MetadataExhausted`). A choice of `choose` taken under the same
+  token passes them.
 - A rejected request writes nothing, a counter of failures included.
 - `krepi_arch::mmu::apply` executes a plan that the check of its entry
   fixed and does not fail. `enable` and `zero_frames` check nothing and do
@@ -699,9 +765,10 @@ or the image covers in part, at most 4.
 
 ## Work bounds
 
-- `map_page`, `map_block`, `unmap_page`, `lookup_page` and `lookup_block`
-  read at most one entry at each of the three levels; their plans have at
-  most seven steps, among them at most two `Zero` of 512 entries each.
+- `map_page`, `unmap_page` and `lookup_page` read at most one entry at each
+  of the three levels, and `map_block` and `lookup_block` the root entry and
+  the level 2 entry; their plans have at most seven steps, among them at
+  most two `Zero` of 512 entries each.
 - `reset` has a plan of one `Zero` for each table in use, at most $N$.
 - `clone_kernel_from` reads each entry of each table in use of the source
   once, at most $512 N$ entries, and marks each table once; its plan has
@@ -709,13 +776,14 @@ or the image covers in part, at most 4.
   for each valid entry of the source, at most $512 N$, and one `Sync`.
 - `kernel_map` checks each of at most 16 ranges against the others and each
   page of each range once, and its plan has one `Store` for each page and
-  table, one `Zero` for each new table and one `Fence` for each table
-  descriptor.
+  table, one `Zero` for each new table and at most one `Fence` for each
+  table descriptor, before each store that makes new tables reachable.
 - `direct_map` walks each usable range once in steps of a block or a
   page: at most RAM / 2 MiB blocks and, at the two ends of each range, at
   most 511 pages each. Its plan has one `Store` for each block, page and
-  table descriptor, one `Zero` for each new table, at most 80, and one
-  `Fence` for each table descriptor; it runs to its end at boot.
+  table descriptor, one `Zero` for each new table, at most 80, and at most
+  one `Fence` for each table descriptor, before each store that makes new
+  tables reachable; it runs to its end at boot.
 - `Ownership::new` compares each of at most 32 banks with the others and
   each of at most 132 exclusions with each bank, and writes at most 132
   exclusion records; `choose`, `assign`, `reserve`, `publish`, `cancel`,
@@ -730,8 +798,10 @@ or the image covers in part, at most 4.
 ## Determinism
 
 - A new table is the one of the lowest free index of the pool, so a set
-  takes its tables in the order in which its plans first need them;
-  `clone_kernel_from` gives its target the indices of the source.
+  takes its tables in the order in which its entries first need them: the
+  level 2 table of a leaf before its level 3 table, and the leaves of
+  `kernel_map` and `direct_map` in address order. `clone_kernel_from` gives
+  its target the indices of the source.
 - The order of the steps of a plan is fixed by
   [Write plans and publication](#write-plans-and-publication); the direct
   map is walked in address order, with a block wherever the rule allows one.
@@ -755,7 +825,7 @@ or the image covers in part, at most 4.
 | The descriptors of the lower kernel set | Shared | The boot CPU, which builds them before the MMU is on; then the token of the kernel tables, for a plan that fills an invalid entry | The `Sync` that ends the plan | Once, before secondary CPUs start; a later fill by its `Sync`, and another CPU executes `DSB` and `ISB` before it relies on the entry ([published data](../../../conventions/smp.md#page-tables-and-published-data)) |
 | The descriptors of the direct map's set | Shared, read-only after boot | The boot CPU, which builds them before the MMU is on | The `ISB` after `enable` writes `TTBR1_EL1` on the boot CPU | Once, before secondary CPUs start; the field never changes after it |
 | The tables in use of the pools of the kernel tables | Shared | The boot CPU; then the token of the kernel tables | The end of the write phase of the entry | Under the token |
-| The page ownership table: its extents, exclusion records, generation counter and arena | Shared | The token of the page ownership table, held by one CPU at a time; with one CPU, by the executing CPU | The end of the write phase of the entry | Under the token, by the release of the lock that provides it once CPUs share it |
+| The page ownership table: its banks, extents, exclusion records, generation counter and arena | Shared | The token of the page ownership table, held by one CPU at a time; with one CPU, by the executing CPU | The end of the write phase of the entry | Under the token, by the release of the lock that provides it once CPUs share it |
 | `MAIR_EL1`, `TCR_EL1`, `TTBR0_EL1`, `TTBR1_EL1` and `SCTLR_EL1` | Per-CPU | The executing CPU | The `ISB` after the writes of `enable` | `none`: each CPU writes its own |
 
 A reservation, an initialized packet and a receipt are values of their
@@ -776,19 +846,25 @@ boot contract.
   16 GB from the bank shapes that the fdt contract infers and the exclusions
   of [Table pool](#table-pool), and check every 2 MiB block against an
   independent page model as `dm-04` does, with the counts of tables, blocks
-  and pages of that table. The 8 GB model is the frozen vector `dm-04`.
+  and pages of that table. The frozen vector `dm-04` models the 8 GB board
+  by its banks, with one page of boot storage and one `no-map` page; the
+  counts of the 8 GB model in [Table pool](#table-pool) are those that the
+  prototype measured on the board, which the board runs check.
   These models are not run on a board in release 0.1; only the 8 GB model
   is.
 - A host test builds a direct map that needs exactly the 80 tables of the
   pool, and one that needs 81 fails with `OutOfTables` and gives no plan.
 - A host test initializes the page ownership table from the boot memory map
-  of each board shape and checks against an independent page model that
-  every managed page has exactly one owner, and that the free pages are
-  exactly the pages of the direct map; another fills the 160 extents exactly
-  and refuses one more with `MetadataExhausted`; and an initialization with
-  132 exclusions succeeds and one with 133 fails with `MetadataExhausted`.
-- A host test gives `kernel_map` a layout whose text and data share a page,
-  and `kernel_map` refuses it, so no page is mapped writable and executable.
+  of each board shape, QEMU virt and the five Pi 5 models with the
+  exclusions of [Table pool](#table-pool), and checks against an independent
+  page model that every managed page has exactly one owner, and that the
+  free pages are exactly the pages of the direct map; another fills the 160
+  extents exactly and refuses one more with `MetadataExhausted`; and an
+  initialization with 132 exclusions succeeds and one with 133 fails with
+  `MetadataExhausted`.
+- A host test gives `kernel_map` a layout whose text and data, each on page
+  boundaries, share a page, and `kernel_map` refuses it with
+  `AlreadyMapped`, so no page is mapped writable and executable.
 - Host tests hold each plan of `map_page`, `map_block`, `unmap_page`,
   `clone_kernel_from`, `kernel_map` and `direct_map` against the order of
   [Write plans and publication](#write-plans-and-publication), written from
@@ -810,6 +886,20 @@ obligations of the contracts that add them, carried by the proof of
 contexts, user copies and the private VM, by release 0.2; the table below
 lists the obligations of the code of this page.
 
+The target of the page-table logic has one open obligation of its own,
+which the target closes and the table therefore does not list.
+`kernel_map`, `direct_map` and `clone_kernel_from` give their plans by
+iterators of the core
+([write plans and publication](#write-plans-and-publication)), and the
+entry table names these functions but not the iterator types, so the roots
+of the target hold no `next`. The `next` of each plan iterator type joins
+the roots once the implementation names the types, and before the
+implementation merges, so that the refinement proof relates the steps that
+each iteration gives to the plan of the specification
+([proof path](proof.md#page-tables)). It is carried by the implementation,
+which names the types and adds their `next` to the roots, and by the
+refinement proof of the target.
+
 | Obligation | Kind | Verified state | Carrier | Stage |
 | --- | --- | --- | --- | --- |
 | `kernel/arch/src/mmu.rs#store_descriptor` (planned) | `unsafe` | Writes the translation tables that the page-table logic describes: one descriptor of a write plan | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
@@ -827,7 +917,15 @@ page is one `#[test]` function of the prototype; in the vector file it is
 the lines whose id starts with the id of the vector and a dot, one line for
 each case, `<vector>.<n>` from 1 in the order of the test, where a case is
 one call of an entry that the test makes with the output that it asserts.
-The expected outputs below are the assertions of the test bodies.
+The expected outputs below are the assertions of the test bodies. Where a
+row says only that a call fails, the vector file gives the error that the
+rules of this page give for its input; the expected output of the row stays
+as the test asserts it. The vector file is the one that the block below
+names; the replay is named once the host tests write their results.
+
+```vectors
+vectors = "verification/vectors/memory/page-tables.vectors"
+```
 
 | File | Vectors |
 | --- | ---: |
@@ -849,6 +947,53 @@ A kind, an error and a region, `lower` or `upper`, are written by their
 names on this page. The output of a call is `ok`, followed by its fields,
 or `err=<error>`; a structured value is a list of `key=value` fields
 separated by single spaces, in the order of the expected output below.
+
+A case of a table set is a call on sets that the earlier calls of its test
+built: its input holds the sets of the test, the earlier calls and writes of
+the test, its call and what the test asserts of the state after the call, in
+the forms of the vector notation of the
+[specification](specification.md#vector-notation). `Kind::bits()` of the
+prototype is `descriptor(kind, 0x0)`.
+
+The earlier calls of a case of `pt-17` that its loop makes are written as
+one item, `map_blocks(set,v,p,count,base,bits)`: the first `count` calls
+`map_block(set,v+0x200000*i,p+0x200000*i,base,bits)` of the loop, for `i`
+from 0 to `count - 1`, in this order, each on the set that the calls before
+it left.
+
+A case of a direct map holds the boot memory map that its test builds:
+`memory=MemoryPlan::new` with the fields `window=`, `ram=`, `boot=` and
+`firmware=`, or `memory=MemoryPlan::all_ram` with the last three, in the
+notation of the
+[fdt contract](../../boot-platform/fdt/contract.md#notation). The output of
+`direct_map` is `ok bytes=<bytes> blocks=<count> pages=<count>`. The counts
+are those of its plan: the blocks and the pages that the plan stores, and
+the bytes of both; a line gives them in the order of that output also where
+its row lists them in another. A line of
+`dm-04` for a 2 MiB block is the check of its test of the pages of that
+block, `translate_block(set,pa,base,bits)`, after the `direct_map` of the
+row, and its last line is the field `bytes` of the `direct_map`,
+`direct_map(set,base,bits).bytes`.
+
+The earlier steps of a line of `own-22` are written as one item,
+`mixed_steps(t,l,count)`: the first `count` steps of the loop of its row,
+from step 0, on the table `t`, with `l` the allocations that are live after
+them in the order of their allocation; `mixed_step(t,l,s)` is step `s` of
+the loop on what the steps before it left, and gives the line of the step;
+`release_all(t,l)` releases every live allocation, in the order of their
+allocation, after the loop.
+
+In a vector of the page ownership table, the calls that make a table, a
+choice, a receipt, a reservation or a packet name it, and later calls take
+it by name. The prototype's allocation with a zeroing callback is two cases,
+`choose`, whose range is the one that the callback zeroes, and `assign`,
+with the outcome of the callback; a request that `choose` refuses has no
+`assign`. A test's helper that builds a range writes a range of the input
+and is not a case. Where a test asserts one field of the statistics, the
+case is that field. A receipt, a reservation or a packet is written whole.
+Arenas, owner identities and generations are written in hexadecimal. A table
+whose row names no capacity has the capacity of its test, and the exclusions
+of a test are firmware reservations.
 
 **Vectors of a property.** `own-22` and `dm-04` assert a property over a
 generated family of inputs, which the vector file expands into lines; their
