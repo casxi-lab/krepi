@@ -7,11 +7,11 @@ public import Krepi.Spec.PageTables.Ownership
 
 Theorems that witness that the specification of the page ownership table of
 the `page-tables` component is not vacuous: for every frozen function of rows
-112 to 116 of the entry table of its contract
+113 to 117 of the entry table of its contract
 (`docs/domains/memory/page-tables/contract.md`), one input on which it
 succeeds, with the value that it gives, and for every error that the contract
 gives that function, one input on which it fails with that error. The table
-sets, rows 106 to 111, have their witnesses in
+sets, rows 107 to 112, have their witnesses in
 `Krepi.Spec.PageTables.Witnesses.TableSets`. Every expected value is a literal
 worked out from the contract, never computed by the specification.
 
@@ -582,7 +582,7 @@ def HighPlacementNoOverflow : Prop :=
 /-! ## The two variants -/
 
 /-- **The variant that rejects every input is refuted.** Each frozen function of
-rows 112 to 116 that can fail succeeds on an input, by the success witnesses
+rows 113 to 117 that can fail succeeds on an input, by the success witnesses
 above. -/
 theorem notAlwaysRejecting :
     (∃ E X a b x, ∃ t : Ownership E X, Ownership.new a b x = .ok t) ∧
@@ -599,7 +599,7 @@ theorem notAlwaysRejecting :
     ⟨_, _, _, _, _, _, validateOk.1⟩⟩
 
 /-- **The variant that accepts every input is refuted.** Each frozen function
-of rows 112 to 116 that can fail fails on an input, by the rejection
+of rows 113 to 117 that can fail fails on an input, by the rejection
 witnesses above. -/
 theorem notAlwaysSucceeding :
     (∃ E X a b x e, (Ownership.new a b x : Except OwnershipError (Ownership E X)) = .error e) ∧

@@ -6,12 +6,12 @@ public import Krepi.Spec.PageTables.Boot
 # Page tables: witnesses of the table sets
 
 Theorems that witness that the specification of the table sets of the
-`page-tables` component is not vacuous: for every frozen function of rows 106
-to 111 of the entry table of its contract
+`page-tables` component is not vacuous: for every frozen function of rows 107
+to 112 of the entry table of its contract
 (`docs/domains/memory/page-tables/contract.md`), one input on which it
 succeeds, with the value that it gives, and for every error that the contract
 gives that function, one input on which it fails with that error. The page
-ownership table, rows 112 to 116, has its witnesses in
+ownership table, rows 113 to 117, has its witnesses in
 `Krepi.Spec.PageTables.Witnesses.PageOwnership`. The value type `Kind` is
 read through `descriptor` and has no witness of its own. Every expected value
 is a literal worked out from the contract, never computed by the
@@ -910,7 +910,7 @@ def CloneTargetWidthChecked : Prop :=
 /-! ## The two variants -/
 
 /-- **The variant that rejects every input is refuted.** Each frozen function of
-rows 106 to 111 that can fail succeeds on an input, by the success witnesses
+rows 107 to 112 that can fail succeeds on an input, by the success witnesses
 above. -/
 theorem notAlwaysRejecting :
     (∃ a n r, PhysRange.new a n = .ok r) ∧
@@ -930,7 +930,7 @@ theorem notAlwaysRejecting :
     (ok_of_outcome directMapOk).elim fun x h => ⟨_, _, _, _, _, x, Or.inl ⟨_, _, _, plansBuilt.1⟩, h⟩⟩
 
 /-- **The variant that accepts every input is refuted.** Each frozen function
-of rows 106 to 111 that can fail fails on an input, by the rejection
+of rows 107 to 112 that can fail fails on an input, by the rejection
 witnesses above. -/
 theorem notAlwaysSucceeding :
     (∃ a n e, PhysRange.new a n = .error e) ∧

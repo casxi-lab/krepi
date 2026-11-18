@@ -23,12 +23,14 @@ list whose length the contract bounds or on fuel from the contract's
 [work bounds](contract.md#work-bounds). The modules lie below
 [`verification/Krepi/Spec/PageTables/`](../../../../verification/Krepi/Spec/PageTables/)
 and import Lean core, the earlier modules of the component and, for the boot
-memory map, the modules of the fdt specification.
+memory map, the modules of the fdt specification. The
+[proof path](proof.md) plans the proof of the code against this
+specification, as the planned target `page-tables`.
 
 This page describes the modules of the state machine: the descriptors and
 kinds, the physical ranges, the pools with the record of their tables in use,
 the walk, the write plans, the kernel mappings, the direct map and the page
-ownership table, the entries of rows 106 to 116 of the
+ownership table, the entries of rows 107 to 117 of the
 [entry table](contract.md#entry-points), and the shared fields of the
 [state fields](contract.md#state-fields) as transactions that hold a token.
 The invariants and the properties of the component are stated in two
@@ -52,8 +54,8 @@ with their planned theorems in `Krepi.Proofs.PageTables.Stp`
 specification is not vacuous are two further modules below
 [`verification/Krepi/Spec/PageTables/Witnesses/`](../../../../verification/Krepi/Spec/PageTables/Witnesses/),
 split along the seam of the entry table: `TableSets` for the table sets,
-rows 106 to 111, and `PageOwnership` for the page ownership table,
-rows 112 to 116 ([Witnesses](#witnesses)).
+rows 107 to 112, and `PageOwnership` for the page ownership table,
+rows 113 to 117 ([Witnesses](#witnesses)).
 [`Krepi.SpecTests.PageTables.Replay`](../../../../verification/Krepi/SpecTests/PageTables/Replay.lean)
 replays the cases of the
 [vector file](../../../../verification/vectors/memory/page-tables.vectors)
@@ -307,7 +309,7 @@ write entries of a set.
 
 [`Boot.lean`](../../../../verification/Krepi/Spec/PageTables/Boot.lean): the
 [kernel mappings](contract.md#kernel-mappings) and the
-[kernel direct map](contract.md#kernel-direct-map), the entries of row 111.
+[kernel direct map](contract.md#kernel-direct-map), the entries of row 112.
 It imports the boot memory map, `MemoryPlan`, from the
 [fdt specification](../../boot-platform/fdt/specification.md) and reads its
 usable ranges through `MemoryPlan.availableRanges`.
@@ -378,7 +380,7 @@ usable ranges through `MemoryPlan.availableRanges`.
 
 [`Ownership.lean`](../../../../verification/Krepi/Spec/PageTables/Ownership.lean):
 the [page ownership](contract.md#page-ownership) table, the entries of rows
-112 to 116, modelled at the level of its extents. It imports `Basic.lean`
+113 to 117, modelled at the level of its extents. It imports `Basic.lean`
 only: the table takes its banks, exclusions, windows and receipts as physical
 ranges, which the boot wiring converts from the boot memory map.
 
@@ -511,18 +513,18 @@ contract.
 
 | Invariant | Kind | States | Established by | Preserved by | Read by | Decidable |
 | --- | --- | --- | --- | --- | --- | --- |
-| `Tables.WellFormed` | Structural: the descriptors of every table of a set and its tables in use; the well-formedness of the page tables | At `base` and `bits`: a pool that the contract admits (lines 35 to 40, 654 and 655); a record of the root and at most $N$ tables (lines 28 to 34); every table not in use zero (line 664); the root holds only 0 and table descriptors with no attribute of tables in use, a level 2 table also block descriptors of `ReadWrite`, a level 3 table only 0 and page descriptors of a kind, every output address below $2^{\mathrm{bits}}$ (lines 149 to 158, 172 and 173); the table descriptors reach every table in use but the root exactly once and the root never (lines 265 and 266, 297 and 298) | `Tables::new` on zero storage (`NewWellFormed`); `reset` and `clone_kernel_from`, from any record, when the tables not in use are zero (`ResetWellFormed`, `CloneKernelFromWellFormed`); the kernel tables of `kernel_map` and `direct_map` on such sets (`BootKernelMapWellFormed`, `BootDirectMapWellFormed`) | `map_page`, `map_block`, `unmap_page`, `kernel_map`, `direct_map`, once the plan has run | The walk of every entry, which finds no bad table descriptor on such a set; the abstract mapping and the properties `AfterEveryWrite`, `TablesInUseCounted`, `PlansPublishInOrder` and `KernelTablesOnlyFilled`; `clone_kernel_from`, whose checks of its source are these rules | Yes: `Tables.checkWellFormed` |
-| `Ownership.WellFormed` | Structural: the banks, the extents and the exclusion records | The arena not 0 (line 86); at least one bank, each on page boundaries, in address order and disjoint (lines 535 to 537); at most `E` extents (lines 624 and 625), each a range of whole pages in the bank that it names (lines 87 and 88), in address order and disjoint (line 786); at most `X` exclusion records (lines 630 to 634); a counter that has given no generation 0 (line 606) | `Ownership::new` (`NewOwnershipWellFormed`) | `assign` of a choice of `choose`, `reserve`, `publish`, `cancel`, `release` | `choose`, whose scan in address order it makes the order of the contract, `owner` and `stats`; the functional invariants and their checks | Yes: `Ownership.checkWellFormed` |
-| `Shared.WellFormed` | Structural: the shared fields (lines 803 to 806) | Both kernel sets well-formed in their pools at a `Config`, and the page ownership table, once built, well-formed | The shared state of the boot (`BootWellFormed`) | Each transaction of `Tokens.lean`: `buildKernelMap`, `buildDirectMap`, `enable`, `fillKernel`, `newOwnership`, `withOwnership` with an entry that keeps a table well-formed, `allocate` | `KernelTablesOnlyFilled`; the transactions | Yes: `Shared.checkWellFormed` |
-| `Ownership.OneOwner` | Functional: the uniqueness of page ownership | "Every managed page has exactly one owner" (line 520): the table records exactly one owner for each managed page, the holding of one extent or, for a page in no extent, that of the exclusion records that touch it | `Ownership::new` (`NewOneOwner`) | `assign`, `reserve`, `publish`, `cancel`, `release` | `owner` and the owner function $O$, on which the rows of `AfterEveryWrite` and `BootOwnersMatchDirectMap` are stated; the zeroing through the direct map, which reaches a page of one holder | Yes, on a well-formed table: `Ownership.checkOneOwner` |
-| `Ownership.HolderRanges` | Functional | "The pages of one holder generation form one range in one bank, the range of one extent, and two holders never share a generation" (lines 521 and 522): the pages whose owner has the generation of a held extent are exactly the pages of that extent | `Ownership::new` (`NewHolderRanges`) | The same five entries | `release`, `publish`, `cancel` and `validate`, whose check of one extent is then the requirement "exactly for the pages $q$ of $x$" (lines 338 to 340) | Yes, on a well-formed table with one owner: `Ownership.checkHolderRanges` |
-| `Ownership.GenerationsBelowCounter` | Functional | Every generation of a holder is at least 1 and below the counter: it "starts at 1, grows by one with each allocation and reservation, and is never reused" (lines 606 to 608, 794) | `Ownership::new` (`NewGenerationsBelowCounter`) | The same five entries | `assign` and `reserve`, whose generation no holder has; the preservation of `Ownership.HolderRanges` | Yes, on a well-formed table: `Ownership.checkGenerationsBelowCounter` |
-| `Ownership.FreeExtentsMaximal` | Functional | No free extent ends where a free extent of its bank starts: a released extent merges with the free extents next to it (lines 605 and 606), one extent for each free run (lines 627 and 628) | `Ownership::new` (`NewFreeExtentsMaximal`) | The same five entries | `stats`, whose free extents and largest one are the free runs; the count of the extents against the capacity in `choose` and in [PGT-R11](requirements.md#pgt-r11) | Yes: `Ownership.checkFreeExtentsMaximal` |
-| `Ownership.FreeOrHeldUsable` | Functional, of the table of the kernel root and its boot memory map | "The pages that are free or held are exactly the pages of its usable ranges, so exactly the pages of the direct map" (lines 523 to 525) | `Ownership::new` on the managed banks and the exclusions of a well-formed boot memory map (`NewFreeOrHeldUsable`, with `BootTableRanges`) | The same five entries | The direct map, which maps those pages (`BootOwnersMatchDirectMap`; W^X, line 210) | Yes, on a well-formed table with one owner: `Ownership.checkFreeOrHeldUsable` |
-| `Shared.DirectMapOffset` | Functional, of the direct map's set | Every page of the set maps `DIRECT_BASE \| pa` to a page `pa` below $2^{39}$ as `ReadWrite` (lines 54 and 55, 467 to 469, 488) | The shared state of the boot (`BootDirectMapOffset`) | `buildDirectMap` (`BuildDirectMapOffset`); no other transaction writes the field | `direct_address` and the zeroing of pages through the direct map; W^X | Yes: `Shared.checkDirectMapOffset` |
+| `Tables.WellFormed` | Structural: the descriptors of every table of a set and its tables in use; the well-formedness of the page tables | At `base` and `bits`: a pool that the contract admits (lines 36 to 41, 669 and 670); a record of the root and at most $N$ tables (lines 29 to 35); every table not in use zero (line 679); the root holds only 0 and table descriptors with no attribute of tables in use, a level 2 table also block descriptors of `ReadWrite`, a level 3 table only 0 and page descriptors of a kind, every output address below $2^{\mathrm{bits}}$ (lines 150 to 159, 173 and 174); the table descriptors reach every table in use but the root exactly once and the root never (lines 270 and 271, 302 and 303) | `Tables::new` on zero storage (`NewWellFormed`); `reset` and `clone_kernel_from`, from any record, when the tables not in use are zero (`ResetWellFormed`, `CloneKernelFromWellFormed`); the kernel tables of `kernel_map` and `direct_map` on such sets (`BootKernelMapWellFormed`, `BootDirectMapWellFormed`) | `map_page`, `map_block`, `unmap_page`, `kernel_map`, `direct_map`, once the plan has run | The walk of every entry, which finds no bad table descriptor on such a set; the abstract mapping and the properties `AfterEveryWrite`, `TablesInUseCounted`, `PlansPublishInOrder` and `KernelTablesOnlyFilled`; `clone_kernel_from`, whose checks of its source are these rules | Yes: `Tables.checkWellFormed` |
+| `Ownership.WellFormed` | Structural: the banks, the extents and the exclusion records | The arena not 0 (line 87); at least one bank, each on page boundaries, in address order and disjoint (lines 550 to 552); at most `E` extents (lines 639 and 640), each a range of whole pages in the bank that it names (lines 88 and 89), in address order and disjoint (line 808); at most `X` exclusion records (lines 645 to 649); a counter that has given no generation 0 (line 621) | `Ownership::new` (`NewOwnershipWellFormed`) | `assign` of a choice of `choose`, `reserve`, `publish`, `cancel`, `release` | `choose`, whose scan in address order it makes the order of the contract, `owner` and `stats`; the functional invariants and their checks | Yes: `Ownership.checkWellFormed` |
+| `Shared.WellFormed` | Structural: the shared fields (lines 825 to 828) | Both kernel sets well-formed in their pools at a `Config`, and the page ownership table, once built, well-formed | The shared state of the boot (`BootWellFormed`) | Each transaction of `Tokens.lean`: `buildKernelMap`, `buildDirectMap`, `enable`, `fillKernel`, `newOwnership`, `withOwnership` with an entry that keeps a table well-formed, `allocate` | `KernelTablesOnlyFilled`; the transactions | Yes: `Shared.checkWellFormed` |
+| `Ownership.OneOwner` | Functional: the uniqueness of page ownership | "Every managed page has exactly one owner" (line 535): the table records exactly one owner for each managed page, the holding of one extent or, for a page in no extent, that of the exclusion records that touch it | `Ownership::new` (`NewOneOwner`) | `assign`, `reserve`, `publish`, `cancel`, `release` | `owner` and the owner function $O$, on which the rows of `AfterEveryWrite` and `BootOwnersMatchDirectMap` are stated; the zeroing through the direct map, which reaches a page of one holder | Yes, on a well-formed table: `Ownership.checkOneOwner` |
+| `Ownership.HolderRanges` | Functional | "The pages of one holder generation form one range in one bank, the range of one extent, and two holders never share a generation" (lines 536 and 537): the pages whose owner has the generation of a held extent are exactly the pages of that extent | `Ownership::new` (`NewHolderRanges`) | The same five entries | `release`, `publish`, `cancel` and `validate`, whose check of one extent is then the requirement "exactly for the pages $q$ of $x$" (lines 343 to 345) | Yes, on a well-formed table with one owner: `Ownership.checkHolderRanges` |
+| `Ownership.GenerationsBelowCounter` | Functional | Every generation of a holder is at least 1 and below the counter: it "starts at 1, grows by one with each allocation and reservation, and is never reused" (lines 621 to 623, 816) | `Ownership::new` (`NewGenerationsBelowCounter`) | The same five entries | `assign` and `reserve`, whose generation no holder has; the preservation of `Ownership.HolderRanges` | Yes, on a well-formed table: `Ownership.checkGenerationsBelowCounter` |
+| `Ownership.FreeExtentsMaximal` | Functional | No free extent ends where a free extent of its bank starts: a released extent merges with the free extents next to it (lines 620 and 621), one extent for each free run (lines 642 and 643) | `Ownership::new` (`NewFreeExtentsMaximal`) | The same five entries | `stats`, whose free extents and largest one are the free runs; the count of the extents against the capacity in `choose` and in [PGT-R11](requirements.md#pgt-r11) | Yes: `Ownership.checkFreeExtentsMaximal` |
+| `Ownership.FreeOrHeldUsable` | Functional, of the table of the kernel root and its boot memory map | "The pages that are free or held are exactly the pages of its usable ranges, so exactly the pages of the direct map" (lines 538 to 540) | `Ownership::new` on the managed banks and the exclusions of a well-formed boot memory map (`NewFreeOrHeldUsable`, with `BootTableRanges`) | The same five entries | The direct map, which maps those pages (`BootOwnersMatchDirectMap`; W^X, line 213) | Yes, on a well-formed table with one owner: `Ownership.checkFreeOrHeldUsable` |
+| `Shared.DirectMapOffset` | Functional, of the direct map's set | Every page of the set maps `DIRECT_BASE \| pa` to a page `pa` below $2^{39}$ as `ReadWrite` (lines 55 and 56, 482 to 484, 503) | The shared state of the boot (`BootDirectMapOffset`) | `buildDirectMap` (`BuildDirectMapOffset`); no other transaction writes the field | `direct_address` and the zeroing of pages through the direct map; W^X | Yes: `Shared.checkDirectMapOffset` |
 
 The fourth invariant of the page ownership table in the contract, that the
-firmware, image and boot storage pages never change owner (line 526), is a
+firmware, image and boot storage pages never change owner (line 541), is a
 statement of two states, not of one: the rows of `AfterEveryWrite` give it,
 since each changes $O$ only on pages that are free or held. The table sets
 have no functional invariant of one state: what a set means is its abstract
@@ -531,7 +533,7 @@ mapping, and how each entry changes it is `AfterEveryWrite`.
 `Ownership.Invariant` is the conjunction of the invariants of one page
 ownership table but `Ownership.FreeOrHeldUsable`, the hypothesis of the
 preservation statements; `Ownership.Chose` states that a choice is one of
-`choose` on the same table, the requirement of `assign` (line 336).
+`choose` on the same table, the requirement of `assign` (line 341).
 
 The statements of the module, 65 in all, are in four groups:
 
@@ -583,22 +585,22 @@ extent holds and gives a request.
 
 | Property | States | Requirements | Contract |
 | --- | --- | --- | --- |
-| `NoWritableExecutable` | No kind is writable and executable; on every shared state that the transactions reach from the boot, under the rules of the boot wiring and of the fills (`WxPremises`), no frame is mapped writable by the lower kernel set or the direct map's set and executable by one of them, counting also a copy of the lower kernel set | [PGT-R01](requirements.md#pgt-r01), [PGT-R05](requirements.md#pgt-r05), [PGT-R06](requirements.md#pgt-r06) | "At no time is a frame mapped writable and executable, counting every alias in every table set together" (lines 198 to 200), with its three reasons (lines 202 to 220) |
-| `AfterEveryWrite` | For each of the 14 write entries, on a valid state, a success establishes the `Requires` column of its row and the `After` column between the state before and the state once the plan has run; the two failures that the rows name, a failed zeroing of `assign` and the cancel of an attempted reservation | [PGT-R02](requirements.md#pgt-r02) to [PGT-R06](requirements.md#pgt-r06), [PGT-R08](requirements.md#pgt-r08) to [PGT-R10](requirements.md#pgt-r10), [PGT-R12](requirements.md#pgt-r12) | "Each write entry of a set changes $M$ as its row states once its write plan has been executed" (lines 311 and 312) and "each write entry of the page ownership table changes $O$ and $g$ as its row states" (lines 328 and 329), the rows of lines 317 to 324 and 335 to 340 |
-| `DirectMapUnchangedAfterBoot` | From any shared state with the MMU on, every list of transactions leaves the direct map's set as it was, and the MMU on | [PGT-R05](requirements.md#pgt-r05) | "The boot wiring writes the direct map once, before the MMU is on, and no entry changes it afterwards" (lines 490 and 491); "the field never changes after it" (line 804) |
-| `KernelTablesOnlyFilled` | On a well-formed shared state, every transaction keeps every valid entry of both kernel sets, and its plan for a kernel set writes only entries that are invalid when it writes them and holds no `Invalidate` | [PGT-R04](requirements.md#pgt-r04), [PGT-R07](requirements.md#pgt-r07) | "A plan for one of the kernel tables writes only invalid entries and holds no `Invalidate`; no entry of this page removes or changes a valid entry of the kernel tables" (lines 411 to 414) |
-| `PlansPublishInOrder` | On a well-formed set, the plans of `map_page`, `map_block`, `kernel_map` and `direct_map` build each new table, under it first, before the one store that makes it reachable, with a `Fence` before that store, fill only invalid entries of reached tables and end with `Sync`; the plan of `unmap_page` is the store of 0 into the leaf and `Invalidate`; the plan of a copy is `Zero` steps, `Store` steps and `Sync` | [PGT-R07](requirements.md#pgt-r07), [PGT-R04](requirements.md#pgt-r04), [PGT-R12](requirements.md#pgt-r12) | The rules of new tables, new entries, unmapping and the copy (lines 401 to 410, 415 to 417, 425 to 436) |
-| `TablesInUseCounted` | On a well-formed set, the record of the tables in use is 1 and the numbers of the elements of $G$ and of $P$, which `Tables.gSlots` and `Tables.pSlots` list once each | [PGT-R03](requirements.md#pgt-r03), [PGT-R05](requirements.md#pgt-r05), [PGT-R11](requirements.md#pgt-r11) | "$\mathrm{used} = 1 + \|G\| + \|P\|$" (lines 297 and 298); the count of a mapping (lines 672 to 674) |
-| `PlacementFirstFit` | On a well-formed table, a choice is the range that an extent of the scan of its placement gives, the lowest or highest aligned range inside the window, within the capacity, and every earlier extent gives none or one beyond the capacity; `OutOfMemory` means that no extent holds the request, `MetadataExhausted` that every range given needs more extents than the capacity has free | [PGT-R09](requirements.md#pgt-r09), [PGT-R10](requirements.md#pgt-r10) | The placement (lines 559 to 565) and the end of the scan (lines 573 to 575) |
-| `BootOwnersMatchDirectMap` | For every well-formed boot memory map, the table of `Ownership::new` on its managed banks and exclusions has one owner for every managed page, and once `direct_map` of the same map has run on a new set, a page is free exactly when the direct map maps it | [PGT-R08](requirements.md#pgt-r08), [PGT-R05](requirements.md#pgt-r05) | The criterion of [PGT-R08](requirements.md#pgt-r08); "the direct map maps only pages whose owner is free or a holder" (lines 209 and 210); lines 523 to 525 |
+| `NoWritableExecutable` | No kind is writable and executable; on every shared state that the transactions reach from the boot, under the rules of the boot wiring and of the fills (`WxPremises`), no frame is mapped writable by the lower kernel set or the direct map's set and executable by one of them, counting also a copy of the lower kernel set | [PGT-R01](requirements.md#pgt-r01), [PGT-R05](requirements.md#pgt-r05), [PGT-R06](requirements.md#pgt-r06) | "At no time is a frame mapped writable and executable, counting every alias in every table set together" (lines 201 to 203), with its three reasons (lines 205 to 230) |
+| `AfterEveryWrite` | For each of the 14 write entries, on a valid state, a success establishes the `Requires` column of its row and the `After` column between the state before and the state once the plan has run; the two failures that the rows name, a failed zeroing of `assign` and the cancel of an attempted reservation | [PGT-R02](requirements.md#pgt-r02) to [PGT-R06](requirements.md#pgt-r06), [PGT-R08](requirements.md#pgt-r08) to [PGT-R10](requirements.md#pgt-r10), [PGT-R12](requirements.md#pgt-r12) | "Each write entry of a set changes $M$ as its row states once its write plan has been executed" (lines 316 and 317) and "each write entry of the page ownership table changes $O$ and $g$ as its row states" (lines 333 and 334), the rows of lines 322 to 329 and 340 to 345 |
+| `DirectMapUnchangedAfterBoot` | From any shared state with the MMU on, every list of transactions leaves the direct map's set as it was, and the MMU on | [PGT-R05](requirements.md#pgt-r05) | "The boot wiring writes the direct map once, before the MMU is on, and no entry changes it afterwards" (lines 505 and 506); "the field never changes after it" (line 826) |
+| `KernelTablesOnlyFilled` | On a well-formed shared state, every transaction keeps every valid entry of both kernel sets, and its plan for a kernel set writes only entries that are invalid when it writes them and holds no `Invalidate` | [PGT-R04](requirements.md#pgt-r04), [PGT-R07](requirements.md#pgt-r07) | "A plan for one of the kernel tables writes only invalid entries and holds no `Invalidate`; no entry of this page removes or changes a valid entry of the kernel tables" (lines 426 to 429) |
+| `PlansPublishInOrder` | On a well-formed set, the plans of `map_page`, `map_block`, `kernel_map` and `direct_map` build each new table, under it first, before the one store that makes it reachable, with a `Fence` before that store, fill only invalid entries of reached tables and end with `Sync`; the plan of `unmap_page` is the store of 0 into the leaf and `Invalidate`; the plan of a copy is `Zero` steps, `Store` steps and `Sync` | [PGT-R07](requirements.md#pgt-r07), [PGT-R04](requirements.md#pgt-r04), [PGT-R12](requirements.md#pgt-r12) | The rules of new tables, new entries, unmapping and the copy (lines 406 to 425, 430 to 432, 440 to 451) |
+| `TablesInUseCounted` | On a well-formed set, the record of the tables in use is 1 and the numbers of the elements of $G$ and of $P$, which `Tables.gSlots` and `Tables.pSlots` list once each | [PGT-R03](requirements.md#pgt-r03), [PGT-R05](requirements.md#pgt-r05), [PGT-R11](requirements.md#pgt-r11) | "$\mathrm{used} = 1 + \|G\| + \|P\|$" (lines 302 and 303); the count of a mapping (lines 687 to 689) |
+| `PlacementFirstFit` | On a well-formed table, a choice is the range that an extent of the scan of its placement gives, the lowest or highest aligned range inside the window, within the capacity, and every earlier extent gives none or one beyond the capacity; `OutOfMemory` means that no extent holds the request, `MetadataExhausted` that every range given needs more extents than the capacity has free | [PGT-R09](requirements.md#pgt-r09), [PGT-R10](requirements.md#pgt-r10) | The placement (lines 574 to 580) and the end of the scan (lines 588 to 590) |
+| `BootOwnersMatchDirectMap` | For every well-formed boot memory map, the table of `Ownership::new` on its managed banks and exclusions has one owner for every managed page, and once `direct_map` of the same map has run on a new set, a page is free exactly when the direct map maps it | [PGT-R08](requirements.md#pgt-r08), [PGT-R05](requirements.md#pgt-r05) | The criterion of [PGT-R08](requirements.md#pgt-r08); "the direct map maps only pages whose owner is free or a holder" (lines 212 and 213); lines 538 to 540 |
 
 `WxPremises` states the rules that W^X rests on and that no entry of the
 component checks: `kernel_map` and `direct_map` run at most once each (line
-111); the boot memory map is well-formed and each `ReadExecute` range of the
-layout lies in a span of its boot storage, the image (lines 206 to 215 and
-510); and a fill of the lower kernel set maps an executable kind only at a
-page of the text and a page of the text only with `ReadExecute` (lines 216
-to 220). The mappings of the address spaces of processes beyond the copy,
+112); the boot memory map is well-formed and each `ReadExecute` range of the
+layout lies in a span of its boot storage, the image (lines 209 to 218 and
+525); and a fill of the lower kernel set maps an executable kind only at a
+page of the text and a page of the text only with `ReadExecute` (lines 219
+to 230). The mappings of the address spaces of processes beyond the copy,
 among them `UserReadExecute` for the boot bundle, are those of the
 address-space component.
 
@@ -681,12 +683,12 @@ and
 the theorems that witness that the specification is not vacuous
 ([specifications](../../../formal-verification.md#specifications)), split
 into two modules along the seam of the entry table. For each frozen function
-of rows 106 to 116, one input on which it succeeds, with the value that it
+of rows 107 to 117, one input on which it succeeds, with the value that it
 gives; for each error that the contract gives that function, one input on
 which it fails with that error. The functions are counted, not the rows: 28,
-of which 17 can fail. The value type `Kind` of row 106 is read through
+of which 17 can fail. The value type `Kind` of row 107 is read through
 `descriptor`, whose witness takes every kind, and has no witness of its own;
-the adapter of row 117 is excluded. The expected values are literals worked
+the adapter of row 118 is excluded. The expected values are literals worked
 out from the contract, never computed by the specification. Where the
 contract gives one error for several rules, the witness of that error is a
 conjunction with one input for each rule, for instance the eight rules of
@@ -717,21 +719,21 @@ either above 1 s.
 
 | Line | Functions | Success | Rejection | Priority pairs | Unreachable branches |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 106 | 9 | 9 | 10 | 8 | 0 |
-| 107 | 3 | 3 | 4 | 10 | 1 |
-| 108 | 1 | 1 | 5 | 6 | 0 |
+| 107 | 9 | 9 | 10 | 8 | 0 |
+| 108 | 3 | 3 | 4 | 10 | 1 |
 | 109 | 1 | 1 | 5 | 6 | 0 |
-| 110 | 1 | 1 | 4 | 4 | 0 |
-| 111 | 2 | 2 | 10 | 15 | 2 |
-| 112 | 1 | 1 | 4 | 5 | 0 |
-| 113 | 2 | 2 | 7 | 5 | 2 |
-| 114 | 3 | 3 | 9 | 7 | 2 |
-| 115 | 2 | 2 | 7 | 5 | 0 |
-| 116 | 3 | 3 | 3 | 2 | 0 |
+| 110 | 1 | 1 | 5 | 6 | 0 |
+| 111 | 1 | 1 | 4 | 4 | 0 |
+| 112 | 2 | 2 | 10 | 15 | 2 |
+| 113 | 1 | 1 | 4 | 5 | 0 |
+| 114 | 2 | 2 | 7 | 5 | 2 |
+| 115 | 3 | 3 | 9 | 7 | 2 |
+| 116 | 2 | 2 | 7 | 5 | 0 |
+| 117 | 3 | 3 | 3 | 2 | 0 |
 | Total | 28 | 28 | 68 | 73 | 5 statements, all planned |
 
 The two statements of the page ownership table each cover a branch of
-rows 113 and 114, so the column counts them at both lines.
+rows 114 and 115, so the column counts them at both lines.
 
 **Error priority.** For each step of the error orders of the contract, one
 more witness gives an input that breaks a rule of that step and a later
@@ -764,10 +766,12 @@ fails with the error of the later rule, so each witness tells the order of
 the contract from the reverse one.
 
 `assignRechecks` gives `assign` choices that `choose` does not give on the
-table, outside the requirement of its row: the reading of the contract keeps
-the checks of `choose` in `assign` ([readings](#readings-of-the-contract)),
-and the three refusals show which. They are not errors that the contract
-gives `assign`, whose one error is `ZeroFailed`.
+table, outside the requirement of its row, and states the three refusals of
+the checks that `assign` makes after the zeroing, in the order of those of
+`choose` ([check and execute](contract.md#check-and-execute)). The table
+counts the one error that the row of `assign` gives it, `ZeroFailed`; the
+three refusals are those of choices outside its requirement, which a choice
+of `choose` on the same table never meets (`TakeAcceptsChoice`).
 
 An error branch that no input of its entry reaches has no witness. For each,
 a planned proposition states the fact that keeps the entry from it, and a
@@ -830,10 +834,10 @@ and 614), the reading follows the prototype and names the place.
 | `kernel_map` and `direct_map` check their ranges sorted by the start, ranges of one start in the order of their input, and for each the alignment of its ends, then its width, then the free slots of its leaves one by one in address order: the walk of the leaf, `TableBacking` and then `AlreadyMapped`, and then `AlreadyMapped` for a leaf that an earlier range covers, for `kernel_map` also for a guard page; then `OutOfTables` for the whole plan | [Errors of table sets](contract.md#errors-of-table-sets), lines 341, 342, 345 and 349 to 355; [Kernel direct map](contract.md#kernel-direct-map), lines 447, 457 and 458; [Check and execute](contract.md#check-and-execute), lines 681 to 683; now stated in [Errors of table sets](contract.md#errors-of-table-sets) | The order gives alignment, width and the free slots for each range in address order, the walk's `TableBacking` before `AlreadyMapped`, and the tables last; a page of an earlier range is not free once the plan maps it, which makes two ranges that share a page `AlreadyMapped` |
 | The width of a range is its end against $2^{39}$ and against $2^{\mathrm{bits}}$, one `AddressWidth` before any leaf of the range | [Errors of table sets](contract.md#errors-of-table-sets), line 342; [Kernel direct map](contract.md#kernel-direct-map), lines 440 to 443, 457 and 458; now stated in [Errors of table sets](contract.md#errors-of-table-sets) | A usable range that ends above $2^{39}$ has no direct address, and a range on page boundaries holds a page at or above $2^{\mathrm{bits}}$ exactly when it ends above it |
 | The new tables of `kernel_map` and `direct_map` take the lowest free indices in the order in which the walk of the leaves, in address order, first needs them, a level 2 table before the level 3 tables under it | [Table pool](contract.md#table-pool), line 616; [Determinism](contract.md#determinism), lines 732 and 733; now stated in [Determinism](contract.md#determinism) | As for `map_page`: the walk needs the level 2 table first |
-| The plan of `kernel_map` and `direct_map` builds the tables bottom up: under a new level 2 table, each new level 3 table with its pages, then the level 2 table with its entries in index order, then one `Fence` and the store into the root; a new level 3 table under a level 2 table of the set is followed by one `Fence` and the store of its table descriptor; `Sync` ends the plan. "One `Fence` for each table descriptor" of the work bounds is read as a bound: a `Fence` comes before each store that makes new tables reachable from a table of the set, so there is at most one for each table descriptor | [Write plans and publication](contract.md#write-plans-and-publication), lines 372 to 377, 380 to 389 and 414 to 416; [Work bounds](contract.md#work-bounds), lines 710 to 718; [Determinism](contract.md#determinism), lines 735 to 737 | The rule of new tables writes a table completely before the store that makes it reachable, a table under another new table first, and the plan of two new tables, lines 384 to 386, has one `Fence` for two table descriptors; with that rule the plan of one leaf is that of `map_page` or `map_block` |
-| `Sync` ends every plan of `kernel_map` and `direct_map`, also that of a map with no leaf | [Write plans and publication](contract.md#write-plans-and-publication), lines 387 to 389 | A plan whose last store makes an entry valid ends with `Sync`; the copy ends with `Sync` in the same way, and with no store the `Sync` is harmless |
+| The plan of `kernel_map` and `direct_map` builds the tables bottom up: under a new level 2 table, each new level 3 table with its pages, then the level 2 table with its entries in index order, then one `Fence` and the store into the root; a new level 3 table under a level 2 table of the set is followed by one `Fence` and the store of its table descriptor; `Sync` ends the plan. "One `Fence` for each table descriptor" of the work bounds is read as a bound: a `Fence` comes before each store that makes new tables reachable from a table of the set, so there is at most one for each table descriptor | [Write plans and publication](contract.md#write-plans-and-publication), lines 372 to 377, 380 to 389 and 414 to 416; [Work bounds](contract.md#work-bounds), lines 710 to 718; [Determinism](contract.md#determinism), lines 735 to 737; now stated in [Write plans and publication](contract.md#write-plans-and-publication) and [Work bounds](contract.md#work-bounds) | The rule of new tables writes a table completely before the store that makes it reachable, a table under another new table first, and the plan of two new tables, lines 384 to 386, has one `Fence` for two table descriptors; with that rule the plan of one leaf is that of `map_page` or `map_block` |
+| `Sync` ends every plan of `kernel_map` and `direct_map`, also that of a map with no leaf | [Write plans and publication](contract.md#write-plans-and-publication), lines 387 to 389; now stated in [Write plans and publication](contract.md#write-plans-and-publication) | A plan whose last store makes an entry valid ends with `Sync`; the copy ends with `Sync` in the same way, and with no store the `Sync` is harmless |
 | `direct_map` takes the boot memory map as a value of the fdt specification, any value of its type, and maps its usable ranges, `MemoryPlan.availableRanges` | [Terms](contract.md#terms), lines 52 to 57 and 64 to 66; [Kernel direct map](contract.md#kernel-direct-map), lines 444 to 456 | The contract takes the map as a value that it reads and never changes, and the usable ranges hold no reservation, hole or unmanaged RAM |
-| The counts of a direct map, its bytes, blocks and pages, are those of its plan: a block for each `Store` of a block descriptor and a page for each `Store` of a page descriptor | [Entry points](contract.md#entry-points), line 107; [Work bounds](contract.md#work-bounds), lines 714 to 718; the rows of `dm-01` and `dm-02`, lines 966 and 967 | The entry returns a plan; the vectors assert the counts of the map that it writes, and the plan has one `Store` for each block and page |
+| The counts of a direct map, its bytes, blocks and pages, are those of its plan: a block for each `Store` of a block descriptor and a page for each `Store` of a page descriptor | [Entry points](contract.md#entry-points), line 107; [Work bounds](contract.md#work-bounds), lines 714 to 718; the rows of `dm-01` and `dm-02`, lines 966 and 967; now stated in [Legacy test vectors](contract.md#legacy-test-vectors) | The entry returns a plan; the vectors assert the counts of the map that it writes, and the plan has one `Store` for each block and page |
 | The capacities of the kernel tables, 80 and 32, are constants, and the entries are stated for every capacity `N` | [Table pool](contract.md#table-pool), lines 632 to 634 and 646 to 648 | The vectors build direct maps in pools of 2 to 16 tables |
 | The state of the page ownership table holds the managed banks in address order beside its extents, exclusion records, generation counter and arena, and each extent names its bank | [Terms](contract.md#terms), lines 58, 83 and 84; [Page ownership](contract.md#page-ownership), lines 530 and 566 to 573; [State fields](contract.md#state-fields), line 758; its banks now stated in [State fields](contract.md#state-fields) | An extent is a range of one bank, a released extent merges only within its bank, and `owner` tells a page of a managed bank in no extent, so the table knows its banks; they never change after the initialization |
 | The capacities of the table, 160 extents and 132 exclusion records, are constants, `EXTENTS` and `EXCLUSION_RECORDS`, and the entries are stated for every extent capacity `E` and exclusion capacity `X` | [Page ownership](contract.md#page-ownership), lines 581 to 592; the rows of `own-01`, `own-03`, `own-05`, `own-08`, `own-16`, `own-17`, `own-21` and `own-22`, lines 884, 891, 893, 896, 904, 910, 914 and 915 | The vectors build tables of 0 to 128 extents |
@@ -842,7 +846,7 @@ and 614), the reading follows the prototype and names the place.
 | `owner` takes an address and gives the owner of the page that holds it, and none for a page of no managed bank | [Page ownership](contract.md#page-ownership), lines 570 to 573; [Terms](contract.md#terms), line 58; [Abstract mapping](contract.md#abstract-mapping), lines 290 to 292; now stated in [Page ownership](contract.md#page-ownership) | $O$ is defined on the managed pages, and the entry has no error |
 | `choose` compares the bytes of the request and those of its alignment, `pages` and `alignment` times 4 KiB, each with $2^{64}$ (`AddressOverflow`); in the scan, a free extent whose start rounded up, or the end of whose range, is $2^{64}$ or more gives `AddressOverflow` when the scan reaches it, so an extent earlier in the scan that holds the range gives it first; a high placement rounds down and does not overflow | [Page ownership](contract.md#page-ownership), lines 524 to 538; now stated in [Page ownership](contract.md#page-ownership) | The order puts the rounding after the generation and before the outcome of the scan, and the first broken rule wins; a range never ends beyond 64 bits ([Terms](contract.md#terms), lines 67 to 71) |
 | Taking a range from a free extent needs one more extent for each part of the extent before and after the range, 0 to 2, and the capacity has `E` less the extents in use free | [Page ownership](contract.md#page-ownership), lines 527 to 529, 510 and 583 to 585 | The table records free and held extents together, and the excluded pages take no extent |
-| `assign` checks the outcome of the zeroing first (`ZeroFailed`), then the requirement that the choice is one of `choose` under the same token, with the checks of `choose` that its write repeats: the counter exhausted (`GenerationExhausted`), the range not inside one free extent (`OutOfMemory`), the extents (`MetadataExhausted`); a choice of `choose` on the same table passes them | [After ownership](contract.md#after-ownership), line 321; [Page ownership](contract.md#page-ownership), lines 543 to 546; [Check and execute](contract.md#check-and-execute), lines 689 to 694 | The entry counts the extents in its checks before its write; the contract fixes no result for a choice that breaks the requirement, so the specification refuses it and writes nothing, and a refinement takes the requirement as a premise |
+| `assign` checks the outcome of the zeroing first (`ZeroFailed`), then the requirement that the choice is one of `choose` under the same token, with the checks of `choose` that its write repeats: the counter exhausted (`GenerationExhausted`), the range not inside one free extent (`OutOfMemory`), the extents (`MetadataExhausted`); a choice of `choose` on the same table passes them | [After ownership](contract.md#after-ownership), line 321; [Page ownership](contract.md#page-ownership), lines 543 to 546; [Check and execute](contract.md#check-and-execute), lines 689 to 694; now stated in [Check and execute](contract.md#check-and-execute) | The entry counts the extents in its checks before its write; the contract fixes no result for a choice that breaks the requirement, so the specification refuses it and writes nothing, and a refinement takes the requirement as a premise |
 | The generation counter is the generation of the next allocation or reservation, or exhausted: `assign` and `reserve` give it and advance it, the one that gives $2^{64} - 1$ leaves it exhausted, and `choose` and `reserve` then refuse with `GenerationExhausted` | [After ownership](contract.md#after-ownership), lines 321 and 322; [Page ownership](contract.md#page-ownership), lines 535 and 567 to 569; the row of `own-01`, line 884 | "$g' = g + 1$, or exhausted after $2^{64} - 1$": the allocation of `own-01` gets the generation `0xffffffffffffffff` and the next request is refused |
 | `Reservation::initialized` gives the packet with the count of failures of the reservation, or the reservation marked as attempted with its count increased by one; the count is 64-bit and stays at $2^{64} - 1$ once there | [Page ownership](contract.md#page-ownership), lines 547 to 552; [After ownership](contract.md#after-ownership), lines 331 and 332; now stated in [Page ownership](contract.md#page-ownership) | The function has no error and changes only the value that it consumes; the count reaches $2^{64} - 1$ only after as many failed zeroings |
 | `validate` takes a receipt or an initialized packet and makes the checks of `release` with the state that the value names, published for a receipt and reserved for a packet | [Page ownership](contract.md#page-ownership), line 570; the rows of `own-23` and `own-25`, lines 921 and 923; now stated in [Page ownership](contract.md#page-ownership) | `own-23` validates a packet, whose pages are reserved, and expects it to pass; `own-25` validates one at another arena |
@@ -862,8 +866,8 @@ and 614), the reading follows the prototype and names the place.
 | In the row of `direct_map`, "$G'$ and $P'$ add the slots of those pages" is read as $G'$ adding the 1 GiB slots of the pages and $P'$ the 2 MiB slots of the pages mapped as pages | [After mapping](contract.md#after-mapping), lines 305 and 309; now stated in [After mapping](contract.md#after-mapping) | A block takes no level 3 table, as the row of `map_block` states with $P' = P$ |
 | A row of `After mapping` or `After ownership` is stated for a success of its entry on a state that keeps the invariants: the success establishes its `Requires` column and its `After` column; a requirement that the entry does not check, the zero storage of `Tables::new`, is a hypothesis, and one of the hardware, no `TTBR` or TLB holding a set, is not modelled; a failure carries no state and no plan, by the type of the result | [After mapping](contract.md#after-mapping), lines 296 to 298 and 300 to 309; [After ownership](contract.md#after-ownership), lines 313 to 316 and 318 to 325 | "A failed entry returns an error, changes nothing and returns no plan" |
 | The statements of `assign` take its requirement, a choice of `choose` on the same table, as a hypothesis | [After ownership](contract.md#after-ownership), line 321 | The checks of `assign` repeat those of `choose` that its write needs, not that the range lies on page boundaries, which every choice of `choose` does |
-| W^X counts the lower kernel set, the direct map's set and a copy of the lower kernel set, on the states that the transactions reach from the boot under three rules that no entry checks: `kernel_map` and `direct_map` run once each; the `ReadExecute` ranges of the layout lie in a span of the boot storage of a well-formed boot memory map; a fill of the lower kernel set maps an executable kind only at a page of the text and the text only with `ReadExecute` | [Descriptors and attributes](contract.md#descriptors-and-attributes), lines 193 to 195 and 197 to 213; [Entry points](contract.md#entry-points), line 107; [State fields](contract.md#state-fields), line 755; its second rule now stated in [Descriptors and attributes](contract.md#descriptors-and-attributes) | The three reasons of W^X rest on the layout and the fills, which the contract states for the image and its text; it gives no rule for the frame and kind of a fill |
-| A guard page is not part of the state of a set: `kernel_map` writes no entry of a guard page of its layout, and a later fill of the lower kernel set does not see the guards | [Descriptors and attributes](contract.md#descriptors-and-attributes), lines 181 to 184; [After mapping](contract.md#after-mapping), line 308 | "No entry of this page writes a valid descriptor where a guard is": `map_page` takes no guard, so the rule binds its caller |
+| W^X counts the lower kernel set, the direct map's set and a copy of the lower kernel set, on the states that the transactions reach from the boot under three rules that no entry checks: `kernel_map` and `direct_map` run once each; the `ReadExecute` ranges of the layout lie in a span of the boot storage of a well-formed boot memory map; a fill of the lower kernel set maps an executable kind only at a page of the text and the text only with `ReadExecute` | [Descriptors and attributes](contract.md#descriptors-and-attributes), lines 193 to 195 and 197 to 213; [Entry points](contract.md#entry-points), line 107; [State fields](contract.md#state-fields), line 755; its second and third rules now stated in [Descriptors and attributes](contract.md#descriptors-and-attributes) | The three reasons of W^X rest on the layout and the fills, which the contract states for the image and its text; it gives no rule for the frame and kind of a fill |
+| A guard page is not part of the state of a set: `kernel_map` writes no entry of a guard page of its layout, and a later fill of the lower kernel set does not see the guards | [Descriptors and attributes](contract.md#descriptors-and-attributes), lines 181 to 184; [After mapping](contract.md#after-mapping), line 308; now stated in [Descriptors and attributes](contract.md#descriptors-and-attributes) | "No entry of this page writes a valid descriptor where a guard is": `map_page` takes no guard, so the rule binds its caller |
 
 ### Vector notation
 
@@ -918,8 +922,10 @@ as the last line of `dm-04` writes it.
   the count of tables in use is a call of `used` and a case of its own.
 - `pt-08` replaces the source's root entry 0 by `0x100000003`, by
   `0x100005003` and by the valid entry with bit 6 set, where the row of the
-  contract says only that the copy fails. The file gives the errors of the
-  order of [copying the kernel tables](contract.md#copying-the-kernel-tables):
+  contract says only that the copy fails. The file gives, as the rule of
+  [legacy test vectors](contract.md#legacy-test-vectors) for such a row
+  says, the errors of the order of
+  [copying the kernel tables](contract.md#copying-the-kernel-tables):
   the first points at the root, a table already reached, and the second at
   table 5, outside the three tables in use, both `TableBacking`; the third is
   a table descriptor with an attribute bit, `InvalidDescriptor`. Its row says
@@ -972,11 +978,11 @@ reservation keeps its name, as the test keeps the value that it gets back.
   receipt is the output of `assign`, with `true` when the callback succeeds
   and `false` when it fails; a request that `choose` refuses asks for no
   zeroing and has no `assign` ([behaviour changes](contract.md#legacy-test-vectors),
-  lines 962 to 965). The staged `initialize` with its callback is
+  lines 992 to 995). The staged `initialize` with its callback is
   `Reservation::initialized` with the outcome of the callback.
 - The assertions of `own-07`, `own-11` and `own-24` on the counts of failed
-  requests and of failed zeroings of the table have no case (lines 966 to
-  968); the count of failures of a reservation is the reservation's and has
+  requests and of failed zeroings of the table have no case (lines 996 to
+  998); the count of failures of a reservation is the reservation's and has
   its cases.
 - A table that the test unwraps is a case, `ok`, as every unwrapped call. The
   tests' helper `range(start, bytes)`, which unwraps `PhysRange::new`, writes
@@ -1012,7 +1018,7 @@ these modules answer 47, in 9,382 cases; 6 do not apply.
 | --- | --- | --- |
 | Replayed, 44 | `pt-01` to `pt-16`, `pt-18`, `pt-21`, `dm-01` to `dm-03`, `own-01` to `own-11`, `own-16` to `own-21` and `own-23` to `own-28` | Every case is a line of the vector file; the 7 GiB of `own-21` are two extents, so its cases take no more than the others |
 | Replayed with a large input, 3 | `pt-17`, `dm-04`, `own-22` | `pt-17`: 4,103 cases, the 4,096 calls of its loop each a case whose earlier calls are a `map_blocks` item. `dm-04`: the property vector of its row, 4,097 lines by the rule of the row. `own-22`: the property vector of its row, 801 lines, whose earlier steps are a `mixed_steps` item. The generator of the file takes the expected outputs of the three from models of the rules of the contract that do not use the specification, for `own-22` a model of each page of each bank as busy or free, and checks them against the literals of the rows |
-| Not applicable, 6 | `pt-19`, `pt-20`, `own-12` to `own-15` | `pt-19` and `pt-20`: the direct map never changes after boot, so the sealing of a page, with the split and merge of its block, is not carried ([behaviour changes](contract.md#legacy-test-vectors), lines 972 to 974). `own-12` to `own-15`: the kernel has no byte heap (line 975); the failure of a page request of `own-15` is in `own-07` and `own-28` |
+| Not applicable, 6 | `pt-19`, `pt-20`, `own-12` to `own-15` | `pt-19` and `pt-20`: the direct map never changes after boot, so the sealing of a page, with the split and merge of its block, is not carried ([behaviour changes](contract.md#legacy-test-vectors), lines 1002 to 1004). `own-12` to `own-15`: the kernel has no byte heap (line 1005); the failure of a page request of `own-15` is in `own-07` and `own-28` |
 
 The comments of the vector file name the vectors that are not applicable.
 The replay module checks one representative case of each vector of the file,
@@ -1027,17 +1033,17 @@ state, and the Lean definitions that state its entries, below
 
 | Line | Entries | Lean |
 | --- | --- | --- |
-| 106 | `page_tables::Kind`, `page_tables::descriptor`, `page_tables::direct_address`, `PhysRange::new`, `end`, `contains` and `overlaps`, and `Tables::lookup_page`, `lookup_block` and `used` | `Kind` with `Kind.attributes` and `Attributes.bits`; `descriptor`; `directAddress`; `PhysRange.new`, `PhysRange.endAddr`, `PhysRange.contains`, `PhysRange.overlaps`; `Tables.lookupPage` with `checkEntry` and `Tables.pageLeaf`, `Tables.lookupBlock` with `Tables.walk2`, `Tables.usedTables` |
-| 107 | `Tables::new`, `Tables::reset` and `Tables::clone_kernel_from` | `Tables.new`; `Tables.reset`; `Tables.cloneKernelFrom`, with `checkPool`, `Tables.walkRoot`, `Tables.walkLevel2`, `Tables.reach`, `checkLeaves`, `copyableLeaf` and `copyStores` |
-| 108 | `Tables::map_page` | `Tables.mapPage`, with `checkEntry`, `checkPhysical` and `Tables.walk2` |
-| 109 | `Tables::map_block` | `Tables.mapBlock`, with `checkEntry`, `checkPhysical`, `Tables.walk2` and `blockDescriptor` |
-| 110 | `Tables::unmap_page` | `Tables.unmapPage`, with `checkEntry` and `Tables.pageLeaf` |
-| 111 | `page_tables::kernel_map` and `page_tables::direct_map` | `Tables.kernelMap` with `Layout`, `LayoutRange`, `layoutKinds`, `sortByKey`, `layoutPages` and `Tables.checkLayoutRange`; `Tables.directMap` with `directLeaves`, `directFuel` and `Tables.checkUsableRange`; both with `Tables.place`, `Tables.checkLeaf`, `assignTables`, `mapPlan` and `Tables.mapLeaves`; `Plan.counts` |
-| 112 | `Ownership::new` | `Ownership.new`, with `PhysRange.onPages`, `anyOverlap`, `sortByKey`, `initialExtents`, `bankExtents`, `Exclusion.cut` and `cutRuns` |
-| 113 | `Ownership::choose` and `Ownership::assign` | `Ownership.choose` with `isPowerOfTwo`, `scan`, `Placement.part`, `fit` and `Extent.extra`; `Ownership.assign` with `Ownership.take`, `Extent.take` and `Counter.after` |
-| 114 | `Ownership::reserve`, `Reservation::initialized` and `Ownership::publish` | `Ownership.reserve` with `Ownership.choose` and `Ownership.take`; `Reservation.initialized` with `Initialization`; `Ownership.publish` with `Ownership.findHeld` |
-| 115 | `Ownership::cancel` and `Ownership::release` | `Ownership.cancel` and `Ownership.release`, with `Ownership.findHeld`, `mergeFreed` and `Extent.join` |
-| 116 | `Ownership::owner`, `Ownership::validate` and `Ownership::stats` | `Ownership.owner` with `Ownership.ownerOf` and `firstExcluder`; `Ownership.validate` with `Ownership.findHeld`; `Ownership.stats` with `Stats` |
+| 107 | `page_tables::Kind`, `page_tables::descriptor`, `page_tables::direct_address`, `PhysRange::new`, `end`, `contains` and `overlaps`, and `Tables::lookup_page`, `lookup_block` and `used` | `Kind` with `Kind.attributes` and `Attributes.bits`; `descriptor`; `directAddress`; `PhysRange.new`, `PhysRange.endAddr`, `PhysRange.contains`, `PhysRange.overlaps`; `Tables.lookupPage` with `checkEntry` and `Tables.pageLeaf`, `Tables.lookupBlock` with `Tables.walk2`, `Tables.usedTables` |
+| 108 | `Tables::new`, `Tables::reset` and `Tables::clone_kernel_from` | `Tables.new`; `Tables.reset`; `Tables.cloneKernelFrom`, with `checkPool`, `Tables.walkRoot`, `Tables.walkLevel2`, `Tables.reach`, `checkLeaves`, `copyableLeaf` and `copyStores` |
+| 109 | `Tables::map_page` | `Tables.mapPage`, with `checkEntry`, `checkPhysical` and `Tables.walk2` |
+| 110 | `Tables::map_block` | `Tables.mapBlock`, with `checkEntry`, `checkPhysical`, `Tables.walk2` and `blockDescriptor` |
+| 111 | `Tables::unmap_page` | `Tables.unmapPage`, with `checkEntry` and `Tables.pageLeaf` |
+| 112 | `page_tables::kernel_map` and `page_tables::direct_map` | `Tables.kernelMap` with `Layout`, `LayoutRange`, `layoutKinds`, `sortByKey`, `layoutPages` and `Tables.checkLayoutRange`; `Tables.directMap` with `directLeaves`, `directFuel` and `Tables.checkUsableRange`; both with `Tables.place`, `Tables.checkLeaf`, `assignTables`, `mapPlan` and `Tables.mapLeaves`; `Plan.counts` |
+| 113 | `Ownership::new` | `Ownership.new`, with `PhysRange.onPages`, `anyOverlap`, `sortByKey`, `initialExtents`, `bankExtents`, `Exclusion.cut` and `cutRuns` |
+| 114 | `Ownership::choose` and `Ownership::assign` | `Ownership.choose` with `isPowerOfTwo`, `scan`, `Placement.part`, `fit` and `Extent.extra`; `Ownership.assign` with `Ownership.take`, `Extent.take` and `Counter.after` |
+| 115 | `Ownership::reserve`, `Reservation::initialized` and `Ownership::publish` | `Ownership.reserve` with `Ownership.choose` and `Ownership.take`; `Reservation.initialized` with `Initialization`; `Ownership.publish` with `Ownership.findHeld` |
+| 116 | `Ownership::cancel` and `Ownership::release` | `Ownership.cancel` and `Ownership.release`, with `Ownership.findHeld`, `mergeFreed` and `Extent.join` |
+| 117 | `Ownership::owner`, `Ownership::validate` and `Ownership::stats` | `Ownership.owner` with `Ownership.ownerOf` and `firstExcluder`; `Ownership.validate` with `Ownership.findHeld`; `Ownership.stats` with `Stats` |
 
 The rules of the contract and the definitions that state them:
 
@@ -1046,7 +1052,7 @@ The rules of the contract and the definitions that state them:
 | [Terms](contract.md#terms): region, table, table set, pool, physical width, kind, abstract mapping, write plan, physical range | `Region` with `Region.holds`; `Table`, `index1`, `index2`, `index3`; `Tables` with `Pool`; `tableAddress`; `widthOk`; `Kind`; `Tables.M`, `Tables.G`, `Tables.P`; `Plan`; `PhysRange` |
 | [Descriptors and attributes](contract.md#descriptors-and-attributes): the formats and the kind table | `descriptor`, `blockDescriptor`, `tableDescriptor`, `INVALID`, `typeBits`, `isValid`, `outputAddress`, `blockAddress`, `Kind.attributes`, `Attributes.bits` |
 | RO, NX, Device and kernel and user | `Attributes.readOnly`, `writable`, `el0Access`, `executableEl1`, `executableEl0`, `isDevice`, `isGlobal` |
-| [Copying the kernel tables](contract.md#copying-the-kernel-tables) | `Tables.cloneKernelFrom` and the definitions of line 107 above |
+| [Copying the kernel tables](contract.md#copying-the-kernel-tables) | `Tables.cloneKernelFrom` and the definitions of line 108 above |
 | [Abstract mapping](contract.md#abstract-mapping): the state of a set | `Tables`, `Tables.M`, `Tables.G`, `Tables.P` |
 | [After mapping](contract.md#after-mapping): the rows of `Tables::new`, `reset`, `map_page`, `map_block`, `unmap_page`, `clone_kernel_from`, `kernel_map` and `direct_map` | `Tables.new`, `Tables.reset`, `Tables.mapPage`, `Tables.mapBlock`, `Tables.unmapPage`, `Tables.cloneKernelFrom`, `Tables.kernelMap`, `Tables.directMap`, each with `Tables.apply` of its plan |
 | [Errors of table sets](contract.md#errors-of-table-sets): the error table and the order | `TableError`; `checkEntry`, `checkPool` and `checkPhysical`, then the walk (`Tables.walk2`, `Tables.walk`, `Tables.child?`), then the free tables, in each entry; for the maps, `checkPool`, then `Tables.checkLayoutRange` or `Tables.checkUsableRange` for each range in address order with `Tables.place` and `Tables.checkLeaf` for each leaf, then `Tables.mapLeaves` |
@@ -1060,7 +1066,7 @@ The rules of the contract and the definitions that state them:
 | [Determinism](contract.md#determinism), for these entries | Every definition is a function; a new table is the one at the record, the lowest free index; the maps walk their ranges in address order, the direct map with a block wherever the rule allows one; `Ownership.choose` scans the extents in address order, from the lowest or the highest by the caller's placement, and takes the first fit in the caller's window; the generation of an allocation is the counter |
 | [Abstract mapping](contract.md#abstract-mapping): the state of the page ownership table | `Ownership`, `Ownership.ownerOf` for $O$, `Ownership.counter` for $g$ |
 | [After ownership](contract.md#after-ownership): the rows of `Ownership::new`, `assign`, `reserve`, `publish`, `cancel` and `release`, and `Reservation::initialized` | `Ownership.new`, `Ownership.assign`, `Ownership.reserve`, `Ownership.publish`, `Ownership.cancel`, `Ownership.release`, `Reservation.initialized` |
-| [Page ownership](contract.md#page-ownership): the owners, initialization, placement, zeroing before publication, receipts, statistics and capacity | `Owner`, `Excluder`, `HoldState`, `Holding`, `Extent`, `Exclusion`, `Counter`; the entries of rows 112 to 116 above; `EXTENTS`, `EXCLUSION_RECORDS` |
+| [Page ownership](contract.md#page-ownership): the owners, initialization, placement, zeroing before publication, receipts, statistics and capacity | `Owner`, `Excluder`, `HoldState`, `Holding`, `Extent`, `Exclusion`, `Counter`; the entries of rows 113 to 117 above; `EXTENTS`, `EXCLUSION_RECORDS` |
 | [Page ownership](contract.md#page-ownership): the error table | `OwnershipError` |
 | [Terms](contract.md#terms): managed page, extent, receipt, reservation and initialized packet, token | `PhysRange.holdsPage` on the banks; `Extent`; `Allocation`; `Reservation`, `Initialized`; `BootCpu`, `KernelTablesToken`, `OwnershipToken` |
 | [State fields](contract.md#state-fields): the four shared fields | `Shared` with the transactions of `Tokens.lean` |
@@ -1111,7 +1117,7 @@ requirements, which has no ID.
 | [PGT-R10](requirements.md#pgt-r10) | `Ownership.reserve`, `Reservation.initialized`, `Ownership.publish`, `Ownership.cancel`, `Ownership.validate`, `Ownership.release`, `Ownership.stats` | `AfterEveryWrite` (the rows of `reserve`, `publish` and `cancel`), `PlacementFirstFit`, `ReserveWellFormed`, `PublishWellFormed`, `CancelWellFormed`, the preservation by `reserve`, `publish` and `cancel` | `ReservationPublishesAfterZeroing`, `CancelRefusesAttemptedReservation` | `own-23` to `own-28` | The zeroing on a CPU |
 | [PGT-R11](requirements.md#pgt-r11) | `DIRECT_MAP_TABLES`, `KERNEL_TABLES`; `OutOfTables` of `Tables.mapLeaves` before any write; `EXTENTS`, `EXCLUSION_RECORDS`; `MetadataExhausted` of `Ownership.new`, `Ownership.choose` and `Ownership.reserve` before any write | `TablesInUseCounted`, `NewOwnershipWellFormed` and the well-formedness lemmas of the page ownership table, which bound its extents and exclusion records by their capacities, `NewFreeExtentsMaximal`, `CheckFreeExtentsMaximal`, `PlacementFirstFit` | `CapacitiesAtTheirLimits`, `CapacitiesRefuseOneMore` | `dm-03`, `own-05`, `own-08` | - |
 | [PGT-R12](requirements.md#pgt-r12) | `Tables.cloneKernelFrom` | `AfterEveryWrite` (the row of `clone_kernel_from`), `CloneKernelFromWellFormed`, `PlansPublishInOrder`, `NoWritableExecutable`, which counts the copy | `CopyIsPrivateAndOrdered`, `CopyRefusesPrivateLeaf` | `pt-07`, `pt-08`, `pt-10`, `pt-12`, `pt-18` | A process running on the copy, which the tables of address spaces show |
-| [Liveness, time and performance](requirements.md#liveness-time-and-performance) | Every definition is total and ends by structural recursion on a measure that the contract bounds: the walk reads one entry at each of three levels; the copy folds over the 512 entries of each table that it reaches and over the tables below the record; `kernel_map` over at most 16 ranges and over the pages of each (`layoutPages`); `direct_map` over the usable ranges and, in each, on fuel $L / 2\,\mathrm{MiB} + 2 \cdot 511$ (`directFuel`, from the work bounds, lines 760 to 762); the plans fold over their leaves and their steps; the page ownership table folds over its banks, its exclusions and its at most `E` extents (`cutRuns`, `scan`, `splitFirst`, `Ownership.stats`); the transactions of the shared state are single steps. No definition waits or takes a lock | None: every definition is total by structural recursion, which Lean checks, so termination needs no statement | None | Every case returns | The time of an entry, which no test bounds |
+| [Liveness, time and performance](requirements.md#liveness-time-and-performance) | Every definition is total and ends by structural recursion on a measure that the contract bounds: the walk reads one entry at each of three levels; the copy folds over the 512 entries of each table that it reaches and over the tables below the record; `kernel_map` over at most 16 ranges and over the pages of each (`layoutPages`); `direct_map` over the usable ranges and, in each, on fuel $L / 2\,\mathrm{MiB} + 2 \cdot 511$ (`directFuel`, from the work bounds, lines 781 to 783); the plans fold over their leaves and their steps; the page ownership table folds over its banks, its exclusions and its at most `E` extents (`cutRuns`, `scan`, `splitFirst`, `Ownership.stats`); the transactions of the shared state are single steps. No definition waits or takes a lock | None: every definition is total by structural recursion, which Lean checks, so termination needs no statement | None | Every case returns | The time of an entry, which no test bounds |
 
 ### PGT-R01
 
@@ -1205,7 +1211,10 @@ its row, with `0x1ffbfe000` bytes. The specification test
 `DirectMapCountsOfPi5Models` states the tables, blocks and pages of the five
 Pi 5 models of the table of [Table pool](contract.md#table-pool), and
 `DirectMapOmitsExcludedPages` that a page of each kind of exclusion, a hole
-and a bank outside the managed window have no direct address. The
+and a bank outside the managed window have no direct address. The criterion
+names the four other models; the test states the 8 GB model too, whose
+counts the prototype measured on the board and the board runs check
+([testing obligations](contract.md#testing-obligations)). The
 translation on QEMU virt is evidence of the QEMU tests.
 
 `AfterEveryWrite` states the row of `direct_map`,
