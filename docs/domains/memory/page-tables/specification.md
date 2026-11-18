@@ -5,6 +5,7 @@ specifications:
   - Krepi.Spec.PageTables.Tables
   - Krepi.Spec.PageTables.Plan
   - Krepi.Spec.PageTables.Map
+  - Krepi.Spec.PageTables.Boot
 ---
 
 # Page-tables specification
@@ -14,15 +15,17 @@ The Lean specification of the `page-tables` component, written from its
 implementation. It is an executable model: every entry is a computable
 definition whose body is public (`@[expose]`), none is `noncomputable` or
 chooses with `Classical.choice`, and every loop is structural recursion on a
-list whose length the contract bounds. The modules lie below
+list whose length the contract bounds or on fuel from the contract's
+[work bounds](contract.md#work-bounds). The modules lie below
 [`verification/Krepi/Spec/PageTables/`](../../../../verification/Krepi/Spec/PageTables/)
-and import Lean core and the earlier modules of the component alone.
+and import Lean core, the earlier modules of the component and, for the boot
+memory map, the modules of the fdt specification.
 
 This page describes the modules of the table sets: the descriptors and kinds,
 the physical ranges, the pools with the record of their tables in use, the
-walk, the write plans and the entries of rows 102 to 106 of the
-[entry table](contract.md#entry-points). The kernel mappings, the direct map,
-the page ownership table and the tokens of the
+walk, the write plans, the kernel mappings and the direct map, the entries of
+rows 102 to 107 of the [entry table](contract.md#entry-points). The page
+ownership table and the tokens of the
 [state fields](contract.md#state-fields) are specified by further modules,
 which this page will describe with the invariants, the properties, the
 specification tests and the witnesses.
@@ -49,7 +52,8 @@ each entry:
 | `Tables.mapPage`, `Tables.mapBlock` | The record, raised by the new tables; the plan writes them and the entry of the leaf |
 | `Tables.unmapPage` | Nothing; the plan writes the entry of the leaf |
 | `Tables.cloneKernelFrom` | The record of the target, set to that of the source; the plan zeroes the target's tables in use and writes its tables of the indices that the source uses; the source is an argument and is not written |
-| `Tables.lookupPage`, `Tables.lookupBlock`, `Tables.usedTables`, `descriptor`, `directAddress`, the functions of `PhysRange` | Nothing |
+| `Tables.kernelMap`, `Tables.directMap` | The record, raised by the new tables; the plan writes them and the entries of the leaves; the layout and the boot memory map are arguments and are not written |
+| `Tables.lookupPage`, `Tables.lookupBlock`, `Tables.usedTables`, `descriptor`, `directAddress`, the functions of `PhysRange`, `Plan.counts` | Nothing |
 
 Each entry is stated for all of its inputs at their machine widths:
 
@@ -62,6 +66,8 @@ Each entry is stated for all of its inputs at their machine widths:
 | A table set | `Tables r N` of a region `r` and a capacity `N` | Every pool of `N` tables and every record, also a set that no entry built |
 | The capacity `N`, the record of the tables in use, a table index and an entry index of a plan step | `Nat` | Every natural number |
 | A write plan | `Plan`, a list of `Step` | Every list |
+| A layout of `kernel_map` | `Layout`: a list of `LayoutRange`, each a `PhysRange` with a kind of `layoutKinds`, and a list of guard addresses of `UInt64` | At most 16 ranges, each of one of the four kinds of a layout; every list of guard addresses |
+| The boot memory map of `direct_map` | `Krepi.Spec.Fdt.MemoryPlan` of the fdt specification | Every value, also one that no entry of the fdt specification built |
 
 Inside a definition arithmetic is on `Nat`, which does not wrap. The rules
 that compare with a power of two compare the exact value: the end of a pool,
@@ -239,6 +245,77 @@ write entries of a set.
   the table descriptors pointing into the target's pool, and ends with
   `Sync`; the record of the target becomes that of the source.
 
+### Boot
+
+[`Boot.lean`](../../../../verification/Krepi/Spec/PageTables/Boot.lean): the
+[kernel mappings](contract.md#kernel-mappings) and the
+[kernel direct map](contract.md#kernel-direct-map), the entries of row 107.
+It imports the boot memory map, `MemoryPlan`, from the
+[fdt specification](../../boot-platform/fdt/specification.md) and reads its
+usable ranges through `MemoryPlan.availableRanges`.
+
+- **Leaves.** A mapping writes leaves, `MapLeaf`: a virtual address, an
+  output address, a descriptor and a form, page or block. `Tables.place`
+  walks the set for one leaf with the rules of `map_page` and `map_block`:
+  `TableBacking` for a bad table descriptor, `AlreadyMapped` for a slot that
+  is not free, and otherwise the place of the leaf, `Place`: under an invalid
+  root entry, in a level 2 table of the set, or in a level 3 table of the
+  set. `Tables.checkLeaf` adds the rule of the map itself: a leaf that the
+  map already covers is `AlreadyMapped`.
+- **New tables.** `assignTables` gives the leaves, in address order, their
+  tables: a leaf under an invalid root entry takes the new level 2 table of
+  its 1 GiB slot, the one that an earlier leaf of the slot took or else the
+  next free index, and then a page whose level 2 entry is free takes the new
+  level 3 table of its 2 MiB slot in the same way (`Alloc.add`). The next
+  free index after the map less the record is the number of new tables.
+- **The plan.** `mapPlan` writes the leaves one 1 GiB slot after the other,
+  in address order (`runsBy`): under a level 2 table of the set, each 2 MiB
+  slot is a `Store` of its block, the `Store` of each of its pages into a
+  level 3 table of the set, or `Zero(t3)`, the `Store` of each page, `Fence`
+  and the `Store` of the table descriptor of the new level 3 table
+  (`heldLevel2Steps`); under a new level 2 table, every new level 3 table
+  under it first, `Zero(t3)` and its pages, then `Zero(t2)`, the `Store` of
+  each of its entries in index order, `Fence` and the `Store` of its table
+  descriptor into the root (`newLevel2Steps`). `Sync` ends the plan. Each new
+  table is complete before the one store that makes it reachable from a
+  table of the set, and on one leaf the plan is that of `Tables.mapPage` or
+  `Tables.mapBlock` for it. `Tables.mapLeaves` refuses with `OutOfTables` a
+  map that needs more tables than the pool has free, and otherwise returns
+  the set whose record holds the new tables and the plan.
+- **`Tables.kernelMap`** takes the lower kernel set and a `Layout`: at most
+  16 ranges, `LayoutRange`, each a `PhysRange` with one of the four kinds of
+  `layoutKinds`, and the guard pages, each named by an address in it. It
+  makes the first checks of a pool (`checkPool`), then checks the ranges
+  sorted by their start (`sortByKey`), each with `Tables.checkLayoutRange`:
+  its ends on page boundaries, `Alignment`; its end at most $2^{39}$ and
+  $2^{\mathrm{bits}}$, `AddressWidth`; then its pages in address order
+  (`layoutPages`), each mapped at its physical address with the kind of the
+  range, the walk of each and then `AlreadyMapped` for a page that an earlier
+  range holds or that holds a guard address. Last the tables, with
+  `Tables.mapLeaves`.
+- **`Tables.directMap`** takes the direct map's set and a boot memory map. It
+  makes the first checks of a pool, then checks the usable ranges sorted by
+  their start, each with `Tables.checkUsableRange`: its ends on page
+  boundaries, `Alignment`; its end at most $2^{39}$ and $2^{\mathrm{bits}}$,
+  `AddressWidth`; then its leaves in address order (`directLeaves`), a block
+  of `ReadWrite` at each multiple of 2 MiB with 2 MiB of the range left and a
+  page of `ReadWrite` elsewhere, each at `DIRECT_BASE | pa`, with the walk of
+  each and then `AlreadyMapped` for a leaf that shares an address with an
+  earlier range. Last the tables, with `Tables.mapLeaves`.
+- **Counts.** `Plan.counts` gives the bytes, the blocks and the pages of the
+  map that a plan writes: one block for each `Store` of a block descriptor
+  (`Step.storesBlock`) and one page for each `Store` of the page descriptor of
+  a kind (`Step.storesPage`), 2 MiB and 4 KiB each.
+- **Capacities.** `DIRECT_MAP_TABLES`, 80, and `KERNEL_TABLES`, 32, are the
+  pools of the kernel tables ([table pool](contract.md#table-pool)). The
+  entries are stated for every capacity.
+- **Bounds.** Every loop is structural recursion on a list or on fuel: the
+  pages of a range of a layout are its length over 4 KiB (`layoutPages`),
+  and the steps of the walk of a usable range of length $L$ are at most
+  $L / 2\,\mathrm{MiB} + 2 \cdot 511$ (`directFuel`), the bound of
+  [work bounds](contract.md#work-bounds): a block for each 2 MiB and at most
+  511 pages at each end.
+
 ## Design decisions
 
 ### Readings of the contract
@@ -269,6 +346,17 @@ follows the prototype and names the place.
 | `PhysRange::new` gives `InvalidRange` for a length of 0 before it adds; the order of its two rules is not observable | [Terms](contract.md#terms), lines 67 to 71; the row of `own-02`, line 890 | A range of length 0 ends at its start, which fits in 64 bits |
 | `PhysRange::contains` and `overlaps` take a range, and compare the address sets | [Terms](contract.md#terms), lines 67 to 71; the row of `own-02`, line 890 | The row asks whether a range contains and overlaps ranges |
 | $M$ holds a page of a set where the walk reaches a page descriptor whose bits are those of a kind, or the block descriptor of `ReadWrite`; a page of a block maps to the physical page at its offset in the block | [Terms](contract.md#terms), lines 39 to 43; [After mapping](contract.md#after-mapping), line 305 | The contract defines $M$ on the pages of the region; the block row maps $v + i$ to $p + i$ |
+| `kernel_map` takes the lower kernel set and `direct_map` the direct map's set, as sets of the lower and the upper region | [Terms](contract.md#terms), lines 47 to 51; [Kernel mappings](contract.md#kernel-mappings), lines 222, 223 and 225 to 228 | The kernel tables are a lower set, which maps the image at its physical addresses, and the direct map's set in the upper region |
+| A range of a layout is a physical range, `PhysRange`, mapped at its physical address; the at most 16 ranges and the four kinds of a layout are rules of its type, with no error | [Kernel mappings](contract.md#kernel-mappings), lines 222, 223, 225 to 228, 236 and 237; [Terms](contract.md#terms), lines 67 to 71; [Work bounds](contract.md#work-bounds), line 710 | The contract states both rules of the layout that the board gives and gives no error for them; the image runs at its load address, so a range is one of physical addresses |
+| A guard page is named by an address in it, and a range covers it when the range holds that address; `kernel_map` checks the guards against the ranges and not against the set, and writes no entry of a guard page | [Kernel mappings](contract.md#kernel-mappings), lines 233 to 235; [After mapping](contract.md#after-mapping), line 308; [Errors of table sets](contract.md#errors-of-table-sets), line 345 | A range on page boundaries holds an address of a page exactly when it holds the page; "every guard page of $L$ stays outside $\mathrm{dom}\,M'$" is a rule of what the plan writes, since the error table refuses only a range that covers a guard |
+| `kernel_map` and `direct_map` check their ranges sorted by the start, ranges of one start in the order of their input, and for each the alignment of its ends, then its width, then the free slots of its leaves one by one in address order: the walk of the leaf, `TableBacking` and then `AlreadyMapped`, and then `AlreadyMapped` for a leaf that an earlier range covers, for `kernel_map` also for a guard page; then `OutOfTables` for the whole plan | [Errors of table sets](contract.md#errors-of-table-sets), lines 341, 342, 345 and 349 to 355; [Kernel direct map](contract.md#kernel-direct-map), lines 447, 457 and 458; [Check and execute](contract.md#check-and-execute), lines 681 to 683 | The order gives alignment, width and the free slots for each range in address order, the walk's `TableBacking` before `AlreadyMapped`, and the tables last; a page of an earlier range is not free once the plan maps it, which makes two ranges that share a page `AlreadyMapped` |
+| The width of a range is its end against $2^{39}$ and against $2^{\mathrm{bits}}$, one `AddressWidth` before any leaf of the range | [Errors of table sets](contract.md#errors-of-table-sets), line 342; [Kernel direct map](contract.md#kernel-direct-map), lines 440 to 443, 457 and 458 | A usable range that ends above $2^{39}$ has no direct address, and a range on page boundaries holds a page at or above $2^{\mathrm{bits}}$ exactly when it ends above it |
+| The new tables of `kernel_map` and `direct_map` take the lowest free indices in the order in which the walk of the leaves, in address order, first needs them, a level 2 table before the level 3 tables under it | [Table pool](contract.md#table-pool), line 616; [Determinism](contract.md#determinism), lines 732 and 733 | As for `map_page`: the walk needs the level 2 table first |
+| The plan of `kernel_map` and `direct_map` builds the tables bottom up: under a new level 2 table, each new level 3 table with its pages, then the level 2 table with its entries in index order, then one `Fence` and the store into the root; a new level 3 table under a level 2 table of the set is followed by one `Fence` and the store of its table descriptor; `Sync` ends the plan. "One `Fence` for each table descriptor" of the work bounds is read as a bound: a `Fence` comes before each store that makes new tables reachable from a table of the set, so there is at most one for each table descriptor | [Write plans and publication](contract.md#write-plans-and-publication), lines 372 to 377, 380 to 389 and 414 to 416; [Work bounds](contract.md#work-bounds), lines 710 to 718; [Determinism](contract.md#determinism), lines 735 to 737 | The rule of new tables writes a table completely before the store that makes it reachable, a table under another new table first, and the plan of two new tables, lines 384 to 386, has one `Fence` for two table descriptors; with that rule the plan of one leaf is that of `map_page` or `map_block` |
+| `Sync` ends every plan of `kernel_map` and `direct_map`, also that of a map with no leaf | [Write plans and publication](contract.md#write-plans-and-publication), lines 387 to 389 | A plan whose last store makes an entry valid ends with `Sync`; the copy ends with `Sync` in the same way, and with no store the `Sync` is harmless |
+| `direct_map` takes the boot memory map as a value of the fdt specification, any value of its type, and maps its usable ranges, `MemoryPlan.availableRanges` | [Terms](contract.md#terms), lines 52 to 57 and 64 to 66; [Kernel direct map](contract.md#kernel-direct-map), lines 444 to 456 | The contract takes the map as a value that it reads and never changes, and the usable ranges hold no reservation, hole or unmanaged RAM |
+| The counts of a direct map, its bytes, blocks and pages, are those of its plan: a block for each `Store` of a block descriptor and a page for each `Store` of a page descriptor | [Entry points](contract.md#entry-points), line 107; [Work bounds](contract.md#work-bounds), lines 714 to 718; the rows of `dm-01` and `dm-02`, lines 966 and 967 | The entry returns a plan; the vectors assert the counts of the map that it writes, and the plan has one `Store` for each block and page |
+| The capacities of the kernel tables, 80 and 32, are constants, and the entries are stated for every capacity `N` | [Table pool](contract.md#table-pool), lines 632 to 634 and 646 to 648 | The vectors build direct maps in pools of 2 to 16 tables |
 
 ### Vector notation
 
@@ -281,8 +369,9 @@ calls built, so an input holds the whole test up to the case:
 | Field | Meaning |
 | --- | --- |
 | `sets=` | The sets of the test, `-` for none, `<name>:<region>:<N>` joined by `,`: a set that `Tables::new` makes on zero storage, of region `lower` or `upper` and capacity `N`; `<name>:<region>:<N>:<record>` is zero storage with that record of tables in use |
+| `memory=` | Only in a test of the direct map: the boot memory map that the test builds, `MemoryPlan::new` with the fields `window=`, `ram=`, `boot=` and `firmware=` after it, or `MemoryPlan::all_ram` with the last three, which the fdt specification builds from them. A span is `<start>+<size>`, a list of spans is joined by `,`, `-` for none, and a firmware reservation is its span, `/` and its flag, `no-map`, `reusable` or `none`, as in the [notation](../../boot-platform/fdt/contract.md#notation) of the fdt contract |
 | `do=` | The earlier calls and writes of the test, `-` for none, joined by `;`; a write entry that succeeds has its plan executed |
-| `call=` | The call of the case: `map_page(set,v,p,kind,base,bits)`, `map_block(set,v,p,base,bits)`, `unmap_page(set,v,base,bits)`, `lookup_page(set,v,base,bits)`, `lookup_block(set,v,base,bits)`, `used(set)`, `reset(set)`, `clone_kernel_from(target,source,source_base,base,bits)` or `descriptor(kind,address)` |
+| `call=` | The call of the case: `map_page(set,v,p,kind,base,bits)`, `map_block(set,v,p,base,bits)`, `unmap_page(set,v,base,bits)`, `lookup_page(set,v,base,bits)`, `lookup_block(set,v,base,bits)`, `used(set)`, `reset(set)`, `clone_kernel_from(target,source,source_base,base,bits)`, `descriptor(kind,address)` or `direct_map(set,base,bits)`, the direct map of the boot memory map of `memory=` in an upper set |
 | `ask=` | What the test asserts of the state after the call, `-` for nothing, joined by `;`: `unchanged(set)`, whether the set, its pool and its record, is the one from before the call; `zero(set)`, whether every entry of its pool is 0; `entry(set,table,index)`, an entry |
 
 The two writes of a test, which are not entries, are
@@ -290,8 +379,22 @@ The two writes of a test, which are not entries, are
 storage, and `set_used(set,record)`, which writes the record; `pt-08` uses
 them as its test writes the source directly. The output of a call is `ok`,
 followed by its fields, or `err=<error>`: `unmap_page` gives `page=`,
-`lookup_page`, `lookup_block` and `descriptor` give `descriptor=`, and `used`
-gives `used=`; then each item of `ask=` gives `<item>=<value>`.
+`lookup_page`, `lookup_block` and `descriptor` give `descriptor=`, `used`
+gives `used=`, and `direct_map` gives `bytes=`, `blocks=` and `pages=`, the
+counts of its plan (`Plan.counts`); then each item of `ask=` gives
+`<item>=<value>`.
+
+Two forms stand for calls of a test that the vector file does not write one
+by one:
+
+| Form | Meaning | Vectors |
+| --- | --- | --- |
+| `map_blocks(set,v,p,count,base,bits)` | The first `count` calls of the loop of `pt-17`: `map_block(set,v+0x200000*i,p+0x200000*i,base,bits)` for `i` from 0 to `count - 1`, in this order, each on the set that the calls before it left; in `call=`, `ok` when every call succeeds and the first error otherwise | `pt-17` |
+| `translate_block(set,pa,base,bits)` | The check of `dm-04` of the 2 MiB block at the physical address `pa` of a direct map, as its test reads every page of it: when `lookup_block` of `DIRECT_BASE \| pa` gives a block descriptor whose output address is `pa`, `map=block`; otherwise `lookup_page` of each of its 512 pages, `map=pages absent=<addresses>` when each gives a page descriptor whose output address is its own address or `NotMapped`, with the addresses of the latter joined by `,` or `-` for none, and `map=none` when every page is `NotMapped`. Each descriptor has AP[2], AP[1] and nG 0 and PXN and UXN 1; any other translation is `map=wrong page=<address>`, of the first such page | `dm-04` |
+
+A call followed by `.` and the name of a field of its output,
+`direct_map(s,0x80000,40).bytes`, gives that field alone, `bytes=<bytes>`,
+as the last line of `dm-04` writes it.
 
 - A call that the test unwraps asserts that it succeeds, so it is a case,
   with `ok` or `ok page=...`.
@@ -317,14 +420,40 @@ gives `used=`; then each item of `ask=` gives `<item>=<value>`.
   `0x4000`, level 3 table 3 for `0x9000000` and level 2 table 4 and level 3
   table 5 for `0x40000000`, by the lowest free index with the level 2 table
   first.
+- A call whose result the test only checks with `is_ok` succeeds, so the
+  case gives `ok` and the descriptor that it gives, as for an unwrapped call;
+  `dm-01` checks three lookups so.
+- A call whose output the test does not assert, such as the `reset` of
+  `pt-13`, whose test asserts only the count of tables in use after it, is an
+  item of `do=` and not a case.
+- The counts of a direct map are written in the order `bytes`, `blocks`,
+  `pages` of the row of `dm-01`, also for `dm-02`, whose row lists the pages
+  before the blocks, so that one form serves both.
+- The earlier calls of a case of `pt-17` are the calls of its loop that come
+  before it, `map_blocks(s,0xffffff8000000000,0x0,<n>,0x100000000,40)` with
+  `<n>` the number of them, and the calls after the loop; writing each of
+  them would give the file about 0.5 GB.
+- The lines of `dm-04` are those of its row: lines `dm-04.1` to
+  `dm-04.4096`, one for each 2 MiB block from `0x0` in address order, are the
+  `direct_map` of the row and the `translate_block` of the block, and line
+  `dm-04.4097` is the bytes of the `direct_map`.
 
 ### Vector disposition
 
-The vectors `pt-01` to `pt-10` are replayed: every case of each is a line of
-the vector file, 99 cases, and the replay module checks one representative
-case of each. The other vectors of
-[legacy test vectors](contract.md#legacy-test-vectors) have no line in the
-vector file yet.
+Of the 53 vectors of [legacy test vectors](contract.md#legacy-test-vectors),
+these modules answer the 25 of the table sets and of the direct map; the 28
+of the page ownership table have no line in the vector file yet.
+
+| Disposition | Vectors | Reason |
+| --- | --- | --- |
+| Replayed, 21 | `pt-01` to `pt-16`, `pt-18`, `pt-21` and `dm-01` to `dm-03` | Every case is a line of the vector file |
+| Replayed with a large input, 2 | `pt-17`, `dm-04` | `pt-17`: 4,103 cases, the 4,096 calls of its loop each a case whose earlier calls are a `map_blocks` item. `dm-04`: the property vector of its row, 4,097 lines by the rule of the row. The generator of the file takes the expected outputs of both from models of the rules of the contract that do not use the specification, and checks them against the literals of the rows |
+| Not applicable, 2 | `pt-19`, `pt-20` | The direct map never changes after boot, so the sealing of a page, with the split and merge of its block, is not carried ([behaviour changes](contract.md#legacy-test-vectors), lines 871 to 873) |
+
+The comments of the vector file name the vectors that are not applicable.
+The replay module checks one representative case of each vector of the file,
+two of `dm-04`, and the whole file is replayed through the same `replay` by
+the driver of `cargo xtask formal vectors`.
 
 ## Contract correspondence
 
@@ -339,6 +468,7 @@ state, and the Lean definitions that state its entries, below
 | 104 | `Tables::map_page` | `Tables.mapPage`, with `checkEntry`, `checkPhysical` and `Tables.walk2` |
 | 105 | `Tables::map_block` | `Tables.mapBlock`, with `checkEntry`, `checkPhysical`, `Tables.walk2` and `blockDescriptor` |
 | 106 | `Tables::unmap_page` | `Tables.unmapPage`, with `checkEntry` and `Tables.pageLeaf` |
+| 107 | `page_tables::kernel_map` and `page_tables::direct_map` | `Tables.kernelMap` with `Layout`, `LayoutRange`, `layoutKinds`, `sortByKey`, `layoutPages` and `Tables.checkLayoutRange`; `Tables.directMap` with `directLeaves`, `directFuel` and `Tables.checkUsableRange`; both with `Tables.place`, `Tables.checkLeaf`, `assignTables`, `mapPlan` and `Tables.mapLeaves`; `Plan.counts` |
 
 The rules of the contract and the definitions that state them:
 
@@ -349,14 +479,16 @@ The rules of the contract and the definitions that state them:
 | RO, NX, Device and kernel and user | `Attributes.readOnly`, `writable`, `el0Access`, `executableEl1`, `executableEl0`, `isDevice`, `isGlobal` |
 | [Copying the kernel tables](contract.md#copying-the-kernel-tables) | `Tables.cloneKernelFrom` and the definitions of line 103 above |
 | [Abstract mapping](contract.md#abstract-mapping): the state of a set | `Tables`, `Tables.M`, `Tables.G`, `Tables.P` |
-| [After mapping](contract.md#after-mapping): the rows of `Tables::new`, `reset`, `map_page`, `map_block`, `unmap_page` and `clone_kernel_from` | `Tables.new`, `Tables.reset`, `Tables.mapPage`, `Tables.mapBlock`, `Tables.unmapPage`, `Tables.cloneKernelFrom`, each with `Tables.apply` of its plan |
-| [Errors of table sets](contract.md#errors-of-table-sets): the error table and the order | `TableError`; `checkEntry`, `checkPool` and `checkPhysical`, then the walk (`Tables.walk2`, `Tables.walk`, `Tables.child?`), then the free tables, in each entry |
-| [Write plans and publication](contract.md#write-plans-and-publication): the steps and their order | `Step`, `Plan`, `Step.exec`, `Plan.exec`, `Tables.apply`; the plans of `Tables.mapPage`, `Tables.mapBlock`, `Tables.unmapPage`, `Tables.reset` and `Tables.cloneKernelFrom` |
+| [After mapping](contract.md#after-mapping): the rows of `Tables::new`, `reset`, `map_page`, `map_block`, `unmap_page`, `clone_kernel_from`, `kernel_map` and `direct_map` | `Tables.new`, `Tables.reset`, `Tables.mapPage`, `Tables.mapBlock`, `Tables.unmapPage`, `Tables.cloneKernelFrom`, `Tables.kernelMap`, `Tables.directMap`, each with `Tables.apply` of its plan |
+| [Errors of table sets](contract.md#errors-of-table-sets): the error table and the order | `TableError`; `checkEntry`, `checkPool` and `checkPhysical`, then the walk (`Tables.walk2`, `Tables.walk`, `Tables.child?`), then the free tables, in each entry; for the maps, `checkPool`, then `Tables.checkLayoutRange` or `Tables.checkUsableRange` for each range in address order with `Tables.place` and `Tables.checkLeaf` for each leaf, then `Tables.mapLeaves` |
+| [Write plans and publication](contract.md#write-plans-and-publication): the steps and their order | `Step`, `Plan`, `Step.exec`, `Plan.exec`, `Tables.apply`; the plans of `Tables.mapPage`, `Tables.mapBlock`, `Tables.unmapPage`, `Tables.reset` and `Tables.cloneKernelFrom`; `mapPlan`, with `newLevel2Steps`, `heldLevel2Steps` and `level2Entry`, for `Tables.kernelMap` and `Tables.directMap` |
+| [Kernel mappings](contract.md#kernel-mappings): the layout, the identity map of its ranges, their kinds and the guard pages | `Layout`, `LayoutRange`, `layoutKinds`, `MAX_LAYOUT_RANGES`, `layoutPages`, `MapLeaf.isGuard`, `Tables.checkLayoutRange`, `Tables.kernelMap` |
 | [Kernel direct map](contract.md#kernel-direct-map): `DIRECT_BASE` and `direct_address` | `DIRECT_BASE`, `directAddress` |
-| [Table pool](contract.md#table-pool): the pool and its first checks, the lowest free index, zero storage | `poolFits`, `checkEntry`, `checkPool`; the new tables of `Tables.mapPage` and `Tables.mapBlock` at the record; `Tables.new` on the storage that its caller gives |
-| [Check and execute](contract.md#check-and-execute), for these entries | Each write entry checks every rule before it returns its set and plan, and a failure returns only the error; `Tables.new` and `Tables.reset` have no error; the lookups, `used`, `descriptor` and `directAddress` return values only |
-| [Work bounds](contract.md#work-bounds), for these entries | The walk reads one entry at each level; the plans of `map_page`, `map_block` and `unmap_page` have at most seven steps, two of them `Zero`; the walk of the copy folds over the 512 entries of each table that it reaches, at most once each since a table is reached once, and its stores fold over the tables below the record, at most `N` |
-| [Determinism](contract.md#determinism), for these entries | Every definition is a function; a new table is the one at the record, the lowest free index |
+| [Kernel direct map](contract.md#kernel-direct-map): the usable ranges in address order, the block where 2 MiB fit and pages elsewhere, nothing else, the width of $2^{39}$ | `Tables.directMap` with `MemoryPlan.availableRanges` of the fdt specification, `sortByKey`, `directLeaves`, `Tables.checkUsableRange` |
+| [Table pool](contract.md#table-pool): the pool and its first checks, the lowest free index, zero storage, the count, the capacities of the kernel tables | `poolFits`, `checkEntry`, `checkPool`; the new tables of `Tables.mapPage` and `Tables.mapBlock` at the record, and of the maps by `assignTables`; `Tables.new` on the storage that its caller gives; `DIRECT_MAP_TABLES`, `KERNEL_TABLES` |
+| [Check and execute](contract.md#check-and-execute), for these entries | Each write entry checks every rule before it returns its set and plan, and a failure returns only the error; `Tables.kernelMap` and `Tables.directMap` check every range and the tables of the whole plan first; `Tables.new` and `Tables.reset` have no error; the lookups, `used`, `descriptor` and `directAddress` return values only |
+| [Work bounds](contract.md#work-bounds), for these entries | The walk reads one entry at each level; the plans of `map_page`, `map_block` and `unmap_page` have at most seven steps, two of them `Zero`; the walk of the copy folds over the 512 entries of each table that it reaches, at most once each since a table is reached once, and its stores fold over the tables below the record, at most `N`; `Tables.kernelMap` folds over at most 16 ranges and over each page of each once (`layoutPages`), and `Tables.directMap` over each usable range once, in at most $L / 2\,\mathrm{MiB} + 2 \cdot 511$ steps of a block or a page (`directFuel`); the plan of each map has one `Store` for each leaf and table descriptor and one `Zero` for each new table |
+| [Determinism](contract.md#determinism), for these entries | Every definition is a function; a new table is the one at the record, the lowest free index; the maps walk their ranges in address order, the direct map with a block wherever the rule allows one |
 | [Page ownership](contract.md#page-ownership): the error table | `OwnershipError` |
 
 ## Requirement correspondence
@@ -366,20 +498,26 @@ the cases of the
 [vector file](../../../../verification/vectors/memory/page-tables.vectors)
 that
 [`Krepi.SpecTests.PageTables.Replay`](../../../../verification/Krepi/SpecTests/PageTables/Replay.lean)
-answers through them. The kernel direct map, the kernel mappings and the page
-ownership table of
-[PGT-R05](requirements.md#pgt-r05), [PGT-R06](requirements.md#pgt-r06) and
-[PGT-R08](requirements.md#pgt-r08) to [PGT-R11](requirements.md#pgt-r11) are
-specified by further modules.
+answers through them. The page ownership table of
+[PGT-R08](requirements.md#pgt-r08) to [PGT-R10](requirements.md#pgt-r10),
+and its capacities in [PGT-R11](requirements.md#pgt-r11), are specified by
+further modules. The parts of [PGT-R05](requirements.md#pgt-r05) to
+[PGT-R07](requirements.md#pgt-r07) that a CPU shows, the translation with
+the MMU on and the effect of the barriers, belong to the adapter, an
+[open obligation](contract.md#open-obligations), and to the QEMU and board
+tests of the requirements; these modules state the tables and the plans.
 
 | Requirement | Stated by | Vectors |
 | --- | --- | --- |
-| [PGT-R01](requirements.md#pgt-r01) | `Kind`, `Kind.attributes`, `Attributes.bits`, `descriptor`, `blockDescriptor`, the permissions of `Attributes`; `Tables.lookupPage`, `Tables.lookupBlock` | `pt-01`, `pt-02`, `pt-06` |
-| [PGT-R02](requirements.md#pgt-r02) | `Tables.new`, `Tables.mapPage`, `Tables.lookupPage`, `Tables.usedTables`, `Region.holds` | `pt-01`, `pt-03`, `pt-04`, `pt-05` |
-| [PGT-R03](requirements.md#pgt-r03) | `Tables.mapBlock`, `Tables.lookupBlock`, `blockDescriptor`; `Tables.unmapPage` and `Tables.mapPage` on a page of a block | - |
-| [PGT-R04](requirements.md#pgt-r04) | `Tables.unmapPage`, `Tables.reset` | `pt-05`, `pt-09` |
-| [PGT-R07](requirements.md#pgt-r07) | `Step`, `Plan`, `Step.exec`; the plans of `Tables.mapPage`, `Tables.mapBlock`, `Tables.unmapPage` and `Tables.cloneKernelFrom` | - |
-| [PGT-R12](requirements.md#pgt-r12) | `Tables.cloneKernelFrom` | `pt-07`, `pt-08`, `pt-10` |
+| [PGT-R01](requirements.md#pgt-r01) | `Kind`, `Kind.attributes`, `Attributes.bits`, `descriptor`, `blockDescriptor`, the permissions of `Attributes`; `Tables.lookupPage`, `Tables.lookupBlock` | `pt-01`, `pt-02`, `pt-06`, `pt-11`, `pt-15`, `pt-21` |
+| [PGT-R02](requirements.md#pgt-r02) | `Tables.new`, `Tables.mapPage`, `Tables.lookupPage`, `Tables.usedTables`, `Region.holds` | `pt-01`, `pt-03`, `pt-04`, `pt-05`, `pt-13`, `pt-14` |
+| [PGT-R03](requirements.md#pgt-r03) | `Tables.mapBlock`, `Tables.lookupBlock`, `blockDescriptor`; `Tables.unmapPage` and `Tables.mapPage` on a page of a block | `pt-15`, `pt-16`, `pt-17` |
+| [PGT-R04](requirements.md#pgt-r04) | `Tables.unmapPage`, `Tables.reset` | `pt-05`, `pt-09`, `pt-11` |
+| [PGT-R05](requirements.md#pgt-r05) | `Tables.directMap` with `directLeaves` and `MemoryPlan.availableRanges`; `directAddress`; `Plan.counts`; `Tables.lookupPage`, `Tables.lookupBlock`, `Tables.usedTables` | `dm-01` to `dm-04` |
+| [PGT-R06](requirements.md#pgt-r06) | `Tables.kernelMap` with `Layout`, `layoutKinds` and `Tables.checkLayoutRange` | - |
+| [PGT-R07](requirements.md#pgt-r07) | `Step`, `Plan`, `Step.exec`; the plans of `Tables.mapPage`, `Tables.mapBlock`, `Tables.unmapPage` and `Tables.cloneKernelFrom`, and `mapPlan` for `Tables.kernelMap` and `Tables.directMap` | - |
+| [PGT-R11](requirements.md#pgt-r11), the tables of the direct map | `DIRECT_MAP_TABLES`, `KERNEL_TABLES`; `OutOfTables` of `Tables.mapLeaves` before any write | `dm-03` |
+| [PGT-R12](requirements.md#pgt-r12) | `Tables.cloneKernelFrom` | `pt-07`, `pt-08`, `pt-10`, `pt-12`, `pt-18` |
 
 ### PGT-R01
 
@@ -391,9 +529,10 @@ bit 0 or a bit of the row, and `blockDescriptor` the block form of
 of the requirement are statements on the bits: no kind is writable and
 executable; the kernel kinds give EL0 no access and are global except
 `KernelPrivateReadWrite`; the user kinds are not global and do not execute at
-EL1; `Device` and `UserDevice` have AttrIndx 0. The replay answers the descriptors of `pt-02` and
-`pt-06` through `descriptor`, and those that `pt-01` and `pt-06` read back
-through `Tables.lookupPage`.
+EL1; `Device` and `UserDevice` have AttrIndx 0. The replay answers the
+descriptors of `pt-02`, `pt-06` and `pt-21` through `descriptor`, those that
+`pt-01`, `pt-06` and `pt-11` read back through `Tables.lookupPage`, and the
+block of `pt-15` through `Tables.lookupBlock`.
 
 ### PGT-R02
 
@@ -403,8 +542,10 @@ checks, the physical address, the walk and the free tables, each with the
 error of the contract in its order, and a refused call returns its error
 alone, so no table changes and the record stays. `Region.holds` in the first
 checks makes a lower set refuse the addresses of the upper region and the
-other way round. The replay answers `pt-01`, `pt-03`, `pt-04` and `pt-05`,
-whose cases of `used` after each refusal give the count unchanged.
+other way round. The replay answers `pt-01`, `pt-03`, `pt-04`, `pt-05`,
+`pt-13` and `pt-14`, whose cases of `used` after each refusal give the count
+unchanged; `pt-14` refuses the addresses of each region in a set of the
+other.
 
 ### PGT-R03
 
@@ -413,8 +554,10 @@ descriptor of `ReadWrite` at a 2 MiB-aligned address, refused with
 `AlreadyMapped` where the level 2 entry is valid, so a level 3 table never
 becomes a block; `Tables.lookupPage` and `Tables.unmapPage` give `NotMapped`
 for a page of a block and `Tables.mapPage` gives `AlreadyMapped`, so a block
-never becomes pages. Its vectors, `pt-15` to `pt-17`, have no line in the
-vector file yet.
+never becomes pages. The replay answers `pt-15` and `pt-16`, and `pt-17`, the
+4,096 blocks of 8 GiB from `DIRECT_BASE` in an upper set of 9 tables, across
+the 1 GiB and 4 GiB boundaries, and the refusal of one more with
+`OutOfTables`.
 
 ### PGT-R04
 
@@ -422,8 +565,38 @@ vector file yet.
 `Tables.unmapPage`, whose plan is `Store(t, i, 0)` and then `Invalidate(v)`
 and which leaves the record, so the tables under the leaf stay in the pool,
 and `Tables.reset`, which leaves the root alone in use and zeroes every table
-in use. The replay answers `pt-05` and `pt-09`, among them the reset of
-`pt-09` with every entry 0 after it.
+in use. The replay answers `pt-05`, `pt-09` and `pt-11`, among them the reset
+of `pt-09` with every entry 0 after it.
+
+### PGT-R05
+
+[PGT-R05](requirements.md#pgt-r05), the kernel direct map, is
+`Tables.directMap` on the direct map's set and the boot memory map of the fdt
+specification: it maps every page of every usable range,
+`MemoryPlan.availableRanges`, at `DIRECT_BASE | pa` as `ReadWrite`, with a
+block at each multiple of 2 MiB that has 2 MiB of its range left and pages
+elsewhere (`directLeaves`), and nothing else, since the usable ranges hold no
+reservation, hole between banks or RAM outside the managed banks. It checks
+the whole map before it writes: a range that ends above $2^{39}$ is
+`AddressWidth`, and a map that needs more tables than the pool has free is
+`OutOfTables`, with no plan. `Plan.counts` gives the bytes, blocks and pages
+of the plan. The replay answers `dm-01` to `dm-03`, and `dm-04`, every 2 MiB
+block below 8 GiB of the 8 GB layout of the prototype against the model of
+its row, with `0x1ffbfe000` bytes. The counts of the four other Pi 5 models
+and the translation on QEMU virt are evidence of the host and QEMU tests.
+
+### PGT-R06
+
+[PGT-R06](requirements.md#pgt-r06), the kernel mappings of the image, is
+`Tables.kernelMap` on the lower kernel set: every page of every range of the
+layout at its physical address with the kind of its range, one of
+`ReadExecute`, `ReadOnly`, `ReadWrite` and `Device` by the type of the
+layout, and no entry of a guard page. It refuses a range off page boundaries
+with `Alignment`, and a page that two ranges share or a range that covers a
+guard with `AlreadyMapped`, before any write, so no page has two kinds and,
+since no kind of a layout is writable and executable, no page of the image
+is mapped writable and executable. No vector covers it; the contract's host
+test of a shared page and the QEMU tests are its evidence.
 
 ### PGT-R07
 
@@ -433,8 +606,19 @@ the table descriptor that makes it reachable, with a `Fence` before that
 store; a plan that makes an entry valid ends with `Sync`; the plan of an
 unmap stores the invalid entry and then invalidates the address; no step
 fails, since `Step.exec` is total. The plans of the kernel mappings and the
-direct map are specified with their entries. The execution of the steps on
-hardware is the adapter's, an [open obligation](contract.md#open-obligations).
+direct map are `mapPlan`: under a new level 2 table its level 3 tables
+first, then the level 2 table, one `Fence` and the store into the root, and
+`Sync` last; they write only entries that the checks found free. The
+execution of the steps on hardware is the adapter's, an
+[open obligation](contract.md#open-obligations).
+
+### PGT-R11
+
+[PGT-R11](requirements.md#pgt-r11), the capacities, is served here for the
+tables of the kernel: `DIRECT_MAP_TABLES`, 80, and `KERNEL_TABLES`, 32, and
+the refusal of a map that needs more tables than its pool has free with
+`OutOfTables`, before any write (`Tables.mapLeaves`). The replay answers
+`dm-03`. The capacities of the page ownership table are specified with it.
 
 ### PGT-R12
 
@@ -445,13 +629,13 @@ write; the plan zeroes the target's tables in use and stores every valid
 entry of the source into the target's table of the same index, the leaves as
 they are, global ones included, and the table descriptors pointing into the
 target's pool. The tables of the copy are the target's own, so a later plan
-on either set writes only its own pool. The replay answers `pt-07`, `pt-08`
-and `pt-10`, with the target unchanged after each refusal.
+on either set writes only its own pool. The replay answers `pt-07`, `pt-08`,
+`pt-10`, `pt-12` and `pt-18`, with the target unchanged after each refusal.
 
 ## Dependencies
 
 - The specification of the [fdt](../../boot-platform/fdt/specification.md)
-  component, whose boot memory map the direct map reads, by the modules of
-  the direct map.
+  component, whose boot memory map, `MemoryPlan` with its usable ranges, the
+  direct map reads: `Boot.lean` imports `Krepi.Spec.Fdt.Plan`.
 - Lean core. No module of the specification imports Mathlib, the Aeneas
   library or a generated module.
