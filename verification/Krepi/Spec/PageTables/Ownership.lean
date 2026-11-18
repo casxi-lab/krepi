@@ -36,12 +36,12 @@ write phase. `choose`, `owner`, `validate` and `stats` write nothing.
 Machine widths are explicit where a value crosses an entry: addresses,
 lengths, the arena, owner identities and generations are `UInt64`; the pages
 and the alignment of a request, which count pages, are `UInt64`, as the
-request of 2^64 - 1 pages of the prototype's tests is an input; the count of
-failures of a reservation is `UInt64`. The capacities, the bank of an extent
-and the fields of `Stats` are `Nat`: on a table that the entries built the
-counts are at most the capacity and the bytes are those of disjoint ranges
-below 2^64. Arithmetic inside a definition is on `Nat`, and the rules that
-compare with 2^64 compare the exact value.
+request of $2^{64} - 1$ pages of `own-07` and `own-28` is an input; the count
+of failures of a reservation is `UInt64`. The capacities, the bank of an
+extent and the fields of `Stats` are `Nat`: on a table that the entries built
+the counts are at most the capacity and the bytes are those of disjoint
+ranges below $2^{64}$. Arithmetic inside a definition is on `Nat`, and the
+rules that compare with $2^{64}$ compare the exact value.
 -/
 
 @[expose] public section
@@ -439,8 +439,9 @@ held by its owner identity with the generation of the counter and the state
 `s`, and the counter advanced. The checks of the requirement of `assign`, a
 choice of `choose` under the same token, in the order of the checks of
 `choose` that they repeat: the counter exhausted, `GenerationExhausted`; the
-range not inside one free extent, `OutOfMemory`; more extents than `E`,
-`MetadataExhausted`. A choice of `choose` on the same table passes them. -/
+range not inside one free extent, `OutOfMemory`; more extents than the
+capacity has free, as `scan` counts them, `MetadataExhausted`. A choice of
+`choose` on the same table passes them. -/
 def Ownership.take (t : Ownership E X) (c : Choice) (s : HoldState) :
     Except OwnershipError (Ownership E X × Allocation) := do
   let g ← match t.counter with
@@ -448,10 +449,9 @@ def Ownership.take (t : Ownership E X) (c : Choice) (s : HoldState) :
     | .exhausted => throw .generationExhausted
   let some (before, e, after) := splitFirst (fun e => e.holding == .free && e.range.contains c.range)
       t.extents [] | throw .outOfMemory
-  let parts := e.take c.range (.held c.owner g s)
-  if E < t.extents.length - 1 + parts.length then throw .metadataExhausted
-  pure ({ t with extents := before.reverseAux (parts ++ after), counter := Counter.after g },
-    ⟨t.arena, c.owner, g, c.range⟩)
+  if E - t.extents.length < e.extra c.range then throw .metadataExhausted
+  let extents := before.reverseAux (e.take c.range (.held c.owner g s) ++ after)
+  pure ({ t with extents, counter := Counter.after g }, ⟨t.arena, c.owner, g, c.range⟩)
 
 /-- `Ownership::assign(c, zeroed)`: once the caller has zeroed the range of the
 choice `c` through the direct map, `zeroed` tells whether the zeroing
