@@ -41,8 +41,14 @@ with its theorem below
 [`verification/Krepi/Proofs/PageTables/`](../../../../verification/Krepi/Proofs/PageTables/),
 whose proof is planned: it is `sorry` until a proof pull request proves it
 ([statements and proofs](../../../formal-verification.md#statements-and-proofs)).
-The specification tests and the witnesses are specified by further modules,
-which this page will describe.
+The specification tests, for each requirement one input that the
+specification must accept and one that it must reject, are stated the same
+way in `Stp` below
+[`verification/Krepi/SpecTests/PageTables/`](../../../../verification/Krepi/SpecTests/PageTables/),
+with their planned theorems in `Krepi.Proofs.PageTables.Stp`
+([Specification tests](#specification-tests)). The witnesses that the
+specification is not vacuous are specified by a further module, which this
+page will describe.
 [`Krepi.SpecTests.PageTables.Replay`](../../../../verification/Krepi/SpecTests/PageTables/Replay.lean)
 replays the cases of the
 [vector file](../../../../verification/vectors/memory/page-tables.vectors)
@@ -591,6 +597,77 @@ to 213). The mappings of the address spaces of processes beyond the copy,
 among them `UserReadExecute` for the boot bundle, are those of the
 address-space component.
 
+### Specification tests
+
+[`Stp.lean`](../../../../verification/Krepi/SpecTests/PageTables/Stp.lean):
+for each requirement, one input that the specification must accept, with the
+result that it must give, and one that it must reject, with the error that it
+must give. Each test is a proposition, registered in `statements.json` with
+its theorem in `Krepi.Proofs.PageTables.Stp`, the name of the test with a
+lower-case first letter, whose proof is planned. Each instantiates the
+criterion of its requirement, the sentence that begins "The criterion:", and
+quotes the words that it instantiates, which the last column gives. The
+expected results are literals written from the requirements and the
+contract, never computed by the specification: descriptors from the rows of
+the kind table, plans from the rules of
+[write plans and publication](contract.md#write-plans-and-publication),
+counts from the table of [Table pool](contract.md#table-pool) and outputs of
+the rows of the frozen vectors. Where the criterion is that the frozen
+vectors hold, a test takes the input of a vector of the requirement's
+evidence and states the outputs of its row, with the state that the row
+reads. The module imports `Tokens.lean` alone; its helpers make a set with
+`Tables::new` on zero storage, map a page or a block with the plan executed,
+and write a physical range whose bounds `decide` checks, and the inputs of
+the capacities are made with `PhysRange::new`.
+
+Three requirements rule out an outcome rather than an input, and their
+rejecting tests take that outcome: [PGT-R01](requirements.md#pgt-r01), whose
+descriptor is a function of every kind and address, keeps no bit of an
+address with every bit set outside bits 12 to 47;
+[PGT-R05](requirements.md#pgt-r05) maps no excluded page, so `lookup_page`
+refuses each with `NotMapped` on a direct map that succeeds with the counts
+of the usable pages; and [PGT-R07](requirements.md#pgt-r07), whose plans have
+no failure, writes no valid entry of the kernel tables, so the fill of a page
+that `kernel_map` mapped is refused. Each of the three fails for a
+specification that gave the outcome, as every other rejecting test fails for
+one that always succeeds and every accepting test for one that always
+rejects.
+
+The sets of the tests hold at most 10 tables, the kernel sets the 32 and 80
+tables of their pools, and the tables of page ownership a few extents, except
+where the criterion names a size: the 4,096 blocks of 8 GiB in 9 tables of
+[PGT-R03](requirements.md#pgt-r03); the RAM of the five Pi 5 models, up to
+16 GiB, of the accepting test of [PGT-R05](requirements.md#pgt-r05); and the
+direct maps of 80 and 81 tables and the table of 160 extents and 132
+exclusions of [PGT-R11](requirements.md#pgt-r11).
+
+| Requirement | Test | Input | Result | Criterion |
+| --- | --- | --- | --- | --- |
+| [PGT-R01](requirements.md#pgt-r01) | Accepted: `DescriptorsFollowKindRows` | The nine kinds at the output address `0x10_0800_0000` of `pt-01`; the block of `ReadWrite` at `0x1_0000_0000`; the page of `pt-01` and the block of `pt-15` in new sets | The descriptor of each kind, the bits of its row with the address in bits 12 to 47, and the block descriptor; `lookup_page` and `lookup_block` give those descriptors | "the descriptor of every kind equals the bits of its row, written from the Arm Architecture Reference Manual, and the frozen vectors that read descriptor bits hold" |
+| [PGT-R01](requirements.md#pgt-r01) | Rejected: `DescriptorKeepsOnlyItsBits` | The nine kinds and the block at the output address `0xffff_ffff_ffff_ffff` | The bits of each row and bits 12 to 47 of the address, bits 21 to 47 for the block, and no other bit | "the descriptor of every kind equals the bits of its row", with "every other bit 0" |
+| [PGT-R02](requirements.md#pgt-r02) | Accepted: `MapPageThenLookup` | `pt-03`: `0x4000_0000` to itself as `ReadWrite` in a lower set of 3 tables; `pt-14`: `0xffff_ff80_0000_0000` to `0x1_0000_0000` in an upper set of 3 | 3 tables in use and the descriptor of each page | "the frozen vectors hold" |
+| [PGT-R02](requirements.md#pgt-r02) | Rejected: `MapPageRefusesMappedPage` | `pt-03`: the same address to `0x4000_1000` as `Device` | `AlreadyMapped`; the set keeps its descriptor and 3 tables | "with the tables and the count of tables in use unchanged after every refusal" |
+| [PGT-R03](requirements.md#pgt-r03) | Accepted: `EightGibOfBlocksInNineTables` | `pt-17`: 4,096 blocks from 0 in an upper set of 9 tables | 9 tables in use; `lookup_block` at five blocks across 1 GiB and 4 GiB gives the block at its own address | "4,096 blocks in a pool of 9 tables" |
+| [PGT-R03](requirements.md#pgt-r03) | Rejected: `BlockBeyondNineTablesRefused` | `pt-17`: the block of `0x2_0000_0000` on that set | `OutOfTables` | "the refusal of one more with `OutOfTables`" |
+| [PGT-R04](requirements.md#pgt-r04) | Accepted: `UnmapAndResetFollowContract` | `pt-09`: two pages in a lower set of 4 tables; `unmap_page` of one, `reset`, then a new page | The page and the plan `Store(2, 0, 0)`, `Invalidate(0x0)`, 4 tables in use; the plan of `reset` a `Zero` of each of 4 tables, then 1 table in use and every entry 0; then 3 tables and the new descriptor | "the frozen vectors hold, and the plan of `unmap_page` equals the order of the contract" |
+| [PGT-R04](requirements.md#pgt-r04) | Rejected: `UnmapRefusesUnmappedPage` | `pt-05`: a second `unmap_page` of `0x0` | `NotMapped` | "the frozen vectors hold" |
+| [PGT-R05](requirements.md#pgt-r05) | Accepted: `DirectMapCountsOfPi5Models` | The boot memory maps of the 1, 2, 4, 8 and 16 GB models with the exclusions of `Table pool`, in sets of 80 tables | The tables, blocks and pages of each row of `Table pool`: 4, 508, 581 to 19, 8,188, 581 | "the four other Pi 5 models give the counts of tables, blocks and pages of the contract" |
+| [PGT-R05](requirements.md#pgt-r05) | Rejected: `DirectMapOmitsExcludedPages` | A managed window with an image, a device tree, a boot bundle, a `no-map` and a `reusable` reservation, a hole and a bank outside the window | 4 blocks and 506 pages, and `NotMapped` at a page of each exclusion, the hole and the unmanaged bank | "every page below 8 GiB is mapped to itself or absent exactly as an independent page model says" |
+| [PGT-R06](requirements.md#pgt-r06) | Accepted: `KernelMapGivesKindsAndGuard` | An image on QEMU virt with text, read-only data, data and a stack with its guard page, the device tree, the interrupt controller and the console, in a lower set of 32 tables | 7 tables in use; the descriptor of each page's kind, the read-only pages with AP[2] set, the data and the stack execute-never, the devices `Device`; the guard `NotMapped` | "a write to a `ReadOnly` page, an execution from an execute-never page and an access to the guard each take the fault of the contract, and a `Device` page of the console is written" |
+| [PGT-R06](requirements.md#pgt-r06) | Rejected: `KernelMapRefusesSharedPage` | A text and a data range that share the page `0x4020_1000` | `AlreadyMapped` | "on the host, a layout whose text and data share a page is refused" |
+| [PGT-R07](requirements.md#pgt-r07) | Accepted: `PlansFollowContractOrder` | `map_page` with two new tables, `map_block` of `pt-15`, `unmap_page` of `pt-09`, a copy of one page, `kernel_map` of three pages and `direct_map` of two pages and a block, on new sets | The plan of each, step by step, as the contract writes it | "the plans of `map_page`, `map_block`, `unmap_page`, `clone_kernel_from`, `kernel_map` and `direct_map` equal the order of the contract, written from it" |
+| [PGT-R07](requirements.md#pgt-r07) | Rejected: `KernelFillRefusesValidEntry` | After the boot, the fill under the token of the kernel tables of a page that `kernel_map` mapped | `AlreadyMapped` and no plan | "the plans ... equal the order of the contract", with "a plan for the kernel tables writes only invalid entries" |
+| [PGT-R08](requirements.md#pgt-r08) | Accepted: `OwnershipOfBoardShapes` | QEMU virt and the five Pi 5 models: their boot memory maps and `Ownership::new` of their managed banks and exclusions | The managed banks and usable ranges; the table with one free extent for each usable range, the exclusion records and the counter at 1; the owners of pages of each kind | "for the boot memory map of every board shape, every managed page has exactly one owner, the free pages are exactly the pages of the direct map" |
+| [PGT-R08](requirements.md#pgt-r08) | Rejected: `OwnershipRefusesOverlappingBanks` | `own-17`: banks that share the page `0x1000` | `InvalidRange` | "every managed page has exactly one owner", with the refusal of overlapping banks |
+| [PGT-R09](requirements.md#pgt-r09) | Accepted: `AllocationTakesWindowAndGeneration` | `own-20`: 2 pages at an alignment of 4, high, in a window off its pages; a failed zeroing, then another owner's allocation and its release | The highest aligned range in the window; `ZeroFailed`; the same range with generation 1 and its receipt, the extents after it; one free extent after the release | "the frozen vectors hold" |
+| [PGT-R09](requirements.md#pgt-r09) | Rejected: `ReleaseRefusesStaleReceipt` | `own-10`: the release of a receipt of generation 1 after the page was released and taken again | The new receipt of generation 2, and `InvalidAllocation` | "the frozen vectors hold" |
+| [PGT-R10](requirements.md#pgt-r10) | Accepted: `ReservationPublishesAfterZeroing` | `own-23`: a reservation, an allocation outside it, the zeroing, the validation and the publication, both releases | The reservation held at once, not zeroed; the packet; the receipt; all bytes free at the end | "the frozen vectors hold" |
+| [PGT-R10](requirements.md#pgt-r10) | Rejected: `CancelRefusesAttemptedReservation` | `own-24`: the cancel of a reservation after a failed zeroing | The reservation attempted with 1 failure, and `ZeroFailed` with the reservation returned | "the frozen vectors hold" |
+| [PGT-R11](requirements.md#pgt-r11) | Accepted: `CapacitiesAtTheirLimits` | A direct map that needs exactly 80 tables; a table of 28 banks with 132 exclusions; an allocation of 1 page at its 160 extents | 80 tables in use; the statistics of 160 extents; the page of an extent of exactly one page | "a direct map that needs exactly 80 tables succeeds", "a page ownership table at exactly 160 extents works", "an initialization with 132 exclusions succeeds" |
+| [PGT-R11](requirements.md#pgt-r11) | Rejected: `CapacitiesRefuseOneMore` | A direct map that needs 81 tables; a reservation that needs a 161st extent; a 133rd exclusion | `OutOfTables`, `MetadataExhausted` and `MetadataExhausted` | "one that needs 81 is refused", "one more extent is refused", "one with 133 is refused" |
+| [PGT-R12](requirements.md#pgt-r12) | Accepted: `CopyIsPrivateAndOrdered` | `pt-07`: a source of three pages and a target with a page of its own | The plan of the copy, step by step; 6 tables in use and the source's descriptors; later writes to either set leave the other unchanged | "the frozen vectors hold, and the plan of the copy equals the order of the contract" |
+| [PGT-R12](requirements.md#pgt-r12) | Rejected: `CopyRefusesPrivateLeaf` | `pt-12`: a source with a `KernelPrivateReadWrite` leaf | `InvalidDescriptor` | "the frozen vectors hold" |
+
 ## Design decisions
 
 ### Readings of the contract
@@ -869,7 +946,10 @@ the cases of the
 [vector file](../../../../verification/vectors/memory/page-tables.vectors)
 that
 [`Krepi.SpecTests.PageTables.Replay`](../../../../verification/Krepi/SpecTests/PageTables/Replay.lean)
-answers through them. The parts of [PGT-R05](requirements.md#pgt-r05) to
+answers through them, and the [specification tests](#specification-tests),
+one input that the specification must accept and one that it must reject,
+whose theorems in `Krepi.Proofs.PageTables.Stp` are planned. The parts of
+[PGT-R05](requirements.md#pgt-r05) to
 [PGT-R07](requirements.md#pgt-r07) that a CPU shows, the translation with
 the MMU on and the effect of the barriers, belong to the adapter, an
 [open obligation](contract.md#open-obligations), and to the QEMU and board
@@ -881,30 +961,31 @@ which the caller passes to `assign` and `Reservation::initialized`. The
 criteria of [PGT-R08](requirements.md#pgt-r08) for the boot memory map of
 every board shape, one owner for every managed page and the free pages equal
 to those of the direct map, are `NewOneOwner` and
-`BootOwnersMatchDirectMap`, for every well-formed boot memory map, with the
-host tests of the contract as their evidence on the boot memory maps of the
-board shapes. The registered statements of [invariants](#invariants) and
+`BootOwnersMatchDirectMap`, for every well-formed boot memory map, and the
+specification test `OwnershipOfBoardShapes` on the boot memory maps of QEMU
+virt and the five Pi 5 models. The registered statements of
+[invariants](#invariants) and
 [properties](#properties), whose theorems are planned, are listed for each
 requirement; the statements of the shared state serve the
 [state fields](contract.md#state-fields), which no requirement observes. The
 last row is the section of liveness, time and performance of the
 requirements, which has no ID.
 
-| Requirement | Stated by | Registered statements | Vectors | Not stated by the specification |
-| --- | --- | --- | --- | --- |
-| [PGT-R01](requirements.md#pgt-r01) | `Kind`, `Kind.attributes`, `Attributes.bits`, `descriptor`, `blockDescriptor`, the permissions of `Attributes`; `Tables.lookupPage`, `Tables.lookupBlock` | `NoWritableExecutable`; `CheckTablesWellFormed` and the well-formedness lemmas of the write entries, `MapPageWellFormed`, `MapBlockWellFormed`, `KernelMapWellFormed`, `DirectMapWellFormed` and `CloneKernelFromWellFormed`, by which every leaf of a set is the descriptor of a kind | `pt-01`, `pt-02`, `pt-06`, `pt-11`, `pt-15`, `pt-21` | That a CPU translates and checks the permissions as the bits say, and `SCTLR_EL1.WXN`, which the QEMU tests of PGT-R05 and PGT-R06 and the adapter cover |
-| [PGT-R02](requirements.md#pgt-r02) | `Tables.new`, `Tables.mapPage`, `Tables.lookupPage`, `Tables.usedTables`, `Region.holds` | `AfterEveryWrite` (the rows of `Tables::new` and `map_page`), `NewWellFormed`, `MapPageWellFormed`, `TablesInUseCounted` | `pt-01`, `pt-03`, `pt-04`, `pt-05`, `pt-13`, `pt-14` | A CPU walking the tables |
-| [PGT-R03](requirements.md#pgt-r03) | `Tables.mapBlock`, `Tables.lookupBlock`, `blockDescriptor`; `Tables.unmapPage` and `Tables.mapPage` on a page of a block | `AfterEveryWrite` (the rows of `map_block`, `map_page` and `unmap_page`), `MapBlockWellFormed`, `TablesInUseCounted` | `pt-15`, `pt-16`, `pt-17` | - |
-| [PGT-R04](requirements.md#pgt-r04) | `Tables.unmapPage`, `Tables.reset` | `AfterEveryWrite` (the rows of `unmap_page` and `reset`), `UnmapPageWellFormed`, `ResetWellFormed`, `PlansPublishInOrder`, `KernelTablesOnlyFilled` | `pt-05`, `pt-09`, `pt-11` | The invalidation on a CPU, which the case of break-before-make of the boot component shows |
-| [PGT-R05](requirements.md#pgt-r05) | `Tables.directMap` with `directLeaves` and `MemoryPlan.availableRanges`; `directAddress`; `Plan.counts`; `Tables.lookupPage`, `Tables.lookupBlock`, `Tables.usedTables` | `AfterEveryWrite` (the row of `direct_map`), `DirectMapUnchangedAfterBoot`, `BootDirectMapWellFormed`, `DirectMapWellFormed`, `BootDirectMapOffset`, `BuildDirectMapOffset`, `CheckDirectMapOffset`, `TablesInUseCounted`, `BootOwnersMatchDirectMap`, `NoWritableExecutable` | `dm-01` to `dm-04` | The translation with the MMU on at the edges of the ranges, the three cold boots and the board runs; the counts of the four other Pi 5 models, which host tests take from the inferred bank shapes |
-| [PGT-R06](requirements.md#pgt-r06) | `Tables.kernelMap` with `Layout`, `layoutKinds` and `Tables.checkLayoutRange` | `AfterEveryWrite` (the row of `kernel_map`), `BootKernelMapWellFormed`, `KernelMapWellFormed`, `NoWritableExecutable` | - | The faults on QEMU virt |
-| [PGT-R07](requirements.md#pgt-r07) | `Step`, `Plan`, `Step.exec`; the plans of `Tables.mapPage`, `Tables.mapBlock`, `Tables.unmapPage` and `Tables.cloneKernelFrom`, and `mapPlan` for `Tables.kernelMap` and `Tables.directMap` | `PlansPublishInOrder`, `KernelTablesOnlyFilled` | - | The stores, barriers and register writes of the adapter, [open obligations](contract.md#open-obligations), and the order that the barriers give on several CPUs |
-| [PGT-R08](requirements.md#pgt-r08) | `Ownership.new` with `initialExtents` and `bankExtents`; `Ownership.ownerOf` and `Ownership.owner`; `Ownership.stats`; the merge of `mergeFreed` within a bank | `AfterEveryWrite` (the row of `Ownership::new`), `NewOwnershipWellFormed`, `NewOneOwner`, `NewHolderRanges`, `NewFreeOrHeldUsable`, the preservation of `Ownership.OneOwner` and `Ownership.FreeOrHeldUsable` by the five write entries, `CheckOneOwner`, `CheckFreeOrHeldUsable`, `BootOwnersMatchDirectMap` | `own-03`, `own-04`, `own-05`, `own-17`, `own-18`, `own-19`, `own-21`, `own-22` | The contents of RAM; the boot memory maps of the board shapes, which the host test builds |
-| [PGT-R09](requirements.md#pgt-r09) | `Ownership.choose` with `scan` and `fit`; `Ownership.assign` with `Ownership.take` and `Counter.after`; `Ownership.release` and `Ownership.validate` with `Ownership.findHeld`; `Ownership.stats` | `AfterEveryWrite` (the rows of `assign` and `release`), `PlacementFirstFit`, `AssignWellFormed`, `ReleaseWellFormed`, the preservation by `assign` and `release`, `NewGenerationsBelowCounter`, `CheckHolderRanges`, `CheckGenerationsBelowCounter` | `own-01`, `own-06` to `own-11`, `own-16`, `own-18`, `own-20`, `own-21`, `own-22` | The zeroing, `krepi_arch::mmu::zero_frames`, the adapter's |
-| [PGT-R10](requirements.md#pgt-r10) | `Ownership.reserve`, `Reservation.initialized`, `Ownership.publish`, `Ownership.cancel`, `Ownership.validate`, `Ownership.release`, `Ownership.stats` | `AfterEveryWrite` (the rows of `reserve`, `publish` and `cancel`), `PlacementFirstFit`, `ReserveWellFormed`, `PublishWellFormed`, `CancelWellFormed`, the preservation by `reserve`, `publish` and `cancel` | `own-23` to `own-28` | The zeroing on a CPU |
-| [PGT-R11](requirements.md#pgt-r11) | `DIRECT_MAP_TABLES`, `KERNEL_TABLES`; `OutOfTables` of `Tables.mapLeaves` before any write; `EXTENTS`, `EXCLUSION_RECORDS`; `MetadataExhausted` of `Ownership.new`, `Ownership.choose` and `Ownership.reserve` before any write | `TablesInUseCounted`, `NewOwnershipWellFormed` and the well-formedness lemmas of the page ownership table, which bound its extents and exclusion records by their capacities, `NewFreeExtentsMaximal`, `CheckFreeExtentsMaximal`, `PlacementFirstFit` | `dm-03`, `own-05`, `own-08` | - |
-| [PGT-R12](requirements.md#pgt-r12) | `Tables.cloneKernelFrom` | `AfterEveryWrite` (the row of `clone_kernel_from`), `CloneKernelFromWellFormed`, `PlansPublishInOrder`, `NoWritableExecutable`, which counts the copy | `pt-07`, `pt-08`, `pt-10`, `pt-12`, `pt-18` | A process running on the copy, which the tables of address spaces show |
-| [Liveness, time and performance](requirements.md#liveness-time-and-performance) | Every definition is total and ends by structural recursion on a measure that the contract bounds: the walk reads one entry at each of three levels; the copy folds over the 512 entries of each table that it reaches and over the tables below the record; `kernel_map` over at most 16 ranges and over the pages of each (`layoutPages`); `direct_map` over the usable ranges and, in each, on fuel $L / 2\,\mathrm{MiB} + 2 \cdot 511$ (`directFuel`, from the work bounds, lines 714 to 716); the plans fold over their leaves and their steps; the page ownership table folds over its banks, its exclusions and its at most `E` extents (`cutRuns`, `scan`, `splitFirst`, `Ownership.stats`); the transactions of the shared state are single steps. No definition waits or takes a lock | None: every definition is total by structural recursion, which Lean checks, so termination needs no statement | Every case returns | The time of an entry, which no test bounds |
+| Requirement | Stated by | Registered statements | Specification tests | Vectors | Not stated by the specification |
+| --- | --- | --- | --- | --- | --- |
+| [PGT-R01](requirements.md#pgt-r01) | `Kind`, `Kind.attributes`, `Attributes.bits`, `descriptor`, `blockDescriptor`, the permissions of `Attributes`; `Tables.lookupPage`, `Tables.lookupBlock` | `NoWritableExecutable`; `CheckTablesWellFormed` and the well-formedness lemmas of the write entries, `MapPageWellFormed`, `MapBlockWellFormed`, `KernelMapWellFormed`, `DirectMapWellFormed` and `CloneKernelFromWellFormed`, by which every leaf of a set is the descriptor of a kind | `DescriptorsFollowKindRows`, `DescriptorKeepsOnlyItsBits` | `pt-01`, `pt-02`, `pt-06`, `pt-11`, `pt-15`, `pt-21` | That a CPU translates and checks the permissions as the bits say, and `SCTLR_EL1.WXN`, which the QEMU tests of PGT-R05 and PGT-R06 and the adapter cover |
+| [PGT-R02](requirements.md#pgt-r02) | `Tables.new`, `Tables.mapPage`, `Tables.lookupPage`, `Tables.usedTables`, `Region.holds` | `AfterEveryWrite` (the rows of `Tables::new` and `map_page`), `NewWellFormed`, `MapPageWellFormed`, `TablesInUseCounted` | `MapPageThenLookup`, `MapPageRefusesMappedPage` | `pt-01`, `pt-03`, `pt-04`, `pt-05`, `pt-13`, `pt-14` | A CPU walking the tables |
+| [PGT-R03](requirements.md#pgt-r03) | `Tables.mapBlock`, `Tables.lookupBlock`, `blockDescriptor`; `Tables.unmapPage` and `Tables.mapPage` on a page of a block | `AfterEveryWrite` (the rows of `map_block`, `map_page` and `unmap_page`), `MapBlockWellFormed`, `TablesInUseCounted` | `EightGibOfBlocksInNineTables`, `BlockBeyondNineTablesRefused` | `pt-15`, `pt-16`, `pt-17` | - |
+| [PGT-R04](requirements.md#pgt-r04) | `Tables.unmapPage`, `Tables.reset` | `AfterEveryWrite` (the rows of `unmap_page` and `reset`), `UnmapPageWellFormed`, `ResetWellFormed`, `PlansPublishInOrder`, `KernelTablesOnlyFilled` | `UnmapAndResetFollowContract`, `UnmapRefusesUnmappedPage` | `pt-05`, `pt-09`, `pt-11` | The invalidation on a CPU, which the case of break-before-make of the boot component shows |
+| [PGT-R05](requirements.md#pgt-r05) | `Tables.directMap` with `directLeaves` and `MemoryPlan.availableRanges`; `directAddress`; `Plan.counts`; `Tables.lookupPage`, `Tables.lookupBlock`, `Tables.usedTables` | `AfterEveryWrite` (the row of `direct_map`), `DirectMapUnchangedAfterBoot`, `BootDirectMapWellFormed`, `DirectMapWellFormed`, `BootDirectMapOffset`, `BuildDirectMapOffset`, `CheckDirectMapOffset`, `TablesInUseCounted`, `BootOwnersMatchDirectMap`, `NoWritableExecutable` | `DirectMapCountsOfPi5Models`, `DirectMapOmitsExcludedPages` | `dm-01` to `dm-04` | The translation with the MMU on at the edges of the ranges, the three cold boots and the board runs; the bank shapes of the four other Pi 5 models, which the fdt contract infers |
+| [PGT-R06](requirements.md#pgt-r06) | `Tables.kernelMap` with `Layout`, `layoutKinds` and `Tables.checkLayoutRange` | `AfterEveryWrite` (the row of `kernel_map`), `BootKernelMapWellFormed`, `KernelMapWellFormed`, `NoWritableExecutable` | `KernelMapGivesKindsAndGuard`, `KernelMapRefusesSharedPage` | - | The faults on QEMU virt |
+| [PGT-R07](requirements.md#pgt-r07) | `Step`, `Plan`, `Step.exec`; the plans of `Tables.mapPage`, `Tables.mapBlock`, `Tables.unmapPage` and `Tables.cloneKernelFrom`, and `mapPlan` for `Tables.kernelMap` and `Tables.directMap` | `PlansPublishInOrder`, `KernelTablesOnlyFilled` | `PlansFollowContractOrder`, `KernelFillRefusesValidEntry` | - | The stores, barriers and register writes of the adapter, [open obligations](contract.md#open-obligations), and the order that the barriers give on several CPUs |
+| [PGT-R08](requirements.md#pgt-r08) | `Ownership.new` with `initialExtents` and `bankExtents`; `Ownership.ownerOf` and `Ownership.owner`; `Ownership.stats`; the merge of `mergeFreed` within a bank | `AfterEveryWrite` (the row of `Ownership::new`), `NewOwnershipWellFormed`, `NewOneOwner`, `NewHolderRanges`, `NewFreeOrHeldUsable`, the preservation of `Ownership.OneOwner` and `Ownership.FreeOrHeldUsable` by the five write entries, `CheckOneOwner`, `CheckFreeOrHeldUsable`, `BootOwnersMatchDirectMap` | `OwnershipOfBoardShapes`, `OwnershipRefusesOverlappingBanks` | `own-03`, `own-04`, `own-05`, `own-17`, `own-18`, `own-19`, `own-21`, `own-22` | The contents of RAM |
+| [PGT-R09](requirements.md#pgt-r09) | `Ownership.choose` with `scan` and `fit`; `Ownership.assign` with `Ownership.take` and `Counter.after`; `Ownership.release` and `Ownership.validate` with `Ownership.findHeld`; `Ownership.stats` | `AfterEveryWrite` (the rows of `assign` and `release`), `PlacementFirstFit`, `AssignWellFormed`, `ReleaseWellFormed`, the preservation by `assign` and `release`, `NewGenerationsBelowCounter`, `CheckHolderRanges`, `CheckGenerationsBelowCounter` | `AllocationTakesWindowAndGeneration`, `ReleaseRefusesStaleReceipt` | `own-01`, `own-06` to `own-11`, `own-16`, `own-18`, `own-20`, `own-21`, `own-22` | The zeroing, `krepi_arch::mmu::zero_frames`, the adapter's |
+| [PGT-R10](requirements.md#pgt-r10) | `Ownership.reserve`, `Reservation.initialized`, `Ownership.publish`, `Ownership.cancel`, `Ownership.validate`, `Ownership.release`, `Ownership.stats` | `AfterEveryWrite` (the rows of `reserve`, `publish` and `cancel`), `PlacementFirstFit`, `ReserveWellFormed`, `PublishWellFormed`, `CancelWellFormed`, the preservation by `reserve`, `publish` and `cancel` | `ReservationPublishesAfterZeroing`, `CancelRefusesAttemptedReservation` | `own-23` to `own-28` | The zeroing on a CPU |
+| [PGT-R11](requirements.md#pgt-r11) | `DIRECT_MAP_TABLES`, `KERNEL_TABLES`; `OutOfTables` of `Tables.mapLeaves` before any write; `EXTENTS`, `EXCLUSION_RECORDS`; `MetadataExhausted` of `Ownership.new`, `Ownership.choose` and `Ownership.reserve` before any write | `TablesInUseCounted`, `NewOwnershipWellFormed` and the well-formedness lemmas of the page ownership table, which bound its extents and exclusion records by their capacities, `NewFreeExtentsMaximal`, `CheckFreeExtentsMaximal`, `PlacementFirstFit` | `CapacitiesAtTheirLimits`, `CapacitiesRefuseOneMore` | `dm-03`, `own-05`, `own-08` | - |
+| [PGT-R12](requirements.md#pgt-r12) | `Tables.cloneKernelFrom` | `AfterEveryWrite` (the row of `clone_kernel_from`), `CloneKernelFromWellFormed`, `PlansPublishInOrder`, `NoWritableExecutable`, which counts the copy | `CopyIsPrivateAndOrdered`, `CopyRefusesPrivateLeaf` | `pt-07`, `pt-08`, `pt-10`, `pt-12`, `pt-18` | A process running on the copy, which the tables of address spaces show |
+| [Liveness, time and performance](requirements.md#liveness-time-and-performance) | Every definition is total and ends by structural recursion on a measure that the contract bounds: the walk reads one entry at each of three levels; the copy folds over the 512 entries of each table that it reaches and over the tables below the record; `kernel_map` over at most 16 ranges and over the pages of each (`layoutPages`); `direct_map` over the usable ranges and, in each, on fuel $L / 2\,\mathrm{MiB} + 2 \cdot 511$ (`directFuel`, from the work bounds, lines 714 to 716); the plans fold over their leaves and their steps; the page ownership table folds over its banks, its exclusions and its at most `E` extents (`cutRuns`, `scan`, `splitFirst`, `Ownership.stats`); the transactions of the shared state are single steps. No definition waits or takes a lock | None: every definition is total by structural recursion, which Lean checks, so termination needs no statement | None | Every case returns | The time of an entry, which no test bounds |
 
 ### PGT-R01
 
@@ -919,7 +1000,11 @@ executable; the kernel kinds give EL0 no access and are global except
 EL1; `Device` and `UserDevice` have AttrIndx 0. The replay answers the
 descriptors of `pt-02`, `pt-06` and `pt-21` through `descriptor`, those that
 `pt-01`, `pt-06` and `pt-11` read back through `Tables.lookupPage`, and the
-block of `pt-15` through `Tables.lookupBlock`.
+block of `pt-15` through `Tables.lookupBlock`. The specification test
+`DescriptorsFollowKindRows` states the descriptors of the nine kinds and the
+block at one address, and those that the sets of `pt-01` and `pt-15` read
+back; `DescriptorKeepsOnlyItsBits` the same at an address with every bit
+set, of which only bits 12 to 47 reach a descriptor.
 
 ### PGT-R02
 
@@ -932,7 +1017,9 @@ checks makes a lower set refuse the addresses of the upper region and the
 other way round. The replay answers `pt-01`, `pt-03`, `pt-04`, `pt-05`,
 `pt-13` and `pt-14`, whose cases of `used` after each refusal give the count
 unchanged; `pt-14` refuses the addresses of each region in a set of the
-other.
+other. The specification tests `MapPageThenLookup` and
+`MapPageRefusesMappedPage` take `pt-03` and `pt-14`: a page of each region
+mapped and looked up, and the refusal of a second page at the same address.
 
 `AfterEveryWrite` states the row of `map_page` for every success on a
 well-formed set: $v$ was not mapped, $M$ gains $v \mapsto (p, k,
@@ -953,7 +1040,9 @@ the 1 GiB and 4 GiB boundaries, and the refusal of one more with
 `AfterEveryWrite` states the row of `map_block`, and
 `TablesInUseCounted` that the tables in use of a well-formed set are the
 root and one table for each element of $G$ and $P$, so that 8 GiB of blocks
-use the root and 8 level 2 tables.
+use the root and 8 level 2 tables. The specification tests
+`EightGibOfBlocksInNineTables` and `BlockBeyondNineTablesRefused` take the
+4,096 blocks of `pt-17` and the refusal of one more.
 
 ### PGT-R04
 
@@ -962,7 +1051,10 @@ use the root and 8 level 2 tables.
 and which leaves the record, so the tables under the leaf stay in the pool,
 and `Tables.reset`, which leaves the root alone in use and zeroes every table
 in use. The replay answers `pt-05`, `pt-09` and `pt-11`, among them the reset
-of `pt-09` with every entry 0 after it.
+of `pt-09` with every entry 0 after it. The specification test
+`UnmapAndResetFollowContract` states the plans of `unmap_page` and of
+`reset` of `pt-09` step by step, and `UnmapRefusesUnmappedPage` the second
+unmap of `pt-05`.
 
 `AfterEveryWrite` states the rows of `unmap_page` and `reset`,
 `PlansPublishInOrder` that the plan of `unmap_page` is the store of 0 into
@@ -983,8 +1075,12 @@ the whole map before it writes: a range that ends above $2^{39}$ is
 `OutOfTables`, with no plan. `Plan.counts` gives the bytes, blocks and pages
 of the plan. The replay answers `dm-01` to `dm-03`, and `dm-04`, every 2 MiB
 block below 8 GiB of the 8 GB layout of the prototype against the model of
-its row, with `0x1ffbfe000` bytes. The counts of the four other Pi 5 models
-and the translation on QEMU virt are evidence of the host and QEMU tests.
+its row, with `0x1ffbfe000` bytes. The specification test
+`DirectMapCountsOfPi5Models` states the tables, blocks and pages of the five
+Pi 5 models of the table of [Table pool](contract.md#table-pool), and
+`DirectMapOmitsExcludedPages` that a page of each kind of exclusion, a hole
+and a bank outside the managed window have no direct address. The
+translation on QEMU virt is evidence of the QEMU tests.
 
 `AfterEveryWrite` states the row of `direct_map`,
 `Shared.DirectMapOffset` that the direct map's set maps only
@@ -1003,7 +1099,11 @@ with `Alignment`, and a page that two ranges share or a range that covers a
 guard with `AlreadyMapped`, before any write, so no page has two kinds and,
 since no kind of a layout is writable and executable, no page of the image
 is mapped writable and executable. No vector covers it; the contract's host
-test of a shared page and the QEMU tests are its evidence.
+test of a shared page and the QEMU tests are its evidence. The specification
+test `KernelMapGivesKindsAndGuard` states the descriptors of an image on QEMU
+virt that give the faults of the criterion, with its guard unmapped, and
+`KernelMapRefusesSharedPage` the refusal of a text and a data range that
+share a page.
 
 `AfterEveryWrite` states the row of `kernel_map`, and
 `NoWritableExecutable` that no frame is mapped writable and executable,
@@ -1021,7 +1121,10 @@ direct map are `mapPlan`: under a new level 2 table its level 3 tables
 first, then the level 2 table, one `Fence` and the store into the root, and
 `Sync` last; they write only entries that the checks found free. The
 execution of the steps on hardware is the adapter's, an
-[open obligation](contract.md#open-obligations).
+[open obligation](contract.md#open-obligations). The specification test
+`PlansFollowContractOrder` states the plan of each of the six entries of the
+criterion step by step, and `KernelFillRefusesValidEntry` that the fill of
+a valid entry of the lower kernel set after the boot gives no plan.
 
 `PlansPublishInOrder` states the order of every plan of `map_page`,
 `map_block`, `kernel_map` and `direct_map` on a well-formed set, of
@@ -1050,7 +1153,10 @@ holder spans two. `Ownership.new` refuses no bank and overlapping banks with
 0 with `InvalidArena`, and more banks, exclusions or extents than the
 capacities with `MetadataExhausted`. The replay answers `own-03`, `own-04`,
 `own-05`, `own-17`, `own-18`, `own-19` and `own-21`, and `own-22`, 800 steps
-of mixed placement on three banks against a model of each page.
+of mixed placement on three banks against a model of each page. The
+specification test `OwnershipOfBoardShapes` states the table of each board
+shape, and `OwnershipRefusesOverlappingBanks` the refusal of `own-17` of two
+banks that share a page.
 
 ### PGT-R09
 
@@ -1067,7 +1173,9 @@ published; another owner, another arena, a second release and a stale receipt
 are refused with `WrongOwner`, `WrongArena` and `InvalidAllocation`, and a
 refused request writes nothing. `Ownership.validate` makes the same checks
 without a write. The replay answers `own-01`, `own-06` to `own-11`,
-`own-16`, `own-18`, `own-20`, `own-21` and `own-22`.
+`own-16`, `own-18`, `own-20`, `own-21` and `own-22`. The specification tests
+`AllocationTakesWindowAndGeneration` and `ReleaseRefusesStaleReceipt` take
+`own-20` and `own-10`.
 
 `AfterEveryWrite` states the rows of `assign` and `release`,
 `PlacementFirstFit` the placement and the end of the scan of `choose`, and
@@ -1087,7 +1195,9 @@ whose zeroing was attempted with `ZeroFailed`; publication and cancel by
 another owner identity or at another arena are refused, and the packet or
 the reservation is returned. A reservation or a packet that its holder drops
 is never passed to an entry again, so its pages stay held. The replay
-answers `own-23` to `own-28`.
+answers `own-23` to `own-28`. The specification tests
+`ReservationPublishesAfterZeroing` and `CancelRefusesAttemptedReservation`
+take `own-23` and `own-24`.
 
 `AfterEveryWrite` states the rows of `reserve`, `publish` and
 `cancel`, the last with the refusal of an attempted reservation.
@@ -1104,7 +1214,11 @@ extents than they allow and of a request whose range would need more extents
 than the capacity has free, before any write. The 16 GiB and 32 banks that
 the table manages at most are those that the boot memory map admits. The
 replay answers `dm-03`, `own-05` and `own-08`, and `own-03`, `own-16` and
-`own-17` refuse at the capacity too.
+`own-17` refuse at the capacity too. The specification tests
+`CapacitiesAtTheirLimits` and `CapacitiesRefuseOneMore` take the three
+limits of the criterion: a direct map of exactly 80 tables and one of 81, a
+table of exactly 160 extents and a request for one more, and an
+initialization with 132 exclusions and one with 133.
 
 `TablesInUseCounted` relates the record of the tables in use to the
 slots that a map touches, and the well-formedness lemmas bound the extents
@@ -1121,6 +1235,9 @@ they are, global ones included, and the table descriptors pointing into the
 target's pool. The tables of the copy are the target's own, so a later plan
 on either set writes only its own pool. The replay answers `pt-07`, `pt-08`,
 `pt-10`, `pt-12` and `pt-18`, with the target unchanged after each refusal.
+The specification tests `CopyIsPrivateAndOrdered` and
+`CopyRefusesPrivateLeaf` take `pt-07`, with the plan of its copy step by
+step, and `pt-12`.
 
 `AfterEveryWrite` states the row of `clone_kernel_from`: the copy has
 the abstract mapping, $G$, $P$ and the record of the source;
