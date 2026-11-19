@@ -945,20 +945,21 @@ theorem reserve_spec {E X : Nat} {t t' : Ownership E X} {owner pages alignment :
 /-- `publish` on a well-formed table: the table is well-formed and keeps its
 arena, banks, exclusion records and counter; the packet names an extent of
 the table, exactly its range, reserved by its owner identity with its
-generation; and the pages of that range are published, every other page
-keeping its owner. -/
+generation; the pages of that range are published, every other page
+keeping its owner; and the packet is of the arena and the owner identity. -/
 theorem publish_spec {E X : Nat} {t t' : Ownership E X} {o : UInt64} {x : Initialized}
     {a : Allocation} (hwf : t.WellFormed) (h : t.publish o x = .ok (t', a)) :
     a = x.allocation ∧ t'.WellFormed ∧ t'.arena = t.arena ∧ t'.banks = t.banks ∧
       t'.exclusions = t.exclusions ∧ t'.counter = t.counter ∧
       (∃ e ∈ t.extents, e.range = x.allocation.range ∧
         e.holding = .held o x.allocation.generation .reserved) ∧
-      ∀ q, t'.ownerOf q = if x.allocation.range.holdsPage q = true then
-        some (.held o x.allocation.generation .published) else t.ownerOf q := by
+      (∀ q, t'.ownerOf q = if x.allocation.range.holdsPage q = true then
+        some (.held o x.allocation.generation .published) else t.ownerOf q) ∧
+      x.allocation.arena = t.arena ∧ x.allocation.owner = o := by
   obtain ⟨before, e, after, hf, rfl, rfl⟩ := publish_ok h
-  obtain ⟨-, -, ht, he1, he2⟩ := findHeld_ok hf
+  obtain ⟨ha, ho, ht, he1, he2⟩ := findHeld_ok hf
   refine ⟨rfl, relabel_wellFormed hwf ht rfl, rfl, rfl, rfl, rfl,
-    ⟨e, by rw [ht]; simp, he1, he2⟩, fun q => ?_⟩
+    ⟨e, by rw [ht]; simp, he1, he2⟩, fun q => ?_, ha, ho⟩
   rw [← he1]
   exact ownerOf_relabel (t' := ⟨t.arena, t.banks, _, t.exclusions, t.counter⟩) hwf ht rfl rfl rfl q
 
@@ -982,34 +983,38 @@ theorem free_spec {E X : Nat} {t t' : Ownership E X} {before after : List Extent
 
 /-- `release` on a well-formed table: `free_spec` for the extent of the
 receipt, exactly its range, published by the owner identity with its
-generation. -/
+generation; and the receipt is of the arena and the owner identity. -/
 theorem release_spec {E X : Nat} {t t' : Ownership E X} {o : UInt64} {x : Allocation}
     (hwf : t.WellFormed) (h : t.release o x = .ok t') :
     t'.WellFormed ∧ t'.arena = t.arena ∧ t'.banks = t.banks ∧ t'.exclusions = t.exclusions ∧
       t'.counter = t.counter ∧
       (∃ e ∈ t.extents, e.range = x.range ∧ e.holding = .held o x.generation .published) ∧
-      ∀ q, q % PAGE_SIZE = 0 → t'.ownerOf q =
-        if x.range.holdsPage q = true then some .free else t.ownerOf q := by
+      (∀ q, q % PAGE_SIZE = 0 → t'.ownerOf q =
+        if x.range.holdsPage q = true then some .free else t.ownerOf q) ∧
+      x.arena = t.arena ∧ x.owner = o := by
   obtain ⟨before, e, after, hf, ht'⟩ := release_ok h
-  obtain ⟨-, -, ht, he1, he2⟩ := findHeld_ok hf
+  obtain ⟨ha, ho, ht, he1, he2⟩ := findHeld_ok hf
   obtain ⟨h1, h2, h3, h4, h5, h6⟩ := free_spec hwf ht ht'
-  exact ⟨h1, h2, h3, h4, h5, ⟨e, by rw [ht]; simp, he1, he2⟩, by rw [← he1]; exact h6⟩
+  exact ⟨h1, h2, h3, h4, h5, ⟨e, by rw [ht]; simp, he1, he2⟩, by rw [← he1]; exact h6, ha, ho⟩
 
 /-- `cancel` on a well-formed table: the reservation was not attempted, and
 `free_spec` for the extent of the reservation, exactly its range, reserved by
-the owner identity with its generation. -/
+the owner identity with its generation; and the reservation is of the arena
+and the owner identity. -/
 theorem cancel_spec {E X : Nat} {t t' : Ownership E X} {o : UInt64} {r : Reservation}
     (hwf : t.WellFormed) (h : t.cancel o r = .ok t') :
     r.attempted = false ∧ t'.WellFormed ∧ t'.arena = t.arena ∧ t'.banks = t.banks ∧
       t'.exclusions = t.exclusions ∧ t'.counter = t.counter ∧
       (∃ e ∈ t.extents, e.range = r.allocation.range ∧
         e.holding = .held o r.allocation.generation .reserved) ∧
-      ∀ q, q % PAGE_SIZE = 0 → t'.ownerOf q =
-        if r.allocation.range.holdsPage q = true then some .free else t.ownerOf q := by
+      (∀ q, q % PAGE_SIZE = 0 → t'.ownerOf q =
+        if r.allocation.range.holdsPage q = true then some .free else t.ownerOf q) ∧
+      r.allocation.arena = t.arena ∧ r.allocation.owner = o := by
   obtain ⟨hr, before, e, after, hf, ht'⟩ := cancel_ok h
-  obtain ⟨-, -, ht, he1, he2⟩ := findHeld_ok hf
+  obtain ⟨ha, ho, ht, he1, he2⟩ := findHeld_ok hf
   obtain ⟨h1, h2, h3, h4, h5, h6⟩ := free_spec hwf ht ht'
-  exact ⟨hr, h1, h2, h3, h4, h5, ⟨e, by rw [ht]; simp, he1, he2⟩, by rw [← he1]; exact h6⟩
+  exact ⟨hr, h1, h2, h3, h4, h5, ⟨e, by rw [ht]; simp, he1, he2⟩, by rw [← he1]; exact h6,
+    ha, ho⟩
 
 /-! ## The extents after a write -/
 
