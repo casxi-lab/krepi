@@ -894,13 +894,13 @@
       "name": "Krepi.SpecProperties.PageTables.TablesInUseCounted",
       "theorem": "Krepi.Proofs.PageTables.Mapping.tablesInUseCounted",
       "module": "Krepi.Proofs.PageTables.Mapping",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.PlansPublishInOrder",
       "theorem": "Krepi.Proofs.PageTables.Mapping.plansPublishInOrder",
       "module": "Krepi.Proofs.PageTables.Mapping",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NoWritableExecutable",
