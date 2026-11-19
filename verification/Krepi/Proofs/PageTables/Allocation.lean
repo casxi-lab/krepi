@@ -120,7 +120,7 @@ private theorem boot_pages {N : Nat} {B : Krepi.Spec.Fdt.MemoryPlan} {base : UIn
     · exact absurd hold new_M
     · exact ⟨u, hu, h1, h2⟩
   · rintro ⟨u, hu, h1, h2⟩
-    obtain ⟨hlt, f, hm⟩ := directMap_M_of_usable hs h hu hq h1 h2
+    obtain ⟨hlt, hm⟩ := directMap_M_of_usable hs h hu hq h1 h2
     refine ⟨_, _, hm, ?_⟩
     rw [UInt64.toNat_ofNat']
     exact Nat.mod_eq_of_lt (by simp only [VA_LIMIT] at hlt; omega)

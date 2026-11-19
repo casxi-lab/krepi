@@ -14,13 +14,15 @@ The abstract mapping of the direct map's set after `direct_map`, page by
 page, against the usable ranges of its boot memory map:
 
 - `usableLeaves_cover`: every page of a usable range lies in a leaf of the
-  range, its page leaf or a block leaf that holds it (from the runs of
-  `usableLeaves_eq`, or one run of pages when no block fits; privately, the
-  members of `pageRun` and `blockRun`);
+  range, the block leaf of its 2 MiB block when that block lies in the range
+  and its page leaf otherwise (from the runs of `usableLeaves_eq`, or one run
+  of pages when no block fits; privately, the members of `pageRun` and
+  `blockRun`);
 - `directMap_M_of_usable`: after `direct_map`, every page of a usable range
-  is below $2^{39}$ and mapped at its direct address, `ReadWrite`, to itself
-  (the walk of the set after the map reaches the placed leaf that holds it,
-  `placed_path` and `final_entry_wr`);
+  is below $2^{39}$ and mapped at its direct address, `ReadWrite`, to itself,
+  by a block exactly when its 2 MiB block lies in the range (the walk of the
+  set after the map reaches the placed leaf that holds it, `placed_path` and
+  `final_entry_wr`);
 - `directMap_M_usable`: after `direct_map`, a page of the abstract mapping is
   one of the set before it or a page of a usable range (`final_M`).
 -/
@@ -53,15 +55,19 @@ private theorem mem_blockRun : ∀ (k pa j : Nat), j < k → directBlock (pa + j
       simp only [BLOCK_SIZE]; omega] at this
     exact List.mem_cons_of_mem _ this
 
-/-- Every page of a usable range lies in a leaf of the range: its page leaf,
-or a block leaf that holds it. -/
+/-- Every page of a usable range lies in a leaf of the range: the block leaf
+of its 2 MiB block when that block lies in the range, and its page leaf
+otherwise. -/
 theorem usableLeaves_cover {bits : UInt8} {u : Krepi.Spec.Fdt.Span} (hu : UsableOk bits u)
     {q : Nat} (hq : q % PAGE_SIZE = 0) (h1 : u.start.toNat ≤ q) (h2 : q + PAGE_SIZE ≤ u.endNat) :
-    directPage q ∈ usableLeaves u ∨
-      ∃ b, directBlock b ∈ usableLeaves u ∧ b % BLOCK_SIZE = 0 ∧ b ≤ q ∧ q < b + BLOCK_SIZE := by
+    (directPage q ∈ usableLeaves u ∧ ¬ (u.start.toNat ≤ q / BLOCK_SIZE * BLOCK_SIZE ∧
+        q / BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE ≤ u.endNat)) ∨
+      (directBlock (q / BLOCK_SIZE * BLOCK_SIZE) ∈ usableLeaves u ∧
+        u.start.toNat ≤ q / BLOCK_SIZE * BLOCK_SIZE ∧
+        q / BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE ≤ u.endNat) := by
   obtain ⟨ha, he, -, -⟩ := hu
-  generalize hA : u.start.toNat = a at ha h1
-  generalize hE : u.endNat = e at he h2
+  generalize hA : u.start.toNat = a at ha h1 ⊢
+  generalize hE : u.endNat = e at he h2 ⊢
   obtain ⟨b0, hb0⟩ : ∃ b0, b0 = (a + BLOCK_SIZE - 1) / BLOCK_SIZE * BLOCK_SIZE := ⟨_, rfl⟩
   by_cases hb : b0 ≤ e
   · obtain ⟨e0, he0⟩ : ∃ e0, e0 = e / BLOCK_SIZE * BLOCK_SIZE := ⟨_, rfl⟩
@@ -72,40 +78,43 @@ theorem usableLeaves_cover {bits : UInt8} {u : Krepi.Spec.Fdt.Span} (hu : Usable
     · left
       have := mem_pageRun ((b0 - a) / PAGE_SIZE) a ((q - a) / PAGE_SIZE) (by size_omega)
       rw [show a + (q - a) / PAGE_SIZE * PAGE_SIZE = q by size_omega] at this
-      exact List.mem_append_left _ (List.mem_append_left _ this)
+      exact ⟨List.mem_append_left _ (List.mem_append_left _ this), by size_omega⟩
     by_cases hq2 : q < e0
     · right
       have := mem_blockRun ((e0 - b0) / BLOCK_SIZE) (a + (b0 - a) / PAGE_SIZE * PAGE_SIZE)
         ((q - b0) / BLOCK_SIZE) (by size_omega)
-      exact ⟨_, List.mem_append_left _ (List.mem_append_right _ this), by size_omega, by size_omega,
-        by size_omega⟩
+      rw [show a + (b0 - a) / PAGE_SIZE * PAGE_SIZE + (q - b0) / BLOCK_SIZE * BLOCK_SIZE =
+        q / BLOCK_SIZE * BLOCK_SIZE by size_omega] at this
+      exact ⟨List.mem_append_left _ (List.mem_append_right _ this), by size_omega, by size_omega⟩
     · left
       have := mem_pageRun ((e - e0) / PAGE_SIZE)
         (a + (b0 - a) / PAGE_SIZE * PAGE_SIZE + (e0 - b0) / BLOCK_SIZE * BLOCK_SIZE)
         ((q - e0) / PAGE_SIZE) (by size_omega)
       rw [show a + (b0 - a) / PAGE_SIZE * PAGE_SIZE + (e0 - b0) / BLOCK_SIZE * BLOCK_SIZE +
         (q - e0) / PAGE_SIZE * PAGE_SIZE = q by size_omega] at this
-      exact List.mem_append_right _ this
+      exact ⟨List.mem_append_right _ this, by size_omega⟩
   · left
     unfold usableLeaves
     rw [hA, hE, show directFuel (e - a) = (directFuel (e - a) - (e - a) / PAGE_SIZE) +
       (e - a) / PAGE_SIZE by size_omega, directLeaves_pages _ _ _ (fun j hj => by size_omega) (by size_omega)]
     have := mem_pageRun ((e - a) / PAGE_SIZE) a ((q - a) / PAGE_SIZE) (by size_omega)
     rw [show a + (q - a) / PAGE_SIZE * PAGE_SIZE = q by size_omega] at this
-    exact List.mem_append_left _ this
+    exact ⟨List.mem_append_left _ this, by size_omega⟩
 
 private theorem toNat_ofNat_lt {n : Nat} (h : n < 2 ^ 64) : (UInt64.ofNat n).toNat = n := by
   rw [UInt64.toNat_ofNat']; exact Nat.mod_eq_of_lt h
 
 /-- After `direct_map`, every page of a usable range of its boot memory map
-is below $2^{39}$ and mapped at its direct address, `ReadWrite`, to itself. -/
+is below $2^{39}$ and mapped at its direct address, `ReadWrite`, to itself,
+by a block when its 2 MiB block lies in the range and by a page otherwise. -/
 theorem directMap_M_of_usable {N : Nat} {s s₁ : Tables .upper N} {B : Krepi.Spec.Fdt.MemoryPlan}
     {base : UInt64} {bits : UInt8} {plan : Plan} (hs : s.WellFormed base bits)
     (h : s.directMap B base bits = .ok (s₁, plan)) {u : Krepi.Spec.Fdt.Span}
     (hu : u ∈ B.availableRanges) {q : Nat} (hq : q % PAGE_SIZE = 0) (h1 : u.start.toNat ≤ q)
     (h2 : q + PAGE_SIZE ≤ u.endNat) :
-    q < VA_LIMIT ∧
-      ∃ f, (s₁.apply plan).M base (DIRECT_BASE ||| UInt64.ofNat q) ⟨UInt64.ofNat q, .readWrite, f⟩ := by
+    q < VA_LIMIT ∧ (s₁.apply plan).M base (DIRECT_BASE ||| UInt64.ofNat q)
+      ⟨UInt64.ofNat q, .readWrite, if u.start.toNat ≤ q / BLOCK_SIZE * BLOCK_SIZE ∧
+        q / BLOCK_SIZE * BLOCK_SIZE + BLOCK_SIZE ≤ u.endNat then .block else .page⟩ := by
   obtain ⟨leaves, hlf, happ, hN, -, -, -, hmap, hok⟩ := directMap_facts hs h
   have hu' : u ∈ sortByKey (·.start.toNat) B.availableRanges := (sortByKey_perm _ _).symm.subset hu
   have hlim := (hok u hu').2.2.1
@@ -127,8 +136,9 @@ theorem directMap_M_of_usable {N : Nat} {s s₁ : Tables .upper N} {B : Krepi.Sp
     exact ⟨p, hp, rfl⟩
   refine ⟨hqv, ?_⟩
   rw [happ]
-  rcases usableLeaves_cover (hok u hu') hq h1 h2 with hx | ⟨b, hx, hb1, hb2, hb3⟩
-  · obtain ⟨p, hp, hpx⟩ := hplaced _ hx
+  rcases usableLeaves_cover (hok u hu') hq h1 h2 with ⟨hx, hnb⟩ | ⟨hx, hbu1, hbu2⟩
+  · rw [ite_of_neg hnb]
+    obtain ⟨p, hp, hpx⟩ := hplaced _ hx
     have hform : p.leaf.form = .page := by rw [hpx]; rfl
     have hva : p.leaf.va = DIRECT_BASE ||| UInt64.ofNat q := by rw [hpx]; rfl
     have hdesc : p.leaf.desc = descriptor .readWrite (UInt64.ofNat q) := by rw [hpx]; rfl
@@ -139,14 +149,20 @@ theorem directMap_M_of_usable {N : Nat} {s s₁ : Tables .upper N} {B : Krepi.Sp
         simp only [Placed.store, hform])))⟩
     rw [hva] at hp1 hp2 hent
     rw [hdesc] at hent
-    refine ⟨.page, hreg, hal, Or.inl ⟨p.t2, p.t3, _, walk_ok_level3.2 ⟨_, walk2_ok.2 (Or.inr
+    refine ⟨hreg, hal, Or.inl ⟨p.t2, p.t3, _, walk_ok_level3.2 ⟨_, walk2_ok.2 (Or.inr
       ⟨p.t2, isValid_of_isPlain hp1.2.1, hp1.2.2, rfl⟩), isValid_of_isPlain hp2.2.1,
       by rw [typeBits_of_isPlain hp2.2.1]; decide, hp2.2.2, rfl⟩, ?_, ?_, ?_, rfl⟩⟩
     · rw [hent]; exact typeBits_descriptor _ _
     · rw [hent]; exact ofPage_descriptor _ _
     · rw [hent, outputAddress_descriptor, outputAddress_of_aligned (by rw [hqn]; exact hq)
         (by rw [hqn]; simp only [VA_LIMIT] at hqv; omega)]
-  · obtain ⟨p, hp, hpx⟩ := hplaced _ hx
+  · rw [ite_of_pos ⟨hbu1, hbu2⟩]
+    obtain ⟨b, hbq⟩ : ∃ b, b = q / BLOCK_SIZE * BLOCK_SIZE := ⟨_, rfl⟩
+    rw [← hbq] at hx
+    have hb1 : b % BLOCK_SIZE = 0 := by simp only [BLOCK_SIZE] at hbq ⊢; omega
+    have hb2 : b ≤ q := by simp only [BLOCK_SIZE] at hbq ⊢; omega
+    have hb3 : q < b + BLOCK_SIZE := by simp only [BLOCK_SIZE] at hbq ⊢; omega
+    obtain ⟨p, hp, hpx⟩ := hplaced _ hx
     have hbv : b < VA_LIMIT := by omega
     have hbn : (UInt64.ofNat b).toNat = b := toNat_ofNat_lt (by simp only [VA_LIMIT] at hbv; omega)
     have hform : p.leaf.form = .block := by rw [hpx]; rfl
@@ -174,7 +190,7 @@ theorem directMap_M_of_usable {N : Nat} {s s₁ : Tables .upper N} {B : Krepi.Sp
       rw [key]
     rw [← hi1] at hp1
     rw [← hi2, hdesc] at hent
-    refine ⟨.block, hreg, hal, Or.inr ⟨p.t2, _, walk_ok_block.2 ⟨walk2_ok.2 (Or.inr
+    refine ⟨hreg, hal, Or.inr ⟨p.t2, _, walk_ok_block.2 ⟨walk2_ok.2 (Or.inr
       ⟨p.t2, isValid_of_isPlain hp1.2.1, hp1.2.2, rfl⟩), ?_, ?_⟩, ?_, rfl, rfl, ?_⟩⟩
     · rw [hent]; simp [isValid, typeBits_blockDescriptor, BLOCK]
     · rw [hent, typeBits_blockDescriptor]; rfl
