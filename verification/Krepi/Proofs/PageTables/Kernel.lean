@@ -290,33 +290,6 @@ private theorem set_write {r : Region} {N : Nat} {T T' : Tables r N} {base : UIn
   show (plan.exec T'.pool).get t i = _
   rw [hp]; exact fills_keep plan _ hf hv
 
-private theorem mapPage_pool {r : Region} {N : Nat} {s s' : Tables r N} {v p base : UInt64}
-    {k : Kind} {bits : UInt8} {plan : Plan} (h : s.mapPage v p k base bits = .ok (s', plan)) :
-    s'.pool = s.pool := by
-  unfold Tables.mapPage at h
-  obtain ⟨-, -, h⟩ := except_bind_ok.1 h
-  obtain ⟨-, -, h⟩ := except_bind_ok.1 h
-  obtain ⟨w, -, h⟩ := except_bind_ok.1 h
-  rcases w with _ | ⟨t2, e2⟩
-  · obtain ⟨-, h⟩ := except_jp_ok h
-    simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-    rw [← h.1]
-  · dsimp only at h
-    split at h
-    · obtain ⟨-, h⟩ := except_jp_ok h
-      simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-      rw [← h.1]
-    · split at h
-      · simp [throw, throwThe, MonadExceptOf.throw] at h
-      · split at h
-        next =>
-          split at h
-          next => simp [throw, throwThe, MonadExceptOf.throw, Functor.map, Except.map] at h
-          next =>
-            simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-            rw [← h.1]
-        next => simp [throw, throwThe, MonadExceptOf.throw] at h
-
 private theorem map_ok {ε α β : Type} {f : α → β} {e : Except ε α} {b : β}
     (h : Except.map f e = .ok b) : ∃ a, e = .ok a ∧ b = f a := by
   cases e with
@@ -342,7 +315,7 @@ public theorem kernelTablesOnlyFilled : KernelTablesOnlyFilled := by
       · cases heq
       · obtain ⟨⟨t, pl⟩, h1, h2⟩ := map_ok (Option.some.inj heq)
         simp only [Prod.mk.injEq] at h2; obtain ⟨rfl, rfl⟩ := h2
-        obtain ⟨leaves, hlf, -, hN, hplan, hpool⟩ := kernelMap_facts hl h1
+        obtain ⟨leaves, hlf, -, hN, hplan, hpool, -⟩ := kernelMap_facts hl h1
         obtain ⟨hf, hk⟩ := set_write hl hpool (hplan ▸ mapPlan_inOrder hl hlf hN)
         exact ⟨hk, fun _ _ _ => rfl, fun plan' h => by
           simp only [Option.some.injEq] at h; subst h; exact hf⟩
@@ -356,7 +329,7 @@ public theorem kernelTablesOnlyFilled : KernelTablesOnlyFilled := by
       · cases heq
       · obtain ⟨⟨t, pl⟩, h1, h2⟩ := map_ok (Option.some.inj heq)
         simp only [Prod.mk.injEq] at h2; obtain ⟨rfl, rfl⟩ := h2
-        obtain ⟨leaves, hlf, -, hN, -, hplan, hpool⟩ := directMap_facts hd h1
+        obtain ⟨leaves, hlf, -, hN, -, hplan, hpool, -⟩ := directMap_facts hd h1
         obtain ⟨hf, hk⟩ := set_write hd hpool (hplan ▸ mapPlan_inOrder hd hlf hN)
         exact ⟨fun _ _ _ => rfl, hk, fun plan' h => by
           simp only [Option.some.injEq] at h; subst h; exact hf⟩
@@ -369,7 +342,8 @@ public theorem kernelTablesOnlyFilled : KernelTablesOnlyFilled := by
       split at heq
       · obtain ⟨⟨t, pl⟩, h1, h2⟩ := map_ok (Option.some.inj heq)
         simp only [Prod.mk.injEq] at h2; obtain ⟨rfl, rfl⟩ := h2
-        obtain ⟨hf, hk⟩ := set_write hl (mapPage_pool h1)
+        obtain ⟨-, -, -, -, -, -, -, hpool⟩ := mapPage_single hl h1
+        obtain ⟨hf, hk⟩ := set_write hl hpool
           (Mapping.plansPublishInOrder.1 _ _ _ _ _ _ _ _ _ _ hl h1)
         exact ⟨hk, fun _ _ _ => rfl, fun plan' h => by
           simp only [Option.some.injEq] at h; subst h; exact hf⟩

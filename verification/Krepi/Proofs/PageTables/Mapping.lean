@@ -383,97 +383,17 @@ section Order
 
 variable {r : Region} {N : Nat} {s : Tables r N} {base : UInt64} {bits : UInt8}
 
-private theorem single_inOrder (hs : s.WellFormed base bits) {l : MapLeaf} {pl : Place}
-    (hpl : s.place base l = .ok pl) (hr : r.holds l.va = true) (ha : l.va.toNat % l.form.size = 0)
-    (hd : LeafDesc bits l) (hN : (assignTables s.used [(l, pl)]).1 ≤ N) :
-    (mapPlan base (assignTables s.used [(l, pl)]).2).publishesInOrder base s.pool = true := by
-  refine mapPlan_inOrder hs ⟨fun lp h => ?_, List.pairwise_singleton _ _, fun lp h => ?_,
-    fun lp h => ?_, fun lp h => ?_⟩ hN <;> rw [List.mem_singleton] at h <;> subst h
-  · exact hpl
-  · exact hr
-  · exact ha
-  · exact hd
-
 private theorem mapPage_order {v p : UInt64} {k : Kind} {s' : Tables r N} {plan : Plan}
     (hs : s.WellFormed base bits) (h : s.mapPage v p k base bits = .ok (s', plan)) :
     plan.publishesInOrder base s.pool = true := by
-  unfold Tables.mapPage at h
-  obtain ⟨u1, hce, h⟩ := except_bind_ok.1 h
-  obtain ⟨u2, hcp, h⟩ := except_bind_ok.1 h
-  obtain ⟨w, hw, h⟩ := except_bind_ok.1 h
-  obtain ⟨hv, -, hr, -, -⟩ := checkEntry_ok.1 hce
-  have hpb := (checkPhysical_ok.1 hcp).2
-  have huN := hs.2.2.1
-  have hd : LeafDesc bits ⟨v, p, descriptor k p, .page⟩ :=
-    ⟨fun _ => ⟨⟨k, by rw [outputAddress_descriptor, descriptor_outputAddress]⟩, by
-      rw [outputAddress_descriptor]; exact Nat.lt_of_le_of_lt (outputAddress_le p) hpb⟩,
-      fun hb => by cases hb⟩
-  have key : ∀ pl, s.place base ⟨v, p, descriptor k p, .page⟩ = .ok pl →
-      (assignTables s.used [(⟨v, p, descriptor k p, .page⟩, pl)]).1 ≤ N →
-      plan = mapPlan base (assignTables s.used [(⟨v, p, descriptor k p, .page⟩, pl)]).2 →
-      plan.publishesInOrder base s.pool = true :=
-    fun pl h1 h2 h3 => h3 ▸ single_inOrder hs h1 hr hv hd h2
-  rcases w with _ | ⟨t2, e2⟩
-  · obtain ⟨hlt, h⟩ := except_jp_ok h
-    simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-    obtain ⟨-, rfl⟩ := h
-    exact key .root (by unfold Tables.place; rw [hw]; rfl) (by show s.used + 1 + 1 ≤ N; omega) rfl
-  · dsimp only at h
-    split at h
-    · rename_i hv2
-      obtain ⟨hlt, h⟩ := except_jp_ok h
-      simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-      obtain ⟨-, rfl⟩ := h
-      refine key (.level2 t2) ?_ (by show s.used + 1 ≤ N; omega) rfl
-      unfold Tables.place; rw [hw]
-      simp only [bind, Except.bind, hv2, ite_true]; rfl
-    · rename_i hv2
-      split at h
-      · simp [throw, throwThe, MonadExceptOf.throw] at h
-      · rename_i hb
-        split at h
-        next t3 hc =>
-          split at h
-          next => simp [throw, throwThe, MonadExceptOf.throw, Functor.map, Except.map] at h
-          next hv3 =>
-            simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-            obtain ⟨rfl, rfl⟩ := h
-            refine key (.level3 t2 t3) ?_ huN rfl
-            unfold Tables.place; rw [hw]
-            simp only [bind, Except.bind, hv2, hb, hc, hv3, Bool.false_eq_true, ite_false]; rfl
-        next => simp [throw, throwThe, MonadExceptOf.throw] at h
+  obtain ⟨pl, hl, -, hN, rfl, -⟩ := mapPage_single hs h
+  exact mapPlan_inOrder hs hl hN
 
 private theorem mapBlock_order {v p : UInt64} {s' : Tables r N} {plan : Plan}
     (hs : s.WellFormed base bits) (h : s.mapBlock v p base bits = .ok (s', plan)) :
     plan.publishesInOrder base s.pool = true := by
-  unfold Tables.mapBlock at h
-  obtain ⟨u1, hce, h⟩ := except_bind_ok.1 h
-  obtain ⟨u2, hcp, h⟩ := except_bind_ok.1 h
-  obtain ⟨w, hw, h⟩ := except_bind_ok.1 h
-  obtain ⟨hv, -, hr, -, -⟩ := checkEntry_ok.1 hce
-  have hpb := (checkPhysical_ok.1 hcp).2
-  have huN := hs.2.2.1
-  have hd : LeafDesc bits ⟨v, p, blockDescriptor p, .block⟩ :=
-    ⟨(fun h => by cases h), fun _ => ⟨isReadWriteBlock_blockDescriptor p, by
-      rw [blockAddress_blockDescriptor]; exact Nat.lt_of_le_of_lt (blockAddress_le p) hpb⟩⟩
-  have key : ∀ pl, s.place base ⟨v, p, blockDescriptor p, .block⟩ = .ok pl →
-      (assignTables s.used [(⟨v, p, blockDescriptor p, .block⟩, pl)]).1 ≤ N →
-      plan = mapPlan base (assignTables s.used [(⟨v, p, blockDescriptor p, .block⟩, pl)]).2 →
-      plan.publishesInOrder base s.pool = true :=
-    fun pl h1 h2 h3 => h3 ▸ single_inOrder hs h1 hr hv hd h2
-  rcases w with _ | ⟨t2, e2⟩
-  · obtain ⟨hlt, h⟩ := except_jp_ok h
-    simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-    obtain ⟨-, rfl⟩ := h
-    exact key .root (by unfold Tables.place; rw [hw]; rfl) (by show s.used + 1 ≤ N; omega) rfl
-  · obtain ⟨-, h⟩ := except_jp_ok h
-    obtain ⟨hv2, h⟩ := except_jp_ok h
-    simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
-    obtain ⟨-, rfl⟩ := h
-    refine key (.level2 t2) ?_ huN rfl
-    unfold Tables.place; rw [hw]
-    simp only [bind, Except.bind, Bool.not_eq_true] at hv2 ⊢
-    simp only [hv2, Bool.not_false, ite_true]; rfl
+  obtain ⟨pl, hl, -, hN, rfl, -⟩ := mapBlock_single hs h
+  exact mapPlan_inOrder hs hl hN
 
 /-! ## The copy of the kernel tables -/
 

@@ -21,14 +21,17 @@ What the checks of the two maps give their leaves, so that the lemmas of
   in it, in ascending order, each at `DIRECT_BASE | pa`), `usableLeaves`,
   `UsableOk`, `checkUsableRange_ok`, `usable_fold`, `usableLeaves_spec`,
   `directLeaf_va`, `form_size_dvd` and **`directMap_facts`** (the leaves of a
-  successful `direct_map` satisfy `LeafFacts`, and each is a `DirectLeaf`
-  below $2^{39}$);
+  successful `direct_map` satisfy `LeafFacts`, each is a `DirectLeaf` below
+  $2^{39}$, and they are the leaves of its usable ranges in address order);
 - the kernel mappings: `layoutPages_spec`, `LayoutOk`, `rangePages`,
   `checkLayoutRange_ok`, `layout_fold`, `rangePages_spec` and
-  **`kernelMap_facts`**;
+  **`kernelMap_facts`** (also: the leaves are the pages of the ranges of the
+  layout in address order);
 - descriptors: `descriptor_and_not_mask`, `descriptor_kind_inj`,
   `ofPage_descriptor` (the kind of a page descriptor is its kind) and
-  `blockAddress_of_aligned`.
+  `blockAddress_of_aligned`;
+- **`mapPage_single`**, **`mapBlock_single`**: a successful `map_page` or
+  `map_block` is the map of its one leaf.
 -/
 
 @[expose] public section
@@ -217,7 +220,9 @@ theorem directMap_facts {s : Tables .upper N} {memory : Krepi.Spec.Fdt.MemoryPla
     ∃ leaves, LeafFacts s base bits leaves ∧ s₁.apply plan = finalSet s base leaves ∧
       (assignTables s.used leaves).1 ≤ N ∧
       (∀ lp ∈ leaves, DirectLeaf lp.1 ∧ lp.1.pa.toNat + lp.1.form.size ≤ VA_LIMIT) ∧
-      plan = mapPlan base (assignTables s.used leaves).2 ∧ s₁.pool = s.pool := by
+      plan = mapPlan base (assignTables s.used leaves).2 ∧ s₁.pool = s.pool ∧
+      leaves.map Prod.fst = (sortByKey (·.start.toNat) memory.availableRanges).flatMap usableLeaves ∧
+      ∀ u ∈ sortByKey (·.start.toNat) memory.availableRanges, UsableOk bits u := by
   unfold Tables.directMap at h
   rw [except_bind_ok] at h
   obtain ⟨-, -, h⟩ := h
@@ -246,7 +251,7 @@ theorem directMap_facts {s : Tables .upper N} {memory : Krepi.Spec.Fdt.MemoryPla
     exact ⟨by omega, h3, by omega⟩
   refine ⟨new, ⟨hpl, ?_, fun lp hlp => ?_, fun lp hlp => ?_, fun lp hlp => ?_⟩, happ, hN,
     fun lp hlp => ⟨(hlim _ (List.mem_map_of_mem hlp)).2.1, (hlim _ (List.mem_map_of_mem hlp)).1⟩,
-    hplan⟩
+    hplan.1, hplan.2, hmap, hok⟩
   · have hva : ∀ x ∈ new.map Prod.fst, x.va.toNat = DIRECT_BASE.toNat + x.pa.toNat := fun x hx => by
       obtain ⟨h1, h2, -⟩ := hlim x hx
       exact directLeaf_va h2 (by have := form_size_pos x.form; omega)
@@ -380,7 +385,9 @@ theorem kernelMap_facts {s : Tables .lower N} {layout : Layout} {base : UInt64}
     (h : s.kernelMap layout base bits = .ok (s₁, plan)) :
     ∃ leaves, LeafFacts s base bits leaves ∧ s₁.apply plan = finalSet s base leaves ∧
       (assignTables s.used leaves).1 ≤ N ∧
-      plan = mapPlan base (assignTables s.used leaves).2 ∧ s₁.pool = s.pool := by
+      plan = mapPlan base (assignTables s.used leaves).2 ∧ s₁.pool = s.pool ∧
+      leaves.map Prod.fst = (sortByKey (·.range.start.toNat) layout.ranges).flatMap rangePages ∧
+      ∀ j ∈ sortByKey (·.range.start.toNat) layout.ranges, LayoutOk bits j := by
   unfold Tables.kernelMap at h
   rw [except_bind_ok] at h
   obtain ⟨-, -, h⟩ := h
@@ -400,7 +407,8 @@ theorem kernelMap_facts {s : Tables .lower N} {layout : Layout} {base : UInt64}
     rw [hmap] at hx
     obtain ⟨j, hj, hx⟩ := List.mem_flatMap.1 hx
     exact ⟨j, hj, (rangePages_spec (hok j hj)).1 x hx⟩
-  refine ⟨new, ⟨hpl, ?_, fun lp hlp => ?_, fun lp hlp => ?_, fun lp hlp => ?_⟩, happ, hN, hplan⟩
+  refine ⟨new, ⟨hpl, ?_, fun lp hlp => ?_, fun lp hlp => ?_, fun lp hlp => ?_⟩, happ, hN,
+    hplan.1, hplan.2, hmap, hok⟩
   · rw [hmap, List.pairwise_flatMap]
     refine ⟨fun j hj => ?_, ?_⟩
     · refine (rangePages_spec (hok j hj)).2.imp_of_mem fun {x y} hx hy h => ?_
@@ -472,5 +480,107 @@ theorem blockAddress_of_aligned {a : UInt64} (h1 : a.toNat % BLOCK_SIZE = 0)
       omega
     simp [hb, hlt]
   · simp [hb]
+
+/-! ## `map_page` as a map of one leaf -/
+
+/-- A `map_page` that succeeds on a well-formed set is the map of its one
+leaf: the leaf passes the checks of a map (`LeafFacts`) at the place of its
+walk, the set after the plan is `finalSet`, and the plan is `mapPlan` of the
+placed leaf; the physical page is aligned and below $2^{\mathrm{bits}}$, and the
+write phase keeps the pool. -/
+theorem mapPage_single {s s' : Tables r N} {v p base : UInt64} {k : Kind}
+    {bits : UInt8} {plan : Plan} (hs : s.WellFormed base bits)
+    (h : s.mapPage v p k base bits = .ok (s', plan)) :
+    ∃ pl, LeafFacts s base bits [(⟨v, p, descriptor k p, .page⟩, pl)] ∧
+      s'.apply plan = finalSet s base [(⟨v, p, descriptor k p, .page⟩, pl)] ∧
+      (assignTables s.used [(⟨v, p, descriptor k p, .page⟩, pl)]).1 ≤ N ∧
+      plan = mapPlan base (assignTables s.used [(⟨v, p, descriptor k p, .page⟩, pl)]).2 ∧
+      p.toNat % PAGE_SIZE = 0 ∧ p.toNat < 2 ^ bits.toNat ∧ s'.pool = s.pool := by
+  unfold Tables.mapPage at h
+  obtain ⟨u1, hce, h⟩ := except_bind_ok.1 h
+  obtain ⟨u2, hcp, h⟩ := except_bind_ok.1 h
+  obtain ⟨w, hw, h⟩ := except_bind_ok.1 h
+  obtain ⟨hv, -, hr, -, -⟩ := checkEntry_ok.1 hce
+  obtain ⟨hpa, hpb⟩ := checkPhysical_ok.1 hcp
+  have huN := hs.2.2.1
+  have hd : LeafDesc bits ⟨v, p, descriptor k p, .page⟩ :=
+    ⟨fun _ => ⟨⟨k, by rw [outputAddress_descriptor, descriptor_outputAddress]⟩, by
+      rw [outputAddress_descriptor]; exact Nat.lt_of_le_of_lt (outputAddress_le p) hpb⟩,
+      fun hb => by cases hb⟩
+  have key : ∀ pl, s.place base ⟨v, p, descriptor k p, .page⟩ = .ok pl →
+      LeafFacts s base bits [(⟨v, p, descriptor k p, .page⟩, pl)] := fun pl hpl =>
+    ⟨fun lp h => by rw [List.mem_singleton] at h; subst h; exact hpl, List.pairwise_singleton _ _,
+      fun lp h => by rw [List.mem_singleton] at h; subst h; exact hr,
+      fun lp h => by rw [List.mem_singleton] at h; subst h; exact hv,
+      fun lp h => by rw [List.mem_singleton] at h; subst h; exact hd⟩
+  rcases w with _ | ⟨t2, e2⟩
+  · obtain ⟨hlt, h⟩ := except_jp_ok h
+    simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact ⟨.root, key _ (by unfold Tables.place; rw [hw]; rfl), rfl,
+      by show s.used + 1 + 1 ≤ N; omega, rfl, hpa, hpb, rfl⟩
+  · dsimp only at h
+    split at h
+    · rename_i hv2
+      obtain ⟨hlt, h⟩ := except_jp_ok h
+      simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      refine ⟨.level2 t2, key _ ?_, rfl, by show s.used + 1 ≤ N; omega, rfl, hpa, hpb, rfl⟩
+      unfold Tables.place; rw [hw]
+      simp only [bind, Except.bind, hv2, ite_true]; rfl
+    · rename_i hv2
+      split at h
+      · simp [throw, throwThe, MonadExceptOf.throw] at h
+      · rename_i hb
+        split at h
+        next t3 hc =>
+          split at h
+          next => simp [throw, throwThe, MonadExceptOf.throw, Functor.map, Except.map] at h
+          next hv3 =>
+            simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨rfl, rfl⟩ := h
+            refine ⟨.level3 t2 t3, key _ ?_, rfl, huN, rfl, hpa, hpb, rfl⟩
+            unfold Tables.place; rw [hw]
+            simp only [bind, Except.bind, hv2, hb, hc, hv3, Bool.false_eq_true, ite_false]; rfl
+        next => simp [throw, throwThe, MonadExceptOf.throw] at h
+
+/-- A `map_block` that succeeds on a well-formed set is the map of its one
+leaf, as `mapPage_single` for a page. -/
+theorem mapBlock_single {s s' : Tables r N} {v p base : UInt64} {bits : UInt8} {plan : Plan}
+    (hs : s.WellFormed base bits) (h : s.mapBlock v p base bits = .ok (s', plan)) :
+    ∃ pl, LeafFacts s base bits [(⟨v, p, blockDescriptor p, .block⟩, pl)] ∧
+      s'.apply plan = finalSet s base [(⟨v, p, blockDescriptor p, .block⟩, pl)] ∧
+      (assignTables s.used [(⟨v, p, blockDescriptor p, .block⟩, pl)]).1 ≤ N ∧
+      plan = mapPlan base (assignTables s.used [(⟨v, p, blockDescriptor p, .block⟩, pl)]).2 ∧
+      s'.pool = s.pool := by
+  unfold Tables.mapBlock at h
+  obtain ⟨u1, hce, h⟩ := except_bind_ok.1 h
+  obtain ⟨u2, hcp, h⟩ := except_bind_ok.1 h
+  obtain ⟨w, hw, h⟩ := except_bind_ok.1 h
+  obtain ⟨hv, -, hr, -, -⟩ := checkEntry_ok.1 hce
+  have hpb := (checkPhysical_ok.1 hcp).2
+  have hd : LeafDesc bits ⟨v, p, blockDescriptor p, .block⟩ :=
+    ⟨(fun h => by cases h), fun _ => ⟨isReadWriteBlock_blockDescriptor p, by
+      rw [blockAddress_blockDescriptor]; exact Nat.lt_of_le_of_lt (blockAddress_le p) hpb⟩⟩
+  have key : ∀ pl, s.place base ⟨v, p, blockDescriptor p, .block⟩ = .ok pl →
+      LeafFacts s base bits [(⟨v, p, blockDescriptor p, .block⟩, pl)] := fun pl hpl =>
+    ⟨fun lp h => by rw [List.mem_singleton] at h; subst h; exact hpl, List.pairwise_singleton _ _,
+      fun lp h => by rw [List.mem_singleton] at h; subst h; exact hr,
+      fun lp h => by rw [List.mem_singleton] at h; subst h; exact hv,
+      fun lp h => by rw [List.mem_singleton] at h; subst h; exact hd⟩
+  rcases w with _ | ⟨t2, e2⟩
+  · obtain ⟨hlt, h⟩ := except_jp_ok h
+    simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact ⟨.root, key _ (by unfold Tables.place; rw [hw]; rfl), rfl,
+      by show s.used + 1 ≤ N; omega, rfl, rfl⟩
+  · obtain ⟨-, h⟩ := except_jp_ok h
+    obtain ⟨hv2, h⟩ := except_jp_ok h
+    simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h
+    refine ⟨.level2 t2, key _ ?_, rfl, hs.2.2.1, rfl, rfl⟩
+    unfold Tables.place; rw [hw]
+    simp only [bind, Except.bind, Bool.not_eq_true] at hv2 ⊢
+    simp only [hv2, Bool.not_false, ite_true]; rfl
 
 end Krepi.Proofs.PageTables

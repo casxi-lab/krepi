@@ -9,8 +9,7 @@ import Krepi.Proofs.PageTables.PoolLemmas
 # Page tables: lemmas about well-formed table sets
 
 What `Tables.WellFormed` tells about the entries of a set, and the elementary
-changes of a set that keep it well-formed, from which the proofs of the write
-entries are put together:
+changes of a set that keep it well-formed:
 
 - the tables of a well-formed set: `pointsAt_lt`, `wf_level2_ne_zero`,
   `wf_level3_ne_zero`, `wf_not_level2_level3` (no table is at both levels),
@@ -18,12 +17,11 @@ entries are put together:
   in use is 0) and `wf_plain_child` (every table descriptor in the pool points
   at a table in use);
 - zero tables: `table_eq_zero`, `entry_of_table_zero`;
-- the set of a zero pool with the root alone in use: `wf_zero`;
+- the set of a zero pool with the root alone in use: `wf_zero`, with
+  `not_pointsAt_of_zero`;
 - a leaf, a block of a level 2 table or a page of a level 3 table, written
   into or cleared from an entry that holds no table descriptor:
-  `wf_setLeaf`;
-- a new table, the table of the record, linked into a free entry of the root
-  or of a level 2 table: `wf_link`.
+  `wf_setLeaf`, with `entry_store`.
 -/
 
 @[expose] public section
@@ -210,159 +208,5 @@ theorem wf_setLeaf {s : Tables r N} {base : UInt64} {bits : UInt8} (hs : s.WellF
     exact ⟨t', i', (hPar t').2 hpar, (hpa _ _ _).2 h⟩
   · intro t1 i1 t2 i2 c hp1 hp2 ha hb
     exact huniq t1 i1 t2 i2 c ((hPar t1).1 hp1) ((hPar t2).1 hp2) ((hpa _ _ _).1 ha) ((hpa _ _ _).1 hb)
-
-theorem wf_link {s : Tables r N} {base : UInt64} {bits : UInt8} (hs : s.WellFormed base bits)
-    {t i : Nat} (ht : t = 0 ∨ s.IsLevel2 base t) (hi : i < ENTRIES) (h0 : s.entry t i = 0)
-    (hu : s.used < N) :
-    (⟨s.pool.store t i (tableAt base s.used), s.used + 1⟩ : Tables r N).WellFormed base bits := by
-  have hs0 := hs
-  obtain ⟨hp, h1, hN, hz, hroot, hl2, hl3, hno, hall, huniq⟩ := hs
-  have htu : t < s.used := by
-    rcases ht with rfl | h
-    · omega
-    · exact (wf_level2_lt h).1
-  have htN : t < N := by omega
-  let s' : Tables r N := ⟨s.pool.store t i (tableAt base s.used), s.used + 1⟩
-  have hent : ∀ t' i', s'.entry t' i' = if t' = t ∧ i' = i then tableAt base s.used
-      else s.entry t' i' := entry_store htN hi
-  have hfree : ∀ j c, ¬ s.PointsAt base s.used j c :=
-    fun j c => not_pointsAt_of_zero (wf_entry_free hs0 (Nat.le_refl _) j)
-  have hnt : ∀ c, ¬ s.PointsAt base t i c := fun c => not_pointsAt_of_zero h0
-  have hpa : ∀ t' i' c, s'.PointsAt base t' i' c ↔
-      (t' = t ∧ i' = i ∧ c = s.used) ∨ s.PointsAt base t' i' c := by
-    intro t' i' c
-    by_cases h : t' = t ∧ i' = i
-    · obtain ⟨rfl, rfl⟩ := h
-      have hc : s'.child? base (tableAt base s.used) = some s.used :=
-        child?_tableAt hp (Nat.lt_succ_self _) hu
-      have he' : s'.entry t' i' = tableAt base s.used := by rw [hent]; simp
-      unfold Tables.PointsAt
-      rw [he', hc]
-      constructor
-      · rintro ⟨-, -, hc'⟩
-        exact Or.inl ⟨rfl, rfl, (Option.some.inj hc').symm⟩
-      · rintro (⟨-, -, rfl⟩ | h)
-        · exact ⟨hi, isPlain_tableDescriptor _, rfl⟩
-        · exact absurd h (hnt c)
-    · have hiff : s'.PointsAt base t' i' c ↔ s.PointsAt base t' i' c := by
-        simp only [Tables.PointsAt, hent, h, ite_false]
-        constructor
-        · rintro ⟨hi', hpl, hc⟩
-          obtain ⟨c', hc'⟩ := wf_plain_child hs0 hpl
-          have := child?_mono (u := s.used + 1) (Nat.le_succ _) hc'.2.2
-          have hcc : c' = c := Option.some.inj (this.symm.trans hc)
-          subst hcc; exact hc'
-        · rintro ⟨hi', hpl, hc⟩
-          exact ⟨hi', hpl, child?_mono (Nat.le_succ _) hc⟩
-      rw [hiff]
-      constructor
-      · exact Or.inr
-      · rintro (⟨a, b, -⟩ | h')
-        · exact absurd ⟨a, b⟩ h
-        · exact h'
-  have hL2 : ∀ x, s'.IsLevel2 base x ↔ (t = 0 ∧ x = s.used) ∨ s.IsLevel2 base x := by
-    intro x
-    simp only [Tables.IsLevel2, hpa]
-    constructor
-    · rintro ⟨i', ⟨a, -, c⟩ | h⟩
-      · exact Or.inl ⟨a.symm, c⟩
-      · exact Or.inr ⟨i', h⟩
-    · rintro (⟨a, c⟩ | ⟨i', h⟩)
-      · exact ⟨i, Or.inl ⟨a.symm, rfl, c⟩⟩
-      · exact ⟨i', Or.inr h⟩
-  have hL3 : ∀ x, s'.IsLevel3 base x ↔ (t ≠ 0 ∧ x = s.used) ∨ s.IsLevel3 base x := by
-    intro x
-    simp only [Tables.IsLevel3, hL2, hpa]
-    constructor
-    · rintro ⟨t2, i2, ⟨-, rfl⟩ | h2, ⟨a, -, c⟩ | h⟩
-      · omega
-      · exact absurd h (hfree _ _)
-      · subst a; exact Or.inl ⟨wf_level2_ne_zero hs0 h2, c⟩
-      · exact Or.inr ⟨t2, i2, h2, h⟩
-    · rintro (⟨a, c⟩ | ⟨t2, i2, h2, h⟩)
-      · rcases ht with b | b
-        · exact absurd b a
-        · exact ⟨t, i, Or.inr b, Or.inl ⟨rfl, rfl, c⟩⟩
-      · exact ⟨t2, i2, Or.inr h2, Or.inr h⟩
-  have hPar : ∀ x i' c, s'.IsParent base x → s.PointsAt base x i' c → s.IsParent base x := by
-    rintro x i' c (h | h) hx
-    · exact Or.inl h
-    · rcases (hL2 x).1 h with ⟨-, rfl⟩ | h
-      · exact absurd hx (hfree _ _)
-      · exact Or.inr h
-  have htPar : s'.IsParent base t := by
-    rcases ht with h | h
-    · exact Or.inl h
-    · exact Or.inr ((hL2 t).2 (Or.inr h))
-  refine ⟨hp, Nat.le_add_left 1 s.used, Nat.succ_le_of_lt hu, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  · intro t' ht' ht'N
-    have ht'' : s.used + 1 ≤ t' := ht'
-    apply table_eq_zero; intro i' hi'
-    rw [← entry_eq_get, hent, ite_of_neg (by omega)]
-    exact entry_of_table_zero (hz t' (by omega) ht'N) i'
-  · intro i' hi'
-    by_cases h : 0 = t ∧ i' = i
-    · exact Or.inr ⟨s.used, (hpa 0 i' _).2 (Or.inl ⟨h.1, h.2, rfl⟩)⟩
-    · rw [hent, ite_of_neg h]
-      rcases hroot i' hi' with h' | ⟨c, h'⟩
-      · exact Or.inl h'
-      · exact Or.inr ⟨c, (hpa 0 i' c).2 (Or.inr h')⟩
-  · intro x hx i' hi'
-    rcases (hL2 x).1 hx with ⟨-, rfl⟩ | hx
-    · left; rw [hent, ite_of_neg (by omega)]; exact wf_entry_free hs0 (Nat.le_refl _) i'
-    · by_cases h : x = t ∧ i' = i
-      · exact Or.inr (Or.inl ⟨s.used, (hpa x i' _).2 (Or.inl ⟨h.1, h.2, rfl⟩)⟩)
-      · rw [hent, ite_of_neg h]
-        rcases hl2 x hx i' hi' with h' | ⟨c, h'⟩ | h'
-        · exact Or.inl h'
-        · exact Or.inr (Or.inl ⟨c, (hpa x i' c).2 (Or.inr h')⟩)
-        · exact Or.inr (Or.inr h')
-  · intro x hx i' hi'
-    rcases (hL3 x).1 hx with ⟨-, rfl⟩ | hx3
-    · left; rw [hent, ite_of_neg (by omega)]; exact wf_entry_free hs0 (Nat.le_refl _) i'
-    · have hxt : x ≠ t := by
-        rintro rfl
-        rcases ht with h | h
-        · exact wf_level3_ne_zero hs0 hx3 h
-        · exact wf_not_level2_level3 hs0 h hx3
-      rw [hent, ite_of_neg (fun h => hxt h.1)]
-      exact hl3 x hx3 i' hi'
-  · intro t' i' ht' h
-    rcases (hpa t' i' 0).1 h with ⟨-, -, h⟩ | h
-    · omega
-    · exact hno t' i' (hPar t' i' 0 ht' h) h
-  · intro c hc1 hc2
-    by_cases hc : c = s.used
-    · exact ⟨t, i, htPar, (hpa t i c).2 (Or.inl ⟨rfl, rfl, hc⟩)⟩
-    · obtain ⟨t', i', hpar, h⟩ := hall c hc1 (by
-        have : c < s.used + 1 := hc2
-        omega)
-      refine ⟨t', i', ?_, (hpa _ _ _).2 (Or.inr h)⟩
-      rcases hpar with h' | h'
-      · exact Or.inl h'
-      · exact Or.inr ((hL2 t').2 (Or.inr h'))
-  · intro t1 i1 t2 i2 c hp1 hp2 ha hb
-    rcases (hpa _ _ _).1 ha with ⟨a1, a2, a3⟩ | ha <;>
-      rcases (hpa _ _ _).1 hb with ⟨b1, b2, b3⟩ | hb
-    · exact ⟨a1.trans b1.symm, a2.trans b2.symm⟩
-    · subst a3; exact absurd (pointsAt_lt hb).1 (Nat.lt_irrefl _)
-    · subst b3; exact absurd (pointsAt_lt ha).1 (Nat.lt_irrefl _)
-    · exact huniq t1 i1 t2 i2 c (hPar _ _ _ hp1 ha) (hPar _ _ _ hp2 hb) ha hb
-
-theorem link_pointsAt {s : Tables r N} {base : UInt64} {bits : UInt8} (hp : PoolOk N base bits)
-    {t i : Nat} (ht : t < N) (hi : i < ENTRIES) (hu : s.used < N) :
-    (⟨s.pool.store t i (tableAt base s.used), s.used + 1⟩ : Tables r N).PointsAt base t i s.used := by
-  refine ⟨hi, ?_, ?_⟩ <;> rw [entry_store ht hi, ite_of_pos ⟨rfl, rfl⟩]
-  · exact isPlain_tableDescriptor _
-  · exact child?_tableAt hp (Nat.lt_succ_self _) hu
-
-theorem pointsAt_store_of_ne {s : Tables r N} {base d : UInt64} {t i t' i' c u : Nat}
-    (ht : t < N) (hi : i < ENTRIES) (hu : s.used ≤ u) (h : s.PointsAt base t' i' c)
-    (hne : ¬ (t' = t ∧ i' = i)) :
-    (⟨s.pool.store t i d, u⟩ : Tables r N).PointsAt base t' i' c := by
-  obtain ⟨hi', hp, hc⟩ := h
-  refine ⟨hi', ?_, ?_⟩ <;> rw [entry_store ht hi, ite_of_neg hne]
-  · exact hp
-  · exact child?_mono (s := s) hu hc
 
 end Krepi.Proofs.PageTables
