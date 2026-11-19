@@ -924,13 +924,13 @@
       "name": "Krepi.SpecProperties.PageTables.PlacementFirstFit",
       "theorem": "Krepi.Proofs.PageTables.Allocation.placementFirstFit",
       "module": "Krepi.Proofs.PageTables.Allocation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BootOwnersMatchDirectMap",
       "theorem": "Krepi.Proofs.PageTables.Allocation.bootOwnersMatchDirectMap",
       "module": "Krepi.Proofs.PageTables.Allocation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.DescriptorsFollowKindRows",

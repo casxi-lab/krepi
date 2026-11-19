@@ -25,7 +25,9 @@ evaluated leaf by leaf:
   privately, the next free index of `assignTables` is that of the fold of
   `tick`;
 - the leaves of the direct map in runs: `directPage`, `directBlock`,
-  `pageRun`, `blockRun`, `pageRun_zero`, `blockRun_zero`, `usableLeaves_eq`
+  `pageRun`, `blockRun`, `pageRun_zero`, `blockRun_zero`, `directLeaves_done`
+  (no leaf from the end of a range on), `directLeaves_pages` (a run of pages
+  from a start where no block fits), `usableLeaves_eq`
   (the leaves of a usable range are a run of pages, a run of blocks and a run
   of pages), the counts `pageRun_blocks`, `pageRun_pages`, `blockRun_blocks`,
   `blockRun_pages`, and the slots `dgib` and `dblk` with `tick_block`,
@@ -294,7 +296,7 @@ theorem pageRun_zero (pa : Nat) : pageRun pa 0 = [] := rfl
 
 theorem blockRun_zero (pa : Nat) : blockRun pa 0 = [] := rfl
 
-private theorem directLeaves_done {stop fuel pa : Nat} (h : stop ≤ pa) :
+theorem directLeaves_done {stop fuel pa : Nat} (h : stop ≤ pa) :
     directLeaves stop fuel pa = [] := by
   cases fuel with
   | zero => rfl
@@ -317,7 +319,7 @@ private theorem directLeaves_blocks {stop : Nat} : ∀ k fuel pa, pa % BLOCK_SIZ
         simp only [BLOCK_SIZE]; omega]
     rfl
 
-private theorem directLeaves_pages {stop : Nat} : ∀ k fuel pa,
+theorem directLeaves_pages {stop : Nat} : ∀ k fuel pa,
     (∀ j < k, ¬ ((pa + j * PAGE_SIZE) % BLOCK_SIZE = 0 ∧ pa + j * PAGE_SIZE + BLOCK_SIZE ≤ stop)) →
     pa + k * PAGE_SIZE ≤ stop →
     directLeaves stop (fuel + k) pa = pageRun pa k ++ directLeaves stop fuel (pa + k * PAGE_SIZE)
