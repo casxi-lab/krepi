@@ -678,19 +678,19 @@
       "name": "Krepi.SpecProperties.PageTables.AssignOneOwner",
       "theorem": "Krepi.Proofs.PageTables.Preservation.assignOneOwner",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ReserveOneOwner",
       "theorem": "Krepi.Proofs.PageTables.Preservation.reserveOneOwner",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.PublishOneOwner",
       "theorem": "Krepi.Proofs.PageTables.Preservation.publishOneOwner",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CancelOneOwner",
@@ -708,19 +708,19 @@
       "name": "Krepi.SpecProperties.PageTables.AssignHolderRanges",
       "theorem": "Krepi.Proofs.PageTables.Preservation.assignHolderRanges",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ReserveHolderRanges",
       "theorem": "Krepi.Proofs.PageTables.Preservation.reserveHolderRanges",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.PublishHolderRanges",
       "theorem": "Krepi.Proofs.PageTables.Preservation.publishHolderRanges",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CancelHolderRanges",
@@ -738,19 +738,19 @@
       "name": "Krepi.SpecProperties.PageTables.AssignGenerationsBelowCounter",
       "theorem": "Krepi.Proofs.PageTables.Preservation.assignGenerationsBelowCounter",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ReserveGenerationsBelowCounter",
       "theorem": "Krepi.Proofs.PageTables.Preservation.reserveGenerationsBelowCounter",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.PublishGenerationsBelowCounter",
       "theorem": "Krepi.Proofs.PageTables.Preservation.publishGenerationsBelowCounter",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CancelGenerationsBelowCounter",
@@ -768,19 +768,19 @@
       "name": "Krepi.SpecProperties.PageTables.AssignFreeExtentsMaximal",
       "theorem": "Krepi.Proofs.PageTables.Preservation.assignFreeExtentsMaximal",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ReserveFreeExtentsMaximal",
       "theorem": "Krepi.Proofs.PageTables.Preservation.reserveFreeExtentsMaximal",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.PublishFreeExtentsMaximal",
       "theorem": "Krepi.Proofs.PageTables.Preservation.publishFreeExtentsMaximal",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CancelFreeExtentsMaximal",
@@ -798,19 +798,19 @@
       "name": "Krepi.SpecProperties.PageTables.AssignFreeOrHeldUsable",
       "theorem": "Krepi.Proofs.PageTables.Preservation.assignFreeOrHeldUsable",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ReserveFreeOrHeldUsable",
       "theorem": "Krepi.Proofs.PageTables.Preservation.reserveFreeOrHeldUsable",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.PublishFreeOrHeldUsable",
       "theorem": "Krepi.Proofs.PageTables.Preservation.publishFreeOrHeldUsable",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CancelFreeOrHeldUsable",
