@@ -906,7 +906,7 @@
       "name": "Krepi.SpecProperties.PageTables.NoWritableExecutable",
       "theorem": "Krepi.Proofs.PageTables.Kernel.noWritableExecutable",
       "module": "Krepi.Proofs.PageTables.Kernel",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.DirectMapUnchangedAfterBoot",
