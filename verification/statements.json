@@ -870,19 +870,19 @@
       "name": "Krepi.SpecProperties.PageTables.NewOwnershipSharedWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.newOwnershipSharedWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.WithOwnershipWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.withOwnershipWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.AllocateWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.allocateWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.AfterEveryWrite",
