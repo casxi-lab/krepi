@@ -28,7 +28,21 @@ of the table, from the owner function and the extents after the write
   `take_generationsBelowCounter` (the counter grows by one) and
   `take_freeExtentsMaximal` (the free pieces of the extent that the range is
   taken from lie inside it, so a neighbour of a piece in its bank is a
-  neighbour of that free extent).
+  neighbour of that free extent);
+- for `mergeFreed`, the write of `release` and `cancel`, which frees an
+  extent `e` of a table that keeps `Ownership.Invariant` (its extents
+  `before.reverse ++ e :: after`) and joins it with its free neighbours:
+  `free_oneOwner` and `free_freeOrHeldUsable` (the pages that the extents
+  hold are kept, by the private `free_holds_iff`: a page of `e` stays a
+  page of an extent), `free_holderRanges` and
+  `free_generationsBelowCounter` (every held extent after the write is one
+  of the table, by the private `free_held_mem`, the counter is kept, and a
+  page of `e` is free, so no held extent holds it) and
+  `free_freeExtentsMaximal` (the merged extent joins the free neighbours of
+  `e` in its bank; a neighbour that it does not join is not next to `e`, a
+  joined one is not next to another free extent of its bank, and only the
+  extents right before and after the merged one can be next to it, by the
+  private `head_of_adjacent` and `last_of_adjacent`).
 -/
 
 @[expose] public section
@@ -247,5 +261,156 @@ theorem take_freeExtentsMaximal {E X : Nat} {t t' : Ownership E X} {c : Choice} 
   · exact hmax e hemem y (hm y (Or.inr hy1)) he hyf (hxb.symm.trans hb)
       (by have := h2 y hy1; rcases hxs with ⟨_, _⟩ | ⟨_, _⟩ <;> omega)
   · rcases hxs with ⟨_, _⟩ | ⟨_, _⟩ <;> rcases hys with ⟨_, _⟩ | ⟨_, _⟩ <;> omega
+
+/-! ## `mergeFreed` -/
+
+/-- `mergeFreed` keeps the pages that the extents hold: a page of the freed
+extent is free. -/
+private theorem free_holds_iff {E X : Nat} {t t' : Ownership E X} {before after : List Extent}
+    {e : Extent} (hwf : t.WellFormed) (ht : t.extents = before.reverse ++ e :: after)
+    (ht' : t' = ⟨t.arena, t.banks, mergeFreed before e after, t.exclusions, t.counter⟩)
+    {q : Nat} (hq : q % PAGE_SIZE = 0) :
+    (∃ x ∈ t'.extents, x.range.holdsPage q = true) ↔
+      ∃ x ∈ t.extents, x.range.holdsPage q = true := by
+  obtain ⟨-, -, -, -, -, hown⟩ := free_spec hwf ht ht'
+  exact holds_iff_of_ownerOf rfl (fun hq => ⟨e, by rw [ht]; simp, hq⟩) (hown q hq)
+
+/-- Every held extent after `mergeFreed` is one of the table. -/
+private theorem free_held_mem {E X : Nat} {t t' : Ownership E X} {before after : List Extent}
+    {e y : Extent} {o n : UInt64} {s : HoldState} (ht : t.extents = before.reverse ++ e :: after)
+    (ht' : t' = ⟨t.arena, t.banks, mergeFreed before e after, t.exclusions, t.counter⟩)
+    (hy : y ∈ t'.extents) (hyh : y.holding = .held o n s) : y ∈ t.extents := by
+  subst ht'
+  rcases mem_mergeFreed hy with h | h
+  · rw [ht]
+    exact h
+  · rw [h] at hyh
+    cases hyh
+
+theorem free_oneOwner {E X : Nat} {t t' : Ownership E X} {before after : List Extent}
+    {e : Extent} (hinv : t.Invariant) (ht : t.extents = before.reverse ++ e :: after)
+    (ht' : t' = ⟨t.arena, t.banks, mergeFreed before e after, t.exclusions, t.counter⟩) :
+    t'.OneOwner := by
+  obtain ⟨hwf', -, hb, hx, -, -⟩ := free_spec hinv.1 ht ht'
+  exact oneOwner_of_holds_iff hinv.1.2.2.2.2.2.2.1 hwf'.2.2.2.2.2.2.1 hb hx
+    (fun _ hq => free_holds_iff hinv.1 ht ht' hq) hinv.2.1
+
+theorem free_freeOrHeldUsable {E X : Nat} {t t' : Ownership E X} {before after : List Extent}
+    {e : Extent} {B : Krepi.Spec.Fdt.MemoryPlan} (hinv : t.Invariant)
+    (ht : t.extents = before.reverse ++ e :: after)
+    (ht' : t' = ⟨t.arena, t.banks, mergeFreed before e after, t.exclusions, t.counter⟩)
+    (hu : t.FreeOrHeldUsable B) : t'.FreeOrHeldUsable B :=
+  freeOrHeldUsable_of_holds_iff (fun _ hq => free_holds_iff hinv.1 ht ht' hq) hu
+
+theorem free_generationsBelowCounter {E X : Nat} {t t' : Ownership E X}
+    {before after : List Extent} {e : Extent} (hinv : t.Invariant)
+    (ht : t.extents = before.reverse ++ e :: after)
+    (ht' : t' = ⟨t.arena, t.banks, mergeFreed before e after, t.exclusions, t.counter⟩) :
+    t'.GenerationsBelowCounter := by
+  obtain ⟨hwf, -, -, hgen, -⟩ := hinv
+  intro q o n s hq
+  obtain ⟨y, hy, hyq, hyh⟩ := ownerOf_held hq
+  have hc : t'.counter = t.counter := by rw [ht']
+  rw [hc]
+  exact hgen q o n s ((ownerOf_of_mem hwf.2.2.2.2.2.2.1 (free_held_mem ht ht' hy hyh) hyq).trans
+    (by rw [hyh]; rfl))
+
+theorem free_holderRanges {E X : Nat} {t t' : Ownership E X} {before after : List Extent}
+    {e : Extent} (hinv : t.Invariant) (ht : t.extents = before.reverse ++ e :: after)
+    (ht' : t' = ⟨t.arena, t.banks, mergeFreed before e after, t.exclusions, t.counter⟩) :
+    t'.HolderRanges := by
+  obtain ⟨hwf, -, hhold, -, -⟩ := hinv
+  obtain ⟨hwf', -, -, -, -, hown⟩ := free_spec hwf ht ht'
+  intro y hy o n s hyh q hq
+  have h1 := hown q hq
+  rw [h1]
+  split
+  · -- a page of the freed extent is free, so no held extent holds it
+    rename_i heq
+    refine ⟨fun ⟨o', s', h⟩ => (by simp at h), fun hyq => ?_⟩
+    have h2 := ownerOf_of_mem hwf'.2.2.2.2.2.2.1 hy hyq
+    rw [h1, hyh] at h2
+    simp [heq, Holding.owner] at h2
+  · exact hhold y (free_held_mem ht ht' hy hyh) o n s hyh q hq
+
+/-- In extents in address order, an extent after `m` that starts where `m`
+ends is the one right after `m`. -/
+private theorem head_of_adjacent {m b : Extent} {l : List Extent}
+    (hl : ExtentsInOrder (m :: l)) (hb : b ∈ l) (h : b.range.start.toNat = m.range.endNat) :
+    l.head? = some b := by
+  rcases l with _ | ⟨c, l⟩
+  · simp at hb
+  · rw [ExtentsInOrder, List.pairwise_cons, List.pairwise_cons] at hl
+    rcases List.mem_cons.1 hb with rfl | hb
+    · rfl
+    · have h1 := hl.1 c (by simp)
+      have h2 := hl.2.1 b hb
+      have := range_lt c.range
+      omega
+
+/-- In extents in address order, an extent before `m` that ends where `m`
+starts is the one right before `m`: the head of the extents before `m` in
+reverse order. -/
+private theorem last_of_adjacent {m a : Extent} {before l : List Extent}
+    (hl : ExtentsInOrder (before.reverse ++ m :: l)) (ha : a ∈ before.reverse)
+    (h : a.range.endNat = m.range.start.toNat) : before.head? = some a := by
+  rcases before with _ | ⟨c, before⟩
+  · simp at ha
+  · simp only [List.reverse_cons, List.append_assoc, List.singleton_append, ExtentsInOrder,
+      List.pairwise_append, List.pairwise_cons] at hl
+    simp only [List.reverse_cons, List.mem_append, List.mem_singleton] at ha
+    rcases ha with ha | rfl
+    · have h1 := hl.2.2 a ha c (by simp)
+      have h2 := hl.2.1.1 m (by simp)
+      have := range_lt c.range
+      omega
+    · rfl
+
+theorem free_freeExtentsMaximal {E X : Nat} {t t' : Ownership E X} {before after : List Extent}
+    {e : Extent} (hinv : t.Invariant) (ht : t.extents = before.reverse ++ e :: after)
+    (ht' : t' = ⟨t.arena, t.banks, mergeFreed before e after, t.exclusions, t.counter⟩) :
+    t'.FreeExtentsMaximal := by
+  obtain ⟨hwf, -, -, -, hmax⟩ := hinv
+  obtain ⟨hwf', -⟩ := free_spec hwf ht ht'
+  obtain ⟨l₁, lo, hi, l₂, m, h1, h2, -, hmb, hlo, hhi⟩ := mergeFreed_spec before e after
+  have hext : t'.extents = l₁ ++ m :: l₂ := by subst ht'; exact h2
+  have hl : ExtentsInOrder (l₁ ++ m :: l₂) := hext ▸ hwf'.2.2.2.2.2.2.1
+  have hl2 : ExtentsInOrder (m :: l₂) := (List.pairwise_append.1 hl).2.1
+  have hmem : ∀ x, x ∈ l₁ ∨ x ∈ lo ∨ x ∈ hi ∨ x ∈ l₂ → x ∈ t.extents := fun x hx => by
+    rw [ht, h1]
+    simp only [List.mem_append, List.mem_cons]
+    rcases hx with hx | hx | hx | hx <;> simp [hx]
+  have o1 : ∀ x ∈ l₁, x.range.endNat ≤ m.range.start.toNat := fun x hx =>
+    (List.pairwise_append.1 hl).2.2 x hx m (by simp)
+  have o2 : ∀ x ∈ l₂, m.range.endNat ≤ x.range.start.toNat := fun x hx =>
+    (List.pairwise_cons.1 hl2).1 x hx
+  have hm := range_lt m.range
+  intro a ha b hb haf hbf hab hend
+  rw [hext, List.mem_append, List.mem_cons] at ha hb
+  rcases ha with ha | rfl | ha <;> rcases hb with hb | rfl | hb
+  · exact hmax a (hmem a (Or.inl ha)) b (hmem b (Or.inl hb)) haf hbf hab hend
+  · -- `a` ends where the merged extent starts
+    rcases hlo with ⟨rfl, rfl, hms, hnone⟩ | ⟨x, rfl, -, -, hxf, hxb, hxe, hms⟩
+    · exact hnone a (by rw [last_of_adjacent hl ha hend]; rfl) ⟨haf, hab.trans hmb, by omega⟩
+    · exact hmax a (hmem a (Or.inl ha)) x (hmem x (Or.inr (Or.inl (by simp)))) haf hxf
+        (hab.trans (hmb.trans hxb.symm)) (by omega)
+  · exact hmax a (hmem a (Or.inl ha)) b (hmem b (Or.inr (Or.inr (Or.inr hb)))) haf hbf hab hend
+  · have := o1 b hb
+    have := range_lt b.range
+    omega
+  · omega
+  · -- `b` starts where the merged extent ends
+    rcases hhi with ⟨rfl, rfl, hme, hnone⟩ | ⟨y, rfl, -, -, hyf, hyb, hye, hme⟩
+    · exact hnone b (by rw [head_of_adjacent hl2 hb hend.symm]; rfl)
+        ⟨hbf, hab.symm.trans hmb, by omega⟩
+    · exact hmax y (hmem y (Or.inr (Or.inr (Or.inl (by simp))))) b
+        (hmem b (Or.inr (Or.inr (Or.inr hb)))) hyf hbf (hyb.trans (hmb.symm.trans hab))
+        (by omega)
+  · exact hmax a (hmem a (Or.inr (Or.inr (Or.inr ha)))) b (hmem b (Or.inl hb)) haf hbf hab hend
+  · have := o2 a ha
+    have := range_lt a.range
+    omega
+  · exact hmax a (hmem a (Or.inr (Or.inr (Or.inr ha)))) b
+      (hmem b (Or.inr (Or.inr (Or.inr hb)))) haf hbf hab hend
 
 end Krepi.Proofs.PageTables

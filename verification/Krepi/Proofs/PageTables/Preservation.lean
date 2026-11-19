@@ -15,19 +15,23 @@ of the page ownership table, whose type is exactly that statement: that each
 write entry of the page ownership table preserves each of its functional
 invariants.
 
-The fifteen theorems of `assign`, `reserve` and `publish` are proved.
-`assign` and `reserve` write with `take`, of a range on pages (a choice of
-`choose`, which `assign` takes as its requirement): each invariant follows
-from the lemma of `take` in `Krepi.Proofs.PageTables.PreserveLemmas`.
-`publish` relabels the extent of the packet, reserved, as published with the
-same generation (`publish_spec` and `publish_extents` of
+All twenty-five theorems are proved. `assign` and `reserve` write with
+`take`, of a range on pages (a choice of `choose`, which `assign` takes as
+its requirement): each invariant follows from the lemma of `take` in
+`Krepi.Proofs.PageTables.PreserveLemmas`. `publish` relabels the extent
+of the packet, reserved, as published with the same generation
+(`publish_spec` and `publish_extents` of
 `Krepi.Proofs.PageTables.WriteLemmas`): the pages that the extents hold
 (the private `publish_holds_iff`, then `oneOwner_of_holds_iff` and
 `freeOrHeldUsable_of_holds_iff`), the generation of every page and the free
 extents stay as they are.
 
-The ten theorems of `cancel` and `release` are still planned: their proof is
-`sorry`, and `verification/statements.json` registers them as `planned`.
+`cancel` and `release` find the extent of the value (`cancel_ok`,
+`release_ok` and `findHeld_ok` of `Krepi.Proofs.PageTables.WriteLemmas`),
+free it and merge it with its free neighbours (`mergeFreed`): each
+invariant follows from the lemma of `mergeFreed` in
+`Krepi.Proofs.PageTables.PreserveLemmas`.
+
 Mathlib is imported so that the gate counts the heartbeats of each theorem.
 -/
 
@@ -63,10 +67,14 @@ public theorem publishOneOwner : PublishOneOwner := by
     (fun q _ => publish_holds_iff hwf h q) hone
 
 public theorem cancelOneOwner : CancelOneOwner := by
-  sorry
+  intro E X t o r t' hinv h
+  obtain ⟨-, before, e, after, hf, ht'⟩ := cancel_ok h
+  exact free_oneOwner hinv (findHeld_ok hf).2.2.1 ht'
 
 public theorem releaseOneOwner : ReleaseOneOwner := by
-  sorry
+  intro E X t o x t' hinv h
+  obtain ⟨before, e, after, hf, ht'⟩ := release_ok h
+  exact free_oneOwner hinv (findHeld_ok hf).2.2.1 ht'
 
 public theorem assignHolderRanges : AssignHolderRanges := by
   rintro E X t c z t' a hinv ⟨_, _, _, _, hch⟩ h
@@ -100,10 +108,14 @@ public theorem publishHolderRanges : PublishHolderRanges := by
     exact hhold e he _ _ _ heh q hq
 
 public theorem cancelHolderRanges : CancelHolderRanges := by
-  sorry
+  intro E X t o r t' hinv h
+  obtain ⟨-, before, e, after, hf, ht'⟩ := cancel_ok h
+  exact free_holderRanges hinv (findHeld_ok hf).2.2.1 ht'
 
 public theorem releaseHolderRanges : ReleaseHolderRanges := by
-  sorry
+  intro E X t o x t' hinv h
+  obtain ⟨before, e, after, hf, ht'⟩ := release_ok h
+  exact free_holderRanges hinv (findHeld_ok hf).2.2.1 ht'
 
 public theorem assignGenerationsBelowCounter : AssignGenerationsBelowCounter := by
   rintro E X t c z t' a hinv ⟨_, _, _, _, hch⟩ h
@@ -129,10 +141,14 @@ public theorem publishGenerationsBelowCounter : PublishGenerationsBelowCounter :
   · exact hgen q o' n s hq
 
 public theorem cancelGenerationsBelowCounter : CancelGenerationsBelowCounter := by
-  sorry
+  intro E X t o r t' hinv h
+  obtain ⟨-, before, e, after, hf, ht'⟩ := cancel_ok h
+  exact free_generationsBelowCounter hinv (findHeld_ok hf).2.2.1 ht'
 
 public theorem releaseGenerationsBelowCounter : ReleaseGenerationsBelowCounter := by
-  sorry
+  intro E X t o x t' hinv h
+  obtain ⟨before, e, after, hf, ht'⟩ := release_ok h
+  exact free_generationsBelowCounter hinv (findHeld_ok hf).2.2.1 ht'
 
 public theorem assignFreeExtentsMaximal : AssignFreeExtentsMaximal := by
   rintro E X t c z t' a hinv - h
@@ -155,10 +171,14 @@ public theorem publishFreeExtentsMaximal : PublishFreeExtentsMaximal := by
   exact hmax y (hfree y hy hyf) z (hfree z hz hzf) hyf hzf
 
 public theorem cancelFreeExtentsMaximal : CancelFreeExtentsMaximal := by
-  sorry
+  intro E X t o r t' hinv h
+  obtain ⟨-, before, e, after, hf, ht'⟩ := cancel_ok h
+  exact free_freeExtentsMaximal hinv (findHeld_ok hf).2.2.1 ht'
 
 public theorem releaseFreeExtentsMaximal : ReleaseFreeExtentsMaximal := by
-  sorry
+  intro E X t o x t' hinv h
+  obtain ⟨before, e, after, hf, ht'⟩ := release_ok h
+  exact free_freeExtentsMaximal hinv (findHeld_ok hf).2.2.1 ht'
 
 public theorem assignFreeOrHeldUsable : AssignFreeOrHeldUsable := by
   rintro E X B t c z t' a hinv hu ⟨_, _, _, _, hch⟩ h
@@ -174,9 +194,13 @@ public theorem publishFreeOrHeldUsable : PublishFreeOrHeldUsable := by
   exact freeOrHeldUsable_of_holds_iff (fun q _ => publish_holds_iff hwf h q) hu
 
 public theorem cancelFreeOrHeldUsable : CancelFreeOrHeldUsable := by
-  sorry
+  intro E X B t o r t' hinv hu h
+  obtain ⟨-, before, e, after, hf, ht'⟩ := cancel_ok h
+  exact free_freeOrHeldUsable hinv (findHeld_ok hf).2.2.1 ht' hu
 
 public theorem releaseFreeOrHeldUsable : ReleaseFreeOrHeldUsable := by
-  sorry
+  intro E X B t o x t' hinv hu h
+  obtain ⟨before, e, after, hf, ht'⟩ := release_ok h
+  exact free_freeOrHeldUsable hinv (findHeld_ok hf).2.2.1 ht' hu
 
 end Krepi.Proofs.PageTables.Preservation

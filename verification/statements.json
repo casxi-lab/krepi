@@ -696,13 +696,13 @@
       "name": "Krepi.SpecProperties.PageTables.CancelOneOwner",
       "theorem": "Krepi.Proofs.PageTables.Preservation.cancelOneOwner",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ReleaseOneOwner",
       "theorem": "Krepi.Proofs.PageTables.Preservation.releaseOneOwner",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.AssignHolderRanges",
@@ -726,13 +726,13 @@
       "name": "Krepi.SpecProperties.PageTables.CancelHolderRanges",
       "theorem": "Krepi.Proofs.PageTables.Preservation.cancelHolderRanges",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ReleaseHolderRanges",
       "theorem": "Krepi.Proofs.PageTables.Preservation.releaseHolderRanges",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.AssignGenerationsBelowCounter",
@@ -756,13 +756,13 @@
       "name": "Krepi.SpecProperties.PageTables.CancelGenerationsBelowCounter",
       "theorem": "Krepi.Proofs.PageTables.Preservation.cancelGenerationsBelowCounter",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ReleaseGenerationsBelowCounter",
       "theorem": "Krepi.Proofs.PageTables.Preservation.releaseGenerationsBelowCounter",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.AssignFreeExtentsMaximal",
@@ -786,13 +786,13 @@
       "name": "Krepi.SpecProperties.PageTables.CancelFreeExtentsMaximal",
       "theorem": "Krepi.Proofs.PageTables.Preservation.cancelFreeExtentsMaximal",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ReleaseFreeExtentsMaximal",
       "theorem": "Krepi.Proofs.PageTables.Preservation.releaseFreeExtentsMaximal",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.AssignFreeOrHeldUsable",
@@ -816,13 +816,13 @@
       "name": "Krepi.SpecProperties.PageTables.CancelFreeOrHeldUsable",
       "theorem": "Krepi.Proofs.PageTables.Preservation.cancelFreeOrHeldUsable",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ReleaseFreeOrHeldUsable",
       "theorem": "Krepi.Proofs.PageTables.Preservation.releaseFreeOrHeldUsable",
       "module": "Krepi.Proofs.PageTables.Preservation",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BootWellFormed",
