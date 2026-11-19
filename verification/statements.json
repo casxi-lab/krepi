@@ -516,31 +516,31 @@
       "name": "Krepi.SpecProperties.PageTables.CheckOneOwner",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkOneOwner",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckHolderRanges",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkHolderRanges",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckGenerationsBelowCounter",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkGenerationsBelowCounter",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckFreeExtentsMaximal",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkFreeExtentsMaximal",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckFreeOrHeldUsable",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkFreeOrHeldUsable",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckDirectMapOffset",
