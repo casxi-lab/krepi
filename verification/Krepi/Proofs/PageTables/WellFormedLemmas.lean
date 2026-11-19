@@ -20,7 +20,7 @@ changes of a set that keep it well-formed:
 - the set of a zero pool with the root alone in use: `wf_zero`;
 - a leaf, a block of a level 2 table or a page of a level 3 table, written
   into or cleared from an entry that holds no table descriptor:
-  `wf_setLeaf`.
+  `wf_setLeaf`, with `entry_store` (the entries after one store).
 
 The other lemmas of the module are private steps of these.
 -/
@@ -132,7 +132,7 @@ theorem wf_zero {s : Tables r N} {base : UInt64} {bits : UInt8} (hp : PoolOk N b
 /-! ## Elementary changes -/
 
 /-- The entries of a set after one store into the entry `i` of table `t`. -/
-private theorem entry_store {s : Tables r N} {u t i : Nat} {d : UInt64} (ht : t < N) (hi : i < ENTRIES)
+theorem entry_store {s : Tables r N} {u t i : Nat} {d : UInt64} (ht : t < N) (hi : i < ENTRIES)
     (t' i' : Nat) :
     (⟨s.pool.store t i d, u⟩ : Tables r N).entry t' i' =
       if t' = t ∧ i' = i then d else s.entry t' i' := by

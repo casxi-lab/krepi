@@ -12,9 +12,6 @@ import Krepi.Proofs.PageTables.WalkLemmas
 The steps of the plan of a map (`mapPlan`) come in units, each checked
 against a well-formed set that holds the tables of the units before it:
 
-- entries after a plan: `get_exec_cases` (an entry after a plan is the old
-  one, the value of a store of the plan into it, or 0 after a `Zero` of its
-  table), `get_exec_untouched` (an entry of a table that no step writes);
 - the units: `ukey` (one key for a 1 GiB slot under a new level 2 table and
   one for each 2 MiB slot under a level 2 table of the set, ascending with the
   address), `ukey_gib`, `ukey_eq`, `unitSteps`, and what a unit needs of the
@@ -23,9 +20,9 @@ against a well-formed set that holds the tables of the units before it:
   pass their checks) and `new_allOk` (those of a 1 GiB slot under a new level
   2 table).
 
-`get_exec_cases` and `get_exec_untouched` are not used by another module yet;
-they are stated for the entries after any plan. The other lemmas of the
-module are private steps.
+The other lemmas of the module are private steps, among them the entries
+after a plan (the old entry, the value of a store of the plan into it, or 0
+after a `Zero` of its table; the old entry of a table that no step writes).
 -/
 
 @[expose] public section
@@ -64,7 +61,7 @@ private theorem lastAt_some {t i : Nat} {d : UInt64} : ∀ {plan : Plan}, lastAt
         · cases h
       | _ => simp [stepAt] at h
 
-theorem get_exec_cases (plan : Plan) (p : Pool N) (t i : Nat) :
+private theorem get_exec_cases (plan : Plan) (p : Pool N) (t i : Nat) :
     (plan.exec p).get t i = p.get t i ∨ Step.store t i ((plan.exec p).get t i) ∈ plan ∨
       (Step.zero t ∈ plan ∧ (plan.exec p).get t i = 0) := by
   by_cases ht : t < N
@@ -80,7 +77,7 @@ theorem get_exec_cases (plan : Plan) (p : Pool N) (t i : Nat) :
     · left; rw [get_of_ge_entries _ _ (by omega), get_of_ge_entries _ _ (by omega)]
   · left; rw [get_of_ge _ _ (by omega), get_of_ge _ _ (by omega)]
 
-theorem get_exec_untouched {plan : Plan} {p : Pool N} {t : Nat}
+private theorem get_exec_untouched {plan : Plan} {p : Pool N} {t : Nat}
     (h : ∀ x ∈ plan, x.writes t = false) (i : Nat) : (plan.exec p).get t i = p.get t i := by
   rcases get_exec_cases plan p t i with e | e | ⟨e, -⟩
   · exact e

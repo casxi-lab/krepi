@@ -381,20 +381,6 @@ public theorem kernelTablesOnlyFilled : KernelTablesOnlyFilled := by
 
 section Wx
 
-/-- A set of the boot, `Tables::new` on zero storage, maps nothing. -/
-private theorem new_M {r : Region} {N : Nat} {base v : UInt64} {l : Leaf} :
-    ¬ (Tables.new (Pool.zero N) : Tables r N).M base v l := by
-  have h0 : ∀ i, isValid ((Tables.new (Pool.zero N) : Tables r N).entry 0 i) = false := by
-    intro i; rw [entry_eq_get]; simp [Tables.new, Pool.zero, Pool.get, Table.zero, isValid_zero]
-  have hw2 : ∀ {w}, (Tables.new (Pool.zero N) : Tables r N).walk2 base v = .ok (some w) → False := by
-    intro w hw
-    rcases walk2_ok.1 hw with ⟨-, h⟩ | ⟨_, hv, -⟩
-    · cases h
-    · rw [h0] at hv; cases hv
-  rintro ⟨-, -, ⟨t2, t3, d, hw, -⟩ | ⟨t2, d, hw, -⟩⟩
-  · obtain ⟨e2, h, -⟩ := walk_ok_level3.1 hw; exact hw2 h
-  · exact hw2 (walk_ok_block.1 hw).1
-
 /-- A set that the transactions reach: well-formed, or the set of the boot,
 which stays so while its pool is not one that the contract admits. -/
 private def SetOk {r : Region} {N : Nat} (T : Tables r N) (base : UInt64) (bits : UInt8) : Prop :=

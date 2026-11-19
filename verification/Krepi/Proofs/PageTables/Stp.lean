@@ -20,22 +20,25 @@ whose type is exactly that test: for each requirement of the component,
 PGT-R01 to PGT-R12, the input that the specification accepts with its result
 and the input that it rejects with its error.
 
-The tests of PGT-R01 to PGT-R07 and PGT-R12 are proved, and
-`verification/statements.json` registers each as `proved`. The tests on
-small inputs are decided by the kernel on their concrete inputs once their
-proposition is unfolded, with the equality of `Except` values of
-`Krepi.Proofs.Fdt.decEqExcept` as a local instance. The two tests whose
-results are tuples of ten and six values, `unmapAndResetFollowContract` and
-`copyIsPrivateAndOrdered`, raise `synthInstance.maxSize` so that the instance
-of their equality is found. The tests of PGT-R03 and the accepting test of
-PGT-R05, whose inputs are too large to evaluate, are proved from closed
-forms: the set after the first `n` of the 4,096 blocks, by induction on `n`,
-and the counts of the direct maps of the Pi 5 models from the runs of their
-leaves (`Krepi.Proofs.PageTables.CountLemmas`). The other theorems are
-planned: their proof is `sorry` until a proof pull request proves them, and
-`verification/statements.json` registers each as `planned`. They are the
-tests of PGT-R08 to PGT-R11. Mathlib is imported so that the gate counts the
-heartbeats of each theorem.
+Every theorem is proved, and `verification/statements.json` registers each
+as `proved`. The tests on concrete inputs that the kernel evaluates in
+seconds are decided by the kernel once their proposition is unfolded, with
+the equality of `Except` values of `Krepi.Proofs.Fdt.decEqExcept` as a local
+instance: those of PGT-R01, PGT-R02, PGT-R04, PGT-R06 to PGT-R12 and the
+rejecting test of PGT-R05. Among them are the tests of page ownership of
+PGT-R08 to PGT-R10, the boot memory maps of the board shapes included, and
+both tests of capacities of PGT-R11, whose direct maps of 80 and 81 tables
+and tables of 160 extents and 132 or 133 exclusions the kernel evaluates in
+about two seconds each. The three tests whose results are tuples of ten,
+seven and six values, `unmapAndResetFollowContract`,
+`allocationTakesWindowAndGeneration` and `copyIsPrivateAndOrdered`, raise
+`synthInstance.maxSize` so that the instance of their equality is found. The
+tests of PGT-R03 and the accepting test of PGT-R05, whose inputs are too
+large to evaluate, are proved from closed forms: the set after the first `n`
+of the 4,096 blocks, by induction on `n`, and the counts of the direct maps
+of the Pi 5 models from the runs of their leaves
+(`Krepi.Proofs.PageTables.CountLemmas`). Mathlib is imported so that the gate
+counts the heartbeats of each theorem.
 -/
 
 namespace Krepi.Proofs.PageTables.Stp
@@ -495,34 +498,35 @@ public theorem kernelFillRefusesValidEntry : KernelFillRefusesValidEntry := by
 /-! ## PGT-R08 -/
 
 public theorem ownershipOfBoardShapes : OwnershipOfBoardShapes := by
-  sorry
+  unfold OwnershipOfBoardShapes; decide +kernel
 
 public theorem ownershipRefusesOverlappingBanks : OwnershipRefusesOverlappingBanks := by
-  sorry
+  unfold OwnershipRefusesOverlappingBanks; decide +kernel
 
 /-! ## PGT-R09 -/
 
+set_option synthInstance.maxSize 4096 in
 public theorem allocationTakesWindowAndGeneration : AllocationTakesWindowAndGeneration := by
-  sorry
+  unfold AllocationTakesWindowAndGeneration; decide +kernel
 
 public theorem releaseRefusesStaleReceipt : ReleaseRefusesStaleReceipt := by
-  sorry
+  unfold ReleaseRefusesStaleReceipt; decide +kernel
 
 /-! ## PGT-R10 -/
 
 public theorem reservationPublishesAfterZeroing : ReservationPublishesAfterZeroing := by
-  sorry
+  unfold ReservationPublishesAfterZeroing; decide +kernel
 
 public theorem cancelRefusesAttemptedReservation : CancelRefusesAttemptedReservation := by
-  sorry
+  unfold CancelRefusesAttemptedReservation; decide +kernel
 
 /-! ## PGT-R11 -/
 
 public theorem capacitiesAtTheirLimits : CapacitiesAtTheirLimits := by
-  sorry
+  unfold CapacitiesAtTheirLimits; decide +kernel
 
 public theorem capacitiesRefuseOneMore : CapacitiesRefuseOneMore := by
-  sorry
+  unfold CapacitiesRefuseOneMore; decide +kernel
 
 /-! ## PGT-R12 -/
 

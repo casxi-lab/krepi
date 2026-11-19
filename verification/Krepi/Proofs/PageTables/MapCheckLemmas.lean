@@ -22,12 +22,13 @@ What the checks of the two maps give their leaves, so that the lemmas of
   each at `DIRECT_BASE | pa`), `directLeaf_va` and **`directMap_facts`** (the
   leaves of a successful `direct_map` satisfy `LeafFacts`, each is a
   `DirectLeaf` below $2^{39}$, and they are the leaves of its usable ranges in
-  address order);
-- the kernel mappings: `LayoutOk`, `rangePages`, `layout_fold` (the fold of
-  the checks of the ranges: the pages of the ranges with their places, and
-  no page of a range meets a range checked before it), `rangePages_spec` and
+  address order) and `directMap_apart` (no leaf of a usable range meets a
+  range before it);
+- the kernel mappings: `LayoutOk`, `rangePages`, `rangePages_spec`,
   **`kernelMap_facts`** (also: the leaves are the pages of the ranges of the
-  layout in address order);
+  layout in address order) and `kernelMap_checks` (no page of a range holds
+  a guard address or meets a range before it), from the private fold of the
+  checks of the ranges;
 - descriptors: `descriptor_kind_inj`, `ofPage_descriptor` (the kind of a page
   descriptor is its kind) and `blockAddress_of_aligned`;
 - **`mapPage_single`**, **`mapBlock_single`**: a successful `map_page` or
@@ -286,6 +287,21 @@ theorem directMap_facts {s : Tables .upper N} {memory : Krepi.Spec.Fdt.MemoryPla
     · rw [h2.2.2.2 hb]; exact isReadWriteBlock_blockDescriptor _
     · rw [h2.2.2.2 hb, blockAddress_blockDescriptor]; have := blockAddress_le lp.1.pa; omega
 
+/-- The checks of the usable ranges of a successful `direct_map`: no leaf of
+a range meets a range before it in address order. -/
+theorem directMap_apart {s : Tables .upper N} {memory : Krepi.Spec.Fdt.MemoryPlan} {base : UInt64}
+    {bits : UInt8} {s₁ : Tables .upper N} {plan : Plan}
+    (h : s.directMap memory base bits = .ok (s₁, plan)) :
+    (sortByKey (·.start.toNat) memory.availableRanges).Pairwise
+      (fun u u' => ∀ y ∈ usableLeaves u', y.meets u.start.toNat u.endNat = false) := by
+  unfold Tables.directMap at h
+  rw [except_bind_ok] at h
+  obtain ⟨-, -, h⟩ := h
+  rw [except_bind_ok] at h
+  obtain ⟨res, hf, -⟩ := h
+  obtain ⟨-, -, -, -, -, -, hpw⟩ := usable_fold _ [] [] res hf
+  exact hpw
+
 /-! ## The kernel mappings -/
 
 private theorem layoutPages_spec (k : Kind) : ∀ count pa, pa + count * PAGE_SIZE ≤ VA_LIMIT →
@@ -333,7 +349,7 @@ private theorem checkLayoutRange_ok {s : Tables .lower N} {base : UInt64} {bits 
   simp only [Bool.or_eq_true, bne_iff_ne, ne_eq, decide_eq_true_eq, not_or, Decidable.not_not, Nat.not_lt] at h1 h2
   exact ⟨⟨h1.1, h1.2, h2.1, h2.2⟩, leaves', h3, (except_pure_ok.1 h4).symm⟩
 
-theorem layout_fold {s : Tables .lower N} {base : UInt64} {bits : UInt8} {guards : List UInt64} :
+private theorem layout_fold {s : Tables .lower N} {base : UInt64} {bits : UInt8} {guards : List UInt64} :
     ∀ (js : List LayoutRange) (earlier : List PhysRange) (acc : List (MapLeaf × Place))
       (res : List PhysRange × List (MapLeaf × Place)),
       js.foldlM (s.checkLayoutRange base bits guards) (earlier, acc) = .ok res →
@@ -341,18 +357,20 @@ theorem layout_fold {s : Tables .lower N} {base : UInt64} {bits : UInt8} {guards
         new.map Prod.fst = js.flatMap rangePages ∧ (∀ x ∈ new, s.place base x.1 = .ok x.2) ∧
         (∀ j ∈ js, LayoutOk bits j) ∧
         (∀ j ∈ js, ∀ y ∈ rangePages j, ∀ e ∈ earlier, y.meets e.start.toNat e.endNat = false) ∧
-        js.Pairwise (fun j j' => ∀ y ∈ rangePages j', y.meets j.range.start.toNat j.range.endNat = false)
+        js.Pairwise (fun j j' => ∀ y ∈ rangePages j', y.meets j.range.start.toNat j.range.endNat = false) ∧
+        ∀ j ∈ js, ∀ y ∈ rangePages j, y.isGuard guards = false
   | [], earlier, acc, res, h => by
     simp only [List.foldlM_nil, pure, Except.pure, Except.ok.injEq] at h
-    subst h; exact ⟨[], by simp, by simp, by simp, by simp, by simp, by simp⟩
+    subst h; exact ⟨[], by simp, by simp, by simp, by simp, by simp, by simp, by simp⟩
   | j :: rest, earlier, acc, res, h => by
     rw [List.foldlM_cons, except_bind_ok] at h
     obtain ⟨mid, h1, h2⟩ := h
     obtain ⟨hok, leaves', h3, rfl⟩ := checkLayoutRange_ok h1
     obtain ⟨ps, rfl, hmap, hall⟩ := checkLeaf_fold _ _ _ h3
-    obtain ⟨new, hres, hmap', hpl, hok', hear, hpw⟩ := layout_fold rest _ _ res h2
+    obtain ⟨new, hres, hmap', hpl, hok', hear, hpw, hgd⟩ := layout_fold rest _ _ res h2
     refine ⟨ps ++ new, by rw [hres]; simp, by simp [hmap, hmap'], fun x hx => ?_, fun j' hj' => ?_,
-      fun j' hj' y hy e he => ?_, List.pairwise_cons.2 ⟨fun j' hj' y hy => ?_, hpw⟩⟩
+      fun j' hj' y hy e he => ?_, List.pairwise_cons.2 ⟨fun j' hj' y hy => ?_, hpw⟩,
+      fun j' hj' y hy => ?_⟩
     · rcases List.mem_append.1 hx with hx | hx
       · exact (hall x hx).1
       · exact hpl x hx
@@ -367,6 +385,13 @@ theorem layout_fold {s : Tables .lower N} {base : UInt64} {bits : UInt8} {guards
         exact Bool.eq_false_iff.2 (this.1 e he)
       · exact hear j' hj' y hy e (List.mem_append_left _ he)
     · exact hear j' hj' y hy j.range (List.mem_append_right _ (List.mem_singleton_self _))
+    · rcases List.mem_cons.1 hj' with rfl | hj'
+      · have : y ∈ ps.map Prod.fst := by rw [hmap]; exact hy
+        obtain ⟨x, hx, rfl⟩ := List.mem_map.1 this
+        have := (hall x hx).2
+        simp only [Bool.or_eq_false_iff] at this
+        exact this.2
+      · exact hgd j' hj' y hy
 
 theorem rangePages_spec {bits : UInt8} {j : LayoutRange} (hj : LayoutOk bits j) :
     (∀ x ∈ rangePages j, j.range.start.toNat ≤ x.pa.toNat ∧ x.pa.toNat + PAGE_SIZE ≤ j.range.endNat ∧
@@ -393,7 +418,7 @@ theorem kernelMap_facts {s : Tables .lower N} {layout : Layout} {base : UInt64}
   obtain ⟨-, -, h⟩ := h
   rw [except_bind_ok] at h
   obtain ⟨res, hf, h⟩ := h
-  obtain ⟨new, hres, hmap, hpl, hok, -, hpw⟩ := layout_fold _ [] [] res hf
+  obtain ⟨new, hres, hmap, hpl, hok, -, hpw, -⟩ := layout_fold _ [] [] res hf
   obtain ⟨_, lv⟩ := res
   simp only [List.append_nil] at hres
   subst hres
@@ -434,6 +459,24 @@ theorem kernelMap_facts {s : Tables .lower N} {layout : Layout} {base : UInt64}
     refine ⟨fun _ => ⟨⟨j.kind, ?_⟩, ?_⟩, fun hb => absurd (h5.symm.trans hb) (by decide)⟩
     · rw [h6, outputAddress_descriptor, descriptor_outputAddress]
     · rw [h6, outputAddress_descriptor]; have := outputAddress_le lp.1.pa; simp only [PAGE_SIZE] at h2; omega
+
+/-- The checks of the ranges of a successful `kernel_map`: no page of a range
+holds a guard address, and no page of a range meets a range before it in
+address order. -/
+theorem kernelMap_checks {s : Tables .lower N} {layout : Layout} {base : UInt64}
+    {bits : UInt8} {s₁ : Tables .lower N} {plan : Plan}
+    (h : s.kernelMap layout base bits = .ok (s₁, plan)) :
+    (∀ j ∈ sortByKey (·.range.start.toNat) layout.ranges, ∀ y ∈ rangePages j,
+      y.isGuard layout.guards = false) ∧
+    (sortByKey (·.range.start.toNat) layout.ranges).Pairwise
+      (fun j j' => ∀ y ∈ rangePages j', y.meets j.range.start.toNat j.range.endNat = false) := by
+  unfold Tables.kernelMap at h
+  rw [except_bind_ok] at h
+  obtain ⟨-, -, h⟩ := h
+  rw [except_bind_ok] at h
+  obtain ⟨res, hf, -⟩ := h
+  obtain ⟨-, -, -, -, -, -, hpw, hgd⟩ := layout_fold _ [] [] res hf
+  exact ⟨hgd, hpw⟩
 
 /-! ## Descriptors of the direct map -/
 
@@ -552,13 +595,13 @@ theorem mapBlock_single {s s' : Tables r N} {v p base : UInt64} {bits : UInt8} {
       s'.apply plan = finalSet s base [(⟨v, p, blockDescriptor p, .block⟩, pl)] ∧
       (assignTables s.used [(⟨v, p, blockDescriptor p, .block⟩, pl)]).1 ≤ N ∧
       plan = mapPlan base (assignTables s.used [(⟨v, p, blockDescriptor p, .block⟩, pl)]).2 ∧
-      s'.pool = s.pool := by
+      p.toNat % BLOCK_SIZE = 0 ∧ p.toNat < 2 ^ bits.toNat ∧ s'.pool = s.pool := by
   unfold Tables.mapBlock at h
   obtain ⟨u1, hce, h⟩ := except_bind_ok.1 h
   obtain ⟨u2, hcp, h⟩ := except_bind_ok.1 h
   obtain ⟨w, hw, h⟩ := except_bind_ok.1 h
   obtain ⟨hv, -, hr, -, -⟩ := checkEntry_ok.1 hce
-  have hpb := (checkPhysical_ok.1 hcp).2
+  obtain ⟨hpa, hpb⟩ := checkPhysical_ok.1 hcp
   have hd : LeafDesc bits ⟨v, p, blockDescriptor p, .block⟩ :=
     ⟨(fun h => by cases h), fun _ => ⟨isReadWriteBlock_blockDescriptor p, by
       rw [blockAddress_blockDescriptor]; exact Nat.lt_of_le_of_lt (blockAddress_le p) hpb⟩⟩
@@ -573,12 +616,12 @@ theorem mapBlock_single {s s' : Tables r N} {v p base : UInt64} {bits : UInt8} {
     simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
     obtain ⟨rfl, rfl⟩ := h
     exact ⟨.root, key _ (by unfold Tables.place; rw [hw]; rfl), rfl,
-      by show s.used + 1 ≤ N; omega, rfl, rfl⟩
+      by show s.used + 1 ≤ N; omega, rfl, hpa, hpb, rfl⟩
   · obtain ⟨-, h⟩ := except_jp_ok h
     obtain ⟨hv2, h⟩ := except_jp_ok h
     simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
     obtain ⟨rfl, rfl⟩ := h
-    refine ⟨.level2 t2, key _ ?_, rfl, hs.2.2.1, rfl, rfl⟩
+    refine ⟨.level2 t2, key _ ?_, rfl, hs.2.2.1, rfl, hpa, hpb, rfl⟩
     unfold Tables.place; rw [hw]
     simp only [bind, Except.bind, Bool.not_eq_true] at hv2 ⊢
     simp only [hv2, Bool.not_false, ite_true]; rfl

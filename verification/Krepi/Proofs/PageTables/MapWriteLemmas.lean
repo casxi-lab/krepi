@@ -16,7 +16,8 @@ well-formed set (`LeafFacts`):
   two stores into one entry agree, a store is into a free entry of a table
   below the next free index, and a store of a table descriptor links a new
   table);
-- the entries after the plan: `final_entry_wr` and `final_entry_old`;
+- the entries after the plan: `final_entry_wr`, `final_entry_old` and
+  `not_wr_of_lt` (the plan stores into no nonzero entry of a table in use);
 - the tables after the plan: `NewT2`, `NewT3`, `leaf_not_plain`,
   `child_final`, `final_pointsAt` (a table descriptor of the set after the map
   is a link of a new table or one of the set before it), `final_level2` and
@@ -29,9 +30,9 @@ well-formed set (`LeafFacts`):
   the set before it or lies in a placed leaf, with its descriptor.
 
 Small facts: `placed_t2_ne_zero`, `placed_t3_ne_zero`, `slot_of_t2`.
-`final_entry_wr`, `final_pointsAt`, `final_level2`, `final_level3` and
-`placed_path` are not used by another module yet; they are stated for the
-abstract mapping and the slots after a map.
+`final_entry_wr`, `final_pointsAt`, `final_level2`, `final_level3`,
+`not_wr_of_lt` and `placed_path` serve the abstract mapping and the slots
+after a map (`Krepi.Proofs.PageTables.AfterMapLemmas`).
 -/
 
 @[expose] public section
@@ -291,7 +292,7 @@ theorem final_pointsAt (hs : s.WellFormed base bits) (hl : LeafFacts s base bits
       · exact hpl
       · rw [child_final]; exact child?_mono (s := s) hle hc
 
-private theorem not_wr_of_lt (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {t i : Nat}
+theorem not_wr_of_lt (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {t i : Nat}
     (ht : t < s.used) (hne : s.entry t i ≠ 0) : ∀ d, ¬ Wr base (assignTables s.used leaves).2 t i d :=
   fun _ hw => hne ((wr_facts hs hl hw).2.2 ht)
 

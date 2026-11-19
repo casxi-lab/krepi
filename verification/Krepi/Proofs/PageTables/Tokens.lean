@@ -5,6 +5,7 @@ import Mathlib.Util.CountHeartbeats
 import Krepi.Proofs.PageTables.Tables
 import Krepi.Proofs.PageTables.MapCheckLemmas
 import Krepi.Proofs.PageTables.BitLemmas
+import Krepi.Proofs.PageTables.Ownership
 
 /-!
 # Page tables: proofs about the shared state
@@ -21,11 +22,13 @@ is a theorem of `Krepi.Proofs.PageTables.Tables`, and leaves the other fields
 as they are; every leaf of the direct map after `direct_map` is one of the
 set before it or a leaf of a usable range at `DIRECT_BASE | pa`
 (`Krepi.Proofs.PageTables.MapWriteLemmas`, `MapCheckLemmas`). The three
-theorems about the page ownership table, `newOwnershipSharedWellFormed`,
-`withOwnershipWellFormed` and `allocateWellFormed`, are still planned: their
-proof is `sorry`, and `verification/statements.json` registers them as
-`planned`. Mathlib is imported so that the gate counts the heartbeats of
-each theorem.
+theorems about the page ownership table are proved in the same way: the
+transaction writes only the table, which `Ownership::new` or the entry keeps
+well-formed; for `allocateWellFormed` the entry is `choose` and then
+`assign` of its choice, so the choice meets the requirement of `assign`
+(`Krepi.Proofs.PageTables.Ownership.newOwnershipWellFormed` and
+`assignWellFormed`). Every theorem here is proved. Mathlib is imported so
+that the gate counts the heartbeats of each theorem.
 -/
 
 namespace Krepi.Proofs.PageTables.Tokens
@@ -163,12 +166,37 @@ public theorem fillKernelWellFormed : FillKernelWellFormed := by
   · simp at h
 
 public theorem newOwnershipSharedWellFormed : NewOwnershipSharedWellFormed := by
-  sorry
+  intro E X cfg tok s arena banks exclusions s' hs h
+  unfold Shared.newOwnership at h
+  split at h
+  · simp at h
+  · simp only [Option.some.injEq, except_map_ok] at h
+    obtain ⟨t, h1, rfl⟩ := h
+    refine ⟨hs.1, hs.2.1, fun t' h' => ?_⟩
+    simp only [Option.some.injEq] at h'
+    subst h'
+    exact Krepi.Proofs.PageTables.Ownership.newOwnershipWellFormed _ _ _ _ _ _ h1
 
 public theorem withOwnershipWellFormed : WithOwnershipWellFormed := by
-  sorry
+  intro E X cfg ε α tok s entry s' a hentry hs h
+  unfold Shared.withOwnership at h
+  obtain ⟨t, ht, h⟩ := Option.map_eq_some_iff.1 h
+  obtain ⟨⟨t', b⟩, h1, h2⟩ := except_map_ok.1 h
+  simp only [Prod.mk.injEq] at h2
+  obtain ⟨rfl, rfl⟩ := h2
+  refine ⟨hs.1, hs.2.1, fun t'' h'' => ?_⟩
+  simp only [Option.some.injEq] at h''
+  subst h''
+  exact hentry t t' b (hs.2.2 t ht) h1
 
 public theorem allocateWellFormed : AllocateWellFormed := by
-  sorry
+  intro E X cfg tok s owner pages alignment p zeroed s' a hs h
+  refine withOwnershipWellFormed E X cfg _ _ tok s _ s' a (fun t t' b ht he => ?_) hs h
+  simp only [bind, Except.bind] at he
+  split at he
+  · cases he
+  · rename_i c hc
+    exact Krepi.Proofs.PageTables.Ownership.assignWellFormed _ _ t c _ t' b ht
+      ⟨owner, pages, alignment, p, hc⟩ he
 
 end Krepi.Proofs.PageTables.Tokens

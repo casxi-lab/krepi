@@ -8,20 +8,16 @@ import Krepi.Proofs.PageTables.WalkLemmas
 /-!
 # Page tables: the plan of a map, unit by unit
 
-- `mapPlan_units`: the plan of placed leaves whose tables agree slot by slot
-  is the steps of its units (`ukey`, `unitSteps`) and `Sync`;
-- prefixes of the leaves of a map: `foldl_add_placed`, `leafFacts_take`,
-  `assign_take` (the placed leaves of a prefix are the prefix of the placed
-  leaves);
-- **`mapPlan_inOrder`**: the plan of the leaves of a map that passed their
-  checks in a well-formed set passes `Plan.inOrder`, one unit after the
-  other, each against the set that the units before it left (`finalSet` of a
-  prefix of the leaves, well-formed by `final_wf`), in which its tables are
-  new or held as in the set before the map.
+**`mapPlan_inOrder`**: the plan of the leaves of a map that passed their
+checks in a well-formed set passes `Plan.inOrder`, one unit after the other,
+each against the set that the units before it left (`finalSet` of a prefix
+of the leaves, well-formed by `final_wf`), in which its tables are new or
+held as in the set before the map.
 
-`mapPlan_units`, `foldl_add_placed`, `leafFacts_take` and `assign_take` are
-not used by another module yet; they are stated for any reading of the plan
-of a map unit by unit. The other lemmas of the module are private steps.
+Its private steps: the plan of placed leaves whose tables agree slot by slot
+is the steps of its units (`ukey`, `unitSteps`) and `Sync`, and the placed
+leaves of a prefix of the leaves of a map are the prefix of the placed
+leaves.
 -/
 
 @[expose] public section
@@ -96,7 +92,7 @@ private theorem ukey_lt {q q' : Placed} (hg : q.leaf.gibSlot < q'.leaf.gibSlot) 
   have := Nat.div_le_div_right (c := 2 * ENTRIES) h
   omega
 
-theorem mapPlan_units (base : UInt64) {P : List Placed} (hp : PlacedOk P) :
+private theorem mapPlan_units (base : UInt64) {P : List Placed} (hp : PlacedOk P) :
     mapPlan base P = (runsBy ukey P).flatMap (unitSteps base) ++ [.sync] := by
   rw [mapPlan_eq]
   congr 1
@@ -189,7 +185,7 @@ private theorem placedOk_sublist {P Q : List Placed} (hp : PlacedOk P) (h : Q.Su
     fun q hq => hp.new3 q (h.subset hq), fun q hq q' hq' => hp.t2new q (h.subset hq) q' (h.subset hq'),
     fun q hq q' hq' => hp.t3new q (h.subset hq) q' (h.subset hq')⟩
 
-theorem foldl_add_placed : ∀ (L : List (MapLeaf × Place)) (a : Alloc),
+private theorem foldl_add_placed : ∀ (L : List (MapLeaf × Place)) (a : Alloc),
     ∃ Y, (L.foldl Alloc.add a).placed = Y ++ a.placed
   | [], a => ⟨[], rfl⟩
   | (l, p) :: L, a => by
@@ -201,14 +197,14 @@ section Prefix
 
 variable {s : Tables r N} {base : UInt64} {bits : UInt8} {leaves : List (MapLeaf × Place)}
 
-theorem leafFacts_take (hl : LeafFacts s base bits leaves) (k : Nat) :
+private theorem leafFacts_take (hl : LeafFacts s base bits leaves) (k : Nat) :
     LeafFacts s base bits (leaves.take k) :=
   ⟨fun lp h => hl.place lp (List.mem_of_mem_take h),
     by rw [List.map_take]; exact hl.order.sublist (List.take_sublist _ _),
     fun lp h => hl.region lp (List.mem_of_mem_take h), fun lp h => hl.align lp (List.mem_of_mem_take h),
     fun lp h => hl.desc lp (List.mem_of_mem_take h)⟩
 
-theorem assign_take (hl : LeafFacts s base bits leaves) {k : Nat} (hk : k ≤ leaves.length) :
+private theorem assign_take (hl : LeafFacts s base bits leaves) {k : Nat} (hk : k ≤ leaves.length) :
     (assignTables s.used (leaves.take k)).2 = (assignTables s.used leaves).2.take k := by
   have hlen : (assignTables s.used (leaves.take k)).2.length = k := by
     have := congrArg List.length
