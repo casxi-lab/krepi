@@ -888,7 +888,7 @@
       "name": "Krepi.SpecProperties.PageTables.AfterEveryWrite",
       "theorem": "Krepi.Proofs.PageTables.Mapping.afterEveryWrite",
       "module": "Krepi.Proofs.PageTables.Mapping",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.TablesInUseCounted",

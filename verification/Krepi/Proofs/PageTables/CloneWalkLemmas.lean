@@ -19,7 +19,9 @@ What the target of `Tables.cloneKernelFrom` maps once its plan has run:
   record of the target is that of the source, the valid entries of the root
   and of the level 2 tables of the source are table descriptors with no
   attribute of tables in use, the leaf tables of the walk of the source are
-  the tables that the level 2 tables point at, and each entry of the target
+  the tables that the level 2 tables point at, neither the root nor a table
+  that the root points at is one of them, their valid entries are leaves that
+  the copy takes (`copyableLeaf`), and each entry of the target
   is the copy of the entry of the source (`copyValue`) where that one is
   valid and in a table in use, and 0 elsewhere;
 - `clone_M`: from a well-formed source, every leaf of the abstract mapping of
@@ -51,6 +53,10 @@ theorem clone_facts {target source s : Tables r N} {sb base : UInt64} {bits : UI
           source.child? sb (source.entry 0 i) = some c) ∧
         ∃ j, j < ENTRIES ∧ isValid (source.entry c j) = true ∧
           source.child? sb (source.entry c j) = some t) ∧
+      (∀ t, (t = 0 ∨ ∃ i, i < ENTRIES ∧ isValid (source.entry 0 i) = true ∧
+          source.child? sb (source.entry 0 i) = some t) → t ∉ leaves) ∧
+      (∀ t ∈ leaves, ∀ i, i < ENTRIES → isValid (source.entry t i) = true →
+        copyableLeaf bits (source.entry t i) = true) ∧
       ∀ t i, (s.apply plan).entry t i =
         if t < source.used ∧ i < ENTRIES ∧ isValid (source.entry t i) = true then
           copyValue sb base (leaves.contains t) (source.entry t i) else 0 := by
@@ -64,12 +70,14 @@ theorem clone_facts {target source s : Tables r N} {sb base : UInt64} {bits : UI
   obtain ⟨-, h⟩ := except_jp_ok h
   simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
   obtain ⟨rfl, rfl⟩ := h
-  obtain ⟨w1, -, w3, -⟩ := walkRoot_ok source sb bits hw
-  simp only [table_toList_eq, List.nil_append] at w1 w3
+  obtain ⟨w1, w2, w3, w4⟩ := walkRoot_ok source sb bits hw
+  have hnd := w4 (List.nodup_cons.2 ⟨List.not_mem_nil, List.nodup_nil⟩)
+  simp only [table_toList_eq, List.singleton_append, List.nil_append] at w1 w2 w3 hnd
+  rw [w2] at hnd
   have hmem : ∀ t i, i < ENTRIES → source.entry t i ∈ (List.range ENTRIES).map (source.entry t) :=
     fun t i hi => List.mem_map.2 ⟨i, List.mem_range.2 hi, rfl⟩
   refine ⟨st.leaves, checkPool_ok.1 hc1, checkPool_ok.1 hc2, rfl, fun i hi hv => ?_,
-    fun t => ?_, fun t i => ?_⟩
+    fun t => ?_, fun t ht hl => ?_, fun t ht i hi hv => ?_, fun t i => ?_⟩
   · obtain ⟨hp, c, hc, h2⟩ := w1 _ (hmem 0 i hi) hv
     refine ⟨hp, c, hc, fun j hj hvj => ?_⟩
     obtain ⟨hp', c', hc', -⟩ := h2 _ (hmem c j hj) hvj
@@ -78,6 +86,28 @@ theorem clone_facts {target source s : Tables r N} {sb base : UInt64} {bits : UI
     constructor
     · rintro ⟨c, hc, ht⟩; exact ⟨c, mem_kids.1 hc, mem_kids.1 ht⟩
     · rintro ⟨c, hc, ht⟩; exact ⟨c, mem_kids.2 hc, mem_kids.2 ht⟩
+  · rw [w3] at hl
+    obtain ⟨c, hc, htc⟩ := List.mem_flatMap.1 hl
+    rw [List.nodup_cons] at hnd
+    obtain ⟨h0G, hGn⟩ := hnd
+    rcases ht with rfl | ⟨i, hi, hv, hci⟩
+    · exact h0G (List.mem_flatMap.2 ⟨c, hc, List.mem_cons_of_mem _ htc⟩)
+    · rw [List.nodup_flatMap] at hGn
+      obtain ⟨hgrp, hpw⟩ := hGn
+      by_cases he : c = t
+      · subst he; exact (List.nodup_cons.1 (hgrp c hc)).1 htc
+      · exact disjoint_of_pairwise (g := fun c => c :: ((List.range ENTRIES).map
+          (source.entry c)).filterMap (kidOf source sb)) hpw hc (mem_kids.2 ⟨i, hi, hv, hci⟩) he
+          (List.mem_cons_of_mem _ htc) List.mem_cons_self
+  · rw [w3] at ht
+    obtain ⟨c, hc, htc⟩ := List.mem_flatMap.1 ht
+    obtain ⟨i0, hi0, hv0, hc0⟩ := mem_kids.1 hc
+    obtain ⟨-, c2, hc2, h2⟩ := w1 _ (hmem 0 i0 hi0) hv0
+    obtain rfl : c = c2 := Option.some.inj (hc0.symm.trans hc2)
+    obtain ⟨j, hj, hvj, hcj⟩ := mem_kids.1 htc
+    obtain ⟨-, c3, hc3, h3⟩ := h2 _ (hmem c j hj) hvj
+    obtain rfl : t = c3 := Option.some.inj (hcj.symm.trans hc3)
+    exact h3 _ (hmem t i hi) hv
   · rw [entry_eq_get]
     show (Plan.exec _ target.pool).get t i = _
     by_cases ht : t < N
@@ -140,7 +170,7 @@ theorem clone_M {target source s : Tables r N} {sb base : UInt64} {bits : UInt8}
     (hz : ∀ t, target.used ≤ t → t < N → target.table t = Table.zero)
     (h : target.cloneKernelFrom source sb base bits = .ok (s, plan)) {v : UInt64} {l : Leaf}
     (hm : (s.apply plan).M base v l) : source.M sb v l := by
-  obtain ⟨leaves, -, hpb, hused, h1, h3, hent⟩ := clone_facts hz h
+  obtain ⟨leaves, -, hpb, hused, h1, h3, -, -, hent⟩ := clone_facts hz h
   obtain ⟨hreg, hal, hcase⟩ := hm
   -- a valid entry of the target is the copy of a valid entry of the source
   have hval : ∀ t i, isValid ((s.apply plan).entry t i) = true →
