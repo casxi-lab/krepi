@@ -22,14 +22,18 @@ slot by slot (`PlacedOk`):
 - the stores that a placed leaf needs, `writesOf` (the link of its new level 2
   table into the root, the link `link3` of its new level 3 table into its
   level 2 table, and the leaf), and its new tables, `NewTable`;
+- placed leaves whose tables agree slot by slot, `PlacedOk`, with the slot
+  facts `gib_of_block`, `index1_of_gib` and `index2_of_block`;
 - the plan: `runSteps`, `mapPlan_eq`, `childSteps`, `newLevel2Steps_eq`,
   `mem_writesOf`, `gib_run`, `block_run` (the leaves of a 1 GiB run and of a
-  2 MiB run agree on their tables), `mem_childSteps`, `mem_level2Entry`,
-  `mem_newLevel2Steps`, `mem_heldLevel2Steps`, `mem_runSteps` and
-  `mem_mapPlan` (a store is in the plan exactly when a placed leaf needs it);
-  `store_table`, `conflict`, `zero_runSteps` and `zero_mapPlan` (the plan
-  zeroes only new tables); `pairwise_mapPlan` (it zeroes each before any
-  store into it).
+  2 MiB run agree on their tables), `mem_map_store`, `mem_childSteps`,
+  `mem_level2Entry`, `mem_newLevel2Steps`, `mem_heldLevel2Steps`,
+  `mem_runSteps` and `mem_mapPlan` (a store is in the plan exactly when a
+  placed leaf needs it); `store_table`, `conflict`, `store_ne_zero`,
+  `zero_not_mem_map_store`, `zero_not_mem_level2Entry`, `zero_runSteps` and
+  `zero_mapPlan` (the plan zeroes only new tables); `pairwise_of_no_zero`,
+  `pairwise_runsBy_lt`, `pairwise_block_runs` and `pairwise_mapPlan` (it
+  zeroes each new table before any store into it).
 -/
 
 @[expose] public section

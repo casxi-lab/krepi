@@ -369,8 +369,8 @@ theorem placed_ok (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leav
     fun q hq q' hq' hb => ?_, fun q hq q' hq' hb hf => placed_blockOne hl hq hq' hb hf,
     fun q hq hn hp => (placed_new3 hs hl hq hp).1 hn, fun q hq q' hq' hn' => ?_,
     fun q hq q' hq' hp' hn' => ?_⟩
-  · rcases placed_distinct hl hq hq' with rfl | h | h
-    · exact ⟨rfl, rfl, rfl⟩
+  · by_cases heq : q = q'
+    · subst heq; exact ⟨rfl, rfl, rfl⟩
     cases hf : q.leaf.form
     · cases hf' : q'.leaf.form
       · obtain ⟨hn, ht⟩ := placed_gib hs hl hq hq' (gib_of_block hb)
@@ -389,32 +389,8 @@ theorem placed_ok (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leav
           exact pointsAt_ne_zero (k'.2.2 h3').2.1 this
         · have := (assignTables_spec s.used leaves (leaves_mono hl)).2.2.2.2.2.2.1
           exact ⟨rfl, rfl, (this q hq q' hq' hf h3 hf' h3').2 hb⟩
-      · have := placed_blockOne hl hq' hq hb.symm hf'
-        subst this; rw [hf] at hf'; cases hf'
-    · have := placed_blockOne hl hq hq' hb hf
-      subst this; have := form_size_pos q.leaf.form; omega
-    · cases hf : q.leaf.form
-      · cases hf' : q'.leaf.form
-        · obtain ⟨hn, ht⟩ := placed_gib hs hl hq hq' (gib_of_block hb)
-          have hi := index2_of_block hb
-          have k := placed_new3 hs hl hq hf
-          have k' := placed_new3 hs hl hq' hf'
-          cases h3 : q.new3 <;> cases h3' : q'.new3
-          · exact ⟨rfl, rfl, pointsAt_inj (k.2.2 h3).2.1 (ht ▸ hi ▸ (k'.2.2 h3').2.1)⟩
-          · exfalso
-            have := k'.2.1 h3' (hn ▸ (k.2.2 h3).1)
-            rw [← ht, ← hi] at this
-            exact pointsAt_ne_zero (k.2.2 h3).2.1 this
-          · exfalso
-            have := k.2.1 h3 (hn.symm ▸ (k'.2.2 h3').1)
-            rw [ht, hi] at this
-            exact pointsAt_ne_zero (k'.2.2 h3').2.1 this
-          · have := (assignTables_spec s.used leaves (leaves_mono hl)).2.2.2.2.2.2.1
-            exact ⟨rfl, rfl, (this q hq q' hq' hf h3 hf' h3').2 hb⟩
-        · have := placed_blockOne hl hq' hq hb.symm hf'
-          subst this; have := form_size_pos q'.leaf.form; omega
-      · have := placed_blockOne hl hq hq' hb hf
-        subst this; rw [hf] at *; simp_all
+      · exact absurd (placed_blockOne hl hq' hq hb.symm hf').symm heq
+    · exact absurd (placed_blockOne hl hq hq' hb hf) heq
   · refine ⟨fun e => ?_, fun e => placed_t2eq hs hl hq hq' e.symm, fun hp e => placed_apart hs hl hq' hq hp e⟩
     have := (placed_lt2 hs hl hq').2 hn'; have := hs.2.1; omega
   · refine ⟨fun e => ?_, fun e => placed_apart hs hl hq hq' hp' e.symm,
