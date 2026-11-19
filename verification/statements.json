@@ -1020,49 +1020,49 @@
       "name": "Krepi.SpecTests.PageTables.OwnershipOfBoardShapes",
       "theorem": "Krepi.Proofs.PageTables.Stp.ownershipOfBoardShapes",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.OwnershipRefusesOverlappingBanks",
       "theorem": "Krepi.Proofs.PageTables.Stp.ownershipRefusesOverlappingBanks",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.AllocationTakesWindowAndGeneration",
       "theorem": "Krepi.Proofs.PageTables.Stp.allocationTakesWindowAndGeneration",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.ReleaseRefusesStaleReceipt",
       "theorem": "Krepi.Proofs.PageTables.Stp.releaseRefusesStaleReceipt",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.ReservationPublishesAfterZeroing",
       "theorem": "Krepi.Proofs.PageTables.Stp.reservationPublishesAfterZeroing",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.CancelRefusesAttemptedReservation",
       "theorem": "Krepi.Proofs.PageTables.Stp.cancelRefusesAttemptedReservation",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.CapacitiesAtTheirLimits",
       "theorem": "Krepi.Proofs.PageTables.Stp.capacitiesAtTheirLimits",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.CapacitiesRefuseOneMore",
       "theorem": "Krepi.Proofs.PageTables.Stp.capacitiesRefuseOneMore",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.CopyIsPrivateAndOrdered",
