@@ -612,37 +612,37 @@
       "name": "Krepi.SpecProperties.PageTables.NewOwnershipWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Ownership.newOwnershipWellFormed",
       "module": "Krepi.Proofs.PageTables.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NewOneOwner",
       "theorem": "Krepi.Proofs.PageTables.Ownership.newOneOwner",
       "module": "Krepi.Proofs.PageTables.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NewHolderRanges",
       "theorem": "Krepi.Proofs.PageTables.Ownership.newHolderRanges",
       "module": "Krepi.Proofs.PageTables.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NewGenerationsBelowCounter",
       "theorem": "Krepi.Proofs.PageTables.Ownership.newGenerationsBelowCounter",
       "module": "Krepi.Proofs.PageTables.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NewFreeExtentsMaximal",
       "theorem": "Krepi.Proofs.PageTables.Ownership.newFreeExtentsMaximal",
       "module": "Krepi.Proofs.PageTables.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NewFreeOrHeldUsable",
       "theorem": "Krepi.Proofs.PageTables.Ownership.newFreeOrHeldUsable",
       "module": "Krepi.Proofs.PageTables.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.AssignWellFormed",
