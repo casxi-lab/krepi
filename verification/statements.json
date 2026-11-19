@@ -498,19 +498,19 @@
       "name": "Krepi.SpecProperties.PageTables.CheckTablesWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkTablesWellFormed",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckOwnershipWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkOwnershipWellFormed",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckSharedWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkSharedWellFormed",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckOneOwner",
@@ -546,7 +546,7 @@
       "name": "Krepi.SpecProperties.PageTables.CheckDirectMapOffset",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkDirectMapOffset",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NewWellFormed",
