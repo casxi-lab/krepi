@@ -912,13 +912,13 @@
       "name": "Krepi.SpecProperties.PageTables.DirectMapUnchangedAfterBoot",
       "theorem": "Krepi.Proofs.PageTables.Kernel.directMapUnchangedAfterBoot",
       "module": "Krepi.Proofs.PageTables.Kernel",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.KernelTablesOnlyFilled",
       "theorem": "Krepi.Proofs.PageTables.Kernel.kernelTablesOnlyFilled",
       "module": "Krepi.Proofs.PageTables.Kernel",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.PlacementFirstFit",
