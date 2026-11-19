@@ -960,13 +960,13 @@
       "name": "Krepi.SpecTests.PageTables.EightGibOfBlocksInNineTables",
       "theorem": "Krepi.Proofs.PageTables.Stp.eightGibOfBlocksInNineTables",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.BlockBeyondNineTablesRefused",
       "theorem": "Krepi.Proofs.PageTables.Stp.blockBeyondNineTablesRefused",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.UnmapAndResetFollowContract",
@@ -984,7 +984,7 @@
       "name": "Krepi.SpecTests.PageTables.DirectMapCountsOfPi5Models",
       "theorem": "Krepi.Proofs.PageTables.Stp.directMapCountsOfPi5Models",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.DirectMapOmitsExcludedPages",
