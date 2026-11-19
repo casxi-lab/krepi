@@ -18,43 +18,32 @@ the range get the new owner and every other page keeps its owner.
 - the search of an extent: `splitFirst_some` (the extents around the one
   found) and `splitFirst_none` (no extent passes the test);
 - the pieces of `Extent.take`: `mem_take` (the range taken, or a free part
-  before or after it), `take_within` (inside the extent, of its bank),
-  `take_length` (one more than `Extent.extra`), `take_inOrder`,
-  `take_onPages` and `take_holds` (a page of the extent lies in the piece
-  of the range when the range holds it and in a free piece otherwise);
+  before or after it);
 - the steps of the entries: `take_ok`, `assign_ok`, `reserve_ok`,
-  `findHeld_ok`, `publish_ok`, `release_ok` and `cancel_ok` (what an entry
-  that succeeds checked and wrote), `choose_ok` (the checks and the scan of
-  `choose`), and `fit_onPages`, `scan_onPages` and `choose_onPages` (the
-  range of a choice is on pages);
-- the counter: `counter_after_ne` (it never gives the generation 0) and
-  `counter_after_eq` (it grows by one);
-- joining free extents: `join_eq_some`, `join_eq_none`, `mergeFreed_spec`
-  (the extents that `mergeFreed` joins, case by case, with the neighbours
-  that it does not join) and `mergeFreed_block` (the same as one block
-  replaced by one free extent that covers it);
-- the order of the extents: `inOrder_replace` (a block replaced by ordered
-  extents within its bounds) and its cases `inOrder_take`,
-  `inOrder_relabel` and `inOrder_merge`;
-- well-formedness: `inBank_span` (an extent between two extents of one bank
-  lies in that bank), `wellFormed_replace` (a block replaced in a
-  well-formed table) and its cases `take_wellFormed`, `relabel_wellFormed`
-  and `merge_wellFormed`;
-- the owner function: `ownerOf_take`, `ownerOf_relabel` and
-  `ownerOf_merge`, for the pages at multiples of 4 KiB where the shape
-  needs it;
+  `findHeld_ok`, `release_ok` and `cancel_ok` (what an entry that succeeds
+  checked and wrote), `choose_ok` (the checks and the scan of `choose`), and
+  `choose_onPages` (the range of a choice is on pages);
+- the counter: `counter_after_eq` (it grows by one);
+- joining free extents: `mergeFreed_spec` (the extents that `mergeFreed`
+  joins, case by case, with the neighbours that it does not join);
 - the entries together: `take_spec`, `assign_spec`, `reserve_spec`,
   `publish_spec`, `free_spec`, `release_spec` and `cancel_spec`, each the
   well-formedness, the fields that the entry keeps, the counter, the extent
   that a value names and the owner function after the entry;
 - the extents after a write: `take_extents` (the range was inside a free
   extent, and every extent after is one of the table, free, or the range
-  held), `publish_extents`, `mem_mergeFreed`, `release_extents` and
-  `cancel_extents` (every extent after is one of the table, or the one
-  published, or free).
+  held), `publish_extents` (every extent after is one of the table or the
+  one published) and `mem_mergeFreed` (every extent after `mergeFreed` is
+  one before it or free).
 
-The private `pairwise_toList`, `left_none` and `right_none` are steps of
-these.
+The private steps follow the same order: the pieces of `Extent.take` (inside
+the extent, their number, order, pages and holdings), the publication, the
+range of `fit` and of the scan, the counter that never gives the generation
+0, the join of two free extents, `mergeFreed` as one block replaced by one
+free extent that covers it, the order and the well-formedness of a table
+whose block of extents is replaced, case by case for the three shapes, and
+the owner function after each shape, for the pages at multiples of 4 KiB
+where the shape needs it.
 -/
 
 @[expose] public section
@@ -108,7 +97,7 @@ theorem mem_take {e x : Extent} {r : PhysRange} {h : Holding} (hx : x ∈ e.take
   · obtain ⟨_, _, h1, h2⟩ := rangeOf?_eq_some.1 hg
     exact Or.inr ⟨rfl, rfl, Or.inr ⟨h1, by dsimp only; omega⟩⟩
 
-theorem take_within {e x : Extent} {r : PhysRange} {h : Holding} (hc : e.range.contains r = true)
+private theorem take_within {e x : Extent} {r : PhysRange} {h : Holding} (hc : e.range.contains r = true)
     (hx : x ∈ e.take r h) :
     e.range.start.toNat ≤ x.range.start.toNat ∧ x.range.endNat ≤ e.range.endNat ∧
       x.bank = e.bank := by
@@ -119,7 +108,7 @@ theorem take_within {e x : Extent} {r : PhysRange} {h : Holding} (hc : e.range.c
   · exact ⟨by omega, by omega, hb⟩
   · exact ⟨by omega, by omega, hb⟩
 
-theorem take_length {e : Extent} {r : PhysRange} {h : Holding} (hc : e.range.contains r = true) :
+private theorem take_length {e : Extent} {r : PhysRange} {h : Holding} (hc : e.range.contains r = true) :
     (e.take r h).length = 1 + e.extra r := by
   simp only [PhysRange.contains, Bool.and_eq_true, decide_eq_true_eq] at hc
   have := e.range.fits
@@ -160,7 +149,7 @@ private theorem pairwise_toList {α : Type} {R : α → α → Prop} (o : Option
     o.toList.Pairwise R := by
   cases o <;> simp
 
-theorem take_inOrder {e : Extent} {r : PhysRange} {h : Holding} (hc : e.range.contains r = true) :
+private theorem take_inOrder {e : Extent} {r : PhysRange} {h : Holding} (hc : e.range.contains r = true) :
     ExtentsInOrder (e.take r h) := by
   simp only [PhysRange.contains, Bool.and_eq_true, decide_eq_true_eq] at hc
   unfold Extent.take
@@ -183,7 +172,7 @@ theorem take_inOrder {e : Extent} {r : PhysRange} {h : Holding} (hc : e.range.co
       have := range_lt r
       simp only; omega
 
-theorem take_onPages {e x : Extent} {r : PhysRange} {h : Holding} (he : e.range.onPages = true)
+private theorem take_onPages {e x : Extent} {r : PhysRange} {h : Holding} (he : e.range.onPages = true)
     (hr : r.onPages = true) (hx : x ∈ e.take r h) : x.range.onPages = true := by
   simp only [PhysRange.onPages, Bool.and_eq_true, beq_iff_eq] at he hr ⊢
   rcases mem_take hx with rfl | ⟨-, -, ⟨h1, h2⟩ | ⟨h1, h2⟩⟩
@@ -194,7 +183,7 @@ theorem take_onPages {e x : Extent} {r : PhysRange} {h : Holding} (he : e.range.
 /-- In an extent `e` on pages that a range `r` on pages of it is taken from, a
 page of `e` lies in the piece of `r` when `r` holds it and in a free piece
 otherwise. -/
-theorem take_holds {e : Extent} {r : PhysRange} {h : Holding} (hc : e.range.contains r = true)
+private theorem take_holds {e : Extent} {r : PhysRange} {h : Holding} (hc : e.range.contains r = true)
     (he : e.range.onPages = true) (hr : r.onPages = true) {q : Nat} (hq : q % PAGE_SIZE = 0)
     (heq : e.range.holdsPage q = true) :
     ∃ x ∈ e.take r h, x.range.holdsPage q = true ∧
@@ -258,7 +247,7 @@ theorem take_ok {E X : Nat} {t t' : Ownership E X} {c : Choice} {s : HoldState} 
         refine ⟨before.reverse, e, after, g, rfl, by simpa using h1, h2.1, h2.2, by omega, ?_, rfl⟩
         simp [List.reverseAux_eq]
 
-theorem counter_after_ne (g : UInt64) : Counter.after g ≠ .next 0 := by
+private theorem counter_after_ne (g : UInt64) : Counter.after g ≠ .next 0 := by
   unfold Counter.after
   split
   · rename_i h
@@ -279,7 +268,7 @@ theorem counter_after_eq {g g' : UInt64} (h : Counter.after g = .next g') :
     rw [UInt64.toNat_add, UInt64.toNat_one, Nat.mod_eq_of_lt hl]
   · simp at h
 
-theorem fit_onPages {d : Direction} {lo hi bytes align : Nat} {r : PhysRange}
+private theorem fit_onPages {d : Direction} {lo hi bytes align : Nat} {r : PhysRange}
     (hb : bytes % PAGE_SIZE = 0) (ha : align % PAGE_SIZE = 0)
     (h : fit d lo hi bytes align = .range r) : r.onPages = true := by
   have hd : PAGE_SIZE ∣ align := Nat.dvd_of_mod_eq_zero ha
@@ -319,7 +308,7 @@ theorem fit_onPages {d : Direction} {lo hi bytes align : Nat} {r : PhysRange}
       · cases h
     · cases h
 
-theorem scan_onPages {room bytes align : Nat} {p : Placement} (hb : bytes % PAGE_SIZE = 0)
+private theorem scan_onPages {room bytes align : Nat} {p : Placement} (hb : bytes % PAGE_SIZE = 0)
     (ha : align % PAGE_SIZE = 0) :
     ∀ {l : List Extent} {limited : Bool} {r : PhysRange},
       scan room bytes align p l limited = .ok r → r.onPages = true
@@ -422,7 +411,7 @@ theorem findHeld_ok {E X : Nat} {t : Ownership E X} {o : UInt64} {a : Allocation
     · simp [h1, h2, throw, throwThe, MonadExceptOf.throw, bind, Except.bind] at h
   · simp [h1, throw, throwThe, MonadExceptOf.throw, bind, Except.bind] at h
 
-theorem publish_ok {E X : Nat} {t t' : Ownership E X} {o : UInt64} {x : Initialized}
+private theorem publish_ok {E X : Nat} {t t' : Ownership E X} {o : UInt64} {x : Initialized}
     {a : Allocation} (h : t.publish o x = .ok (t', a)) :
     ∃ before e after, t.findHeld o x.allocation .reserved = .ok (before, e, after) ∧
       t' = ⟨t.arena, t.banks,
@@ -465,7 +454,7 @@ theorem cancel_ok {E X : Nat} {t t' : Ownership E X} {o : UInt64} {r : Reservati
 
 /-! ## Joining free extents -/
 
-theorem join_eq_some {a b m : Extent} (h : a.join b = some m) :
+private theorem join_eq_some {a b m : Extent} (h : a.join b = some m) :
     a.holding = .free ∧ b.holding = .free ∧ a.bank = b.bank ∧
       a.range.endNat = b.range.start.toNat ∧ m.holding = .free ∧ m.bank = a.bank ∧
       m.range.start.toNat = a.range.start.toNat ∧ m.range.endNat = b.range.endNat := by
@@ -479,7 +468,7 @@ theorem join_eq_some {a b m : Extent} (h : a.join b = some m) :
     exact ⟨hc.1.1.1, hc.1.1.2, hc.1.2, hc.2, rfl, rfl, h1, by dsimp only; omega⟩
   · exact absurd h (by simp)
 
-theorem join_eq_none {a b : Extent} (h : a.join b = none) :
+private theorem join_eq_none {a b : Extent} (h : a.join b = none) :
     ¬ (a.holding = .free ∧ b.holding = .free ∧ a.bank = b.bank ∧
       a.range.endNat = b.range.start.toNat) := by
   rintro ⟨h1, h2, h3, h4⟩
@@ -595,7 +584,7 @@ theorem mergeFreed_spec (before : List Extent) (e : Extent) (after : List Extent
 `e` and otherwise free extents of its bank, replaced by the free extent `m`
 of that bank that starts where the block starts, ends where it ends and
 whose every address lies in an extent of the block. -/
-theorem mergeFreed_block (before : List Extent) (e : Extent) (after : List Extent)
+private theorem mergeFreed_block (before : List Extent) (e : Extent) (after : List Extent)
     (hl : ExtentsInOrder (before.reverse ++ e :: after)) :
     ∃ (l₁ K l₂ : List Extent) (m : Extent),
       before.reverse ++ e :: after = l₁ ++ K ++ l₂ ∧ mergeFreed before e after = l₁ ++ m :: l₂ ∧
@@ -659,7 +648,7 @@ theorem mergeFreed_block (before : List Extent) (e : Extent) (after : List Exten
 /-- A block `K` of extents in address order replaced by extents in address
 order that start at or after an extent of the block and end at or before an
 extent of the block keeps the extents in address order. -/
-theorem inOrder_replace {l₁ K M l₂ : List Extent} (hl : ExtentsInOrder (l₁ ++ K ++ l₂))
+private theorem inOrder_replace {l₁ K M l₂ : List Extent} (hl : ExtentsInOrder (l₁ ++ K ++ l₂))
     (hM : ExtentsInOrder M)
     (hlo : ∃ k ∈ K, ∀ x ∈ M, k.range.start.toNat ≤ x.range.start.toNat)
     (hhi : ∃ k ∈ K, ∀ x ∈ M, x.range.endNat ≤ k.range.endNat) :
@@ -678,20 +667,20 @@ theorem inOrder_replace {l₁ K M l₂ : List Extent} (hl : ExtentsInOrder (l₁
       have := hk2' x hx
       omega
 
-theorem inOrder_take {l₁ l₂ : List Extent} {e : Extent} {r : PhysRange} {h : Holding}
+private theorem inOrder_take {l₁ l₂ : List Extent} {e : Extent} {r : PhysRange} {h : Holding}
     (hl : ExtentsInOrder (l₁ ++ e :: l₂)) (hc : e.range.contains r = true) :
     ExtentsInOrder (l₁ ++ e.take r h ++ l₂) :=
   inOrder_replace (K := [e]) (by simpa using hl) (take_inOrder hc)
     ⟨e, by simp, fun _ hx => (take_within hc hx).1⟩ ⟨e, by simp, fun _ hx => (take_within hc hx).2.1⟩
 
-theorem inOrder_relabel {l₁ l₂ : List Extent} {e : Extent} (h : Holding)
+private theorem inOrder_relabel {l₁ l₂ : List Extent} {e : Extent} (h : Holding)
     (hl : ExtentsInOrder (l₁ ++ e :: l₂)) :
     ExtentsInOrder (l₁ ++ (⟨e.range, e.bank, h⟩ : Extent) :: l₂) := by
   have := inOrder_replace (K := [e]) (M := [⟨e.range, e.bank, h⟩]) (by simpa using hl)
     (List.pairwise_singleton _ _) ⟨e, by simp, by simp⟩ ⟨e, by simp, by simp⟩
   simpa using this
 
-theorem inOrder_merge {before after : List Extent} {e : Extent}
+private theorem inOrder_merge {before after : List Extent} {e : Extent}
     (hl : ExtentsInOrder (before.reverse ++ e :: after)) :
     ExtentsInOrder (mergeFreed before e after) := by
   obtain ⟨l₁, K, l₂, m, h1, h2, -, -, -, -, ⟨k, hk, hk'⟩, ⟨k', hk2, hk2'⟩, -⟩ :=
@@ -704,7 +693,7 @@ theorem inOrder_merge {before after : List Extent} {e : Extent}
 
 /-! ## Well-formedness after a write -/
 
-theorem inBank_span {banks : List PhysRange} {x y m : Extent} (hx : x.InBank banks)
+private theorem inBank_span {banks : List PhysRange} {x y m : Extent} (hx : x.InBank banks)
     (hy : y.InBank banks) (hxy : x.bank = y.bank) (hm : m.bank = x.bank)
     (h1 : x.range.start.toNat ≤ m.range.start.toNat) (h2 : m.range.endNat ≤ y.range.endNat) :
     m.InBank banks := by
@@ -722,7 +711,7 @@ block, replaced by extents in address order on pages in the banks, at most
 as many more as the capacity has free, with the same arena, banks and
 exclusion records and a counter that has given no generation 0, is
 well-formed. -/
-theorem wellFormed_replace {E X : Nat} {t t' : Ownership E X} {l₁ K M l₂ : List Extent}
+private theorem wellFormed_replace {E X : Nat} {t t' : Ownership E X} {l₁ K M l₂ : List Extent}
     (hwf : t.WellFormed) (ht : t.extents = l₁ ++ K ++ l₂) (ht' : t'.extents = l₁ ++ M ++ l₂)
     (ha : t'.arena = t.arena) (hb : t'.banks = t.banks) (hx : t'.exclusions = t.exclusions)
     (hc : t'.counter ≠ .next 0) (hlen : M.length ≤ K.length + (E - t.extents.length))
@@ -742,7 +731,7 @@ theorem wellFormed_replace {E X : Nat} {t t' : Ownership E X} {l₁ K M l₂ : L
       · exact hM x hx'
     · exact h6 x (by rw [ht]; simp [hx'])
 
-theorem take_wellFormed {E X : Nat} {t t' : Ownership E X} {c : Choice} {s : HoldState}
+private theorem take_wellFormed {E X : Nat} {t t' : Ownership E X} {c : Choice} {s : HoldState}
     {a : Allocation} (hwf : t.WellFormed) (hr : c.range.onPages = true)
     (h : t.take c s = .ok (t', a)) : t'.WellFormed := by
   obtain ⟨l₁, e, l₂, g, -, ht, -, hc, hroom, rfl, -⟩ := take_ok h
@@ -760,7 +749,7 @@ theorem take_wellFormed {E X : Nat} {t t' : Ownership E X} {c : Choice} {s : Hol
   · obtain ⟨h1, h2, h3⟩ := take_within hc hx
     exact ⟨take_onPages hep hr hx, inBank_span hei hei rfl h3 h1 h2⟩
 
-theorem relabel_wellFormed {E X : Nat} {t t' : Ownership E X} {l₁ l₂ : List Extent} {e : Extent}
+private theorem relabel_wellFormed {E X : Nat} {t t' : Ownership E X} {l₁ l₂ : List Extent} {e : Extent}
     {h : Holding} (hwf : t.WellFormed) (ht : t.extents = l₁ ++ e :: l₂)
     (ht' : t' = ⟨t.arena, t.banks, l₁ ++ ⟨e.range, e.bank, h⟩ :: l₂, t.exclusions, t.counter⟩) :
     t'.WellFormed := by
@@ -776,7 +765,7 @@ theorem relabel_wellFormed {E X : Nat} {t t' : Ownership E X} {l₁ l₂ : List 
   subst hx
   exact ⟨hep, inBank_span hei hei rfl rfl (Nat.le_refl _) (Nat.le_refl _)⟩
 
-theorem merge_wellFormed {E X : Nat} {t t' : Ownership E X} {before after : List Extent}
+private theorem merge_wellFormed {E X : Nat} {t t' : Ownership E X} {before after : List Extent}
     {e : Extent} (hwf : t.WellFormed) (ht : t.extents = before.reverse ++ e :: after)
     (ht' : t' = ⟨t.arena, t.banks, mergeFreed before e after, t.exclusions, t.counter⟩) :
     t'.WellFormed := by
@@ -806,7 +795,7 @@ theorem merge_wellFormed {E X : Nat} {t t' : Ownership E X} {before after : List
 /-- After `take` of the range `r` on pages from the free extent `e` of a
 well-formed table with the holding `h`, a page of `r` has the owner of `h`,
 and every other page keeps its owner. -/
-theorem ownerOf_take {E X : Nat} {t t' : Ownership E X} {l₁ l₂ : List Extent} {e : Extent}
+private theorem ownerOf_take {E X : Nat} {t t' : Ownership E X} {l₁ l₂ : List Extent} {e : Extent}
     {r : PhysRange} {h : Holding} (hwf : t.WellFormed) (ht : t.extents = l₁ ++ e :: l₂)
     (he : e.holding = .free) (hc : e.range.contains r = true) (hr : r.onPages = true)
     (ht' : t'.extents = l₁ ++ e.take r h ++ l₂) (hb : t'.banks = t.banks)
@@ -836,7 +825,7 @@ theorem ownerOf_take {E X : Nat} {t t' : Ownership E X} {l₁ l₂ : List Extent
 
 /-- After the extent `e` of a well-formed table takes the holding `h`, a page
 of `e` has the owner of `h`, and every other page keeps its owner. -/
-theorem ownerOf_relabel {E X : Nat} {t t' : Ownership E X} {l₁ l₂ : List Extent} {e : Extent}
+private theorem ownerOf_relabel {E X : Nat} {t t' : Ownership E X} {l₁ l₂ : List Extent} {e : Extent}
     {h : Holding} (hwf : t.WellFormed) (ht : t.extents = l₁ ++ e :: l₂)
     (ht' : t'.extents = l₁ ++ (⟨e.range, e.bank, h⟩ : Extent) :: l₂) (hb : t'.banks = t.banks)
     (hx : t'.exclusions = t.exclusions) (q : Nat) :
@@ -854,7 +843,7 @@ theorem ownerOf_relabel {E X : Nat} {t t' : Ownership E X} {l₁ l₂ : List Ext
 
 /-- After `mergeFreed` frees the extent `e` of a well-formed table, a page of
 `e` is free, and every other page keeps its owner. -/
-theorem ownerOf_merge {E X : Nat} {t t' : Ownership E X} {before after : List Extent}
+private theorem ownerOf_merge {E X : Nat} {t t' : Ownership E X} {before after : List Extent}
     {e : Extent} (hwf : t.WellFormed) (ht : t.extents = before.reverse ++ e :: after)
     (ht' : t'.extents = mergeFreed before e after) (hb : t'.banks = t.banks)
     (hx : t'.exclusions = t.exclusions) {q : Nat} (hq : q % PAGE_SIZE = 0) :
@@ -1063,23 +1052,5 @@ theorem mem_mergeFreed {before after : List Extent} {e y : Extent}
   · exact Or.inl (Or.inl (Or.inl hy))
   · exact Or.inr hm
   · exact Or.inl (Or.inr hy)
-
-/-- After `release` or `cancel`, every extent is one of the table or a free
-one. -/
-theorem release_extents {E X : Nat} {t t' : Ownership E X} {o : UInt64} {x : Allocation}
-    (h : t.release o x = .ok t') : ∀ y ∈ t'.extents, y ∈ t.extents ∨ y.holding = .free := by
-  obtain ⟨before, e, after, hf, rfl⟩ := release_ok h
-  obtain ⟨-, -, ht, -⟩ := findHeld_ok hf
-  intro y hy
-  rw [ht]
-  exact mem_mergeFreed hy
-
-theorem cancel_extents {E X : Nat} {t t' : Ownership E X} {o : UInt64} {r : Reservation}
-    (h : t.cancel o r = .ok t') : ∀ y ∈ t'.extents, y ∈ t.extents ∨ y.holding = .free := by
-  obtain ⟨-, before, e, after, hf, rfl⟩ := cancel_ok h
-  obtain ⟨-, -, ht, -⟩ := findHeld_ok hf
-  intro y hy
-  rw [ht]
-  exact mem_mergeFreed hy
 
 end Krepi.Proofs.PageTables

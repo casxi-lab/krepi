@@ -22,7 +22,10 @@ set:
   3 table is 0 (`wf_level3_invalid`) and no entry of it is a table descriptor
   (`wf_level3_not_plain`); a walk that ends in a level 3 table reaches it
   from a level 2 table, and its descriptor is the entry of that table
-  (`wf_walk_level3`).
+  (`wf_walk_level3`);
+- sets without valid root entries: `root_zero` (a set whose root entries are
+  all 0 maps nothing) and `new_M` (`Tables::new` on zero storage maps
+  nothing).
 -/
 
 @[expose] public section
@@ -190,5 +193,27 @@ theorem wf_walk_level3 (hs : s.WellFormed base bits) {v : UInt64} {t2 t3 : Nat} 
   exact ⟨h2, hp, h3, hd⟩
 
 end WellFormed
+
+/-! ## Sets without valid root entries -/
+
+/-- A set whose root entries are all 0 maps nothing. -/
+theorem root_zero {s : Tables r N} {base : UInt64} (h0 : ∀ i, s.entry 0 i = 0) :
+    (∀ v l, ¬ s.M base v l) ∧ (∀ g, ¬ s.G base g) ∧ (∀ b, ¬ s.P base b) := by
+  have hw : ∀ v, s.walk2 base v = .ok none := fun v => walk2_ok.2 (Or.inl ⟨by rw [h0]; decide, rfl⟩)
+  refine ⟨fun v l hm => ?_, fun g hg => ?_, fun b hb => ?_⟩
+  · obtain ⟨-, -, ⟨t2, t3, d, h, -⟩ | ⟨t2, d, h, -⟩⟩ := hm
+    · obtain ⟨e2, h2, -⟩ := walk_ok_level3.1 h
+      rw [hw] at h2; simp at h2
+    · have h2 := (walk_ok_block.1 h).1
+      rw [hw] at h2; simp at h2
+  · obtain ⟨-, -, t2, e2, h⟩ := hg
+    rw [hw] at h; simp at h
+  · obtain ⟨-, -, t2, t3, d, h⟩ := hb
+    obtain ⟨e2, h2, -⟩ := walk_ok_level3.1 h
+    rw [hw] at h2; simp at h2
+
+/-- A set of the boot, `Tables::new` on zero storage, maps nothing. -/
+theorem new_M {base v : UInt64} {l : Leaf} : ¬ (Tables.new (Pool.zero N) : Tables r N).M base v l :=
+  (root_zero fun i => by rw [entry_eq_get]; simp [Tables.new, Pool.zero, Pool.get, Table.zero]).1 v l
 
 end Krepi.Proofs.PageTables

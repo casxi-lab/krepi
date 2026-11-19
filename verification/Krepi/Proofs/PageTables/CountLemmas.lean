@@ -25,23 +25,19 @@ evaluated leaf by leaf:
   privately, the next free index of `assignTables` is that of the fold of
   `tick`;
 - the leaves of the direct map in runs: `directPage`, `directBlock`,
-  `pageRun`, `blockRun`, `pageRun_zero`, `blockRun_zero`, `directLeaves_done`
-  (no leaf from the end of a range on), `directLeaves_pages` (a run of pages
-  from a start where no block fits), `usableLeaves_eq`
+  `pageRun`, `blockRun`, `pageRun_zero`, `blockRun_zero`,
+  `directLeaves_pages` (a run of pages from a start where no block fits;
+  privately, no leaf from the end of a range on), `usableLeaves_eq`
   (the leaves of a usable range are a run of pages, a run of blocks and a run
   of pages), the counts `pageRun_blocks`, `pageRun_pages`, `blockRun_blocks`,
-  `blockRun_pages`, and the slots `dgib` and `dblk` with `tick_block`,
-  `tick_page`, `tick_blockRun` and `tick_pageRun` (the fold of `tick` over a
-  run of blocks, and over a run of pages in one 2 MiB slot);
+  `blockRun_pages`, and the slots `dgib` and `dblk` with `tick_blockRun` and
+  `tick_pageRun` (the fold of `tick` over a run of blocks, and over a run of
+  pages in one 2 MiB slot; privately, `tick` of one block and of one page);
 - `direct_map` into a set without valid root entries, where every leaf is
-  placed at the root (private steps): **`directMap_counts`** and
-  **`directMap_full`**: on a set whose pool is zero and whose record holds
-  the root alone, the map succeeds with the tables of the fold of `tick` and
-  the blocks and pages of the leaves when those tables fit, and is refused
-  with `OutOfTables` when they do not.
-
-`tick_block`, `tick_page` and `directMap_full` are not used by another module
-yet; they are stated for the counts of maps of single pages.
+  placed at the root (private steps): **`directMap_counts`**: on a set whose
+  pool is zero and whose record holds the root alone, the map succeeds with
+  the tables of the fold of `tick` and the blocks and pages of the leaves
+  when those tables fit.
 -/
 
 @[expose] public section
@@ -296,7 +292,7 @@ theorem pageRun_zero (pa : Nat) : pageRun pa 0 = [] := rfl
 
 theorem blockRun_zero (pa : Nat) : blockRun pa 0 = [] := rfl
 
-theorem directLeaves_done {stop fuel pa : Nat} (h : stop ≤ pa) :
+private theorem directLeaves_done {stop fuel pa : Nat} (h : stop ≤ pa) :
     directLeaves stop fuel pa = [] := by
   cases fuel with
   | zero => rfl
@@ -405,7 +401,7 @@ private theorem slots_direct {pa : Nat} (h : pa < VA_LIMIT) {l : MapLeaf}
     GIB_SIZE, BLOCK_SIZE]
   omega
 
-theorem tick_block {pa : Nat} (h : pa < VA_LIMIT) (n : Nat) (g b : Option Nat) :
+private theorem tick_block {pa : Nat} (h : pa < VA_LIMIT) (n : Nat) (g b : Option Nat) :
     tick (n, g, b) (directBlock pa) =
       (n + (if g = some (dgib pa) then 0 else 1), some (dgib pa), b) := by
   have hs := (slots_direct (l := directBlock pa) h rfl).1
@@ -413,7 +409,7 @@ theorem tick_block {pa : Nat} (h : pa < VA_LIMIT) (n : Nat) (g b : Option Nat) :
   simp only [hs]
   split <;> rfl
 
-theorem tick_page {pa : Nat} (h : pa < VA_LIMIT) (n : Nat) (g b : Option Nat) :
+private theorem tick_page {pa : Nat} (h : pa < VA_LIMIT) (n : Nat) (g b : Option Nat) :
     tick (n, g, b) (directPage pa) =
       (n + (if g = some (dgib pa) then 0 else 1) + (if b = some (dblk pa) then 0 else 1),
         some (dgib pa), some (dblk pa)) := by
@@ -562,16 +558,6 @@ private theorem mapLeaves_fits {r : Region} {N : Nat} {s : Tables r N} {base : U
   rw [ite_of_neg (by omega)]
   rfl
 
-private theorem mapLeaves_over {r : Region} {N : Nat} {s : Tables r N} {base : UInt64}
-    {L : List (MapLeaf × Place)} (hu : s.used ≤ N) (h : N < (assignTables s.used L).1) :
-    s.mapLeaves base L = .error .outOfTables := by
-  unfold Tables.mapLeaves
-  generalize assignTables s.used L = res at h ⊢
-  obtain ⟨next, placed⟩ := res
-  simp only at h ⊢
-  rw [ite_of_pos (by omega)]
-  rfl
-
 /-- `direct_map` into a set whose pool is zero and whose record holds the
 root alone, of a boot memory map whose usable ranges `us` pass their checks
 and lie in ascending order apart, when the tables of the fold of `tick` over
@@ -601,20 +587,5 @@ theorem directMap_counts {N : Nat} {s : Tables .upper N} {base : UInt64} {bits :
   refine ⟨_, _, hok', by show (assignTables s.used _).1 = _; rw [hu, hnext], ?_, ?_⟩
   · rw [hplan, hb]
   · rw [hplan, hpg]
-
-/-- `direct_map` as in `directMap_counts` when the tables of the fold of
-`tick` do not fit in the pool: refused with `OutOfTables`. -/
-theorem directMap_full {N : Nat} {s : Tables .upper N} {base : UInt64} {bits : UInt8}
-    {M : Krepi.Spec.Fdt.MemoryPlan} {us : List Krepi.Spec.Fdt.Span} (hp : PoolOk N base bits)
-    (hz : ∀ t i, s.pool.get t i = 0) (hu : s.used = 1)
-    (hus : sortByKey (·.start.toNat) M.availableRanges = us) (hok : ∀ u ∈ us, UsableOk bits u)
-    (hpw : us.Pairwise (fun a b => a.endNat ≤ b.start.toNat))
-    (hN : N < ((us.flatMap usableLeaves).foldl tick (1, none, none)).1) :
-    s.directMap M base bits = .error .outOfTables := by
-  have h0 : ∀ i, s.entry 0 i = 0 := fun i => by rw [entry_eq_get, hz]
-  have hnext := assign_root_next s.used (us.flatMap usableLeaves)
-  rw [hu] at hnext
-  rw [directMap_fresh (M := M) hp h0 (hus ▸ hok) (hus ▸ hpw), hus]
-  exact mapLeaves_over (by rw [hu]; exact (pool_ok_facts hp).2.1) (by rw [hu, hnext]; exact hN)
 
 end Krepi.Proofs.PageTables

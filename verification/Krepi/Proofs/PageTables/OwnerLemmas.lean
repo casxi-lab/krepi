@@ -18,13 +18,13 @@ it records, for any table:
   related are equal or related one way or the other;
 - `ExtentsInOrder`, the order of the extents of `Ownership.WellFormed`;
 - the extent that holds a page: `find?_holds_of_mem` (in an ordered list the
-  search for a page finds the extent that holds it) and
-  `filter_holds_length_le` (at most one extent holds a page);
+  search for a page finds the extent that holds it; privately, at most one
+  extent holds a page);
 - the owner function: `ownerOf_of_mem` (a page of an extent has its owner),
   `ownerOf_of_forall` (a page of no extent has the owner of the exclusion
   records), `ownerOf_freeOrHeld` (a free or held owner is that of an extent
-  that holds the page), `ownerOf_held` (likewise for a holder, with
-  `owner_eq_held`, the holding of a holder),
+  that holds the page), `ownerOf_held` (likewise for a holder, with its
+  holding),
   `freeOrHeld_iff` (a page is free or held exactly when an extent holds it)
   and `ownerOf_congr` (two tables whose extents differ in one block, with the
   same owners of the page in the block, give the page one owner);
@@ -128,7 +128,7 @@ theorem find?_holds_of_mem {q : Nat} : ∀ {l : List Extent} {x : Extent}, Exten
       · rw [hq] at hy; exact absurd hy (by simp)
       · exact find?_holds_of_mem hl.2 hx hq
 
-theorem filter_holds_length_le (q : Nat) : ∀ {l : List Extent}, ExtentsInOrder l →
+private theorem filter_holds_length_le (q : Nat) : ∀ {l : List Extent}, ExtentsInOrder l →
     (l.filter (·.range.holdsPage q)).length ≤ 1
   | [], _ => by simp
   | y :: ys, hl => by
@@ -172,7 +172,7 @@ theorem ownerOf_freeOrHeld {E X : Nat} {t : Ownership E X} {q : Nat} {o : Owner}
       simp [Owner.isFreeOrHeld] at ho
     · exact absurd h (by simp)
 
-theorem owner_eq_held {h : Holding} {o n : UInt64} {s : HoldState}
+private theorem owner_eq_held {h : Holding} {o n : UInt64} {s : HoldState}
     (e : h.owner = .held o n s) : h = .held o n s := by
   cases h <;> simp_all [Holding.owner]
 

@@ -10,21 +10,20 @@ The runs `[a, b)` of the specification of the page ownership table, lists
 of pairs of numbers that `cutRuns` and `cutAll` cut: what the points of the
 runs are, and the shape of the runs that the cuts keep.
 
-- `cutRuns_mem` and `cutAll_mem`: a point lies in a run of the result
-  exactly when it lies in a run of the input and in no cut;
-- `cutRuns_sub` and `cutAll_sub`: every run of the result lies inside a run
-  of the input;
-- `cutRuns_nonempty` and `cutAll_nonempty`: the cuts keep every run
-  nonempty, `a < b`;
-- `cutRuns_pairwise` and `cutAll_pairwise`: the cuts keep runs that are in
-  strict address order, apart from each other, in that order, for cuts that
-  are nonempty;
-- `cutRuns_aligned` and `cutAll_aligned`: the cuts keep the ends of the runs
-  multiples of a number when the cuts have such ends;
+- `cutAll_mem`: a point lies in a run of the result exactly when it lies in
+  a run of the input and in no cut;
+- `cutAll_sub`: every run of the result lies inside a run of the input;
+- `cutAll_nonempty`: the cuts keep every run nonempty, `a < b`;
+- `cutAll_pairwise`: the cuts keep runs that are in strict address order,
+  apart from each other, in that order, for cuts that are nonempty;
+- `cutAll_aligned`: the cuts keep the ends of the runs multiples of a number
+  when the cuts have such ends;
 - `runs_eq_nil_iff`: nonempty runs are none exactly when no point lies in
   one.
 
-The private `mem_pieces` names the two parts of a run that a cut meets.
+Each fact of `cutAll` follows from the same fact of `cutRuns`, the runs after
+one cut, by private steps; the private `mem_pieces` names the two parts of a
+run that a cut meets.
 -/
 
 @[expose] public section
@@ -38,7 +37,7 @@ private theorem mem_pieces {a b s t : Nat} {r : Nat × Nat}
     (r = (a, s) ∧ a < s) ∨ (r = (t, b) ∧ t < b) := by
   split at h <;> split at h <;> simp_all
 
-theorem cutRuns_mem (s t p : Nat) : ∀ runs : List (Nat × Nat),
+private theorem cutRuns_mem (s t p : Nat) : ∀ runs : List (Nat × Nat),
     (∃ r ∈ cutRuns s t runs, r.1 ≤ p ∧ p < r.2) ↔
       (∃ r ∈ runs, r.1 ≤ p ∧ p < r.2) ∧ ¬ (s ≤ p ∧ p < t)
   | [] => by simp [cutRuns]
@@ -87,7 +86,7 @@ theorem cutAll_mem (p : Nat) : ∀ (cuts runs : List (Nat × Nat)),
     simp only [cutAll, List.foldl_cons] at ih ⊢
     rw [ih, cutRuns_mem, List.forall_mem_cons, and_assoc]
 
-theorem cutRuns_sub (s t : Nat) : ∀ runs : List (Nat × Nat), ∀ r ∈ cutRuns s t runs,
+private theorem cutRuns_sub (s t : Nat) : ∀ runs : List (Nat × Nat), ∀ r ∈ cutRuns s t runs,
     ∃ r' ∈ runs, r'.1 ≤ r.1 ∧ r.2 ≤ r'.2
   | [] => by simp [cutRuns]
   | (a, b) :: rest => by
@@ -118,7 +117,7 @@ theorem cutAll_sub : ∀ (cuts runs : List (Nat × Nat)), ∀ r ∈ cutAll cuts 
     obtain ⟨r2, h3, h4⟩ := cutRuns_sub c.1 c.2 runs r1 h1
     exact ⟨r2, h3, by omega, by omega⟩
 
-theorem cutRuns_nonempty (s t : Nat) : ∀ runs : List (Nat × Nat), (∀ r ∈ runs, r.1 < r.2) →
+private theorem cutRuns_nonempty (s t : Nat) : ∀ runs : List (Nat × Nat), (∀ r ∈ runs, r.1 < r.2) →
     ∀ r ∈ cutRuns s t runs, r.1 < r.2
   | [] => by simp [cutRuns]
   | (a, b) :: rest => by
@@ -143,7 +142,7 @@ theorem cutAll_nonempty : ∀ (cuts runs : List (Nat × Nat)), (∀ r ∈ runs, 
     simp only [cutAll, List.foldl_cons]
     exact cutAll_nonempty cs _ (cutRuns_nonempty c.1 c.2 runs h)
 
-theorem cutRuns_pairwise {s t : Nat} (hst : s < t) : ∀ runs : List (Nat × Nat),
+private theorem cutRuns_pairwise {s t : Nat} (hst : s < t) : ∀ runs : List (Nat × Nat),
     runs.Pairwise (fun x y => x.2 < y.1) → (cutRuns s t runs).Pairwise (fun x y => x.2 < y.1)
   | [] => by simp [cutRuns]
   | (a, b) :: rest => by
@@ -176,7 +175,7 @@ theorem cutAll_pairwise : ∀ (cuts runs : List (Nat × Nat)), (∀ c ∈ cuts, 
     exact cutAll_pairwise cs _ (fun c' h' => hc c' (List.mem_cons_of_mem _ h'))
       (cutRuns_pairwise (hc c List.mem_cons_self) runs h)
 
-theorem cutRuns_aligned {m s t : Nat} (hs : s % m = 0) (ht : t % m = 0) :
+private theorem cutRuns_aligned {m s t : Nat} (hs : s % m = 0) (ht : t % m = 0) :
     ∀ runs : List (Nat × Nat), (∀ r ∈ runs, r.1 % m = 0 ∧ r.2 % m = 0) →
       ∀ r ∈ cutRuns s t runs, r.1 % m = 0 ∧ r.2 % m = 0
   | [] => by simp [cutRuns]

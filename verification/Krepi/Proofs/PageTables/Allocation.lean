@@ -40,7 +40,7 @@ is a page of a usable range (`Ownership.newFreeOrHeldUsable`); and the pages
 that `direct_map` of the boot maps are exactly those pages
 (`Krepi.Proofs.PageTables.DirectMapLemmas`, through the private
 `boot_pages`: the set of `Tables::new` on zero storage is well-formed and
-maps nothing, private `new_M`).
+maps nothing, `new_M` of `Krepi.Proofs.PageTables.WalkLemmas`).
 
 Every theorem here is proved. Mathlib is imported so that the gate counts the
 heartbeats of each theorem.
@@ -84,20 +84,6 @@ public theorem placementFirstFit : PlacementFirstFit := by
         rcases h3 with h3 | ⟨e, he, hf, r, hr⟩
         · cases h3
         · exact ⟨e, mem_scanOrder.1 he, r, fit_gives hf hpg hal hr⟩
-
-/-- A set of the boot, `Tables::new` on zero storage, maps nothing. -/
-private theorem new_M {r : Region} {N : Nat} {base v : UInt64} {l : Leaf} :
-    ¬ (Tables.new (Pool.zero N) : Tables r N).M base v l := by
-  have h0 : ∀ i, isValid ((Tables.new (Pool.zero N) : Tables r N).entry 0 i) = false := by
-    intro i; rw [entry_eq_get]; simp [Tables.new, Pool.zero, Pool.get, Table.zero, isValid_zero]
-  have hw2 : ∀ {w}, (Tables.new (Pool.zero N) : Tables r N).walk2 base v = .ok (some w) → False := by
-    intro w hw
-    rcases walk2_ok.1 hw with ⟨-, h⟩ | ⟨_, hv, -⟩
-    · cases h
-    · rw [h0] at hv; cases hv
-  rintro ⟨-, -, ⟨t2, t3, d, hw, -⟩ | ⟨t2, d, hw, -⟩⟩
-  · obtain ⟨e2, h, -⟩ := walk_ok_level3.1 hw; exact hw2 h
-  · exact hw2 (walk_ok_block.1 hw).1
 
 /-- The pages that `direct_map` of the boot maps are the pages of the usable
 ranges of its boot memory map. -/

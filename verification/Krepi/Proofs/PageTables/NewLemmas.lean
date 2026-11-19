@@ -20,14 +20,14 @@ exclusion touches.
   nonempty range of whole pages of the bank, whose pages are those that the
   exclusion touches) and `cut_none` (an exclusion without a cut touches no
   page of the bank);
-- the free extents of one bank: `bankExtents_eq` (they are the runs of
-  `cutAll` of the cuts of the exclusions), `mem_bankExtents` (each is free,
-  of the bank's index, inside the bank and, for a bank on pages, on pages),
-  `bankExtents_strict` (in strict address order, apart from each other) and
-  `bankExtents_holds_iff` (a page of a bank on pages lies in one exactly when
-  it lies in the bank and no exclusion touches it);
-- the extents of all banks: `mem_initialExtents` and `mem_initialExtents_go`
-  (each is one of the free extents of the bank that it names), `initialExtents_inOrder` (in address
+- the free extents of one bank, the runs of `cutAll` of the cuts of the
+  exclusions: `mem_bankExtents` (each is free, of the bank's index, inside
+  the bank and, for a bank on pages, on pages) and `bankExtents_strict` (in
+  strict address order, apart from each other); privately, a page of a bank
+  on pages lies in one exactly when it lies in the bank and no exclusion
+  touches it;
+- the extents of all banks: `mem_initialExtents` (each is one of the free
+  extents of the bank that it names), `initialExtents_inOrder` (in address
   order for banks in address order) and `initialExtents_holds_iff` (a page
   lies in one exactly when it lies in a bank and no exclusion touches it);
 - the banks: `anyOverlap_eq_false` (no two overlap) and
@@ -99,7 +99,7 @@ theorem cut_none {x : Exclusion} {b : PhysRange} (h : x.cut b = none) {q : Nat}
     rw [← Bool.not_eq_true, touchesPage_iff]
     omega
 
-theorem bankExtents_eq (exclusions : List Exclusion) (i : Nat) (b : PhysRange) :
+private theorem bankExtents_eq (exclusions : List Exclusion) (i : Nat) (b : PhysRange) :
     bankExtents exclusions i b =
       (cutAll (exclusions.filterMap (·.cut b)) [(b.start.toNat, b.endNat)]).filterMap
         fun r => (rangeOf? r.1 (r.2 - r.1)).map (⟨·, i, .free⟩) := by
@@ -170,7 +170,7 @@ theorem bankExtents_strict (exclusions : List Exclusion) (i : Nat) (b : PhysRang
   simp only
   omega
 
-theorem bankExtents_holds_iff {exclusions : List Exclusion} {i : Nat} {b : PhysRange}
+private theorem bankExtents_holds_iff {exclusions : List Exclusion} {i : Nat} {b : PhysRange}
     (hb : b.onPages = true) {q : Nat} (hq : q % PAGE_SIZE = 0) :
     (∃ e ∈ bankExtents exclusions i b, e.range.holdsPage q = true) ↔
       b.holdsPage q = true ∧ ∀ x ∈ exclusions, x.range.touchesPage q = false := by
@@ -222,7 +222,7 @@ theorem bankExtents_holds_iff {exclusions : List Exclusion} {i : Nat} {b : PhysR
     rw [hx x hx'] at this
     exact absurd this.1 (by simp)
 
-theorem mem_initialExtents_go {exclusions : List Exclusion} {e : Extent} :
+private theorem mem_initialExtents_go {exclusions : List Exclusion} {e : Extent} :
     ∀ {banks : List PhysRange} {k : Nat}, e ∈ initialExtents.go exclusions k banks ↔
       ∃ j b, banks[j]? = some b ∧ e ∈ bankExtents exclusions (k + j) b
   | [], k => by simp [initialExtents.go]

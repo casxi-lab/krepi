@@ -46,7 +46,8 @@ read off their definitions (`plansPublishInOrder`).
 each of the 14 write entries:
 
 - `Tables::new` and `reset` leave every root entry 0, so the walk of every
-  address ends at the root;
+  address ends at the root (`root_zero` of
+  `Krepi.Proofs.PageTables.WalkLemmas`);
 - `map_page`, `map_block`, `kernel_map` and `direct_map` leave the set of the
   map of their leaves (`finalSet`), whose $M$, $G$ and $P$ are those of the
   set before it and the pages and slots of the leaves
@@ -191,10 +192,6 @@ section Count
 
 variable {r : Region} {N : Nat} {s : Tables r N} {base : UInt64} {bits : UInt8}
 
-private theorem walk2_pointsAt {v : UInt64} {c : Nat} (h : s.PointsAt base 0 (index1 v) c) :
-    s.walk2 base v = .ok (some (c, s.entry c (index2 v))) :=
-  walk2_ok.2 (Or.inr ⟨c, isValid_of_isPlain h.2.1, h.2.2, rfl⟩)
-
 private theorem walk2_some_iff (hs : s.WellFormed base bits) (v : UInt64) :
     (∃ t2 e2, s.walk2 base v = .ok (some (t2, e2))) ↔ (s.pointsAt? base 0 (index1 v)).isSome := by
   rw [Option.isSome_iff_exists]
@@ -202,7 +199,7 @@ private theorem walk2_some_iff (hs : s.WellFormed base bits) (v : UInt64) :
   · rintro ⟨t2, e2, h⟩
     exact ⟨t2, (pointsAt?_eq_some s base (index1_lt v)).2 (wf_walk2_some hs h).1⟩
   · rintro ⟨c, h⟩
-    exact ⟨c, _, walk2_pointsAt ((pointsAt?_eq_some s base (index1_lt v)).1 h)⟩
+    exact ⟨c, _, walk2_of_pointsAt ((pointsAt?_eq_some s base (index1_lt v)).1 h)⟩
 
 private theorem level3_iff (hs : s.WellFormed base bits) {v : UInt64} {t2 : Nat}
     (h2 : s.PointsAt base 0 (index1 v) t2) :
@@ -217,7 +214,7 @@ private theorem level3_iff (hs : s.WellFormed base bits) {v : UInt64} {t2 : Nat}
     exact ⟨b, (pointsAt?_eq_some s base (index2_lt v)).2 hp⟩
   · rintro ⟨c, h⟩
     have hp := (pointsAt?_eq_some s base (index2_lt v)).1 h
-    refine ⟨t2, c, _, walk_ok_level3.2 ⟨_, walk2_pointsAt h2, isValid_of_isPlain hp.2.1, ?_, hp.2.2, rfl⟩⟩
+    refine ⟨t2, c, _, walk_ok_level3.2 ⟨_, walk2_of_pointsAt h2, isValid_of_isPlain hp.2.1, ?_, hp.2.2, rfl⟩⟩
     rw [typeBits_of_isPlain hp.2.1]; decide
 
 private theorem gSlots_eq (hs : s.WellFormed base bits) :
@@ -239,7 +236,7 @@ private theorem gSlots_eq (hs : s.WellFormed base bits) :
   | some c =>
     have hpa := (pointsAt?_eq_some s base hi').1 hp
     rw [← h1] at hpa
-    rw [walk2_pointsAt hpa]; rfl
+    rw [walk2_of_pointsAt hpa]; rfl
 
 private theorem pSlots_eq (hs : s.WellFormed base bits) :
     s.pSlots base = (List.range ENTRIES).flatMap fun i =>
@@ -609,23 +606,6 @@ public theorem plansPublishInOrder : PlansPublishInOrder := by
     exact ⟨t2, t3, d, hw, rfl⟩
 
 /-! ## After every write: the table sets -/
-
-/-- A set whose root entries are all 0 maps nothing. -/
-private theorem root_zero {r : Region} {N : Nat} {s : Tables r N} {base : UInt64}
-    (h0 : ∀ i, s.entry 0 i = 0) :
-    (∀ v l, ¬ s.M base v l) ∧ (∀ g, ¬ s.G base g) ∧ (∀ b, ¬ s.P base b) := by
-  have hw : ∀ v, s.walk2 base v = .ok none := fun v => walk2_ok.2 (Or.inl ⟨by rw [h0]; decide, rfl⟩)
-  refine ⟨fun v l hm => ?_, fun g hg => ?_, fun b hb => ?_⟩
-  · obtain ⟨-, -, ⟨t2, t3, d, h, -⟩ | ⟨t2, d, h, -⟩⟩ := hm
-    · obtain ⟨e2, h2, -⟩ := walk_ok_level3.1 h
-      rw [hw] at h2; simp at h2
-    · have h2 := (walk_ok_block.1 h).1
-      rw [hw] at h2; simp at h2
-  · obtain ⟨-, -, t2, e2, h⟩ := hg
-    rw [hw] at h; simp at h
-  · obtain ⟨-, -, t2, t3, d, h⟩ := hb
-    obtain ⟨e2, h2, -⟩ := walk_ok_level3.1 h
-    rw [hw] at h2; simp at h2
 
 private theorem afterNew : AfterNew := by
   intro r N base
