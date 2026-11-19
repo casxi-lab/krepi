@@ -552,7 +552,7 @@
       "name": "Krepi.SpecProperties.PageTables.NewWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.newWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BootKernelMapWellFormed",
@@ -570,7 +570,7 @@
       "name": "Krepi.SpecProperties.PageTables.ResetWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.resetWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CloneKernelFromWellFormed",
@@ -582,19 +582,19 @@
       "name": "Krepi.SpecProperties.PageTables.MapPageWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.mapPageWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.MapBlockWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.mapBlockWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.UnmapPageWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.unmapPageWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.KernelMapWellFormed",
