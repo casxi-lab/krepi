@@ -46,7 +46,12 @@ the range get the new owner and every other page keeps its owner.
 - the entries together: `take_spec`, `assign_spec`, `reserve_spec`,
   `publish_spec`, `free_spec`, `release_spec` and `cancel_spec`, each the
   well-formedness, the fields that the entry keeps, the counter, the extent
-  that a value names and the owner function after the entry.
+  that a value names and the owner function after the entry;
+- the extents after a write: `take_extents` (the range was inside a free
+  extent, and every extent after is one of the table, free, or the range
+  held), `publish_extents`, `mem_mergeFreed`, `release_extents` and
+  `cancel_extents` (every extent after is one of the table, or the one
+  published, or free).
 
 The private `pairwise_toList`, `left_none` and `right_none` are steps of
 these.
@@ -1005,5 +1010,71 @@ theorem cancel_spec {E X : Nat} {t t' : Ownership E X} {o : UInt64} {r : Reserva
   obtain ⟨-, -, ht, he1, he2⟩ := findHeld_ok hf
   obtain ⟨h1, h2, h3, h4, h5, h6⟩ := free_spec hwf ht ht'
   exact ⟨hr, h1, h2, h3, h4, h5, ⟨e, by rw [ht]; simp, he1, he2⟩, by rw [← he1]; exact h6⟩
+
+/-! ## The extents after a write -/
+
+/-- After `take`, the range was inside a free extent of the table, and every
+extent is one of the table, a free one, or the range held by the owner
+identity of the choice with the generation of the counter. -/
+theorem take_extents {E X : Nat} {t t' : Ownership E X} {c : Choice} {s : HoldState}
+    {a : Allocation} (h : t.take c s = .ok (t', a)) :
+    (∃ e ∈ t.extents, e.holding = .free ∧ e.range.contains c.range = true) ∧
+      ∀ x ∈ t'.extents, x ∈ t.extents ∨ x.holding = .free ∨
+        (x.range = c.range ∧ ∃ g, t.counter = .next g ∧ x.holding = .held c.owner g s) := by
+  obtain ⟨l₁, e, l₂, g, hg, ht, he, hc, -, rfl, -⟩ := take_ok h
+  refine ⟨⟨e, by rw [ht]; simp, he, hc⟩, fun x hx => ?_⟩
+  simp only [List.mem_append] at hx
+  rcases hx with (hx | hx) | hx
+  · exact Or.inl (by rw [ht]; simp [hx])
+  · rcases mem_take hx with rfl | ⟨-, hf, -⟩
+    · exact Or.inr (Or.inr ⟨rfl, g, hg, rfl⟩)
+    · exact Or.inr (Or.inl hf)
+  · exact Or.inl (by rw [ht]; simp [hx])
+
+/-- After `publish`, every extent is one of the table or the range of the
+packet published by the owner identity with its generation. -/
+theorem publish_extents {E X : Nat} {t t' : Ownership E X} {o : UInt64} {x : Initialized}
+    {a : Allocation} (h : t.publish o x = .ok (t', a)) :
+    ∀ y ∈ t'.extents, y ∈ t.extents ∨
+      (y.range = x.allocation.range ∧ y.holding = .held o x.allocation.generation .published) := by
+  obtain ⟨before, e, after, hf, rfl, -⟩ := publish_ok h
+  obtain ⟨-, -, ht, he1, -⟩ := findHeld_ok hf
+  intro y hy
+  simp only [List.mem_append, List.mem_cons] at hy
+  rcases hy with hy | rfl | hy
+  · exact Or.inl (by rw [ht]; simp [hy])
+  · exact Or.inr ⟨he1, rfl⟩
+  · exact Or.inl (by rw [ht]; simp [hy])
+
+/-- After `mergeFreed`, every extent is one of the extents before it or a free
+one. -/
+theorem mem_mergeFreed {before after : List Extent} {e y : Extent}
+    (hy : y ∈ mergeFreed before e after) : y ∈ before.reverse ++ e :: after ∨ y.holding = .free := by
+  obtain ⟨l₁, lo, hi, l₂, m, h1, h2, hm, -⟩ := mergeFreed_spec before e after
+  rw [h2] at hy
+  rw [h1]
+  simp only [List.mem_append, List.mem_cons] at hy ⊢
+  rcases hy with hy | rfl | hy
+  · exact Or.inl (Or.inl (Or.inl hy))
+  · exact Or.inr hm
+  · exact Or.inl (Or.inr hy)
+
+/-- After `release` or `cancel`, every extent is one of the table or a free
+one. -/
+theorem release_extents {E X : Nat} {t t' : Ownership E X} {o : UInt64} {x : Allocation}
+    (h : t.release o x = .ok t') : ∀ y ∈ t'.extents, y ∈ t.extents ∨ y.holding = .free := by
+  obtain ⟨before, e, after, hf, rfl⟩ := release_ok h
+  obtain ⟨-, -, ht, -⟩ := findHeld_ok hf
+  intro y hy
+  rw [ht]
+  exact mem_mergeFreed hy
+
+theorem cancel_extents {E X : Nat} {t t' : Ownership E X} {o : UInt64} {r : Reservation}
+    (h : t.cancel o r = .ok t') : ∀ y ∈ t'.extents, y ∈ t.extents ∨ y.holding = .free := by
+  obtain ⟨-, before, e, after, hf, rfl⟩ := cancel_ok h
+  obtain ⟨-, -, ht, -⟩ := findHeld_ok hf
+  intro y hy
+  rw [ht]
+  exact mem_mergeFreed hy
 
 end Krepi.Proofs.PageTables
