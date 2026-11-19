@@ -20,8 +20,9 @@ set:
   level 2 table is 0 (`wf_level2_invalid`) and a valid one other than a block
   points at a level 3 table (`wf_level2_table`); an invalid entry of a level
   3 table is 0 (`wf_level3_invalid`) and no entry of it is a table descriptor
-  (`wf_level3_not_plain`); the page leaf of an address is an entry of a
-  level 3 table (`wf_pageLeaf`).
+  (`wf_level3_not_plain`); a walk that ends in a level 3 table reaches it
+  from a level 2 table, and its descriptor is the entry of that table
+  (`wf_walk_level3`).
 -/
 
 @[expose] public section

@@ -9,7 +9,7 @@ import Mathlib.Data.List.Nodup
 
 Lemmas about the lists of the specification of the `page-tables` component:
 
-- `sortByKey`, an insertion sort: `insert_perm`, `insert_pairwise`,
+- `sortByKey`, an insertion sort (private steps for one insertion):
   `sortByKey_perm` (it permutes its list), `sortByKey_pairwise` (its result
   is in the order of the key) and `sortByKey_of_pairwise` (it leaves a list
   in the order of the key as it is);
@@ -25,7 +25,7 @@ namespace Krepi.Proofs.PageTables
 
 open Krepi.Spec.PageTables
 
-theorem insert_perm {α : Type} (key : α → Nat) (x : α) :
+private theorem insert_perm {α : Type} (key : α → Nat) (x : α) :
     ∀ l, (sortByKey.insert key x l).Perm (x :: l)
   | [] => by simp [sortByKey.insert]
   | y :: ys => by
@@ -34,7 +34,7 @@ theorem insert_perm {α : Type} (key : α → Nat) (x : α) :
     · exact List.Perm.refl _
     · exact ((insert_perm key x ys).cons y).trans (List.Perm.swap x y ys)
 
-theorem insert_pairwise {α : Type} (key : α → Nat) (x : α) :
+private theorem insert_pairwise {α : Type} (key : α → Nat) (x : α) :
     ∀ l, l.Pairwise (fun a b => key a ≤ key b) →
       (sortByKey.insert key x l).Pairwise (fun a b => key a ≤ key b)
   | [] => fun _ => by simp [sortByKey.insert]

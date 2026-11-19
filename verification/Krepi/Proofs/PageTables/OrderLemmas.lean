@@ -14,7 +14,7 @@ import Krepi.Proofs.PageTables.WellFormedLemmas
 
 - the state after one step, `nxt`, the check of one step, `okStep`, and the
   check of a list of steps, `allOk`, with `inOrder_cons`, `inOrder_append`,
-  `allOk_append`, `nxt_pool`, `nxt_steps` and the state after a list of
+  `allOk_append`, `nxt_steps` and the state after a list of
   steps, `foldl_pool`, `foldl_steps`, `foldl_zeroed`, `foldl_sealed`;
 - lists: `filterMap_congr'`, `flatMap_congr'`, `contains_iff`;
 - the tables that the walk reaches: `poolChild_none`, `poolChild_tableAt`,
@@ -122,7 +122,7 @@ theorem allOk_append (base : UInt64) : ∀ (a b : Plan) (st : PlanState N),
   | x :: xs, b, st => by
     simp only [List.cons_append, allOk, List.foldl_cons, allOk_append base xs b, Bool.and_assoc]
 
-theorem nxt_pool (base : UInt64) (st : PlanState N) (step : Step) :
+private theorem nxt_pool (base : UInt64) (st : PlanState N) (step : Step) :
     (nxt base st step).pool = step.exec st.pool := by
   cases step <;> rfl
 

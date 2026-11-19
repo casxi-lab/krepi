@@ -12,10 +12,9 @@ that its placed leaves need, for a list of placed leaves whose tables agree
 slot by slot (`PlacedOk`):
 
 - the execution of a plan whose stores into one entry agree and which zeroes
-  each table before any store into it (`ZeroFirst`): `lastAt_of_no_store`,
-  `lastAt_of_store`, `get_exec_store` (the entry holds the value of its
-  stores) and `get_exec_old` (an entry that no step stores into keeps its
-  value);
+  each table before any store into it (`ZeroFirst`): `get_exec_store` (the
+  entry holds the value of its stores) and `get_exec_old` (an entry that no
+  step stores into keeps its value);
 - runs (`runsBy`): `runsBy_flatten`, `runsBy_key` (each run is nonempty and
   of one key), `mem_runsBy` and `runsBy_pairwise` (the runs of a sorted list
   are in strictly ascending order of their keys);
@@ -26,14 +25,13 @@ slot by slot (`PlacedOk`):
   facts `gib_of_block`, `index1_of_gib` and `index2_of_block`;
 - the plan: `runSteps`, `mapPlan_eq`, `childSteps`, `newLevel2Steps_eq`,
   `mem_writesOf`, `gib_run`, `block_run` (the leaves of a 1 GiB run and of a
-  2 MiB run agree on their tables), `mem_map_store`, `mem_childSteps`,
-  `mem_level2Entry`, `mem_newLevel2Steps`, `mem_heldLevel2Steps`,
-  `mem_runSteps` and `mem_mapPlan` (a store is in the plan exactly when a
-  placed leaf needs it); `store_table`, `conflict`, `store_ne_zero`,
-  `zero_not_mem_map_store`, `zero_not_mem_level2Entry`, `zero_runSteps` and
-  `zero_mapPlan` (the plan zeroes only new tables); `pairwise_of_no_zero`,
-  `pairwise_runsBy_lt`, `pairwise_block_runs` and `pairwise_mapPlan` (it
+  2 MiB run agree on their tables), `mem_childSteps`, `mem_level2Entry`,
+  `mem_newLevel2Steps`, `mem_heldLevel2Steps` and `mem_mapPlan` (a store is
+  in the plan exactly when a placed leaf needs it); `zero_mapPlan` (the plan
+  zeroes only new tables); `pairwise_runsBy_lt` and `pairwise_mapPlan` (it
   zeroes each new table before any store into it).
+
+The other lemmas of the module are private steps of these.
 -/
 
 @[expose] public section
@@ -47,7 +45,7 @@ open Krepi.Spec.PageTables
 /-- No step stores into a table that a later step zeroes. -/
 def ZeroFirst (x y : Step) : Prop := ∀ t i d, x = .store t i d → y ≠ .zero t
 
-theorem lastAt_of_no_store {t i : Nat} : ∀ {l : Plan}, (∀ d, .store t i d ∉ l) →
+private theorem lastAt_of_no_store {t i : Nat} : ∀ {l : Plan}, (∀ d, .store t i d ∉ l) →
     lastAt t i l = none ∨ (lastAt t i l = some 0 ∧ .zero t ∈ l)
   | [], _ => Or.inl rfl
   | x :: rest, h => by
@@ -69,7 +67,7 @@ theorem lastAt_of_no_store {t i : Nat} : ∀ {l : Plan}, (∀ d, .store t i d �
       | invalidate _ => exact Or.inl rfl
     · rw [ih]; exact Or.inr ⟨rfl, List.mem_cons_of_mem _ hz⟩
 
-theorem lastAt_of_store {t i : Nat} {d : UInt64} : ∀ {l : Plan}, l.Pairwise ZeroFirst →
+private theorem lastAt_of_store {t i : Nat} {d : UInt64} : ∀ {l : Plan}, l.Pairwise ZeroFirst →
     (∀ d', .store t i d' ∈ l → d' = d) → .store t i d ∈ l → lastAt t i l = some d
   | [], _, _, h => absurd h (by simp)
   | x :: rest, hpw, hf, h => by
@@ -251,7 +249,7 @@ theorem index1_of_gib {a b : MapLeaf} (h : a.gibSlot = b.gibSlot) : index1 a.va 
 theorem index2_of_block {a b : MapLeaf} (h : a.blockSlot = b.blockSlot) : index2 a.va = index2 b.va := by
   simp only [MapLeaf.blockSlot, index2] at h ⊢; rw [h]
 
-theorem store_table {base : UInt64} {q : Placed} {t i : Nat} {d : UInt64}
+private theorem store_table {base : UInt64} {q : Placed} {t i : Nat} {d : UInt64}
     (h : .store t i d ∈ writesOf base q) : t = 0 ∨ t = q.t2 ∨ (q.leaf.form = .page ∧ t = q.t3) := by
   simp only [writesOf, Placed.store, List.mem_append] at h
   rcases h with (h | h) | h
@@ -261,7 +259,7 @@ theorem store_table {base : UInt64} {q : Placed} {t i : Nat} {d : UInt64}
 
 /-- A store of one leaf into a table that another leaf takes new is in the
 same 1 GiB slot, and in the same 2 MiB slot for a new level 3 table. -/
-theorem conflict {placed : List Placed} (hp : PlacedOk placed) {base : UInt64} {q q' : Placed}
+private theorem conflict {placed : List Placed} (hp : PlacedOk placed) {base : UInt64} {q q' : Placed}
     (hq : q ∈ placed) (hq' : q' ∈ placed) {t i : Nat} {d : UInt64}
     (hx : .store t i d ∈ writesOf base q) (hz : NewTable q' t) :
     q.leaf.gibSlot = q'.leaf.gibSlot ∧
@@ -336,7 +334,7 @@ theorem block_run {placed : List Placed} (hp : PlacedOk placed) {R S : List Plac
   obtain ⟨d, e⟩ := hp.gib q hq' q0 hq0 (gib_of_block hb)
   exact ⟨hmem q hq, hb, a, b, c, d, e, index1_of_gib (gib_of_block hb), index2_of_block hb⟩
 
-theorem mem_map_store {S : List Placed} {x : Step} :
+private theorem mem_map_store {S : List Placed} {x : Step} :
     x ∈ S.map Placed.store ↔ ∃ q ∈ S, x = q.store := by
   simp only [List.mem_map]; exact ⟨fun ⟨q, h, e⟩ => ⟨q, h, e.symm⟩, fun ⟨q, h, e⟩ => ⟨q, h, e.symm⟩⟩
 
@@ -387,7 +385,7 @@ theorem mem_heldLevel2Steps {base : UInt64} {q0 : Placed} {rest : List Placed} {
   · simp [mem_map_store]
 
 /-- The stores of the steps of one 1 GiB slot are those that its leaves need. -/
-theorem mem_runSteps {placed : List Placed} (hp : PlacedOk placed) {base : UInt64} {R : List Placed}
+private theorem mem_runSteps {placed : List Placed} (hp : PlacedOk placed) {base : UInt64} {R : List Placed}
     (hR : R ∈ runsBy (·.leaf.gibSlot) placed) {t i : Nat} {d : UInt64} :
     Step.store t i d ∈ runSteps base R ↔ ∃ q ∈ R, Step.store t i d ∈ writesOf base q := by
   obtain ⟨p, rest, rfl, hRf⟩ := gib_run hp hR
@@ -464,20 +462,20 @@ theorem mem_mapPlan {placed : List Placed} (hp : PlacedOk placed) {base : UInt64
     obtain ⟨R, hR, hqR⟩ := (mem_runsBy (·.leaf.gibSlot)).1 hq
     exact ⟨R, hR, (mem_runSteps hp hR).2 ⟨q, hqR, hx⟩⟩
 
-theorem pairwise_of_no_zero {l : Plan} (h : ∀ t, Step.zero t ∉ l) : l.Pairwise ZeroFirst := by
+private theorem pairwise_of_no_zero {l : Plan} (h : ∀ t, Step.zero t ∉ l) : l.Pairwise ZeroFirst := by
   induction l with
   | nil => exact List.Pairwise.nil
   | cons x rest ih =>
     refine List.pairwise_cons.2 ⟨fun y hy t i d _ hyz => ?_, ih fun t ht => h t (List.mem_cons_of_mem _ ht)⟩
     subst hyz; exact h t (List.mem_cons_of_mem _ hy)
 
-theorem store_ne_zero (q : Placed) (t : Nat) : q.store ≠ .zero t := by
+private theorem store_ne_zero (q : Placed) (t : Nat) : q.store ≠ .zero t := by
   simp only [Placed.store]; split <;> simp
 
-theorem zero_not_mem_map_store {S : List Placed} {t : Nat} : Step.zero t ∉ S.map Placed.store := by
+private theorem zero_not_mem_map_store {S : List Placed} {t : Nat} : Step.zero t ∉ S.map Placed.store := by
   rw [mem_map_store]; rintro ⟨q, -, h⟩; exact store_ne_zero q t h.symm
 
-theorem zero_not_mem_level2Entry {base : UInt64} {S : List Placed} {t : Nat} :
+private theorem zero_not_mem_level2Entry {base : UInt64} {S : List Placed} {t : Nat} :
     Step.zero t ∉ level2Entry base S := by
   cases S with
   | nil => simp [level2Entry]
@@ -487,7 +485,7 @@ theorem zero_not_mem_level2Entry {base : UInt64} {S : List Placed} {t : Nat} :
     · simp [link3] at h
 
 /-- The zeroes of the steps of one 1 GiB slot are of new tables of its leaves. -/
-theorem zero_runSteps {placed : List Placed} (hp : PlacedOk placed) {base : UInt64} {R : List Placed}
+private theorem zero_runSteps {placed : List Placed} (hp : PlacedOk placed) {base : UInt64} {R : List Placed}
     (hR : R ∈ runsBy (·.leaf.gibSlot) placed) {t : Nat} (h : Step.zero t ∈ runSteps base R) :
     ∃ q ∈ R, NewTable q t := by
   obtain ⟨p, rest, rfl, hRf⟩ := gib_run hp hR
@@ -531,7 +529,7 @@ theorem pairwise_runsBy_lt {placed : List Placed} (hp : PlacedOk placed) :
   refine hp.mono.imp fun h => ?_
   simp only [MapLeaf.gibSlot]; exact Nat.div_le_div_right h
 
-theorem pairwise_block_runs {placed : List Placed} (hp : PlacedOk placed) {R : List Placed}
+private theorem pairwise_block_runs {placed : List Placed} (hp : PlacedOk placed) {R : List Placed}
     (hR : R ∈ runsBy (·.leaf.gibSlot) placed) :
     (runsBy (·.leaf.blockSlot) R).Pairwise
       (fun S S' => ∀ x ∈ S, ∀ y ∈ S', x.leaf.blockSlot < y.leaf.blockSlot) := by

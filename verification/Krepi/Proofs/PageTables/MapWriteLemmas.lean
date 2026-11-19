@@ -12,24 +12,26 @@ The set that `kernel_map` and `direct_map` leave once the plan of their
 placed leaves has run (`finalSet`), for leaves that passed their checks in a
 well-formed set (`LeafFacts`):
 
-- the stores of the plan, `Wr` (those that a placed leaf needs), with
-  `wr_cases`, `wr_fun` (two stores into one entry agree), `wr_facts` (a store
-  is into a table below the next free index, and into a free entry of a table
-  of the set), `wr_table` (a store of a table descriptor links a new table);
+- the stores of the plan, `Wr` (those that a placed leaf needs; privately:
+  two stores into one entry agree, a store is into a free entry of a table
+  below the next free index, and a store of a table descriptor links a new
+  table);
 - the entries after the plan: `final_entry_wr` and `final_entry_old`;
-- the tables after the plan: `NewT2`, `NewT3`, `tableAt_inj`, `leaf_not_plain`,
+- the tables after the plan: `NewT2`, `NewT3`, `leaf_not_plain`,
   `child_final`, `final_pointsAt` (a table descriptor of the set after the map
-  is a link of a new table or one of the set before it), `final_level2`,
-  `final_level3`, `lvl_excl`, `final_parent`, `final_level2_entry`,
-  `final_level3_entry`, `final_uniq`;
-- **`final_wf`**: the set after the map is well-formed;
+  is a link of a new table or one of the set before it), `final_level2` and
+  `final_level3` (the level 2 and level 3 tables after the map are those
+  before it and the new ones);
+- **`final_wf`**: the set after the map is well-formed, from private steps
+  for the parents, the entries and the uniqueness of the tables;
 - `placed_path` (the walk of a placed leaf reaches its tables) and
   **`final_M`**: every leaf of the abstract mapping after the map is one of
   the set before it or lies in a placed leaf, with its descriptor.
 
-Small facts: `placed_t2_ne_zero`, `placed_t3_ne_zero`, `placed_t2_lt`,
-`placed_t3_lt`, `placed_lvl2`, `placed_lvl3`, `slot_of_t2`, `va_of_page`,
-`not_wr_of_lt`.
+Small facts: `placed_t2_ne_zero`, `placed_t3_ne_zero`, `slot_of_t2`.
+`final_entry_wr`, `final_pointsAt`, `final_level2`, `final_level3` and
+`placed_path` are not used by another module yet; they are stated for the
+abstract mapping and the slots after a map.
 -/
 
 @[expose] public section
@@ -44,7 +46,7 @@ variable {r : Region} {N : Nat}
 def Wr (base : UInt64) (placed : List Placed) (t i : Nat) (d : UInt64) : Prop :=
   ∃ q ∈ placed, Step.store t i d ∈ writesOf base q
 
-theorem wr_cases {base : UInt64} {placed : List Placed} {t i : Nat} {d : UInt64}
+private theorem wr_cases {base : UInt64} {placed : List Placed} {t i : Nat} {d : UInt64}
     (h : Wr base placed t i d) :
     (∃ q ∈ placed, q.new2 = true ∧ t = 0 ∧ i = index1 q.leaf.va ∧ d = tableAt base q.t2) ∨
     (∃ q ∈ placed, q.leaf.form = .page ∧ q.new3 = true ∧ t = q.t2 ∧ i = index2 q.leaf.va ∧
@@ -86,7 +88,7 @@ theorem slot_of_t2 (hs : s.WellFormed base bits) (hl : LeafFacts s base bits lea
   simp only [MapLeaf.blockSlot, MapLeaf.gibSlot] at hg ⊢
   rw [block_index, block_index, hg, hi]
 
-theorem va_of_page {a b : MapLeaf} (hb : a.blockSlot = b.blockSlot) (hi : index3 a.va = index3 b.va)
+private theorem va_of_page {a b : MapLeaf} (hb : a.blockSlot = b.blockSlot) (hi : index3 a.va = index3 b.va)
     (ha : a.va.toNat % PAGE_SIZE = 0) (hb' : b.va.toNat % PAGE_SIZE = 0) : a.va = b.va := by
   have h1 := page_index a.va
   have h2 := page_index b.va
@@ -97,7 +99,7 @@ theorem va_of_page {a b : MapLeaf} (hb : a.blockSlot = b.blockSlot) (hi : index3
   omega
 
 /-- Two stores of the plan into one entry agree. -/
-theorem wr_fun (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {t i : Nat}
+private theorem wr_fun (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {t i : Nat}
     {d d' : UInt64} (h : Wr base (assignTables s.used leaves).2 t i d)
     (h' : Wr base (assignTables s.used leaves).2 t i d') : d = d' := by
   have hok := placed_ok hs hl
@@ -137,7 +139,7 @@ theorem wr_fun (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves)
 def finalSet (s : Tables r N) (base : UInt64) (leaves : List (MapLeaf × Place)) : Tables r N :=
   ⟨(mapPlan base (assignTables s.used leaves).2).exec s.pool, (assignTables s.used leaves).1⟩
 
-theorem wr_facts (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {t i : Nat}
+private theorem wr_facts (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {t i : Nat}
     {d : UInt64} (h : Wr base (assignTables s.used leaves).2 t i d) :
     t < (assignTables s.used leaves).1 ∧ i < ENTRIES ∧ (t < s.used → s.entry t i = 0) := by
   have hle : s.used ≤ (assignTables s.used leaves).1 := by
@@ -197,7 +199,7 @@ def NewT2 (placed : List Placed) (c : Nat) : Prop := ∃ q ∈ placed, q.new2 = 
 def NewT3 (placed : List Placed) (c : Nat) : Prop :=
   ∃ q ∈ placed, q.leaf.form = .page ∧ q.new3 = true ∧ q.t3 = c
 
-theorem tableAt_inj {base : UInt64} {bits : UInt8} (hp : PoolOk N base bits) {c c' : Nat} (hc : c < N)
+private theorem tableAt_inj {base : UInt64} {bits : UInt8} (hp : PoolOk N base bits) {c c' : Nat} (hc : c < N)
     (hc' : c' < N) (h : tableAt base c = tableAt base c') : c = c' := by
   have := congrArg (fun d => (outputAddress d).toNat) h
   simp only [outputAddress_tableAt hp hc, outputAddress_tableAt hp hc'] at this
@@ -212,7 +214,7 @@ theorem leaf_not_plain {bits : UInt8} {l : MapLeaf} (h : LeafDesc bits l) :
 theorem child_final (d : UInt64) : (finalSet s base leaves).child? base d =
     ({ s with used := (assignTables s.used leaves).1 } : Tables r N).child? base d := rfl
 
-theorem placed_t2_lt (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q : Placed}
+private theorem placed_t2_lt (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q : Placed}
     (hq : q ∈ (assignTables s.used leaves).2) : q.t2 < (assignTables s.used leaves).1 := by
   have hle : s.used ≤ (assignTables s.used leaves).1 := by
     have := (assignTables_spec s.used leaves (leaves_mono hl)).2.2.1; exact this
@@ -220,7 +222,7 @@ theorem placed_t2_lt (hs : s.WellFormed base bits) (hl : LeafFacts s base bits l
   · have := (placed_lt2 hs hl hq).1 hn2; omega
   · exact (placed_range hl hq (Or.inl ⟨hn2, rfl⟩)).2
 
-theorem placed_t3_lt (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q : Placed}
+private theorem placed_t3_lt (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q : Placed}
     (hq : q ∈ (assignTables s.used leaves).2) (hp : q.leaf.form = .page) :
     q.t3 < (assignTables s.used leaves).1 := by
   have hle : s.used ≤ (assignTables s.used leaves).1 := by
@@ -230,7 +232,7 @@ theorem placed_t3_lt (hs : s.WellFormed base bits) (hl : LeafFacts s base bits l
   · exact (placed_range hl hq (Or.inr ⟨hp, hn3, rfl⟩)).2
 
 /-- A store of a table descriptor of the plan is the link of a new table. -/
-theorem wr_table (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves)
+private theorem wr_table (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves)
     (hN : (assignTables s.used leaves).1 ≤ N) {t i c : Nat} (hc : c < N)
     (h : Wr base (assignTables s.used leaves).2 t i (tableAt base c)) :
     (∃ q ∈ (assignTables s.used leaves).2, q.new2 = true ∧ t = 0 ∧ i = index1 q.leaf.va ∧ c = q.t2) ∨
@@ -289,7 +291,7 @@ theorem final_pointsAt (hs : s.WellFormed base bits) (hl : LeafFacts s base bits
       · exact hpl
       · rw [child_final]; exact child?_mono (s := s) hle hc
 
-theorem not_wr_of_lt (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {t i : Nat}
+private theorem not_wr_of_lt (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {t i : Nat}
     (ht : t < s.used) (hne : s.entry t i ≠ 0) : ∀ d, ¬ Wr base (assignTables s.used leaves).2 t i d :=
   fun _ hw => hne ((wr_facts hs hl hw).2.2 ht)
 
@@ -310,14 +312,14 @@ theorem final_level2 (hs : s.WellFormed base bits) (hl : LeafFacts s base bits l
       exact ⟨index1 q.leaf.va, (final_pointsAt hs hl hN).2 (Or.inl
         ⟨⟨q, hq, mem_writesOf.2 (Or.inl ⟨hn, rfl⟩)⟩, h1, h2⟩)⟩
 
-theorem placed_lvl2 (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q : Placed}
+private theorem placed_lvl2 (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q : Placed}
     (hq : q ∈ (assignTables s.used leaves).2) :
     s.IsLevel2 base q.t2 ∨ NewT2 (assignTables s.used leaves).2 q.t2 := by
   cases hn : q.new2
   · exact Or.inl (placed_old2 hs hl hq hn).2
   · exact Or.inr ⟨q, hq, hn, rfl⟩
 
-theorem placed_lvl3 (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q : Placed}
+private theorem placed_lvl3 (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q : Placed}
     (hq : q ∈ (assignTables s.used leaves).2) (hp : q.leaf.form = .page) :
     s.IsLevel3 base q.t3 ∨ NewT3 (assignTables s.used leaves).2 q.t3 := by
   cases hn : q.new3
@@ -347,7 +349,7 @@ theorem final_level3 (hs : s.WellFormed base bits) (hl : LeafFacts s base bits l
         (final_pointsAt hs hl hN).2 (Or.inl ⟨⟨q, hq, mem_writesOf.2 (Or.inr (Or.inl ⟨hp, hn, rfl⟩))⟩,
           h1, h2⟩)⟩
 
-theorem lvl_excl (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {t : Nat}
+private theorem lvl_excl (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {t : Nat}
     (h2 : s.IsLevel2 base t ∨ NewT2 (assignTables s.used leaves).2 t)
     (h3 : s.IsLevel3 base t ∨ NewT3 (assignTables s.used leaves).2 t) : False := by
   rcases h2 with h2 | ⟨q, hq, hn, rfl⟩ <;> rcases h3 with h3 | ⟨q', hq', hp', hn', ht⟩
@@ -356,7 +358,7 @@ theorem lvl_excl (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leave
   · have := (wf_level3_lt h3).1; have := (placed_lt2 hs hl hq).2 hn; omega
   · exact placed_apart hs hl hq hq' hp' ht.symm
 
-theorem final_parent (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves)
+private theorem final_parent (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves)
     (hN : (assignTables s.used leaves).1 ≤ N) {t i c : Nat} (ht : (finalSet s base leaves).IsParent base t)
     (hp : s.PointsAt base t i c) : s.IsParent base t := by
   rcases ht with rfl | ht
@@ -365,7 +367,7 @@ theorem final_parent (hs : s.WellFormed base bits) (hl : LeafFacts s base bits l
     · exact Or.inr ht
     · exact absurd (wf_entry_free hs (placed_range hl hq (Or.inl ⟨hn, rfl⟩)).1 i) (pointsAt_ne_zero hp)
 
-theorem final_level2_entry (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves)
+private theorem final_level2_entry (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves)
     (hN : (assignTables s.used leaves).1 ≤ N) {t : Nat} (ht : (finalSet s base leaves).IsLevel2 base t)
     {i : Nat} (hi : i < ENTRIES) :
     (finalSet s base leaves).entry t i = 0 ∨ (∃ c, (finalSet s base leaves).PointsAt base t i c) ∨
@@ -393,7 +395,7 @@ theorem final_level2_entry (hs : s.WellFormed base bits) (hl : LeafFacts s base 
       · exact Or.inr (Or.inr h)
     · exact Or.inl (wf_entry_free hs (placed_range hl hq (Or.inl ⟨hn, rfl⟩)).1 i)
 
-theorem final_level3_entry (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves)
+private theorem final_level3_entry (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves)
     (hN : (assignTables s.used leaves).1 ≤ N) {t : Nat} (ht : (finalSet s base leaves).IsLevel3 base t)
     {i : Nat} (hi : i < ENTRIES) :
     (finalSet s base leaves).entry t i = 0 ∨
@@ -418,7 +420,7 @@ theorem final_level3_entry (hs : s.WellFormed base bits) (hl : LeafFacts s base 
     · exact hs.2.2.2.2.2.2.1 t h3 i hi
     · exact Or.inl (wf_entry_free hs (placed_range hl hq (Or.inr ⟨hp, hn, rfl⟩)).1 i)
 
-theorem final_uniq (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves)
+private theorem final_uniq (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves)
     (hN : (assignTables s.used leaves).1 ≤ N) {t i t' i' c : Nat}
     (hp : (finalSet s base leaves).IsParent base t) (hp' : (finalSet s base leaves).IsParent base t')
     (ha : (finalSet s base leaves).PointsAt base t i c) (hb : (finalSet s base leaves).PointsAt base t' i' c) :

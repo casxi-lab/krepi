@@ -12,10 +12,9 @@ import Krepi.Proofs.PageTables.WalkLemmas
 The steps of the plan of a map (`mapPlan`) come in units, each checked
 against a well-formed set that holds the tables of the units before it:
 
-- entries after a plan: `lastAt_some`, `get_exec_cases` (an entry after a plan
-  is the old one, the value of a store of the plan into it, or 0 after a
-  `Zero` of its table), `get_exec_untouched` (an entry of a table that no step
-  writes);
+- entries after a plan: `get_exec_cases` (an entry after a plan is the old
+  one, the value of a store of the plan into it, or 0 after a `Zero` of its
+  table), `get_exec_untouched` (an entry of a table that no step writes);
 - the units: `ukey` (one key for a 1 GiB slot under a new level 2 table and
   one for each 2 MiB slot under a level 2 table of the set, ascending with the
   address), `ukey_gib`, `ukey_eq`, `unitSteps`, and what a unit needs of the
@@ -23,6 +22,10 @@ against a well-formed set that holds the tables of the units before it:
 - `held_allOk` (the steps of a 2 MiB slot under a level 2 table of the set
   pass their checks) and `new_allOk` (those of a 1 GiB slot under a new level
   2 table).
+
+`get_exec_cases` and `get_exec_untouched` are not used by another module yet;
+they are stated for the entries after any plan. The other lemmas of the
+module are private steps.
 -/
 
 @[expose] public section
@@ -35,7 +38,7 @@ variable {r : Region} {N : Nat}
 
 /-! ## Entries after a plan -/
 
-theorem lastAt_some {t i : Nat} {d : UInt64} : ∀ {plan : Plan}, lastAt t i plan = some d →
+private theorem lastAt_some {t i : Nat} {d : UInt64} : ∀ {plan : Plan}, lastAt t i plan = some d →
     Step.store t i d ∈ plan ∨ (Step.zero t ∈ plan ∧ d = 0)
   | [], h => by simp [lastAt] at h
   | x :: rest, h => by

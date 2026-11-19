@@ -25,7 +25,7 @@ The tests of PGT-R01 to PGT-R07 and PGT-R12 are proved, and
 small inputs are decided by the kernel on their concrete inputs once their
 proposition is unfolded, with the equality of `Except` values of
 `Krepi.Proofs.Fdt.decEqExcept` as a local instance. The two tests whose
-results are tuples of six and ten values, `unmapAndResetFollowContract` and
+results are tuples of ten and six values, `unmapAndResetFollowContract` and
 `copyIsPrivateAndOrdered`, raise `synthInstance.maxSize` so that the instance
 of their equality is found. The tests of PGT-R03 and the accepting test of
 PGT-R05, whose inputs are too large to evaluate, are proved from closed

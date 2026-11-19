@@ -16,21 +16,20 @@ and what follows for the tables of their placed leaves:
 
 - `PlaceSpec` and `place_spec`: the entries of the walk of a leaf in its
   place;
-- slots: `gib_index` (the 1 GiB slot of an address of a region is its root
-  index past the first slot of the region), `gib_of_index1`, `block_index`,
-  `page_index`;
+- slots: `gib_of_index1`, `block_index`, `page_index` (from the private
+  `gib_index`: the 1 GiB slot of an address of a region is its root index
+  past the first slot of the region);
 - `pointsAt_inj`, `pointsAt_ne_zero`, `pairwise_mem`, `form_size_pos`;
 - `LeafDesc`, `LeafFacts`;
 - the placed leaves of `assignTables`: `leaves_mono`, `placed_order`,
-  `placed_leaf`, `placed_place`, `placed_new2`, `placed_old2`,
-  `placed_new3`, `placed_block` (the entries that a leaf writes in a table of
-  the set are free, and the tables that it does not take new are the tables of
-  its walk), `placed_range`, `placed_lt2`, `placed_lt3` (new tables lie at or
+  `placed_leaf`, `placed_new2`, `placed_old2`, `placed_new3`,
+  `placed_block` (the entries that a leaf writes in a table of the set are
+  free, and the tables that it does not take new are the tables of its
+  walk), `placed_range`, `placed_lt2`, `placed_lt3` (new tables lie at or
   above the record, the others below), `placed_region`, `placed_t2eq`,
-  `placed_t3eq` (one table, one slot), `placed_parent`, `placed_apart` (a
-  level 2 table is no level 3 table), `placed_gib` (one slot, one table),
-  `placed_distinct`, `placed_blockOne` and `placed_ok` (the placed leaves are
-  `PlacedOk`).
+  `placed_t3eq` (one table, one slot), `placed_apart` (a level 2 table is no
+  level 3 table), `placed_distinct`, `placed_blockOne` and `placed_ok` (the
+  placed leaves are `PlacedOk`: one slot, one table, by private steps).
 -/
 
 @[expose] public section
@@ -85,7 +84,7 @@ theorem place_spec {s : Tables r N} {base : UInt64} {bits : UInt8} (hs : s.WellF
 
 /-! ## Slots in a region -/
 
-theorem gib_index {v : UInt64} (hv : r.holds v = true) :
+private theorem gib_index {v : UInt64} (hv : r.holds v = true) :
     v.toNat / GIB_SIZE = r.first / GIB_SIZE + index1 v := by
   have hlt := v.toNat_lt
   cases r with
@@ -152,33 +151,6 @@ structure LeafFacts (s : Tables r N) (base : UInt64) (bits : UInt8) (leaves : Li
   align : ∀ lp ∈ leaves, lp.1.va.toNat % lp.1.form.size = 0
   desc : ∀ lp ∈ leaves, LeafDesc bits lp.1
 
-/-- What the placed leaves of a map tell about their tables in the set. -/
-structure PlacedFacts (s : Tables r N) (base : UInt64) (bits : UInt8) (next : Nat)
-    (placed : List Placed) : Prop where
-  ok : PlacedOk placed
-  region : ∀ q ∈ placed, r.holds q.leaf.va = true
-  align : ∀ q ∈ placed, q.leaf.va.toNat % q.leaf.form.size = 0
-  desc : ∀ q ∈ placed, LeafDesc bits q.leaf
-  le : s.used ≤ next
-  range : ∀ q ∈ placed, ∀ c, NewTable q c → s.used ≤ c ∧ c < next
-  cover : ∀ c, s.used ≤ c → c < next → ∃ q ∈ placed, NewTable q c
-  new2 : ∀ q ∈ placed, q.new2 = true → s.entry 0 (index1 q.leaf.va) = 0
-  old2 : ∀ q ∈ placed, q.new2 = false →
-    s.PointsAt base 0 (index1 q.leaf.va) q.t2 ∧ s.IsLevel2 base q.t2
-  new3 : ∀ q ∈ placed, q.leaf.form = .page → q.new3 = true → q.new2 = false →
-    s.entry q.t2 (index2 q.leaf.va) = 0
-  old3 : ∀ q ∈ placed, q.leaf.form = .page → q.new3 = false →
-    s.PointsAt base q.t2 (index2 q.leaf.va) q.t3 ∧ s.IsLevel3 base q.t3 ∧
-      s.entry q.t3 (index3 q.leaf.va) = 0
-  block : ∀ q ∈ placed, q.leaf.form = .block → q.new2 = false → s.entry q.t2 (index2 q.leaf.va) = 0
-  t2eq : ∀ q ∈ placed, ∀ q' ∈ placed, q.t2 = q'.t2 → q.leaf.gibSlot = q'.leaf.gibSlot
-  t3eq : ∀ q ∈ placed, ∀ q' ∈ placed, q.leaf.form = .page → q'.leaf.form = .page → q.t3 = q'.t3 →
-    q.leaf.blockSlot = q'.leaf.blockSlot
-  apart : ∀ q ∈ placed, ∀ q' ∈ placed, q'.leaf.form = .page → q.t2 ≠ q'.t3
-  distinct : ∀ q ∈ placed, ∀ q' ∈ placed, q = q' ∨
-    q.leaf.va.toNat + q.leaf.form.size ≤ q'.leaf.va.toNat ∨
-    q'.leaf.va.toNat + q'.leaf.form.size ≤ q.leaf.va.toNat
-
 theorem form_size_pos (f : Form) : 0 < f.size := by cases f <;> decide
 
 section Placed
@@ -201,7 +173,7 @@ theorem placed_leaf (hl : LeafFacts s base bits leaves) {q : Placed}
   have := (assignTables_spec s.used leaves (leaves_mono hl)).2.1
   exact this q hq
 
-theorem placed_place (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q : Placed}
+private theorem placed_place (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q : Placed}
     (hq : q ∈ (assignTables s.used leaves).2) :
     ∃ p, (q.leaf, p) ∈ leaves ∧ Matches q p ∧ PlaceSpec s base q.leaf p := by
   obtain ⟨p, hp, hmq⟩ := placed_leaf hl hq
@@ -291,7 +263,7 @@ theorem placed_t2eq (hs : s.WellFormed base bits) (hl : LeafFacts s base bits le
   · have := (assignTables_spec s.used leaves (leaves_mono hl)).2.2.2.2.2.1
     exact (this q hq q' hq' hn hn').1 he
 
-theorem placed_parent (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q : Placed}
+private theorem placed_parent (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q : Placed}
     (hq : q ∈ (assignTables s.used leaves).2) (hp : q.leaf.form = .page) (hn : q.new3 = false) :
     s.IsParent base q.t2 :=
   Or.inr (placed_old2 hs hl hq ((placed_new3 hs hl hq hp).2.2 hn).1).2
@@ -330,7 +302,7 @@ theorem placed_apart (hs : s.WellFormed base bits) (hl : LeafFacts s base bits l
   · have := (assignTables_spec s.used leaves (leaves_mono hl)).2.2.2.2.2.2.2
     exact this q hq q' hq' hn hp' hn' he
 
-theorem placed_gib (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q q' : Placed}
+private theorem placed_gib (hs : s.WellFormed base bits) (hl : LeafFacts s base bits leaves) {q q' : Placed}
     (hq : q ∈ (assignTables s.used leaves).2) (hq' : q' ∈ (assignTables s.used leaves).2)
     (hg : q.leaf.gibSlot = q'.leaf.gibSlot) : q.new2 = q'.new2 ∧ q.t2 = q'.t2 := by
   have hi : index1 q.leaf.va = index1 q'.leaf.va := index1_of_gib hg

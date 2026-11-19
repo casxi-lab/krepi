@@ -15,13 +15,11 @@ which the leaves first need them, and the table of a key is the record plus
 its position in that order.
 
 - the two stages of `Alloc.add`: `stage2`, `stage3`, `add_eq`, `cacheStep`
-  (the cached table or the next free index), `stage2_root`, `stage3_new`,
-  `stage2_level3`, `stage2_placed`, `stage3_level2`, `stage3_placed`;
-- the invariant of one level, `LevelInv`, with `levelInv_other`,
-  `levelInv_old` and `levelInv_step`, and of the fold, `AllocInv`, with
-  `allocInv_add` and `allocInv_foldl`;
-- `Matches` (the tables of a placed leaf as its place gives them),
-  `add_placed`, `foldl_placed`;
+  (the cached table or the next free index), `stage2_root`, `stage3_new`;
+- the invariant of one level, `LevelInv`, and of the fold, `AllocInv`, which
+  each leaf keeps (private steps);
+- `Matches` (the tables of a placed leaf as its place gives them) and
+  `add_placed`;
 - `assignTables_spec`: the placed leaves are the leaves, each with the tables
   of its place; the new tables are the indices from the record up to the next
   free index, each the new table of a leaf; two new level 2 tables are equal
@@ -107,7 +105,7 @@ def LevelInv (used : Nat) (keys : List (Nat × Nat)) (tag : Nat) (c : Option (Na
   (∀ g, (tag, g) ∈ keys → ∃ q ∈ P, isNew q ∧ slot q = g) ∧
   (c = none → ∀ g, (tag, g) ∉ keys)
 
-theorem levelInv_other {used tag : Nat} {keys : List (Nat × Nat)} {c : Option (Nat × Nat)}
+private theorem levelInv_other {used tag : Nat} {keys : List (Nat × Nat)} {c : Option (Nat × Nat)}
     {isNew : Placed → Prop} {tab slot : Placed → Nat} {P : List Placed} {k : Nat × Nat}
     (h : LevelInv used keys tag c isNew tab slot P) (hk : k.1 ≠ tag) :
     LevelInv used (keys ++ [k]) tag c isNew tab slot P := by
@@ -126,7 +124,7 @@ theorem levelInv_other {used tag : Nat} {keys : List (Nat × Nat)} {c : Option (
     exact ⟨(hm _).2 a, by rw [List.idxOf_append_of_mem a]; exact b, fun g' hg' => d g' ((hm g').1 hg')⟩
   · rw [hm]; exact h4 hc g
 
-theorem levelInv_old {used tag : Nat} {keys : List (Nat × Nat)} {c : Option (Nat × Nat)}
+private theorem levelInv_old {used tag : Nat} {keys : List (Nat × Nat)} {c : Option (Nat × Nat)}
     {isNew : Placed → Prop} {tab slot : Placed → Nat} {P : List Placed} {q : Placed}
     (h : LevelInv used keys tag c isNew tab slot P) (hq : ¬ isNew q) :
     LevelInv used keys tag c isNew tab slot (q :: P) := by
@@ -140,7 +138,7 @@ theorem levelInv_old {used tag : Nat} {keys : List (Nat × Nat)} {c : Option (Na
 
 /-- One step of a level: the leaf takes the table of its slot, the cached one
 or the next free index, and the keys grow by its key when it is new. -/
-theorem levelInv_step {used tag : Nat} {keys : List (Nat × Nat)} {c : Option (Nat × Nat)}
+private theorem levelInv_step {used tag : Nat} {keys : List (Nat × Nat)} {c : Option (Nat × Nat)}
     {isNew : Placed → Prop} {tab slot : Placed → Nat} {P : List Placed} {q : Placed} {next : Nat}
     (h : LevelInv used keys tag c isNew tab slot P) (hnext : next = used + keys.length)
     (hord : ∀ g, (tag, g) ∈ keys → g ≤ slot q) (hq : isNew q)
@@ -220,17 +218,17 @@ structure AllocInv (used : Nat) (keys : List (Nat × Nat)) (a : Alloc) : Prop wh
     (·.leaf.blockSlot) a.placed
   cover : ∀ c, used ≤ c → c < a.next → ∃ q ∈ a.placed, NewTable q c
 
-theorem stage2_level3 (a : Alloc) (l : MapLeaf) (p : Place) : (stage2 a l p).2.2.level3 = a.level3 := by
+private theorem stage2_level3 (a : Alloc) (l : MapLeaf) (p : Place) : (stage2 a l p).2.2.level3 = a.level3 := by
   cases p with
   | root => rw [stage2_root]
   | _ => rfl
 
-theorem stage2_placed (a : Alloc) (l : MapLeaf) (p : Place) : (stage2 a l p).2.2.placed = a.placed := by
+private theorem stage2_placed (a : Alloc) (l : MapLeaf) (p : Place) : (stage2 a l p).2.2.placed = a.placed := by
   cases p with
   | root => rw [stage2_root]
   | _ => rfl
 
-theorem stage3_level2 (a : Alloc) (l : MapLeaf) (p : Place) : (stage3 a l p).2.2.level2 = a.level2 := by
+private theorem stage3_placed (a : Alloc) (l : MapLeaf) (p : Place) : (stage3 a l p).2.2.placed = a.placed := by
   simp only [stage3]; split
   · rfl
   · rfl
@@ -238,15 +236,7 @@ theorem stage3_level2 (a : Alloc) (l : MapLeaf) (p : Place) : (stage3 a l p).2.2
     · split <;> rfl
     · rfl
 
-theorem stage3_placed (a : Alloc) (l : MapLeaf) (p : Place) : (stage3 a l p).2.2.placed = a.placed := by
-  simp only [stage3]; split
-  · rfl
-  · rfl
-  · split
-    · split <;> rfl
-    · rfl
-
-theorem allocInv_add {used : Nat} {keys : List (Nat × Nat)} {a : Alloc} (h : AllocInv used keys a)
+private theorem allocInv_add {used : Nat} {keys : List (Nat × Nat)} {a : Alloc} (h : AllocInv used keys a)
     (l : MapLeaf) (p : Place) (hord : ∀ q ∈ a.placed, q.leaf.va.toNat ≤ l.va.toNat) :
     ∃ keys', AllocInv used keys' (a.add (l, p)) := by
   rw [add_eq]
@@ -385,7 +375,7 @@ theorem add_placed (a : Alloc) (l : MapLeaf) (p : Place) :
     simp only [Matches, stage2, true_and]
     cases hf : l.form <;> simp [stage3, hf]
 
-theorem foldl_placed (L : List (MapLeaf × Place)) : ∀ (a : Alloc),
+private theorem foldl_placed (L : List (MapLeaf × Place)) : ∀ (a : Alloc),
     (L.foldl Alloc.add a).placed.map (·.leaf) = (L.map Prod.fst).reverse ++ a.placed.map (·.leaf) ∧
     ∀ q ∈ (L.foldl Alloc.add a).placed, q ∈ a.placed ∨ ∃ p, (q.leaf, p) ∈ L ∧ Matches q p := by
   induction L with
@@ -404,7 +394,7 @@ theorem foldl_placed (L : List (MapLeaf × Place)) : ∀ (a : Alloc),
       · exact Or.inl h
     · exact Or.inr ⟨p', List.mem_cons_of_mem _ hp', hm'⟩
 
-theorem allocInv_foldl (used : Nat) : ∀ (L : List (MapLeaf × Place)) (keys : List (Nat × Nat))
+private theorem allocInv_foldl (used : Nat) : ∀ (L : List (MapLeaf × Place)) (keys : List (Nat × Nat))
     (a : Alloc), AllocInv used keys a → (∀ lp ∈ L, ∀ q ∈ a.placed, q.leaf.va.toNat ≤ lp.1.va.toNat) →
     (L.map Prod.fst).Pairwise (fun x y => x.va.toNat ≤ y.va.toNat) →
     ∃ keys', AllocInv used keys' (L.foldl Alloc.add a)

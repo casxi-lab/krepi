@@ -21,11 +21,15 @@ the check reads.
 
 The checks of the structural invariants, `Tables.checkWellFormed`,
 `Ownership.checkWellFormed` and `Shared.checkWellFormed`, and the check of
-the offset of the direct map, `Shared.checkDirectMapOffset`, are proved. The
-five checks of the functional invariants of the page ownership table are
-still planned: their proof is `sorry`, and `verification/statements.json`
-registers them as `planned`. Mathlib is imported so that the gate counts the heartbeats of
-each theorem.
+the offset of the direct map, `Shared.checkDirectMapOffset`, are proved:
+each conjunct of a structural check is rewritten into its proposition (the
+lists of tables that the check of a table set reads by
+`Krepi.Proofs.PageTables.TreeLemmas`), and the offset check walks the leaves
+of the direct map (`Tables.leaves`, `Krepi.Proofs.PageTables.LeavesLemmas`)
+in both directions. The five checks of the functional invariants of the page
+ownership table are still planned: their proof is `sorry`, and
+`verification/statements.json` registers them as `planned`. Mathlib is
+imported so that the gate counts the heartbeats of each theorem.
 -/
 
 namespace Krepi.Proofs.PageTables.Checks

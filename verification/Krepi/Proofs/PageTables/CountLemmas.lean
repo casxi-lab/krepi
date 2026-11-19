@@ -16,14 +16,14 @@ large map is counted from closed forms of its leaves instead of being
 evaluated leaf by leaf:
 
 - `Except`: `ok_bind_eq` and `ok_map_eq`, the bind and the map of a success;
-- the stores of a plan: `CountOk` (what a count of steps asks of the steps)
-  and `countP_mapPlan` (the steps of `mapPlan` that a count counts are the
-  stores of the placed leaves that it counts), with `counts_mapPlan`: the
-  blocks and the pages of the plan of a map are its block and page leaves;
+- the stores of a plan: `CountOk` (what a count of steps asks of the steps);
+  privately, the steps of `mapPlan` that such a count counts are the stores
+  of the placed leaves that it counts, so the blocks and the pages of the
+  plan of a map are its block and page leaves;
 - the new tables of leaves whose root entries are invalid: `tick` (the next
-  free index and the slots of the last new tables after one more leaf) and
-  `assign_root_next` (the next free index of `assignTables` is that of the
-  fold of `tick`);
+  free index and the slots of the last new tables after one more leaf);
+  privately, the next free index of `assignTables` is that of the fold of
+  `tick`;
 - the leaves of the direct map in runs: `directPage`, `directBlock`,
   `pageRun`, `blockRun`, `pageRun_zero`, `blockRun_zero`, `usableLeaves_eq`
   (the leaves of a usable range are a run of pages, a run of blocks and a run
@@ -31,13 +31,15 @@ evaluated leaf by leaf:
   `blockRun_pages`, and the slots `dgib` and `dblk` with `tick_block`,
   `tick_page`, `tick_blockRun` and `tick_pageRun` (the fold of `tick` over a
   run of blocks, and over a run of pages in one 2 MiB slot);
-- `direct_map` into a set without valid root entries: `directMap_fresh`
-  (every leaf is placed at the root and the result is the write phase of the
-  leaves of the usable ranges), `mapLeaves_fits`, `mapLeaves_over`, and
-  **`directMap_counts`** and **`directMap_full`**: on a set whose pool is
-  zero and whose record holds the root alone, the map succeeds with the
-  tables of the fold of `tick` and the blocks and pages of the leaves when
-  those tables fit, and is refused with `OutOfTables` when they do not.
+- `direct_map` into a set without valid root entries, where every leaf is
+  placed at the root (private steps): **`directMap_counts`** and
+  **`directMap_full`**: on a set whose pool is zero and whose record holds
+  the root alone, the map succeeds with the tables of the fold of `tick` and
+  the blocks and pages of the leaves when those tables fit, and is refused
+  with `OutOfTables` when they do not.
+
+`tick_block`, `tick_page` and `directMap_full` are not used by another module
+yet; they are stated for the counts of maps of single pages.
 -/
 
 @[expose] public section
@@ -151,7 +153,7 @@ private theorem countP_runSteps (hp : PlacedOk placed) (hnd : placed.Nodup)
 
 /-- The steps of the plan of placed leaves that a count `f` counts are the
 placed leaves that `g` counts. -/
-theorem countP_mapPlan (hp : PlacedOk placed) (hnd : placed.Nodup) (hc : CountOk base placed f g) :
+private theorem countP_mapPlan (hp : PlacedOk placed) (hnd : placed.Nodup) (hc : CountOk base placed f g) :
     (mapPlan base placed).countP f = placed.countP g := by
   rw [mapPlan_eq, List.countP_append, List.countP_cons, hc.sync, List.countP_nil]
   simp only [Bool.false_eq_true, ite_false, Nat.add_zero]
@@ -193,7 +195,7 @@ private theorem storesPage_leaf {bits : UInt8} {q : Placed} (h : LeafDesc bits q
 
 /-- The blocks and the pages of the plan of a map whose leaves passed their
 checks on a well-formed set are its block leaves and its page leaves. -/
-theorem counts_mapPlan {r : Region} {N : Nat} {s : Tables r N} {base : UInt64} {bits : UInt8}
+private theorem counts_mapPlan {r : Region} {N : Nat} {s : Tables r N} {base : UInt64} {bits : UInt8}
     {leaves : List (MapLeaf × Place)} (hs : s.WellFormed base bits)
     (hl : LeafFacts s base bits leaves) :
     (mapPlan base (assignTables s.used leaves).2).counts.blocks =
@@ -264,7 +266,7 @@ private theorem keysOf_foldl : ∀ (L : List MapLeaf) (a : Alloc),
 
 /-- The next free index after the new tables of leaves whose root entries are
 all invalid is that of the fold of `tick`. -/
-theorem assign_root_next (used : Nat) (L : List MapLeaf) :
+private theorem assign_root_next (used : Nat) (L : List MapLeaf) :
     (assignTables used (L.map (·, Place.root))).1 = (L.foldl tick (used, none, none)).1 :=
   congrArg (·.1) (keysOf_foldl L ⟨used, none, none, []⟩)
 
@@ -533,7 +535,7 @@ private theorem usable_fold_fresh (h0 : ∀ i, s.entry 0 i = 0) :
 /-- `direct_map` into a set whose root entries are invalid, of usable ranges
 that pass their checks and lie in ascending order apart: the write phase of
 the leaves of the ranges, each placed at the root. -/
-theorem directMap_fresh (hp : PoolOk N base bits) (h0 : ∀ i, s.entry 0 i = 0)
+private theorem directMap_fresh (hp : PoolOk N base bits) (h0 : ∀ i, s.entry 0 i = 0)
     {M : Krepi.Spec.Fdt.MemoryPlan}
     (hok : ∀ u ∈ sortByKey (·.start.toNat) M.availableRanges, UsableOk bits u)
     (hpw : (sortByKey (·.start.toNat) M.availableRanges).Pairwise
@@ -547,7 +549,7 @@ theorem directMap_fresh (hp : PoolOk N base bits) (h0 : ∀ i, s.entry 0 i = 0)
 
 end Fresh
 
-theorem mapLeaves_fits {r : Region} {N : Nat} {s : Tables r N} {base : UInt64}
+private theorem mapLeaves_fits {r : Region} {N : Nat} {s : Tables r N} {base : UInt64}
     {L : List (MapLeaf × Place)} (h : (assignTables s.used L).1 ≤ N) :
     s.mapLeaves base L = .ok ({ s with used := (assignTables s.used L).1 },
       mapPlan base (assignTables s.used L).2) := by
@@ -558,7 +560,7 @@ theorem mapLeaves_fits {r : Region} {N : Nat} {s : Tables r N} {base : UInt64}
   rw [ite_of_neg (by omega)]
   rfl
 
-theorem mapLeaves_over {r : Region} {N : Nat} {s : Tables r N} {base : UInt64}
+private theorem mapLeaves_over {r : Region} {N : Nat} {s : Tables r N} {base : UInt64}
     {L : List (MapLeaf × Place)} (hu : s.used ≤ N) (h : N < (assignTables s.used L).1) :
     s.mapLeaves base L = .error .outOfTables := by
   unfold Tables.mapLeaves

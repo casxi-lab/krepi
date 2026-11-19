@@ -14,14 +14,13 @@ The lists of tables that `Tables.checkWellFormed` reads, against the
 propositions of `Tables.WellFormed`:
 
 - `pointsAt?_eq_some` (`Tables.pointsAt?` is `Tables.PointsAt`),
-  `mem_childrenOf`, `mem_level2Tables`, `mem_level3Tables` and
-  `mem_tablesOf` (the level 2 and level 3 tables together are the tables
-  that a parent points at);
-- `childrenOf_nodup_iff`: the table descriptors of one table point at
-  different tables;
+  `mem_level2Tables`, `mem_level3Tables` and `mem_tablesOf` (the level 2
+  and level 3 tables together are the tables that a parent points at), from
+  the private `mem_childrenOf`;
 - `tablesOf_nodup_iff`: with no pointer at the root, the level 2 and level 3
   tables are listed once each exactly when every table has at most one
-  pointer from a parent;
+  pointer from a parent (by the private `childrenOf_nodup_iff`: the table
+  descriptors of one table point at different tables);
 - `sort_eq_range_iff`: the sorted list of the tables is the list from 1 below
   the record exactly when it holds each of them once.
 -/
@@ -39,7 +38,7 @@ theorem pointsAt?_eq_some {t i c : Nat} (hi : i < ENTRIES) :
   unfold Tables.pointsAt? Tables.PointsAt
   split <;> simp_all
 
-theorem mem_childrenOf {t c : Nat} : c ∈ s.childrenOf base t ↔ ∃ i, s.PointsAt base t i c := by
+private theorem mem_childrenOf {t c : Nat} : c ∈ s.childrenOf base t ↔ ∃ i, s.PointsAt base t i c := by
   simp only [Tables.childrenOf, List.mem_filterMap, List.mem_range]
   constructor
   · rintro ⟨i, hi, h⟩; exact ⟨i, (pointsAt?_eq_some s base hi).1 h⟩
@@ -66,7 +65,7 @@ theorem mem_tablesOf {c : Nat} : c ∈ s.level2Tables base ++ s.level3Tables bas
     · exact Or.inl ⟨i, h⟩
     · exact Or.inr ⟨t, i, h2, h⟩
 
-theorem childrenOf_nodup_iff {t : Nat} : (s.childrenOf base t).Nodup ↔
+private theorem childrenOf_nodup_iff {t : Nat} : (s.childrenOf base t).Nodup ↔
     ∀ i j c, s.PointsAt base t i c → s.PointsAt base t j c → i = j := by
   constructor
   · intro h i j c hi hj

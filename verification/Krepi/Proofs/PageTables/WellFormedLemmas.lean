@@ -17,11 +17,12 @@ changes of a set that keep it well-formed:
   in use is 0) and `wf_plain_child` (every table descriptor in the pool points
   at a table in use);
 - zero tables: `table_eq_zero`, `entry_of_table_zero`;
-- the set of a zero pool with the root alone in use: `wf_zero`, with
-  `not_pointsAt_of_zero`;
+- the set of a zero pool with the root alone in use: `wf_zero`;
 - a leaf, a block of a level 2 table or a page of a level 3 table, written
   into or cleared from an entry that holds no table descriptor:
-  `wf_setLeaf`, with `entry_store`.
+  `wf_setLeaf`.
+
+The other lemmas of the module are private steps of these.
 -/
 
 @[expose] public section
@@ -114,7 +115,7 @@ end WellFormed
 
 /-! ## The set of a zero pool -/
 
-theorem not_pointsAt_of_zero {s : Tables r N} {base : UInt64} {t i c : Nat}
+private theorem not_pointsAt_of_zero {s : Tables r N} {base : UInt64} {t i c : Nat}
     (h : s.entry t i = 0) : ¬ s.PointsAt base t i c := by
   rintro ⟨-, hp, -⟩; rw [h] at hp; exact absurd hp (by decide)
 
@@ -131,7 +132,7 @@ theorem wf_zero {s : Tables r N} {base : UInt64} {bits : UInt8} (hp : PoolOk N b
 /-! ## Elementary changes -/
 
 /-- The entries of a set after one store into the entry `i` of table `t`. -/
-theorem entry_store {s : Tables r N} {u t i : Nat} {d : UInt64} (ht : t < N) (hi : i < ENTRIES)
+private theorem entry_store {s : Tables r N} {u t i : Nat} {d : UInt64} (ht : t < N) (hi : i < ENTRIES)
     (t' i' : Nat) :
     (⟨s.pool.store t i d, u⟩ : Tables r N).entry t' i' =
       if t' = t ∧ i' = i then d else s.entry t' i' := by

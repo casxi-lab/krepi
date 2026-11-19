@@ -11,20 +11,20 @@ Lemmas about the pool of a table set and the execution of a write plan on
 it, for every proof that reads a pool after a plan:
 
 - `ite_of_pos` and `ite_of_neg`, the branches of an `if`;
-- entries: `entry_eq_get` (`Tables.entry` is `Pool.get`), `zero_get`,
-  `get_of_ge`, `get_of_ge_entries`, `pool_ext` (two pools with the same
-  entries are equal);
+- entries: `entry_eq_get` (`Tables.entry` is `Pool.get`), `get_of_ge`,
+  `get_of_ge_entries`;
 - one step: `get_store` and `get_zeroTable`, the entries after a `Store`
   and a `Zero`;
 - plans: `stepAt` and `lastAt`, the value that a step and the last step of a
   plan that writes an entry give it; `get_exec` (an entry after a plan is
-  the value of the last step that writes it, or the entry before), with
-  `exec_cons`, `exec_append`, `lastAt_append` and `lastAt_zeros`;
+  the value of the last step that writes it, or the entry before, by the
+  private `get_step` for one step), with `exec_cons`, `exec_append`,
+  `lastAt_append` and `lastAt_zeros`;
 - pools that the contract admits: `pool_ok_facts`;
 - table pointers: `child?_some` (a pointer reaches a table in use),
   `child?_mono` (it keeps its table when the record grows),
-  `tableAddress_toNat`, `outputAddress_tableAt` and `child?_tableAt` (the
-  table descriptor of a table in use points at it).
+  `outputAddress_tableAt` and `child?_tableAt` (the table descriptor of a
+  table in use points at it).
 -/
 
 @[expose] public section
@@ -40,9 +40,6 @@ theorem ite_of_neg {α : Sort _} {c : Prop} [Decidable c] {a b : α} (h : ¬ c) 
 
 theorem ite_of_pos {α : Sort _} {c : Prop} [Decidable c] {a b : α} (h : c) :
     (if c then a else b) = a := by simp [h]
-
-theorem zero_get (i : Nat) (h : i < ENTRIES) : Table.zero[i] = 0 := by
-  simp [Table.zero]
 
 theorem entry_eq_get (s : Tables r N) (t i : Nat) : s.entry t i = s.pool.get t i := by
   unfold Tables.entry Tables.table Pool.get
@@ -82,12 +79,6 @@ theorem get_zeroTable (p : Pool N) (t t' i' : Nat) :
     · subst he; simp [ht]
     · simp [ht, he]
 
-theorem pool_ext {p q : Pool N} (h : ∀ t i, t < N → i < ENTRIES → p.get t i = q.get t i) : p = q := by
-  apply Vector.ext; intro t ht
-  apply Vector.ext; intro i hi
-  have := h t i ht hi
-  simpa [Pool.get, ht, hi] using this
-
 /-! ## Plans -/
 
 def stepAt (t i : Nat) : Step → Option UInt64
@@ -99,13 +90,12 @@ def lastAt (t i : Nat) : Plan → Option UInt64
   | [] => none
   | step :: rest => (lastAt t i rest).or (stepAt t i step)
 
-theorem exec_nil (p : Pool N) : Plan.exec [] p = p := rfl
 theorem exec_cons (step : Step) (rest : Plan) (p : Pool N) :
     Plan.exec (step :: rest) p = Plan.exec rest (step.exec p) := rfl
 theorem exec_append (a b : Plan) (p : Pool N) : Plan.exec (a ++ b) p = Plan.exec b (Plan.exec a p) := by
   simp [Plan.exec, List.foldl_append]
 
-theorem get_step (step : Step) (p : Pool N) {t i : Nat} (ht : t < N) (hi : i < ENTRIES) :
+private theorem get_step (step : Step) (p : Pool N) {t i : Nat} (ht : t < N) (hi : i < ENTRIES) :
     (step.exec p).get t i = (stepAt t i step).getD (p.get t i) := by
   cases step with
   | zero t' => simp only [Step.exec, get_zeroTable, stepAt]; by_cases h : t = t' <;> simp [h, eq_comm]
@@ -174,7 +164,7 @@ theorem child?_mono {s : Tables r N} {base d : UInt64} {c u : Nat} (hu : s.used 
     · rename_i hn; exact absurd ⟨by omega, by omega⟩ hn
   · simp at h
 
-theorem tableAddress_toNat {base : UInt64} {c : Nat} (h : base.toNat + PAGE_SIZE * c < 2 ^ 64) :
+private theorem tableAddress_toNat {base : UInt64} {c : Nat} (h : base.toNat + PAGE_SIZE * c < 2 ^ 64) :
     (tableAddress base c).toNat = base.toNat + PAGE_SIZE * c := by
   simp only [tableAddress, UInt64.toNat_ofNat']; exact Nat.mod_eq_of_lt h
 

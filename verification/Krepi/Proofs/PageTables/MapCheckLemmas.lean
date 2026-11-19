@@ -13,23 +13,23 @@ import Krepi.Proofs.Fdt.ExceptLemmas
 What the checks of the two maps give their leaves, so that the lemmas of
 `Krepi.Proofs.PageTables.MapWriteLemmas` apply to them:
 
-- `checkLeaf_ok`, `checkLeaf_fold` (the leaves that pass the free-slot check,
-  each with its place and not taken), `mapLeaves_ok` (the set after the plan
-  is `finalSet`, and the new tables fit in the pool), `mapLeaves_plan` (the plan
-  is `mapPlan` of the placed leaves, and the pool is unchanged by the write phase);
-- the direct map: `DirectLeaf`, `directLeaves_spec` (the leaves of a range lie
-  in it, in ascending order, each at `DIRECT_BASE | pa`), `usableLeaves`,
-  `UsableOk`, `checkUsableRange_ok`, `usable_fold`, `usableLeaves_spec`,
-  `directLeaf_va`, `form_size_dvd` and **`directMap_facts`** (the leaves of a
-  successful `direct_map` satisfy `LeafFacts`, each is a `DirectLeaf` below
-  $2^{39}$, and they are the leaves of its usable ranges in address order);
-- the kernel mappings: `layoutPages_spec`, `LayoutOk`, `rangePages`,
-  `checkLayoutRange_ok`, `layout_fold`, `rangePages_spec` and
+- the write phase, in private steps: the leaves that pass the free-slot
+  check, each with its place and not taken; the set after the plan is
+  `finalSet`, and the new tables fit in the pool; the plan is `mapPlan` of
+  the placed leaves, and the pool is unchanged by the write phase;
+- the direct map: `DirectLeaf`, `usableLeaves`, `UsableOk`,
+  `usableLeaves_spec` (the leaves of a range lie in it, in ascending order,
+  each at `DIRECT_BASE | pa`), `directLeaf_va` and **`directMap_facts`** (the
+  leaves of a successful `direct_map` satisfy `LeafFacts`, each is a
+  `DirectLeaf` below $2^{39}$, and they are the leaves of its usable ranges in
+  address order);
+- the kernel mappings: `LayoutOk`, `rangePages`, `layout_fold` (the fold of
+  the checks of the ranges: the pages of the ranges with their places, and
+  no page of a range meets a range checked before it), `rangePages_spec` and
   **`kernelMap_facts`** (also: the leaves are the pages of the ranges of the
   layout in address order);
-- descriptors: `descriptor_and_not_mask`, `descriptor_kind_inj`,
-  `ofPage_descriptor` (the kind of a page descriptor is its kind) and
-  `blockAddress_of_aligned`;
+- descriptors: `descriptor_kind_inj`, `ofPage_descriptor` (the kind of a page
+  descriptor is its kind) and `blockAddress_of_aligned`;
 - **`mapPage_single`**, **`mapBlock_single`**: a successful `map_page` or
   `map_block` is the map of its one leaf.
 -/
@@ -43,7 +43,7 @@ open Krepi.Proofs.Fdt (except_bind_ok except_jp_ok except_pure_ok)
 
 variable {r : Region} {N : Nat}
 
-theorem checkLeaf_ok {s : Tables r N} {base : UInt64} {taken : MapLeaf → Bool}
+private theorem checkLeaf_ok {s : Tables r N} {base : UInt64} {taken : MapLeaf → Bool}
     {acc res : List (MapLeaf × Place)} {l : MapLeaf} (h : s.checkLeaf base taken acc l = .ok res) :
     ∃ p, s.place base l = .ok p ∧ taken l = false ∧ res = (l, p) :: acc := by
   unfold Tables.checkLeaf at h
@@ -52,7 +52,7 @@ theorem checkLeaf_ok {s : Tables r N} {base : UInt64} {taken : MapLeaf → Bool}
   cases ht : taken l <;> simp_all [pure, Except.pure, throw, throwThe, MonadExceptOf.throw, bind,
     Except.bind]
 
-theorem checkLeaf_fold {s : Tables r N} {base : UInt64} {taken : MapLeaf → Bool} :
+private theorem checkLeaf_fold {s : Tables r N} {base : UInt64} {taken : MapLeaf → Bool} :
     ∀ (ls : List MapLeaf) (acc res : List (MapLeaf × Place)),
       ls.foldlM (s.checkLeaf base taken) acc = .ok res →
       ∃ ps : List (MapLeaf × Place), res = ps.reverse ++ acc ∧ ps.map Prod.fst = ls ∧
@@ -70,7 +70,7 @@ theorem checkLeaf_fold {s : Tables r N} {base : UInt64} {taken : MapLeaf → Boo
     · exact ⟨hp, ht⟩
     · exact hall x hx
 
-theorem mapLeaves_ok {s : Tables r N} {base : UInt64} {leaves : List (MapLeaf × Place)}
+private theorem mapLeaves_ok {s : Tables r N} {base : UInt64} {leaves : List (MapLeaf × Place)}
     {s₁ : Tables r N} {plan : Plan} (hs : s.used ≤ N) (h : s.mapLeaves base leaves = .ok (s₁, plan)) :
     s₁.apply plan = finalSet s base leaves ∧ (assignTables s.used leaves).1 ≤ N := by
   unfold Tables.mapLeaves at h
@@ -85,7 +85,7 @@ theorem mapLeaves_ok {s : Tables r N} {base : UInt64} {leaves : List (MapLeaf ×
     refine ⟨by simp only [Tables.apply, finalSet, hr], ?_⟩
     show next ≤ N; omega
 
-theorem mapLeaves_plan {s : Tables r N} {base : UInt64} {leaves : List (MapLeaf × Place)}
+private theorem mapLeaves_plan {s : Tables r N} {base : UInt64} {leaves : List (MapLeaf × Place)}
     {s₁ : Tables r N} {plan : Plan} (h : s.mapLeaves base leaves = .ok (s₁, plan)) :
     plan = mapPlan base (assignTables s.used leaves).2 ∧ s₁.pool = s.pool := by
   unfold Tables.mapLeaves at h
@@ -106,7 +106,7 @@ def DirectLeaf (x : MapLeaf) : Prop :=
     (x.form = .page → x.desc = descriptor .readWrite x.pa) ∧
     (x.form = .block → x.desc = blockDescriptor x.pa)
 
-theorem directLeaves_spec (stop : Nat) (hstop : stop % PAGE_SIZE = 0) (hlim : stop ≤ VA_LIMIT) :
+private theorem directLeaves_spec (stop : Nat) (hstop : stop % PAGE_SIZE = 0) (hlim : stop ≤ VA_LIMIT) :
     ∀ fuel pa, pa % PAGE_SIZE = 0 →
       (∀ x ∈ directLeaves stop fuel pa, pa ≤ x.pa.toNat ∧ x.pa.toNat + x.form.size ≤ stop ∧
         DirectLeaf x) ∧
@@ -151,7 +151,7 @@ def UsableOk (bits : UInt8) (u : Krepi.Spec.Fdt.Span) : Prop :=
   u.start.toNat % PAGE_SIZE = 0 ∧ u.endNat % PAGE_SIZE = 0 ∧ u.endNat ≤ VA_LIMIT ∧
     u.endNat ≤ 2 ^ bits.toNat
 
-theorem checkUsableRange_ok {s : Tables .upper N} {base : UInt64} {bits : UInt8}
+private theorem checkUsableRange_ok {s : Tables .upper N} {base : UInt64} {bits : UInt8}
     {earlier : List Krepi.Spec.Fdt.Span} {acc : List (MapLeaf × Place)} {u : Krepi.Spec.Fdt.Span}
     {res : List Krepi.Spec.Fdt.Span × List (MapLeaf × Place)}
     (h : s.checkUsableRange base bits (earlier, acc) u = .ok res) :
@@ -167,7 +167,7 @@ theorem checkUsableRange_ok {s : Tables .upper N} {base : UInt64} {bits : UInt8}
   simp only [Bool.or_eq_true, bne_iff_ne, ne_eq, decide_eq_true_eq, not_or, Decidable.not_not, Nat.not_lt] at h1 h2
   exact ⟨⟨h1.1, h1.2, h2.1, h2.2⟩, leaves', h3, (except_pure_ok.1 h4).symm⟩
 
-theorem usable_fold {s : Tables .upper N} {base : UInt64} {bits : UInt8} :
+private theorem usable_fold {s : Tables .upper N} {base : UInt64} {bits : UInt8} :
     ∀ (us earlier : List Krepi.Spec.Fdt.Span) (acc : List (MapLeaf × Place))
       (res : List Krepi.Spec.Fdt.Span × List (MapLeaf × Place)),
       us.foldlM (s.checkUsableRange base bits) (earlier, acc) = .ok res →
@@ -212,7 +212,7 @@ theorem directLeaf_va {x : MapLeaf} (hx : DirectLeaf x) (hlt : x.pa.toNat < VA_L
     x.va.toNat = DIRECT_BASE.toNat + x.pa.toNat := by
   rw [hx.1, direct_or hlt]
 
-theorem form_size_dvd (f : Form) : BLOCK_SIZE % f.size = 0 := by cases f <;> decide
+private theorem form_size_dvd (f : Form) : BLOCK_SIZE % f.size = 0 := by cases f <;> decide
 
 theorem directMap_facts {s : Tables .upper N} {memory : Krepi.Spec.Fdt.MemoryPlan} {base : UInt64}
     {bits : UInt8} {s₁ : Tables .upper N} {plan : Plan} (hs : s.WellFormed base bits)
@@ -288,7 +288,7 @@ theorem directMap_facts {s : Tables .upper N} {memory : Krepi.Spec.Fdt.MemoryPla
 
 /-! ## The kernel mappings -/
 
-theorem layoutPages_spec (k : Kind) : ∀ count pa, pa + count * PAGE_SIZE ≤ VA_LIMIT →
+private theorem layoutPages_spec (k : Kind) : ∀ count pa, pa + count * PAGE_SIZE ≤ VA_LIMIT →
     (∀ x ∈ layoutPages k count pa, pa ≤ x.pa.toNat ∧ x.pa.toNat + PAGE_SIZE ≤ pa + count * PAGE_SIZE ∧
       x.pa.toNat % PAGE_SIZE = pa % PAGE_SIZE ∧ x.va = x.pa ∧ x.form = .page ∧
       x.desc = descriptor k x.pa) ∧
@@ -317,7 +317,7 @@ def LayoutOk (bits : UInt8) (j : LayoutRange) : Prop :=
 def rangePages (j : LayoutRange) : List MapLeaf :=
   layoutPages j.kind (j.range.len.toNat / PAGE_SIZE) j.range.start.toNat
 
-theorem checkLayoutRange_ok {s : Tables .lower N} {base : UInt64} {bits : UInt8} {guards : List UInt64}
+private theorem checkLayoutRange_ok {s : Tables .lower N} {base : UInt64} {bits : UInt8} {guards : List UInt64}
     {earlier : List PhysRange} {acc : List (MapLeaf × Place)} {j : LayoutRange}
     {res : List PhysRange × List (MapLeaf × Place)}
     (h : s.checkLayoutRange base bits guards (earlier, acc) j = .ok res) :
@@ -437,7 +437,7 @@ theorem kernelMap_facts {s : Tables .lower N} {layout : Layout} {base : UInt64}
 
 /-! ## Descriptors of the direct map -/
 
-theorem descriptor_and_not_mask (k : Kind) (a : UInt64) :
+private theorem descriptor_and_not_mask (k : Kind) (a : UInt64) :
     descriptor k a &&& ~~~ADDRESS_MASK = k.attributes.bits ||| TABLE_OR_PAGE := by
   simp only [descriptor, u64_or_and, UInt64.and_assoc, attr_and_not_mask]
   rw [show ADDRESS_MASK &&& ~~~ADDRESS_MASK = 0 by decide,

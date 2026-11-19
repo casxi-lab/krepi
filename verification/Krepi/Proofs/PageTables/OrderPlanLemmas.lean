@@ -10,14 +10,18 @@ import Krepi.Proofs.PageTables.WalkLemmas
 
 - `mapPlan_units`: the plan of placed leaves whose tables agree slot by slot
   is the steps of its units (`ukey`, `unitSteps`) and `Sync`;
-- prefixes of the leaves of a map: `placedOk_sublist`, `foldl_add_placed`,
-  `leafFacts_take`, `assign_take` (the placed leaves of a prefix are the
-  prefix of the placed leaves);
+- prefixes of the leaves of a map: `foldl_add_placed`, `leafFacts_take`,
+  `assign_take` (the placed leaves of a prefix are the prefix of the placed
+  leaves);
 - **`mapPlan_inOrder`**: the plan of the leaves of a map that passed their
   checks in a well-formed set passes `Plan.inOrder`, one unit after the
   other, each against the set that the units before it left (`finalSet` of a
   prefix of the leaves, well-formed by `final_wf`), in which its tables are
   new or held as in the set before the map.
+
+`mapPlan_units`, `foldl_add_placed`, `leafFacts_take` and `assign_take` are
+not used by another module yet; they are stated for any reading of the plan
+of a map unit by unit. The other lemmas of the module are private steps.
 -/
 
 @[expose] public section
@@ -178,7 +182,7 @@ theorem mapPlan_units (base : UInt64) {P : List Placed} (hp : PlacedOk P) :
 
 /-! ## A prefix of the leaves -/
 
-theorem placedOk_sublist {P Q : List Placed} (hp : PlacedOk P) (h : Q.Sublist P) : PlacedOk Q :=
+private theorem placedOk_sublist {P Q : List Placed} (hp : PlacedOk P) (h : Q.Sublist P) : PlacedOk Q :=
   ⟨hp.mono.sublist h, fun q hq q' hq' => hp.gib q (h.subset hq) q' (h.subset hq'),
     fun q hq q' hq' => hp.block q (h.subset hq) q' (h.subset hq'),
     fun q hq q' hq' => hp.blockOne q (h.subset hq) q' (h.subset hq'),

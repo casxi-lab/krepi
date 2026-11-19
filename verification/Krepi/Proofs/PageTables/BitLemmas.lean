@@ -10,23 +10,26 @@ Lemmas about the descriptors of the specification of the `page-tables`
 component, for every proof that reads an entry of a pool:
 
 - bitwise identities of `UInt64`: `u64_or_and` (`&&&` distributes over
-  `|||`) and `u64_and_or_self`;
-- the zero entry: `typeBits_zero`, `isValid_zero`, `isPlain_zero`;
+  `|||`);
+- the zero entry: `isValid_zero`, `isPlain_zero`;
+- the attributes of a kind: `attr_and_not_mask`;
 - table descriptors: `isPlain_tableDescriptor`, `typeBits_tableDescriptor`,
   `isValid_tableDescriptor`, `outputAddress_tableDescriptor`;
 - page descriptors: `typeBits_descriptor`, `isValid_descriptor`,
   `outputAddress_descriptor`, `descriptor_outputAddress` and
   `isPlain_descriptor` (a page descriptor is no table descriptor), with
-  `ofPage_isSome_iff` (what `Kind.ofPage` finds) and `mem_all`;
-- block descriptors: `typeBits_blockDescriptor`, `isValid_blockDescriptor`,
-  `blockAddress_blockDescriptor`, `blockDescriptor_blockAddress`,
-  `isReadWriteBlock_blockDescriptor`, and what a block or a table descriptor
-  is from its check (`typeBits_of_isReadWriteBlock`, `typeBits_of_isPlain`,
+  `ofPage_isSome_iff` (what `Kind.ofPage` finds);
+- block descriptors: `typeBits_blockDescriptor`,
+  `blockAddress_blockDescriptor`, `isReadWriteBlock_blockDescriptor`, and
+  what a block or a table descriptor is from its check
+  (`typeBits_of_isReadWriteBlock`, `typeBits_of_isPlain`,
   `isValid_of_isPlain`, `isPlain_of_isReadWriteBlock`);
 - output addresses: `outputAddress_le`, `blockAddress_le`,
-  `outputAddress_mod`, `blockAddress_mod`, `outputAddress_of_aligned` (an
-  aligned address below $2^{48}$ is its own output address) and `direct_or`
-  (`DIRECT_BASE | a` is a sum below $2^{39}$).
+  `blockAddress_mod`, `outputAddress_of_aligned` (an aligned address below
+  $2^{48}$ is its own output address) and `direct_or` (`DIRECT_BASE | a` is a
+  sum below $2^{39}$).
+
+The other lemmas of the module are private steps of these.
 -/
 
 @[expose] public section
@@ -38,25 +41,24 @@ open Krepi.Spec.PageTables
 theorem u64_or_and (x y m : UInt64) : (x ||| y) &&& m = (x &&& m) ||| (y &&& m) := by
   apply UInt64.toBitVec_inj.1; simp [BitVec.and_or_distrib_right]
 
-theorem u64_and_or_self (x m : UInt64) : (x &&& m) ||| m = m := by
+private theorem u64_and_or_self (x m : UInt64) : (x &&& m) ||| m = m := by
   apply UInt64.toBitVec_inj.1
   apply BitVec.eq_of_getElem_eq
   intro i hi
   simp only [UInt64.toBitVec_and, UInt64.toBitVec_or, BitVec.getElem_and, BitVec.getElem_or]
   cases m.toBitVec[i] <;> simp
 
-theorem typeBits_or3 (x : UInt64) : typeBits (x ||| TABLE_OR_PAGE) = TABLE_OR_PAGE := by
+private theorem typeBits_or3 (x : UInt64) : typeBits (x ||| TABLE_OR_PAGE) = TABLE_OR_PAGE := by
   simp only [typeBits, u64_or_and]
   rw [show TABLE_OR_PAGE &&& 3 = 3 by decide]; exact u64_and_or_self _ _
 
-theorem typeBits_zero : typeBits 0 = 0 := by decide
 theorem isValid_zero : isValid 0 = false := by decide
 theorem isPlain_zero : isPlainTableDescriptor 0 = false := by decide
 
-theorem attr_and_mask (k : Kind) : k.attributes.bits &&& ADDRESS_MASK = 0 := by cases k <;> decide
+private theorem attr_and_mask (k : Kind) : k.attributes.bits &&& ADDRESS_MASK = 0 := by cases k <;> decide
 theorem attr_and_not_mask (k : Kind) : k.attributes.bits &&& ~~~ADDRESS_MASK = k.attributes.bits := by
   cases k <;> decide
-theorem attr_or3_ne (k : Kind) : (k.attributes.bits ||| TABLE_OR_PAGE) ≠ TABLE_OR_PAGE := by
+private theorem attr_or3_ne (k : Kind) : (k.attributes.bits ||| TABLE_OR_PAGE) ≠ TABLE_OR_PAGE := by
   cases k <;> decide
 
 theorem isPlain_tableDescriptor (a : UInt64) : isPlainTableDescriptor (tableDescriptor a) = true := by
@@ -96,7 +98,7 @@ theorem isPlain_descriptor (k : Kind) (a : UInt64) : isPlainTableDescriptor (des
     show TABLE_OR_PAGE &&& ~~~ADDRESS_MASK = TABLE_OR_PAGE by decide, UInt64.and_zero, UInt64.zero_or]
   simpa using attr_or3_ne k
 
-theorem blockDescriptor_eq (p : UInt64) : blockDescriptor p =
+private theorem blockDescriptor_eq (p : UInt64) : blockDescriptor p =
     (p &&& BLOCK_ADDRESS_MASK) ||| (Kind.readWrite.attributes.bits ||| 1) := by
   simp only [blockDescriptor, descriptor, u64_or_and, UInt64.and_assoc, UInt64.or_assoc]
   rw [show BLOCK_ADDRESS_MASK &&& (ADDRESS_MASK &&& ~~~2) = BLOCK_ADDRESS_MASK by decide,
@@ -110,9 +112,6 @@ theorem typeBits_blockDescriptor (p : UInt64) : typeBits (blockDescriptor p) = B
     show Kind.readWrite.attributes.bits &&& 3 = 0 by decide, show (1 : UInt64) &&& 3 = 1 by decide]
   simp [BLOCK]
 
-theorem isValid_blockDescriptor (p : UInt64) : isValid (blockDescriptor p) = true := by
-  simp [isValid, typeBits_blockDescriptor, BLOCK]
-
 theorem blockAddress_blockDescriptor (p : UInt64) :
     blockAddress (blockDescriptor p) = blockAddress p := by
   rw [blockDescriptor_eq]
@@ -121,7 +120,7 @@ theorem blockAddress_blockDescriptor (p : UInt64) :
     show (1 : UInt64) &&& BLOCK_ADDRESS_MASK = 0 by decide]
   simp
 
-theorem blockDescriptor_blockAddress (p : UInt64) :
+private theorem blockDescriptor_blockAddress (p : UInt64) :
     blockDescriptor (blockAddress p) = blockDescriptor p := by
   simp only [blockDescriptor_eq, blockAddress, UInt64.and_assoc, UInt64.and_self]
 
@@ -167,15 +166,6 @@ theorem blockAddress_mod (a : UInt64) : (blockAddress a).toNat % BLOCK_SIZE = 0 
     Nat.and_two_pow_sub_one_eq_mod] at this
   simpa [BLOCK_SIZE] using this
 
-theorem outputAddress_mod (a : UInt64) : (outputAddress a).toNat % PAGE_SIZE = 0 := by
-  have h : outputAddress a &&& 0xfff = 0 := by
-    simp only [outputAddress, UInt64.and_assoc]
-    rw [show ADDRESS_MASK &&& 0xfff = 0 by decide, UInt64.and_zero]
-  have := congrArg UInt64.toNat h
-  rw [UInt64.toNat_and, show (0xfff : UInt64).toNat = 2 ^ 12 - 1 by decide,
-    Nat.and_two_pow_sub_one_eq_mod] at this
-  simpa [PAGE_SIZE] using this
-
 theorem outputAddress_of_aligned {a : UInt64} (h1 : a.toNat % PAGE_SIZE = 0)
     (h2 : a.toNat < 2 ^ 48) : outputAddress a = a := by
   apply UInt64.toNat_inj.1
@@ -202,7 +192,7 @@ theorem direct_or {a : UInt64} (h : a.toNat < VA_LIMIT) :
   rw [UInt64.toNat_or, show DIRECT_BASE.toNat = 2 ^ 39 * (2 ^ 25 - 1) by decide]
   exact (Nat.two_pow_add_eq_or_of_lt h _).symm
 
-theorem mem_all (k : Kind) : k ∈ Kind.all := by cases k <;> decide
+private theorem mem_all (k : Kind) : k ∈ Kind.all := by cases k <;> decide
 
 theorem ofPage_isSome_iff (d : UInt64) :
     (Kind.ofPage d).isSome = true ↔ ∃ k, descriptor k (outputAddress d) = d := by

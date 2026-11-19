@@ -16,12 +16,11 @@ entries of the target after its plan:
 
 - `table_toList_eq`: the entries of a table as a list are its entries by
   index;
-- `kidOf`, the table that a valid entry points at, with `reach_ok`,
-  `checkLeaves_ok`, `walkLevel2_ok` and `walkRoot_ok`: a walk of the source
-  that succeeds met only table descriptors at levels 1 and 2 and only
-  copyable leaves at level 3, and the tables that it reached are the root,
-  then each level 2 table followed by its level 3 tables, without
-  duplicates;
+- `kidOf`, the table that a valid entry points at, with `walkRoot_ok` (from
+  private steps for each level of the walk): a walk of the source that
+  succeeds met only table descriptors at levels 1 and 2 and only copyable
+  leaves at level 3, and the tables that it reached are the root, then each
+  level 2 table followed by its level 3 tables, without duplicates;
 - `copyValue`, the descriptor that the copy stores for an entry, with
   `lastAt_copyStores` and `lastAt_flatMap_range`, the last store of the plan
   of the copy into an entry;
@@ -57,7 +56,7 @@ section Walk
 
 variable (src : Tables r N) (sb : UInt64) (bits : UInt8)
 
-theorem reach_ok {d : UInt64} {st st' : Visit} {t : Nat} (h : src.reach sb d st = .ok (t, st')) :
+private theorem reach_ok {d : UInt64} {st st' : Visit} {t : Nat} (h : src.reach sb d st = .ok (t, st')) :
     isPlainTableDescriptor d = true ∧ src.child? sb d = some t ∧ t ∉ st.reached ∧
       st' = { st with reached := st.reached ++ [t] } := by
   unfold Tables.reach at h
@@ -71,7 +70,7 @@ theorem reach_ok {d : UInt64} {st st' : Visit} {t : Nat} (h : src.reach sb d st 
     obtain ⟨rfl, rfl⟩ := h
     exact ⟨by simpa using hp, rfl, fun h' => hm (by simpa using h'), rfl⟩
 
-theorem checkLeaves_ok : ∀ {ds : List UInt64} {u : Unit}, checkLeaves bits ds = .ok u →
+private theorem checkLeaves_ok : ∀ {ds : List UInt64} {u : Unit}, checkLeaves bits ds = .ok u →
     ∀ d ∈ ds, isValid d = true → copyableLeaf bits d = true
   | [], _, _ => by simp
   | d :: rest, u, h => by
@@ -84,7 +83,7 @@ theorem checkLeaves_ok : ∀ {ds : List UInt64} {u : Unit}, checkLeaves bits ds 
       · simpa [hv] using hb
       · exact checkLeaves_ok h e he hv
 
-theorem walkLevel2_ok : ∀ {ds : List UInt64} {st st' : Visit},
+private theorem walkLevel2_ok : ∀ {ds : List UInt64} {st st' : Visit},
     src.walkLevel2 sb bits ds st = .ok st' →
       (∀ d ∈ ds, isValid d = true → isPlainTableDescriptor d = true ∧ ∃ c,
         src.child? sb d = some c ∧
