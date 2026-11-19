@@ -1098,13 +1098,13 @@
       "name": "Krepi.Spec.PageTables.Witnesses.PageOwnership.TakeAcceptsChoice",
       "theorem": "Krepi.Proofs.PageTables.Witnesses.PageOwnership.takeAcceptsChoice",
       "module": "Krepi.Proofs.PageTables.Witnesses.PageOwnership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.PageTables.Witnesses.PageOwnership.HighPlacementNoOverflow",
       "theorem": "Krepi.Proofs.PageTables.Witnesses.PageOwnership.highPlacementNoOverflow",
       "module": "Krepi.Proofs.PageTables.Witnesses.PageOwnership",
-      "state": "planned"
+      "state": "proved"
     }
   ]
 }
