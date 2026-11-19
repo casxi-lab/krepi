@@ -558,13 +558,13 @@
       "name": "Krepi.SpecProperties.PageTables.BootKernelMapWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.bootKernelMapWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BootDirectMapWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.bootDirectMapWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ResetWellFormed",
@@ -600,13 +600,13 @@
       "name": "Krepi.SpecProperties.PageTables.KernelMapWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.kernelMapWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.DirectMapWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.directMapWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NewOwnershipWellFormed",
@@ -840,19 +840,19 @@
       "name": "Krepi.SpecProperties.PageTables.BuildDirectMapOffset",
       "theorem": "Krepi.Proofs.PageTables.Tokens.buildDirectMapOffset",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BuildKernelMapWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.buildKernelMapWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BuildDirectMapWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.buildDirectMapWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.EnableWellFormed",

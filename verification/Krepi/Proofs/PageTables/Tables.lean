@@ -9,6 +9,7 @@ import Krepi.Proofs.PageTables.WellFormedLemmas
 import Krepi.Proofs.PageTables.WalkLemmas
 import Krepi.Proofs.PageTables.EntryLemmas
 import Krepi.Proofs.PageTables.CloneLemmas
+import Krepi.Proofs.PageTables.MapCheckLemmas
 
 /-!
 # Page tables: proofs about the well-formedness of table sets
@@ -19,15 +20,16 @@ whose type is exactly that statement: that `Tables::new` on zero storage and
 the kernel tables that `kernel_map` and `direct_map` write into such sets
 are well-formed, and that each write entry of a set keeps a set well-formed.
 
-The theorems about `Tables::new`, `reset`, `map_page`, `map_block`,
-`unmap_page` and `clone_kernel_from` are proved. Each write of one leaf is
-put together from the elementary changes of
-`Krepi.Proofs.PageTables.WellFormedLemmas`, a link of a new table and a leaf
-in a free entry, and the pool after its plan is shown equal to that of those
-changes; the copy is well-formed by what the walk of its source checked
-(`Krepi.Proofs.PageTables.CloneLemmas`). The other theorems are still planned: their proof is
-`sorry`, and `verification/statements.json` registers them as `planned`.
-Mathlib is imported so that the gate counts the heartbeats of each theorem.
+Every theorem here is proved. Each write of one leaf is put together from
+the elementary changes of `Krepi.Proofs.PageTables.WellFormedLemmas`, a link
+of a new table and a leaf in a free entry, and the pool after its plan is
+shown equal to that of those changes; the copy is well-formed by what the walk
+of its source checked (`Krepi.Proofs.PageTables.CloneLemmas`); the leaves of
+`kernel_map` and `direct_map` pass the checks of
+`Krepi.Proofs.PageTables.MapCheckLemmas`, so the set after their plan is
+well-formed (`Krepi.Proofs.PageTables.MapWriteLemmas`), and the kernel sets of
+the boot are these maps on the set of `Tables::new`. Mathlib is imported so
+that the gate counts the heartbeats of each theorem.
 -/
 
 namespace Krepi.Proofs.PageTables.Tables
@@ -41,11 +43,6 @@ public theorem newWellFormed : NewWellFormed := by
   intro r N base bits hp
   exact wf_zero hp (fun t i => by simp [Tables.new, Pool.zero, Pool.get, Table.zero]) rfl
 
-public theorem bootKernelMapWellFormed : BootKernelMapWellFormed := by
-  sorry
-
-public theorem bootDirectMapWellFormed : BootDirectMapWellFormed := by
-  sorry
 
 public theorem resetWellFormed : ResetWellFormed := by
   intro r N s base bits hp hz
@@ -556,9 +553,21 @@ public theorem unmapPageWellFormed : UnmapPageWellFormed := by
     (fun h2 => absurd h3 fun h3 => wf_not_level2_level3 hs h2 h3) (fun _ => Or.inl rfl)
 
 public theorem kernelMapWellFormed : KernelMapWellFormed := by
-  sorry
+  intro N s layout base bits s' plan hs h
+  obtain ⟨leaves, hl, happ, hN⟩ := kernelMap_facts hs h
+  rw [happ]; exact final_wf hs hl hN
 
 public theorem directMapWellFormed : DirectMapWellFormed := by
-  sorry
+  intro N s memory base bits s' plan hs h
+  obtain ⟨leaves, hl, happ, hN, -⟩ := directMap_facts hs h
+  rw [happ]; exact final_wf hs hl hN
+
+public theorem bootKernelMapWellFormed : BootKernelMapWellFormed := by
+  intro N layout base bits s plan hp h
+  exact kernelMapWellFormed N _ layout base bits s plan (newWellFormed .lower N base bits hp) h
+
+public theorem bootDirectMapWellFormed : BootDirectMapWellFormed := by
+  intro N memory base bits s plan hp h
+  exact directMapWellFormed N _ memory base bits s plan (newWellFormed .upper N base bits hp) h
 
 end Krepi.Proofs.PageTables.Tables
