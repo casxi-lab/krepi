@@ -936,25 +936,25 @@
       "name": "Krepi.SpecTests.PageTables.DescriptorsFollowKindRows",
       "theorem": "Krepi.Proofs.PageTables.Stp.descriptorsFollowKindRows",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.DescriptorKeepsOnlyItsBits",
       "theorem": "Krepi.Proofs.PageTables.Stp.descriptorKeepsOnlyItsBits",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.MapPageThenLookup",
       "theorem": "Krepi.Proofs.PageTables.Stp.mapPageThenLookup",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.MapPageRefusesMappedPage",
       "theorem": "Krepi.Proofs.PageTables.Stp.mapPageRefusesMappedPage",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.EightGibOfBlocksInNineTables",
@@ -972,13 +972,13 @@
       "name": "Krepi.SpecTests.PageTables.UnmapAndResetFollowContract",
       "theorem": "Krepi.Proofs.PageTables.Stp.unmapAndResetFollowContract",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.UnmapRefusesUnmappedPage",
       "theorem": "Krepi.Proofs.PageTables.Stp.unmapRefusesUnmappedPage",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.DirectMapCountsOfPi5Models",
@@ -990,31 +990,31 @@
       "name": "Krepi.SpecTests.PageTables.DirectMapOmitsExcludedPages",
       "theorem": "Krepi.Proofs.PageTables.Stp.directMapOmitsExcludedPages",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.KernelMapGivesKindsAndGuard",
       "theorem": "Krepi.Proofs.PageTables.Stp.kernelMapGivesKindsAndGuard",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.KernelMapRefusesSharedPage",
       "theorem": "Krepi.Proofs.PageTables.Stp.kernelMapRefusesSharedPage",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.PlansFollowContractOrder",
       "theorem": "Krepi.Proofs.PageTables.Stp.plansFollowContractOrder",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.KernelFillRefusesValidEntry",
       "theorem": "Krepi.Proofs.PageTables.Stp.kernelFillRefusesValidEntry",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.OwnershipOfBoardShapes",
@@ -1068,13 +1068,13 @@
       "name": "Krepi.SpecTests.PageTables.CopyIsPrivateAndOrdered",
       "theorem": "Krepi.Proofs.PageTables.Stp.copyIsPrivateAndOrdered",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.CopyRefusesPrivateLeaf",
       "theorem": "Krepi.Proofs.PageTables.Stp.copyRefusesPrivateLeaf",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.PageTables.Witnesses.TableSets.DirectMapRangesOnPages",
