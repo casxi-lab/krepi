@@ -9,7 +9,6 @@ import Krepi.Proofs.PageTables.WellFormedLemmas
 import Krepi.Proofs.PageTables.WalkLemmas
 import Krepi.Proofs.PageTables.MapCheckLemmas
 import Krepi.Proofs.PageTables.OrderPlanLemmas
-import Krepi.Proofs.PageTables.Mapping
 import Krepi.Proofs.PageTables.Tables
 import Krepi.Proofs.PageTables.EntryLemmas
 import Krepi.Proofs.PageTables.ListLemmas
@@ -356,9 +355,8 @@ public theorem kernelTablesOnlyFilled : KernelTablesOnlyFilled := by
       split at heq
       · obtain ⟨⟨t, pl⟩, h1, h2⟩ := map_ok (Option.some.inj heq)
         simp only [Prod.mk.injEq] at h2; obtain ⟨rfl, rfl⟩ := h2
-        obtain ⟨-, -, -, -, -, -, -, hpool⟩ := mapPage_single hl h1
-        obtain ⟨hf, hk⟩ := set_write hl hpool
-          (Mapping.plansPublishInOrder.1 _ _ _ _ _ _ _ _ _ _ hl h1)
+        obtain ⟨pl, hlf, -, hN, hplan, -, -, hpool⟩ := mapPage_single hl h1
+        obtain ⟨hf, hk⟩ := set_write hl hpool (hplan ▸ mapPlan_inOrder hl hlf hN)
         exact ⟨hk, fun _ _ _ => rfl, fun plan' h => by
           simp only [Option.some.injEq] at h; subst h; exact hf⟩
       · cases heq
