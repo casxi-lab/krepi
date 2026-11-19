@@ -6,6 +6,7 @@ import Krepi.Proofs.Fdt.Plan
 import Krepi.Proofs.PageTables.ListLemmas
 import Krepi.Proofs.PageTables.OwnerLemmas
 import Krepi.Proofs.PageTables.NewLemmas
+import Krepi.Proofs.PageTables.WriteLemmas
 
 /-!
 # Page tables: proofs about the establishment and the well-formedness of the page ownership table
@@ -26,9 +27,17 @@ usable ranges of the boot memory map hold the same pages
 (`Krepi.Proofs.Fdt.Plan.usableRangesExact` and
 `availableRangesWellFormed`, through the private `usablePage_iff`).
 
-The five statements of the write entries are still planned: their proof is
-`sorry`, and `verification/statements.json` registers them as `planned`.
-Mathlib is imported so that the gate counts the heartbeats of each theorem.
+The five statements of the write entries are proved from the lemmas of
+each entry in `Krepi.Proofs.PageTables.WriteLemmas` (`assign_spec`,
+`reserve_spec`, `publish_spec`, `cancel_spec` and `release_spec`): the
+block of extents that a write replaces is replaced by extents in address
+order, on pages and in the bank of the extents that they replace, at most as
+many more as the capacity has free, and the counter never gives the
+generation 0. A choice of `choose` is a range on pages, which is all that
+`assign` needs of its requirement here.
+
+Every theorem here is proved. Mathlib is imported so that the gate counts the
+heartbeats of each theorem.
 -/
 
 namespace Krepi.Proofs.PageTables.Ownership
@@ -192,18 +201,22 @@ public theorem newFreeOrHeldUsable : NewFreeOrHeldUsable := by
     exact this
 
 public theorem assignWellFormed : AssignWellFormed := by
-  sorry
+  intro E X t c zeroed t' a hwf hc h
+  obtain ⟨g, -, -, -, hwf', -⟩ := assign_spec hwf hc h
+  exact hwf'
 
 public theorem reserveWellFormed : ReserveWellFormed := by
-  sorry
+  intro E X t owner pages alignment p t' r hwf h
+  obtain ⟨c, g, -, -, -, -, hwf', -⟩ := reserve_spec hwf h
+  exact hwf'
 
-public theorem publishWellFormed : PublishWellFormed := by
-  sorry
+public theorem publishWellFormed : PublishWellFormed :=
+  fun _ _ _ _ _ _ _ hwf h => (publish_spec hwf h).2.1
 
-public theorem cancelWellFormed : CancelWellFormed := by
-  sorry
+public theorem cancelWellFormed : CancelWellFormed :=
+  fun _ _ _ _ _ _ hwf h => (cancel_spec hwf h).2.1
 
-public theorem releaseWellFormed : ReleaseWellFormed := by
-  sorry
+public theorem releaseWellFormed : ReleaseWellFormed :=
+  fun _ _ _ _ _ _ hwf h => (release_spec hwf h).1
 
 end Krepi.Proofs.PageTables.Ownership

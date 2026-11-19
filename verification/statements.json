@@ -648,31 +648,31 @@
       "name": "Krepi.SpecProperties.PageTables.AssignWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Ownership.assignWellFormed",
       "module": "Krepi.Proofs.PageTables.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ReserveWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Ownership.reserveWellFormed",
       "module": "Krepi.Proofs.PageTables.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.PublishWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Ownership.publishWellFormed",
       "module": "Krepi.Proofs.PageTables.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CancelWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Ownership.cancelWellFormed",
       "module": "Krepi.Proofs.PageTables.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ReleaseWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Ownership.releaseWellFormed",
       "module": "Krepi.Proofs.PageTables.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.AssignOneOwner",
