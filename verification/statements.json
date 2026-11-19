@@ -576,7 +576,7 @@
       "name": "Krepi.SpecProperties.PageTables.CloneKernelFromWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.cloneKernelFromWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.MapPageWellFormed",
