@@ -828,13 +828,13 @@
       "name": "Krepi.SpecProperties.PageTables.BootWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.bootWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BootDirectMapOffset",
       "theorem": "Krepi.Proofs.PageTables.Tokens.bootDirectMapOffset",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BuildDirectMapOffset",
@@ -858,13 +858,13 @@
       "name": "Krepi.SpecProperties.PageTables.EnableWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.enableWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.FillKernelWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.fillKernelWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NewOwnershipSharedWellFormed",
@@ -1080,19 +1080,19 @@
       "name": "Krepi.Spec.PageTables.Witnesses.TableSets.DirectMapRangesOnPages",
       "theorem": "Krepi.Proofs.PageTables.Witnesses.TableSets.directMapRangesOnPages",
       "module": "Krepi.Proofs.PageTables.Witnesses.TableSets",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.PageTables.Witnesses.TableSets.DirectMapRangesApart",
       "theorem": "Krepi.Proofs.PageTables.Witnesses.TableSets.directMapRangesApart",
       "module": "Krepi.Proofs.PageTables.Witnesses.TableSets",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.PageTables.Witnesses.TableSets.CloneTargetWidthChecked",
       "theorem": "Krepi.Proofs.PageTables.Witnesses.TableSets.cloneTargetWidthChecked",
       "module": "Krepi.Proofs.PageTables.Witnesses.TableSets",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.PageTables.Witnesses.PageOwnership.TakeAcceptsChoice",

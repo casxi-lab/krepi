@@ -10,8 +10,9 @@ import Mathlib.Data.List.Nodup
 Lemmas about the lists of the specification of the `page-tables` component:
 
 - `sortByKey`, an insertion sort: `insert_perm`, `insert_pairwise`,
-  `sortByKey_perm` (it permutes its list) and `sortByKey_pairwise` (its result
-  is in the order of the key);
+  `sortByKey_perm` (it permutes its list), `sortByKey_pairwise` (its result
+  is in the order of the key) and `sortByKey_of_pairwise` (it leaves a list
+  in the order of the key as it is);
 - `eq_of_perm_of_pairwise_le`: two permutations of one list of numbers, both
   in ascending order, are equal;
 - `filterMap_nodup_inj`: a `filterMap` of a list without duplicates that
@@ -104,5 +105,15 @@ theorem filterMap_nodup_inj {α β : Type} {f : α → Option β} :
     · exact (key hj' hfj hfi).elim
     · exact (key hi' hfi hfj).elim
     · exact filterMap_nodup_inj hl.2 hrest hi' hj' hfi hfj
+
+theorem sortByKey_of_pairwise {α : Type} (key : α → Nat) :
+    ∀ l : List α, l.Pairwise (fun a b => key a ≤ key b) → sortByKey key l = l
+  | [], _ => rfl
+  | x :: rest, h => by
+    rw [List.pairwise_cons] at h
+    simp only [sortByKey, sortByKey_of_pairwise key rest h.2]
+    cases rest with
+    | nil => rfl
+    | cons y ys => simp [sortByKey.insert, h.1 y (by simp)]
 
 end Krepi.Proofs.PageTables
