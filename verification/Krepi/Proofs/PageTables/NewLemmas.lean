@@ -26,13 +26,17 @@ exclusion touches.
   `bankExtents_strict` (in strict address order, apart from each other) and
   `bankExtents_holds_iff` (a page of a bank on pages lies in one exactly when
   it lies in the bank and no exclusion touches it);
-- the extents of all banks: `mem_initialExtents` (each is one of the free
-  extents of the bank that it names), `initialExtents_inOrder` (in address
+- the extents of all banks: `mem_initialExtents` and `mem_initialExtents_go`
+  (each is one of the free extents of the bank that it names), `initialExtents_inOrder` (in address
   order for banks in address order) and `initialExtents_holds_iff` (a page
   lies in one exactly when it lies in a bank and no exclusion touches it);
 - the banks: `anyOverlap_eq_false` (no two overlap) and
   `sortByKey_banks_inOrder` (sorted by their start, banks that do not
   overlap are in address order).
+
+The private `bankRuns` and `bankRuns_facts` name the runs of one bank and
+their shape: nonempty, inside the bank, in strict address order and, for a
+bank on pages, on pages.
 -/
 
 @[expose] public section

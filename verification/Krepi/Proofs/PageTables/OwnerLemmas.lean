@@ -16,17 +16,15 @@ it records, for any table:
   `touchesPage_iff` (the tests of a page as inequalities);
 - `pairwise_mem_cases`: two elements of a list in which every pair is
   related are equal or related one way or the other;
-- `ExtentsInOrder`, the order of the extents of `Ownership.WellFormed`, with
-  `inOrder_split` (the extents before and after an extent of an ordered list)
-  and `inOrder_sandwich` (a block of ordered extents between the bounds of
-  the extents around it keeps the list ordered);
+- `ExtentsInOrder`, the order of the extents of `Ownership.WellFormed`;
 - the extent that holds a page: `find?_holds_of_mem` (in an ordered list the
-  search for the page finds every extent that holds it, so there is one) and
+  search for a page finds the extent that holds it) and
   `filter_holds_length_le` (at most one extent holds a page);
 - the owner function: `ownerOf_of_mem` (a page of an extent has its owner),
   `ownerOf_of_forall` (a page of no extent has the owner of the exclusion
   records), `ownerOf_freeOrHeld` (a free or held owner is that of an extent
-  that holds the page), `ownerOf_held` (likewise for a holder),
+  that holds the page), `ownerOf_held` (likewise for a holder, with
+  `owner_eq_held`, the holding of a holder),
   `freeOrHeld_iff` (a page is free or held exactly when an extent holds it)
   and `ownerOf_congr` (two tables whose extents differ in one block, with the
   same owners of the page in the block, give the page one owner);
@@ -109,25 +107,6 @@ theorem touchesPage_iff (r : PhysRange) (q : Nat) :
 keeps them. -/
 abbrev ExtentsInOrder (l : List Extent) : Prop :=
   l.Pairwise (fun a b => a.range.endNat ≤ b.range.start.toNat)
-
-theorem inOrder_split {l₁ l₂ : List Extent} {e : Extent} (h : ExtentsInOrder (l₁ ++ e :: l₂)) :
-    ExtentsInOrder l₁ ∧ ExtentsInOrder l₂ ∧ (∀ x ∈ l₁, x.range.endNat ≤ e.range.start.toNat) ∧
-      ∀ y ∈ l₂, e.range.endNat ≤ y.range.start.toNat := by
-  rw [ExtentsInOrder, List.pairwise_append, List.pairwise_cons] at h
-  exact ⟨h.1, h.2.1.2, fun x hx => h.2.2 x hx e List.mem_cons_self, h.2.1.1⟩
-
-theorem inOrder_sandwich {l₁ M l₂ : List Extent} {lo hi : Nat} (h₁ : ExtentsInOrder l₁)
-    (h₂ : ExtentsInOrder l₂) (hM : ExtentsInOrder M) (hlh : lo ≤ hi)
-    (hl₁ : ∀ x ∈ l₁, x.range.endNat ≤ lo) (hl₂ : ∀ y ∈ l₂, hi ≤ y.range.start.toNat)
-    (hm : ∀ x ∈ M, lo ≤ x.range.start.toNat ∧ x.range.endNat ≤ hi) :
-    ExtentsInOrder (l₁ ++ M ++ l₂) := by
-  rw [ExtentsInOrder, List.pairwise_append, List.pairwise_append]
-  refine ⟨⟨h₁, hM, fun x hx y hy => ?_⟩, h₂, fun x hx y hy => ?_⟩
-  · have := hl₁ x hx; have := hm y hy; omega
-  · have := hl₂ y hy
-    rcases List.mem_append.1 hx with hx | hx
-    · have := hl₁ x hx; omega
-    · have := hm x hx; omega
 
 theorem find?_holds_of_mem {q : Nat} : ∀ {l : List Extent} {x : Extent}, ExtentsInOrder l →
     x ∈ l → x.range.holdsPage q = true → l.find? (·.range.holdsPage q) = some x
