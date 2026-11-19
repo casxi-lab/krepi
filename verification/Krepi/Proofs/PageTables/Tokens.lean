@@ -112,7 +112,7 @@ public theorem buildDirectMapOffset : BuildDirectMapOffset := by
     obtain ⟨⟨t, pl⟩, h1, h2⟩ := h
     simp only [Prod.mk.injEq] at h2
     obtain ⟨rfl, rfl⟩ := h2
-    obtain ⟨leaves, hl, happ, hN, hdl⟩ := directMap_facts hs.2.1 h1
+    obtain ⟨leaves, hl, happ, hN, hdl, -⟩ := directMap_facts hs.2.1 h1
     intro v l hM
     change (t.apply pl).M cfg.directBase v l at hM
     rw [happ] at hM

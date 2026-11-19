@@ -554,7 +554,7 @@ public theorem unmapPageWellFormed : UnmapPageWellFormed := by
 
 public theorem kernelMapWellFormed : KernelMapWellFormed := by
   intro N s layout base bits s' plan hs h
-  obtain ⟨leaves, hl, happ, hN⟩ := kernelMap_facts hs h
+  obtain ⟨leaves, hl, happ, hN, -⟩ := kernelMap_facts hs h
   rw [happ]; exact final_wf hs hl hN
 
 public theorem directMapWellFormed : DirectMapWellFormed := by

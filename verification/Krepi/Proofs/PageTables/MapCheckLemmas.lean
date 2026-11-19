@@ -15,7 +15,8 @@ What the checks of the two maps give their leaves, so that the lemmas of
 
 - `checkLeaf_ok`, `checkLeaf_fold` (the leaves that pass the free-slot check,
   each with its place and not taken), `mapLeaves_ok` (the set after the plan
-  is `finalSet`, and the new tables fit in the pool);
+  is `finalSet`, and the new tables fit in the pool), `mapLeaves_plan` (the plan
+  is `mapPlan` of the placed leaves, and the pool is unchanged by the write phase);
 - the direct map: `DirectLeaf`, `directLeaves_spec` (the leaves of a range lie
   in it, in ascending order, each at `DIRECT_BASE | pa`), `usableLeaves`,
   `UsableOk`, `checkUsableRange_ok`, `usable_fold`, `usableLeaves_spec`,
@@ -80,6 +81,19 @@ theorem mapLeaves_ok {s : Tables r N} {base : UInt64} {leaves : List (MapLeaf ×
     obtain ⟨rfl, rfl⟩ := h
     refine ⟨by simp only [Tables.apply, finalSet, hr], ?_⟩
     show next ≤ N; omega
+
+theorem mapLeaves_plan {s : Tables r N} {base : UInt64} {leaves : List (MapLeaf × Place)}
+    {s₁ : Tables r N} {plan : Plan} (h : s.mapLeaves base leaves = .ok (s₁, plan)) :
+    plan = mapPlan base (assignTables s.used leaves).2 ∧ s₁.pool = s.pool := by
+  unfold Tables.mapLeaves at h
+  generalize hr : assignTables s.used leaves = res at h
+  obtain ⟨next, placed⟩ := res
+  simp only at h
+  split at h
+  · simp [throw, throwThe, MonadExceptOf.throw, Functor.map, Except.map] at h
+  · simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact ⟨rfl, rfl⟩
 
 /-- A leaf of the direct map: at `DIRECT_BASE | pa`, its physical address
 aligned to its form, the page descriptor of `ReadWrite` or the block
@@ -202,7 +216,8 @@ theorem directMap_facts {s : Tables .upper N} {memory : Krepi.Spec.Fdt.MemoryPla
     (h : s.directMap memory base bits = .ok (s₁, plan)) :
     ∃ leaves, LeafFacts s base bits leaves ∧ s₁.apply plan = finalSet s base leaves ∧
       (assignTables s.used leaves).1 ≤ N ∧
-      ∀ lp ∈ leaves, DirectLeaf lp.1 ∧ lp.1.pa.toNat + lp.1.form.size ≤ VA_LIMIT := by
+      (∀ lp ∈ leaves, DirectLeaf lp.1 ∧ lp.1.pa.toNat + lp.1.form.size ≤ VA_LIMIT) ∧
+      plan = mapPlan base (assignTables s.used leaves).2 ∧ s₁.pool = s.pool := by
   unfold Tables.directMap at h
   rw [except_bind_ok] at h
   obtain ⟨-, -, h⟩ := h
@@ -214,6 +229,7 @@ theorem directMap_facts {s : Tables .upper N} {memory : Krepi.Spec.Fdt.MemoryPla
   subst hres
   simp only [List.reverse_reverse] at h
   obtain ⟨happ, hN⟩ := mapLeaves_ok hs.2.2.1 h
+  have hplan := mapLeaves_plan h
   have hleaf : ∀ x ∈ new.map Prod.fst, ∃ u ∈ sortByKey (·.start.toNat) memory.availableRanges,
       u.start.toNat ≤ x.pa.toNat ∧ x.pa.toNat + x.form.size ≤ u.endNat ∧ DirectLeaf x := by
     intro x hx
@@ -229,7 +245,8 @@ theorem directMap_facts {s : Tables .upper N} {memory : Krepi.Spec.Fdt.MemoryPla
     have := form_size_pos x.form
     exact ⟨by omega, h3, by omega⟩
   refine ⟨new, ⟨hpl, ?_, fun lp hlp => ?_, fun lp hlp => ?_, fun lp hlp => ?_⟩, happ, hN,
-    fun lp hlp => ⟨(hlim _ (List.mem_map_of_mem hlp)).2.1, (hlim _ (List.mem_map_of_mem hlp)).1⟩⟩
+    fun lp hlp => ⟨(hlim _ (List.mem_map_of_mem hlp)).2.1, (hlim _ (List.mem_map_of_mem hlp)).1⟩,
+    hplan⟩
   · have hva : ∀ x ∈ new.map Prod.fst, x.va.toNat = DIRECT_BASE.toNat + x.pa.toNat := fun x hx => by
       obtain ⟨h1, h2, -⟩ := hlim x hx
       exact directLeaf_va h2 (by have := form_size_pos x.form; omega)
@@ -362,7 +379,8 @@ theorem kernelMap_facts {s : Tables .lower N} {layout : Layout} {base : UInt64}
     {bits : UInt8} {s₁ : Tables .lower N} {plan : Plan} (hs : s.WellFormed base bits)
     (h : s.kernelMap layout base bits = .ok (s₁, plan)) :
     ∃ leaves, LeafFacts s base bits leaves ∧ s₁.apply plan = finalSet s base leaves ∧
-      (assignTables s.used leaves).1 ≤ N := by
+      (assignTables s.used leaves).1 ≤ N ∧
+      plan = mapPlan base (assignTables s.used leaves).2 ∧ s₁.pool = s.pool := by
   unfold Tables.kernelMap at h
   rw [except_bind_ok] at h
   obtain ⟨-, -, h⟩ := h
@@ -374,6 +392,7 @@ theorem kernelMap_facts {s : Tables .lower N} {layout : Layout} {base : UInt64}
   subst hres
   simp only [List.reverse_reverse] at h
   obtain ⟨happ, hN⟩ := mapLeaves_ok hs.2.2.1 h
+  have hplan := mapLeaves_plan h
   have hleaf : ∀ x ∈ new.map Prod.fst, ∃ j ∈ sortByKey (·.range.start.toNat) layout.ranges,
       j.range.start.toNat ≤ x.pa.toNat ∧ x.pa.toNat + PAGE_SIZE ≤ j.range.endNat ∧
       x.pa.toNat % PAGE_SIZE = 0 ∧ x.va = x.pa ∧ x.form = .page ∧ x.desc = descriptor j.kind x.pa := by
@@ -381,7 +400,7 @@ theorem kernelMap_facts {s : Tables .lower N} {layout : Layout} {base : UInt64}
     rw [hmap] at hx
     obtain ⟨j, hj, hx⟩ := List.mem_flatMap.1 hx
     exact ⟨j, hj, (rangePages_spec (hok j hj)).1 x hx⟩
-  refine ⟨new, ⟨hpl, ?_, fun lp hlp => ?_, fun lp hlp => ?_, fun lp hlp => ?_⟩, happ, hN⟩
+  refine ⟨new, ⟨hpl, ?_, fun lp hlp => ?_, fun lp hlp => ?_, fun lp hlp => ?_⟩, happ, hN, hplan⟩
   · rw [hmap, List.pairwise_flatMap]
     refine ⟨fun j hj => ?_, ?_⟩
     · refine (rangePages_spec (hok j hj)).2.imp_of_mem fun {x y} hx hy h => ?_
