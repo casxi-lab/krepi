@@ -498,19 +498,19 @@
       "name": "Krepi.SpecProperties.PageTables.CheckTablesWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkTablesWellFormed",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckOwnershipWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkOwnershipWellFormed",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckSharedWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkSharedWellFormed",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckOneOwner",
@@ -546,67 +546,67 @@
       "name": "Krepi.SpecProperties.PageTables.CheckDirectMapOffset",
       "theorem": "Krepi.Proofs.PageTables.Checks.checkDirectMapOffset",
       "module": "Krepi.Proofs.PageTables.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NewWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.newWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BootKernelMapWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.bootKernelMapWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BootDirectMapWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.bootDirectMapWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.ResetWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.resetWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CloneKernelFromWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.cloneKernelFromWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.MapPageWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.mapPageWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.MapBlockWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.mapBlockWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.UnmapPageWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.unmapPageWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.KernelMapWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.kernelMapWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.DirectMapWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tables.directMapWellFormed",
       "module": "Krepi.Proofs.PageTables.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NewOwnershipWellFormed",
@@ -828,43 +828,43 @@
       "name": "Krepi.SpecProperties.PageTables.BootWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.bootWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BootDirectMapOffset",
       "theorem": "Krepi.Proofs.PageTables.Tokens.bootDirectMapOffset",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BuildDirectMapOffset",
       "theorem": "Krepi.Proofs.PageTables.Tokens.buildDirectMapOffset",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BuildKernelMapWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.buildKernelMapWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.BuildDirectMapWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.buildDirectMapWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.EnableWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.enableWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.FillKernelWellFormed",
       "theorem": "Krepi.Proofs.PageTables.Tokens.fillKernelWellFormed",
       "module": "Krepi.Proofs.PageTables.Tokens",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NewOwnershipSharedWellFormed",
@@ -894,31 +894,31 @@
       "name": "Krepi.SpecProperties.PageTables.TablesInUseCounted",
       "theorem": "Krepi.Proofs.PageTables.Mapping.tablesInUseCounted",
       "module": "Krepi.Proofs.PageTables.Mapping",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.PlansPublishInOrder",
       "theorem": "Krepi.Proofs.PageTables.Mapping.plansPublishInOrder",
       "module": "Krepi.Proofs.PageTables.Mapping",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.NoWritableExecutable",
       "theorem": "Krepi.Proofs.PageTables.Kernel.noWritableExecutable",
       "module": "Krepi.Proofs.PageTables.Kernel",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.DirectMapUnchangedAfterBoot",
       "theorem": "Krepi.Proofs.PageTables.Kernel.directMapUnchangedAfterBoot",
       "module": "Krepi.Proofs.PageTables.Kernel",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.KernelTablesOnlyFilled",
       "theorem": "Krepi.Proofs.PageTables.Kernel.kernelTablesOnlyFilled",
       "module": "Krepi.Proofs.PageTables.Kernel",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.PlacementFirstFit",
@@ -936,85 +936,85 @@
       "name": "Krepi.SpecTests.PageTables.DescriptorsFollowKindRows",
       "theorem": "Krepi.Proofs.PageTables.Stp.descriptorsFollowKindRows",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.DescriptorKeepsOnlyItsBits",
       "theorem": "Krepi.Proofs.PageTables.Stp.descriptorKeepsOnlyItsBits",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.MapPageThenLookup",
       "theorem": "Krepi.Proofs.PageTables.Stp.mapPageThenLookup",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.MapPageRefusesMappedPage",
       "theorem": "Krepi.Proofs.PageTables.Stp.mapPageRefusesMappedPage",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.EightGibOfBlocksInNineTables",
       "theorem": "Krepi.Proofs.PageTables.Stp.eightGibOfBlocksInNineTables",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.BlockBeyondNineTablesRefused",
       "theorem": "Krepi.Proofs.PageTables.Stp.blockBeyondNineTablesRefused",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.UnmapAndResetFollowContract",
       "theorem": "Krepi.Proofs.PageTables.Stp.unmapAndResetFollowContract",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.UnmapRefusesUnmappedPage",
       "theorem": "Krepi.Proofs.PageTables.Stp.unmapRefusesUnmappedPage",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.DirectMapCountsOfPi5Models",
       "theorem": "Krepi.Proofs.PageTables.Stp.directMapCountsOfPi5Models",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.DirectMapOmitsExcludedPages",
       "theorem": "Krepi.Proofs.PageTables.Stp.directMapOmitsExcludedPages",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.KernelMapGivesKindsAndGuard",
       "theorem": "Krepi.Proofs.PageTables.Stp.kernelMapGivesKindsAndGuard",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.KernelMapRefusesSharedPage",
       "theorem": "Krepi.Proofs.PageTables.Stp.kernelMapRefusesSharedPage",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.PlansFollowContractOrder",
       "theorem": "Krepi.Proofs.PageTables.Stp.plansFollowContractOrder",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.KernelFillRefusesValidEntry",
       "theorem": "Krepi.Proofs.PageTables.Stp.kernelFillRefusesValidEntry",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.OwnershipOfBoardShapes",
@@ -1068,31 +1068,31 @@
       "name": "Krepi.SpecTests.PageTables.CopyIsPrivateAndOrdered",
       "theorem": "Krepi.Proofs.PageTables.Stp.copyIsPrivateAndOrdered",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.PageTables.CopyRefusesPrivateLeaf",
       "theorem": "Krepi.Proofs.PageTables.Stp.copyRefusesPrivateLeaf",
       "module": "Krepi.Proofs.PageTables.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.PageTables.Witnesses.TableSets.DirectMapRangesOnPages",
       "theorem": "Krepi.Proofs.PageTables.Witnesses.TableSets.directMapRangesOnPages",
       "module": "Krepi.Proofs.PageTables.Witnesses.TableSets",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.PageTables.Witnesses.TableSets.DirectMapRangesApart",
       "theorem": "Krepi.Proofs.PageTables.Witnesses.TableSets.directMapRangesApart",
       "module": "Krepi.Proofs.PageTables.Witnesses.TableSets",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.PageTables.Witnesses.TableSets.CloneTargetWidthChecked",
       "theorem": "Krepi.Proofs.PageTables.Witnesses.TableSets.cloneTargetWidthChecked",
       "module": "Krepi.Proofs.PageTables.Witnesses.TableSets",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.PageTables.Witnesses.PageOwnership.TakeAcceptsChoice",
