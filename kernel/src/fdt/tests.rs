@@ -17,6 +17,9 @@ use std::{vec, vec::Vec};
 
 mod cpus;
 mod discovery;
+mod dynamic;
+mod limits;
+mod order;
 mod parser;
 mod translation;
 

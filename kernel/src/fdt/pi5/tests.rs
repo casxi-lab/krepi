@@ -14,6 +14,7 @@ use std::{vec, vec::Vec};
 mod boundaries;
 mod builder;
 mod firmware;
+mod models;
 mod platform;
 mod selection;
 use builder::Builder;
