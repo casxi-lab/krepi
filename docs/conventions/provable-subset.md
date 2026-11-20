@@ -961,20 +961,24 @@ sequential refinement:
 - Two constructs joined the list in this way when the port of the
   device-tree module met them. The pinned tools
   ([tools](../formal-verification.md#tools)) reject them, and their
-  alternatives are local, as those of R1 to R3 and R5 are:
+  alternatives are local, as those of R1 to R3 and R5 are, where the
+  function concerned is a private helper; an entry keeps its interface:
   - A `match` on an `Option<&[u8]>` whose arms give the borrowed payload or
-    a `const` empty slice, when the joined slice is then checked by a call
-    with `?` and stored in the value that the function returns. Aeneas
-    reports `Nested borrows are not supported yet` and leaves the function
-    without its body. Alternative: each arm checks its own slice and builds
-    its own value. Qualification: `option-slice-join` (rejected) and
-    `option-slice-arms` (translated).
+    a `const` empty slice, unless the function builds the value that it
+    returns from the joined slice right after the `match`: any statement
+    before that, such as a check with `?`, another call, a branch or a
+    cast, is rejected. Aeneas reports `Nested borrows are not supported
+    yet` and leaves the function without its body. Alternative: each arm
+    checks its own slice and builds its own value. Qualification:
+    `option-slice-join` (rejected) and `option-slice-arms` (translated).
   - A byte-string literal returned as `&'static [u8]`, also from the arms
     of a `match`. Aeneas reports `There should be no bottoms in the value`
     and leaves the function without its body. Alternative: the literal is
     an argument of the function that uses it, with a `match` whose arms
-    each give their own literal where a value chooses it. Qualification:
-    `byte-string-return` (rejected) and `byte-string-slice` (translated).
+    each give their own literal where a value chooses it; for an entry that
+    returns a literal, the alternative changes its interface and is a
+    design change. Qualification: `byte-string-return` (rejected) and
+    `byte-string-slice` (translated).
 
 ## Mechanical checks
 
