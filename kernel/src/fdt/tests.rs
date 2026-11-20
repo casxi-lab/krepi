@@ -1,8 +1,8 @@
 //! The host tests of the device tree: the builder of test trees, the
 //! minimal tree of the parser tests and the test modules of the parse, the
 //! node access, the translation, the memory discovery, the CPU nodes, the
-//! limits, the dynamic reservations, the error orders and the frozen
-//! vectors.
+//! limits, the dynamic reservations, the error orders, the frozen vectors
+//! and the examples of the feature document.
 //!
 //! Feature: krepi.platform.device-tree
 //!
@@ -18,6 +18,7 @@ use std::{vec, vec::Vec};
 mod cpus;
 mod discovery;
 mod dynamic;
+mod examples;
 mod limits;
 mod order;
 mod parser;
