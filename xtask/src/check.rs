@@ -1133,6 +1133,59 @@ mod tests {
             .collect()
     }
 
+    /// Whether `cmd` keeps to the package rule of the source layout in
+    /// `docs/architecture.md`: since the core is the root package of the
+    /// kernel workspace, a Cargo command that acts on that workspace through
+    /// `--manifest-path kernel/Cargo.toml` and selects packages, `build`,
+    /// `check`, `test`, `clippy`, `run` or `doc`, names them with `-p` or
+    /// takes `--workspace`, and `fmt` takes `--all`, or it acts on the core
+    /// alone. Only the arguments of Cargo count, not those after `--`.
+    fn keeps_the_package_rule(cmd: &Cmd) -> bool {
+        let end = cmd.args.iter().position(|arg| arg == "--");
+        let args = &cmd.args[..end.unwrap_or(cmd.args.len())];
+        let given = |flag: &str| {
+            let long = format!("{flag}=");
+            let short = flag.len() == 2 && !flag.starts_with("--");
+            (args.iter())
+                .any(|arg| arg == flag || arg.starts_with(&long) || short && arg.starts_with(flag))
+        };
+        let manifest = (args.windows(2))
+            .any(|pair| pair[0] == "--manifest-path" && pair[1] == "kernel/Cargo.toml");
+        let kernel = manifest || given("--manifest-path=kernel/Cargo.toml");
+        let command = args.iter().find(|arg| !arg.starts_with(['+', '-']));
+        match command.map(String::as_str) {
+            _ if !kernel => true,
+            Some("build" | "check" | "test" | "clippy" | "run" | "doc") => {
+                given("-p") || given("--package") || given("--workspace")
+            }
+            Some("fmt") => given("--all"),
+            _ => true,
+        }
+    }
+
+    #[test]
+    fn the_package_rule_rejects_a_kernel_test_without_packages() {
+        let cmd = |args: &str| Cmd {
+            program: cargo(),
+            args: args.split(' ').map(str::to_string).collect(),
+        };
+        // Without `-p` and `--workspace`, the test runs the core alone.
+        let core = cmd("test --manifest-path kernel/Cargo.toml --locked -- --workspace");
+        assert!(!keeps_the_package_rule(&core));
+        for kept in [
+            "test --workspace --locked --manifest-path kernel/Cargo.toml",
+            "build --manifest-path=kernel/Cargo.toml -p krepi-qemu-virt",
+            "clippy --manifest-path kernel/Cargo.toml --package=krepi-arch",
+            "fmt --all --check --manifest-path kernel/Cargo.toml",
+            "test --manifest-path user/Cargo.toml",
+            "metadata --manifest-path kernel/Cargo.toml",
+        ] {
+            assert!(keeps_the_package_rule(&cmd(kept)), "{kept}");
+        }
+        let format = cmd("fmt --check --manifest-path kernel/Cargo.toml");
+        assert!(!keeps_the_package_rule(&format));
+    }
+
     #[test]
     fn command_steps_cover_their_workspaces() {
         let every = [
@@ -1148,6 +1201,16 @@ mod tests {
                     .find(|step| step.name == name)
                     .expect("the step exists")
             };
+            // Every command of every step keeps to the package rule.
+            for step in &steps {
+                let Action::Commands(commands) = &step.action else {
+                    continue;
+                };
+                for cmd in commands {
+                    let rule = keeps_the_package_rule(cmd);
+                    assert!(rule, "{}: {:?}", step.name, cmd.args);
+                }
+            }
             assert_eq!(manifests_of(step("fmt")), every);
             // The host Clippy of each workspace, then the kernel workspace
             // for the bare-metal target.

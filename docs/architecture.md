@@ -1345,13 +1345,13 @@ The image build follows a rule for every Cargo command that selects
 packages, such as `build`, `check`, `test`, `clippy`, `run` and `doc`, when
 it acts on the kernel workspace, in `kernel/` or with
 `--manifest-path kernel/Cargo.toml`: it names its packages with `-p` or
-takes `--workspace`, because once the core is the root package of
-`kernel/`, a command with neither acts on the core alone. `cargo fmt`, which
+takes `--workspace`, because the core is the root package of `kernel/`,
+so a command with neither acts on the core alone. `cargo fmt`, which
 has no `--workspace`, takes `--all`. The one exception is the extraction of
 the proof gate, which names no package and so extracts the root package
 ([extraction](formal-verification.md#extraction)). A unit test of
-`cargo xtask check` is to check its command steps against this rule
-(planned), and a test of the QEMU boot suite checks the command with which
+`cargo xtask check` checks its command steps against this rule, and a
+test of the QEMU boot suite checks the command with which
 `cargo xtask qemu-boot` builds the default image; review checks the
 commands in CI, in documents and in the other `cargo xtask` commands.
 
