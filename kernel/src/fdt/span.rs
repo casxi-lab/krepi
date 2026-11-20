@@ -36,6 +36,17 @@ impl Span {
     }
 }
 
+/// The empty span at 0, with which the tables of the module are filled.
+pub(super) const EMPTY: Span = Span { start: 0, size: 0 };
+
+/// Whether the end of `span` lies within 64 bits.
+pub(super) fn valid(span: Span) -> bool {
+    match span.start.checked_add(span.size) {
+        Some(_) => true,
+        None => false,
+    }
+}
+
 /// Whether `address` lies below the exact end of `span`.
 fn below_end(address: u64, span: Span) -> bool {
     match span.start.checked_add(span.size) {
@@ -48,6 +59,11 @@ fn below_end(address: u64, span: Span) -> bool {
 /// ends: for two nonempty spans, whether they share an address.
 pub(super) fn overlaps(a: Span, b: Span) -> bool {
     below_end(a.start, b) && below_end(b.start, a)
+}
+
+/// Whether two spans touch: both are nonempty and they share an address.
+pub(super) fn touches(a: Span, b: Span) -> bool {
+    a.size != 0 && b.size != 0 && overlaps(a, b)
 }
 
 /// Whether the exact end of `inner` is at most that of `outer`. Two ends
@@ -71,4 +87,34 @@ fn ends_within(inner: Span, outer: Span) -> bool {
 /// exact ends.
 pub(super) fn holds(outer: Span, inner: Span) -> bool {
     outer.start <= inner.start && ends_within(inner, outer)
+}
+
+/// Whether one span of `ranges` holds `span`: the contract's "inside one
+/// range".
+pub(super) fn in_one_range(ranges: &[Span], span: Span) -> bool {
+    let mut index = 0;
+    while index < ranges.len() {
+        if holds(ranges[index], span) {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+/// Whether a span of `spans` touches `span`.
+pub(super) fn touches_any(spans: &[Span], span: Span) -> bool {
+    let mut index = 0;
+    while index < spans.len() {
+        if touches(spans[index], span) {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+/// The first `count` items of `items`, which holds at least `count`.
+pub(super) fn prefix<T>(items: &[T], count: usize) -> &[T] {
+    &items[0..count]
 }

@@ -340,6 +340,14 @@ pub(super) fn value_at(
     property_range(structure, strings, node.properties, name)
 }
 
+/// Whether `node` has the property `name`.
+pub(super) fn has_property(structure: &[u8], strings: &[u8], node: NodeAt, name: &[u8]) -> bool {
+    match value_at(structure, strings, node, name) {
+        Some(_) => true,
+        None => false,
+    }
+}
+
 /// The offsets of the string of the property `name` of `node`, before its
 /// NUL, or none without the property: a value without a NUL, or whose bytes
 /// before the NUL are not UTF-8, `BadString`; then a byte after the NUL,
@@ -366,6 +374,21 @@ pub(super) fn string_at(
         return Err(Error::BadProperty);
     }
     Ok(Some((start, start + nul)))
+}
+
+/// Whether the string property `name` of `node` is `expected`, with the
+/// errors of [`string_at`]; false without the property.
+pub(super) fn string_is(
+    structure: &[u8],
+    strings: &[u8],
+    node: NodeAt,
+    name: &[u8],
+    expected: &[u8],
+) -> Result<bool, Error> {
+    match string_at(structure, strings, node, name)? {
+        Some((start, end)) => Ok(same_bytes(structure, start, end, expected)),
+        None => Ok(false),
+    }
 }
 
 /// Whether `node` is enabled: its `status` is absent, `okay` or `ok`, with
@@ -413,6 +436,26 @@ pub(super) fn address_cells_at(
 /// The `#size-cells` of `node`, 1 when absent.
 pub(super) fn size_cells_at(structure: &[u8], strings: &[u8], node: NodeAt) -> Result<u32, Error> {
     cells_at(structure, strings, node, b"#size-cells", 1)
+}
+
+/// The flag `name` of `node`: false when absent, true for an empty value,
+/// and `BadProperty` for a value.
+pub(super) fn flag_at(
+    structure: &[u8],
+    strings: &[u8],
+    node: NodeAt,
+    name: &[u8],
+) -> Result<bool, Error> {
+    match value_at(structure, strings, node, name) {
+        Some((start, end)) => {
+            if start == end {
+                Ok(true)
+            } else {
+                Err(Error::BadProperty)
+            }
+        }
+        None => Ok(false),
+    }
 }
 
 /// A `reg` value that [`check_reg`] accepted: its offsets and its cells.

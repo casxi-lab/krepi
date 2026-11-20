@@ -222,6 +222,15 @@ pub(super) fn same_bytes(bytes: &[u8], start: usize, end: usize, other: &[u8]) -
     true
 }
 
+/// Whether the bytes `[start, end)` of `bytes` start with those of
+/// `prefix`.
+pub(super) fn starts_with(bytes: &[u8], start: usize, end: usize, prefix: &[u8]) -> bool {
+    if start > end || end > bytes.len() || end - start < prefix.len() {
+        return false;
+    }
+    same_bytes(bytes, start, start + prefix.len(), prefix)
+}
+
 /// Whether the string at `offset` of the strings block `strings`, up to its
 /// NUL, is `name`, which holds no NUL.
 pub(super) fn name_at(strings: &[u8], offset: usize, name: &[u8]) -> bool {

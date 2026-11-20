@@ -11,10 +11,13 @@
 
 extern crate std;
 
-use super::format::{HEADER_SIZE, MAGIC};
+use super::format::{HEADER_SIZE, MAGIC, padded_end, u32_at};
 use super::*;
-use std::vec::Vec;
+use std::{vec, vec::Vec};
 
+mod cpus;
+mod discovery;
+mod parser;
 mod translation;
 
 /// A device tree under construction: its structure block, strings block
@@ -109,4 +112,28 @@ impl Builder {
 
 fn cells(values: &[u32]) -> Vec<u8> {
     values.iter().flat_map(|n| n.to_be_bytes()).collect()
+}
+
+/// The minimal tree: a root with 2 and 2 cells and one node
+/// `memory@100000000` of `0x100000000+0x200000`.
+fn minimal() -> Vec<u8> {
+    let mut b = Builder::default();
+    b.root();
+    b.memory();
+    b.end();
+    b.finish()
+}
+
+fn set_word(bytes: &mut [u8], at: usize, value: u32) {
+    bytes[at..at + 4].copy_from_slice(&value.to_be_bytes());
+}
+
+/// The nodes of a tree, in the order of its structure block.
+fn all_nodes(tree: Fdt<'_>) -> Vec<Node<'_>> {
+    let mut nodes = tree.nodes();
+    let mut all = Vec::new();
+    while let Some(node) = nodes.next() {
+        all.push(node);
+    }
+    all
 }

@@ -1,6 +1,7 @@
 //! The device tree: the bounded parsing of the flattened device tree that
-//! the firmware hands to the kernel, and the access to its nodes and
-//! properties with the translation of their addresses.
+//! the firmware hands to the kernel, the access to its nodes and properties
+//! with the translation of their addresses, the discovery of its memory and
+//! of its CPU nodes, and the Pi 5 boot memory.
 //!
 //! Feature: krepi.platform.device-tree
 //!
@@ -38,9 +39,12 @@
     clippy::redundant_pattern_matching
 )]
 
+mod cpus;
+mod discovery;
 mod format;
 mod nodes;
 mod parser;
+mod pi5;
 mod span;
 mod translation;
 
@@ -84,6 +88,12 @@ const DEPTH: usize = MAX_DEPTH as usize;
 
 /// [`MAX_TOKENS`] as a count.
 const TOKENS: usize = MAX_TOKENS as usize;
+
+/// [`MAX_MEMORY_REGIONS`] as a length.
+const RAM_RANGES: usize = MAX_MEMORY_REGIONS as usize;
+
+/// [`MAX_RESERVED_REGIONS`] as a length.
+const RESERVED_REGIONS: usize = MAX_RESERVED_REGIONS as usize;
 
 /// An error of the parse, the node access, the translation, the memory
 /// discovery, the CPU nodes or the Pi 5 boot memory: the rule that the
@@ -153,6 +163,20 @@ pub struct Span {
     pub start: u64,
     /// The number of addresses.
     pub size: u64,
+}
+
+/// A span that the kernel does not hand out, with the flags `no-map` and
+/// `reusable`: an entry of the reservation map, which counts as `no-map`, or
+/// a span of the `reg` of an enabled child of `/reserved-memory`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReservedRegion {
+    /// The addresses of the region.
+    pub span: Span,
+    /// Whether the region is not to be mapped as part of the standard
+    /// mapping of system memory.
+    pub no_map: bool,
+    /// Whether the operating system may use the region; it stays reserved.
+    pub reusable: bool,
 }
 
 /// A tree that [`Fdt::parse`] checked: a view of the bytes of a device tree
@@ -267,6 +291,69 @@ pub struct AddressMap<'a> {
     parent_cells: u32,
     /// The cells of a size.
     size_cells: u32,
+}
+
+/// The result of [`Fdt::discover_memory`]: the RAM ranges, the reserved
+/// regions and the number of dynamic reservations of a tree.
+#[derive(Debug)]
+pub struct MemoryMap {
+    /// The RAM ranges, in tree order.
+    ram: [Span; RAM_RANGES],
+    /// The number of RAM ranges.
+    ram_count: usize,
+    /// The reserved regions: those of the reservation map, then those of
+    /// `/reserved-memory` in tree order.
+    reserved: [ReservedRegion; RESERVED_REGIONS],
+    /// The number of reserved regions.
+    reserved_count: usize,
+    /// The number of dynamic reservations.
+    dynamic: u64,
+}
+
+/// The result of [`Fdt::discover_pi5_boot_memory`]: the memory map of a
+/// Pi 5 hand-over tree, checked against the spans of the image and of the
+/// tree.
+#[derive(Debug)]
+pub struct Pi5BootMemory {
+    /// The memory map of the tree.
+    memory: MemoryMap,
+    /// The span of the tree.
+    dtb: Span,
+    /// The span of the image with its BSS and stacks.
+    image: Span,
+    /// The sum of the RAM ranges.
+    ram_bytes: u64,
+}
+
+/// The PSCI conduit of a CPU profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PsciConduit {
+    /// The hypervisor call.
+    Hvc,
+    /// The secure monitor call.
+    Smc,
+}
+
+/// The CPU profile of a board: it fixes the affinity level of the CPU IDs
+/// and the PSCI conduit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CpuProfile {
+    /// QEMU virt with PSCI over HVC.
+    QemuHvc,
+    /// QEMU virt with EL2 and PSCI over SMC.
+    QemuSmc,
+    /// The Raspberry Pi 5.
+    Pi5,
+}
+
+/// The result of [`Fdt::discover_cpus`]: the profile and the number of
+/// CPUs, whose logical IDs are 0 to `count - 1`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CpuTopology {
+    /// The profile.
+    profile: CpuProfile,
+    /// The number of CPUs: 1, 2 or 4.
+    count: u64,
 }
 
 /// The number of `cells` big-endian cells in `bytes`: 0, 1 or 2 cells, and
