@@ -115,14 +115,14 @@ map.
 
 ## Extractability
 
-- The module `fdt` of the provable core, with its sources in the block below,
-  follows the [provable Rust subset](../../../conventions/provable-subset.md):
-  it is the module of the role fdt in its scope. It is plain code that reads
-  byte slices and values and writes only the values it returns; it holds no
-  `unsafe` code, no assembly and no access to a register or a physical address.
-- The component has no hardware action, so no adapter of `kernel/arch` is part
-  of it. The page-table logic and the `mmu` adapter of `kernel/arch` (planned),
-  which turns the MMU on and stores into live tables, belong to the
+- The module `fdt` of the provable core follows the [provable Rust
+  subset](../../../conventions/provable-subset.md) as the module of the role
+  fdt: plain code over byte slices and values that writes only what it returns,
+  with no hardware action, `unsafe` code, assembly or access to a register or a
+  physical address, and no adapter of `kernel/arch`. The block lists its sources
+  and the core's crate root `kernel/src/lib.rs` until the objects contract does.
+- The page-table logic and the `mmu` adapter of `kernel/arch` (planned), which
+  turns the MMU on and stores into live tables, belong to the
   [page-tables](../../memory/page-tables/contract.md) component.
 - The board crate obtains the bytes of the hand-over tree and wires the results
   into its boot code. It forms a slice of the 40-byte header where its firmware
