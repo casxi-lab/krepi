@@ -46,7 +46,7 @@ names the module of each role. Each is named here by its role, and the
   change that adds or moves a module of the list writes its paths there.
   Every `.rs` file below `kernel/src/` that production code reaches is
   listed in the `paths` block of some contract, and the `manifests` step of
-  `cargo xtask check` is to fail on one that is not (planned).
+  `cargo xtask check` fails on one that is not.
 
 ## Constructs and alternatives
 
@@ -1026,11 +1026,9 @@ of `AmbiguousIfClone` give once the handle implements `Clone`.
 
 Review applies rules 3 and 6 to 8 to what the checks do not see: a type
 that wraps an `UnsafeCell` under another name, a `cfg_attr` attribute, the
-`cfg!` macro outside the tokens of another macro, a guard without a
-compile-fail case, and a module whose paths no contract lists, for which
-review checks each module of the list against the contract of its
-component. The checks read names, so they also do not see what a listed
-file takes from code that no contract lists: a type alias, a re-export or
+`cfg!` macro outside the tokens of another macro and a guard without a
+compile-fail case. The checks read names, so they also do not see what a
+listed file takes from code that no contract lists: a type alias, a re-export or
 a name defined there, a macro defined there whose expansion holds a
 refused construct, and a file that `include!` reads, which the inventory
 of `cargo xtask formal check` refuses.

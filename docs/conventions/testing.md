@@ -96,9 +96,10 @@ The steps are:
    that `toolchains.toml` pins for the host (`darwin-arm64` or
    `linux-aarch64`), and every host pins the rustc of `rust-toolchain.toml`;
 2. `manifests`: every crate is licensed MIT, both workspace root manifests
-   build releases with `overflow-checks = true`, and the dependency rules of
-   the [source layout](../architecture.md#source-layout) hold, as far as the
-   following checks reach:
+   build releases with `overflow-checks = true`, the dependency rules of
+   the [source layout](../architecture.md#source-layout) hold and the
+   contracts list the sources of the core, as far as the following checks
+   reach:
    - Cargo resolves the kernel workspace with
      `cargo metadata --locked --offline --all-features`, so a dependency that
      it cannot resolve offline, or a `Cargo.lock` that the manifests no longer
@@ -123,6 +124,13 @@ The steps are:
      only on the architecture crate and the core. The proof gate checks the
      edges on its export too, but not in the calibration workspace, whose
      member lies outside these four directories.
+   - Every `.rs` file below `kernel/src/`, a source of the core, is listed
+     in the `paths` block of the `Extractability` section of some
+     component's `contract.md`, as the `subset` step reads those blocks,
+     unless the inventory of `cargo xtask formal check` reaches it from the
+     roots of the kernel targets in the same report only as test code
+     ([legacy inventory and admission](../formal-verification.md#legacy-inventory-and-admission));
+     a file that no `mod` declaration reaches fails as well.
    - The root manifest `kernel/Cargo.toml` has the shape of the
      [source layout](../architecture.md#source-layout): without `[package]`
      it passes; with it, the package is `krepi-kernel`, the manifest holds

@@ -1,8 +1,9 @@
 //! The manifests step: crate licenses, release profiles, the dependency
 //! direction between the two workspaces, the tables of the tracked Cargo
 //! configuration and, as Cargo resolves it, the kernel workspace's freedom
-//! from external crates, the dependency edges between its crates and the
-//! shape of its root manifest.
+//! from external crates, the dependency edges between its crates, the
+//! shape of its root manifest and the contracts that list the sources of
+//! its core.
 
 use std::fs;
 use std::path::Path;
@@ -12,7 +13,9 @@ use serde_json::Value as Json;
 use toml::{Table, Value};
 
 use crate::check;
+use crate::formal::inventory;
 use crate::repo::{self, Entry, Tree};
+use crate::subset;
 
 /// The kernel workspace. Its crates may only reach paths inside it.
 pub const KERNEL: &str = "kernel";
@@ -28,13 +31,41 @@ pub const LICENSE: &str = "MIT";
 
 /// The manifests step.
 pub fn run(root: &Path) -> Result<(), String> {
-    let mut problems = check(&Tree::load(root)?);
+    let tree = Tree::load(root)?;
+    let mut problems = check(&tree);
     problems.extend(check_kernel_workspace(root));
+    // The roots of the kernel targets, for the sources of the core; a
+    // resolution that fails is already a problem of the check above.
+    if let Ok(metadata) = kernel_metadata(root, KERNEL) {
+        match inventory::roots(&metadata, KERNEL) {
+            Ok(roots) => problems.extend(unlisted_sources(&tree, &roots)),
+            Err(problem) => problems.push(problem),
+        }
+    }
     if problems.is_empty() {
         Ok(())
     } else {
         Err(problems.join("\n"))
     }
+}
+
+/// The sources of the core, the `.rs` files below `kernel/src/` in `tree`,
+/// that the `paths` block of no contract lists, apart from those that the
+/// inventory reaches from the `roots` of the kernel targets only as test
+/// code: every file that production code reaches, or that no `mod`
+/// declaration reaches, is listed.
+fn unlisted_sources(tree: &Tree, roots: &[(String, bool)]) -> Vec<String> {
+    let (listed, _) = subset::listed(tree);
+    let reached = inventory::inventory(tree, roots, KERNEL).0.reached;
+    let core = format!("{KERNEL}/src");
+    let sources = tree.entries().map(|(path, _)| path);
+    let sources = sources.filter(|path| path.ends_with(".rs") && repo::is_within(path, &core));
+    let unlisted = sources.filter(|path| !listed.contains(*path));
+    (unlisted.filter(|path| reached.get(*path) != Some(&false)))
+        .map(|path| {
+            format!("{path}: a source of the core that the paths block of no contract lists")
+        })
+        .collect()
 }
 
 /// Every manifest problem in `tree`.
@@ -962,6 +993,57 @@ mod tests {
             problems
                 .iter()
                 .any(|problem| problem.contains(":3: the source path"))
+        );
+    }
+
+    /// The tree of a contract whose `Extractability` section lists the
+    /// crate root of the core and `kernel/src/a.rs`, with `files`.
+    fn core(files: &[(&str, &str)]) -> Tree {
+        let contract =
+            "# C\n\n## Extractability\n\n```paths\nkernel/src/lib.rs\nkernel/src/a.rs\n```\n";
+        Tree::from_files(&[&[("docs/domains/d/c/contract.md", contract)], files].concat())
+    }
+
+    /// The root of the library of the core, a production root.
+    fn lib_root() -> [(String, bool); 1] {
+        [("kernel/src/lib.rs".to_string(), true)]
+    }
+
+    #[test]
+    fn rejects_an_unlisted_source_of_the_core() {
+        let tree = core(&[
+            ("kernel/src/lib.rs", "mod a;\nmod b;\n"),
+            ("kernel/src/a.rs", "pub fn a() {}\n"),
+            ("kernel/src/b.rs", "pub fn b() {}\n"),
+        ]);
+        assert_eq!(
+            unlisted_sources(&tree, &lib_root()),
+            ["kernel/src/b.rs: a source of the core that the paths block of no contract lists"]
+        );
+    }
+
+    #[test]
+    fn accepts_a_test_only_source_of_the_core() {
+        // A test module in a file of its own, reached only as test code,
+        // and a crate outside the core.
+        let tree = core(&[
+            ("kernel/src/lib.rs", "mod a;\n#[cfg(test)]\nmod tests;\n"),
+            ("kernel/src/a.rs", "pub fn a() {}\n"),
+            ("kernel/src/tests.rs", "fn t() {}\n"),
+            ("kernel/abi/src/lib.rs", "pub fn abi() {}\n"),
+        ]);
+        let mut roots = lib_root().to_vec();
+        roots.push(("kernel/abi/src/lib.rs".to_string(), true));
+        assert_eq!(unlisted_sources(&tree, &roots), Vec::<String>::new());
+        // A source that no module declaration reaches is no test code.
+        let mut tree = tree;
+        tree.insert(
+            "kernel/src/lost.rs",
+            Entry::File(b"pub fn lost() {}\n".to_vec()),
+        );
+        assert_eq!(
+            unlisted_sources(&tree, &roots),
+            ["kernel/src/lost.rs: a source of the core that the paths block of no contract lists"]
         );
     }
 
