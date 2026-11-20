@@ -1,7 +1,8 @@
 //! The device tree: the bounded parsing of the flattened device tree that
 //! the firmware hands to the kernel, the access to its nodes and properties
 //! with the translation of their addresses, the discovery of its memory and
-//! of its CPU nodes, and the Pi 5 boot memory.
+//! of its CPU nodes, the Pi 5 boot memory, and the boot memory map, which the
+//! page-tables component takes as its input.
 //!
 //! Feature: krepi.platform.device-tree
 //!
@@ -45,6 +46,7 @@ mod format;
 mod nodes;
 mod parser;
 mod pi5;
+mod plan;
 mod span;
 mod translation;
 
@@ -94,6 +96,15 @@ const RAM_RANGES: usize = MAX_MEMORY_REGIONS as usize;
 
 /// [`MAX_RESERVED_REGIONS`] as a length.
 const RESERVED_REGIONS: usize = MAX_RESERVED_REGIONS as usize;
+
+/// The most RAM banks of a boot memory map.
+const BANKS: usize = 32;
+
+/// The most spans of boot storage of a boot memory map.
+const BOOT_SPANS: usize = 4;
+
+/// The most firmware reservations of a boot memory map.
+const FIRMWARE: usize = 128;
 
 /// An error of the parse, the node access, the translation, the memory
 /// discovery, the CPU nodes or the Pi 5 boot memory: the rule that the
@@ -152,6 +163,33 @@ pub enum Error {
     BadPath,
     /// No enabled RAM range.
     NoMemory,
+}
+
+/// An error of the boot memory map: the rule that its input breaks, as the
+/// error table of the contract names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanError {
+    /// A managed window, RAM bank, boot storage span or firmware reservation
+    /// of size 0.
+    InvalidRange,
+    /// A span, its rounding to pages or the sum of the RAM banks leaves
+    /// 64 bits.
+    Overflow,
+    /// A managed window whose ends are not on 4 KiB pages, or RAM banks
+    /// without one complete page.
+    Alignment,
+    /// No RAM bank or more than 32, no boot storage or more than 4 spans of
+    /// it, or more than 128 firmware reservations.
+    Capacity,
+    /// Two RAM banks share an address, two spans of boot storage share a
+    /// page, or a firmware reservation shares a page with boot storage.
+    Overlap,
+    /// The pages of a boot storage span, or a managed window, lie outside
+    /// every single RAM bank.
+    OutsideRam,
+    /// A managed window above 128 MiB, or RAM banks of more than 16 GiB
+    /// together.
+    ArenaTooLarge,
 }
 
 /// The addresses `[start, start + size)`. A value may be any pair, also one
@@ -354,6 +392,50 @@ pub struct CpuTopology {
     profile: CpuProfile,
     /// The number of CPUs: 1, 2 or 4.
     count: u64,
+}
+
+/// The boot memory map: the RAM banks, sorted by their start; the boot
+/// storage and the firmware reservations, each rounded outward to whole
+/// 4 KiB pages; and the managed banks, the complete pages of the banks that
+/// it manages.
+#[derive(Debug)]
+pub struct MemoryPlan {
+    /// The RAM banks, sorted by their start.
+    ram: [Span; BANKS],
+    /// The number of RAM banks.
+    ram_count: usize,
+    /// The managed banks, in address order.
+    managed: [Span; BANKS],
+    /// The number of managed banks.
+    managed_count: usize,
+    /// The pages of the boot storage and then those of the firmware
+    /// reservations, each in input order.
+    reserved: [Span; BOOT_SPANS + FIRMWARE],
+    /// The number of spans of boot storage.
+    boot_count: usize,
+    /// The number of reservations.
+    reserved_count: usize,
+}
+
+/// The position of an iterator of usable ranges.
+#[derive(Clone, Copy, Debug)]
+struct Cursor {
+    /// The index of the managed bank.
+    bank: usize,
+    /// The address from which it looks for the next usable range.
+    at: u64,
+}
+
+/// The iterator of [`MemoryPlan::available_ranges`]: the usable ranges in
+/// address order.
+#[derive(Clone, Copy, Debug)]
+pub struct AvailableRanges<'a> {
+    /// The managed banks of the map.
+    managed: &'a [Span],
+    /// The reservations of the map.
+    reservations: &'a [Span],
+    /// Its position.
+    cursor: Cursor,
 }
 
 /// The number of `cells` big-endian cells in `bytes`: 0, 1 or 2 cells, and

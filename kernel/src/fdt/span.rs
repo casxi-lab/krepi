@@ -118,3 +118,8 @@ pub(super) fn touches_any(spans: &[Span], span: Span) -> bool {
 pub(super) fn prefix<T>(items: &[T], count: usize) -> &[T] {
     &items[0..count]
 }
+
+/// The items `[start, end)` of `items`, which holds at least `end`.
+pub(super) fn part<T>(items: &[T], start: usize, end: usize) -> &[T] {
+    &items[start..end]
+}

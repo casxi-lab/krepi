@@ -13,6 +13,8 @@ use std::{vec, vec::Vec};
 
 mod boundaries;
 mod builder;
+mod firmware;
+mod platform;
 mod selection;
 use builder::Builder;
 
