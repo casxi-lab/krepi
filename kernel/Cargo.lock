@@ -11,6 +11,10 @@ name = "krepi-arch"
 version = "0.0.0"
 
 [[package]]
+name = "krepi-kernel"
+version = "0.0.0"
+
+[[package]]
 name = "krepi-qemu-virt"
 version = "0.0.0"
 dependencies = [

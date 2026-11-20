@@ -1,5 +1,15 @@
 # The kernel workspace: the EL1 kernel, the board support, the ABI crate and
 # the ABI manifest. Its crates depend only on crates inside this directory.
+# Its root package is the provable core, whose library is in src/.
+[package]
+name = "krepi-kernel"
+version = "0.0.0"
+description = "The provable core of the krepi kernel: the logic of its components that the proofs cover, which the architecture crate and the board crates call"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
 [workspace]
 resolver = "3"
 members = ["abi", "arch", "boards/qemu-virt"]
@@ -9,6 +19,10 @@ edition = "2024"
 license = "MIT"
 publish = false
 rust-version = "1.99"
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
 
 [profile.release]
 overflow-checks = true

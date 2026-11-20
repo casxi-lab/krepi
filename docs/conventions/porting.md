@@ -74,8 +74,8 @@ kernel crate root, with its manifest and the files of the crate outside
 `kernel/arch/src/lib.rs` has `docs/porting/arch.md`, and
 `kernel/boards/qemu-virt/src/lib.rs` has `docs/porting/qemu-virt.md`. The
 crate directory of the provable core is `kernel/` itself, so the record of
-its crate root `kernel/src/lib.rs` (planned) is `docs/porting/kernel.md`,
-which also covers `kernel/Cargo.toml` and `kernel/Cargo.lock`. The modules
+its crate root `kernel/src/lib.rs` is `docs/porting/kernel.md`, which also
+covers `kernel/Cargo.toml` and `kernel/Cargo.lock`. The modules
 of the crates of the kernel workspace, the core included, have names that
 differ from each other, and none is named `kernel`, so that no two kernel
 records share a name. Code outside the core that both boards share is in

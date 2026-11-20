@@ -872,11 +872,24 @@ mod tests {
         member("kernel/abi/Cargo.toml", &LIB)
     }
 
-    /// The problems of a kernel workspace with the root `root`, whose only
-    /// member is `m`, and the given packages.
+    /// The root package of the kernel workspace of this repository, as Cargo
+    /// reports it.
+    fn core_package() -> Json {
+        let lib = [("lib", "kernel/src/lib.rs")];
+        package(KERNEL_PACKAGE, Json::Null, "kernel/Cargo.toml", &lib)
+    }
+
+    /// The problems of a kernel workspace with the root `root`, whose
+    /// members are its root package and `m`, and the given packages next to
+    /// its root package.
     fn metadata_problems(root: &str, packages: &[Json]) -> Vec<String> {
-        let metadata =
-            json!({ "workspace_root": at(root), "workspace_members": ["m"], "packages": packages });
+        let packages = [&[core_package()], packages].concat();
+        let members = ["m", KERNEL_PACKAGE];
+        let metadata = json!({
+            "workspace_root": at(root),
+            "workspace_members": members,
+            "packages": packages,
+        });
         check_kernel_metadata(
             &metadata,
             &repo::root().join(KERNEL),
@@ -1017,8 +1030,25 @@ mod tests {
     #[test]
     fn a_root_manifest_in_its_shape_passes() {
         assert_eq!(shape(ROOT, &[]), Vec::<String>::new());
+        // The root manifest and the library of this repository.
+        let (manifest, lib) = (
+            include_str!("../../kernel/Cargo.toml"),
+            include_str!("../../kernel/src/lib.rs"),
+        );
+        assert_eq!(root_package(manifest), Ok(Some(KERNEL_PACKAGE.to_string())));
+        let kinds = [("lib".to_string(), "kernel/src/lib.rs".to_string())];
+        assert_eq!(
+            root_shape(
+                [KERNEL, KERNEL_PACKAGE],
+                manifest,
+                &kinds,
+                Some(("kernel/src/lib.rs", lib))
+            ),
+            Vec::<String>::new()
+        );
         // A virtual workspace has no root package, whatever it holds.
-        let virtual_workspace = include_str!("../../kernel/Cargo.toml");
+        let virtual_workspace = "[workspace]\nresolver = \"3\"\nmembers = [\"abi\"]\n\n\
+                                 [profile.release]\noverflow-checks = true\n";
         assert_eq!(root_package(virtual_workspace), Ok(None));
         assert_eq!(
             root_shape([KERNEL, KERNEL_PACKAGE], virtual_workspace, &[], None),

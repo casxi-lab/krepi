@@ -1304,7 +1304,7 @@ Cargo workspaces of their own, each in its own directory:
 
 | Path | Contents |
 | --- | --- |
-| `kernel/` | The kernel workspace: the EL1 kernel, board support, the ABI crate and the operation inventory; the input of proof extraction. Its root package is the provable core `krepi-kernel` (planned), with its sources in `kernel/src/`. It holds the ABI crate `kernel/abi` (`krepi-abi`), which defines no interface yet, the architecture crate `kernel/arch` (`krepi-arch`) and one crate per board below `kernel/boards/`: the QEMU virt board crate `kernel/boards/qemu-virt` (`krepi-qemu-virt`) and the Raspberry Pi 5 board crate `kernel/boards/pi5` (planned). The [kernel workspace crates](#kernel-workspace-crates) are described below. |
+| `kernel/` | The kernel workspace: the EL1 kernel, board support, the ABI crate and the operation inventory; the input of proof extraction. Its root package is the provable core `krepi-kernel`, with its sources in `kernel/src/`. It holds the ABI crate `kernel/abi` (`krepi-abi`), which defines no interface yet, the architecture crate `kernel/arch` (`krepi-arch`) and one crate per board below `kernel/boards/`: the QEMU virt board crate `kernel/boards/qemu-virt` (`krepi-qemu-virt`) and the Raspberry Pi 5 board crate `kernel/boards/pi5` (planned). The [kernel workspace crates](#kernel-workspace-crates) are described below. |
 | `tools/` | The host tooling crate `krepi-tools`, a Cargo workspace of its own: a bounded ELF64 reader, the JSON values of tool reports, the serial port transport, the serial capture behind `cargo xtask serial-capture`, the serial link over the standard streams of a guest's process with the process helpers it uses, the QEMU virt command with the serial capture of a guest on QEMU or behind a board's serial port, the QEMU runner behind `cargo xtask qemu` and the test image that its tests boot, the QEMU boot suite behind `cargo xtask qemu-boot`, the line matchers and record parsers of a guest's serial output, and the time values of these tools per platform |
 | `user/` | The user-space workspace: the resident root, services, drivers, the SDK and workers, which are members outside `default-members`. It holds the SDK crate `user/sdk` (`krepi-sdk`). |
 | `verification/` | The Lean proof project and its registries, and the definition of the proof tools: their manifest, the reviewed patches and the recipe of the image that holds them, kept beside the proof project that the tools check ([formal verification](formal-verification.md#tools)) |
@@ -1359,11 +1359,11 @@ commands in CI, in documents and in the other `cargo xtask` commands.
 
 The kernel workspace has four kinds of crate:
 
-- The provable core `krepi-kernel` (planned) is the root package of the
-  workspace: `kernel/Cargo.toml` holds both its `[package]` and the
-  `[workspace]`, its library `krepi_kernel` is in `kernel/src/` and its
-  integration tests are in `kernel/tests/`. It has one module per component,
-  and every module that the
+- The provable core `krepi-kernel` is the root package of the workspace:
+  `kernel/Cargo.toml` holds both its `[package]` and the `[workspace]`, its
+  library `krepi_kernel` is in `kernel/src/` and its integration tests are
+  in `kernel/tests/` (planned). It has one module per component, and every
+  module that the
   [provable Rust subset](conventions/provable-subset.md#scope) lists is one
   of them. It depends on no crate, forbids `unsafe` code, is `no_std`
   without a condition and has no `cfg` other than `#[cfg(test)]` on a
@@ -1386,7 +1386,7 @@ normal, build and development, and for every target:
 
 | Crate | Depends only on |
 | --- | --- |
-| `krepi-kernel` (planned) | No crate |
+| `krepi-kernel` | No crate |
 | `krepi-abi` | No crate |
 | `krepi-arch` | `krepi-kernel` |
 | A board crate | `krepi-arch` and `krepi-kernel` |
@@ -1440,7 +1440,7 @@ workspace has none ([gate run](formal-verification.md#gate-run)).
 
 | Crate | Modules |
 | --- | --- |
-| `kernel/` (`krepi-kernel`) (planned) | The provable core, the root package of the kernel workspace: its library in `kernel/src/`, with one module per component in the [module order](#module-order-in-the-core) below and the kernel root in `lib.rs`, and its integration tests in `kernel/tests/`. |
+| `kernel/` (`krepi-kernel`) | The provable core, the root package of the kernel workspace: its library in `kernel/src/`, with one module per component in the [module order](#module-order-in-the-core) below and the kernel root in `lib.rs`, and its integration tests in `kernel/tests/` (planned). |
 | `kernel/arch` (`krepi-arch`) | The AArch64 processor layer with the ARM interrupt controller and timer that the boards share: `boot`, the cold entry `_start` of an image in `boot.S`; `cache`, the cache and TLB maintenance of the executing CPU by address; `cache_range`, the cache-line walks of a range; `cpu`, the processor registers that EL1 code reads and the halt of a CPU; `exception`, the exception vectors of EL1 in `exception.S`, the frame that they save and the class of an exception; `gic`, the GICv2 driver; and `timer`, the generic timer. The boards give the addresses, interrupt IDs and timers that they use. `boot`, `cache`, `cpu`, `gic`, `timer` and the vectors are compiled only for the bare-metal target; the frame, the classes and the cache-line walks are plain code. |
 | `kernel/boards/qemu-virt` (`krepi-qemu-virt`) | The QEMU virt board support, its default image and its test images. The library holds `console`, the host-testable bounded writes of the serial console with `console::polled` and `console::emitter`, `fault`, the host-testable exception record, the PL011 driver `uart`, `irq`, the wiring of the GICv2 and the virtual timer, and the addresses and platform parameters of the board. The binary `krepi-qemu-virt`, from `src/main.rs`, is the default image, with the Rust entry `kernel_main`, the CPU check and the exception dispatch; the examples in `examples/` are the test images of the QEMU boot suite; `build.rs` hands the linker `link.ld`, the layout of the images, for the bare-metal target. |
 

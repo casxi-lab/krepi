@@ -12,7 +12,7 @@ qualification of code shapes and the proof gate. The
 
 The convention binds the code of the following modules. They are modules
 of the provable core, the root package of the kernel workspace, so their
-sources are below `kernel/src/` (planned); the
+sources are below `kernel/src/`; the
 [module order](../architecture.md#module-order-in-the-core) of the core
 names the module of each role. Each is named here by its role, and the
 `paths` block of its component's `contract.md` fixes its source paths.
