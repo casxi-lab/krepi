@@ -47,15 +47,19 @@ state for the tooling taken from the CAS project.
 
 New in krepi, and not taken from the CAS project:
 
-- the 14 cases after `division-walk` in `cases.json` and their modules at
+- the 17 cases after `division-walk` in `cases.json` and their modules at
   the end of `src/lib.rs`: `cfg-shape` and `const-generic`, one case for each
   of the items R1 to R7 of the
   [provable Rust subset](../conventions/provable-subset.md#constructs-and-alternatives),
-  whose shapes follow the Examples there, and `borrowed-view-by-value`,
+  whose shapes follow the Examples there, `borrowed-view-by-value`,
   `own-iterator-next`, `slice-range-generic`, `byte-string-slice` and
   `const-array-repeat`, which record
   [code shapes](../domains/boot-platform/fdt/proof.md#code-shapes) of the
-  device-tree module;
+  device-tree module, and `option-slice-join`, `option-slice-arms` and
+  `byte-string-return`, which record two constructs of that module that the
+  [provable Rust subset](../conventions/provable-subset.md#constructs-the-tools-do-not-support)
+  lists among those that the tools do not support, and the alternative of
+  the first;
 - the reviewed external types of `r7-private-enum`,
   `verification/externals/Qual/R7PrivateEnum/TypesExternal.lean`;
 - the definitions in `verification/Krepi/Qualification/Models/`
@@ -107,18 +111,19 @@ New in krepi, and not taken from the CAS project:
   - the documentation of `term_layout_cut` says that the case installs
     reviewed external declarations in which `Arc` is a structure, in place
     of the structure model of `Arc`.
-- The 14 new modules are appended after `division_walk`: `cfg_shape`,
+- The 17 new modules are appended after `division_walk`: `cfg_shape`,
   `const_generic`, `r1_function_item_value`, `r2_iterator_any`,
   `r3_iterator_flatten`, `r4_closure_callback`,
   `r5_stop_path_borrow_join`, `r6_same_enum_name` with the modules `objects`
   and `capabilities`, `r7_private_enum`, `borrowed_view_by_value`,
-  `own_iterator_next`, `slice_range_generic`, `byte_string_slice` and
-  `const_array_repeat`. Each defines the types it uses.
+  `own_iterator_next`, `slice_range_generic`, `byte_string_slice`,
+  `const_array_repeat`, `option_slice_join`, `option_slice_arms` and
+  `byte_string_return`. Each defines the types it uses.
 
 ### The cases
 
 `cases.json` keeps schema 1 and the formatting of the CAS project. Its
-cases are the 103 kept cases in the order of the CAS project, then the 14
+cases are the 103 kept cases in the order of the CAS project, then the 17
 new ones. In the CAS project the kept cases are 67 translated, 28 rejected and
 8 ill-typed (5 with their type errors in `Funs.lean`, 3 in `Types.lean`); 4
 have `opaque`, 2 `loop_sources`, 3 `models` and 3 `proof`. After the
@@ -155,11 +160,12 @@ of its own:
 | `r6-same-enum-name` | Ill-typed in `Check.lean`: the two `Discriminant` instances `instDiscriminantErrorIsize` cannot be imported together |
 | `r7-private-enum` | Ill-typed in `TypesExternal.lean`: the `discriminant` attribute rejects the private enumeration with `invalid scope` |
 
-The other new cases record shapes of the device-tree module. Their
-expectations are what the same tools gave on `darwin-arm64` for the
-extraction with the arguments of the gate: the diagnostics, the external
-items and the loops. The qualification of the gate is the first to build
-the generated code of those that are translated.
+The other new cases record shapes of the device-tree module and two
+constructs that the tools reject in it. Their expectations are what the
+same tools gave on `darwin-arm64` for the extraction with the arguments of
+the gate: the diagnostics, the external items and the loops. The
+qualification of the gate is the first to build the generated code of
+those that are translated.
 
 | Case | Shape | Expectation |
 | --- | --- | --- |
@@ -168,6 +174,9 @@ the generated code of those that are translated.
 | `slice-range-generic` | Generic helpers that take `&items[a..b]` of a slice of any element type, for the filled part of an array field and for a part of a byte slice | Translated, without external items; the loop of its byte sum |
 | `byte-string-slice` | Byte-string literals given as `&[u8]` arguments to a loop helper, one literal in each arm of a `match` among them | Translated, without external items; the loop of the helper |
 | `const-array-repeat` | Array repeat expressions in `const` items, one of them of another `const`, and a `Copy` structure with an array field that a loop helper takes by value and returns in a tuple | Translated, without external items; the loop of the helper |
+| `option-slice-join` | A `match` on an `Option` of borrowed bytes whose arms give the bytes or a `const` empty slice, the joined slice then checked by a call with `?` and stored in the value that the function returns | Rejected: `Nested borrows are not supported yet` in that function; no external items or loops |
+| `option-slice-arms` | The alternative of `option-slice-join`: each arm checks its own slice and builds its own value | Translated, without external items or loops |
+| `byte-string-return` | Byte-string literals returned as `&'static [u8]` by the arms of a `match`, and a loop helper that compares bytes with the result | Rejected: `There should be no bottoms in the value` in the function that returns them; no external items; the loop of the helper |
 
 `r6-same-enum-name` has a form that no case of the CAS project has: its
 `start_from` is empty and its `parts` list two modules, each with its own

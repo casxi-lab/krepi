@@ -9384,3 +9384,172 @@ pub mod const_array_repeat {
         }
     }
 }
+
+/// A `match` on an `Option` of borrowed bytes whose arms give the bytes or a
+/// `const` empty slice, as `AddressMap::new` of the device-tree module first
+/// did: the joined slice is checked with `?` and stored in the value that
+/// the function returns. Aeneas rejects it; `option-slice-arms` checks and
+/// builds the value in each arm.
+pub mod option_slice_join {
+    /// The value of an absent property.
+    const NO_VALUE: &[u8] = &[];
+
+    /// Why a value is refused.
+    #[derive(Clone, Copy, Debug)]
+    pub enum Error {
+        Bad,
+    }
+
+    /// A property value in cells, or an absent one.
+    #[derive(Clone, Copy)]
+    pub struct Map<'a> {
+        bytes: &'a [u8],
+        present: bool,
+        cells: u32,
+    }
+
+    /// A present value shorter than one cell, or more than 2 cells, `Bad`.
+    fn check(bytes: &[u8], present: bool, cells: u32) -> Result<(), Error> {
+        if present && bytes.len() < 4 {
+            return Err(Error::Bad);
+        }
+        if cells > 2 {
+            return Err(Error::Bad);
+        }
+        Ok(())
+    }
+
+    impl<'a> Map<'a> {
+        /// The map of `bytes`, none for an absent property, after the check.
+        pub fn new(bytes: Option<&'a [u8]>, cells: u32) -> Result<Map<'a>, Error> {
+            let (bytes, present) = match bytes {
+                Some(value) => (value, true),
+                None => (NO_VALUE, false),
+            };
+            check(bytes, present, cells)?;
+            Ok(Map {
+                bytes,
+                present,
+                cells,
+            })
+        }
+
+        /// The number of cells of a present value, 0 for an absent one.
+        pub fn cells(self) -> u32 {
+            if self.present { self.cells } else { 0 }
+        }
+
+        /// The number of bytes of the value.
+        pub fn size(self) -> usize {
+            self.bytes.len()
+        }
+    }
+}
+
+/// The alternative to `option-slice-join`, as `AddressMap::new` of the
+/// device-tree module is written: each arm checks its own slice and builds
+/// its own value, so that no borrow is joined with the constant.
+pub mod option_slice_arms {
+    /// The value of an absent property.
+    const NO_VALUE: &[u8] = &[];
+
+    /// Why a value is refused.
+    #[derive(Clone, Copy, Debug)]
+    pub enum Error {
+        Bad,
+    }
+
+    /// A property value in cells, or an absent one.
+    #[derive(Clone, Copy)]
+    pub struct Map<'a> {
+        bytes: &'a [u8],
+        present: bool,
+        cells: u32,
+    }
+
+    /// A present value shorter than one cell, or more than 2 cells, `Bad`.
+    fn check(bytes: &[u8], present: bool, cells: u32) -> Result<(), Error> {
+        if present && bytes.len() < 4 {
+            return Err(Error::Bad);
+        }
+        if cells > 2 {
+            return Err(Error::Bad);
+        }
+        Ok(())
+    }
+
+    impl<'a> Map<'a> {
+        /// The map of `bytes`, none for an absent property, after the check.
+        pub fn new(bytes: Option<&'a [u8]>, cells: u32) -> Result<Map<'a>, Error> {
+            match bytes {
+                Some(value) => {
+                    check(value, true, cells)?;
+                    Ok(Map {
+                        bytes: value,
+                        present: true,
+                        cells,
+                    })
+                }
+                None => {
+                    check(NO_VALUE, false, cells)?;
+                    Ok(Map {
+                        bytes: NO_VALUE,
+                        present: false,
+                        cells,
+                    })
+                }
+            }
+        }
+
+        /// The number of cells of a present value, 0 for an absent one.
+        pub fn cells(self) -> u32 {
+            if self.present { self.cells } else { 0 }
+        }
+
+        /// The number of bytes of the value.
+        pub fn size(self) -> usize {
+            self.bytes.len()
+        }
+    }
+}
+
+/// Byte-string literals returned as `&'static [u8]` by the arms of a
+/// `match`, as the device-tree module first named the PSCI conduits, and
+/// compared by a loop helper. Aeneas rejects the function that returns them;
+/// `byte-string-slice` gives each literal as an argument instead.
+pub mod byte_string_return {
+    /// A way to call the firmware.
+    #[derive(Clone, Copy)]
+    pub enum Conduit {
+        Hvc,
+        Smc,
+    }
+
+    /// The name of `conduit`.
+    fn method(conduit: Conduit) -> &'static [u8] {
+        match conduit {
+            Conduit::Hvc => b"hvc",
+            Conduit::Smc => b"smc",
+        }
+    }
+
+    /// Whether `bytes` equals `other`.
+    fn same(bytes: &[u8], other: &[u8]) -> bool {
+        if bytes.len() != other.len() {
+            return false;
+        }
+        let mut index = 0;
+        while index < other.len() {
+            if bytes[index] != other[index] {
+                return false;
+            }
+            index += 1;
+        }
+        true
+    }
+
+    /// Whether `bytes` names `conduit`.
+    pub fn names(conduit: Conduit, bytes: &[u8]) -> bool {
+        same(bytes, method(conduit))
+    }
+}

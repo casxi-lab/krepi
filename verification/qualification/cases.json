@@ -1846,6 +1846,50 @@
       "loop_sources": [
         "const_array_repeat.step_loop src/lib.rs"
       ]
+    },
+    {
+      "name": "option-slice-join",
+      "module": "Qual.OptionSliceJoin",
+      "start_from": [
+        "crate::option_slice_join"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Nested borrows are not supported yet",
+        "[Warn ] Could not translate the body of function 'formal_qualification::option_slice_join::{formal_qualification::option_slice_join::Map<'a>}::new because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
+    },
+    {
+      "name": "option-slice-arms",
+      "module": "Qual.OptionSliceArms",
+      "start_from": [
+        "crate::option_slice_arms"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
+    },
+    {
+      "name": "byte-string-return",
+      "module": "Qual.ByteStringReturn",
+      "start_from": [
+        "crate::byte_string_return"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] There should be no bottoms in the value",
+        "[Warn ] Could not translate the body of function 'formal_qualification::byte_string_return::method because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "byte_string_return.same_loop src/lib.rs"
+      ]
     }
   ]
 }

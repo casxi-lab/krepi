@@ -899,11 +899,12 @@ sequential refinement:
 
 ## Constructs the tools do not support
 
-- This convention covers the constructs of the list and the shape rules
-  stated above, such as the loop shapes. They are coding rules: new code
-  avoids the listed constructs and follows the shape rules, code taken from
-  the prototype tree is brought to them in the change that ports it, and
-  merged code is brought to them as the next two points state.
+- This convention covers the constructs of the list, the shape rules
+  stated above, such as the loop shapes, and the two constructs of the last
+  point below. They are coding rules: new code avoids the listed constructs
+  and follows the shape rules, code taken from the prototype tree is
+  brought to them in the change that ports it, and merged code is brought
+  to them as the next two points state.
 - The alternatives of R1 to R3 and R5, and the R4 alternative for a closure
   given to a combinator or an iterator adapter, are local: they change only
   function bodies, may add private helper functions to the same module, and
@@ -957,6 +958,23 @@ sequential refinement:
   the construct joins this list with its alternative and a qualification
   case; or, where a proof of merged code meets it and no local alternative
   exists, a design change removes it.
+- Two constructs joined the list in this way when the port of the
+  device-tree module met them. The pinned tools
+  ([tools](../formal-verification.md#tools)) reject them, and their
+  alternatives are local, as those of R1 to R3 and R5 are:
+  - A `match` on an `Option<&[u8]>` whose arms give the borrowed payload or
+    a `const` empty slice, when the joined slice is then checked by a call
+    with `?` and stored in the value that the function returns. Aeneas
+    reports `Nested borrows are not supported yet` and leaves the function
+    without its body. Alternative: each arm checks its own slice and builds
+    its own value. Qualification: `option-slice-join` (rejected) and
+    `option-slice-arms` (translated).
+  - A byte-string literal returned as `&'static [u8]`, also from the arms
+    of a `match`. Aeneas reports `There should be no bottoms in the value`
+    and leaves the function without its body. Alternative: the literal is
+    an argument of the function that uses it, with a `match` whose arms
+    each give their own literal where a value chooses it. Qualification:
+    `byte-string-return` (rejected) and `byte-string-slice` (translated).
 
 ## Mechanical checks
 
