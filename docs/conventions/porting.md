@@ -91,7 +91,7 @@ A record starts with a metadata block:
 | Field | Content |
 | --- | --- |
 | `source` | `prototype@` followed by the full commit hash, for example `prototype@ec8305c618a8f4e84e0707fa56beac5673f4675e`; tooling taken from the CAS project uses `cas-project@` and its full commit hash |
-| `paths` | Every legacy path taken, file or directory |
+| `paths` | Every legacy path taken, file or directory; a record of new code that has no counterpart in the legacy tree writes `none`, with the treatment `redesigned` |
 | `destination` | The krepi paths that received the code |
 | `treatment` | `ported` or `redesigned` |
 | `features` | The krepi feature IDs that the code serves, or `none` while no feature document exists |
