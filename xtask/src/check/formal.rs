@@ -3,7 +3,8 @@
 //! [`GATE_FLAGS`], as the owner of the repository root, which they mount at
 //! its path: Lake's version, the replay of [`FIXTURE`], the host tests of the
 //! kernel and user-space workspaces, which write their results below an
-//! emptied `artifacts/formal/vectors`, and `cargo xtask formal vectors`. A
+//! emptied `artifacts/formal/vectors` and are judged against the
+//! known-failures ledger ([`ledger`]), and `cargo xtask formal vectors`. A
 //! container is named after the check's process and its part and removed
 //! before and after it runs, as a stop of the check kills only the client.
 
@@ -16,7 +17,7 @@ use std::time::Instant;
 use serde_json::Value;
 
 use super::lanes::{Stop, output};
-use super::{Cmd, FIXTURE, Facts, GATE_FLAGS, REPLAYED, Status, Supervisor, cargo};
+use super::{Cmd, FIXTURE, Facts, GATE_FLAGS, REPLAYED, Status, Supervisor, cargo, ledger};
 use crate::formal::{Layout, toolchain as tools};
 
 /// The programs that the step runs, xtask, Cargo and Docker, and whether the
@@ -112,14 +113,34 @@ fn parts(
     }
     let set = format!("KREPI_VECTOR_RESULTS={}", results.display());
     let started = Instant::now();
+    // The host tests are judged against the known-failures ledger.
+    let known = ledger::load(root).map_err(Status::Failed)?;
+    let mut tests = Vec::new();
     for manifest in ["kernel/Cargo.toml", "user/Cargo.toml"] {
         let mut args = vec![set.clone(), cargo.clone()];
-        args.extend(words("test --workspace --locked --manifest-path"));
+        args.extend(words(
+            "test --workspace --locked --no-fail-fast --color never --manifest-path",
+        ));
         args.push(manifest.to_string());
-        run("env", args, log, Status::Failed)?;
+        tests.extend(ledger::tested(
+            root,
+            &Cmd {
+                program: "env".into(),
+                args,
+            },
+            log,
+            stop,
+        )?);
     }
     let seconds = started.elapsed().as_secs_f64();
     fact("host tests", format!("{seconds:.1} s"));
+    let (status, judged) = ledger::judge("formal", false, &known, &tests);
+    judged
+        .into_iter()
+        .for_each(|(key, value)| fact(&key, value));
+    if status != Status::Passed {
+        return Err(status);
+    }
     let compared = in_image("vectors", &[xtask, "formal", "vectors"])?;
     let counts = compared.lines().rfind(|line| line.ends_with(" problems"));
     fact("vectors", counts.unwrap_or_default().to_string());
@@ -163,6 +184,7 @@ mod tests {
         let pin = Layout::PRODUCTION.image_pin;
         let text = fs::read_to_string(crate::repo::root().join(pin)).expect("the pin");
         scratch.write(pin, &text);
+        scratch.write(ledger::PATH, &ledger::render(&[]));
         let calls = scratch.0.join("calls").display().to_string();
         let root = scratch.0.display().to_string();
         let [xtask, cargo, docker] = [("xtask", 0), ("cargo", 1), ("docker", 2)].map(|(name, at)| {
@@ -223,6 +245,34 @@ mod tests {
     }
 
     #[test]
+    fn a_host_test_failure_on_the_ledger_passes_the_formal_step() {
+        let scratch = Scratch::temporary("formal-ledger");
+        // The host tests of the kernel workspace report a failed test, as
+        // libtest does, and Cargo exits with 101.
+        let failing = r#"case "$*" in *--no-fail-fast*kernel/Cargo.toml*) printf '%s\n' \
+            '     Running unittests src/lib.rs (target/debug/deps/krepi_kernel-0123)' \
+            'test fdt::tests::known ... FAILED' 'test result: FAILED. 0 passed; 1 failed'
+            exit 101 ;; esac"#;
+        let cargo = format!("{CARGO}\n{failing}");
+        let test = "kernel/krepi_kernel/fdt::tests::known";
+        for (step, passes) in [("formal", true), ("test", false)] {
+            let programs = fakes(&scratch, ["", &cargo, &docker()]);
+            let entry = ledger::Entry {
+                step: step.to_string(),
+                test: test.to_string(),
+                first_failed: "0".repeat(40),
+                finding: Some("kd1".to_string()),
+            };
+            scratch.write(ledger::PATH, &ledger::render(&[entry]));
+            let ran = alone(&scratch, formal(programs));
+            let outcome = &ran.outcomes[0];
+            assert_eq!(outcome.status == Status::Passed, passes, "{outcome:?}");
+            let failed = ("failed tests".to_string(), test.to_string());
+            assert!(outcome.facts.contains(&failed), "{outcome:?}");
+        }
+    }
+
+    #[test]
     fn the_formal_step_runs_its_parts_in_order_in_the_pinned_image() {
         let scratch = Scratch::temporary("formal-parts");
         let docker = docker();
@@ -236,7 +286,9 @@ mod tests {
         assert!(!stale.exists());
         let results = format!("with {root}/artifacts/formal/vectors");
         let tests = |manifest: &str| {
-            format!("cargo test --workspace --locked --manifest-path {manifest} {results}")
+            format!(
+                "cargo test --workspace --locked --no-fail-fast --color never --manifest-path {manifest} {results}"
+            )
         };
         let replay = format!("{root}/bin/tests --exact --ignored --nocapture {FIXTURE}");
         let compare = format!("{root}/bin/xtask formal vectors");
@@ -253,12 +305,20 @@ mod tests {
         .concat();
         assert_eq!(calls(&scratch), expected);
         let facts = Vec::from_iter(outcome.facts.iter().map(|(key, _)| key.as_str()));
-        let keys = ["image", "lake", "test executable", "host tests", "vectors"];
+        let keys = [
+            "image",
+            "lake",
+            "test executable",
+            "host tests",
+            "tests",
+            "vectors",
+        ];
         assert_eq!(facts, keys);
         assert_eq!(outcome.facts[1].1, "Lake version 5.0.0-test");
         assert_eq!(outcome.facts[2].1, format!("{root}/bin/tests"));
         assert!(outcome.facts[3].1.ends_with(" s"), "{:?}", outcome.facts[3]);
-        assert_eq!(outcome.facts[4].1, "0 components, 0 problems");
+        assert_eq!(outcome.facts[4].1, "0 passed, 0 failed");
+        assert_eq!(outcome.facts[5].1, "0 components, 0 problems");
         // The replay passes only with the line of libtest at its start.
         for printed in [
             "",

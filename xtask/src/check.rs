@@ -38,6 +38,7 @@
 mod ci;
 mod formal;
 mod lanes;
+pub mod ledger;
 
 use std::ffi::OsString;
 use std::fs;
@@ -109,6 +110,9 @@ pub type Supervisor = Box<dyn Fn(&Path, &Path, &lanes::Stop, &mut Facts) -> Stat
 pub enum Action {
     /// Run commands in order; each must exit with status 0.
     Commands(Vec<Cmd>),
+    /// Run libtest commands in order, each to its end, and judge their failed
+    /// tests against the known-failures ledger ([`ledger`]).
+    Tests(Vec<Cmd>),
     /// Run a check written in this crate.
     Internal(Check),
     /// Run a step that supervises its own commands.
@@ -364,7 +368,19 @@ pub fn steps(slow: bool, skip_formal: bool) -> Vec<Step> {
         lane,
         action: Action::Commands(commands),
     };
-    let test = ["test", "--workspace", "--locked"];
+    let tests_step = |name, lane, commands| Step {
+        name,
+        lane,
+        action: Action::Tests(commands),
+    };
+    let test = [
+        "test",
+        "--workspace",
+        "--locked",
+        "--no-fail-fast",
+        "--color",
+        "never",
+    ];
     let mut tests = per_workspace(&WORKSPACES, &test, &[]);
     if slow {
         tests.extend(per_workspace(
@@ -373,7 +389,7 @@ pub fn steps(slow: bool, skip_formal: bool) -> Vec<Step> {
             &["--", "--ignored", SLOW],
         ));
     }
-    let release = ["test", "--release", "--workspace", "--locked"];
+    let release = [&test[..1], &["--release"], &test[1..]].concat();
     let mut clippy = per_workspace(
         &WORKSPACES,
         &["clippy", "--workspace", "--all-targets", "--locked"],
@@ -393,8 +409,8 @@ pub fn steps(slow: bool, skip_formal: bool) -> Vec<Step> {
             per_workspace(&WORKSPACES, &["fmt", "--all", "--check"], &[]),
         ),
         commands("clippy", Lane::Lint, clippy),
-        commands("test", Lane::Debug, tests),
-        commands(
+        tests_step("test", Lane::Debug, tests),
+        tests_step(
             "test-release",
             Lane::Release,
             per_workspace(&RELEASE_WORKSPACES, &release, &[]),
@@ -1119,11 +1135,17 @@ mod tests {
         );
     }
 
+    /// The commands of `step`, which must run commands or tests.
+    fn commands_of(step: &Step) -> &[Cmd] {
+        match &step.action {
+            Action::Commands(commands) | Action::Tests(commands) => commands,
+            _ => panic!("{} runs commands", step.name),
+        }
+    }
+
     /// The manifest of each command of `step`, which must run commands.
     fn manifests_of(step: &Step) -> Vec<&str> {
-        let Action::Commands(commands) = &step.action else {
-            panic!("{} runs commands", step.name);
-        };
+        let commands = commands_of(step);
         commands
             .iter()
             .map(|cmd| {
@@ -1322,7 +1344,7 @@ mod tests {
             };
             // Every command of every step keeps to the package rule.
             for step in &steps {
-                let Action::Commands(commands) = &step.action else {
+                let (Action::Commands(commands) | Action::Tests(commands)) = &step.action else {
                     continue;
                 };
                 for cmd in commands {
@@ -1365,27 +1387,29 @@ mod tests {
                 manifests_of(step("test-release")),
                 ["kernel/Cargo.toml", "user/Cargo.toml"]
             );
-            let Action::Commands(commands) = &step("test").action else {
-                unreachable!("checked above");
-            };
-            for (at, cmd) in commands.iter().enumerate() {
-                assert_eq!(cmd.args[..3], ["test", "--workspace", "--locked"]);
-                let trailing = &cmd.args[5..];
+            for (at, cmd) in commands_of(step("test")).iter().enumerate() {
+                let test = ["test", "--workspace", "--locked", "--no-fail-fast"];
+                assert_eq!(cmd.args[..6], [&test[..], &["--color", "never"]].concat());
+                let trailing = &cmd.args[8..];
                 if at < every.len() {
                     assert!(trailing.is_empty(), "{:?}", cmd.args);
                 } else {
                     assert_eq!(trailing, ["--", "--ignored", SLOW]);
                 }
             }
-            let Action::Commands(commands) = &step("test-release").action else {
-                unreachable!("checked above");
-            };
-            for cmd in commands {
+            for cmd in commands_of(step("test-release")) {
                 assert_eq!(
-                    cmd.args[..4],
-                    ["test", "--release", "--workspace", "--locked"]
+                    cmd.args[..5],
+                    [
+                        "test",
+                        "--release",
+                        "--workspace",
+                        "--locked",
+                        "--no-fail-fast"
+                    ]
                 );
-                assert_eq!(cmd.args.len(), 6, "{:?}", cmd.args);
+                assert_eq!(cmd.args[5..7], ["--color", "never"]);
+                assert_eq!(cmd.args.len(), 9, "{:?}", cmd.args);
             }
         }
     }

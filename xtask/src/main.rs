@@ -51,6 +51,11 @@ pub const COMMANDS: &[Command] = &[
         subcommands: &[],
     },
     Command {
+        name: "known-failures",
+        about: "Write the known-failures ledger, known-failures.json, from the receipt of a check and the committed ledger: an entry for each test that the test, release or formal step reported as failed, keeping the commit and finding of its committed entry; --help lists the options",
+        subcommands: &[],
+    },
+    Command {
         name: "qemu",
         about: "Run an ELF image on QEMU virt with one Cortex-A76 until the guest powers off or a limit ends the run, writing the serial transcript, QEMU's standard error and a receipt into a new directory; --help lists the options",
         subcommands: &[],
@@ -122,6 +127,7 @@ fn main() -> ExitCode {
         }
         ["formal", rest @ ..] => formal::run(&repo::root(), rest),
         ["image", rest @ ..] => image::command(&repo::root(), rest),
+        ["known-failures", rest @ ..] => check::ledger::command(&repo::root(), rest),
         ["suite", rest @ ..] => suite::command(&repo::root(), rest),
         ["usage", rest @ ..] => usage::command(rest),
         ["run-record", rest @ ..] => record::command(rest),

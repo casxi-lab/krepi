@@ -29,7 +29,7 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::{Action, Cmd, Facts, Lane, Mode, Outcome, Status, Step, signal_name};
+use super::{Action, Cmd, Facts, Lane, Mode, Outcome, Status, Step, ledger, signal_name};
 use crate::formal::process;
 
 /// What a run of the steps gives.
@@ -174,6 +174,14 @@ fn run_step(context: &Context, at: usize) -> Outcome {
             .map_or_else(Status::Failed, |()| Status::Passed),
         (_, Err(error)) => Status::Failed(error.to_string()),
         (Action::Commands(commands), Ok(log)) => run_commands(context, commands, log),
+        (Action::Tests(commands), Ok(log)) => ledger::run(
+            context.root,
+            step.name,
+            commands,
+            log,
+            context.stop,
+            &mut facts,
+        ),
         (Action::Supervised(supervise), Ok(log)) => {
             unwound(|| supervise(context.root, log, context.stop, &mut facts))
                 .unwrap_or_else(Status::Failed)
@@ -241,21 +249,51 @@ pub(super) fn output(
     stop: &Stop,
     failure: fn(String) -> Status,
 ) -> Result<String, Status> {
+    let (status, text) = ended(root, cmd, log, stop, failure)?;
+    let exited = format!("`{}` exited with {status}", shown(cmd));
+    match status.code() {
+        _ if status.success() => Ok(text),
+        Some(125..=127) => Err(failure(exited)),
+        _ => Err(Status::Failed(exited)),
+    }
+}
+
+/// Runs the libtest command `cmd` as [`output`] runs a command, and gives
+/// whether it exited with 0 and its output, also when it exited with 101, as
+/// Cargo does when a test failed, for the known-failures ledger to judge
+/// ([`ledger`]); any other end is the status of its step.
+pub fn tested(root: &Path, cmd: &Cmd, log: &Path, stop: &Stop) -> Result<(bool, String), Status> {
+    let (status, text) = ended(root, cmd, log, stop, Status::Failed)?;
+    match status.code() {
+        Some(0 | 101) => Ok((status.success(), text)),
+        _ => Err(Status::Failed(format!(
+            "`{}` exited with {status}",
+            shown(cmd)
+        ))),
+    }
+}
+
+/// How [`ended`] ends: the exit status and the output of a command, or the
+/// status of its step.
+type Ending = Result<(ExitStatus, String), Status>;
+
+/// Runs `cmd` as [`output`] does, and gives its exit status and its output,
+/// or the status of its step when the check stopped or `failure` when the
+/// command could not run.
+fn ended(root: &Path, cmd: &Cmd, log: &Path, stop: &Stop, failure: fn(String) -> Status) -> Ending {
     if let Some(reason) = stop.reason() {
         return Err(Status::Cancelled(reason));
     }
     let start = fs::metadata(log).map_or(0, |meta| meta.len() as usize);
-    let exited = |status: ExitStatus| format!("`{}` exited with {status}", shown(cmd));
     match run_command(root, cmd, log, stop) {
-        Ended::Exited(status) if status.success() => {
+        Ended::Exited(status) => {
             let text = fs::read(log).unwrap_or_default();
             let text = String::from_utf8_lossy(text.get(start..).unwrap_or_default());
-            Ok(text.split_once('\n').map_or("", |(_, rest)| rest).into())
+            Ok((
+                status,
+                text.split_once('\n').map_or("", |(_, rest)| rest).into(),
+            ))
         }
-        Ended::Exited(status) if matches!(status.code(), Some(125..=127)) => {
-            Err(failure(exited(status)))
-        }
-        Ended::Exited(status) => Err(Status::Failed(exited(status))),
         Ended::Cancelled(reason) => Err(Status::Cancelled(reason)),
         Ended::Failed(detail) => Err(failure(detail)),
     }
@@ -427,6 +465,7 @@ pub(super) mod tests {
     fn run_in(scratch: &Scratch, steps: &[Step], mode: Mode) -> Run {
         let logs = scratch.0.join("logs");
         fs::create_dir_all(&logs).expect("create the log directory");
+        scratch.write(ledger::PATH, &ledger::render(&[]));
         run(&scratch.0, steps, mode, Ok(&logs))
     }
 
@@ -627,6 +666,12 @@ pub(super) mod tests {
                         program: "/bin/sh".into(),
                         args: vec!["-c".into(), "exit 3".into()],
                     }]),
+                    // A failure of libtest that reports no test, which no
+                    // ledger excuses.
+                    Action::Tests(_) => Action::Tests(vec![Cmd {
+                        program: "/bin/sh".into(),
+                        args: vec!["-c".into(), "exit 101".into()],
+                    }]),
                     Action::Internal(_) => Action::Internal(Box::new(|_, facts| {
                         facts.push(("seen".to_string(), "before failing".to_string()));
                         Err("forced failure".to_string())
@@ -672,6 +717,11 @@ pub(super) mod tests {
                 }
                 std::cmp::Ordering::Equal => {
                     assert!(matches!(outcome.status, Status::Failed(_)), "{outcome:?}");
+                    if let (Status::Failed(detail), "test" | "test-release") =
+                        (&outcome.status, failing)
+                    {
+                        assert!(detail.contains("not only in tests"), "{detail}");
+                    }
                     assert!(outcome.offset.expect("the step ran") >= previous);
                 }
                 std::cmp::Ordering::Greater => {
