@@ -8951,3 +8951,228 @@ pub mod r7_private_enum {
         phase
     }
 }
+
+/// A view of borrowed bytes, a `Copy` type with a lifetime parameter, taken
+/// by value in methods without a loop, as the device-tree module takes its
+/// views. Each loop is in a helper whose parameters are a slice of bytes and
+/// scalars, never the view, and a method builds a view of the same bytes from
+/// the result of a helper with a `match`. In `view_index_loop` and
+/// `view_borrowed_helper` the function that holds the loop takes the view by
+/// reference.
+pub mod borrowed_view_by_value {
+    /// The bytes of a slice from an offset.
+    #[derive(Clone, Copy)]
+    pub struct ByteView<'a> {
+        bytes: &'a [u8],
+        at: usize,
+    }
+
+    /// The wrapping sum of the bytes of `bytes` from `at`.
+    fn sum_from(bytes: &[u8], at: usize) -> u64 {
+        let mut total = 0u64;
+        let mut index = at;
+        while index < bytes.len() {
+            total = total.wrapping_add(bytes[index] as u64);
+            index += 1;
+        }
+        total
+    }
+
+    /// The offset of the first byte `byte` of `bytes` from `at`, or none.
+    fn position(bytes: &[u8], at: usize, byte: u8) -> Option<usize> {
+        let mut index = at;
+        while index < bytes.len() {
+            if bytes[index] == byte {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    impl<'a> ByteView<'a> {
+        /// The view of every byte of `bytes`.
+        pub fn new(bytes: &'a [u8]) -> ByteView<'a> {
+            ByteView { bytes, at: 0 }
+        }
+
+        /// The wrapping sum of the bytes of the view.
+        pub fn sum(self) -> u64 {
+            sum_from(self.bytes, self.at)
+        }
+
+        /// The view from the first byte `byte` of the view, or none.
+        // A `match` rather than `Option::map`, which takes a closure.
+        #[allow(clippy::manual_map)]
+        pub fn find(self, byte: u8) -> Option<ByteView<'a>> {
+            match position(self.bytes, self.at, byte) {
+                Some(at) => Some(ByteView {
+                    bytes: self.bytes,
+                    at,
+                }),
+                None => None,
+            }
+        }
+    }
+
+    /// The wrapping sum of the bytes of `view` from its first byte `byte`,
+    /// or zero.
+    pub fn sum_after(view: ByteView<'_>, byte: u8) -> u64 {
+        match view.find(byte) {
+            Some(found) => found.sum(),
+            None => 0,
+        }
+    }
+}
+
+/// Iterators of their own over borrowed slices, as the device-tree module
+/// writes them: a type with a lifetime parameter that holds a slice or a view
+/// and a cursor, with an inherent `next(&mut self)` without a loop. `next`
+/// calls a step helper that takes the slice and the cursor by value and
+/// returns the new cursor with the item, stores the cursor once and returns
+/// the item. `Spans` gives plain values, with a cursor that is a `Copy`
+/// structure of plain data; `Marks` gives views of the bytes that it walks,
+/// built by a helper with a `match`. Neither implements `Iterator`, whose
+/// provided methods would reach library functions without a model.
+pub mod own_iterator_next {
+    /// A range of addresses.
+    #[derive(Clone, Copy)]
+    pub struct Span {
+        pub start: u64,
+        pub size: u64,
+    }
+
+    /// The position of `Spans`: the index of the next span and the end of
+    /// the span given last.
+    #[derive(Clone, Copy)]
+    struct Cursor {
+        index: usize,
+        reached: u64,
+    }
+
+    /// The spans of a slice that start at or above the end of the span
+    /// given before them, in order.
+    pub struct Spans<'a> {
+        spans: &'a [Span],
+        cursor: Cursor,
+    }
+
+    /// The first span from `cursor` that starts at or above its end, and the
+    /// cursor after it, or none after the last span.
+    fn span_step(spans: &[Span], cursor: Cursor) -> (Cursor, Option<Span>) {
+        let mut cursor = cursor;
+        while cursor.index < spans.len() {
+            let span = spans[cursor.index];
+            cursor.index += 1;
+            if span.start >= cursor.reached {
+                cursor.reached = span.start.wrapping_add(span.size);
+                return (cursor, Some(span));
+            }
+        }
+        (cursor, None)
+    }
+
+    impl<'a> Spans<'a> {
+        /// The spans of `spans`.
+        pub fn new(spans: &'a [Span]) -> Spans<'a> {
+            Spans {
+                spans,
+                cursor: Cursor {
+                    index: 0,
+                    reached: 0,
+                },
+            }
+        }
+
+        /// The next span, or none after the last.
+        // The iterator implements `next` alone.
+        #[allow(clippy::should_implement_trait)]
+        pub fn next(&mut self) -> Option<Span> {
+            let (cursor, span) = span_step(self.spans, self.cursor);
+            self.cursor = cursor;
+            span
+        }
+    }
+
+    /// Borrowed bytes.
+    #[derive(Clone, Copy)]
+    pub struct Text<'a> {
+        bytes: &'a [u8],
+    }
+
+    /// A byte of a text, the item of `Marks`.
+    #[derive(Clone, Copy)]
+    pub struct Mark<'a> {
+        text: Text<'a>,
+        at: usize,
+    }
+
+    /// The bytes of a text that equal a byte, in order.
+    pub struct Marks<'a> {
+        text: Text<'a>,
+        byte: u8,
+        cursor: usize,
+    }
+
+    /// The offset of the first byte `byte` of `bytes` from `cursor`, and the
+    /// cursor after it, or none after the last byte.
+    fn mark_step(bytes: &[u8], byte: u8, cursor: usize) -> (usize, Option<usize>) {
+        let mut index = cursor;
+        while index < bytes.len() {
+            if bytes[index] == byte {
+                return (index + 1, Some(index));
+            }
+            index += 1;
+        }
+        (index, None)
+    }
+
+    /// The mark of `text` at `found`, or none.
+    // A `match` rather than `Option::map`, which takes a closure.
+    #[allow(clippy::manual_map)]
+    fn mark_of(text: Text<'_>, found: Option<usize>) -> Option<Mark<'_>> {
+        match found {
+            Some(at) => Some(Mark { text, at }),
+            None => None,
+        }
+    }
+
+    impl<'a> Text<'a> {
+        /// The text of `bytes`.
+        pub fn new(bytes: &'a [u8]) -> Text<'a> {
+            Text { bytes }
+        }
+
+        /// The bytes of the text that equal `byte`.
+        pub fn marks(self, byte: u8) -> Marks<'a> {
+            Marks {
+                text: self,
+                byte,
+                cursor: 0,
+            }
+        }
+    }
+
+    impl Mark<'_> {
+        /// The offset of the mark in its text.
+        pub fn offset(self) -> usize {
+            self.at
+        }
+
+        /// The number of bytes of its text from the mark.
+        pub fn remaining(self) -> usize {
+            self.text.bytes.len() - self.at
+        }
+    }
+
+    impl<'a> Marks<'a> {
+        /// The next mark, or none after the last.
+        // The iterator implements `next` alone.
+        #[allow(clippy::should_implement_trait)]
+        pub fn next(&mut self) -> Option<Mark<'a>> {
+            let (cursor, found) = mark_step(self.text.bytes, self.byte, self.cursor);
+            self.cursor = cursor;
+            mark_of(self.text, found)
+        }
+    }
+}

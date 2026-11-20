@@ -1774,6 +1774,36 @@
       "external_types": [
         "formal_qualification::r7_private_enum::Phase"
       ]
+    },
+    {
+      "name": "borrowed-view-by-value",
+      "module": "Qual.BorrowedViewByValue",
+      "start_from": [
+        "crate::borrowed_view_by_value"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "borrowed_view_by_value.position_loop src/lib.rs",
+        "borrowed_view_by_value.sum_from_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "own-iterator-next",
+      "module": "Qual.OwnIteratorNext",
+      "start_from": [
+        "crate::own_iterator_next"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "own_iterator_next.mark_step_loop src/lib.rs",
+        "own_iterator_next.span_step_loop src/lib.rs"
+      ]
     }
   ]
 }

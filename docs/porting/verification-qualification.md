@@ -47,11 +47,14 @@ state for the tooling taken from the CAS project.
 
 New in krepi, and not taken from the CAS project:
 
-- the 9 cases after `division-walk` in `cases.json` and their modules at the
-  end of `src/lib.rs`: `cfg-shape` and `const-generic`, and one case for each
+- the 11 cases after `division-walk` in `cases.json` and their modules at
+  the end of `src/lib.rs`: `cfg-shape` and `const-generic`, one case for each
   of the items R1 to R7 of the
   [provable Rust subset](../conventions/provable-subset.md#constructs-and-alternatives),
-  whose shapes follow the Examples there;
+  whose shapes follow the Examples there, and `borrowed-view-by-value` and
+  `own-iterator-next`, which record
+  [code shapes](../domains/boot-platform/fdt/proof.md#code-shapes) of the
+  device-tree module;
 - the reviewed external types of `r7-private-enum`,
   `verification/externals/Qual/R7PrivateEnum/TypesExternal.lean`;
 - the definitions in `verification/Krepi/Qualification/Models/`
@@ -103,17 +106,18 @@ New in krepi, and not taken from the CAS project:
   - the documentation of `term_layout_cut` says that the case installs
     reviewed external declarations in which `Arc` is a structure, in place
     of the structure model of `Arc`.
-- The 9 new modules are appended after `division_walk`: `cfg_shape`,
+- The 11 new modules are appended after `division_walk`: `cfg_shape`,
   `const_generic`, `r1_function_item_value`, `r2_iterator_any`,
   `r3_iterator_flatten`, `r4_closure_callback`,
   `r5_stop_path_borrow_join`, `r6_same_enum_name` with the modules `objects`
-  and `capabilities`, and `r7_private_enum`. Each defines the types it uses.
+  and `capabilities`, `r7_private_enum`, `borrowed_view_by_value` and
+  `own_iterator_next`. Each defines the types it uses.
 
 ### The cases
 
 `cases.json` keeps schema 1 and the formatting of the CAS project. Its
-cases are the 103 kept cases in the order of the CAS project, then the 9 new
-ones. In the CAS project the kept cases are 67 translated, 28 rejected and
+cases are the 103 kept cases in the order of the CAS project, then the 11
+new ones. In the CAS project the kept cases are 67 translated, 28 rejected and
 8 ill-typed (5 with their type errors in `Funs.lean`, 3 in `Types.lean`); 4
 have `opaque`, 2 `loop_sources`, 3 `models` and 3 `proof`. After the
 [revised expectations](#revised-expectations) of 27 of them, which follow
@@ -132,9 +136,10 @@ to the crate:
 | The directories of reviewed external declarations keep their paths, which now hold the krepi files | `models` | `str_from`, `match-machine-arc`, `term-layout-cut` |
 | The source file of a loop is reported relative to the crate, which is a workspace of its own | `loop_sources`: `verification/qualification/src/lib.rs` becomes `src/lib.rs` | `unwrap-in-helper` (1 entry), `division-walk` (4 entries) |
 
-The 9 new cases record what the pinned tools gave on `darwin-arm64` with the
-arguments and environment of the extraction of `cargo xtask formal run`,
-each extraction and each Lake build in a directory of its own:
+The first 9 new cases record what the pinned tools gave on `darwin-arm64`
+with the arguments and environment of the extraction of
+`cargo xtask formal run`, each extraction and each Lake build in a directory
+of its own:
 
 | Case | Expectation |
 | --- | --- |
@@ -147,6 +152,20 @@ each extraction and each Lake build in a directory of its own:
 | `r5-stop-path-borrow-join` | Translated, without external items |
 | `r6-same-enum-name` | Ill-typed in `Check.lean`: the two `Discriminant` instances `instDiscriminantErrorIsize` cannot be imported together |
 | `r7-private-enum` | Ill-typed in `TypesExternal.lean`: the `discriminant` attribute rejects the private enumeration with `invalid scope` |
+
+The last 2 record the shapes in which the device-tree module takes its views
+and writes its iterators. `borrowed-view-by-value` takes a view of borrowed
+bytes by value in methods without a loop, which call helpers that hold the
+loops and take only the slice and scalars, and builds a view of the same
+bytes with a `match`; in `view-index-loop` and `view-borrowed-helper`, which
+are rejected, the function of the loop takes the view by reference.
+`own-iterator-next` has two iterators of their own, which hold a slice or a
+view and a cursor: their inherent `next(&mut self)` holds no loop, calls a
+step helper with the slice and the cursor, stores the new cursor and returns
+a plain value or a view. Each expects a translation without diagnostics or
+external items, with the loops of its two helpers, as the translated cases
+`slices`, `view-value-join` and `view-map-helper` give for the parts of
+these shapes.
 
 `r6-same-enum-name` has a form that no case of the CAS project has: its
 `start_from` is empty and its `parts` list two modules, each with its own
