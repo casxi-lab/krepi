@@ -9176,3 +9176,211 @@ pub mod own_iterator_next {
         }
     }
 }
+
+/// Subslices by range through generic helpers, as the device-tree module
+/// takes the filled part of a table and the bytes of a block: `prefix` and
+/// `part` take `&items[a..b]` of a slice of any element type, a method gives
+/// the filled part of an array field, and a loop helper walks a part of a
+/// byte slice by index. `string-bytes` takes a range of a `str`, which reaches
+/// library functions of `str`.
+pub mod slice_range_generic {
+    /// A range of addresses.
+    #[derive(Clone, Copy)]
+    pub struct Span {
+        pub start: u64,
+        pub size: u64,
+    }
+
+    /// The most spans of a table.
+    const SPANS: usize = 4;
+
+    /// The spans of a table, filled from the first.
+    pub struct Table {
+        spans: [Span; SPANS],
+        count: usize,
+    }
+
+    /// The first `count` items of `items`, which holds at least `count`.
+    fn prefix<T>(items: &[T], count: usize) -> &[T] {
+        &items[0..count]
+    }
+
+    /// The items `[start, end)` of `items`, which holds at least `end`.
+    fn part<T>(items: &[T], start: usize, end: usize) -> &[T] {
+        &items[start..end]
+    }
+
+    /// The wrapping sum of the bytes of `bytes`.
+    fn sum(bytes: &[u8]) -> u64 {
+        let mut total = 0u64;
+        let mut index = 0;
+        while index < bytes.len() {
+            total = total.wrapping_add(bytes[index] as u64);
+            index += 1;
+        }
+        total
+    }
+
+    impl Table {
+        /// The table of the first `count` of `spans`, at most `SPANS`.
+        pub fn new(spans: [Span; SPANS], count: usize) -> Table {
+            let count = if count < SPANS { count } else { SPANS };
+            Table { spans, count }
+        }
+
+        /// The filled spans, in order.
+        pub fn spans(&self) -> &[Span] {
+            prefix(&self.spans, self.count)
+        }
+    }
+
+    /// The wrapping sum of the bytes `[start, end)` of `bytes`, or zero
+    /// when they do not lie in it.
+    pub fn sum_of(bytes: &[u8], start: usize, end: usize) -> u64 {
+        if start > end || end > bytes.len() {
+            return 0;
+        }
+        sum(part(bytes, start, end))
+    }
+}
+
+/// Byte-string literals given as `&[u8]` arguments, as the device-tree
+/// module compares names and values: a loop helper compares bytes with a
+/// literal, and the arms of a `match` give each its own literal to the same
+/// helper. A literal returned as `&'static [u8]` is `byte-string-return`.
+pub mod byte_string_slice {
+    /// A way to call the firmware.
+    #[derive(Clone, Copy)]
+    pub enum Conduit {
+        Hvc,
+        Smc,
+    }
+
+    /// Whether `bytes` equals `other`.
+    fn same(bytes: &[u8], other: &[u8]) -> bool {
+        if bytes.len() != other.len() {
+            return false;
+        }
+        let mut index = 0;
+        while index < other.len() {
+            if bytes[index] != other[index] {
+                return false;
+            }
+            index += 1;
+        }
+        true
+    }
+
+    /// Whether `name` is `memory`.
+    pub fn is_memory(name: &[u8]) -> bool {
+        same(name, b"memory")
+    }
+
+    /// Whether `method` names `conduit`.
+    pub fn names(conduit: Conduit, method: &[u8]) -> bool {
+        match conduit {
+            Conduit::Hvc => same(method, b"hvc"),
+            Conduit::Smc => same(method, b"smc"),
+        }
+    }
+}
+
+/// Array repeat expressions in `const` items, and a `Copy` structure with an
+/// array field taken and returned by value, as the device-tree module writes
+/// its empty tables and its walk: a `const` structure holds `[EMPTY; SPANS]`
+/// of another `const`, and a walker with `[0; DEPTH]` goes through a loop
+/// helper that takes it by value and returns it in a tuple with the item.
+pub mod const_array_repeat {
+    /// A range of addresses.
+    #[derive(Clone, Copy)]
+    pub struct Span {
+        pub start: u64,
+        pub size: u64,
+    }
+
+    /// The most spans of a table.
+    const SPANS: usize = 4;
+
+    /// The most open levels of a walk.
+    const DEPTH: usize = 3;
+
+    /// The span with which a table is filled.
+    const EMPTY: Span = Span { start: 0, size: 0 };
+
+    /// Spans, filled from the first.
+    pub struct Table {
+        spans: [Span; SPANS],
+        count: usize,
+    }
+
+    /// The table before anything is added.
+    const NO_SPANS: Table = Table {
+        spans: [EMPTY; SPANS],
+        count: 0,
+    };
+
+    /// A walk over nesting marks: the cursor and the offsets of the open
+    /// levels.
+    #[derive(Clone, Copy)]
+    pub struct Walker {
+        cursor: usize,
+        depth: usize,
+        open: [usize; DEPTH],
+    }
+
+    /// A walk before the first byte.
+    pub const START: Walker = Walker {
+        cursor: 0,
+        depth: 0,
+        open: [0; DEPTH],
+    };
+
+    /// The offset of the next byte `1` of `bytes` after the cursor of
+    /// `walker`, recorded as an open level, and the walker after it, or none
+    /// after the last byte.
+    pub fn step(bytes: &[u8], walker: Walker) -> (Walker, Option<usize>) {
+        let mut walker = walker;
+        while walker.cursor < bytes.len() {
+            let at = walker.cursor;
+            walker.cursor += 1;
+            if bytes[at] == 1 {
+                if walker.depth < DEPTH {
+                    walker.open[walker.depth] = at;
+                }
+                walker.depth += 1;
+                return (walker, Some(at));
+            }
+        }
+        (walker, None)
+    }
+
+    /// The offset of the innermost open level of `walker`, or none.
+    pub fn innermost(walker: Walker) -> Option<usize> {
+        if walker.depth == 0 || walker.depth > DEPTH {
+            return None;
+        }
+        Some(walker.open[walker.depth - 1])
+    }
+
+    impl Table {
+        /// The table without spans.
+        pub fn empty() -> Table {
+            NO_SPANS
+        }
+
+        /// Adds `span`, unless the table is full; whether it was added.
+        pub fn add(&mut self, span: Span) -> bool {
+            if self.count >= SPANS {
+                return false;
+            }
+            self.spans[self.count] = span;
+            self.count += 1;
+            true
+        }
+
+        /// The number of spans.
+        pub fn count(&self) -> usize {
+            self.count
+        }
+    }
+}

@@ -1804,6 +1804,48 @@
         "own_iterator_next.mark_step_loop src/lib.rs",
         "own_iterator_next.span_step_loop src/lib.rs"
       ]
+    },
+    {
+      "name": "slice-range-generic",
+      "module": "Qual.SliceRangeGeneric",
+      "start_from": [
+        "crate::slice_range_generic"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "slice_range_generic.sum_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "byte-string-slice",
+      "module": "Qual.ByteStringSlice",
+      "start_from": [
+        "crate::byte_string_slice"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "byte_string_slice.same_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "const-array-repeat",
+      "module": "Qual.ConstArrayRepeat",
+      "start_from": [
+        "crate::const_array_repeat"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "const_array_repeat.step_loop src/lib.rs"
+      ]
     }
   ]
 }
