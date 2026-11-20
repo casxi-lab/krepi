@@ -12,3 +12,5 @@
 //! tests run, and for the bare-metal target of the images.
 
 #![no_std]
+
+pub mod fdt;

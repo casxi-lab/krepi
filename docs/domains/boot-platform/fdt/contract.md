@@ -115,27 +115,27 @@ of the core too, reads the boot memory map.
 
 ## Extractability
 
-- The module `fdt` of the provable core (planned), with its sources in
-  `kernel/src/fdt.rs` and below `kernel/src/fdt/` (planned), follows the
-  [provable Rust subset](../../../conventions/provable-subset.md): it is the
-  module of the role fdt in its scope. It is plain code that reads byte
-  slices and values and writes only the values that it returns; it holds no
-  `unsafe` code, no assembly and no access to a register or to a physical
-  address.
-- The component has no hardware action, so no adapter of `kernel/arch` is
-  part of it. The page-table logic and the `mmu` adapter of `kernel/arch`
-  (planned), which turns the MMU on and stores into live tables, belong to
-  the [page-tables](../../memory/page-tables/contract.md) component.
-- The board crate obtains the bytes of the hand-over tree and wires the
-  results into its boot code. It forms a slice of the 40-byte header at the
-  address where its firmware leaves the tree, reads `totalsize`, and forms
-  the slice of the whole tree only when `totalsize` is at least 40 and at
-  most the limit of its board, within storage that it gives the boot memory
-  map as boot storage; then it passes that slice to `Fdt::parse`. Forming a
-  slice from an address is the `unsafe` site of
-  [Open obligations](#open-obligations).
-- The contract is written before the code, so this section holds no `paths`
-  block; the change that adds the module writes its paths here.
+- The module `fdt` of the provable core, with its sources in the block below,
+  follows the [provable Rust subset](../../../conventions/provable-subset.md):
+  it is the module of the role fdt in its scope. It is plain code that reads
+  byte slices and values and writes only the values it returns; it holds no
+  `unsafe` code, no assembly and no access to a register or a physical address.
+- The component has no hardware action, so no adapter of `kernel/arch` is part
+  of it. The page-table logic and the `mmu` adapter of `kernel/arch` (planned),
+  which turns the MMU on and stores into live tables, belong to the
+  [page-tables](../../memory/page-tables/contract.md) component.
+- The board crate obtains the bytes of the hand-over tree and wires the results
+  into its boot code. It forms a slice of the 40-byte header where its firmware
+  leaves the tree, reads `totalsize`, and forms the slice of the whole tree only
+  when `totalsize` is at least 40 and at most the limit of its board, within
+  storage that it gives the boot memory map as boot storage; then it passes that
+  slice to `Fdt::parse`. Its `unsafe` site is [open](#open-obligations).
+
+```paths
+kernel/src/lib.rs
+kernel/src/fdt.rs
+kernel/src/fdt
+```
 
 ## Format and bounds
 
@@ -886,12 +886,10 @@ afterwards.
 
 ## Open obligations
 
-The module `fdt` has no `unsafe` code and no assembly, and its targets are
-to cover it, so the only obligation that no target closes is the board's:
-forming the slice of the hand-over tree from the address where the firmware
-leaves it ([Extractability](#extractability)). Each board forms that slice
-in its board crate; the row of the Pi 5 board is added with its board
-crate.
+The module `fdt` has no `unsafe` code and no assembly. Until its target lists
+the functions that it proves and reaches, the first two rows cover them. The
+other obligation is the board's: forming the slice of the hand-over tree
+([Extractability](#extractability)); the Pi 5 board adds its row with its crate.
 
 The target of the module has one open obligation of its own, which the
 target closes and the table therefore does not list. The entry table names
@@ -907,6 +905,8 @@ refinement proof of the target.
 
 | Obligation | Kind | Verified state | Carrier | Stage |
 | --- | --- | --- | --- | --- |
+| `kernel/src/fdt` | `code` | - | The refinement proof of the target fdt | `0.1` |
+| `kernel/src/fdt.rs` | `code` | - | The refinement proof of the target fdt | `0.1` |
 | `kernel/boards/qemu-virt/src/main.rs#image::device_tree` (planned) | `unsafe` | Neither (forms the byte slice of the tree at the start of RAM, where QEMU's loader places it, first of its 40-byte header and then of `totalsize` bytes) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
 
 ## Legacy test vectors

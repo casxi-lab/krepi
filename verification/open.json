@@ -723,6 +723,22 @@
       "contract": "docs/domains/runtime-sdk/dispatch/contract.md"
     },
     {
+      "item": "kernel/src/fdt",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The refinement proof of the target fdt",
+      "stage": "0.1",
+      "contract": "docs/domains/boot-platform/fdt/contract.md"
+    },
+    {
+      "item": "kernel/src/fdt.rs",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The refinement proof of the target fdt",
+      "stage": "0.1",
+      "contract": "docs/domains/boot-platform/fdt/contract.md"
+    },
+    {
       "item": "kernel/src/lifecycle.rs#acknowledge",
       "kind": "code",
       "verified_state": "reads and writes",

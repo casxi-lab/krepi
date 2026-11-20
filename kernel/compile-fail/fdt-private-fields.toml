@@ -1,0 +1,6 @@
+# The fields of a tree are private to the module fdt: a struct literal of
+# `Fdt` in another module does not compile, so only `Fdt::parse` builds one.
+file = "kernel/src/lib.rs"
+find = "pub mod fdt;"
+replace = "pub mod fdt;\n\n/// A tree that no parse checked.\npub fn forged(bytes: &[u8]) -> fdt::Fdt<'_> {\n    let checked = fdt::Fdt::parse(bytes).ok().unwrap();\n    fdt::Fdt { ..checked }\n}"
+error = "E0451"

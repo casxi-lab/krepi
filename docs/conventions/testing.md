@@ -1220,6 +1220,9 @@ affected features until they are obtained again.
   `lib.rs`, which see its `pub(crate)` items and are test code in the
   inventory
   ([legacy inventory and admission](../formal-verification.md#legacy-inventory-and-admission)).
+  The tests of the core through its `pub(crate)` entries are `#[cfg(test)]`
+  modules in `kernel/src/`, grouped by the module of their component, such
+  as `kernel/src/fdt/tests.rs`.
   No test crate with a library is built. The top-level modules of the
   kernel crates have names that differ from each other: the core has
   `context` (planned), so the save and restore module of the architecture
