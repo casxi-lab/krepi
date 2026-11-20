@@ -1181,7 +1181,9 @@ mod tests {
     /// `--manifest-path kernel/Cargo.toml` and selects packages, `build`,
     /// `check`, `test`, `clippy`, `run` or `doc`, names them with `-p` or
     /// takes `--workspace`, and `fmt` takes `--all`, or it acts on the core
-    /// alone. Only the arguments of Cargo count, not those after `--`.
+    /// alone. Cargo's built-in aliases `b`, `c`, `t`, `r` and `d` count as
+    /// the subcommands that they stand for. Only the arguments of Cargo
+    /// count, not those after `--`.
     ///
     /// The subcommand is the first argument, after a `+toolchain`: a command
     /// on the kernel workspace whose first argument is an option does not
@@ -1237,9 +1239,9 @@ mod tests {
             _ if !kernel => true,
             None => false,
             Some(command) if command.starts_with('-') => false,
-            Some("build" | "check" | "test" | "clippy" | "run" | "doc") => {
-                given("-p") || given("--package") || given("--workspace")
-            }
+            Some(
+                "build" | "check" | "test" | "clippy" | "run" | "doc" | "b" | "c" | "t" | "r" | "d",
+            ) => given("-p") || given("--package") || given("--workspace"),
             Some("fmt") => given("--all"),
             _ => true,
         }
@@ -1287,6 +1289,8 @@ mod tests {
             "test --manifest-path kernel/Cargo.toml --features -p",
             "clippy --manifest-path kernel/Cargo.toml --target --workspace",
             "fmt --manifest-path kernel/Cargo.toml --config --all --check",
+            // A built-in alias of a subcommand that selects packages.
+            "t --manifest-path kernel/Cargo.toml",
         ] {
             assert!(!keeps_the_package_rule(&cmd(broken)), "{broken}");
         }
