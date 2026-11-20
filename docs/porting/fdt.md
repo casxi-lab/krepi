@@ -87,8 +87,9 @@ The other test files keep their names below `kernel/src/fdt/tests/` and
   which was `platform::MemoryPlan` beside the device bindings, is part of
   the module, in `plan.rs`.
 - **Entries.** `pub` is kept for the rows of the contract's entry table and
-  the value types that they take and return. `PsciConduit::name`, which no
-  row names, is a private helper of `cpus.rs`. `Reservations::new` and
+  the value types that they take and return. `PsciConduit::name` is gone:
+  the private `method_is` of `cpus.rs` compares the method of `/psci` with
+  the name of each conduit, given as a literal. `Reservations::new` and
   `AvailableRanges::new` are gone: their entries build the iterators.
 - **Errors.** `Error` has no `DynamicReservation`: a dynamic reservation is
   accepted (below). The memory plan's `platform::Error` is `PlanError`,
