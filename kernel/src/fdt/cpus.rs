@@ -28,11 +28,18 @@ fn is_pi5(profile: CpuProfile) -> bool {
     }
 }
 
-/// The `method` of `/psci` that names a conduit.
-fn method(conduit: PsciConduit) -> &'static [u8] {
+/// Whether the `method` of `/psci` at `psci` names `conduit`, with the
+/// errors of [`string_is`]. Each arm gives its name as an argument: a
+/// byte-string literal returned as `&'static [u8]` is not translated.
+fn method_is(
+    structure: &[u8],
+    strings: &[u8],
+    psci: NodeAt,
+    conduit: PsciConduit,
+) -> Result<bool, Error> {
     match conduit {
-        PsciConduit::Hvc => b"hvc",
-        PsciConduit::Smc => b"smc",
+        PsciConduit::Hvc => string_is(structure, strings, psci, b"method", b"hvc"),
+        PsciConduit::Smc => string_is(structure, strings, psci, b"method", b"smc"),
     }
 }
 
@@ -297,13 +304,7 @@ impl Fdt<'_> {
         if !enabled_at(structure, strings, psci)? {
             return Err(Error::BadProperty);
         }
-        if !string_is(
-            structure,
-            strings,
-            psci,
-            b"method",
-            method(profile.conduit()),
-        )? {
+        if !method_is(structure, strings, psci, profile.conduit())? {
             return Err(Error::BadProperty);
         }
         if !psci_compatible(structure, value_at(structure, strings, psci, b"compatible")) {

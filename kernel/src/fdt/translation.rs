@@ -305,18 +305,30 @@ impl<'a> AddressMap<'a> {
         parent_cells: u32,
         size_cells: u32,
     ) -> Result<AddressMap<'a>, Error> {
-        let (bytes, present) = match bytes {
-            Some(value) => (value, true),
-            None => (NO_VALUE, false),
-        };
-        check_map(bytes, present, child_cells, parent_cells, size_cells)?;
-        Ok(AddressMap {
-            bytes,
-            present,
-            child_cells,
-            parent_cells,
-            size_cells,
-        })
+        // Each arm checks and builds its own map: a `match` that gives the
+        // borrowed value or the constant before the check is not translated.
+        match bytes {
+            Some(value) => {
+                check_map(value, true, child_cells, parent_cells, size_cells)?;
+                Ok(AddressMap {
+                    bytes: value,
+                    present: true,
+                    child_cells,
+                    parent_cells,
+                    size_cells,
+                })
+            }
+            None => {
+                check_map(NO_VALUE, false, child_cells, parent_cells, size_cells)?;
+                Ok(AddressMap {
+                    bytes: NO_VALUE,
+                    present: false,
+                    child_cells,
+                    parent_cells,
+                    size_cells,
+                })
+            }
+        }
     }
 
     /// The kind of the map: `Absent`, `Identity` or `Windows`.
