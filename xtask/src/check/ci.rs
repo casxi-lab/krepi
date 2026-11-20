@@ -362,11 +362,17 @@ const BY_RECORD: &str = "${{ steps.record.outputs.retention }}";
 
 /// Every upload step of the tracked workflows: the file, the key of the
 /// job, the name of the step and its `retention-days` as written.
-const RETENTION: [(&str, &str, &str, &str); 29] = [
+const RETENTION: [(&str, &str, &str, &str); 30] = [
     (
         ".github/workflows/check.yml",
         "check",
         "Upload the receipt",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/check.yml",
+        "check",
+        "Upload the known-failures ledger",
         BY_REF,
     ),
     (

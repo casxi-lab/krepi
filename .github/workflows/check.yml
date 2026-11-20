@@ -14,8 +14,10 @@
 # run when one of them takes too long; the QEMU boot suite runs after the
 # check without a deadline of its own. The script that sets the deadline
 # also passes a stop signal of the runner on to the command and waits for
-# it, so that a cancelled check still writes its receipt. Actions are
-# pinned to full commit SHAs; the comment names the release.
+# it, so that a cancelled check still writes its receipt. After the check,
+# the job writes the known-failures ledger that its receipt gives and
+# uploads it beside the receipt. Actions are pinned to full commit SHAs;
+# the comment names the release.
 name: check
 
 on:
@@ -99,6 +101,12 @@ jobs:
       - name: Run the QEMU boot suite
         run: cargo xtask qemu-boot --output-dir artifacts/qemu-boot
 
+      # The known-failures ledger that this check gives: the failed tests of
+      # its receipt, with the commit and finding of their committed entries.
+      - name: Write the known-failures ledger
+        if: always()
+        run: cargo xtask known-failures --receipt artifacts/check-receipt.json --output artifacts/known-failures.json
+
       # The size of each path of the two caches and of each cache, against
       # which the limits of the entries that the workflow cache saves are set.
       # A size for which du failed, as the measure of that workflow would,
@@ -136,6 +144,15 @@ jobs:
         with:
           name: check-receipt-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: artifacts/check-receipt.json
+          if-no-files-found: error
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+      - name: Upload the known-failures ledger
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: known-failures-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: artifacts/known-failures.json
           if-no-files-found: error
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
