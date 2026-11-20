@@ -1042,14 +1042,16 @@ for example, replaces `pub struct ReplyRight {` by `#[derive(Clone)]` and
 the same line and expects `E0283`, the error that the two implementations
 of `AmbiguousIfClone` give once the handle implements `Clone`.
 
-Review applies rules 3 and 6 to 8 to what the checks do not see: a type
-that wraps an `UnsafeCell` under another name, a `cfg_attr` attribute, the
-`cfg!` macro outside the tokens of another macro and a guard without a
-compile-fail case. The checks read names, so they also do not see what a
-listed file takes from code that no contract lists: a type alias, a re-export or
-a name defined there, a macro defined there whose expansion holds a
-refused construct, and a file that `include!` reads, which the inventory
-of `cargo xtask formal check` refuses.
+Review applies rules 3 and 6 to 8 to what the checks do not see: a type that
+wraps an `UnsafeCell` under another name, a `cfg_attr` attribute, the `cfg!`
+macro outside the tokens of another macro, a guard without a compile-fail
+case, and a module of the core that a `#[path]` attribute takes from outside
+`kernel/src/`, which the `manifests` step does not count, for which review
+checks that the contract of its component lists its path. The checks read
+names, so they also do not see what a listed file takes from code that no
+contract lists: a type alias, a re-export or a name defined there, a macro
+defined there whose expansion holds a refused construct, and a file that
+`include!` reads, which the inventory of `cargo xtask formal check` refuses.
 
 ## References
 
