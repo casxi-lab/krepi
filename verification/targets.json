@@ -469,8 +469,10 @@
       "start_from": [
         "krepi_kernel::fdt::Fdt::parse",
         "krepi_kernel::fdt::Fdt::nodes",
+        "krepi_kernel::fdt::Nodes::next",
         "krepi_kernel::fdt::Fdt::find_node",
         "krepi_kernel::fdt::Fdt::reservations",
+        "krepi_kernel::fdt::Reservations::next",
         "krepi_kernel::fdt::Fdt::total_size",
         "krepi_kernel::fdt::Node::name",
         "krepi_kernel::fdt::Node::parent",
@@ -506,6 +508,7 @@
         "krepi_kernel::fdt::CpuProfile::conduit",
         "krepi_kernel::fdt::cells_u64",
         "krepi_kernel::fdt::Reg::new",
+        "krepi_kernel::fdt::Reg::next",
         "krepi_kernel::fdt::AddressMap::new",
         "krepi_kernel::fdt::AddressMap::kind",
         "krepi_kernel::fdt::AddressMap::to_parent",
@@ -524,6 +527,7 @@
         "krepi_kernel::fdt::MemoryPlan::is_available",
         "krepi_kernel::fdt::MemoryPlan::permits_backing",
         "krepi_kernel::fdt::MemoryPlan::available_ranges",
+        "krepi_kernel::fdt::AvailableRanges::next",
         "krepi_kernel::fdt::Span::new",
         "krepi_kernel::fdt::Span::end",
         "krepi_kernel::fdt::Span::contains"
