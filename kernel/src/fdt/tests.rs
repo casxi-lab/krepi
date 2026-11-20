@@ -21,6 +21,7 @@ mod dynamic;
 mod limits;
 mod order;
 mod parser;
+mod results;
 mod translation;
 
 /// A device tree under construction: its structure block, strings block
