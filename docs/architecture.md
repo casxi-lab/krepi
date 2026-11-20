@@ -1396,11 +1396,11 @@ crate depends on a board crate. The core does not depend on `krepi-abi`
 either: the dispatch table of the core and `krepi-abi` are each to hold
 the operation numbers and error codes, and a check of `xtask` is to keep
 both equal to the operation inventory (planned). The `manifests` step of
-`cargo xtask check` and the proof gate are to check these edges (planned)
-in what `cargo metadata` reports, by the directory of each package: the
-core is `kernel/` itself, the ABI crate `kernel/abi`, the architecture
-crate `kernel/arch` and a board crate a directory directly below
-`kernel/boards/`. A package in any other directory fails the check.
+`cargo xtask check` and the proof gate check these edges in the
+dependencies that `cargo metadata` resolves, by the directory of each
+package: the core is `kernel/` itself, the ABI crate `kernel/abi`, the
+architecture crate `kernel/arch` and a board crate a directory directly
+below `kernel/boards/`. A package in any other directory fails the check.
 
 `kernel/Cargo.toml` keeps one shape, which the `manifests` step of
 `cargo xtask check` and the proof gate check in the manifest, in the

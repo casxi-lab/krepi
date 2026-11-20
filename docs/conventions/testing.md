@@ -109,6 +109,20 @@ The steps are:
      inside `kernel/`. Paths are compared with symbolic links resolved, and
      one that cannot be resolved fails. Every feature of every member is on,
      and every package is a member, so no choice of features adds a package.
+   - In the same report, the crates of the kernel workspace keep to the
+     dependency edges of the
+     [kernel workspace crates](../architecture.md#kernel-workspace-crates).
+     Each member whose manifest lies inside `kernel/` is, by its directory,
+     the core `kernel/`, the ABI crate `kernel/abi`, the architecture crate
+     `kernel/arch` or a board crate directly below `kernel/boards/`; a
+     package in any other directory, such as `kernel/tools` or
+     `kernel/boards/x/y`, fails. Each dependency that Cargo resolved for a
+     member, normal, build or development and for any target, is one that
+     the kind of the member allows: the core and the ABI crate have none,
+     the architecture crate depends only on the core, and a board crate
+     only on the architecture crate and the core. The proof gate checks the
+     edges on its export too, but not in the calibration workspace, whose
+     member lies outside these four directories.
    - The root manifest `kernel/Cargo.toml` has the shape of the
      [source layout](../architecture.md#source-layout): without `[package]`
      it passes; with it, the package is `krepi-kernel`, the manifest holds
@@ -127,8 +141,11 @@ The steps are:
      through `concat!` or in `cfg_attr`, is not seen.
    - Every tracked `.cargo/config.toml` or `.cargo/config` at the repository
      root or in a directory below `kernel/`, whatever the case of its name,
-     is a regular file of TOML, and no string in it, split at whitespace,
-     has a word that starts with `--extern` or `-L`; a tracked `.cargo`
+     is a regular file of TOML that holds only the table `[alias]` and the
+     key `rustflags` of `[target.aarch64-unknown-none-softfloat]`, so a
+     profile, `[build]`, another target, the environment, a source
+     replacement or a patch fails; and no string in it, split at whitespace,
+     has a word that starts with `--extern` or `-L`. A tracked `.cargo`
      entry in those places that is a symbolic link or a submodule fails.
      Cargo reads this configuration when it runs from the repository root,
      as `cargo xtask` does, or from a directory below `kernel/`.

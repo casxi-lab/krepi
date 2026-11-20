@@ -1,7 +1,8 @@
 //! The manifests step: crate licenses, release profiles, the dependency
-//! direction between the two workspaces and, as Cargo resolves it, the
-//! kernel workspace's freedom from external crates and the shape of its
-//! root manifest.
+//! direction between the two workspaces, the tables of the tracked Cargo
+//! configuration and, as Cargo resolves it, the kernel workspace's freedom
+//! from external crates, the dependency edges between its crates and the
+//! shape of its root manifest.
 
 use std::fs;
 use std::path::Path;
@@ -359,9 +360,14 @@ pub fn check_kernel_workspace(root: &Path) -> Vec<String> {
 /// `kernel`, `workspace` with its root package: its root must be `kernel`,
 /// and every package must be a member of it, with its manifest and the
 /// sources of its targets inside `kernel`; and the problems of
-/// [`root_shape`] in its root manifest. Paths are compared with symbolic
-/// links resolved; a path that cannot be resolved is a problem.
+/// [`root_shape`] in its root manifest. For the kernel workspace of this
+/// repository, [`KERNEL`] with [`KERNEL_PACKAGE`], so in the `manifests`
+/// step and in the proof gate on its export, the problems of
+/// [`edge_problems`] as well. Paths are compared with symbolic links
+/// resolved; a path that cannot be resolved is a problem. Each problem
+/// names the directory of the workspace.
 pub fn check_kernel_metadata(metadata: &Json, kernel: &Path, workspace: [&str; 2]) -> Vec<String> {
+    let ws = workspace[0];
     let kernel = match fs::canonicalize(kernel) {
         Ok(kernel) => kernel,
         Err(error) => return vec![format!("cannot resolve {}: {error}", kernel.display())],
@@ -372,14 +378,16 @@ pub fn check_kernel_metadata(metadata: &Json, kernel: &Path, workspace: [&str; 2
     let root = &metadata["workspace_root"];
     if resolve(root).as_ref() != Some(&kernel) {
         problems.push(format!(
-            "kernel workspace: the root {root} does not resolve to kernel/"
+            "{ws} workspace: the root {root} does not resolve to {ws}/"
         ));
     }
     let (Some(packages), Some(members)) = (
         metadata["packages"].as_array(),
         metadata["workspace_members"].as_array(),
     ) else {
-        problems.push("kernel workspace: cargo metadata lists no packages or members".to_string());
+        problems.push(format!(
+            "{ws} workspace: cargo metadata lists no packages or members"
+        ));
         return problems;
     };
     for package in packages {
@@ -387,26 +395,174 @@ pub fn check_kernel_metadata(metadata: &Json, kernel: &Path, workspace: [&str; 2
         // Members have no source: registry and Git packages are never members.
         if !members.contains(id) {
             problems.push(format!(
-                "kernel workspace: package {name} is not a member: {id}"
+                "{ws} workspace: package {name} is not a member: {id}"
             ));
             continue;
         }
         let manifest = &package["manifest_path"];
         if !inside(manifest) {
             problems.push(format!(
-                "kernel workspace: package {name} has a manifest that does not resolve inside kernel/: {manifest}"
+                "{ws} workspace: package {name} has a manifest that does not resolve inside {ws}/: {manifest}"
             ));
         }
         for target in package["targets"].as_array().into_iter().flatten() {
             let (target, path) = (&target["name"], &target["src_path"]);
             if !inside(path) {
                 problems.push(format!(
-                    "kernel workspace: target {target} of package {name} has a source that does not resolve inside kernel/: {path}"
+                    "{ws} workspace: target {target} of package {name} has a source that does not resolve inside {ws}/: {path}"
                 ));
             }
         }
     }
     problems.extend(root_problems(packages, &kernel, workspace));
+    if workspace == [KERNEL, KERNEL_PACKAGE] {
+        problems.extend(edge_problems(metadata, members, &kernel));
+    }
+    problems
+}
+
+/// The four kinds of crate of the kernel workspace, which the directory of
+/// each package gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// The core, the root package, in the workspace directory itself.
+    Core,
+    /// The ABI crate, in `abi`.
+    Abi,
+    /// The architecture crate, in `arch`.
+    Arch,
+    /// A board crate, in a directory directly below `boards`.
+    Board,
+}
+
+impl Kind {
+    /// The kind of the package in the resolved directory `dir` of the
+    /// kernel workspace in the resolved directory `kernel`, if it has one.
+    fn of(dir: &Path, kernel: &Path) -> Option<Kind> {
+        match () {
+            _ if dir == kernel => Some(Kind::Core),
+            _ if dir == kernel.join("abi") => Some(Kind::Abi),
+            _ if dir == kernel.join("arch") => Some(Kind::Arch),
+            _ if dir.parent() == Some(&kernel.join("boards")) => Some(Kind::Board),
+            _ => None,
+        }
+    }
+
+    /// The kinds that a crate of this kind may depend on.
+    fn allowed(self) -> &'static [Kind] {
+        match self {
+            Kind::Core | Kind::Abi => &[],
+            Kind::Arch => &[Kind::Core],
+            Kind::Board => &[Kind::Arch, Kind::Core],
+        }
+    }
+
+    /// The rule of [`Kind::allowed`] in words.
+    fn rule(self) -> &'static str {
+        match self {
+            Kind::Core => "the core depends on no crate",
+            Kind::Abi => "the ABI crate depends on no crate",
+            Kind::Arch => "the architecture crate depends only on the core",
+            Kind::Board => "a board crate depends only on the architecture crate and the core",
+        }
+    }
+}
+
+/// The dependency edges of the kernel workspace of this repository in
+/// `kernel`, a resolved path, that the source layout forbids, in what
+/// `cargo metadata` reports: each member whose manifest resolves inside
+/// `kernel` is of one of the four kinds of [`Kind`] by its directory, and
+/// each of its dependencies that Cargo resolved, normal, build or
+/// development and for any target, is one that its kind allows. The core
+/// and the ABI crate depend on nothing at all; for the other kinds, a
+/// dependency on a package that is no member, or whose manifest lies
+/// outside `kernel`, is already a problem of [`check_kernel_metadata`].
+/// The edges come from the resolution, so a dependency that a `[patch]`
+/// or a renaming leads to a member is seen as well.
+fn edge_problems(metadata: &Json, members: &[Json], kernel: &Path) -> Vec<String> {
+    let mut problems = Vec::new();
+    let packages = metadata["packages"].as_array().into_iter().flatten();
+    let shown = |dir: &Path| match dir.strip_prefix(kernel) {
+        Ok(below) if below.as_os_str().is_empty() => format!("{KERNEL}/"),
+        Ok(below) => format!("{KERNEL}/{}", below.display()),
+        Err(_) => dir.display().to_string(),
+    };
+    // The name, the directory and the kind of each package by its id; the
+    // kind only for a member inside `kernel` of one of the four kinds.
+    let mut found = Vec::new();
+    for package in packages {
+        let (name, id) = (&package["name"], &package["id"]);
+        let manifest = package["manifest_path"]
+            .as_str()
+            .and_then(|p| fs::canonicalize(p).ok());
+        let dir = manifest
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf);
+        let local = dir.filter(|dir| members.contains(id) && dir.starts_with(kernel));
+        let kind = local.as_deref().and_then(|dir| Kind::of(dir, kernel));
+        if let (Some(dir), None) = (&local, kind) {
+            problems.push(format!(
+                "{KERNEL} workspace: package {name} is in {}, which is not the core \
+                 ({KERNEL}/), the ABI crate ({KERNEL}/abi), the architecture crate \
+                 ({KERNEL}/arch) or a board crate (a directory directly below {KERNEL}/boards/)",
+                shown(dir)
+            ));
+        }
+        let place = local.as_deref().map(|dir| format!(" in {}", shown(dir)));
+        found.push((
+            id,
+            format!("package {name}{}", place.unwrap_or_default()),
+            kind,
+        ));
+    }
+    let Some(nodes) = metadata["resolve"]["nodes"].as_array() else {
+        problems.push(format!(
+            "{KERNEL} workspace: cargo metadata reports no resolution of the dependencies"
+        ));
+        return problems;
+    };
+    let package = |id: &Json| found.iter().find(|(other, ..)| *other == id);
+    for node in nodes {
+        let Some((_, from, Some(kind))) = package(&node["id"]) else {
+            continue;
+        };
+        for dep in node["deps"].as_array().into_iter().flatten() {
+            let to = package(&dep["pkg"]);
+            let forbidden = match (kind, to.and_then(|(.., to)| *to)) {
+                (Kind::Core | Kind::Abi, _) => true,
+                (_, Some(to)) => !kind.allowed().contains(&to),
+                (_, None) => false,
+            };
+            if !forbidden {
+                continue;
+            }
+            let fallback = format!("package {}", dep["name"]);
+            let to = to.map_or(fallback, |(_, to, _)| to.clone());
+            // Each kind of the dependency, with the target that it is for.
+            let mut kinds = Vec::new();
+            for dep_kind in dep["dep_kinds"].as_array().into_iter().flatten() {
+                let what = match dep_kind["kind"].as_str() {
+                    None => "a normal",
+                    Some("build") => "a build",
+                    Some("dev") => "a development",
+                    Some(_) => "a",
+                };
+                let target = dep_kind["target"].as_str();
+                kinds.push((what, target.map(|target| format!(" for `{target}`"))));
+            }
+            if kinds.is_empty() {
+                kinds.push(("a", None));
+            }
+            for (what, target) in kinds {
+                problems.push(format!(
+                    "{KERNEL} workspace: {from} has {what} dependency on {to}{}; {}",
+                    target.unwrap_or_default(),
+                    kind.rule()
+                ));
+            }
+        }
+    }
     problems
 }
 
@@ -579,9 +735,12 @@ fn strings(value: &Value, found: &mut Vec<String>) {
     }
 }
 
-/// Tracked Cargo configuration that applies to the kernel workspace passes
-/// rustc no crate and no library search path: no string in it, split at
-/// whitespace, has a word that starts with `--extern` or `-L`.
+/// Tracked Cargo configuration that applies to the kernel workspace holds
+/// only the tables `[alias]` and `[target.<TARGET>]`, the bare-metal target
+/// of the images, and the latter only `rustflags`, which
+/// [`config_tables`] checks; and it passes rustc no crate and no library
+/// search path: no string in it, split at whitespace, has a word that starts
+/// with `--extern` or `-L`.
 fn check_cargo_configs(tree: &Tree, problems: &mut Vec<String>) {
     for (path, _) in tree
         .entries()
@@ -593,6 +752,7 @@ fn check_cargo_configs(tree: &Tree, problems: &mut Vec<String>) {
             ));
             continue;
         };
+        config_tables(path, &table, problems);
         let mut texts = Vec::new();
         strings(&Value::Table(table), &mut texts);
         for word in texts.iter().flat_map(|text| text.split_whitespace()) {
@@ -602,6 +762,39 @@ fn check_cargo_configs(tree: &Tree, problems: &mut Vec<String>) {
                 ));
             }
         }
+    }
+}
+
+/// The tables and keys of the Cargo configuration `table` in `path` other
+/// than `[alias]` and the `rustflags` of `[target.<TARGET>]`: a profile, a
+/// build setting, the flags of another target, the environment of rustc, a
+/// source replacement or a patch would change what the kernel workspace
+/// builds outside its manifests.
+fn config_tables(path: &str, table: &Table, problems: &mut Vec<String>) {
+    let mut refused = Vec::new();
+    for (key, value) in table {
+        match (key.as_str(), value.as_table()) {
+            ("alias", _) => {}
+            ("target", Some(targets)) => {
+                for (target, flags) in targets {
+                    match flags.as_table() {
+                        Some(flags) if target == check::TARGET => refused.extend(
+                            (flags.keys().filter(|key| *key != "rustflags"))
+                                .map(|key| format!("target.{target}.{key}")),
+                        ),
+                        _ => refused.push(format!("[target.{target}]")),
+                    }
+                }
+            }
+            (key, _) => refused.push(format!("[{key}]")),
+        }
+    }
+    for what in refused {
+        problems.push(format!(
+            "{path}: Cargo configuration may hold only [alias] and the rustflags of \
+             [target.{}], not {what}",
+            check::TARGET
+        ));
     }
 }
 
@@ -798,7 +991,7 @@ mod tests {
 
     #[test]
     fn accepts_cargo_configuration_that_passes_no_crate() {
-        let text = "[build]\nrustflags = [\"-C\", \"link-arg=-Tlink.ld\"]\n\n[alias]\nk = \"build --release\"\n";
+        let text = "[target.aarch64-unknown-none-softfloat]\nrustflags = [\"-C\", \"link-arg=-Tlink.ld\"]\n\n[alias]\nk = \"build --release\"\n";
         assert_eq!(
             config_problems("kernel/.cargo/config.toml", config(text)),
             Vec::<String>::new()
@@ -807,25 +1000,33 @@ mod tests {
 
     #[test]
     fn rejects_extern_and_library_search_paths_in_cargo_configuration() {
-        let text = "[build]\nrustflags = [\"--extern\", \"x=/tmp/libx.rlib\", \"-L/tmp\"]\n\n[target.aarch64-unknown-none]\nrustflags = \"--extern=y=/tmp/liby.rlib -L dependency=/tmp\"\n";
-        let problems = config_problems("kernel/.cargo/config.toml", config(text));
-        assert_eq!(problems.len(), 4, "{problems:?}");
-        for word in [
-            "`--extern`",
-            "`-L/tmp`",
-            "`--extern=y=/tmp/liby.rlib`",
-            "`-L`",
-        ] {
-            assert!(
-                problems.iter().any(|problem| problem.contains(word)),
-                "{word}: {problems:?}"
-            );
+        // The flags as an array and as one string.
+        let flags = [
+            (
+                "[\"--extern\", \"x=/tmp/libx.rlib\", \"-L/tmp\"]",
+                ["`--extern`", "`-L/tmp`"],
+            ),
+            (
+                "\"--extern=y=/tmp/liby.rlib -L dependency=/tmp\"",
+                ["`--extern=y=/tmp/liby.rlib`", "`-L`"],
+            ),
+        ];
+        for (flags, words) in flags {
+            let text = format!("[target.aarch64-unknown-none-softfloat]\nrustflags = {flags}\n");
+            let problems = config_problems("kernel/.cargo/config.toml", config(&text));
+            assert_eq!(problems.len(), 2, "{problems:?}");
+            for word in words {
+                assert!(
+                    problems.iter().any(|problem| problem.contains(word)),
+                    "{word}: {problems:?}"
+                );
+            }
         }
     }
 
     #[test]
     fn rejects_cargo_configuration_whatever_the_case_of_its_name() {
-        let text = "[build]\nrustflags = [\"-L/tmp\"]\n";
+        let text = "[target.aarch64-unknown-none-softfloat]\nrustflags = [\"-L/tmp\"]\n";
         for path in [
             ".cargo/config",
             "kernel/.Cargo/Config.toml",
@@ -835,6 +1036,37 @@ mod tests {
             assert_eq!(problems.len(), 1, "{path}: {problems:?}");
             assert!(problems[0].contains("`-L/tmp`"), "{problems:?}");
         }
+    }
+
+    /// The one problem of the Cargo configuration `text` at the repository
+    /// root, which must name `what`.
+    fn refused_config(text: &str, what: &str) {
+        assert_eq!(
+            config_problems(".cargo/config.toml", config(text)),
+            [format!(
+                ".cargo/config.toml: Cargo configuration may hold only [alias] and the \
+                 rustflags of [target.aarch64-unknown-none-softfloat], not {what}"
+            )]
+        );
+    }
+
+    #[test]
+    fn rejects_a_profile_in_cargo_configuration() {
+        refused_config("[profile.dev]\nopt-level = 1\n", "[profile]");
+    }
+
+    #[test]
+    fn rejects_build_in_cargo_configuration() {
+        refused_config("[build]\ntarget-dir = \"elsewhere\"\n", "[build]");
+    }
+
+    #[test]
+    fn rejects_another_target_in_cargo_configuration() {
+        let text = "[target.aarch64-unknown-none]\nrustflags = [\"-C\", \"opt-level=0\"]\n";
+        refused_config(text, "[target.aarch64-unknown-none]");
+        // Nor any key of the bare-metal target of the images but its flags.
+        let text = "[target.aarch64-unknown-none-softfloat]\nlinker = \"ld\"\n";
+        refused_config(text, "target.aarch64-unknown-none-softfloat.linker");
     }
 
     #[test]
@@ -889,6 +1121,7 @@ mod tests {
             "workspace_root": at(root),
             "workspace_members": members,
             "packages": packages,
+            "resolve": { "nodes": [] },
         });
         check_kernel_metadata(
             &metadata,
@@ -992,6 +1225,283 @@ mod tests {
             [KERNEL, KERNEL_PACKAGE],
         );
         assert_eq!(problems.len(), 1, "{problems:?}");
+    }
+
+    /// A kernel workspace in a scratch directory, with its root package
+    /// `krepi-kernel` in `kernel/` in the shape of the source layout and a
+    /// manifest and a library in each directory of `dirs` below it, and the
+    /// problems of [`check_kernel_metadata`] for it.
+    struct Edges(Scratch);
+
+    impl Edges {
+        fn new(label: &str, dirs: &[&str]) -> Edges {
+            let scratch = Scratch::new(label);
+            scratch.write(
+                "kernel/Cargo.toml",
+                "[package]\nname = \"krepi-kernel\"\nversion = \"0.0.0\"\n\n\
+                 [workspace]\nresolver = \"3\"\n\n[lints.rust]\nunsafe_code = \"forbid\"\n",
+            );
+            scratch.write("kernel/src/lib.rs", "#![no_std]\n");
+            for dir in dirs {
+                scratch.write(&format!("kernel/{dir}/Cargo.toml"), "");
+                scratch.write(&format!("kernel/{dir}/src/lib.rs"), "");
+            }
+            Edges(scratch)
+        }
+
+        /// The kernel workspace in the scratch directory.
+        fn kernel(&self) -> std::path::PathBuf {
+            self.0.0.join(KERNEL)
+        }
+
+        /// The library package `name`, which is its id, in the directory
+        /// `dir` below `kernel/`, empty for the root package.
+        fn package(&self, name: &str, dir: &str) -> Json {
+            let dir = self.kernel().join(dir);
+            let path = |file: &str| Json::from(dir.join(file).to_string_lossy().into_owned());
+            let lib = json!({ "name": name, "kind": ["lib"], "src_path": path("src/lib.rs") });
+            json!({ "name": name, "id": name, "source": null, "manifest_path": path("Cargo.toml"), "targets": [lib] })
+        }
+
+        /// The problems of the workspace whose members are `packages`, the
+        /// pairs of name and directory of [`Edges::package`], with the
+        /// dependencies `deps`, each from a member on a member, of the kind
+        /// that Cargo names (`null` for a normal one) and for the target.
+        fn problems(
+            &self,
+            packages: &[(&str, &str)],
+            deps: &[(&str, &str, Json, Json)],
+        ) -> Vec<String> {
+            let members: Vec<&str> = packages.iter().map(|(name, _)| *name).collect();
+            let nodes: Vec<Json> = (members.iter())
+                .map(|name| {
+                    let deps: Vec<Json> = (deps.iter())
+                        .filter(|(from, ..)| from == name)
+                        .map(|(_, to, kind, target)| {
+                            json!({ "name": to, "pkg": to, "dep_kinds": [{ "kind": kind, "target": target }] })
+                        })
+                        .collect();
+                    json!({ "id": name, "deps": deps })
+                })
+                .collect();
+            let packages: Vec<Json> = (packages.iter())
+                .map(|(name, dir)| self.package(name, dir))
+                .collect();
+            let metadata = json!({
+                "workspace_root": self.kernel().to_string_lossy(),
+                "workspace_members": members,
+                "packages": packages,
+                "resolve": { "nodes": nodes },
+            });
+            check_kernel_metadata(&metadata, &self.kernel(), [KERNEL, KERNEL_PACKAGE])
+        }
+    }
+
+    /// The crates of the source layout, two boards among them, by name and
+    /// directory below `kernel/`.
+    const CRATES: [(&str, &str); 5] = [
+        ("krepi-kernel", ""),
+        ("krepi-abi", "abi"),
+        ("krepi-arch", "arch"),
+        ("krepi-a", "boards/a"),
+        ("krepi-b", "boards/b"),
+    ];
+
+    /// The one problem of [`CRATES`] with the dependency `dep`.
+    fn edge_problem(label: &str, dep: (&str, &str, Json, Json)) -> String {
+        let edges = Edges::new(label, &["abi", "arch", "boards/a", "boards/b"]);
+        let problems = edges.problems(&CRATES, &[dep]);
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        problems[0].clone()
+    }
+
+    #[test]
+    fn edges_of_the_source_layout_pass() {
+        let edges = Edges::new("edges", &["abi", "arch", "boards/a", "boards/b"]);
+        let null = Json::Null;
+        let allowed = [
+            ("krepi-arch", "krepi-kernel", null.clone(), null.clone()),
+            ("krepi-a", "krepi-arch", null.clone(), null.clone()),
+            ("krepi-a", "krepi-kernel", json!("build"), null.clone()),
+            ("krepi-b", "krepi-arch", json!("dev"), null.clone()),
+            (
+                "krepi-b",
+                "krepi-kernel",
+                null,
+                json!("cfg(target_os = \"none\")"),
+            ),
+        ];
+        assert_eq!(edges.problems(&CRATES, &allowed), Vec::<String>::new());
+    }
+
+    #[test]
+    fn edges_reject_a_dependency_of_the_core() {
+        let dep = ("krepi-kernel", "krepi-abi", json!("dev"), Json::Null);
+        assert_eq!(
+            edge_problem("core", dep),
+            "kernel workspace: package \"krepi-kernel\" in kernel/ has a development dependency on \
+             package \"krepi-abi\" in kernel/abi; the core depends on no crate"
+        );
+    }
+
+    #[test]
+    fn edges_reject_a_dependency_of_the_abi() {
+        let dep = ("krepi-abi", "krepi-kernel", json!("build"), Json::Null);
+        assert_eq!(
+            edge_problem("abi", dep),
+            "kernel workspace: package \"krepi-abi\" in kernel/abi has a build dependency on \
+             package \"krepi-kernel\" in kernel/; the ABI crate depends on no crate"
+        );
+    }
+
+    #[test]
+    fn edges_reject_the_architecture_on_the_abi() {
+        let dep = ("krepi-arch", "krepi-abi", Json::Null, Json::Null);
+        assert_eq!(
+            edge_problem("arch-abi", dep),
+            "kernel workspace: package \"krepi-arch\" in kernel/arch has a normal dependency on \
+             package \"krepi-abi\" in kernel/abi; the architecture crate depends only on the core"
+        );
+    }
+
+    #[test]
+    fn edges_reject_the_architecture_on_a_board() {
+        // A normal dependency would make a cycle, which Cargo refuses.
+        let dep = ("krepi-arch", "krepi-a", json!("dev"), Json::Null);
+        assert_eq!(
+            edge_problem("arch-board", dep),
+            "kernel workspace: package \"krepi-arch\" in kernel/arch has a development dependency \
+             on package \"krepi-a\" in kernel/boards/a; the architecture crate depends only on the \
+             core"
+        );
+    }
+
+    #[test]
+    fn edges_reject_a_board_on_another_board() {
+        let target = json!("cfg(target_os = \"none\")");
+        let dep = ("krepi-a", "krepi-b", Json::Null, target);
+        assert_eq!(
+            edge_problem("boards", dep),
+            "kernel workspace: package \"krepi-a\" in kernel/boards/a has a normal dependency on \
+             package \"krepi-b\" in kernel/boards/b for `cfg(target_os = \"none\")`; a board crate \
+             depends only on the architecture crate and the core"
+        );
+    }
+
+    #[test]
+    fn edges_reject_a_board_on_the_abi() {
+        let dep = ("krepi-b", "krepi-abi", Json::Null, Json::Null);
+        assert_eq!(
+            edge_problem("board-abi", dep),
+            "kernel workspace: package \"krepi-b\" in kernel/boards/b has a normal dependency on \
+             package \"krepi-abi\" in kernel/abi; a board crate depends only on the architecture \
+             crate and the core"
+        );
+    }
+
+    #[test]
+    fn edges_reject_a_package_outside_the_four_kinds() {
+        let edges = Edges::new("kinds", &["tools", "boards/x/y"]);
+        let packages = [
+            ("krepi-kernel", ""),
+            ("tools", "tools"),
+            ("y", "boards/x/y"),
+        ];
+        let problem = |name: &str, dir: &str| {
+            format!(
+                "kernel workspace: package \"{name}\" is in kernel/{dir}, which is not the core \
+                 (kernel/), the ABI crate (kernel/abi), the architecture crate (kernel/arch) or a \
+                 board crate (a directory directly below kernel/boards/)"
+            )
+        };
+        assert_eq!(
+            edges.problems(&packages, &[]),
+            [problem("tools", "tools"), problem("y", "boards/x/y")]
+        );
+    }
+
+    /// The root package of the calibration workspace of this repository,
+    /// in `dir`.
+    fn calibration(dir: &str) -> Json {
+        let lib = format!("{dir}/src/lib.rs");
+        let manifest = format!("{dir}/Cargo.toml");
+        package(
+            "formal-calibration",
+            Json::Null,
+            &manifest,
+            &[("lib", &lib)],
+        )
+    }
+
+    #[test]
+    fn edges_are_not_checked_in_the_calibration_layout() {
+        // The calibration workspace: its root package depends on its member,
+        // which is none of the four kinds of crate.
+        let dir = "verification/qualification/calibration";
+        let (member, lib) = (
+            format!("{dir}/member/Cargo.toml"),
+            format!("{dir}/member/src/lib.rs"),
+        );
+        let packages = [
+            calibration(dir),
+            package(
+                "formal-calibration-member",
+                Json::Null,
+                &member,
+                &[("lib", &lib)],
+            ),
+        ];
+        let dep = json!({ "name": "formal_calibration_member", "pkg": "formal-calibration-member", "dep_kinds": [{ "kind": null, "target": null }] });
+        let metadata = json!({
+            "workspace_root": at(dir),
+            "workspace_members": ["formal-calibration", "formal-calibration-member"],
+            "packages": packages,
+            "resolve": { "nodes": [
+                { "id": "formal-calibration", "deps": [dep] },
+                { "id": "formal-calibration-member", "deps": [] },
+            ] },
+        });
+        let layout = [dir, "formal-calibration"];
+        assert_eq!(
+            check_kernel_metadata(&metadata, &repo::root().join(dir), layout),
+            Vec::<String>::new()
+        );
+        // The same shape fails in the kernel workspace.
+        let edges = Edges::new("calibration", &["member"]);
+        let packages = [("krepi-kernel", ""), ("member", "member")];
+        let dep = ("krepi-kernel", "member", Json::Null, Json::Null);
+        assert_eq!(edges.problems(&packages, &[dep]).len(), 2);
+    }
+
+    #[test]
+    fn metadata_problems_name_the_workspace_that_they_check() {
+        let dir = "verification/qualification/calibration";
+        let outside = package("m", Json::Null, "kernel/abi/Cargo.toml", &LIB);
+        let metadata = json!({
+            "workspace_root": at(KERNEL),
+            "workspace_members": ["formal-calibration", "m"],
+            "packages": [calibration(dir), outside],
+        });
+        let layout = [dir, "formal-calibration"];
+        assert_eq!(
+            check_kernel_metadata(&metadata, &repo::root().join(dir), layout),
+            [
+                format!(
+                    "{dir} workspace: the root {} does not resolve to {dir}/",
+                    at(KERNEL)
+                ),
+                format!(
+                    "{dir} workspace: package \"m\" has a manifest that does not resolve inside \
+                     {dir}/: {}",
+                    at("kernel/abi/Cargo.toml")
+                ),
+                format!(
+                    "{dir} workspace: target \"lib\" of package \"m\" has a source that does not \
+                     resolve inside {dir}/: {}",
+                    at("kernel/abi/src/lib.rs")
+                ),
+            ]
+        );
     }
 
     /// A root manifest of the kernel workspace in its shape.
@@ -1237,7 +1747,7 @@ mod tests {
         scratch.write(
             "kernel/Cargo.toml",
             "[package]\nname = \"krepi-kernel\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n\
-             [workspace]\nresolver = \"3\"\nmembers = [\"a\", \"b\"]\n\n\
+             [workspace]\nresolver = \"3\"\nmembers = [\"arch\", \"boards/a\"]\n\n\
              [lints.rust]\nunsafe_code = \"forbid\"\n",
         );
         scratch.write("kernel/src/lib.rs", "#![no_std]\n");
@@ -1254,24 +1764,24 @@ mod tests {
         );
     }
 
-    const MEMBER: &str =
-        "[package]\nname = \"a\"\nedition = \"2024\"\n\n[dependencies]\nb = { path = \"../b\" }\n";
+    const MEMBER: &str = "[package]\nname = \"a\"\nedition = \"2024\"\n\n[dependencies]\nb = { path = \"../../arch\" }\n";
 
-    /// A repository whose kernel workspace holds the crate `a`, which depends
-    /// on the crate `b`, with the crate `outside` next to `kernel/`.
+    /// A repository whose kernel workspace holds the board crate `a`, which
+    /// depends on the architecture crate `b`, with the crate `outside` next
+    /// to `kernel/`.
     fn repository(label: &str) -> Scratch {
         let scratch = Scratch::new(label);
         scratch.write(
             "kernel/Cargo.toml",
-            "[workspace]\nresolver = \"3\"\nmembers = [\"a\", \"b\"]\n",
+            "[workspace]\nresolver = \"3\"\nmembers = [\"arch\", \"boards/a\"]\n",
         );
-        scratch.write("kernel/a/Cargo.toml", MEMBER);
-        scratch.write("kernel/a/src/lib.rs", "");
+        scratch.write("kernel/boards/a/Cargo.toml", MEMBER);
+        scratch.write("kernel/boards/a/src/lib.rs", "");
         scratch.write(
-            "kernel/b/Cargo.toml",
+            "kernel/arch/Cargo.toml",
             "[package]\nname = \"b\"\nedition = \"2024\"\n",
         );
-        scratch.write("kernel/b/src/lib.rs", "");
+        scratch.write("kernel/arch/src/lib.rs", "");
         // A workspace of its own, so that Cargo does not look for one in the
         // directories that hold the scratch directory.
         scratch.write(
@@ -1302,8 +1812,8 @@ mod tests {
     #[test]
     fn cargo_finds_a_path_dependency_outside_kernel() {
         let scratch = repository("path");
-        let text = format!("{MEMBER}outside = {{ path = \"../../outside\" }}\n");
-        scratch.write("kernel/a/Cargo.toml", &text);
+        let text = format!("{MEMBER}outside = {{ path = \"../../../outside\" }}\n");
+        scratch.write("kernel/boards/a/Cargo.toml", &text);
         scratch.lock();
         let problems = check_kernel_workspace(&scratch.0);
         assert_eq!(problems.len(), 1, "{problems:?}");
@@ -1318,7 +1828,7 @@ mod tests {
         let scratch = repository("member");
         scratch.write(
             "kernel/Cargo.toml",
-            "[workspace]\nresolver = \"3\"\nmembers = [\"a\", \"b\", \"../outside\"]\n",
+            "[workspace]\nresolver = \"3\"\nmembers = [\"arch\", \"boards/a\", \"../outside\"]\n",
         );
         scratch.write(
             "outside/Cargo.toml",
@@ -1335,10 +1845,10 @@ mod tests {
         let scratch = repository("patch");
         scratch.write(
             "kernel/Cargo.toml",
-            "[workspace]\nresolver = \"3\"\nmembers = [\"a\", \"b\"]\n\n[patch.crates-io]\noutside = { path = \"../outside\" }\n",
+            "[workspace]\nresolver = \"3\"\nmembers = [\"arch\", \"boards/a\"]\n\n[patch.crates-io]\noutside = { path = \"../outside\" }\n",
         );
         scratch.write(
-            "kernel/a/Cargo.toml",
+            "kernel/boards/a/Cargo.toml",
             &format!("{MEMBER}outside = \"0.0.0\"\n"),
         );
         scratch.lock();
@@ -1355,7 +1865,7 @@ mod tests {
         let scratch = repository("excluded");
         scratch.write(
             "kernel/Cargo.toml",
-            "[workspace]\nresolver = \"3\"\nmembers = [\"a\"]\nexclude = [\"b\"]\n",
+            "[workspace]\nresolver = \"3\"\nmembers = [\"boards/a\"]\nexclude = [\"arch\"]\n",
         );
         scratch.lock();
         let problems = check_kernel_workspace(&scratch.0);
@@ -1396,7 +1906,7 @@ mod tests {
     #[test]
     fn cargo_accepts_a_build_script_inside_kernel() {
         let scratch = repository("build");
-        scratch.write("kernel/b/build.rs", "fn main() {}\n");
+        scratch.write("kernel/arch/build.rs", "fn main() {}\n");
         scratch.lock();
         assert_eq!(check_kernel_workspace(&scratch.0), Vec::<String>::new());
     }
@@ -1406,16 +1916,16 @@ mod tests {
         let scratch = repository("dot-dot");
         let text = MEMBER.replace(
             "edition = \"2024\"\n",
-            "edition = \"2024\"\n\n[lib]\npath = \"../../outside/src/lib.rs\"\n",
+            "edition = \"2024\"\n\n[lib]\npath = \"../../../outside/src/lib.rs\"\n",
         );
-        scratch.write("kernel/a/Cargo.toml", &text);
+        scratch.write("kernel/boards/a/Cargo.toml", &text);
         scratch.lock();
         let problems = check_kernel_workspace(&scratch.0);
         assert_eq!(problems.len(), 1, "{problems:?}");
-        // Cargo prints the path below kernel/a, so only the resolved path
-        // shows that it leaves kernel/.
+        // Cargo prints the path below kernel/boards/a, so only the resolved
+        // path shows that it leaves kernel/.
         assert!(
-            problems[0].contains("kernel/a/../../outside/src/lib.rs"),
+            problems[0].contains("kernel/boards/a/../../../outside/src/lib.rs"),
             "{problems:?}"
         );
     }
@@ -1425,7 +1935,7 @@ mod tests {
         let scratch = repository("registry");
         scratch.lock();
         let text = format!("{MEMBER}krepi-no-such-crate = \"1\"\n");
-        scratch.write("kernel/a/Cargo.toml", &text);
+        scratch.write("kernel/boards/a/Cargo.toml", &text);
         let problems = check_kernel_workspace(&scratch.0);
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(
@@ -1439,7 +1949,7 @@ mod tests {
         let scratch = repository("stale");
         scratch.lock();
         scratch.write(
-            "kernel/b/Cargo.toml",
+            "kernel/arch/Cargo.toml",
             "[package]\nname = \"b\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
         );
         let problems = check_kernel_workspace(&scratch.0);
