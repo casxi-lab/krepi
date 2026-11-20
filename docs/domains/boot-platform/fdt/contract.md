@@ -49,10 +49,10 @@ evidence, is in the [requirements](requirements.md). The
 - **Span.** The value `Span`: a start and a size, the addresses
   `[start, start + size)`. A value may be any pair of 64-bit numbers, also
   one whose end `start + size` leaves 64 bits. `Span::new(start, size)`
-  refuses such a pair with `Overflow` and accepts an empty span. The entries
-  that take a span refuse one whose end leaves 64 bits at the step that
+  refuses such a pair with `Overflow` and accepts an empty span. An entry
+  that takes a span and returns errors refuses such a span at the step that
   checks it, with `Overflow`, or `PlanError::Overflow` in the boot memory
-  map, and the queries of the boot memory map hold for no such span.
+  map; a query of the boot memory map returns no error and is false for it.
   `Span::end` gives `start + size`, or `Overflow`; `Span::contains(other)`
   fails with `Overflow` when `other` and then the span itself end beyond
   64 bits, and otherwise holds when `other` lies inside the span, which
@@ -93,25 +93,25 @@ evidence, is in the [requirements](requirements.md). The
 
 ## Entry points
 
-The module `fdt` of the provable core is planned, and so is every entry
-below; the names are those that this contract fixes. Every entry is `pub`:
-the boot code of the boards calls them, and the device bindings of the
-boards read the tree through them. The page-tables component, which is part
-of the core too, reads the boot memory map.
+Every entry below is `pub` in the module `fdt` of the provable core, with
+the name that this contract fixes: the boot code of the boards calls them,
+and the device bindings of the boards read the tree through them. The
+page-tables component, which is part of the core too, reads the boot memory
+map.
 
 | Entry point | Kind | Called by | Rules |
 | --- | --- | --- | --- |
-| `fdt::Fdt::parse` (planned) | Function, host-testable | The boot code of a board, once on the boot CPU, with the bytes of the hand-over tree | [Format and bounds](#format-and-bounds), [Rejection and error priority](#rejection-and-error-priority) |
-| `Fdt::nodes`, `find_node`, `reservations` and `total_size`, and `Node::name`, `parent`, `property`, `string_property`, `enabled`, `address_cells`, `size_cells`, `reg`, `ranges`, `dma_ranges` and `translate_reg` (planned) | Functions and iterators, host-testable | The entries of this component; the device bindings that the boards and other components read from a tree | [Format and bounds](#format-and-bounds), [Address translation](#address-translation) |
-| `Fdt::discover_memory`, which returns a `MemoryMap` with `ram`, `reserved` and `dynamic` (planned) | Function, host-testable | The boot code of a board | [Memory discovery](#memory-discovery) |
-| `Fdt::discover_pi5_boot_memory`, which returns a `Pi5BootMemory` with `ram`, `reserved`, `dynamic`, `dtb`, `image`, `ram_bytes` and `is_available` (planned) | Function, host-testable | The boot code of the Pi 5 board | [Memory discovery](#memory-discovery) |
-| `Pi5BootMemory::find_available` (planned) | Function, host-testable | The boot code of the Pi 5 board, before the page ownership table exists | [Boot memory map](#boot-memory-map) |
-| `Fdt::discover_cpus`, which returns a `CpuTopology` with `count`, `profile`, `affinity` and `validate_qemu_timers`, and `CpuProfile::logical_id`, `affinity_shift` and `conduit` (planned) | Functions, host-testable | The boot code of a board; the start of the secondary CPUs | [CPU nodes](#cpu-nodes) |
-| `cells_u64`, `Reg::new`, and `AddressMap::new`, `kind`, `to_parent` and `to_child` (planned) | Functions and an iterator, host-testable | The node access of this component; device bindings | [Address translation](#address-translation) |
-| `MemoryPlan::all_ram`, `new` and `from_pi5` (planned) | Functions, host-testable | The boot code of a board | [Boot memory map](#boot-memory-map) |
-| `MemoryPlan::managed_banks`, `ram`, `reservations`, `boot_ranges`, `firmware_ranges`, `described_bytes`, `managed_bytes`, `contains_ram`, `is_available`, `permits_backing` and `available_ranges` (planned) | Functions and an iterator, host-testable | The kernel direct map and the page ownership table of the page-tables component; the boot code of a board | [Boot memory map](#boot-memory-map) |
-| `Span::new`, `end` and `contains`, and the value types `Fdt`, `Node`, `Span`, `ReservedRegion`, `MemoryMap`, `Pi5BootMemory`, `CpuProfile`, `CpuTopology`, `MemoryPlan`, `Error` and `PlanError` (planned) | Functions and value types | Every caller of the entries above | [Rejection and error priority](#rejection-and-error-priority) |
-| `MAX_BLOB_SIZE`, `MAX_DEPTH`, `MAX_TOKENS`, `MAX_PROPERTIES`, `MAX_PROPERTY_NAME`, `MAX_RESERVATIONS`, `MAX_MEMORY_REGIONS`, `MAX_RESERVED_REGIONS` and `PI5_MAX_BLOB_SIZE` (planned) | Constants | The boot code of a board, which bounds the slice of the tree with them | [Format and bounds](#format-and-bounds) |
+| `fdt::Fdt::parse` | Function, host-testable | The boot code of a board, once on the boot CPU, with the bytes of the hand-over tree | [Format and bounds](#format-and-bounds), [Rejection and error priority](#rejection-and-error-priority) |
+| `Fdt::nodes`, `find_node`, `reservations` and `total_size`, and `Node::name`, `parent`, `property`, `string_property`, `enabled`, `address_cells`, `size_cells`, `reg`, `ranges`, `dma_ranges` and `translate_reg` | Functions and iterators, host-testable | The entries of this component; the device bindings that the boards and other components read from a tree | [Format and bounds](#format-and-bounds), [Address translation](#address-translation) |
+| `Fdt::discover_memory`, which returns a `MemoryMap` with `ram`, `reserved` and `dynamic` | Function, host-testable | The boot code of a board | [Memory discovery](#memory-discovery) |
+| `Fdt::discover_pi5_boot_memory`, which returns a `Pi5BootMemory` with `ram`, `reserved`, `dynamic`, `dtb`, `image`, `ram_bytes` and `is_available` | Function, host-testable | The boot code of the Pi 5 board | [Memory discovery](#memory-discovery) |
+| `Pi5BootMemory::find_available` | Function, host-testable | The boot code of the Pi 5 board, before the page ownership table exists | [Boot memory map](#boot-memory-map) |
+| `Fdt::discover_cpus`, which returns a `CpuTopology` with `count`, `profile`, `affinity` and `validate_qemu_timers`, and `CpuProfile::logical_id`, `affinity_shift` and `conduit` | Functions, host-testable | The boot code of a board; the start of the secondary CPUs | [CPU nodes](#cpu-nodes) |
+| `cells_u64`, `Reg::new`, and `AddressMap::new`, `kind`, `to_parent` and `to_child` | Functions and an iterator, host-testable | The node access of this component; device bindings | [Address translation](#address-translation) |
+| `MemoryPlan::all_ram`, `new` and `from_pi5` | Functions, host-testable | The boot code of a board | [Boot memory map](#boot-memory-map) |
+| `MemoryPlan::managed_banks`, `ram`, `reservations`, `boot_ranges`, `firmware_ranges`, `described_bytes`, `managed_bytes`, `contains_ram`, `is_available`, `permits_backing` and `available_ranges` | Functions and an iterator, host-testable | The kernel direct map and the page ownership table of the page-tables component; the boot code of a board | [Boot memory map](#boot-memory-map) |
+| `Span::new`, `end` and `contains`, and the value types `Fdt`, `Node`, `Span`, `ReservedRegion`, `MemoryMap`, `Pi5BootMemory`, `CpuProfile`, `CpuTopology`, `MemoryPlan`, `Error` and `PlanError` | Functions and value types | Every caller of the entries above | [Rejection and error priority](#rejection-and-error-priority) |
+| `MAX_BLOB_SIZE`, `MAX_DEPTH`, `MAX_TOKENS`, `MAX_PROPERTIES`, `MAX_PROPERTY_NAME`, `MAX_RESERVATIONS`, `MAX_MEMORY_REGIONS`, `MAX_RESERVED_REGIONS` and `PI5_MAX_BLOB_SIZE` | Constants | The boot code of a board, which bounds the slice of the tree with them | [Format and bounds](#format-and-bounds) |
 
 ## Extractability
 
@@ -300,13 +300,13 @@ tree. An entry that calls another, such as `discover_pi5_boot_memory` with
 `discover_memory`, reports the error of the callee at the step where it
 calls it.
 
-Some checks of these orders cannot fail on the inputs that reach them:
-the ends of the blocks, of the reservation entries before the end of the
-tree and of the property values, whose offsets and lengths are 32-bit
-words; the translated span, which lies in a window that `AddressMap::new`
-checked; and the sums of the RAM ranges and of the RAM banks, which are
-disjoint spans within 64 bits. They keep their place in the orders, as in
-the prototype tree.
+Some checks of these orders cannot fail on the inputs that reach them: the
+ends of the blocks, of the reservation entries before the end of the tree
+and of the property values, whose offsets and lengths are 32-bit words; the
+translated span, which lies in a window that `AddressMap::new` checked; the
+sums of the RAM ranges and of the RAM banks, disjoint spans within 64 bits;
+and the cells of the `reg` of a CPU node, which `/cpus` gives as 1 or 2.
+They keep their place in the orders, as in the prototype tree.
 
 The parse and the entries on a tree:
 
@@ -833,7 +833,7 @@ afterwards.
 
 ## Testing obligations
 
-- The host tests of the module `fdt` (planned) replay every vector of
+- The host tests of the module `fdt` replay every vector of
   [Legacy test vectors](#legacy-test-vectors) that is part of this
   component, with the expected outputs of that section; the vectors that
   are not part of it are replayed by the components that the section names.
@@ -894,14 +894,14 @@ other obligation is the board's: forming the slice of the hand-over tree
 The target of the module has one open obligation of its own, which the
 target closes and the table therefore does not list. The entry table names
 the functions that give iterators, `Fdt::nodes`, `Fdt::reservations`, the
-entries of a `Reg` and `MemoryPlan::available_ranges`, but not the iterator
-types, so the roots of the target hold no `next`. The `next` of each
-iterator type joins the roots once the implementation names the types, and
-before the implementation merges, so that the refinement proof relates what
-each iteration gives to the list of the specification
-([proof path](proof.md#premises)). It is carried by the implementation,
-which names the types and adds their `next` to the roots, and by the
-refinement proof of the target.
+entries of a `Reg` and `MemoryPlan::available_ranges`, and the module names
+their iterator types, `Nodes`, `Reservations`, `Reg` and `AvailableRanges`,
+each of which gives its items through `next` alone. The `next` of each type
+is a root of the target, so that the refinement proof relates what each
+iteration gives to the list of the specification
+([proof path](proof.md#premises)). It is carried by the refinement proof
+of the target, which relates the `next` of each of the four types to the
+list that the specification gives for its iterator.
 
 | Obligation | Kind | Verified state | Carrier | Stage |
 | --- | --- | --- | --- | --- |
