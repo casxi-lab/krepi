@@ -1,5 +1,6 @@
 ---
-features: none
+features:
+  - krepi.platform.device-tree
 ---
 
 # Device-tree requirements
@@ -13,7 +14,7 @@ tests follow are in the [contract](contract.md).
 ## Sources
 
 - The parser, the node access and the translation of addresses, the memory
-  discovery, the CPU nodes and the Pi 5 boot memory are to be ported from
+  discovery, the CPU nodes and the Pi 5 boot memory are ported from
   `src/fdt` of the prototype tree at
   `prototype@ec8305c618a8f4e84e0707fa56beac5673f4675e`, without its Pi 5
   device bindings, and the boot memory map from
@@ -46,7 +47,7 @@ tests follow are in the [contract](contract.md).
   a board in release 0.1; the 1, 2, 4 and 16 GB models are covered by host
   tests on trees of their inferred RAM ranges and are not run on a board in
   that release.
-- **Host.** The host tests of the module `fdt` (planned), on the
+- **Host.** The host tests of the module `fdt`, on the
   development host and in CI, with the frozen vectors and the trees that
   the tests build.
 - The component runs on the boot CPU before the secondary CPUs start; more
@@ -70,13 +71,16 @@ of the contract, and every vector of the parse gives its expected output.
 The limits of the RAM ranges, of the reserved regions and of the Pi 5
 hand-over tree are those of FDT-R03 and FDT-R05.
 
-- **Examples.** None: no feature document describes the component.
-- **Entry points.** `fdt::Fdt::parse` (planned).
+- **Examples.**
+  [ex1](../../../features/platform/device-tree.md#ex1-the-ram-of-a-qemu-virt-tree)
+  and
+  [ex2](../../../features/platform/device-tree.md#ex2-a-truncated-tree-is-rejected)
+- **Entry points.** `fdt::Fdt::parse`.
 - **Contract.** [Format and bounds](contract.md#format-and-bounds),
   [Rejection and error priority](contract.md#rejection-and-error-priority).
 - **Specification.** [FDT-R01](specification.md#fdt-r01) of the specification.
 - **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
-- **Evidence.** The host tests of the module `fdt` (planned) that replay the
+- **Evidence.** The host tests of the module `fdt` that replay the
   vectors `fdt-parser-1` to `fdt-parser-9` and the tests of each limit
   that the [testing obligations](contract.md#testing-obligations) list. They
   show the limits on trees that the tests build. They do not show the trees
@@ -96,7 +100,8 @@ table is reached by a vector or a test; and for each step of the error
 orders, an input that breaks that step and a later one gives the error of
 that step.
 
-- **Examples.** None: no feature document describes the component.
+- **Examples.**
+  [ex2](../../../features/platform/device-tree.md#ex2-a-truncated-tree-is-rejected)
 - **Entry points.** Every entry of the
   [contract](contract.md#entry-points).
 - **Contract.**
@@ -129,9 +134,12 @@ accepted, and 33 and 129 fail with `LimitExceeded`; and a tree with the RAM
 ranges and both reserved regions of the 8 GB hand-over tree is accepted,
 with the region of 62 bytes in the hole between two ranges kept.
 
-- **Examples.** None: no feature document describes the component.
+- **Examples.**
+  [ex1](../../../features/platform/device-tree.md#ex1-the-ram-of-a-qemu-virt-tree)
+  and
+  [ex4](../../../features/platform/device-tree.md#ex4-the-boot-memory-map-of-the-pi-5-8-gb-model)
 - **Entry points.** `Fdt::discover_memory` and the `MemoryMap` that it
-  returns (planned).
+  returns.
 - **Contract.** [Memory discovery](contract.md#memory-discovery).
 - **Specification.** [FDT-R03](specification.md#fdt-r03) of the specification.
 - **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
@@ -157,9 +165,10 @@ disables it. The criterion: the vectors `fdt-discovery-4`, `fdt-pi5-4` and
 did not, and `fdt-pi5-2` its own; and the tests of dynamic reservations of
 the [testing obligations](contract.md#testing-obligations) pass.
 
-- **Examples.** None: no feature document describes the component.
+- **Examples.**
+  [ex3](../../../features/platform/device-tree.md#ex3-a-dynamic-reservation-is-counted-and-not-reserved)
 - **Entry points.** `Fdt::discover_memory`, `MemoryMap::dynamic`,
-  `Fdt::discover_pi5_boot_memory` and `Pi5BootMemory::dynamic` (planned).
+  `Fdt::discover_pi5_boot_memory` and `Pi5BootMemory::dynamic`.
 - **Contract.** [Memory discovery](contract.md#memory-discovery),
   [Behaviour changes](contract.md#behaviour-changes).
 - **Specification.** [FDT-R04](specification.md#fdt-r04) of the specification.
@@ -184,9 +193,10 @@ two RAM ranges or a hole. The criterion: the vectors of the Pi 5 boot memory
 give their expected outputs, and a hand-over tree of exactly 128 KiB is
 accepted and one of 1 byte more fails with `LimitExceeded`.
 
-- **Examples.** None: no feature document describes the component.
+- **Examples.**
+  [ex4](../../../features/platform/device-tree.md#ex4-the-boot-memory-map-of-the-pi-5-8-gb-model)
 - **Entry points.** `Fdt::discover_pi5_boot_memory`,
-  `Pi5BootMemory::is_available` and `find_available` (planned).
+  `Pi5BootMemory::is_available` and `find_available`.
 - **Contract.** [Memory discovery](contract.md#memory-discovery),
   [Boot memory map](contract.md#boot-memory-map).
 - **Specification.** [FDT-R05](specification.md#fdt-r05) of the specification.
@@ -214,9 +224,10 @@ size less 4 MiB as RAM and the hole left out of the usable ranges; for the
 8 GB model, the vector `fdt-pi5-platform-1` does the same with the
 measured ranges.
 
-- **Examples.** None: no feature document describes the component.
+- **Examples.**
+  [ex4](../../../features/platform/device-tree.md#ex4-the-boot-memory-map-of-the-pi-5-8-gb-model)
 - **Entry points.** `Fdt::discover_pi5_boot_memory` and
-  `MemoryPlan::all_ram` and `from_pi5` (planned).
+  `MemoryPlan::all_ram` and `from_pi5`.
 - **Contract.** [Memory discovery](contract.md#memory-discovery),
   [Boot memory map](contract.md#boot-memory-map),
   [Testing obligations](contract.md#testing-obligations).
@@ -243,9 +254,10 @@ criterion: the vectors of the boot memory map give their expected outputs,
 with the one change of `platform-10`, and boot storage of 4 spans is
 accepted and of 5 fails with `Capacity`.
 
-- **Examples.** None: no feature document describes the component.
+- **Examples.**
+  [ex4](../../../features/platform/device-tree.md#ex4-the-boot-memory-map-of-the-pi-5-8-gb-model)
 - **Entry points.** `MemoryPlan::all_ram`, `new` and `from_pi5`, and its
-  queries and `available_ranges` (planned).
+  queries and `available_ranges`.
 - **Contract.** [Boot memory map](contract.md#boot-memory-map).
 - **Specification.** [FDT-R07](specification.md#fdt-r07) of the specification.
 - **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
@@ -272,10 +284,10 @@ not change a logical ID. `validate_qemu_timers` accepts only the timer
 records of QEMU virt for the admitted CPUs. The criterion: the vectors of
 the CPU nodes give their expected outputs.
 
-- **Examples.** None: no feature document describes the component.
+- **Examples.**
+  [ex6](../../../features/platform/device-tree.md#ex6-the-cpu-topology-of-the-pi-5)
 - **Entry points.** `Fdt::discover_cpus`, `CpuTopology::count`, `profile`,
-  `affinity` and `validate_qemu_timers`, and `CpuProfile::logical_id`
-  (planned).
+  `affinity` and `validate_qemu_timers`, and `CpuProfile::logical_id`.
 - **Contract.** [CPU nodes](contract.md#cpu-nodes).
 - **Specification.** [FDT-R08](specification.md#fdt-r08) of the specification.
 - **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
@@ -294,10 +306,11 @@ part, or whose result leaves the width of its side, fails. CPU addresses
 and the addresses of devices are separate maps. The criterion: the vectors
 of the translation give their expected outputs.
 
-- **Examples.** None: no feature document describes the component.
+- **Examples.**
+  [ex5](../../../features/platform/device-tree.md#ex5-a-device-address-is-translated-through-a-bus)
 - **Entry points.** `cells_u64`, `Reg::new`, `AddressMap::new`, `kind`,
   `to_parent` and `to_child`, and `Node::reg`, `ranges`, `dma_ranges` and
-  `translate_reg` (planned).
+  `translate_reg`.
 - **Contract.** [Address translation](contract.md#address-translation),
   [Format and bounds](contract.md#format-and-bounds).
 - **Specification.** [FDT-R09](specification.md#fdt-r09) of the specification.
@@ -317,9 +330,12 @@ random seeds that QEMU virt writes into `/chosen` at every boot reach no
 result. The criterion: three cold boots of QEMU virt, each in a new QEMU
 process, give the same results of the parse and of the boot memory map.
 
-- **Examples.** None: no feature document describes the component.
+- **Examples.**
+  [ex7](../../../features/platform/device-tree.md#ex7-seeds-in-the-chosen-node-change-no-result),
+  on the host; the criterion is the case of the QEMU boot suite.
 - **Entry points.** `Fdt::parse`, `Fdt::discover_memory` and
-  `MemoryPlan::all_ram` (planned), as the boot code of QEMU virt calls them.
+  `MemoryPlan::all_ram`, as the boot code of QEMU virt is to call them
+  (planned).
 - **Contract.** [Determinism](contract.md#determinism).
 - **Specification.** [FDT-R10](specification.md#fdt-r10) of the specification.
 - **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
