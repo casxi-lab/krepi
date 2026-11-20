@@ -1,0 +1,6 @@
+# A tree borrows its bytes for its lifetime: a write to the bytes while a
+# tree of them lives does not compile.
+file = "kernel/src/lib.rs"
+find = "pub mod fdt;"
+replace = "pub mod fdt;\n\n/// Writes a byte of the tree while the tree lives.\npub fn overwrite(bytes: &mut [u8]) -> u64 {\n    let tree = fdt::Fdt::parse(bytes);\n    bytes[0] = 0;\n    match tree {\n        Ok(tree) => tree.total_size(),\n        Err(_) => 0,\n    }\n}"
+error = "E0506"

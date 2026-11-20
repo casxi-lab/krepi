@@ -74,8 +74,8 @@ kernel crate root, with its manifest and the files of the crate outside
 `kernel/arch/src/lib.rs` has `docs/porting/arch.md`, and
 `kernel/boards/qemu-virt/src/lib.rs` has `docs/porting/qemu-virt.md`. The
 crate directory of the provable core is `kernel/` itself, so the record of
-its crate root `kernel/src/lib.rs` (planned) is `docs/porting/kernel.md`,
-which also covers `kernel/Cargo.toml` and `kernel/Cargo.lock`. The modules
+its crate root `kernel/src/lib.rs` is `docs/porting/kernel.md`, which also
+covers `kernel/Cargo.toml` and `kernel/Cargo.lock`. The modules
 of the crates of the kernel workspace, the core included, have names that
 differ from each other, and none is named `kernel`, so that no two kernel
 records share a name. Code outside the core that both boards share is in
@@ -91,7 +91,7 @@ A record starts with a metadata block:
 | Field | Content |
 | --- | --- |
 | `source` | `prototype@` followed by the full commit hash, for example `prototype@ec8305c618a8f4e84e0707fa56beac5673f4675e`; tooling taken from the CAS project uses `cas-project@` and its full commit hash |
-| `paths` | Every legacy path taken, file or directory |
+| `paths` | Every legacy path taken, file or directory; a record of new code that has no counterpart in the legacy tree writes `none`, with the treatment `redesigned` |
 | `destination` | The krepi paths that received the code |
 | `treatment` | `ported` or `redesigned` |
 | `features` | The krepi feature IDs that the code serves, or `none` while no feature document exists |

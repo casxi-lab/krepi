@@ -8951,3 +8951,605 @@ pub mod r7_private_enum {
         phase
     }
 }
+
+/// A view of borrowed bytes, a `Copy` type with a lifetime parameter, taken
+/// by value in methods without a loop, as the device-tree module takes its
+/// views. Each loop is in a helper whose parameters are a slice of bytes and
+/// scalars, never the view, and a method builds a view of the same bytes from
+/// the result of a helper with a `match`. In `view_index_loop` and
+/// `view_borrowed_helper` the function that holds the loop takes the view by
+/// reference.
+pub mod borrowed_view_by_value {
+    /// The bytes of a slice from an offset.
+    #[derive(Clone, Copy)]
+    pub struct ByteView<'a> {
+        bytes: &'a [u8],
+        at: usize,
+    }
+
+    /// The wrapping sum of the bytes of `bytes` from `at`.
+    fn sum_from(bytes: &[u8], at: usize) -> u64 {
+        let mut total = 0u64;
+        let mut index = at;
+        while index < bytes.len() {
+            total = total.wrapping_add(bytes[index] as u64);
+            index += 1;
+        }
+        total
+    }
+
+    /// The offset of the first byte `byte` of `bytes` from `at`, or none.
+    fn position(bytes: &[u8], at: usize, byte: u8) -> Option<usize> {
+        let mut index = at;
+        while index < bytes.len() {
+            if bytes[index] == byte {
+                return Some(index);
+            }
+            index += 1;
+        }
+        None
+    }
+
+    impl<'a> ByteView<'a> {
+        /// The view of every byte of `bytes`.
+        pub fn new(bytes: &'a [u8]) -> ByteView<'a> {
+            ByteView { bytes, at: 0 }
+        }
+
+        /// The wrapping sum of the bytes of the view.
+        pub fn sum(self) -> u64 {
+            sum_from(self.bytes, self.at)
+        }
+
+        /// The view from the first byte `byte` of the view, or none.
+        // A `match` rather than `Option::map`, which takes a closure.
+        #[allow(clippy::manual_map)]
+        pub fn find(self, byte: u8) -> Option<ByteView<'a>> {
+            match position(self.bytes, self.at, byte) {
+                Some(at) => Some(ByteView {
+                    bytes: self.bytes,
+                    at,
+                }),
+                None => None,
+            }
+        }
+    }
+
+    /// The wrapping sum of the bytes of `view` from its first byte `byte`,
+    /// or zero.
+    pub fn sum_after(view: ByteView<'_>, byte: u8) -> u64 {
+        match view.find(byte) {
+            Some(found) => found.sum(),
+            None => 0,
+        }
+    }
+}
+
+/// Iterators of their own over borrowed slices, as the device-tree module
+/// writes them: a type with a lifetime parameter that holds a slice or a view
+/// and a cursor, with an inherent `next(&mut self)` without a loop. `next`
+/// calls a step helper that takes the slice and the cursor by value and
+/// returns the new cursor with the item, stores the cursor once and returns
+/// the item. `Spans` gives plain values, with a cursor that is a `Copy`
+/// structure of plain data; `Marks` gives views of the bytes that it walks,
+/// built by a helper with a `match`. Neither implements `Iterator`, whose
+/// provided methods would reach library functions without a model.
+pub mod own_iterator_next {
+    /// A range of addresses.
+    #[derive(Clone, Copy)]
+    pub struct Span {
+        pub start: u64,
+        pub size: u64,
+    }
+
+    /// The position of `Spans`: the index of the next span and the end of
+    /// the span given last.
+    #[derive(Clone, Copy)]
+    struct Cursor {
+        index: usize,
+        reached: u64,
+    }
+
+    /// The spans of a slice that start at or above the end of the span
+    /// given before them, in order.
+    pub struct Spans<'a> {
+        spans: &'a [Span],
+        cursor: Cursor,
+    }
+
+    /// The first span from `cursor` that starts at or above its end, and the
+    /// cursor after it, or none after the last span.
+    fn span_step(spans: &[Span], cursor: Cursor) -> (Cursor, Option<Span>) {
+        let mut cursor = cursor;
+        while cursor.index < spans.len() {
+            let span = spans[cursor.index];
+            cursor.index += 1;
+            if span.start >= cursor.reached {
+                cursor.reached = span.start.wrapping_add(span.size);
+                return (cursor, Some(span));
+            }
+        }
+        (cursor, None)
+    }
+
+    impl<'a> Spans<'a> {
+        /// The spans of `spans`.
+        pub fn new(spans: &'a [Span]) -> Spans<'a> {
+            Spans {
+                spans,
+                cursor: Cursor {
+                    index: 0,
+                    reached: 0,
+                },
+            }
+        }
+
+        /// The next span, or none after the last.
+        // The iterator implements `next` alone.
+        #[allow(clippy::should_implement_trait)]
+        pub fn next(&mut self) -> Option<Span> {
+            let (cursor, span) = span_step(self.spans, self.cursor);
+            self.cursor = cursor;
+            span
+        }
+    }
+
+    /// Borrowed bytes.
+    #[derive(Clone, Copy)]
+    pub struct Text<'a> {
+        bytes: &'a [u8],
+    }
+
+    /// A byte of a text, the item of `Marks`.
+    #[derive(Clone, Copy)]
+    pub struct Mark<'a> {
+        text: Text<'a>,
+        at: usize,
+    }
+
+    /// The bytes of a text that equal a byte, in order.
+    pub struct Marks<'a> {
+        text: Text<'a>,
+        byte: u8,
+        cursor: usize,
+    }
+
+    /// The offset of the first byte `byte` of `bytes` from `cursor`, and the
+    /// cursor after it, or none after the last byte.
+    fn mark_step(bytes: &[u8], byte: u8, cursor: usize) -> (usize, Option<usize>) {
+        let mut index = cursor;
+        while index < bytes.len() {
+            if bytes[index] == byte {
+                return (index + 1, Some(index));
+            }
+            index += 1;
+        }
+        (index, None)
+    }
+
+    /// The mark of `text` at `found`, or none.
+    // A `match` rather than `Option::map`, which takes a closure.
+    #[allow(clippy::manual_map)]
+    fn mark_of(text: Text<'_>, found: Option<usize>) -> Option<Mark<'_>> {
+        match found {
+            Some(at) => Some(Mark { text, at }),
+            None => None,
+        }
+    }
+
+    impl<'a> Text<'a> {
+        /// The text of `bytes`.
+        pub fn new(bytes: &'a [u8]) -> Text<'a> {
+            Text { bytes }
+        }
+
+        /// The bytes of the text that equal `byte`.
+        pub fn marks(self, byte: u8) -> Marks<'a> {
+            Marks {
+                text: self,
+                byte,
+                cursor: 0,
+            }
+        }
+    }
+
+    impl Mark<'_> {
+        /// The offset of the mark in its text.
+        pub fn offset(self) -> usize {
+            self.at
+        }
+
+        /// The number of bytes of its text from the mark.
+        pub fn remaining(self) -> usize {
+            self.text.bytes.len() - self.at
+        }
+    }
+
+    impl<'a> Marks<'a> {
+        /// The next mark, or none after the last.
+        // The iterator implements `next` alone.
+        #[allow(clippy::should_implement_trait)]
+        pub fn next(&mut self) -> Option<Mark<'a>> {
+            let (cursor, found) = mark_step(self.text.bytes, self.byte, self.cursor);
+            self.cursor = cursor;
+            mark_of(self.text, found)
+        }
+    }
+}
+
+/// Subslices by range through generic helpers, as the device-tree module
+/// takes the filled part of a table and the bytes of a block: `prefix` and
+/// `part` take `&items[a..b]` of a slice of any element type, a method gives
+/// the filled part of an array field, and a loop helper walks a part of a
+/// byte slice by index. `string-bytes` takes a range of a `str`, which reaches
+/// library functions of `str`.
+pub mod slice_range_generic {
+    /// A range of addresses.
+    #[derive(Clone, Copy)]
+    pub struct Span {
+        pub start: u64,
+        pub size: u64,
+    }
+
+    /// The most spans of a table.
+    const SPANS: usize = 4;
+
+    /// The spans of a table, filled from the first.
+    pub struct Table {
+        spans: [Span; SPANS],
+        count: usize,
+    }
+
+    /// The first `count` items of `items`, which holds at least `count`.
+    fn prefix<T>(items: &[T], count: usize) -> &[T] {
+        &items[0..count]
+    }
+
+    /// The items `[start, end)` of `items`, which holds at least `end`.
+    fn part<T>(items: &[T], start: usize, end: usize) -> &[T] {
+        &items[start..end]
+    }
+
+    /// The wrapping sum of the bytes of `bytes`.
+    fn sum(bytes: &[u8]) -> u64 {
+        let mut total = 0u64;
+        let mut index = 0;
+        while index < bytes.len() {
+            total = total.wrapping_add(bytes[index] as u64);
+            index += 1;
+        }
+        total
+    }
+
+    impl Table {
+        /// The table of the first `count` of `spans`, at most `SPANS`.
+        pub fn new(spans: [Span; SPANS], count: usize) -> Table {
+            let count = if count < SPANS { count } else { SPANS };
+            Table { spans, count }
+        }
+
+        /// The filled spans, in order.
+        pub fn spans(&self) -> &[Span] {
+            prefix(&self.spans, self.count)
+        }
+    }
+
+    /// The wrapping sum of the bytes `[start, end)` of `bytes`, or zero
+    /// when they do not lie in it.
+    pub fn sum_of(bytes: &[u8], start: usize, end: usize) -> u64 {
+        if start > end || end > bytes.len() {
+            return 0;
+        }
+        sum(part(bytes, start, end))
+    }
+}
+
+/// Byte-string literals given as `&[u8]` arguments, as the device-tree
+/// module compares names and values: a loop helper compares bytes with a
+/// literal, and the arms of a `match` give each its own literal to the same
+/// helper. A literal returned as `&'static [u8]` is `byte-string-return`.
+pub mod byte_string_slice {
+    /// A way to call the firmware.
+    #[derive(Clone, Copy)]
+    pub enum Conduit {
+        Hvc,
+        Smc,
+    }
+
+    /// Whether `bytes` equals `other`.
+    fn same(bytes: &[u8], other: &[u8]) -> bool {
+        if bytes.len() != other.len() {
+            return false;
+        }
+        let mut index = 0;
+        while index < other.len() {
+            if bytes[index] != other[index] {
+                return false;
+            }
+            index += 1;
+        }
+        true
+    }
+
+    /// Whether `name` is `memory`.
+    pub fn is_memory(name: &[u8]) -> bool {
+        same(name, b"memory")
+    }
+
+    /// Whether `method` names `conduit`.
+    pub fn names(conduit: Conduit, method: &[u8]) -> bool {
+        match conduit {
+            Conduit::Hvc => same(method, b"hvc"),
+            Conduit::Smc => same(method, b"smc"),
+        }
+    }
+}
+
+/// Array repeat expressions in `const` items, and a `Copy` structure with an
+/// array field taken and returned by value, as the device-tree module writes
+/// its empty tables and its walk: a `const` structure holds `[EMPTY; SPANS]`
+/// of another `const`, and a walker with `[0; DEPTH]` goes through a loop
+/// helper that takes it by value and returns it in a tuple with the item.
+pub mod const_array_repeat {
+    /// A range of addresses.
+    #[derive(Clone, Copy)]
+    pub struct Span {
+        pub start: u64,
+        pub size: u64,
+    }
+
+    /// The most spans of a table.
+    const SPANS: usize = 4;
+
+    /// The most open levels of a walk.
+    const DEPTH: usize = 3;
+
+    /// The span with which a table is filled.
+    const EMPTY: Span = Span { start: 0, size: 0 };
+
+    /// Spans, filled from the first.
+    pub struct Table {
+        spans: [Span; SPANS],
+        count: usize,
+    }
+
+    /// The table before anything is added.
+    const NO_SPANS: Table = Table {
+        spans: [EMPTY; SPANS],
+        count: 0,
+    };
+
+    /// A walk over nesting marks: the cursor and the offsets of the open
+    /// levels.
+    #[derive(Clone, Copy)]
+    pub struct Walker {
+        cursor: usize,
+        depth: usize,
+        open: [usize; DEPTH],
+    }
+
+    /// A walk before the first byte.
+    pub const START: Walker = Walker {
+        cursor: 0,
+        depth: 0,
+        open: [0; DEPTH],
+    };
+
+    /// The offset of the next byte `1` of `bytes` after the cursor of
+    /// `walker`, recorded as an open level, and the walker after it, or none
+    /// after the last byte.
+    pub fn step(bytes: &[u8], walker: Walker) -> (Walker, Option<usize>) {
+        let mut walker = walker;
+        while walker.cursor < bytes.len() {
+            let at = walker.cursor;
+            walker.cursor += 1;
+            if bytes[at] == 1 {
+                if walker.depth < DEPTH {
+                    walker.open[walker.depth] = at;
+                }
+                walker.depth += 1;
+                return (walker, Some(at));
+            }
+        }
+        (walker, None)
+    }
+
+    /// The offset of the innermost open level of `walker`, or none.
+    pub fn innermost(walker: Walker) -> Option<usize> {
+        if walker.depth == 0 || walker.depth > DEPTH {
+            return None;
+        }
+        Some(walker.open[walker.depth - 1])
+    }
+
+    impl Table {
+        /// The table without spans.
+        pub fn empty() -> Table {
+            NO_SPANS
+        }
+
+        /// Adds `span`, unless the table is full; whether it was added.
+        pub fn add(&mut self, span: Span) -> bool {
+            if self.count >= SPANS {
+                return false;
+            }
+            self.spans[self.count] = span;
+            self.count += 1;
+            true
+        }
+
+        /// The number of spans.
+        pub fn count(&self) -> usize {
+            self.count
+        }
+    }
+}
+
+/// A `match` on an `Option` of borrowed bytes whose arms give the bytes or a
+/// `const` empty slice, as `AddressMap::new` of the device-tree module first
+/// did: the joined slice is checked with `?` and stored in the value that
+/// the function returns. Aeneas rejects it; `option-slice-arms` checks and
+/// builds the value in each arm.
+pub mod option_slice_join {
+    /// The value of an absent property.
+    const NO_VALUE: &[u8] = &[];
+
+    /// Why a value is refused.
+    #[derive(Clone, Copy, Debug)]
+    pub enum Error {
+        Bad,
+    }
+
+    /// A property value in cells, or an absent one.
+    #[derive(Clone, Copy)]
+    pub struct Map<'a> {
+        bytes: &'a [u8],
+        present: bool,
+        cells: u32,
+    }
+
+    /// A present value shorter than one cell, or more than 2 cells, `Bad`.
+    fn check(bytes: &[u8], present: bool, cells: u32) -> Result<(), Error> {
+        if present && bytes.len() < 4 {
+            return Err(Error::Bad);
+        }
+        if cells > 2 {
+            return Err(Error::Bad);
+        }
+        Ok(())
+    }
+
+    impl<'a> Map<'a> {
+        /// The map of `bytes`, none for an absent property, after the check.
+        pub fn new(bytes: Option<&'a [u8]>, cells: u32) -> Result<Map<'a>, Error> {
+            let (bytes, present) = match bytes {
+                Some(value) => (value, true),
+                None => (NO_VALUE, false),
+            };
+            check(bytes, present, cells)?;
+            Ok(Map {
+                bytes,
+                present,
+                cells,
+            })
+        }
+
+        /// The number of cells of a present value, 0 for an absent one.
+        pub fn cells(self) -> u32 {
+            if self.present { self.cells } else { 0 }
+        }
+
+        /// The number of bytes of the value.
+        pub fn size(self) -> usize {
+            self.bytes.len()
+        }
+    }
+}
+
+/// The alternative to `option-slice-join`, as `AddressMap::new` of the
+/// device-tree module is written: each arm checks its own slice and builds
+/// its own value, so that no borrow is joined with the constant.
+pub mod option_slice_arms {
+    /// The value of an absent property.
+    const NO_VALUE: &[u8] = &[];
+
+    /// Why a value is refused.
+    #[derive(Clone, Copy, Debug)]
+    pub enum Error {
+        Bad,
+    }
+
+    /// A property value in cells, or an absent one.
+    #[derive(Clone, Copy)]
+    pub struct Map<'a> {
+        bytes: &'a [u8],
+        present: bool,
+        cells: u32,
+    }
+
+    /// A present value shorter than one cell, or more than 2 cells, `Bad`.
+    fn check(bytes: &[u8], present: bool, cells: u32) -> Result<(), Error> {
+        if present && bytes.len() < 4 {
+            return Err(Error::Bad);
+        }
+        if cells > 2 {
+            return Err(Error::Bad);
+        }
+        Ok(())
+    }
+
+    impl<'a> Map<'a> {
+        /// The map of `bytes`, none for an absent property, after the check.
+        pub fn new(bytes: Option<&'a [u8]>, cells: u32) -> Result<Map<'a>, Error> {
+            match bytes {
+                Some(value) => {
+                    check(value, true, cells)?;
+                    Ok(Map {
+                        bytes: value,
+                        present: true,
+                        cells,
+                    })
+                }
+                None => {
+                    check(NO_VALUE, false, cells)?;
+                    Ok(Map {
+                        bytes: NO_VALUE,
+                        present: false,
+                        cells,
+                    })
+                }
+            }
+        }
+
+        /// The number of cells of a present value, 0 for an absent one.
+        pub fn cells(self) -> u32 {
+            if self.present { self.cells } else { 0 }
+        }
+
+        /// The number of bytes of the value.
+        pub fn size(self) -> usize {
+            self.bytes.len()
+        }
+    }
+}
+
+/// Byte-string literals returned as `&'static [u8]` by the arms of a
+/// `match`, as the device-tree module first named the PSCI conduits, and
+/// compared by a loop helper. Aeneas rejects the function that returns them;
+/// `byte-string-slice` gives each literal as an argument instead.
+pub mod byte_string_return {
+    /// A way to call the firmware.
+    #[derive(Clone, Copy)]
+    pub enum Conduit {
+        Hvc,
+        Smc,
+    }
+
+    /// The name of `conduit`.
+    fn method(conduit: Conduit) -> &'static [u8] {
+        match conduit {
+            Conduit::Hvc => b"hvc",
+            Conduit::Smc => b"smc",
+        }
+    }
+
+    /// Whether `bytes` equals `other`.
+    fn same(bytes: &[u8], other: &[u8]) -> bool {
+        if bytes.len() != other.len() {
+            return false;
+        }
+        let mut index = 0;
+        while index < other.len() {
+            if bytes[index] != other[index] {
+                return false;
+            }
+            index += 1;
+        }
+        true
+    }
+
+    /// Whether `bytes` names `conduit`.
+    pub fn names(conduit: Conduit, bytes: &[u8]) -> bool {
+        same(bytes, method(conduit))
+    }
+}

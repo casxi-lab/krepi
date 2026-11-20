@@ -1133,6 +1133,178 @@ mod tests {
             .collect()
     }
 
+    /// The Cargo options of the commands of the steps that take their value
+    /// in the next argument when it is not joined to them, with `=` for a
+    /// long option or directly for a short one.
+    const VALUED: [&str; 20] = [
+        "--manifest-path",
+        "--package",
+        "-p",
+        "--exclude",
+        "--features",
+        "-F",
+        "--target",
+        "--target-dir",
+        "--profile",
+        "--color",
+        "--config",
+        "-C",
+        "-Z",
+        "--jobs",
+        "-j",
+        "--message-format",
+        "--bin",
+        "--example",
+        "--test",
+        "--bench",
+    ];
+
+    /// `path` without its empty and `.` components and with each `..`
+    /// applied to the component before it.
+    fn normal(path: &str) -> String {
+        let mut parts: Vec<&str> = Vec::new();
+        for part in path.split('/') {
+            match part {
+                "" | "." => {}
+                ".." if parts.last().is_some_and(|last| *last != "..") => {
+                    parts.pop();
+                }
+                _ => parts.push(part),
+            }
+        }
+        parts.join("/")
+    }
+
+    /// Whether `cmd` keeps to the package rule of the source layout in
+    /// `docs/architecture.md`: since the core is the root package of the
+    /// kernel workspace, a Cargo command that acts on that workspace through
+    /// `--manifest-path kernel/Cargo.toml` and selects packages, `build`,
+    /// `check`, `test`, `clippy`, `run` or `doc`, names them with `-p` or
+    /// takes `--workspace`, and `fmt` takes `--all`, or it acts on the core
+    /// alone. Cargo's built-in aliases `b`, `c`, `t`, `r` and `d` count as
+    /// the subcommands that they stand for. Only the arguments of Cargo
+    /// count, not those after `--`.
+    ///
+    /// The subcommand is the first argument, after a `+toolchain`: a command
+    /// on the kernel workspace whose first argument is an option does not
+    /// keep the rule, since the value of a global option could be read as
+    /// its subcommand. A manifest path counts as that of the workspace once
+    /// its `.`, `..` and empty components are resolved, and wherever it ends
+    /// in `kernel/Cargo.toml`. An option counts by its name only, not as the
+    /// value of an option of [`VALUED`].
+    fn keeps_the_package_rule(cmd: &Cmd) -> bool {
+        let end = cmd.args.iter().position(|arg| arg == "--");
+        let args = &cmd.args[..end.unwrap_or(cmd.args.len())];
+        let args = match args.first() {
+            Some(first) if first.starts_with('+') => &args[1..],
+            _ => args,
+        };
+        // Each option, by its name, with its value.
+        let mut options: Vec<(&str, Option<&str>)> = Vec::new();
+        let mut index = 0;
+        while index < args.len() {
+            let arg = args[index].as_str();
+            let (name, joined) = if arg.starts_with("--") {
+                match arg.split_once('=') {
+                    Some((name, value)) => (name, Some(value)),
+                    None => (arg, None),
+                }
+            } else if arg.starts_with('-') && arg.len() > 2 {
+                let (name, value) = arg.split_at(2);
+                (name, Some(value))
+            } else {
+                (arg, None)
+            };
+            let next = args.get(index + 1).map(String::as_str);
+            let value = match joined {
+                None if VALUED.contains(&name) && next.is_some() => {
+                    index += 1;
+                    next
+                }
+                _ => joined,
+            };
+            if name.starts_with('-') {
+                options.push((name, value));
+            }
+            index += 1;
+        }
+        let given = |flag: &str| options.iter().any(|(name, _)| *name == flag);
+        let kernel = options.iter().any(|(name, value)| {
+            let path = value.map(normal).unwrap_or_default();
+            *name == "--manifest-path"
+                && (path == "kernel/Cargo.toml" || path.ends_with("/kernel/Cargo.toml"))
+        });
+        let command = args.first().map(String::as_str);
+        match command {
+            _ if !kernel => true,
+            None => false,
+            Some(command) if command.starts_with('-') => false,
+            Some(
+                "build" | "check" | "test" | "clippy" | "run" | "doc" | "b" | "c" | "t" | "r" | "d",
+            ) => given("-p") || given("--package") || given("--workspace"),
+            Some("fmt") => given("--all"),
+            _ => true,
+        }
+    }
+
+    #[test]
+    fn the_package_rule_rejects_a_kernel_test_without_packages() {
+        let cmd = |args: &str| Cmd {
+            program: cargo(),
+            args: args.split(' ').map(str::to_string).collect(),
+        };
+        // Without `-p` and `--workspace`, the test runs the core alone.
+        let core = cmd("test --manifest-path kernel/Cargo.toml --locked -- --workspace");
+        assert!(!keeps_the_package_rule(&core));
+        for kept in [
+            "test --workspace --locked --manifest-path kernel/Cargo.toml",
+            "build --manifest-path=kernel/Cargo.toml -p krepi-qemu-virt",
+            "clippy --manifest-path kernel/Cargo.toml --package=krepi-arch",
+            "fmt --all --check --manifest-path kernel/Cargo.toml",
+            "test --manifest-path user/Cargo.toml",
+            "metadata --manifest-path kernel/Cargo.toml",
+        ] {
+            assert!(keeps_the_package_rule(&cmd(kept)), "{kept}");
+        }
+        let format = cmd("fmt --check --manifest-path kernel/Cargo.toml");
+        assert!(!keeps_the_package_rule(&format));
+    }
+
+    #[test]
+    fn the_package_rule_reads_the_subcommand_the_manifest_and_the_options() {
+        let cmd = |args: &str| Cmd {
+            program: cargo(),
+            args: args.split(' ').map(str::to_string).collect(),
+        };
+        for broken in [
+            // A global option and its value before the subcommand.
+            "--color never test --manifest-path kernel/Cargo.toml",
+            "--manifest-path kernel/Cargo.toml test",
+            "--config net.offline=true test --manifest-path kernel/Cargo.toml -p krepi-kernel",
+            // Other spellings of the manifest of the kernel workspace.
+            "test --manifest-path ./kernel/Cargo.toml",
+            "test --manifest-path=user/../kernel/Cargo.toml",
+            "check --manifest-path kernel//Cargo.toml",
+            // `-p` and `--workspace` as the values of other options.
+            "test --manifest-path kernel/Cargo.toml --features -p",
+            "clippy --manifest-path kernel/Cargo.toml --target --workspace",
+            "fmt --manifest-path kernel/Cargo.toml --config --all --check",
+            // A built-in alias of a subcommand that selects packages.
+            "t --manifest-path kernel/Cargo.toml",
+        ] {
+            assert!(!keeps_the_package_rule(&cmd(broken)), "{broken}");
+        }
+        for kept in [
+            "+1.99.0 test --manifest-path kernel/Cargo.toml -p krepi-kernel",
+            "test --manifest-path ./kernel/Cargo.toml -pkrepi-kernel",
+            "test --manifest-path kernel/Cargo.toml --features x -p krepi-kernel",
+            "doc --manifest-path=kernel/./Cargo.toml --package krepi-arch",
+            "test --manifest-path user/../user/Cargo.toml",
+        ] {
+            assert!(keeps_the_package_rule(&cmd(kept)), "{kept}");
+        }
+    }
+
     #[test]
     fn command_steps_cover_their_workspaces() {
         let every = [
@@ -1148,6 +1320,16 @@ mod tests {
                     .find(|step| step.name == name)
                     .expect("the step exists")
             };
+            // Every command of every step keeps to the package rule.
+            for step in &steps {
+                let Action::Commands(commands) = &step.action else {
+                    continue;
+                };
+                for cmd in commands {
+                    let rule = keeps_the_package_rule(cmd);
+                    assert!(rule, "{}: {:?}", step.name, cmd.args);
+                }
+            }
             assert_eq!(manifests_of(step("fmt")), every);
             // The host Clippy of each workspace, then the kernel workspace
             // for the bare-metal target.
