@@ -1,6 +1,7 @@
 //! The host tests of the page tables: the execution of a plan on the pool
 //! of its set, the frozen vectors of the contract, the rows of the kind
-//! table and the direct address.
+//! table and the direct address, the kernel's mappings, the direct maps of
+//! the Pi 5 models against a page model, and the capacity of the pool.
 //!
 //! Feature: krepi.kernel.kernel-memory
 //!
@@ -10,9 +11,14 @@
 extern crate std;
 
 use super::*;
+use crate::fdt::ReservedRegion;
 use std::vec::Vec;
 
+mod boot;
+mod capacity;
 mod kinds;
+mod mapping;
+mod models;
 mod ownership;
 mod paging;
 
@@ -100,4 +106,78 @@ fn copy<const N: usize, const UPPER: bool>(
         execute(&mut target.pool, step);
     }
     Ok(())
+}
+
+/// `kernel_map` with its plan executed once the plan has given its last
+/// step; the steps of the plan.
+fn kernel<const N: usize>(
+    set: &mut Tables<N, false>,
+    layout: Layout<'_>,
+    base: u64,
+    bits: u8,
+) -> Result<Vec<Step>, TableError> {
+    let mut plan = kernel_map(set, layout, base, bits)?;
+    let steps: Vec<Step> = std::iter::from_fn(|| plan.next()).collect();
+    for step in &steps {
+        execute(&mut set.pool, *step);
+    }
+    Ok(steps)
+}
+
+/// `direct_map` with its plan executed once the plan has given its last
+/// step; the steps of the plan.
+fn direct<const N: usize>(
+    set: &mut Tables<N, true>,
+    memory: &MemoryPlan,
+    base: u64,
+    bits: u8,
+) -> Result<Vec<Step>, TableError> {
+    let mut plan = direct_map(set, memory, base, bits)?;
+    let steps: Vec<Step> = std::iter::from_fn(|| plan.next()).collect();
+    for step in &steps {
+        execute(&mut set.pool, *step);
+    }
+    Ok(steps)
+}
+
+/// The span `[start, start + size)`.
+fn span(start: u64, size: u64) -> Span {
+    Span { start, size }
+}
+
+/// The layout of the ranges `(start, len, kind)` and the guard addresses
+/// `guards`.
+fn layout<'a>(ranges: &[(u64, u64, LayoutKind)], guards: &'a [u64]) -> Layout<'a> {
+    let unused = LayoutRange {
+        range: PhysRange::new(0, PAGE_SIZE).unwrap(),
+        kind: LayoutKind::ReadWrite,
+    };
+    let mut all = [unused; MAX_LAYOUT_RANGES];
+    for (slot, &(start, len, kind)) in all.iter_mut().zip(ranges) {
+        let range = PhysRange::new(start, len).unwrap();
+        *slot = LayoutRange { range, kind };
+    }
+    Layout {
+        ranges: all,
+        count: ranges.len(),
+        guards,
+    }
+}
+
+/// The bytes, blocks and pages that the stores of a plan map: a block
+/// descriptor has bits 1 and 0 `0b01`, and a page descriptor `0b11` and the
+/// access flag, which no table descriptor has.
+fn counts(steps: &[Step]) -> (u64, u64, u64) {
+    let (mut blocks, mut pages) = (0, 0);
+    for step in steps {
+        if let Step::Store(_, _, d) = *step {
+            if d & 3 == 1 {
+                blocks += 1;
+            }
+            if d & 3 == 3 && d & (1 << 10) != 0 {
+                pages += 1;
+            }
+        }
+    }
+    (blocks * BLOCK_SIZE + pages * PAGE_SIZE, blocks, pages)
 }

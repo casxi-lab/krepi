@@ -42,13 +42,13 @@ fn in_region(upper: bool, va: u64) -> bool {
 }
 
 /// Whether `bits` is a physical width, 32 to 48.
-pub(super) fn width_ok(bits: u8) -> bool {
+fn width_ok(bits: u8) -> bool {
     bits >= 32 && bits <= 48
 }
 
 /// Whether a pool of `count` tables at `base` holds a table and ends at or
 /// below `2^bits`; `bits` is a physical width.
-pub(super) fn pool_fits(count: usize, base: u64, bits: u8) -> bool {
+fn pool_fits(count: usize, base: u64, bits: u8) -> bool {
     let limit = 1u64 << bits;
     if count == 0 || count as u64 > limit / PAGE_SIZE {
         return false;
@@ -57,6 +57,21 @@ pub(super) fn pool_fits(count: usize, base: u64, bits: u8) -> bool {
         Some(end) => end <= limit,
         None => false,
     }
+}
+
+/// The first checks of a pool of `count` tables at `base`, without a
+/// virtual address: `Alignment`, `AddressWidth` and `TableBacking`.
+pub(super) fn check_pool(count: usize, base: u64, bits: u8) -> Result<(), TableError> {
+    if base % PAGE_SIZE != 0 {
+        return Err(TableError::Alignment);
+    }
+    if !width_ok(bits) {
+        return Err(TableError::AddressWidth);
+    }
+    if !pool_fits(count, base, bits) {
+        return Err(TableError::TableBacking);
+    }
+    Ok(())
 }
 
 /// The first checks of an entry on a set of the region `upper` and `count`

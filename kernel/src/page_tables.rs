@@ -26,25 +26,32 @@
 
 // The code shapes of the proof path write a `match` where Clippy suggests a
 // combinator, the `?` of an `Option` or `matches!`, `%` where it suggests
-// `is_multiple_of` and a comparison where it suggests `saturating_sub`: each
-// of those would reach a library function without a model; and a nested
-// `if` where it suggests a let chain.
+// `is_multiple_of`, a comparison where it suggests `saturating_sub` and
+// three moves where it suggests `swap`: each of those would reach a library
+// function without a model; and a nested `if` where it suggests a let
+// chain.
 #![allow(
     clippy::collapsible_if,
     clippy::implicit_saturating_sub,
     clippy::manual_is_multiple_of,
     clippy::manual_map,
     clippy::manual_range_contains,
+    clippy::manual_swap,
     clippy::match_like_matches_macro,
     clippy::question_mark,
     clippy::redundant_pattern_matching
 )]
 
+mod boot;
 mod copy;
 mod encoding;
 mod range;
 mod walk;
 mod write;
+
+use crate::fdt::{AvailableRanges, MemoryPlan, Span};
+use boot::{MapCursor, direct, layout};
+use walk::check_pool;
 
 #[cfg(test)]
 mod tests;
@@ -58,6 +65,16 @@ pub const DIRECT_BASE: u64 = 0xffff_ff80_0000_0000;
 
 /// The most steps of the plan of `map_page`, `map_block` or `unmap_page`.
 pub const MAX_PLAN_STEPS: usize = 7;
+
+/// The tables of the pool of the direct map's set, sized for 16 GiB of RAM.
+pub const DIRECT_MAP_TABLES: usize = 80;
+
+/// The tables of the pool of the lower kernel set, and of the lower tables
+/// of each address space, which the copy of the kernel tables fills.
+pub const KERNEL_TABLES: usize = 32;
+
+/// The most ranges of a layout.
+pub const MAX_LAYOUT_RANGES: usize = 16;
 
 /// A page, 4 KiB.
 const PAGE_SIZE: u64 = 0x1000;
@@ -216,6 +233,89 @@ pub struct ClonePlan<'a, const N: usize, const UPPER: bool> {
     done: bool,
 }
 
+/// The kind of a range of a layout: one of the four kinds that a layout
+/// names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayoutKind {
+    /// `Kind::ReadExecute`: the text of the image.
+    ReadExecute,
+    /// `Kind::ReadOnly`: the read-only data of the image, the device tree.
+    ReadOnly,
+    /// `Kind::ReadWrite`: data, BSS, stacks and the pools of the kernel
+    /// tables.
+    ReadWrite,
+    /// `Kind::Device`: the registers of the kernel's devices.
+    Device,
+}
+
+/// A range of a layout, mapped at its physical address with its kind.
+#[derive(Clone, Copy, Debug)]
+pub struct LayoutRange {
+    /// The physical range.
+    pub range: PhysRange,
+    /// Its kind.
+    pub kind: LayoutKind,
+}
+
+/// The layout that the board gives [`kernel_map`]: the first `count` of
+/// `ranges`, a count above 16 reading as 16, and the guard pages, each named
+/// by an address in it. The board writes the ranges of whole pages, no two
+/// sharing a page and none holding a guard page, which `kernel_map` checks.
+#[derive(Clone, Copy, Debug)]
+pub struct Layout<'a> {
+    /// The ranges, in any order.
+    pub ranges: [LayoutRange; MAX_LAYOUT_RANGES],
+    /// The number of ranges.
+    pub count: usize,
+    /// An address in each guard page.
+    pub guards: &'a [u64],
+}
+
+/// The plan of [`kernel_map`], given one step at a time by `next`, in the
+/// order of the map plans of the contract: the leaves in address order, one
+/// 1 GiB slot after the other. Under a new level 2 table, each new level 3
+/// table with its pages comes first, then the level 2 table with its
+/// entries, `Fence` and the store of its table descriptor into the root.
+/// Under a level 2 table of the set, each 2 MiB slot is the store of its
+/// block, the stores of its pages into a level 3 table of the set, or a new
+/// level 3 table with its pages, `Fence` and the store of its table
+/// descriptor. `Sync` ends the plan.
+///
+/// The plan borrows the set for its lifetime and reads only entries that
+/// none of its earlier steps writes: the root entry of a 1 GiB slot at the
+/// first step of the slot, before the store into it, and the level 2 and
+/// level 3 entries of a 2 MiB slot at the first step of the slot. So the
+/// caller may execute each step before it asks for the next.
+pub struct KernelMapPlan<'a, const N: usize> {
+    /// The lower kernel set, after the write phase.
+    set: &'a Tables<N, false>,
+    /// The `base` of its pool.
+    base: u64,
+    /// The position of the plan.
+    cursor: MapCursor,
+    /// The ranges of the layout, sorted by their start.
+    ranges: [LayoutRange; MAX_LAYOUT_RANGES],
+    /// The number of ranges.
+    count: usize,
+}
+
+/// The plan of [`direct_map`], given one step at a time by `next`, in the
+/// order and with the reads of [`KernelMapPlan`]. The plan borrows the set
+/// and the boot memory map for its lifetime.
+pub struct DirectMapPlan<'a, const N: usize> {
+    /// The direct map's set, after the write phase.
+    set: &'a Tables<N, true>,
+    /// The `base` of its pool.
+    base: u64,
+    /// The position of the plan.
+    cursor: MapCursor,
+    /// The usable ranges after `range`.
+    ranges: AvailableRanges<'a>,
+    /// The usable range from which the plan looks for the leaves of its
+    /// 1 GiB slot: the range of the first of them.
+    range: Span,
+}
+
 /// A nonempty range of physical addresses `[start, start + len)` whose end
 /// fits in 64 bits; only [`PhysRange::new`] builds one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -257,4 +357,67 @@ pub fn direct_address(range: PhysRange) -> Option<u64> {
     } else {
         None
     }
+}
+
+/// Maps every page of every range of `layout` into the lower kernel set
+/// `set`, whose pool is at `base`, at its physical address with the kind of
+/// its range, and writes no entry of a guard page. It checks, in this order:
+/// the pool; the ranges in the order of their starts, those of one start in
+/// the order given, each with its ends off a page (`Alignment`), its end
+/// above `2^39` or `2^bits` (`AddressWidth`) and its pages in address order,
+/// first the walk (`TableBacking`, `AlreadyMapped`) and then a page that an
+/// earlier range or a guard holds (`AlreadyMapped`); and last the tables of
+/// the whole plan (`OutOfTables`). The boot wiring calls it once, before the
+/// MMU is on.
+pub fn kernel_map<'a, const N: usize>(
+    set: &'a mut Tables<N, false>,
+    layout: Layout<'a>,
+    base: u64,
+    bits: u8,
+) -> Result<KernelMapPlan<'a, N>, TableError> {
+    check_pool(N, base, bits)?;
+    let count = if layout.count < MAX_LAYOUT_RANGES {
+        layout.count
+    } else {
+        MAX_LAYOUT_RANGES
+    };
+    let mut ranges = layout.ranges;
+    layout::sort_ranges(&mut ranges, count);
+    let check = layout::check_layout(set, &ranges, count, layout.guards, base, bits)?;
+    let cursor = boot::write_phase(set, check)?;
+    Ok(KernelMapPlan {
+        set,
+        base,
+        cursor,
+        ranges,
+        count,
+    })
+}
+
+/// Maps every page of every usable range of the boot memory map `memory`
+/// into the direct map's set `set`, whose pool is at `base`, at
+/// `DIRECT_BASE | pa` as `ReadWrite`: a block at each multiple of 2 MiB with
+/// at least 2 MiB of its range left, and a page elsewhere. It checks, in
+/// this order: the pool; the usable ranges in address order, each with its
+/// ends off a page (`Alignment`), its end above `2^39` or `2^bits`
+/// (`AddressWidth`) and its leaves in address order, first the walk
+/// (`TableBacking`, `AlreadyMapped`) and then a leaf that an earlier range
+/// holds (`AlreadyMapped`); and last the tables of the whole plan
+/// (`OutOfTables`). The boot wiring calls it once, before the MMU is on.
+pub fn direct_map<'a, const N: usize>(
+    set: &'a mut Tables<N, true>,
+    memory: &'a MemoryPlan,
+    base: u64,
+    bits: u8,
+) -> Result<DirectMapPlan<'a, N>, TableError> {
+    check_pool(N, base, bits)?;
+    let check = direct::check_usable(set, memory.available_ranges(), base, bits)?;
+    let cursor = boot::write_phase(set, check)?;
+    Ok(DirectMapPlan {
+        set,
+        base,
+        cursor,
+        ranges: memory.available_ranges(),
+        range: Span { start: 0, size: 0 },
+    })
 }

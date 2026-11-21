@@ -1,0 +1,7 @@
+# The region of a set is a parameter of its type: `kernel_map` takes a set
+# of the lower region, so a set of the upper region given to it does not
+# compile, and no layout is mapped into the window of the direct map.
+file = "kernel/src/lib.rs"
+find = "pub mod page_tables;"
+replace = "pub mod page_tables;\n\n/// Maps a layout into a set of the upper region.\npub fn upper_kernel_map() -> usize {\n    let mut set = page_tables::Tables::<2, true>::new([[0; 512]; 2]);\n    match page_tables::PhysRange::new(0, 0x1000) {\n        Ok(range) => {\n            let kind = page_tables::LayoutKind::ReadWrite;\n            let range = page_tables::LayoutRange { range, kind };\n            let layout = page_tables::Layout { ranges: [range; 16], count: 1, guards: &[] };\n            match page_tables::kernel_map(&mut set, layout, 0x1_0000_0000, 40) {\n                Ok(_) => 1,\n                Err(_) => 0,\n            }\n        }\n        Err(_) => 0,\n    }\n}"
+error = "E0308"

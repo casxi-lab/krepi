@@ -37,7 +37,7 @@ fn two_steps(first: Step, last: Step) -> WritePlan {
 
 impl<const N: usize, const UPPER: bool> Tables<N, UPPER> {
     /// The tables of the pool that are not in use.
-    fn free_tables(&self) -> usize {
+    pub(super) fn free_tables(&self) -> usize {
         if self.used < N { N - self.used } else { 0 }
     }
 
@@ -60,8 +60,8 @@ impl<const N: usize, const UPPER: bool> Tables<N, UPPER> {
     /// Maps the page `va` of the region to the physical page `pa` with
     /// `kind`, in the set whose pool is at `base`, of physical width
     /// `bits`.
-    // Called by `kernel_map`, and by the modules vm and creation of the
-    // core, which are planned.
+    // Called by the modules vm and creation of the core, which are planned;
+    // the plan of `kernel_map` gives the steps of this plan for one page.
     #[allow(dead_code)]
     pub(crate) fn map_page(
         &mut self,
@@ -152,7 +152,8 @@ impl<const N: usize, const UPPER: bool> Tables<N, UPPER> {
     /// Maps the block slot `va` to the physical block `pa` as `ReadWrite`
     /// with one level 2 descriptor. It never replaces a level 3 table by a
     /// block.
-    // Called by `direct_map`.
+    // No module of the core calls it yet; the plan of `direct_map` gives the
+    // steps of this plan for one block.
     #[allow(dead_code)]
     pub(crate) fn map_block(
         &mut self,

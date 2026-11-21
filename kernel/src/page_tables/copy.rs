@@ -12,7 +12,7 @@
 //! index.
 
 use super::encoding::{ADDRESS_MASK, TABLE_OR_PAGE, is_valid, output_address, table_descriptor};
-use super::walk::{child_index, pool_fits, table_address, width_ok};
+use super::walk::{check_pool, child_index, table_address};
 use super::{ClonePlan, ENTRIES, Kind, PAGE_SIZE, Step, TableError, Tables, descriptor};
 
 /// The level of a table that the walk has not reached.
@@ -26,21 +26,6 @@ const LEVEL2: u8 = 2;
 
 /// The level of a table of leaves.
 const LEAVES: u8 = 3;
-
-/// The first checks of a pool of `count` tables at `base`, without a
-/// virtual address: `Alignment`, `AddressWidth` and `TableBacking`.
-fn check_pool(count: usize, base: u64, bits: u8) -> Result<(), TableError> {
-    if base % PAGE_SIZE != 0 {
-        return Err(TableError::Alignment);
-    }
-    if !width_ok(bits) {
-        return Err(TableError::AddressWidth);
-    }
-    if !pool_fits(count, base, bits) {
-        return Err(TableError::TableBacking);
-    }
-    Ok(())
-}
 
 /// Whether `d` is the page descriptor at `address` of `ReadExecute`,
 /// `ReadOnly`, `ReadWrite` or `Device`.
