@@ -25,6 +25,7 @@ mod ownership;
 mod paging;
 mod plans;
 mod reservations;
+mod results;
 
 /// The `base` of the sets of the tests unless one says otherwise.
 const BASE: u64 = 0x1_0000_0000;
