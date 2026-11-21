@@ -1,5 +1,7 @@
-//! Receipts: the checks of a value that names held pages, the validation of
-//! such a value and the release of a receipt.
+//! Receipts and staged reservations: the checks of a value that names held
+//! pages, the validation of such a value, the release of a receipt, the
+//! zeroing outcome of a reservation, the publication of a packet and the
+//! cancel of an unused reservation.
 //!
 //! Feature: krepi.kernel.kernel-memory
 //!
@@ -9,7 +11,9 @@
 //! state that the value names. Freed pages merge with the free extents next
 //! to them in the same bank, so a release never needs an extent.
 
-use super::super::{Allocation, Extent, HoldState, Holding, Ownership, OwnershipError};
+use super::super::{
+    Allocation, Extent, HoldState, Holding, Initialized, Ownership, OwnershipError, Reservation,
+};
 use super::is_free;
 
 impl<const E: usize, const X: usize> Ownership<E, X> {
@@ -38,7 +42,7 @@ impl<const E: usize, const X: usize> Ownership<E, X> {
 
     /// The checks of `release` without a write, for a value of the owner
     /// identity `owner` whose pages are in the state `state`: published for a
-    /// receipt.
+    /// receipt, reserved for the allocation of an initialized packet.
     // Called by the modules of the core that take pages, which are planned.
     #[allow(dead_code)]
     pub(crate) fn validate(
@@ -66,12 +70,104 @@ impl<const E: usize, const X: usize> Ownership<E, X> {
         self.extent_count = merge_freed(&mut self.extents, self.extent_count, index);
         Ok(())
     }
+
+    /// Publishes `packet`, of the owner identity `owner`, after the checks
+    /// of a value whose pages are reserved, and gives its receipt: the pages
+    /// are published with the same generation, and the counter does not
+    /// change. A refused packet comes back with the error.
+    // Called by the modules of the core that take pages, which are planned.
+    #[allow(dead_code)]
+    pub(crate) fn publish(
+        &mut self,
+        owner: u64,
+        packet: Initialized,
+    ) -> Result<Allocation, (OwnershipError, Initialized)> {
+        let allocation = packet.allocation;
+        match self.find_held(owner, allocation, HoldState::Reserved) {
+            Ok(index) => {
+                let generation = allocation.generation;
+                self.extents[index].holding =
+                    Holding::Held(owner, generation, HoldState::Published);
+                Ok(allocation)
+            }
+            Err(error) => Err((error, packet)),
+        }
+    }
+
+    /// Frees the pages of the unused `reservation`, of the owner identity
+    /// `owner`, as `release` does. It checks first a reservation whose
+    /// zeroing was attempted, `ZeroFailed`, and then makes the checks of a
+    /// value whose pages are reserved. A refused reservation comes back with
+    /// the error.
+    // Called by the modules of the core that take and return pages, which
+    // are planned.
+    #[allow(dead_code)]
+    pub(crate) fn cancel(
+        &mut self,
+        owner: u64,
+        reservation: Reservation,
+    ) -> Result<(), (OwnershipError, Reservation)> {
+        if reservation.attempted {
+            return Err((OwnershipError::ZeroFailed, reservation));
+        }
+        match self.find_held(owner, reservation.allocation, HoldState::Reserved) {
+            Ok(index) => {
+                self.extent_count = merge_freed(&mut self.extents, self.extent_count, index);
+                Ok(())
+            }
+            Err(error) => Err((error, reservation)),
+        }
+    }
+}
+
+// Called by the modules of the core that take pages, which are planned.
+#[allow(dead_code)]
+impl Reservation {
+    /// The packet of the reservation once the caller has zeroed its pages,
+    /// when `zeroed` tells that the zeroing completed; otherwise the same
+    /// reservation, marked as attempted, with one more failure, a count that
+    /// stays at `2^64 - 1` once there. It changes no table.
+    pub(crate) fn initialized(self, zeroed: bool) -> Result<Initialized, Reservation> {
+        if zeroed {
+            Ok(Initialized {
+                allocation: self.allocation,
+                failures: self.failures,
+            })
+        } else {
+            Err(Reservation {
+                allocation: self.allocation,
+                attempted: true,
+                failures: self.failures.saturating_add(1),
+            })
+        }
+    }
+
+    /// The allocation of the reserved pages.
+    pub(crate) fn allocation(&self) -> Allocation {
+        self.allocation
+    }
+}
+
+// Called by the modules of the core that take pages, which are planned.
+#[allow(dead_code)]
+impl Initialized {
+    /// The allocation of the reserved pages.
+    pub(crate) fn allocation(&self) -> Allocation {
+        self.allocation
+    }
+
+    /// The failed zeroings before the one that completed.
+    pub(crate) fn failures(&self) -> u64 {
+        self.failures
+    }
 }
 
 /// Whether two states of a holder are the same.
 fn same_state(a: HoldState, b: HoldState) -> bool {
     match (a, b) {
+        (HoldState::Reserved, HoldState::Reserved) => true,
         (HoldState::Published, HoldState::Published) => true,
+        _ => false,
     }
 }
 

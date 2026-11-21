@@ -12,7 +12,7 @@
 
 use super::super::{
     Allocation, Choice, Counter, Direction, Extent, HoldState, Holding, Ownership, OwnershipError,
-    PAGE_SIZE, PhysRange, Placement,
+    PAGE_SIZE, PhysRange, Placement, Reservation,
 };
 use super::is_free;
 
@@ -75,6 +75,28 @@ impl<const E: usize, const X: usize> Ownership<E, X> {
             return Err(OwnershipError::ZeroFailed);
         }
         self.take(choice, HoldState::Published)
+    }
+
+    /// Holds the pages that `choose` gives at once, reserved, without zeroing
+    /// them, for the owner identity `owner` with the generation of the
+    /// counter, and gives the reservation, not attempted and with no failure.
+    /// It makes the checks of `choose`.
+    // Called by the modules of the core that take pages, which are planned.
+    #[allow(dead_code)]
+    pub(crate) fn reserve(
+        &mut self,
+        owner: u64,
+        pages: u64,
+        alignment: u64,
+        placement: Placement,
+    ) -> Result<Reservation, OwnershipError> {
+        let choice = self.choose(owner, pages, alignment, placement)?;
+        let allocation = self.take(choice, HoldState::Reserved)?;
+        Ok(Reservation {
+            allocation,
+            attempted: false,
+            failures: 0,
+        })
     }
 
     /// Takes the pages of `choice` for its owner identity in the state

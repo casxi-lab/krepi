@@ -362,6 +362,8 @@ pub struct Exclusion {
 /// The state of a holder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum HoldState {
+    /// The pages are held at once, not yet zeroed or not yet published.
+    Reserved,
     /// The pages are zeroed and published.
     Published,
 }
@@ -474,6 +476,30 @@ pub struct Choice {
     range: PhysRange,
 }
 
+/// Pages that [`Ownership::reserve`] holds at once, reserved, whose bytes
+/// the caller has not zeroed yet: their allocation, whether a zeroing was
+/// attempted, and the count of failed zeroings. A reservation that its
+/// holder drops keeps its pages held.
+#[derive(Debug)]
+pub(crate) struct Reservation {
+    /// The allocation of the pages.
+    allocation: Allocation,
+    /// Whether a zeroing was attempted.
+    attempted: bool,
+    /// The failed zeroings, a count that stays at `2^64 - 1` once there.
+    failures: u64,
+}
+
+/// Reserved pages whose zeroing has completed and that are not published
+/// yet, with the count of the failed zeroings before it.
+#[derive(Debug)]
+pub(crate) struct Initialized {
+    /// The allocation of the pages.
+    allocation: Allocation,
+    /// The failed zeroings before the one that completed.
+    failures: u64,
+}
+
 /// The statistics of a page ownership table. The excluded pages take no
 /// extent and count as no managed bytes; reserved pages count as allocated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -513,6 +539,13 @@ const _: () = <Tables<1, false> as AmbiguousIfClone<_>>::CHECK;
 // A page ownership table is neither `Clone` nor `Copy`: a copy would give
 // the same pages twice.
 const _: () = <Ownership<1, 1> as AmbiguousIfClone<_>>::CHECK;
+
+// A reservation is neither `Clone` nor `Copy`: a copy kept across a failed
+// zeroing could be cancelled as if no zeroing had been attempted.
+const _: () = <Reservation as AmbiguousIfClone<_>>::CHECK;
+
+// A packet is neither `Clone` nor `Copy`: it is published once.
+const _: () = <Initialized as AmbiguousIfClone<_>>::CHECK;
 
 /// The page descriptor of `kind` at the output address `address`, of
 /// which it takes bits 12 to 47.
