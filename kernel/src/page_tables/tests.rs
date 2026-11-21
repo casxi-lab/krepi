@@ -1,8 +1,8 @@
 //! The host tests of the page tables: the execution of a plan on the pool
 //! of its set, the frozen vectors of the contract, the rows of the kind
 //! table and the direct address, the kernel's mappings, the direct maps of
-//! the Pi 5 models against a page model, the page ownership table, and the
-//! capacities.
+//! the Pi 5 models against a page model, the page ownership table, the
+//! owners of the board shapes, the order of the plans and the capacities.
 //!
 //! Feature: krepi.kernel.kernel-memory
 //!
@@ -23,6 +23,7 @@ mod mapping;
 mod models;
 mod ownership;
 mod paging;
+mod plans;
 mod reservations;
 
 /// The `base` of the sets of the tests unless one says otherwise.

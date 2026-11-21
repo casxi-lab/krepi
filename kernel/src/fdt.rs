@@ -51,7 +51,7 @@ mod span;
 mod translation;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// The largest `totalsize` that [`Fdt::parse`] accepts, 2 MiB.
 pub const MAX_BLOB_SIZE: u64 = 0x20_0000;

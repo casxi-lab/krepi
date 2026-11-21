@@ -28,10 +28,10 @@ mod translation;
 /// A device tree under construction: its structure block, strings block
 /// and reservation map.
 #[derive(Default)]
-struct Builder {
+pub(crate) struct Builder {
     structure: Vec<u8>,
     strings: Vec<u8>,
-    reservations: Vec<Span>,
+    pub(crate) reservations: Vec<Span>,
 }
 
 impl Builder {
@@ -45,18 +45,18 @@ impl Builder {
         }
     }
 
-    fn begin(&mut self, name: &str) {
+    pub(crate) fn begin(&mut self, name: &str) {
         self.word(1);
         self.structure.extend(name.bytes());
         self.structure.push(0);
         self.align();
     }
 
-    fn end(&mut self) {
+    pub(crate) fn end(&mut self) {
         self.word(2);
     }
 
-    fn property(&mut self, name: &str, bytes: &[u8]) {
+    pub(crate) fn property(&mut self, name: &str, bytes: &[u8]) {
         self.word(3);
         self.word(bytes.len() as u32);
         self.word(self.strings.len() as u32);
@@ -66,11 +66,11 @@ impl Builder {
         self.align();
     }
 
-    fn cells(&mut self, name: &str, values: &[u32]) {
+    pub(crate) fn cells(&mut self, name: &str, values: &[u32]) {
         self.property(name, &cells(values));
     }
 
-    fn root(&mut self) {
+    pub(crate) fn root(&mut self) {
         self.begin("");
         self.cells("#address-cells", &[2]);
         self.cells("#size-cells", &[2]);
@@ -83,7 +83,7 @@ impl Builder {
         self.end();
     }
 
-    fn finish(mut self) -> Vec<u8> {
+    pub(crate) fn finish(mut self) -> Vec<u8> {
         self.word(9);
         let reserve_len = (self.reservations.len() + 1) * 16;
         let structure_offset = HEADER_SIZE + reserve_len;
@@ -129,7 +129,7 @@ fn minimal() -> Vec<u8> {
     b.finish()
 }
 
-fn set_word(bytes: &mut [u8], at: usize, value: u32) {
+pub(crate) fn set_word(bytes: &mut [u8], at: usize, value: u32) {
     bytes[at..at + 4].copy_from_slice(&value.to_be_bytes());
 }
 
