@@ -40,6 +40,7 @@
     clippy::redundant_pattern_matching
 )]
 
+mod copy;
 mod encoding;
 mod range;
 mod walk;
@@ -184,6 +185,35 @@ pub struct Tables<const N: usize, const UPPER: bool> {
     pool: [[u64; ENTRIES]; N],
     /// The number of tables in use.
     used: usize,
+}
+
+/// The plan of [`Tables::clone_kernel_from`], given one step at a time by
+/// `next`: a `Zero` of every table in use of the target, in the order of
+/// their indices; then a `Store` of every valid entry of every table in use
+/// of the source into the target's table of the same index, the tables and
+/// the entries of each in the order of their indices, its table
+/// descriptors pointing into the target's pool; and `Sync` last. The plan
+/// borrows the source and the target for its lifetime, so neither changes
+/// until its last step.
+pub struct ClonePlan<'a, const N: usize, const UPPER: bool> {
+    /// The source of the copy.
+    source: &'a Tables<N, UPPER>,
+    /// The `base` of the pool of the source.
+    source_base: u64,
+    /// The `base` of the pool of the target.
+    base: u64,
+    /// The level of each table in use of the source, 1 to 3.
+    levels: [u8; N],
+    /// The tables of the target to zero.
+    zero_tables: usize,
+    /// The tables of the target zeroed so far.
+    zeroed: usize,
+    /// The table of the source from which the next store is looked for.
+    table: usize,
+    /// The entry of that table from which the next store is looked for.
+    entry: usize,
+    /// Whether the plan has given its `Sync`.
+    done: bool,
 }
 
 /// A nonempty range of physical addresses `[start, start + len)` whose end

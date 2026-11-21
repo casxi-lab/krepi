@@ -95,6 +95,21 @@ pub(super) fn check_physical(pa: u64, align: u64, bits: u8) -> Result<(), TableE
     Ok(())
 }
 
+/// The table below `limit` that the table descriptor `entry` of the pool
+/// at `base` points at, or none when its address is that of no such table.
+pub(super) fn child_index(entry: u64, base: u64, limit: usize) -> Option<usize> {
+    let address = output_address(entry);
+    if address < base {
+        return None;
+    }
+    let index = (address - base) / PAGE_SIZE;
+    if index < limit as u64 {
+        Some(index as usize)
+    } else {
+        None
+    }
+}
+
 impl<const N: usize, const UPPER: bool> Tables<N, UPPER> {
     /// The set of the storage `pool`, with the root alone in use. It
     /// checks nothing: the storage must be zero in all its tables.
@@ -119,16 +134,7 @@ impl<const N: usize, const UPPER: bool> Tables<N, UPPER> {
     /// `base` points at, or none when its address is that of no table in
     /// use.
     pub(super) fn child(&self, entry: u64, base: u64) -> Option<usize> {
-        let address = output_address(entry);
-        if address < base {
-            return None;
-        }
-        let index = (address - base) / PAGE_SIZE;
-        if index < self.in_use() as u64 {
-            Some(index as usize)
-        } else {
-            None
-        }
+        child_index(entry, base, self.in_use())
     }
 
     /// The level 2 table of `va` with its level 2 entry, or none when the

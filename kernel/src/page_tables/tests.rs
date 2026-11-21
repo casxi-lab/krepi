@@ -10,6 +10,7 @@
 extern crate std;
 
 use super::*;
+use std::vec::Vec;
 
 mod kinds;
 mod ownership;
@@ -82,4 +83,21 @@ fn unmap<const N: usize, const UPPER: bool>(
     let (plan, page) = set.unmap_page(va, base, bits)?;
     apply(set, plan);
     Ok(page)
+}
+
+/// `clone_kernel_from` with its plan executed on the target, once the plan
+/// has given its last step and so no longer borrows the target.
+fn copy<const N: usize, const UPPER: bool>(
+    target: &mut Tables<N, UPPER>,
+    source: &Tables<N, UPPER>,
+    source_base: u64,
+    base: u64,
+    bits: u8,
+) -> Result<(), TableError> {
+    let mut plan = target.clone_kernel_from(source, source_base, base, bits)?;
+    let steps: Vec<Step> = std::iter::from_fn(|| plan.next()).collect();
+    for step in steps {
+        execute(&mut target.pool, step);
+    }
+    Ok(())
 }

@@ -110,6 +110,139 @@ fn user_pages_enforce_el0_access_wx_and_asid_scope() {
     assert_eq!(descriptor(Kind::Device, 0), 0x60_0000_0000_0403);
 }
 
+/// `pt-07`.
+#[test]
+fn cloned_kernel_tables_are_private_and_keep_global_physical_leaves() {
+    let mut source = set::<10, false>();
+    let mut target = set::<10, false>();
+    let target_base = 0x1_0000_a000;
+    for (va, pa, kind) in [
+        (0x4000, 0x4000_0000, Kind::ReadExecute),
+        (0x900_0000, 0x900_0000, Kind::Device),
+        (0x4000_0000, 0x2_0000_0000, Kind::ReadWrite),
+    ] {
+        map(&mut source, va, pa, kind, BASE, BITS).unwrap();
+    }
+    map(
+        &mut target,
+        0x8000_0000,
+        0,
+        Kind::ReadWrite,
+        target_base,
+        BITS,
+    )
+    .unwrap();
+    let original = source.pool;
+    copy(&mut target, &source, BASE, target_base, BITS).unwrap();
+    assert!(source.pool == original);
+    assert_eq!((target.used(), source.used()), (6, 6));
+    // Each leaf under table descriptors of the target's tables of the
+    // source's indices: (table, entry, descriptor).
+    for (va, d, path) in [
+        (
+            0x4000,
+            0x40_0000_4000_0787,
+            [(0, 0, 0x1_0000_b003), (1, 0, 0x1_0000_c003)],
+        ),
+        (
+            0x900_0000,
+            0x60_0000_0900_0403,
+            [(0, 0, 0x1_0000_b003), (1, 72, 0x1_0000_d003)],
+        ),
+        (
+            0x4000_0000,
+            0x60_0002_0000_0707,
+            [(0, 1, 0x1_0000_e003), (4, 0, 0x1_0000_f003)],
+        ),
+    ] {
+        assert_eq!(target.lookup_page(va, target_base, BITS), Ok(d));
+        assert_eq!(source.lookup_page(va, BASE, BITS), Ok(d));
+        for (table, index, entry) in path {
+            assert_eq!(target.pool[table][index], entry);
+        }
+    }
+    let old = target.lookup_page(0x8000_0000, target_base, BITS);
+    assert_eq!(old, Err(TableError::NotMapped));
+    map(
+        &mut target,
+        0x8000,
+        0x6000,
+        Kind::UserReadWrite,
+        target_base,
+        BITS,
+    )
+    .unwrap();
+    let own = source.lookup_page(0x8000, BASE, BITS);
+    assert_eq!(own, Err(TableError::NotMapped));
+    assert_eq!(unmap(&mut source, 0x4000, BASE, BITS), Ok(0x4000_0000));
+    let kept = target.lookup_page(0x4000, target_base, BITS);
+    assert_eq!(kept, Ok(0x40_0000_4000_0787));
+}
+
+/// A copy that `clone_kernel_from` refuses with `error`, leaving the
+/// target's tables and record unchanged.
+fn refused<const N: usize, const UPPER: bool>(
+    target: &mut Tables<N, UPPER>,
+    source: &Tables<N, UPPER>,
+    (source_base, base, bits): (u64, u64, u8),
+    error: TableError,
+) {
+    let (pool, used) = (target.pool, target.used);
+    let plan = target.clone_kernel_from(source, source_base, base, bits);
+    assert_eq!(plan.err(), Some(error));
+    assert!(target.pool == pool && target.used == used);
+}
+
+/// `pt-08`.
+#[test]
+fn kernel_clone_errors_preserve_the_destination() {
+    let mut source = set::<6, false>();
+    let mut target = set::<6, false>();
+    let target_base = 0x1_0000_6000;
+    map(&mut source, 0, 0x4000, Kind::ReadOnly, BASE, BITS).unwrap();
+    map(
+        &mut target,
+        0x1000,
+        0x8000,
+        Kind::ReadWrite,
+        target_base,
+        BITS,
+    )
+    .unwrap();
+    for (bases, error) in [
+        ((BASE, BASE, BITS), TableError::TableBacking),
+        ((BASE, BASE + 0x1000, BITS), TableError::TableBacking),
+        ((BASE + 1, target_base, BITS), TableError::Alignment),
+        ((BASE, target_base + 1, BITS), TableError::Alignment),
+        ((BASE, target_base, 31), TableError::AddressWidth),
+        ((BASE, 0xff_ffff_f000, BITS), TableError::TableBacking),
+    ] {
+        refused(&mut target, &source, bases, error);
+    }
+    let bases = (BASE, target_base, BITS);
+    let root = source.pool[0][0];
+    for (entry, error) in [
+        (BASE | 3, TableError::TableBacking),
+        ((BASE + 0x5000) | 3, TableError::TableBacking),
+        (root | 1 << 6, TableError::InvalidDescriptor),
+    ] {
+        source.pool[0][0] = entry;
+        refused(&mut target, &source, bases, error);
+    }
+    source.pool[0][0] = root;
+    // Two parents of one table.
+    source.pool[0][1] = root;
+    refused(&mut target, &source, bases, TableError::TableBacking);
+    source.pool[0][1] = 0;
+    // A table in use that no entry reaches.
+    source.used += 1;
+    refused(&mut target, &source, bases, TableError::TableBacking);
+    source.used -= 1;
+    assert_eq!(unmap(&mut source, 0, BASE, BITS), Ok(0x4000));
+    map(&mut source, 0, 0x4000, Kind::UserReadOnly, BASE, BITS).unwrap();
+    refused(&mut target, &source, bases, TableError::InvalidDescriptor);
+}
+
 /// `pt-09`.
 #[test]
 fn whole_address_space_reset_reclaims_intermediate_tables() {
@@ -138,6 +271,18 @@ fn whole_address_space_reset_reclaims_intermediate_tables() {
     assert_eq!(d, Ok(0x20_0000_0000_8fc7));
 }
 
+/// `pt-10`.
+#[test]
+fn kernel_clone_rejects_leaf_physical_addresses_outside_the_profile() {
+    let mut source = set::<3, false>();
+    let mut target = set::<3, false>();
+    map(&mut source, 0, 1 << 40, Kind::ReadOnly, BASE, 48).unwrap();
+    let bases = (BASE, 0x1_0000_3000, BITS);
+    refused(&mut target, &source, bases, TableError::InvalidDescriptor);
+    assert_eq!(target.used(), 1);
+    assert!(target.pool.iter().flatten().all(|entry| *entry == 0));
+}
+
 /// `pt-11`.
 #[test]
 fn private_kernel_stacks_are_privileged_non_executable_and_asid_scoped() {
@@ -164,6 +309,28 @@ fn private_kernel_stacks_are_privileged_non_executable_and_asid_scoped() {
     );
     assert_eq!(unmap(&mut first, stack, BASE, BITS), Ok(0x4100_0000));
     assert_eq!(second.lookup_page(stack, second_base, BITS), d);
+}
+
+/// `pt-12`.
+#[test]
+fn kernel_template_clone_rejects_private_privileged_stack_mappings() {
+    let mut source = set::<3, false>();
+    let mut target = set::<3, false>();
+    let target_base = 0x1_0000_4000;
+    let kind = Kind::KernelPrivateReadWrite;
+    map(&mut source, 0x2000_1000, 0x4100_0000, kind, BASE, BITS).unwrap();
+    map(
+        &mut target,
+        0x4000_0000,
+        0x4000_0000,
+        Kind::ReadWrite,
+        target_base,
+        BITS,
+    )
+    .unwrap();
+    let bases = (BASE, target_base, BITS);
+    refused(&mut target, &source, bases, TableError::InvalidDescriptor);
+    assert_eq!(target.used(), 3);
 }
 
 /// `pt-13`.
@@ -267,6 +434,20 @@ fn eight_gib_of_blocks_use_nine_tables_and_cross_root_boundaries() {
     }
     let beyond = block(&mut t, DIRECT_BASE | 8 << 30, 8 << 30, BASE, BITS);
     assert_eq!(beyond, Err(TableError::OutOfTables));
+}
+
+/// `pt-18`.
+#[test]
+fn cloning_a_block_map_is_rejected_without_changing_the_destination() {
+    let mut source = set::<3, true>();
+    let mut target = set::<3, true>();
+    let target_base = 0x1_0000_4000;
+    block(&mut source, DIRECT_BASE, 0, BASE, BITS).unwrap();
+    let page = DIRECT_BASE + 0x1000;
+    map(&mut target, page, 0x1000, Kind::ReadOnly, target_base, BITS).unwrap();
+    let bases = (BASE, target_base, BITS);
+    refused(&mut target, &source, bases, TableError::InvalidDescriptor);
+    assert_eq!(target.used(), 3);
 }
 
 /// `pt-21`.
