@@ -1,0 +1,7 @@
+# The fields of a physical range are private to the module page_tables: a
+# struct literal of `PhysRange` in another module does not compile, so only
+# `PhysRange::new` builds one and every range keeps its invariant.
+file = "kernel/src/lib.rs"
+find = "pub mod page_tables;"
+replace = "pub mod page_tables;\n\n/// A range that no constructor checked.\npub fn forged(start: u64) -> page_tables::PhysRange {\n    let checked = page_tables::PhysRange::new(start, 1).ok().unwrap();\n    page_tables::PhysRange { ..checked }\n}"
+error = "E0451"

@@ -795,6 +795,22 @@
       "contract": "docs/domains/objects-capabilities/lifecycle/contract.md"
     },
     {
+      "item": "kernel/src/page_tables",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The refinement proof of the target page-tables",
+      "stage": "0.1",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
+      "item": "kernel/src/page_tables.rs",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The refinement proof of the target page-tables",
+      "stage": "0.1",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
       "item": "kernel/src/scheduler.rs#RunQueues::new",
       "kind": "code",
       "verified_state": null,

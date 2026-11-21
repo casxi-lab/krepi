@@ -14,3 +14,4 @@
 #![no_std]
 
 pub mod fdt;
+pub mod page_tables;
