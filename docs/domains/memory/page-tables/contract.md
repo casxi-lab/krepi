@@ -99,23 +99,23 @@ evidence, is in the [requirements](requirements.md). The
 
 ## Entry points
 
-The entries of the core are in the module `page_tables` of `krepi-kernel`
-(planned); the adapter is the module `mmu` of `krepi-arch` (planned).
+The entries of the core are in the module `page_tables` of `krepi-kernel`;
+the adapter is the module `mmu` of `krepi-arch` (planned).
 
 | Entry point | Kind | Called by | Rules |
 | --- | --- | --- | --- |
-| `page_tables::Kind`, `page_tables::descriptor`, `page_tables::direct_address`, `PhysRange::new`, `end`, `contains` and `overlaps`, and `Tables::lookup_page`, `lookup_block` and `used` | Value types and functions that write nothing, host-testable | The entries of this page; `krepi_arch::mmu`, for `direct_address`; the modules `vm` and `creation` of the core (planned) | [Descriptors and attributes](#descriptors-and-attributes), [Kernel direct map](#kernel-direct-map) |
+| `page_tables::Kind`, `page_tables::descriptor`, `page_tables::direct_address`, `PhysRange::new`, `end`, `contains` and `overlaps`, and `Tables::lookup_page`, `lookup_block` and `used` | Value types and functions that write nothing, host-testable | The entries of this page; `krepi_arch::mmu`, for `direct_address`; the boot wiring, for `PhysRange::new`, with which it gives the page ownership table its banks and exclusions and `kernel_map` its layout; the modules `vm` and `creation` of the core (planned) | [Descriptors and attributes](#descriptors-and-attributes), [Kernel direct map](#kernel-direct-map) |
 | `Tables::new`, `Tables::reset` and `Tables::clone_kernel_from` | Write entries, host-testable; `reset` and `clone_kernel_from` return write plans | `new`: the boot wiring, for the kernel tables; `new`, `reset` and `clone_kernel_from`: the modules `creation` and `lifecycle` of the core (planned), for the lower tables of a process, which `clone_kernel_from` fills from the lower kernel set | [Abstract mapping](#abstract-mapping), [Copying the kernel tables](#copying-the-kernel-tables), [Table pool](#table-pool) |
-| `Tables::map_page` | Write entry, host-testable; returns a write plan | `kernel_map`; the modules `vm` and `creation` of the core (planned) | [Abstract mapping](#abstract-mapping), [Write plans and publication](#write-plans-and-publication) |
-| `Tables::map_block` | Write entry, host-testable; returns a write plan | `direct_map` | [Abstract mapping](#abstract-mapping), [Kernel direct map](#kernel-direct-map) |
+| `Tables::map_page` | Write entry, host-testable; returns a write plan | The modules `vm` and `creation` of the core (planned); the plan of `kernel_map` gives the steps of its plan for each page of a layout | [Abstract mapping](#abstract-mapping), [Write plans and publication](#write-plans-and-publication) |
+| `Tables::map_block` | Write entry, host-testable; returns a write plan | None yet: the plan of `direct_map` gives the steps of its plan for each block of the direct map | [Abstract mapping](#abstract-mapping), [Kernel direct map](#kernel-direct-map) |
 | `Tables::unmap_page` | Write entry, host-testable; returns a write plan | The module `vm` of the core (planned), for a set that is not one of the kernel tables | [Abstract mapping](#abstract-mapping), [Write plans and publication](#write-plans-and-publication) |
-| `page_tables::kernel_map` and `page_tables::direct_map` | Write entries, host-testable; return write plans | The boot wiring, once each, before the MMU is on | [Kernel mappings](#kernel-mappings), [Kernel direct map](#kernel-direct-map) |
+| `page_tables::kernel_map` and `page_tables::direct_map` | Write entries, host-testable; return write plans | The boot wiring, once each, before the MMU is on. Once is needed for `kernel_map`: a fill of the lower kernel set maps an executable kind only at a page of the text of the layout ([W^X](#descriptors-and-attributes)), so a second layout, even a refused one, could name as text a page that the first maps `ReadWrite`, and a fill could then map it `ReadExecute` | [Kernel mappings](#kernel-mappings), [Kernel direct map](#kernel-direct-map) |
 | `Ownership::new` | Write entry, host-testable | The boot wiring, once, for the kernel root | [Page ownership](#page-ownership) |
-| `Ownership::choose` and `Ownership::assign` | A read entry and a write entry, host-testable | The modules of the core that take pages (planned) | [Page ownership](#page-ownership) |
+| `Ownership::choose` and `Ownership::assign` | A read entry and a write entry, host-testable | The boot wiring, for the storage that it carves at boot: the storage of the objects, the pools of the tables of address spaces, the root's private pages, the page pool and the frame metadata; the modules of the core that take pages (planned) | [Page ownership](#page-ownership) |
 | `Ownership::reserve`, `Reservation::initialized` and `Ownership::publish` | Write entries and a value function, host-testable | The modules of the core that take pages (planned) | [Page ownership](#page-ownership) |
 | `Ownership::cancel` and `Ownership::release` | Write entries, host-testable | The modules of the core that take and return pages (planned) | [Page ownership](#page-ownership) |
 | `Ownership::owner`, `Ownership::validate` and `Ownership::stats` | Read entries, host-testable | The modules of the core that take pages (planned) | [Page ownership](#page-ownership) |
-| `krepi_arch::mmu::apply`, `enable` and `zero_frames` (planned) | Functions; `enable` and `zero_frames` are `unsafe` | `apply`: the boot wiring, and the entry of a system call in `krepi_arch` for the plans that the dispatch of the core returns; `enable`: the boot wiring, once on each CPU; `zero_frames`: the code that zeroes pages for the page ownership table | [Write plans and publication](#write-plans-and-publication) |
+| `krepi_arch::mmu::apply`, `enable` and `zero_frames` (planned) | Functions; `enable` and `zero_frames` are `unsafe` | `apply`: the boot wiring, and the entry of a system call in `krepi_arch` for the plans that the dispatch of the core returns; `enable`: the boot wiring, once on each CPU; `zero_frames`: the code that zeroes pages for the page ownership table, among them `krepi_arch::frames::apply` (planned), for the frame of a frame plan | [Write plans and publication](#write-plans-and-publication) |
 
 ## Extractability
 
@@ -398,8 +398,8 @@ them in order, each completing before the next:
 - The check phase of an entry fixes its whole plan: every step follows from
   the state and the arguments by the rules of this page, and no step fails.
   `kernel_map`, `direct_map` and `clone_kernel_from` give their steps one
-  at a time, by an iterator of the core over their input (planned), so
-  that a plan needs no storage in proportion to the map; the other plans
+  at a time, by an iterator of the core over their input, so that a plan
+  needs no storage in proportion to the map; the other plans
   have at most seven steps, apart from `reset`.
 - The caller holds the token of the set from the entry to the last step of
   its plan, and executes nothing else on the set in between.
@@ -526,9 +526,9 @@ The page ownership table records one owner for every managed page:
 | Boot storage | Every page of the other spans of boot storage, such as the device tree and the boot bundle, a segment of the image in a span of its own | `Ownership::new`; never changed |
 | A holder, $\mathrm{held}(o, n, s)$ | The pages of one allocation or reservation: owner identity $o$, a 64-bit value that the holder's component gives, generation $n$ and state $s$, reserved or published | `assign`, `reserve`, `publish` |
 
-The holders of release 0.1 are the pools of the tables of address spaces,
-the pools that the capacity record carves at boot and the pages of VM
-objects; the component of each names its owner identities.
+The holders of release 0.1 are the pools of the tables of address spaces, the root's private
+pages (`OWNER_ROOT_PAGES`), the pools that the capacity record carves at boot, the page pool
+and its frame metadata, and the pages of VM objects; each component names its owner identities.
 
 **Invariants.**
 

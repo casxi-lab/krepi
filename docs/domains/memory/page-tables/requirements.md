@@ -1,13 +1,15 @@
 ---
-features: none
+features:
+  - krepi.kernel.kernel-memory
 ---
 
 # Page-tables requirements
 
 The observable behaviour of the `page-tables` component of the
 [memory and address spaces](../README.md) domain. The rules that its code
-and tests follow are in the [contract](contract.md). No feature document
-covers the component, so the metadata lists none.
+and tests follow are in the [contract](contract.md). The feature document
+[Kernel memory](../../../features/kernel/kernel-memory.md) describes what
+the component provides.
 
 ## Sources
 
@@ -40,9 +42,9 @@ covers the component, so the metadata lists none.
   the other four are verified by host tests with the bank shapes that the
   [fdt contract](../../boot-platform/fdt/contract.md#memory-discovery)
   infers from that measurement, and are not run on a board.
-- **Host.** The host tests of the module `page_tables` of the core (planned)
-  run on the development host and in CI, with the frozen vectors and the
-  tests that the [contract](contract.md#testing-obligations) adds.
+- **Host.** The host tests of the module `page_tables` of the core run on
+  the development host and in CI, with the frozen vectors and the tests
+  that the [contract](contract.md#testing-obligations) adds.
 - One CPU: no requirement here covers secondary CPUs or the acknowledgement
   of TLB invalidation across CPUs.
 
@@ -61,14 +63,15 @@ descriptor of every kind equals the bits of its row, written from the Arm
 Architecture Reference Manual, and the frozen vectors that read descriptor
 bits hold.
 
-- **Examples.** None: no feature document covers the component.
+- **Examples.**
+  [ex1](../../../features/kernel/kernel-memory.md#ex1-the-descriptors-of-the-kernel-kinds)
 - **Entry points.** `page_tables::Kind`, `page_tables::descriptor` and
-  `Tables::lookup_page` and `lookup_block` (planned).
+  `Tables::lookup_page` and `lookup_block`.
 - **Contract.** [Descriptors and attributes](contract.md#descriptors-and-attributes).
 - **Specification.** [PGT-R01](specification.md#pgt-r01) of the specification.
 - **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `pt-01`, `pt-02`, `pt-06`, `pt-11`,
-  `pt-15` and `pt-21` as host tests of the module `page_tables` (planned),
+  `pt-15` and `pt-21` as host tests of the module `page_tables`,
   and a host test of each row of the kind table against bits written from
   the manual. They show the encoding on the host; they do not show that a
   CPU translates and checks permissions as the bits say, which PGT-R05 and
@@ -88,9 +91,9 @@ of the upper region and the other way round. The criterion: the frozen
 vectors hold, with the tables and the count of tables in use unchanged
 after every refusal.
 
-- **Examples.** None: no feature document covers the component.
-- **Entry points.** `Tables::new`, `map_page`, `lookup_page` and `used`
-  (planned).
+- **Examples.**
+  [ex2](../../../features/kernel/kernel-memory.md#ex2-a-page-is-mapped-looked-up-and-unmapped)
+- **Entry points.** `Tables::new`, `map_page`, `lookup_page` and `used`.
 - **Contract.** [Abstract mapping](contract.md#abstract-mapping),
   [Write plans and publication](contract.md#write-plans-and-publication)
   and [Check and execute](contract.md#check-and-execute).
@@ -110,9 +113,12 @@ blocks from address 0 use 9 tables, across the 1 GiB and 4 GiB boundaries.
 The criterion: the frozen vectors hold, among them 4,096 blocks in a pool
 of 9 tables and the refusal of one more with `OutOfTables`.
 
-- **Examples.** None: no feature document covers the component.
+- **Examples.**
+  [ex4](../../../features/kernel/kernel-memory.md#ex4-the-direct-map-of-qemu-virt)
+  and
+  [ex5](../../../features/kernel/kernel-memory.md#ex5-the-direct-map-of-the-raspberry-pi-5-of-8-gb)
 - **Entry points.** `map_block`, `lookup_block`, `unmap_page`, `map_page`
-  and `used` (planned).
+  and `used`.
 - **Contract.** [Abstract mapping](contract.md#abstract-mapping) and
   [Kernel direct map](contract.md#kernel-direct-map).
 - **Specification.** [PGT-R03](specification.md#pgt-r03) of the specification.
@@ -130,9 +136,9 @@ root alone in use with every entry 0. No entry removes or changes a valid
 entry of the kernel tables. The criterion: the frozen vectors hold, and the
 plan of `unmap_page` equals the order of the contract.
 
-- **Examples.** None: no feature document covers the component.
-- **Entry points.** `unmap_page`, `reset`, `map_page` and `lookup_page`
-  (planned).
+- **Examples.**
+  [ex2](../../../features/kernel/kernel-memory.md#ex2-a-page-is-mapped-looked-up-and-unmapped)
+- **Entry points.** `unmap_page`, `reset`, `map_page` and `lookup_page`.
 - **Contract.** [Abstract mapping](contract.md#abstract-mapping) and
   [Write plans and publication](contract.md#write-plans-and-publication).
 - **Specification.** [PGT-R04](specification.md#pgt-r04) of the specification.
@@ -161,9 +167,14 @@ models give the counts of tables, blocks and pages of the
 [contract](contract.md#table-pool); on QEMU virt with the MMU on, the edges
 of the mapped and the excluded ranges behave as the map says.
 
-- **Examples.** None: no feature document covers the component.
+- **Examples.**
+  [ex4](../../../features/kernel/kernel-memory.md#ex4-the-direct-map-of-qemu-virt)
+  and
+  [ex5](../../../features/kernel/kernel-memory.md#ex5-the-direct-map-of-the-raspberry-pi-5-of-8-gb),
+  on the host; the criterion on QEMU virt is a case of the QEMU boot suite
+  (planned).
 - **Entry points.** `page_tables::direct_map`, `direct_address`,
-  `lookup_page`, `lookup_block` and `used`, and `krepi_arch::mmu::apply` and
+  `lookup_page`, `lookup_block` and `used`; `krepi_arch::mmu::apply` and
   `enable` (planned).
 - **Contract.** [Kernel direct map](contract.md#kernel-direct-map),
   [Table pool](contract.md#table-pool) and
@@ -193,8 +204,11 @@ execute-never page and an access to the guard each take the fault of the
 contract, and a `Device` page of the console is written; on the host, a
 layout whose text and data share a page is refused.
 
-- **Examples.** None: no feature document covers the component.
-- **Entry points.** `page_tables::kernel_map`, and `krepi_arch::mmu::apply`
+- **Examples.**
+  [ex3](../../../features/kernel/kernel-memory.md#ex3-text-and-data-on-one-page-are-refused),
+  the refusal on the host; the criterion on QEMU virt is a case of the QEMU
+  boot suite (planned).
+- **Entry points.** `page_tables::kernel_map`; `krepi_arch::mmu::apply`
   and `enable` (planned).
 - **Contract.** [Kernel mappings](contract.md#kernel-mappings) and
   [Descriptors and attributes](contract.md#descriptors-and-attributes).
@@ -218,9 +232,10 @@ No plan step fails. The criterion: the plans of `map_page`, `map_block`,
 `unmap_page`, `clone_kernel_from`, `kernel_map` and `direct_map` equal the
 order of the contract, written from it.
 
-- **Examples.** None: no feature document covers the component.
+- **Examples.**
+  [ex2](../../../features/kernel/kernel-memory.md#ex2-a-page-is-mapped-looked-up-and-unmapped)
 - **Entry points.** `map_page`, `map_block`, `unmap_page`,
-  `clone_kernel_from`, `kernel_map`, `direct_map` and
+  `clone_kernel_from`, `kernel_map` and `direct_map`;
   `krepi_arch::mmu::apply` (planned).
 - **Contract.** [Write plans and publication](contract.md#write-plans-and-publication).
 - **Specification.** [PGT-R07](specification.md#pgt-r07) of the specification.
@@ -245,8 +260,9 @@ criterion: for the boot memory map of every board shape, every managed page
 has exactly one owner, the free pages are exactly the pages of the direct
 map, and the frozen vectors hold.
 
-- **Examples.** None: no feature document covers the component.
-- **Entry points.** `Ownership::new`, `owner` and `stats` (planned).
+- **Examples.**
+  [ex6](../../../features/kernel/kernel-memory.md#ex6-an-allocation-in-one-step)
+- **Entry points.** `Ownership::new`, `owner` and `stats`.
 - **Contract.** [Page ownership](contract.md#page-ownership).
 - **Specification.** [PGT-R08](specification.md#pgt-r08) of the specification.
 - **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
@@ -269,9 +285,10 @@ another arena, twice or with a stale receipt is refused, with the errors of
 the [contract](contract.md#page-ownership), and changes nothing. The
 criterion: the frozen vectors hold.
 
-- **Examples.** None: no feature document covers the component.
+- **Examples.**
+  [ex6](../../../features/kernel/kernel-memory.md#ex6-an-allocation-in-one-step)
 - **Entry points.** `Ownership::choose`, `assign`, `release`, `validate`
-  and `stats`, and `krepi_arch::mmu::zero_frames` (planned).
+  and `stats`; `krepi_arch::mmu::zero_frames` (planned).
 - **Contract.** [Page ownership](contract.md#page-ownership) and
   [Check and execute](contract.md#check-and-execute).
 - **Specification.** [PGT-R09](specification.md#pgt-r09) of the specification.
@@ -292,10 +309,10 @@ packet keeps its pages held. Publication and cancel by another owner or at
 another arena are refused and return the packet. The criterion: the frozen
 vectors hold.
 
-- **Examples.** None: no feature document covers the component.
+- **Examples.**
+  [ex7](../../../features/kernel/kernel-memory.md#ex7-a-staged-reservation-after-a-failed-zeroing)
 - **Entry points.** `Ownership::reserve`, `Reservation::initialized`,
-  `Ownership::publish`, `cancel`, `validate`, `release` and `stats`
-  (planned).
+  `Ownership::publish`, `cancel`, `validate`, `release` and `stats`.
 - **Contract.** [Page ownership](contract.md#page-ownership).
 - **Specification.** [PGT-R10](specification.md#pgt-r10) of the specification.
 - **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
@@ -316,9 +333,11 @@ page ownership table at exactly 160 extents works and one more extent is
 refused; an initialization with 132 exclusions succeeds and one with 133 is
 refused.
 
-- **Examples.** None: no feature document covers the component.
+- **Examples.**
+  [ex5](../../../features/kernel/kernel-memory.md#ex5-the-direct-map-of-the-raspberry-pi-5-of-8-gb),
+  the direct map of the 8 GB model in 11 of the 80 tables of the pool.
 - **Entry points.** `page_tables::direct_map`, `Ownership::new`, `choose`
-  and `reserve` (planned).
+  and `reserve`.
 - **Contract.** [Table pool](contract.md#table-pool) and
   [Page ownership](contract.md#page-ownership).
 - **Specification.** [PGT-R11](specification.md#pgt-r11) of the specification.
@@ -342,9 +361,10 @@ descriptors do not reach its tables in use exactly once. The criterion:
 the frozen vectors hold, and the plan of the copy equals the order of the
 contract.
 
-- **Examples.** None: no feature document covers the component.
+- **Examples.**
+  [ex8](../../../features/kernel/kernel-memory.md#ex8-the-copy-of-the-lower-kernel-set)
 - **Entry points.** `Tables::clone_kernel_from`, `map_page`, `unmap_page`,
-  `lookup_page` and `used` (planned).
+  `lookup_page` and `used`.
 - **Contract.** [Copying the kernel tables](contract.md#copying-the-kernel-tables),
   [Abstract mapping](contract.md#abstract-mapping) and
   [Write plans and publication](contract.md#write-plans-and-publication).
