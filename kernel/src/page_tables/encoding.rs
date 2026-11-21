@@ -7,14 +7,20 @@
 //! bits 8 and 9, AF in bit 10, nG in bit 11, PXN in bit 53 and UXN in bit
 //! 54; every other bit of a leaf is 0 or a bit of its output address.
 
-use super::Kind;
+use super::{Kind, descriptor};
 
 /// Bits 12 to 47: the output address of a page and the address of the
 /// next table of a table descriptor.
 pub(super) const ADDRESS_MASK: u64 = 0x0000_ffff_ffff_f000;
 
+/// Bits 21 to 47: the output address of a block.
+const BLOCK_ADDRESS_MASK: u64 = 0x0000_ffff_ffe0_0000;
+
 /// Bits 1 and 0 of a table or a page descriptor.
 pub(super) const TABLE_OR_PAGE: u64 = 0b11;
+
+/// Bits 1 and 0 of a block descriptor.
+pub(super) const BLOCK: u64 = 0b01;
 
 /// AP[2]: no write at EL1 or EL0.
 const READ_ONLY: u64 = 1 << 7;
@@ -61,4 +67,31 @@ impl Kind {
             Kind::UserDevice => EL0 | ACCESS | NOT_GLOBAL | PXN | UXN,
         }
     }
+}
+
+/// Bits 1 and 0 of a descriptor.
+pub(super) fn type_bits(d: u64) -> u64 {
+    d & 0b11
+}
+
+/// Whether a descriptor is valid: its bits 1 and 0 are not `0b00`.
+pub(super) fn is_valid(d: u64) -> bool {
+    type_bits(d) != 0
+}
+
+/// The output address of a page descriptor, or the address that a table
+/// descriptor holds.
+pub(super) fn output_address(d: u64) -> u64 {
+    d & ADDRESS_MASK
+}
+
+/// The block descriptor of `ReadWrite` at the output address `address`, of
+/// which it takes bits 21 to 47: its page descriptor with bit 1 clear.
+pub(super) fn block_descriptor(address: u64) -> u64 {
+    descriptor(Kind::ReadWrite, address & BLOCK_ADDRESS_MASK) & !0b10
+}
+
+/// The table descriptor of the table at `address`, with no attribute.
+pub(super) fn table_descriptor(address: u64) -> u64 {
+    (address & ADDRESS_MASK) | TABLE_OR_PAGE
 }

@@ -25,10 +25,13 @@
 //! iterators implement `next` alone.
 
 // The code shapes of the proof path write a `match` where Clippy suggests a
-// combinator, the `?` of an `Option` or `matches!`, and `%` where it
-// suggests `is_multiple_of`: each of those would reach a library function
-// without a model.
+// combinator, the `?` of an `Option` or `matches!`, `%` where it suggests
+// `is_multiple_of` and a comparison where it suggests `saturating_sub`: each
+// of those would reach a library function without a model; and a nested
+// `if` where it suggests a let chain.
 #![allow(
+    clippy::collapsible_if,
+    clippy::implicit_saturating_sub,
     clippy::manual_is_multiple_of,
     clippy::manual_map,
     clippy::manual_range_contains,
@@ -39,6 +42,8 @@
 
 mod encoding;
 mod range;
+mod walk;
+mod write;
 
 #[cfg(test)]
 mod tests;
@@ -49,6 +54,15 @@ pub const ENTRIES: usize = 512;
 /// The start of the upper region and of the window of the direct map,
 /// `2^64 - 2^39`.
 pub const DIRECT_BASE: u64 = 0xffff_ff80_0000_0000;
+
+/// The most steps of the plan of `map_page`, `map_block` or `unmap_page`.
+pub const MAX_PLAN_STEPS: usize = 7;
+
+/// A page, 4 KiB.
+const PAGE_SIZE: u64 = 0x1000;
+
+/// A block, the span of a level 2 entry, 2 MiB.
+const BLOCK_SIZE: u64 = 0x20_0000;
 
 /// The end of the lower region and the size of the window of the direct
 /// map, `2^39`.
@@ -132,6 +146,46 @@ pub enum OwnershipError {
     InvalidAllocation,
 }
 
+/// A step of a write plan, which the architecture crate executes in order,
+/// each completing before the next. A table is named by its index in the
+/// pool and an entry by its index in the table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// Writes 0 into the 512 entries of a table.
+    Zero(usize),
+    /// Writes a descriptor into an entry of a table.
+    Store(usize, usize, u64),
+    /// `DMB ISHST`.
+    Fence,
+    /// `DSB ISH`, then `ISB`.
+    Sync,
+    /// `DSB ISH`, `TLBI VAAE1IS` of the address, `DSB ISH`, `ISB`.
+    Invalidate(u64),
+}
+
+/// The write plan of `map_page`, `map_block`, `unmap_page` or `reset`:
+/// `Zero(0)` to `Zero(zero_tables - 1)`, then the first `len` of `steps`;
+/// the steps after them are not part of the plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WritePlan {
+    /// The tables of the lowest indices that the plan zeroes first.
+    pub zero_tables: usize,
+    /// The steps after the zeroed tables.
+    pub steps: [Step; MAX_PLAN_STEPS],
+    /// The number of those steps.
+    pub len: usize,
+}
+
+/// The tables of one region, the lower when `UPPER` is false, in a pool of
+/// `N` tables with the root at index 0, and the record of the tables in
+/// use: those of the indices below it.
+pub struct Tables<const N: usize, const UPPER: bool> {
+    /// The storage of the tables.
+    pool: [[u64; ENTRIES]; N],
+    /// The number of tables in use.
+    used: usize,
+}
+
 /// A nonempty range of physical addresses `[start, start + len)` whose end
 /// fits in 64 bits; only [`PhysRange::new`] builds one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,6 +195,20 @@ pub struct PhysRange {
     /// The length, not 0.
     len: u64,
 }
+
+/// The trait of the assertions of rule 6: `CHECK` is ambiguous for a type
+/// that implements `Clone`, so such an assertion does not compile.
+trait AmbiguousIfClone<A> {
+    const CHECK: () = ();
+}
+
+impl<T: ?Sized> AmbiguousIfClone<()> for T {}
+
+impl<T: Clone> AmbiguousIfClone<u8> for T {}
+
+// A set is neither `Clone` nor `Copy`: a copy would keep a record of tables
+// in use that its pool no longer has.
+const _: () = <Tables<1, false> as AmbiguousIfClone<_>>::CHECK;
 
 /// The page descriptor of `kind` at the output address `address`, of
 /// which it takes bits 12 to 47.
