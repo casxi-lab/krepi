@@ -9553,3 +9553,634 @@ pub mod byte_string_return {
         same(bytes, method(conduit))
     }
 }
+
+/// A `bool` const parameter of a type, as the page tables give the region of
+/// a set in its type: the methods of `Set<N, UPPER>` pass `UPPER` and `N` as
+/// values to a helper that branches on them, the constructor is a `const fn`,
+/// and two entries take a set of one region each.
+pub mod const_bool_parameter {
+    /// The start of the upper region.
+    const UPPER_BASE: u64 = 0xffff_ff80_0000_0000;
+
+    /// The addresses of `N` slots of the lower region, or of the upper
+    /// region when `UPPER`, and the number in use.
+    pub struct Set<const N: usize, const UPPER: bool> {
+        slots: [u64; N],
+        used: usize,
+    }
+
+    /// Whether `va` lies in the upper region when `upper`, and in the lower
+    /// region otherwise.
+    fn in_region(upper: bool, va: u64) -> bool {
+        if upper {
+            va >= UPPER_BASE
+        } else {
+            va < 1 << 39
+        }
+    }
+
+    impl<const N: usize, const UPPER: bool> Set<N, UPPER> {
+        /// The set of the slots `slots`, none in use.
+        pub const fn new(slots: [u64; N]) -> Self {
+            Set { slots, used: 0 }
+        }
+
+        /// Records `va` in the next slot; whether it lies in the region and
+        /// a slot was free.
+        pub fn add(&mut self, va: u64) -> bool {
+            if !in_region(UPPER, va) || self.used >= N {
+                return false;
+            }
+            self.slots[self.used] = va;
+            self.used += 1;
+            true
+        }
+    }
+
+    /// Adds `va` to a lower set of 4 slots.
+    pub fn add_lower(set: &mut Set<4, false>, va: u64) -> bool {
+        set.add(va)
+    }
+
+    /// Adds `va` to an upper set of 4 slots.
+    pub fn add_upper(set: &mut Set<4, true>, va: u64) -> bool {
+        set.add(va)
+    }
+}
+
+/// A pool of tables held inline as an array of arrays, `[[u64; 512]; N]`, as
+/// a page-table set holds its pool: a loop helper over the whole pool reads
+/// `tables[table][entry]`, a loop helper takes one table `&tables[table]`,
+/// and a method writes an entry through the field.
+pub mod nested_array_index {
+    /// The entries of a table.
+    pub const ENTRIES: usize = 512;
+
+    /// `N` tables and the number in use.
+    pub struct Pool<const N: usize> {
+        tables: [[u64; ENTRIES]; N],
+        used: usize,
+    }
+
+    /// The first nonzero entry at or after `(table, entry)` of the first
+    /// `used` tables, or `(used, 0)`.
+    fn next_set<const N: usize>(
+        tables: &[[u64; ENTRIES]; N],
+        used: usize,
+        mut table: usize,
+        mut entry: usize,
+    ) -> (usize, usize) {
+        while table < used && table < N {
+            if entry < ENTRIES {
+                if tables[table][entry] != 0 {
+                    return (table, entry);
+                }
+                entry += 1;
+            } else {
+                table += 1;
+                entry = 0;
+            }
+        }
+        (used, 0)
+    }
+
+    /// The nonzero entries of one table.
+    fn count_set(table: &[u64; ENTRIES]) -> usize {
+        let mut count = 0;
+        let mut index = 0;
+        while index < ENTRIES {
+            if table[index] != 0 {
+                count += 1;
+            }
+            index += 1;
+        }
+        count
+    }
+
+    impl<const N: usize> Pool<N> {
+        /// The pool of the storage `tables`, its first table in use.
+        pub fn new(tables: [[u64; ENTRIES]; N]) -> Self {
+            Pool { tables, used: 1 }
+        }
+
+        /// Writes `d` into entry `entry` of table `table`; whether the table
+        /// is in use.
+        pub fn store(&mut self, table: usize, entry: usize, d: u64) -> bool {
+            if table >= self.used || table >= N || entry >= ENTRIES {
+                return false;
+            }
+            self.tables[table][entry] = d;
+            true
+        }
+
+        /// The first nonzero entry at or after `(table, entry)`.
+        pub fn first_set(&self, table: usize, entry: usize) -> (usize, usize) {
+            next_set(&self.tables, self.used, table, entry)
+        }
+
+        /// The nonzero entries of table `table`, 0 outside the pool.
+        pub fn set_entries(&self, table: usize) -> usize {
+            if table < N {
+                count_set(&self.tables[table])
+            } else {
+                0
+            }
+        }
+    }
+}
+
+/// Plan iterators built by entries that take their set by `&'a mut`, as the
+/// maps and the copy of the page tables are: `fill` takes entries of the set
+/// and returns a plan that holds the set as a shared reborrow, whose `next`
+/// reads it; `copy_from` takes the target by `&'a mut` and the source by
+/// `&'a`, and returns a plan that holds the source alone, the target staying
+/// borrowed through the lifetime. Neither implements `Iterator`.
+pub mod plan_iterator_from_mut {
+    /// The entries of a set.
+    const SLOTS: usize = 8;
+
+    /// Entries, the first `used` of them taken.
+    pub struct Set {
+        entries: [u64; SLOTS],
+        used: usize,
+    }
+
+    /// The plan of `fill`: the entries taken, from `next`, with their values.
+    pub struct FillPlan<'a> {
+        set: &'a Set,
+        next: usize,
+    }
+
+    /// The plan of `copy_from`: the entries of the source, from `next`.
+    pub struct CopyPlan<'a> {
+        source: &'a Set,
+        next: usize,
+    }
+
+    impl Set {
+        /// The set of `entries`, none taken.
+        pub fn new(entries: [u64; SLOTS]) -> Set {
+            Set { entries, used: 0 }
+        }
+
+        /// Takes `count` more entries and gives the plan that fills them,
+        /// or none when the set has fewer left.
+        pub fn fill<'a>(&'a mut self, count: usize) -> Option<FillPlan<'a>> {
+            if count > SLOTS || self.used > SLOTS - count {
+                return None;
+            }
+            let next = self.used;
+            self.used += count;
+            Some(FillPlan { set: &*self, next })
+        }
+
+        /// Takes as many entries as `source` and gives the plan that copies
+        /// them.
+        pub fn copy_from<'a>(&'a mut self, source: &'a Set) -> CopyPlan<'a> {
+            self.used = source.used;
+            CopyPlan { source, next: 0 }
+        }
+    }
+
+    impl FillPlan<'_> {
+        /// The next entry to fill with the value the set holds there, or
+        /// none after the last.
+        // The iterator implements `next` alone.
+        #[allow(clippy::should_implement_trait)]
+        pub fn next(&mut self) -> Option<(usize, u64)> {
+            if self.next >= self.set.used || self.next >= SLOTS {
+                return None;
+            }
+            let index = self.next;
+            self.next = index + 1;
+            Some((index, self.set.entries[index]))
+        }
+    }
+
+    impl CopyPlan<'_> {
+        /// The next entry of the source with its value, or none after the
+        /// last.
+        // The iterator implements `next` alone.
+        #[allow(clippy::should_implement_trait)]
+        pub fn next(&mut self) -> Option<(usize, u64)> {
+            if self.next >= self.source.used || self.next >= SLOTS {
+                return None;
+            }
+            let index = self.next;
+            self.next = index + 1;
+            Some((index, self.source.entries[index]))
+        }
+    }
+}
+
+/// An own iterator that holds another own iterator, a `Copy` view of a
+/// slice, as the plan of the direct map holds the iterator of the usable
+/// ranges of the boot memory map: `Pages::next` calls `next` of the inner
+/// iterator through its field, and `Pages::skip_span` copies the inner
+/// iterator out, advances the copy and stores it back.
+pub mod iterator_in_iterator {
+    /// A range of addresses.
+    #[derive(Clone, Copy)]
+    pub struct Span {
+        pub start: u64,
+        pub size: u64,
+    }
+
+    /// The spans of a slice, in order.
+    #[derive(Clone, Copy)]
+    pub struct Spans<'a> {
+        spans: &'a [Span],
+        at: usize,
+    }
+
+    impl<'a> Spans<'a> {
+        /// The spans of `spans`.
+        pub fn new(spans: &'a [Span]) -> Spans<'a> {
+            Spans { spans, at: 0 }
+        }
+
+        /// The next span, or none after the last.
+        // The iterator implements `next` alone.
+        #[allow(clippy::should_implement_trait)]
+        pub fn next(&mut self) -> Option<Span> {
+            if self.at >= self.spans.len() {
+                return None;
+            }
+            let span = self.spans[self.at];
+            self.at += 1;
+            Some(span)
+        }
+    }
+
+    /// The pages, 4 KiB each, of the spans that `spans` gives.
+    pub struct Pages<'a> {
+        spans: Spans<'a>,
+        current: Span,
+    }
+
+    impl<'a> Pages<'a> {
+        /// The pages of the spans of `spans`.
+        pub fn new(spans: Spans<'a>) -> Pages<'a> {
+            Pages {
+                spans,
+                current: Span { start: 0, size: 0 },
+            }
+        }
+
+        /// The next page, or none after the last; a span shorter than a
+        /// page ends the pages.
+        // The iterator implements `next` alone, and a `match` rather than
+        // `?` takes the next span, as the provable subset writes it.
+        #[allow(clippy::should_implement_trait, clippy::question_mark)]
+        pub fn next(&mut self) -> Option<u64> {
+            if self.current.size == 0 {
+                match self.spans.next() {
+                    Some(span) => self.current = span,
+                    None => return None,
+                }
+            }
+            if self.current.size < 0x1000 {
+                return None;
+            }
+            let page = self.current.start;
+            self.current = Span {
+                start: page + 0x1000,
+                size: self.current.size - 0x1000,
+            };
+            Some(page)
+        }
+
+        /// Leaves the rest of the current span and the next span.
+        pub fn skip_span(&mut self) {
+            let mut spans = self.spans;
+            let _ = spans.next();
+            self.spans = spans;
+            self.current = Span { start: 0, size: 0 };
+        }
+    }
+}
+
+/// Loops that drive an own iterator held by value in a local and call its
+/// `next` until it gives none, as the direct map of the page tables reaches
+/// the usable ranges of the boot memory map, whose iterator is the only way
+/// to them: `total` with `while let`, the check phase, and `first_at` with
+/// `loop` and a `match` that returns from its arms, the search of the plan,
+/// which also returns the iterator where it stopped. The iterator is a
+/// `Copy` view taken by value, never by reference.
+pub mod iterator_driven_loop {
+    /// A range of addresses.
+    #[derive(Clone, Copy)]
+    pub struct Span {
+        pub start: u64,
+        pub size: u64,
+    }
+
+    /// The spans of a slice, in order.
+    #[derive(Clone, Copy)]
+    pub struct Spans<'a> {
+        spans: &'a [Span],
+        at: usize,
+    }
+
+    impl<'a> Spans<'a> {
+        /// The spans of `spans`.
+        pub fn new(spans: &'a [Span]) -> Spans<'a> {
+            Spans { spans, at: 0 }
+        }
+
+        /// The next span, or none after the last.
+        // The iterator implements `next` alone.
+        #[allow(clippy::should_implement_trait)]
+        pub fn next(&mut self) -> Option<Span> {
+            if self.at >= self.spans.len() {
+                return None;
+            }
+            let span = self.spans[self.at];
+            self.at += 1;
+            Some(span)
+        }
+    }
+
+    /// Why a span is refused.
+    pub enum Error {
+        Unaligned,
+    }
+
+    /// The bytes of the spans of `spans`, or `Unaligned` for the first span
+    /// that starts off a page.
+    pub fn total(spans: Spans<'_>) -> Result<u64, Error> {
+        let mut spans = spans;
+        let mut total: u64 = 0;
+        while let Some(span) = spans.next() {
+            if span.start % 0x1000 != 0 {
+                return Err(Error::Unaligned);
+            }
+            total = total.saturating_add(span.size);
+        }
+        Ok(total)
+    }
+
+    /// The first span of `spans` that ends above `at`, with the spans after
+    /// it, or none with the spans used up.
+    pub fn first_at(spans: Spans<'_>, at: u64) -> (Spans<'_>, Option<Span>) {
+        let mut spans = spans;
+        loop {
+            match spans.next() {
+                Some(span) => {
+                    if span.start.saturating_add(span.size) > at {
+                        return (spans, Some(span));
+                    }
+                }
+                None => return (spans, None),
+            }
+        }
+    }
+}
+
+/// A `let` bound to a chain of `||` that ends in a comparison, then tested
+/// by an `if`, as the copy of the page tables first tested the kind of a
+/// leaf: Charon and Aeneas translate it, but Lean infers a proposition for
+/// the bound value and cannot decide the `if` (`failed to synthesize
+/// Decidable`), so the generated functions do not type-check.
+pub mod or_chain_let {
+    /// The descriptor of the kind `kind` at `address`.
+    fn word(kind: u8, address: u64) -> u64 {
+        address | kind as u64
+    }
+
+    /// Whether `d` is the descriptor of one of three kinds at an address
+    /// below `2^bits`.
+    pub fn copyable(d: u64, bits: u8) -> bool {
+        let address = d & 0x0000_ffff_ffff_f000;
+        let kind = d == word(1, address) || d == word(2, address) || d == word(3, address);
+        if !kind {
+            return false;
+        }
+        address < 1u64 << bits
+    }
+}
+
+/// A `bool` that the arms of a `match` give as a negation and a literal,
+/// bound to a local and tested by an `if`, as the checks of a leaf of the
+/// boot maps of the page tables first counted new tables: Charon and Aeneas
+/// translate it, but Lean infers a proposition for the flag and cannot
+/// decide the `if` (`failed to synthesize Decidable`), so the generated
+/// functions do not type-check.
+pub mod negation_flag {
+    /// Where the walk of a set puts a leaf.
+    pub enum Place {
+        Root,
+        Level2(usize),
+        Level3(usize, usize),
+    }
+
+    /// `next`, plus one when a leaf in `place`, a block when `block`, needs
+    /// a new level 3 table.
+    pub fn count(next: usize, place: Place, block: bool) -> usize {
+        let level3 = match place {
+            Place::Root => !block,
+            Place::Level2(_) => !block,
+            Place::Level3(_, _) => false,
+        };
+        if level3 { next + 1 } else { next }
+    }
+}
+
+/// The alternative to a `let` bound to a chain of `||` that ends in a
+/// comparison, as the copy of the page tables tests the kind of a leaf:
+/// Charon and Aeneas translate the bound chain, but Lean infers a
+/// proposition for it and cannot decide the `if` that tests it. The chain is
+/// the value of a helper function that returns `bool`, and the condition of
+/// the `if` calls the helper.
+pub mod or_chain_helper {
+    /// The descriptor of the kind `kind` at `address`.
+    fn word(kind: u8, address: u64) -> u64 {
+        address | kind as u64
+    }
+
+    /// Whether `d` is the descriptor of one of three kinds at `address`.
+    fn known_kind(d: u64, address: u64) -> bool {
+        d == word(1, address) || d == word(2, address) || d == word(3, address)
+    }
+
+    /// Whether `d` is a descriptor of a known kind whose address lies below
+    /// `2^bits`.
+    pub fn copyable(d: u64, bits: u8) -> bool {
+        let address = d & 0x0000_ffff_ffff_f000;
+        if !known_kind(d, address) {
+            return false;
+        }
+        address < 1u64 << bits
+    }
+}
+
+/// The alternative to a `bool` that the arms of a `match` give as a negation
+/// and a literal, bound to a local and tested by an `if`, as the checks of a
+/// leaf of the boot maps of the page tables count new tables: Charon and
+/// Aeneas translate the flag, but Lean infers a proposition for it and
+/// cannot decide the `if`. The `match` only updates the counts and gives no
+/// value, and the negation is the condition of the `if` itself.
+pub mod negation_in_condition {
+    /// Where the walk of a set puts a leaf.
+    pub enum Place {
+        Root,
+        Level2(usize),
+        Level3(usize, usize),
+    }
+
+    /// The new tables counted so far, with the 1 GiB slot of the latest new
+    /// level 2 table and the 2 MiB slot of the latest new level 3 table.
+    pub struct Count {
+        pub next: usize,
+        pub gib: u64,
+        pub slot: u64,
+    }
+
+    /// Counts the new tables of the leaf at `pa`, a block when `block`, in
+    /// `place`.
+    pub fn count(count: &mut Count, place: Place, pa: u64, block: bool) {
+        match place {
+            Place::Root => {
+                let gib = pa & !((1 << 30) - 1);
+                if gib != count.gib {
+                    count.gib = gib;
+                    count.next += 1;
+                }
+            }
+            Place::Level2(_) => {}
+            Place::Level3(_, _) => return,
+        }
+        if !block {
+            let slot = pa & !((1 << 21) - 1);
+            if slot != count.slot {
+                count.slot = slot;
+                count.next += 1;
+            }
+        }
+    }
+}
+
+/// A `match` that binds the fields of a variant of an enumeration field of
+/// an element of an array borrowed through `&self`, as the page ownership
+/// table first read the owner of an extent. Aeneas rejects it;
+/// `element-enum-by-value` passes the field by value to a function that
+/// matches on it.
+pub mod element_enum_match {
+    /// The state of a holding.
+    #[derive(Clone, Copy)]
+    pub enum State {
+        Reserved,
+        Published,
+    }
+
+    /// What an extent holds: nothing, or an owner identity, a generation and
+    /// a state.
+    #[derive(Clone, Copy)]
+    pub enum Holding {
+        Free,
+        Held(u64, u64, State),
+    }
+
+    /// The owner of the pages of an extent.
+    pub enum Owner {
+        Free,
+        Held(u64, u64, State),
+    }
+
+    /// An extent of pages and its holding.
+    #[derive(Clone, Copy)]
+    pub struct Extent {
+        pub len: u64,
+        pub holding: Holding,
+    }
+
+    /// `E` extents and the number in use.
+    pub struct Table<const E: usize> {
+        extents: [Extent; E],
+        count: usize,
+    }
+
+    impl<const E: usize> Table<E> {
+        /// The table of `extents`, the first `count` in use.
+        pub fn new(extents: [Extent; E], count: usize) -> Table<E> {
+            Table { extents, count }
+        }
+
+        /// The owner of the extent at `index`, or none past those in use.
+        pub fn owner(&self, index: usize) -> Option<Owner> {
+            if index >= self.count || index >= E {
+                return None;
+            }
+            match self.extents[index].holding {
+                Holding::Free => Some(Owner::Free),
+                Holding::Held(owner, generation, state) => {
+                    Some(Owner::Held(owner, generation, state))
+                }
+            }
+        }
+    }
+}
+
+/// The alternative to `element-enum-match`, as the page ownership table reads
+/// the owner of an extent: the enumeration field of the element is passed by
+/// value to a function that matches on it.
+pub mod element_enum_by_value {
+    /// The state of a holding.
+    #[derive(Clone, Copy)]
+    pub enum State {
+        Reserved,
+        Published,
+    }
+
+    /// What an extent holds: nothing, or an owner identity, a generation and
+    /// a state.
+    #[derive(Clone, Copy)]
+    pub enum Holding {
+        Free,
+        Held(u64, u64, State),
+    }
+
+    /// The owner of the pages of an extent.
+    pub enum Owner {
+        Free,
+        Held(u64, u64, State),
+    }
+
+    /// An extent of pages and its holding.
+    #[derive(Clone, Copy)]
+    pub struct Extent {
+        pub len: u64,
+        pub holding: Holding,
+    }
+
+    /// `E` extents and the number in use.
+    pub struct Table<const E: usize> {
+        extents: [Extent; E],
+        count: usize,
+    }
+
+    impl Holding {
+        /// The owner of the pages of an extent of the holding.
+        fn owner(self) -> Owner {
+            match self {
+                Holding::Free => Owner::Free,
+                Holding::Held(owner, generation, state) => Owner::Held(owner, generation, state),
+            }
+        }
+    }
+
+    impl<const E: usize> Table<E> {
+        /// The table of `extents`, the first `count` in use.
+        pub fn new(extents: [Extent; E], count: usize) -> Table<E> {
+            Table { extents, count }
+        }
+
+        /// The owner of the extent at `index`, or none past those in use.
+        pub fn owner(&self, index: usize) -> Option<Owner> {
+            if index >= self.count || index >= E {
+                return None;
+            }
+            Some(self.extents[index].holding.owner())
+        }
+    }
+}

@@ -1890,6 +1890,147 @@
       "loop_sources": [
         "byte_string_return.same_loop src/lib.rs"
       ]
+    },
+    {
+      "name": "const-bool-parameter",
+      "module": "Qual.ConstBoolParameter",
+      "start_from": [
+        "crate::const_bool_parameter"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
+    },
+    {
+      "name": "nested-array-index",
+      "module": "Qual.NestedArrayIndex",
+      "start_from": [
+        "crate::nested_array_index"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "nested_array_index.count_set_loop src/lib.rs",
+        "nested_array_index.next_set_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "plan-iterator-from-mut",
+      "module": "Qual.PlanIteratorFromMut",
+      "start_from": [
+        "crate::plan_iterator_from_mut"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
+    },
+    {
+      "name": "iterator-in-iterator",
+      "module": "Qual.IteratorInIterator",
+      "start_from": [
+        "crate::iterator_in_iterator"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
+    },
+    {
+      "name": "iterator-driven-loop",
+      "module": "Qual.IteratorDrivenLoop",
+      "start_from": [
+        "crate::iterator_driven_loop"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "iterator_driven_loop.first_at_loop src/lib.rs",
+        "iterator_driven_loop.total_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "or-chain-let",
+      "module": "Qual.OrChainLet",
+      "start_from": [
+        "crate::or_chain_let"
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "Funs.lean",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "negation-flag",
+      "module": "Qual.NegationFlag",
+      "start_from": [
+        "crate::negation_flag"
+      ],
+      "expect": "ill-typed",
+      "type_errors_in": "Funs.lean",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": []
+    },
+    {
+      "name": "or-chain-helper",
+      "module": "Qual.OrChainHelper",
+      "start_from": [
+        "crate::or_chain_helper"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
+    },
+    {
+      "name": "negation-in-condition",
+      "module": "Qual.NegationInCondition",
+      "start_from": [
+        "crate::negation_in_condition"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
+    },
+    {
+      "name": "element-enum-match",
+      "module": "Qual.ElementEnumMatch",
+      "start_from": [
+        "crate::element_enum_match"
+      ],
+      "expect": "rejected",
+      "diagnostics": [
+        "[Error] Not allowed to expand enumerations with several variants",
+        "[Warn ] Could not translate the body of function 'formal_qualification::element_enum_match::{formal_qualification::element_enum_match::Table<E>}::owner because of previous error"
+      ],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
+    },
+    {
+      "name": "element-enum-by-value",
+      "module": "Qual.ElementEnumByValue",
+      "start_from": [
+        "crate::element_enum_by_value"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
     }
   ]
 }

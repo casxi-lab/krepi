@@ -900,8 +900,8 @@ sequential refinement:
 ## Constructs the tools do not support
 
 - This convention covers the constructs of the list, the shape rules
-  stated above, such as the loop shapes, and the two constructs of the last
-  point below. They are coding rules: new code avoids the listed constructs
+  stated above, such as the loop shapes, and the constructs of the last two
+  points below. They are coding rules: new code avoids the listed constructs
   and follows the shape rules, code taken from the prototype tree is
   brought to them in the change that ports it, and merged code is brought
   to them as the next two points state.
@@ -979,6 +979,31 @@ sequential refinement:
     returns a literal, the alternative changes its interface and is a
     design change. Qualification: `byte-string-return` (rejected) and
     `byte-string-slice` (translated).
+- Three constructs joined the list in this way when the port of the
+  page-table module met them. The pinned tools translate the first two, but
+  their generated code does not type-check in Lean, so their qualification
+  cases expect type errors; Aeneas rejects the third. Their alternatives
+  are local, as those of R1 to R3 and R5 are:
+  - A `let` bound to a chain of `||` that ends in a comparison, then tested
+    by an `if` or used in a `&&`. Lean takes the bound value for a
+    proposition and reports `failed to synthesize Decidable` where it is
+    tested. Alternative: the chain is the value of a helper function that
+    returns `bool`, called in the condition. Qualification: `or-chain-let`
+    (ill-typed) and `or-chain-helper` (translated).
+  - A `bool` that the arms of a `match` give as a negation and a literal,
+    alone or in a tuple, bound to a local and tested by an `if`. Lean
+    reports `failed to synthesize Decidable` at the test. Alternative: the
+    `match` gives no value, and the negation is the condition of the `if`
+    itself. Qualification: `negation-flag` (ill-typed) and
+    `negation-in-condition` (translated).
+  - A `match` that binds the fields of a variant of an enumeration field of
+    an element of an array borrowed through `&self`, such as
+    `match self.extents[index].holding`, also when it binds integer fields
+    alone. Aeneas reports `Not allowed to expand enumerations with several
+    variants` and leaves the function without its body. Alternative: the
+    field is passed by value to a function that matches on it.
+    Qualification: `element-enum-match` (rejected) and
+    `element-enum-by-value` (translated).
 
 ## Mechanical checks
 

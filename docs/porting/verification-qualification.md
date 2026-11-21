@@ -47,7 +47,7 @@ state for the tooling taken from the CAS project.
 
 New in krepi, and not taken from the CAS project:
 
-- the 17 cases after `division-walk` in `cases.json` and their modules at
+- the 28 cases after `division-walk` in `cases.json` and their modules at
   the end of `src/lib.rs`: `cfg-shape` and `const-generic`, one case for each
   of the items R1 to R7 of the
   [provable Rust subset](../conventions/provable-subset.md#constructs-and-alternatives),
@@ -55,11 +55,19 @@ New in krepi, and not taken from the CAS project:
   `own-iterator-next`, `slice-range-generic`, `byte-string-slice` and
   `const-array-repeat`, which record
   [code shapes](../domains/boot-platform/fdt/proof.md#code-shapes) of the
-  device-tree module, and `option-slice-join`, `option-slice-arms` and
+  device-tree module, `option-slice-join`, `option-slice-arms` and
   `byte-string-return`, which record two constructs of that module that the
   [provable Rust subset](../conventions/provable-subset.md#constructs-the-tools-do-not-support)
   lists among those that the tools do not support, and the alternative of
-  the first;
+  the first, and `const-bool-parameter`, `nested-array-index`,
+  `plan-iterator-from-mut`, `iterator-in-iterator` and
+  `iterator-driven-loop`, which record
+  [code shapes](../domains/memory/page-tables/proof.md#code-shapes) of the
+  page-table module, and `or-chain-let`, `negation-flag`,
+  `or-chain-helper`, `negation-in-condition`, `element-enum-match` and
+  `element-enum-by-value`, which record three constructs of that module
+  that the provable Rust subset lists among those that the tools do not
+  support, each with its alternative;
 - the reviewed external types of `r7-private-enum`,
   `verification/externals/Qual/R7PrivateEnum/TypesExternal.lean`;
 - the definitions in `verification/Krepi/Qualification/Models/`
@@ -111,19 +119,23 @@ New in krepi, and not taken from the CAS project:
   - the documentation of `term_layout_cut` says that the case installs
     reviewed external declarations in which `Arc` is a structure, in place
     of the structure model of `Arc`.
-- The 17 new modules are appended after `division_walk`: `cfg_shape`,
+- The 28 new modules are appended after `division_walk`: `cfg_shape`,
   `const_generic`, `r1_function_item_value`, `r2_iterator_any`,
   `r3_iterator_flatten`, `r4_closure_callback`,
   `r5_stop_path_borrow_join`, `r6_same_enum_name` with the modules `objects`
   and `capabilities`, `r7_private_enum`, `borrowed_view_by_value`,
   `own_iterator_next`, `slice_range_generic`, `byte_string_slice`,
-  `const_array_repeat`, `option_slice_join`, `option_slice_arms` and
-  `byte_string_return`. Each defines the types it uses.
+  `const_array_repeat`, `option_slice_join`, `option_slice_arms`,
+  `byte_string_return`, `const_bool_parameter`, `nested_array_index`,
+  `plan_iterator_from_mut`, `iterator_in_iterator`, `iterator_driven_loop`,
+  `or_chain_let`, `negation_flag`, `or_chain_helper`,
+  `negation_in_condition`, `element_enum_match` and
+  `element_enum_by_value`. Each defines the types it uses.
 
 ### The cases
 
 `cases.json` keeps schema 1 and the formatting of the CAS project. Its
-cases are the 103 kept cases in the order of the CAS project, then the 17
+cases are the 103 kept cases in the order of the CAS project, then the 28
 new ones. In the CAS project the kept cases are 67 translated, 28 rejected and
 8 ill-typed (5 with their type errors in `Funs.lean`, 3 in `Types.lean`); 4
 have `opaque`, 2 `loop_sources`, 3 `models` and 3 `proof`. After the
@@ -160,12 +172,14 @@ of its own:
 | `r6-same-enum-name` | Ill-typed in `Check.lean`: the two `Discriminant` instances `instDiscriminantErrorIsize` cannot be imported together |
 | `r7-private-enum` | Ill-typed in `TypesExternal.lean`: the `discriminant` attribute rejects the private enumeration with `invalid scope` |
 
-The other new cases record shapes of the device-tree module and two
-constructs that the tools reject in it. Their expectations are what the
-same tools gave on `darwin-arm64` for the extraction with the arguments of
-the gate: the diagnostics, the external items and the loops. The
-qualification of the gate is the first to build the generated code of
-those that are translated.
+The other new cases record shapes of the device-tree and page-table
+modules and constructs that the tools reject in them. Their
+expectations are what the same tools gave on `darwin-arm64` for the
+extraction with the arguments of the gate: the diagnostics, the external
+items and the loops. The qualification of the gate is the first to build
+the generated code of the device-tree cases that are translated; that of
+each page-table case also built with `lake build --wfail` on
+`darwin-arm64`.
 
 | Case | Shape | Expectation |
 | --- | --- | --- |
@@ -177,6 +191,17 @@ those that are translated.
 | `option-slice-join` | A `match` on an `Option` of borrowed bytes whose arms give the bytes or a `const` empty slice, the joined slice then checked by a call with `?` and stored in the value that the function returns | Rejected: `Nested borrows are not supported yet` in that function; no external items or loops |
 | `option-slice-arms` | The alternative of `option-slice-join`: each arm checks its own slice and builds its own value | Translated, without external items or loops |
 | `byte-string-return` | Byte-string literals returned as `&'static [u8]` by the arms of a `match`, and a loop helper that compares bytes with the result | Rejected: `There should be no bottoms in the value` in the function that returns them; no external items; the loop of the helper |
+| `const-bool-parameter` | A type with a `bool` const parameter, as a set of the page tables has its region, whose methods pass the parameter and the capacity as values to a helper that branches on them; a `const fn` constructor; entries that take a set of each region | Translated, without external items or loops |
+| `nested-array-index` | A pool of tables held inline as `[[u64; 512]; N]`: a loop helper over the pool reads `tables[table][entry]`, another takes one table `&tables[table]`, and a method writes an entry through the field | Translated, without external items; the loops of its two helpers |
+| `plan-iterator-from-mut` | Entries that take their set by `&'a mut` and return an iterator of their own: one holds the set as a shared reborrow and reads it in `next`, the other holds only the source that the entry takes by `&'a`, the target borrowed through the lifetime | Translated, without external items or loops |
+| `iterator-in-iterator` | An iterator of its own that holds another, a `Copy` view of a slice, calls its `next` through the field, and copies it out, advances the copy and stores it back | Translated, without external items or loops |
+| `iterator-driven-loop` | Loops that drive an iterator of its own held by value in a local until its `next` gives none, one `while let` and one `loop` with a `match` that returns from its arms with the iterator where it stopped | Translated, without external items; the loops of its two functions |
+| `or-chain-let` | A `let` bound to a chain of `\|\|` that ends in a comparison, tested by an `if` | Ill-typed: in `Funs.lean` Lean cannot decide the `if` (`failed to synthesize Decidable`); no diagnostics, external items or loops |
+| `negation-flag` | A `bool` that the arms of a `match` give as a negation and a literal, bound to a local and tested by an `if` | Ill-typed: in `Funs.lean` Lean cannot decide the `if` (`failed to synthesize Decidable`); no diagnostics, external items or loops |
+| `or-chain-helper` | The alternative to a `let` bound to a chain of `\|\|` that ends in a comparison, which Lean cannot decide: the chain is the value of a helper that returns `bool`, called in the condition of an `if` | Translated, without external items or loops |
+| `negation-in-condition` | The alternative to a `bool` that the arms of a `match` give as a negation and a literal, which Lean cannot decide: the `match` updates counts and gives no value, and the negation is the condition of an `if` | Translated, without external items or loops |
+| `element-enum-match` | A `match` that binds the fields of a variant of an enumeration field of an array element borrowed through `&self` | Rejected: `Not allowed to expand enumerations with several variants` in that function; no external items or loops |
+| `element-enum-by-value` | The alternative of `element-enum-match`: the field is passed by value to a function that matches on it | Translated, without external items or loops |
 
 `r6-same-enum-name` has a form that no case of the CAS project has: its
 `start_from` is empty and its `parts` list two modules, each with its own
