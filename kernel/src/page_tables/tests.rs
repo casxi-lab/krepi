@@ -2,7 +2,7 @@
 //! of its set, the frozen vectors of the contract, the rows of the kind
 //! table and the direct address, the kernel's mappings, the direct maps of
 //! the Pi 5 models against a page model, the page ownership table, the
-//! owners of the board shapes, the order of the plans and the capacities.
+//! owners of the board shapes, the plan order, the capacities and examples.
 //!
 //! Feature: krepi.kernel.kernel-memory
 //!
@@ -18,6 +18,7 @@ use std::vec::Vec;
 mod banks;
 mod boot;
 mod capacity;
+mod examples;
 mod kinds;
 mod mapping;
 mod models;
