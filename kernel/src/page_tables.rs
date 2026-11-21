@@ -45,6 +45,7 @@
 mod boot;
 mod copy;
 mod encoding;
+mod ownership;
 mod range;
 mod walk;
 mod write;
@@ -75,6 +76,15 @@ pub const KERNEL_TABLES: usize = 32;
 
 /// The most ranges of a layout.
 pub const MAX_LAYOUT_RANGES: usize = 16;
+
+/// The extents of the page ownership table of the kernel root, free and
+/// held together.
+pub const EXTENTS: usize = 160;
+
+/// The exclusion records of the page ownership table of the kernel root:
+/// the 4 spans of boot storage and the 128 firmware reservations that the
+/// boot memory map admits at most.
+pub const EXCLUSION_RECORDS: usize = 132;
 
 /// A page, 4 KiB.
 const PAGE_SIZE: u64 = 0x1000;
@@ -326,6 +336,166 @@ pub struct PhysRange {
     len: u64,
 }
 
+/// The owner of an exclusion and of the pages that it excludes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Excluder {
+    /// A firmware reservation, `no-map`, `reusable` or neither.
+    Firmware,
+    /// The boot storage of the kernel image, with its BSS, its stacks and
+    /// the pools of the kernel tables.
+    Image,
+    /// Another span of boot storage, such as the device tree.
+    BootStorage,
+}
+
+/// A range that the page ownership table excludes, as the boot wiring
+/// gives it from the boot memory map: a physical range, which need not lie
+/// on page boundaries, with its owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Exclusion {
+    /// The range.
+    pub range: PhysRange,
+    /// Its owner.
+    pub owner: Excluder,
+}
+
+/// The state of a holder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HoldState {
+    /// The pages are zeroed and published.
+    Published,
+}
+
+/// The owner of a managed page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Owner {
+    /// No one holds the page.
+    Free,
+    /// An exclusion holds the page.
+    Excluded(Excluder),
+    /// A holder: its owner identity, its generation and its state.
+    Held(u64, u64, HoldState),
+}
+
+/// What an extent records: its pages free, or held by one holder, with its
+/// owner identity, its generation and its state.
+#[derive(Clone, Copy)]
+enum Holding {
+    Free,
+    Held(u64, u64, HoldState),
+}
+
+/// A range of whole pages of the bank of index `bank`, in the address order
+/// of the banks, with one holding.
+#[derive(Clone, Copy)]
+struct Extent {
+    range: PhysRange,
+    bank: usize,
+    holding: Holding,
+}
+
+/// The generation of the next allocation or reservation, or exhausted once
+/// the generation `2^64 - 1` has been given.
+#[derive(Clone, Copy)]
+enum Counter {
+    Next(u64),
+    Exhausted,
+}
+
+/// The page ownership table: one owner for every page of its managed
+/// banks, free, the owner of an exclusion or a holder. A page in an extent
+/// has the owner of the extent, and a page of a bank in no extent the first
+/// owner, in the order firmware, image, boot storage, of the exclusion
+/// records that touch it. The table records at most `E` extents, free and
+/// held together, and `X` exclusion records; the kernel root's has
+/// `EXTENTS` and `EXCLUSION_RECORDS`. Its fields are private, so only its
+/// entries change it.
+pub struct Ownership<const E: usize, const X: usize> {
+    /// The arena, not 0.
+    arena: u64,
+    /// The managed banks, in address order.
+    banks: [PhysRange; E],
+    /// The number of banks.
+    bank_count: usize,
+    /// The extents, in address order.
+    extents: [Extent; E],
+    /// The number of extents.
+    extent_count: usize,
+    /// The exclusion records, in the order given.
+    exclusions: [Exclusion; X],
+    /// The number of exclusion records.
+    exclusion_count: usize,
+    /// The generation counter.
+    counter: Counter,
+}
+
+/// A receipt: the arena, the owner identity, the generation and the range
+/// of an allocation. It is bookkeeping, not authority: each entry that
+/// takes one checks it against the table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Allocation {
+    /// The arena of the table.
+    pub arena: u64,
+    /// The owner identity.
+    pub owner: u64,
+    /// The generation.
+    pub generation: u64,
+    /// The pages.
+    pub range: PhysRange,
+}
+
+/// The direction of a placement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    /// From the lowest free extent, at the lowest aligned start.
+    Low,
+    /// From the highest free extent, at the highest aligned start.
+    High,
+}
+
+/// Where a request is placed, the caller's choice: a direction and an
+/// optional window, a physical range outside which no page is taken.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Placement {
+    /// The direction of the scan.
+    pub direction: Direction,
+    /// The window, if any.
+    pub window: Option<PhysRange>,
+}
+
+/// The pages that [`Ownership::choose`] gives an owner identity, which
+/// [`Ownership::assign`] takes once the caller has zeroed them. Only
+/// `choose` builds one.
+#[derive(Debug)]
+pub struct Choice {
+    /// The owner identity of the request.
+    owner: u64,
+    /// The pages.
+    range: PhysRange,
+}
+
+/// The statistics of a page ownership table. The excluded pages take no
+/// extent and count as no managed bytes; reserved pages count as allocated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Stats {
+    /// The bytes of the free and held pages.
+    pub managed: u64,
+    /// The bytes of the free pages.
+    pub free: u64,
+    /// The bytes of the held pages.
+    pub allocated: u64,
+    /// The number of holders.
+    pub allocations: usize,
+    /// The number of free extents.
+    pub free_extents: usize,
+    /// The bytes of the largest free extent.
+    pub largest_free: u64,
+    /// The extents in use.
+    pub extents: usize,
+    /// The capacity of the extents.
+    pub capacity: usize,
+}
+
 /// The trait of the assertions of rule 6: `CHECK` is ambiguous for a type
 /// that implements `Clone`, so such an assertion does not compile.
 trait AmbiguousIfClone<A> {
@@ -339,6 +509,10 @@ impl<T: Clone> AmbiguousIfClone<u8> for T {}
 // A set is neither `Clone` nor `Copy`: a copy would keep a record of tables
 // in use that its pool no longer has.
 const _: () = <Tables<1, false> as AmbiguousIfClone<_>>::CHECK;
+
+// A page ownership table is neither `Clone` nor `Copy`: a copy would give
+// the same pages twice.
+const _: () = <Ownership<1, 1> as AmbiguousIfClone<_>>::CHECK;
 
 /// The page descriptor of `kind` at the output address `address`, of
 /// which it takes bits 12 to 47.

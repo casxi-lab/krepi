@@ -25,7 +25,6 @@ impl PhysRange {
     /// Whether every address of `other` lies in the range.
     // Called by the page ownership table, and by the modules of the core
     // that take pages, which are planned.
-    #[allow(dead_code)]
     pub(crate) fn contains(self, other: PhysRange) -> bool {
         self.start <= other.start && other.end() <= self.end()
     }
@@ -33,7 +32,6 @@ impl PhysRange {
     /// Whether the two ranges share an address.
     // Called by the page ownership table, and by the modules of the core
     // that take pages, which are planned.
-    #[allow(dead_code)]
     pub(crate) fn overlaps(self, other: PhysRange) -> bool {
         self.start < other.end() && other.start < self.end()
     }

@@ -1,7 +1,8 @@
 //! The host tests of the page tables: the execution of a plan on the pool
 //! of its set, the frozen vectors of the contract, the rows of the kind
 //! table and the direct address, the kernel's mappings, the direct maps of
-//! the Pi 5 models against a page model, and the capacity of the pool.
+//! the Pi 5 models against a page model, the page ownership table, and the
+//! capacities.
 //!
 //! Feature: krepi.kernel.kernel-memory
 //!
@@ -14,6 +15,7 @@ use super::*;
 use crate::fdt::ReservedRegion;
 use std::vec::Vec;
 
+mod banks;
 mod boot;
 mod capacity;
 mod kinds;
@@ -180,4 +182,70 @@ fn counts(steps: &[Step]) -> (u64, u64, u64) {
         }
     }
     (blocks * BLOCK_SIZE + pages * PAGE_SIZE, blocks, pages)
+}
+
+/// The range `[start, start + len)`.
+fn range(start: u64, len: u64) -> PhysRange {
+    PhysRange::new(start, len).unwrap()
+}
+
+/// The page ownership table of `E` extents and the exclusion records of the
+/// core in the arena `arena`, of the banks and the firmware reservations
+/// `(start, len)`.
+fn table<const E: usize>(
+    arena: u64,
+    banks: &[(u64, u64)],
+    firmware: &[(u64, u64)],
+) -> Result<Ownership<E, EXCLUSION_RECORDS>, OwnershipError> {
+    let banks: Vec<PhysRange> = banks.iter().map(|&(s, l)| range(s, l)).collect();
+    let exclusions: Vec<Exclusion> = firmware
+        .iter()
+        .map(|&(s, l)| Exclusion {
+            range: range(s, l),
+            owner: Excluder::Firmware,
+        })
+        .collect();
+    Ownership::new(arena, &banks, &exclusions)
+}
+
+/// A low placement without a window.
+const LOW: Placement = Placement {
+    direction: Direction::Low,
+    window: None,
+};
+
+/// A high placement without a window.
+const HIGH: Placement = Placement {
+    direction: Direction::High,
+    window: None,
+};
+
+/// A placement in the window `[start, start + len)`.
+fn within(direction: Direction, start: u64, len: u64) -> Placement {
+    let window = Some(range(start, len));
+    Placement { direction, window }
+}
+
+/// The receipt of the arena, the owner identity, the generation and the
+/// range `[start, start + len)`.
+fn receipt(arena: u64, owner: u64, generation: u64, start: u64, len: u64) -> Allocation {
+    let range = range(start, len);
+    Allocation {
+        arena,
+        owner,
+        generation,
+        range,
+    }
+}
+
+/// `choose`, then `assign` with a completed zeroing.
+fn allocate<const E: usize, const X: usize>(
+    t: &mut Ownership<E, X>,
+    owner: u64,
+    pages: u64,
+    alignment: u64,
+    placement: Placement,
+) -> Result<Allocation, OwnershipError> {
+    let choice = t.choose(owner, pages, alignment, placement)?;
+    t.assign(choice, true)
 }
