@@ -9,6 +9,9 @@ version = "0.0.0"
 [[package]]
 name = "krepi-arch"
 version = "0.0.0"
+dependencies = [
+ "krepi-kernel",
+]
 
 [[package]]
 name = "krepi-kernel"

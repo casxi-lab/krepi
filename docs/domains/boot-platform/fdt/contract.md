@@ -121,7 +121,7 @@ map.
   with no hardware action, `unsafe` code, assembly or access to a register or a
   physical address, and no adapter of `kernel/arch`. The block lists its sources
   and the core's crate root `kernel/src/lib.rs` until the objects contract does.
-- The page-table logic and the `mmu` adapter of `kernel/arch` (planned), which
+- The page-table logic and the `mmu` adapter of `kernel/arch`, which
   turns the MMU on and stores into live tables, belong to the
   [page-tables](../../memory/page-tables/contract.md) component.
 - The board crate obtains the bytes of the hand-over tree and wires the results

@@ -19,15 +19,13 @@ impl PhysRange {
     }
 
     /// The first address.
-    // Called by the zeroing of frames of the architecture crate, which is
-    // planned.
+    // Called by the zeroing of frames of the architecture crate.
     pub fn start(self) -> u64 {
         self.start
     }
 
     /// The number of bytes, which is not 0.
-    // Called by the zeroing of frames of the architecture crate, which is
-    // planned.
+    // Called by the zeroing of frames of the architecture crate.
     pub fn size(self) -> u64 {
         self.len
     }

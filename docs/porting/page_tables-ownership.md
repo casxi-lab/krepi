@@ -68,7 +68,7 @@ shapes of the [proof path](../domains/memory/page-tables/proof.md).
   table that a board calls, `PhysRange::new`, `Ownership::new`, `choose`
   and `assign`, for the value types that they take and return, and for
   `start` and `size` of `PhysRange`, which the zeroing of frames in
-  `krepi_arch::mmu` (planned) reads and which the contract lists as open
+  `krepi_arch::mmu` reads and which the contract lists as open
   obligations of their own; the other rows are `pub(crate)`, since only
   modules of the core call them.
   So these public items of the prototype are `pub(crate)`, under the names
