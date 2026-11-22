@@ -95,6 +95,13 @@ command.
   `0x4040_0000`. The other bits of the ISS are not judged, since QEMU
   versions may fill them differently; the return address of the branch into
   the direct map is an absolute symbol of the image.
+- The case `boot-memory` is new: its test image writes the counts of the
+  boot memory map and of the plans of the two kernel table sets in two
+  count records, and the case boots it three times. The transcripts must be
+  identical and the counts those that the suite computes from the contracts
+  of the fdt and page-tables components, the link symbols of the ELF file
+  and the size of the tree that QEMU dumps for the machine with `dumpdtb`
+  before the runs; a dump that fails ends the case as an error.
 - The receipt of a test image's run must name the machine of its case: the
   machine with EL2 for the SError, the runner's machine for the others.
 - The three runs must use the same image and give identical transcripts; the
@@ -132,6 +139,7 @@ them.
 | The case whose vectors halt after its dispatch passes only when nothing follows its self-check, and an unexpected interrupt only once | `qemu_boot::tests::records::a_case_that_halts_after_its_dispatch_fails_with_more_or_less` |
 | A case of the cache and TLB maintenance passes only with its start record, its self-check with no failure and its end, and fails with an exception record, a failed self-check, a missing end or another image | `qemu_boot::tests::records::good_runs_of_the_test_images_pass`, `qemu_boot::tests::records::a_case_without_exceptions_fails_with_an_exception_record` |
 | The case of kernel memory passes only with its five faults, by the class, level, kind and write bit of each syndrome and by the return address, its twelve self-checks and an image inside its 2 MiB block | `qemu_boot::tests::memory::a_good_run_of_kernel_memory_passes`, `qemu_boot::tests::memory::a_fault_of_another_kind_or_address_fails`, `qemu_boot::tests::memory::the_image_must_lie_in_its_block` |
+| The case of the boot memory passes only with three identical runs whose counts are those of the contracts for the machine's tree and the image, and whose self-check holds; the size of the tree comes from QEMU's dump of the machine | `qemu_boot::tests::memory::three_identical_runs_of_boot_memory_with_the_contract_counts_pass`, `qemu_boot::tests::memory::other_counts_a_failed_check_or_differing_runs_fail`, `qemu_boot::tests::the_tree_size_comes_from_the_dump_of_the_machine` |
 | The receipt of a test image must name the machine of its case and no input | `qemu_boot::tests::records::a_receipt_of_another_machine_or_with_input_fails` |
 | The suite takes the worst outcome of its cases | `qemu_boot::tests::the_cases_name_their_symbols_images_and_outcome` |
 | The case runs each boot through the runner into a directory of its own and passes, or fails or ends as an error, as a whole | `qemu_boot::tests::the_case_passes_with_a_guest_that_boots_and_echoes`, `qemu_boot::tests::the_case_fails_with_a_guest_at_another_level`, `qemu_boot::tests::a_run_that_cannot_start_is_an_error` |

@@ -342,6 +342,8 @@ fn the_build_command_names_the_images() {
             "--example",
             "code-publication",
             "--example",
+            "boot-memory",
+            "--example",
             "kernel-memory",
             "--message-format=json-render-diagnostics",
         ]
@@ -430,6 +432,7 @@ fn the_case_passes_with_a_guest_that_boots_and_echoes() {
             image: &image,
             sha256: &digest,
             symbols: &[],
+            tree: None,
         },
         Some(&qemu),
         &output,
@@ -476,6 +479,7 @@ fn the_case_fails_with_a_guest_at_another_level() {
             image: &image,
             sha256: &sha256(b"image\n"),
             symbols: &[],
+            tree: None,
         },
         Some(&qemu),
         &output,
@@ -512,6 +516,7 @@ fn a_run_that_cannot_start_is_an_error() {
             image: &image,
             sha256: &sha256(b"image\n"),
             symbols: &[],
+            tree: None,
         },
         Some(&scratch.path("no-qemu")),
         &output,
@@ -532,6 +537,60 @@ fn a_run_that_cannot_start_is_an_error() {
     );
 }
 
+/// A fake QEMU that writes its arguments to its standard error and, when
+/// one of them adds `dumpdtb=<file>` to the machine and `write` holds, a
+/// device tree of 40 bytes, its header with that `totalsize`, into that
+/// file, and exits with `status`.
+fn dumping_qemu(scratch: &Scratch, name: &str, status: u8, write: bool) -> PathBuf {
+    let dump = if write {
+        "[ -n \"$file\" ] && printf '\\320\\015\\376\\355\\000\\000\\000\\050' > \"$file\" \
+         && head -c 32 /dev/zero >> \"$file\"\n"
+    } else {
+        ""
+    };
+    scratch.script(
+        name,
+        &format!(
+            "#!/bin/sh\necho \"$@\" >&2\nfile=\nfor arg do case $arg in *dumpdtb=*) file=${{arg#*dumpdtb=}} ;; esac; done\n\
+             {dump}exit {status}\n"
+        ),
+    )
+}
+
+/// The case of the boot memory takes the size of the tree from the dump of a
+/// QEMU run with the arguments of the case and `dumpdtb` after its machine;
+/// a dump that fails or writes no tree fails.
+#[test]
+fn the_tree_size_comes_from_the_dump_of_the_machine() {
+    let scratch = Scratch::new("qemu-boot-dump");
+    let image = scratch.write("image.elf", b"image\n");
+    let boot_memory = CASES
+        .iter()
+        .find(|case| case.name == "boot-memory")
+        .unwrap();
+    let output = scratch.path("suite");
+    std::fs::create_dir(&output).unwrap();
+    let qemu = dumping_qemu(&scratch, "qemu", 0, true);
+    assert_eq!(
+        machine_tree(boot_memory, &image, Some(&qemu), &output),
+        Ok(40)
+    );
+    let log = std::fs::read_to_string(output.join("boot-memory-tree.log")).unwrap();
+    let dump = output.join("boot-memory-tree.dtb");
+    let machine = format!("-machine {MACHINE},dumpdtb={} -cpu", dump.display());
+    let kernel = format!("-kernel {}", image.canonicalize().unwrap().display());
+    assert!(log.contains(&machine) && log.contains(&kernel), "{log}");
+    for (name, status, write) in [("failing", 1, true), ("silent", 0, false)] {
+        let other = scratch.path(&format!("{name}-suite"));
+        std::fs::create_dir(&other).unwrap();
+        let qemu = dumping_qemu(&scratch, name, status, write);
+        assert!(
+            machine_tree(boot_memory, &image, Some(&qemu), &other).is_err(),
+            "{name}"
+        );
+    }
+}
+
 /// The addresses that the test images of the tests have for the symbols of
 /// the cases.
 fn symbols() -> Vec<(String, u64)> {
@@ -548,6 +607,11 @@ fn symbols() -> Vec<(String, u64)> {
         ("krepi_test_store", 0x4020_1208),
         ("krepi_test_execute_never", 0xffff_ff80_47ff_e000),
         ("__text_start", 0x4020_0000),
+        ("__text_end", 0x4020_b000),
+        ("__rodata_start", 0x4020_b000),
+        ("__rodata_end", 0x4020_e000),
+        ("__stack_guard", 0x4027_f000),
+        ("__stack_bottom", 0x4028_0000),
         ("__image_end", 0x4029_0000),
     ]
     .map(|(name, address)| (name.to_string(), address))
@@ -706,7 +770,7 @@ fn judge_one(name: &str, transcript: Vec<u8>, machine: Machine) -> Vec<Check> {
         receipt: image_receipt(&transcript, machine),
         transcript,
     };
-    judge_records(case(name), IMAGE_SHA256, &symbols(), &[run])
+    judge_records(case(name), IMAGE_SHA256, &symbols(), None, &[run])
 }
 
 mod records {
@@ -1131,7 +1195,7 @@ mod records {
                 receipt,
                 transcript: transcript.clone(),
             };
-            let checks = judge_records(case("el1-brk"), IMAGE_SHA256, &symbols(), &[run]);
+            let checks = judge_records(case("el1-brk"), IMAGE_SHA256, &symbols(), None, &[run]);
             assert_eq!(failed(&checks), ["run 1 receipt"]);
         }
     }
@@ -1145,9 +1209,9 @@ mod records {
             receipt: image_receipt(&transcript, Machine::Virt),
             transcript,
         };
-        let checks = judge_records(case("el1-brk"), IMAGE_SHA256, &[], &[run]);
+        let checks = judge_records(case("el1-brk"), IMAGE_SHA256, &[], None, &[run]);
         assert_eq!(failed(&checks), ["run 1 exception 1"]);
-        let checks = judge_records(case("el1-brk"), IMAGE_SHA256, &symbols(), &[]);
+        let checks = judge_records(case("el1-brk"), IMAGE_SHA256, &symbols(), None, &[]);
         assert_eq!(failed(&checks), ["runs"]);
     }
 }
@@ -1222,7 +1286,7 @@ mod memory {
             receipt: image_receipt(&transcript, Machine::Virt),
             transcript,
         };
-        judge_records(case("kernel-memory"), IMAGE_SHA256, symbols, &[run])
+        judge_records(case("kernel-memory"), IMAGE_SHA256, symbols, None, &[run])
     }
 
     /// A good run passes: its receipt, its records, each fault, each
@@ -1371,6 +1435,149 @@ mod memory {
         let checks = judge_kernel_memory(good, &without);
         assert_eq!(failed(&checks), ["image edges"]);
     }
+
+    /// The count records of a good run of `boot-memory` for a tree of 1 MiB
+    /// and the image of [`symbols`], written from the contracts: the lower
+    /// kernel set uses the root, the level 2 tables of the RAM and of the
+    /// devices and the level 3 tables of the block of the image, of the
+    /// tree, of the PL011 and of the GICv2, 7, and maps the 11 pages of the
+    /// text, 3 of the read-only data, 113 of the data up to the guard page,
+    /// 16 of the stack, 256 of the tree and 1 + 32 of the devices, 432; the
+    /// direct map uses the root, the level 2 table and the level 3 tables of
+    /// the blocks at `0x4000_0000` and `0x4020_0000`, 4, and maps the 62
+    /// blocks from `0x4040_0000` to the end of RAM and the 256 pages from
+    /// the tree to the image and the 368 above the image, 624.
+    const COUNTS: [&str; 2] = [
+        "CASXI_MEMORY tree=1048576 ram=1 reserved=0 boot=2 managed=1 usable=2",
+        "CASXI_TABLES lower=7,0,432 direct=4,62,624",
+    ];
+
+    /// The transcript of a run of `boot-memory` with the count records
+    /// `counts` and its self-check with the mask `failures`.
+    fn boot_transcript(counts: [&str; 2], failures: u64) -> Vec<u8> {
+        let check = format!("CASXI_CHECK name=stack-depth failures={failures:#018x}");
+        let [memory, tables] = counts.map(str::as_bytes);
+        lines(&[
+            b"CASXI_TEST image=boot-memory",
+            memory,
+            tables,
+            check.as_bytes(),
+            b"CASXI_RESUMED",
+        ])
+    }
+
+    /// The checks of the runs of `boot-memory` with `transcripts` on a
+    /// machine whose tree has `tree` bytes.
+    fn judge_boot_memory(transcripts: &[&[u8]], tree: Option<u64>) -> Vec<Check> {
+        let run = |transcript: &&[u8]| Run {
+            receipt: image_receipt(transcript, Machine::Virt),
+            transcript: transcript.to_vec(),
+        };
+        let runs: Vec<Run> = transcripts.iter().map(run).collect();
+        judge_records(case("boot-memory"), IMAGE_SHA256, &symbols(), tree, &runs)
+    }
+
+    /// The names of the failed checks of [`judge_boot_memory`], joined.
+    fn boot_failures(transcripts: &[&[u8]], tree: Option<u64>) -> String {
+        failed(&judge_boot_memory(transcripts, tree)).join(", ")
+    }
+
+    /// Three identical runs with the counts of the contracts pass; each run's
+    /// receipt, records, counts and self-check are checks of their own,
+    /// beside the count of runs and the identity of the transcripts.
+    #[test]
+    fn three_identical_runs_of_boot_memory_with_the_contract_counts_pass() {
+        let good = boot_transcript(COUNTS, 0);
+        let checks = judge_boot_memory(&[good.as_slice(); 3], Some(0x10_0000));
+        assert_eq!(failed(&checks), Vec::<&str>::new());
+        let mut names = Vec::new();
+        for n in 1..=3 {
+            for check in [
+                "receipt",
+                "transcript",
+                "memory counts",
+                "table counts",
+                "stack-depth",
+            ] {
+                names.push(format!("run {n} {check}"));
+            }
+        }
+        names.extend(["runs".to_string(), "identical transcripts".to_string()]);
+        let got: Vec<&str> = checks.iter().map(|check| check.name.as_str()).collect();
+        assert_eq!(got, names);
+        let boot_memory = case("boot-memory");
+        assert_eq!((boot_memory.runs, boot_memory.machine), (3, Machine::Virt));
+        assert_eq!(case_inputs(boot_memory), Vec::new());
+        // A tree of 1 MiB and 2 KiB has one page more in the lower kernel set
+        // and leaves one less to the direct map.
+        let longer = boot_transcript(
+            [
+                "CASXI_MEMORY tree=1050624 ram=1 reserved=0 boot=2 managed=1 usable=2",
+                "CASXI_TABLES lower=7,0,433 direct=4,62,623",
+            ],
+            0,
+        );
+        assert_eq!(boot_failures(&[longer.as_slice(); 3], Some(0x10_0800)), "");
+    }
+
+    /// A count other than that of the contracts, a failed self-check, a
+    /// swapped record or a run that differs fails, and so do the counts of
+    /// a tree other than the machine's, of an unknown tree or of one that
+    /// leaves no page below the image, and two runs.
+    #[test]
+    fn other_counts_a_failed_check_or_differing_runs_fail() {
+        let good = boot_transcript(COUNTS, 0);
+        let second =
+            |transcript: &[u8]| boot_failures(&[&good, transcript, &good], Some(0x10_0000));
+        for (from, to, check) in [
+            ("tree=1048576", "tree=1048577", "memory counts"),
+            ("reserved=0", "reserved=1", "memory counts"),
+            ("usable=2", "usable=1", "memory counts"),
+            ("lower=7,0,432", "lower=7,0,431", "table counts"),
+            ("lower=7,0,432", "lower=6,0,432", "table counts"),
+            ("direct=4,62,624", "direct=3,62,624", "table counts"),
+            ("direct=4,62,624", "direct=4,63,624", "table counts"),
+        ] {
+            let text = String::from_utf8(good.clone()).unwrap().replace(from, to);
+            assert_eq!(
+                second(text.as_bytes()),
+                format!("run 2 {check}, identical transcripts"),
+                "{to}"
+            );
+        }
+        let failing = boot_transcript(COUNTS, 1);
+        assert_eq!(second(&failing), "run 2 stack-depth, identical transcripts");
+        let swapped = lines(&[
+            b"CASXI_TEST image=boot-memory",
+            COUNTS[1].as_bytes(),
+            COUNTS[0].as_bytes(),
+            b"CASXI_CHECK name=stack-depth failures=0x0000000000000000",
+            b"CASXI_RESUMED",
+        ]);
+        assert_eq!(
+            second(&swapped),
+            "run 2 transcript, run 2 memory counts, run 2 table counts, run 2 stack-depth, identical transcripts"
+        );
+        let counts: Vec<String> = (1..=3)
+            .flat_map(|n| {
+                [
+                    format!("run {n} memory counts"),
+                    format!("run {n} table counts"),
+                ]
+            })
+            .collect();
+        for tree in [Some(0x10_1000), None, Some(0x20_0000), Some(39)] {
+            assert_eq!(
+                boot_failures(&[good.as_slice(); 3], tree),
+                counts.join(", "),
+                "{tree:?}"
+            );
+        }
+        assert_eq!(
+            boot_failures(&[good.as_slice(); 2], Some(0x10_0000)),
+            "runs"
+        );
+    }
 }
 
 /// The cases name each symbol once, the test images once each, and the
@@ -1398,6 +1605,7 @@ fn the_cases_name_their_symbols_images_and_outcome() {
             "invalidate-to-poc",
             "invalidate-tlb-page",
             "code-publication",
+            "boot-memory",
             "kernel-memory"
         ]
     );

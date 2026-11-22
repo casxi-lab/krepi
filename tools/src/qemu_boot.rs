@@ -23,7 +23,10 @@
 //! missing parents: by default `artifacts/qemu-boot/<%Y%m%dT%H%M%SZ>-<12
 //! hex digits>` below the repository root. It holds `build.log`, the
 //! standard error of the build, a directory `<case>-<n>` for each run, which
-//! the runner fills, and the suite receipt `summary.json`, with sorted keys.
+//! the runner fills, for the case `boot-memory` the device tree that QEMU
+//! dumps, `boot-memory-tree.dtb`, with QEMU's standard error in
+//! `boot-memory-tree.log`, and the suite receipt `summary.json`, with sorted
+//! keys.
 //!
 //! The suite runs the cases of [`CASES`] in order, each run in a new QEMU
 //! process with one Cortex-A76 and the host clock, on the runner's machine
@@ -63,6 +66,17 @@
 //! boundary below `0x4040_0000`, the edge of the image that the addresses
 //! of its probes assume.
 //!
+//! The case `boot-memory` boots the test image that writes the counts of the
+//! boot wiring three times. Each transcript must hold the start record, the
+//! two count records, the self-check of the stack with no failure and
+//! `CASXI_RESUMED`, and the three must be identical byte for byte. The
+//! counts must be those that the suite computes from the contracts of the
+//! fdt and page-tables components for the runner's RAM, the link symbols of
+//! the ELF file and the size of the device tree that QEMU builds for the
+//! machine, which QEMU dumps with the machine option `dumpdtb` before the
+//! runs, so that the expectation does not rest on the parse under test. A
+//! dump that fails ends the case as an error.
+//!
 //! The suite exits with 0 for `PASS`, 1 for `FAIL`, 2 for `ERROR`, such as
 //! a failed build or a run that could not start, and for a usage error, 130
 //! for `INTERRUPTED` and 120 when it cannot write its own output, by the
@@ -86,6 +100,7 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::AtomicI32;
+use std::time::{Duration, Instant};
 
 /// The bare-metal target of the kernel images.
 pub const TARGET: &str = "aarch64-unknown-none-softfloat";
@@ -449,6 +464,11 @@ pub enum Judgment {
     /// the edge of its image: `__text_start` at `0x4020_0000` and
     /// `__image_end` on a page boundary below `0x4040_0000`.
     KernelMemory(&'static [Exception], End),
+    /// The records of the test image of the boot memory: its two count
+    /// records, equal to the counts that the contracts give for the tree of
+    /// the machine, the runner's RAM and the link symbols of the image, then
+    /// the end; and the runs identical.
+    BootMemory(End),
 }
 
 /// One case of the suite.
@@ -469,7 +489,7 @@ pub struct Case {
 }
 
 /// The cases of the suite, in the order in which it runs them.
-pub const CASES: [Case; 13] = [
+pub const CASES: [Case; 14] = [
     Case {
         name: CASE,
         criterion: CRITERION,
@@ -616,6 +636,14 @@ pub const CASES: [Case; 13] = [
         judgment: Judgment::Records(&[], End::Resumed(&["published-code-runs"])),
     },
     Case {
+        name: "boot-memory",
+        criterion: "Three cold boots of the test image that runs the boot wiring of the board give identical transcripts, whose count records hold the size of the device tree that QEMU dumps for the machine, one RAM bank, no firmware reservation, two spans of boot storage, one managed bank and two usable ranges, and the tables, blocks and pages that the page-tables contract gives for the lower kernel set and the direct map of the image and the tree, and whose self-check holds that the stack stayed within 48 KiB",
+        image: Image::Test("boot-memory"),
+        machine: Machine::Virt,
+        runs: RUNS,
+        judgment: Judgment::BootMemory(End::Resumed(&["stack-depth"])),
+    },
+    Case {
         name: "kernel-memory",
         criterion: "With the kernel tables of the boot wiring and the MMU on, the six edge pages of the usable ranges of the boot memory map read and write through the direct map, and the last page of the tree and the first page of the image are not mapped there; a write to read-only data, a branch into the direct map and a read of the guard page below the stack fault, each with the syndrome and return address of the Arm Architecture Reference Manual, and resume; the registers of the PL011 translate as Device-nGnRnE memory; the image checks each of the twelve",
         image: Image::Test("kernel-memory"),
@@ -728,6 +756,82 @@ fn check_edges(symbols: &[(String, u64)]) -> Result<(), Failure> {
             )
         },
     )
+}
+
+/// The link symbols of the parts of an image, in the order of its link
+/// script.
+const LINK_SYMBOLS: [&str; 7] = [
+    "__text_start",
+    "__text_end",
+    "__rodata_start",
+    "__rodata_end",
+    "__stack_guard",
+    "__stack_bottom",
+    "__image_end",
+];
+/// Where QEMU's loader places the device tree: the start of the RAM of
+/// QEMU virt.
+const TREE_BASE: u64 = 0x4000_0000;
+/// The end of the 128 MiB of RAM that the runner gives QEMU virt.
+const RAM_END: u64 = 0x4800_0000;
+/// The largest device tree that the board takes, `MAX_BLOB_SIZE` of the
+/// fdt component: 2 MiB, the room below the image.
+const MAX_TREE: u64 = 0x20_0000;
+/// The pages that the lower kernel set maps as Device memory: the register
+/// frame of the PL011, and the distributor and the CPU interface of the
+/// GICv2, 64 KiB each.
+const DEVICE_PAGES: u64 = 1 + 32;
+/// The count records of the test image of the boot memory.
+const COUNT_RECORDS: [&str; 2] = ["CASXI_MEMORY", "CASXI_TABLES"];
+
+/// The count records that the test image of the boot memory must write for
+/// a device tree of `tree` bytes and an image with the link symbols of
+/// `symbols`, by the boot memory map of the fdt contract and the table pool
+/// and the direct map of the page-tables contract. The map holds the
+/// runner's one RAM bank, no firmware reservation, the image and then the
+/// tree as boot storage, one managed bank and two usable ranges: from the
+/// end `T` of the tree's pages to the image, and from the end `E` of the
+/// image to the end of RAM. The lower kernel set uses 6 tables and one for
+/// each 2 MiB block that the image touches, and maps no block and the pages
+/// of the image but its guard page, of the tree and of the devices. The
+/// direct map uses the root, the level 2 table of the RAM and the level 3
+/// tables of the blocks of `T` and of `E`, and maps the blocks from the
+/// first 2 MiB boundary `B` above `E` to the end of RAM and the pages of
+/// `[T, 0x4020_0000)` and `[E, B)`.
+fn boot_counts(symbols: &[(String, u64)], tree: u64) -> Result<[String; 2], Failure> {
+    check_edges(symbols)?;
+    let mut at = [0; 7];
+    for (slot, name) in at.iter_mut().zip(LINK_SYMBOLS) {
+        *slot = address(symbols, name)?;
+    }
+    let [text, text_end, rodata, rodata_end, guard, stack, end] = at;
+    require(
+        at.windows(2).all(|pair| pair[0] <= pair[1])
+            && guard < stack
+            && at.iter().all(|bound| bound.is_multiple_of(PAGE)),
+        || format!("the link symbols {at:x?} do not bound pages in the order of the link script"),
+    )?;
+    let tree_end = TREE_BASE + tree.next_multiple_of(PAGE);
+    require((40..=MAX_TREE).contains(&tree) && tree_end < text, || {
+        format!("a tree of {tree} bytes leaves no usable page below the image")
+    })?;
+    let pages = |start: u64, end: u64| (end - start) / PAGE;
+    let block = end.next_multiple_of(BLOCK);
+    let lower_tables = 6 + (text % BLOCK + end - text).div_ceil(BLOCK);
+    let lower_pages = pages(text, text_end)
+        + pages(rodata, rodata_end)
+        + pages(rodata_end, guard)
+        + pages(stack, end)
+        + pages(TREE_BASE, tree_end)
+        + DEVICE_PAGES;
+    let direct_blocks = (RAM_END - block) / BLOCK;
+    let direct_pages = pages(tree_end, text) + pages(end, block);
+    Ok([
+        format!("CASXI_MEMORY tree={tree} ram=1 reserved=0 boot=2 managed=1 usable=2"),
+        format!(
+            "CASXI_TABLES lower={lower_tables},0,{lower_pages} direct=4,{direct_blocks},{direct_pages}"
+        ),
+    ])
 }
 
 /// The common checks of the receipt of one run of an image with the digest
@@ -937,24 +1041,28 @@ fn record_lines(transcript: &[u8]) -> Result<Vec<&[u8]>, Failure> {
     Ok(lines)
 }
 
-/// The exception records and the self-check records of a transcript, in
-/// order, without their CR LF.
+/// The count records, the exception records and the self-check records of
+/// a transcript, in order, without their CR LF.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Records<'t> {
+    pub counts: Vec<&'t [u8]>,
     pub exceptions: Vec<&'t [u8]>,
     pub checks: Vec<&'t [u8]>,
 }
 
-/// The exception records and the self-check records of the transcript of a
-/// test image `image` that a case judges with `exceptions` and `end`: the
-/// start record `CASXI_TEST image=<image>`; for each expected exception an
-/// empty line and an exception record; then, for [`End::Halted`],
-/// `CASXI_HALTED`, for [`End::Resumed`] one `CASXI_CHECK` record of each
-/// self-check in order and `CASXI_RESUMED`, or for [`End::Silent`] those
-/// self-check records alone; and nothing else.
+/// The count records, the exception records and the self-check records of
+/// the transcript of a test image `image` that a case judges with the count
+/// records `counts`, `exceptions` and `end`: the start record `CASXI_TEST
+/// image=<image>`; a record of each name of `counts`, which begins with the
+/// name and a space; for each expected exception an empty line and an
+/// exception record; then, for [`End::Halted`], `CASXI_HALTED`, for
+/// [`End::Resumed`] one `CASXI_CHECK` record of each self-check in order and
+/// `CASXI_RESUMED`, or for [`End::Silent`] those self-check records alone;
+/// and nothing else.
 pub fn check_records<'t>(
     transcript: &'t [u8],
     image: &str,
+    counts: &[&str],
     exceptions: &[Exception],
     end: End,
 ) -> Result<Records<'t>, Failure> {
@@ -965,7 +1073,8 @@ pub fn check_records<'t>(
         End::Resumed(checks) => (checks, Some(b"CASXI_RESUMED")),
         End::Silent(checks) => (checks, None),
     };
-    let expected = 1 + 2 * exceptions.len() + checks.len() + usize::from(last_record.is_some());
+    let expected =
+        1 + counts.len() + 2 * exceptions.len() + checks.len() + usize::from(last_record.is_some());
     require(lines.len() == expected, || {
         format!(
             "the transcript has {} records, not {expected}: {}",
@@ -979,8 +1088,14 @@ pub fn check_records<'t>(
             lines[0].escape_ascii()
         )
     })?;
+    let (count_lines, lines) = lines[1..].split_at(counts.len());
+    for (line, name) in count_lines.iter().zip(counts) {
+        require(line.starts_with(format!("{name} ").as_bytes()), || {
+            format!("the record {} is not {name}", line.escape_ascii())
+        })?;
+    }
     let mut records = Vec::new();
-    for pair in lines[1..1 + 2 * exceptions.len()].chunks(2) {
+    for pair in lines[..2 * exceptions.len()].chunks(2) {
         require(
             pair[0].is_empty() && pair[1].starts_with(b"CASXI_EXCEPTION "),
             || {
@@ -993,7 +1108,7 @@ pub fn check_records<'t>(
         )?;
         records.push(pair[1]);
     }
-    let rest = &lines[1 + 2 * exceptions.len()..];
+    let rest = &lines[2 * exceptions.len()..];
     let check_lines = &rest[..checks.len()];
     for (line, name) in check_lines.iter().zip(checks) {
         let prefix = format!("CASXI_CHECK name={name} failures=0x");
@@ -1012,29 +1127,48 @@ pub fn check_records<'t>(
         })?;
     }
     Ok(Records {
+        counts: count_lines.to_vec(),
         exceptions: records,
         checks: check_lines.to_vec(),
     })
 }
 
 /// The checks of the runs of the test image of `case`, an image with the
-/// digest `image_sha256` and `symbols`: for each run its receipt on the
-/// machine of the case, without input; the records of its transcript; each
+/// digest `image_sha256` and `symbols` on a machine whose device tree has
+/// `tree` bytes: for each run its receipt on the machine of the case,
+/// without input; the records of its transcript; for the case of the boot
+/// memory each count record, which must be that of [`boot_counts`]; each
 /// expected exception record; and each self-check, which passes when the
-/// image reports no failure; then the count of runs, and for the case of
-/// kernel memory the edge of its image. A case of the default image is
-/// judged by [`judge`].
+/// image reports no failure; then the count of runs, for the case of kernel
+/// memory the edge of its image, and for the case of the boot memory the
+/// identity of the transcripts. A case of the default image is judged by
+/// [`judge`].
 pub fn judge_records(
     case: &Case,
     image_sha256: &str,
     symbols: &[(String, u64)],
+    tree: Option<u64>,
     runs: &[Run],
 ) -> Vec<Check> {
-    let (exceptions, end) = match case.judgment {
+    let (exceptions, end, counts) = match case.judgment {
         Judgment::ColdBootEcho => return judge(image_sha256, runs),
         Judgment::Records(exceptions, end) | Judgment::KernelMemory(exceptions, end) => {
-            (exceptions, end)
+            (exceptions, end, None)
         }
+        Judgment::BootMemory(end) => {
+            let unknown = || Failure::new("the size of the tree of the machine is not known");
+            let expected = tree.ok_or_else(unknown);
+            (
+                &[][..],
+                end,
+                Some(expected.and_then(|tree| boot_counts(symbols, tree))),
+            )
+        }
+    };
+    let names: &[&str] = if counts.is_some() {
+        &COUNT_RECORDS
+    } else {
+        &[]
     };
     let (image, machine) = (case.image.target(), case.machine);
     let mut checks = Vec::new();
@@ -1047,12 +1181,28 @@ pub fn judge_records(
                 })
             });
         checks.push(Check::of(format!("run {number} receipt"), receipt));
-        let parsed = check_records(&run.transcript, image, exceptions, end);
+        let parsed = check_records(&run.transcript, image, names, exceptions, end);
         let missing = || Failure::new("the transcript does not have the record");
         checks.push(Check::of(
             format!("run {number} transcript"),
             parsed.as_ref().map(|_| ()).map_err(Clone::clone),
         ));
+        if let Some(expected) = &counts {
+            for (position, name) in ["memory counts", "table counts"].into_iter().enumerate() {
+                let result = expected.clone().and_then(|lines| {
+                    let records = parsed.as_ref().map_err(|_| missing())?;
+                    let line = records.counts[position];
+                    require(line == lines[position].as_bytes(), || {
+                        format!(
+                            "the image reports {}, not {}",
+                            line.escape_ascii(),
+                            lines[position]
+                        )
+                    })
+                });
+                checks.push(Check::of(format!("run {number} {name}"), result));
+            }
+        }
         for (position, expected) in exceptions.iter().enumerate() {
             let result = parsed
                 .as_ref()
@@ -1084,8 +1234,17 @@ pub fn judge_records(
             format!("{} runs, not {expected}", runs.len())
         }),
     ));
-    if let Judgment::KernelMemory(..) = case.judgment {
-        checks.push(Check::of("image edges", check_edges(symbols)));
+    match case.judgment {
+        Judgment::KernelMemory(..) => checks.push(Check::of("image edges", check_edges(symbols))),
+        Judgment::BootMemory(_) => checks.push(Check::of(
+            "identical transcripts",
+            require(
+                runs.windows(2)
+                    .all(|pair| pair[0].transcript == pair[1].transcript),
+                || "the transcripts of the runs differ".to_string(),
+            ),
+        )),
+        Judgment::ColdBootEcho | Judgment::Records(..) => {}
     }
     checks
 }
@@ -1273,6 +1432,9 @@ pub struct Subject<'s> {
     pub image: &'s Path,
     pub sha256: &'s str,
     pub symbols: &'s [(String, u64)],
+    /// The size of the device tree of the machine of the case, which the
+    /// case of the boot memory needs.
+    pub tree: Option<u64>,
 }
 
 /// The input of each run of `case`: the challenge after the ready record
@@ -1284,7 +1446,7 @@ pub fn case_inputs(case: &Case) -> Vec<Input> {
             after: READY.to_vec(),
             bytes: CHALLENGE.to_vec(),
         }],
-        Judgment::Records(..) | Judgment::KernelMemory(..) => Vec::new(),
+        Judgment::Records(..) | Judgment::KernelMemory(..) | Judgment::BootMemory(_) => Vec::new(),
     }
 }
 
@@ -1356,7 +1518,7 @@ pub fn run_case<'a>(
             break;
         }
     }
-    let checks = judge_records(case, subject.sha256, subject.symbols, &runs);
+    let checks = judge_records(case, subject.sha256, subject.symbols, subject.tree, &runs);
     let outcome = stopped.unwrap_or(if checks.iter().all(|check| check.failure.is_none()) {
         Outcome::Pass
     } else {
@@ -1384,18 +1546,81 @@ pub fn suite_outcome(outcomes: &[Outcome]) -> Outcome {
         .unwrap_or(Outcome::Pass)
 }
 
+/// The size of the device tree that QEMU builds for the machine of `case`
+/// with the image `image`: the QEMU `qemu`, run with the arguments of a run
+/// of the case and with `dumpdtb=<directory>/<case>-tree.dtb` added to the
+/// machine, writes the tree into that file and exits, its standard error in
+/// `<case>-tree.log`; the size is the `totalsize` of the header of the tree.
+/// The dump is no run of the case and has no receipt. QEMU must exit with 0
+/// within [`RUN_WINDOW`] seconds and write a tree, or the dump fails.
+pub fn machine_tree(
+    case: &Case,
+    image: &Path,
+    qemu: Option<&Path>,
+    directory: &Path,
+) -> Result<u64, Failure> {
+    let file = directory.join(format!("{}-tree.dtb", case.name));
+    let log = directory.join(format!("{}-tree.log", case.name));
+    let mut command = crate::qemu::build_command_on(image, qemu, Clock::Host, case.machine)?;
+    let dump = format!("{},dumpdtb={}", case.machine.option(), file.display());
+    for argument in command
+        .iter_mut()
+        .filter(|arg| *arg == case.machine.option())
+    {
+        argument.clone_from(&dump);
+    }
+    let stderr = std::fs::File::create_new(&log).map_err(|error| file_error(&log, error))?;
+    let mut child = Command::new(&command[0])
+        .args(&command[1..])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(stderr)
+        .spawn()
+        .map_err(|error| file_error(Path::new(&command[0]), error))?;
+    let deadline = Instant::now() + Duration::from_secs_f64(RUN_WINDOW);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(Failure::new("QEMU did not exit after the dump of the tree"));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    require(status.success(), || {
+        format!(
+            "the dump of the tree failed with {status}; see {}",
+            log.display()
+        )
+    })?;
+    let tree = std::fs::read(&file).map_err(|error| file_error(&file, error))?;
+    require(
+        tree.len() >= 8 && tree[..4] == [0xd0, 0x0d, 0xfe, 0xed],
+        || format!("{} holds no device tree", file.display()),
+    )?;
+    let size = u64::from(u32::from_be_bytes([tree[4], tree[5], tree[6], tree[7]]));
+    require(size <= tree.len() as u64, || {
+        format!("the tree of {size} bytes is longer than its dump")
+    })?;
+    Ok(size)
+}
+
 /// A lookup of a symbol in an ELF file.
 type Lookup = fn(&Path, &str) -> Result<u64, Failure>;
 
 /// The symbols that `case` needs from its image, read from the ELF file
 /// `image`: those of its exception records, each in its section or
-/// absolute, and for the case of kernel memory the link symbols of the edge
-/// of the image, which may end their section.
+/// absolute, and the link symbols of the edge of the image for the case of
+/// kernel memory and of all its parts for the case of the boot memory, which
+/// may end their section.
 fn case_symbols(case: &Case, image: &Path) -> Result<Vec<(String, u64)>, Failure> {
     let (sites, bounds) = match case.judgment {
         Judgment::ColdBootEcho => (Vec::new(), Vec::new()),
         Judgment::Records(exceptions, _) => (symbols_of(exceptions), Vec::new()),
         Judgment::KernelMemory(exceptions, _) => (symbols_of(exceptions), EDGE_SYMBOLS.to_vec()),
+        Judgment::BootMemory(_) => (Vec::new(), LINK_SYMBOLS.to_vec()),
     };
     let lookups: [(Vec<&str>, Lookup); 2] =
         [(sites, elf::symbol_address), (bounds, elf::bound_address)];
@@ -1487,7 +1712,19 @@ fn run(root: &Path, args: &[String], timing: &Timing, streams: &mut Streams) -> 
                     .find(|(target, _)| *target == case.image.target())
                     .expect("every image of a case is built");
                 let mut lines = Vec::new();
-                let (entry, outcome) = match case_symbols(case, &image.path) {
+                let facts = case_symbols(case, &image.path).and_then(|symbols| {
+                    let tree = match case.judgment {
+                        Judgment::BootMemory(_) => Some(machine_tree(
+                            case,
+                            &image.path,
+                            options.qemu.as_deref(),
+                            &output,
+                        )?),
+                        _ => None,
+                    };
+                    Ok((symbols, tree))
+                });
+                let (entry, outcome) = match facts {
                     Err(Failure(error)) => {
                         lines.push(format!("{}: {}", case.name, render(&error)));
                         let entry = json!({
@@ -1498,12 +1735,13 @@ fn run(root: &Path, args: &[String], timing: &Timing, streams: &mut Streams) -> 
                         });
                         (entry, Outcome::Error)
                     }
-                    Ok(symbols) => run_case(
+                    Ok((symbols, tree)) => run_case(
                         case,
                         Subject {
                             image: &image.path,
                             sha256: &image.sha256,
                             symbols: &symbols,
+                            tree,
                         },
                         options.qemu.as_deref(),
                         &output,
