@@ -403,17 +403,36 @@ fn read_fixture(source: &Path) -> Result<Vec<u8>, Failure> {
     Ok(data)
 }
 
-/// The address of `symbol` in `source`, which must be allocated.
+/// The section index of an absolute symbol, `SHN_ABS`, whose value is an
+/// address of no section.
+const SHN_ABS: u64 = 0xfff1;
+
+/// The address of `symbol` in `source`, which must be allocated or
+/// absolute.
 pub fn symbol_address(source: &Path, symbol: &str) -> Result<u64, Failure> {
-    let patched = patch_symbol(source, None, symbol, 0, 0, 0)?;
-    patched
+    locate(source, symbol, false)
+}
+
+/// The address of `symbol` in `source` as a bound of a part of the image,
+/// such as a link symbol that ends the text: as [`symbol_address`], but the
+/// address may also be the end of the symbol's allocated section.
+pub fn bound_address(source: &Path, symbol: &str) -> Result<u64, Failure> {
+    locate(source, symbol, true)
+}
+
+/// The address of `symbol` in `source`: absolute, or in its allocated
+/// section or, with `end`, at the end of that section.
+fn locate(source: &Path, symbol: &str, end: bool) -> Result<u64, Failure> {
+    let located = patch_or_locate(source, None, symbol, [0; 3], end)?;
+    located
         .get("address")
         .and_then(Value::as_u64)
         .ok_or_else(|| Failure::new("Missing or duplicated target symbol"))
 }
 
 /// Patches one checked file-backed `u32` at `symbol` in a fresh ELF fixture,
-/// or, with no destination, only locates the symbol.
+/// or, with no destination, only locates the symbol, which may then be
+/// absolute.
 pub fn patch_symbol(
     source: &Path,
     destination: Option<&Path>,
@@ -421,6 +440,20 @@ pub fn patch_symbol(
     expected: u32,
     replacement: u32,
     permission: u32,
+) -> Result<Value, Failure> {
+    let words = [expected, replacement, permission];
+    patch_or_locate(source, destination, symbol, words, false)
+}
+
+/// [`patch_symbol`] with the expected word, its replacement and the
+/// permission in `words`, whose lookup also admits, with `end`, the end of
+/// the symbol's section.
+fn patch_or_locate(
+    source: &Path,
+    destination: Option<&Path>,
+    symbol: &str,
+    [expected, replacement, permission]: [u32; 3],
+    end: bool,
 ) -> Result<Value, Failure> {
     require(destination.is_none_or(|d| !d.exists()), || {
         "Negative ELF destination already exists".to_string()
@@ -487,7 +520,7 @@ pub fn patch_symbol(
     let names = &data[strings[4] as usize..(strings[4] + strings[5]) as usize];
     let mut target = symbol.as_bytes().to_vec();
     target.push(0);
-    let mut matches: Vec<([u64; 10], u64)> = Vec::new();
+    let mut matches: Vec<(u64, u64)> = Vec::new();
     let mut offset = symtab[4];
     while offset < symtab[4] + symtab[5] {
         let base = offset as usize;
@@ -499,26 +532,35 @@ pub fn patch_symbol(
             "ELF symbol name is out of bounds".to_string()
         })?;
         if names[name..].starts_with(&target) {
+            // Only a lookup takes an absolute symbol; a patch needs a section.
+            let absolute = section_index == SHN_ABS && destination.is_none();
             require(
-                section_index > 0 && section_index < shnum && (size == 0 || size >= 4),
+                absolute
+                    || (section_index > 0 && section_index < shnum && (size == 0 || size >= 4)),
                 || "Undefined or short target symbol".to_string(),
             )?;
-            matches.push((sections[section_index as usize], value));
+            matches.push((section_index, value));
         }
     }
     require(matches.len() == 1, || {
         "Missing or duplicated target symbol".to_string()
     })?;
-    let (section, address) = matches[0];
+    let (section_index, address) = matches[0];
     let Some(destination) = destination else {
         require(
-            section[2] & 2 != 0
-                && section[3] <= address
-                && address < section[3].wrapping_add(section[5]),
+            section_index == SHN_ABS || {
+                let section = sections[section_index as usize];
+                let limit = section[3].wrapping_add(section[5]);
+                section[2] & 2 != 0
+                    && section[3] <= address
+                    && (address < limit || (end && address == limit))
+            },
             || "Symbol is outside its allocated section".to_string(),
         )?;
         return Ok(json!({ "address": address }));
     };
+    // The loop admitted only a section index below `shnum` for a patch.
+    let section = sections[section_index as usize];
     require(
         address.is_multiple_of(4)
             && address.checked_add(4).is_some()
@@ -962,11 +1004,50 @@ mod tests {
             message(symbol_address(&outside, "data_obj")),
             "Symbol is outside its allocated section"
         );
+        // As a bound, a symbol may lie at the end of its section, not past it.
+        assert_eq!(bound_address(&outside, "data_obj"), Ok(TEXT_ADDR + 0x100));
+        assert_eq!(bound_address(&path, "kernel_main"), Ok(TEXT_ADDR));
+        let past = scratch.write(
+            "past.elf",
+            &mutated(SYMTAB_OFF + 4 * 24 + 8, &(TEXT_ADDR + 0x101).to_le_bytes()),
+        );
+        assert_eq!(
+            message(bound_address(&past, "data_obj")),
+            "Symbol is outside its allocated section"
+        );
         let short = scratch.write("short.elf", &synthetic_elf()[..63]);
         assert_eq!(
             message(symbol_address(&short, "kernel_main")),
             "ELF outside the fixture size bound"
         );
+    }
+
+    #[test]
+    fn an_absolute_symbol_is_located_but_never_patched() {
+        let scratch = Scratch::new("elf-absolute");
+        // `data_obj` gets the section index `index` and an address of the
+        // direct map, which no section holds.
+        let with_index = |name: &str, index: u16| {
+            let mut image = mutated(SYMTAB_OFF + 4 * 24 + 6, &index.to_le_bytes());
+            let address = 0xffff_ff80_47ff_e000u64;
+            put(&mut image, SYMTAB_OFF + 4 * 24 + 8, address.to_le_bytes());
+            scratch.write(name, &image)
+        };
+        let absolute = with_index("absolute.elf", 0xfff1);
+        assert_eq!(
+            symbol_address(&absolute, "data_obj"),
+            Ok(0xffff_ff80_47ff_e000)
+        );
+        let patched = scratch.path("patched.elf");
+        let patch = patch_symbol(&absolute, Some(&patched), "data_obj", 0, 1, 4);
+        let refused = "Undefined or short target symbol";
+        assert_eq!(message(patch), refused);
+        assert!(!patched.exists());
+        // An undefined symbol and one of another special index stay refused.
+        for index in [0u16, 0xfff2] {
+            let other = with_index(&format!("index-{index}.elf"), index);
+            assert_eq!(message(symbol_address(&other, "data_obj")), refused);
+        }
     }
 
     #[test]

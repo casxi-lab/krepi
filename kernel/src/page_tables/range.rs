@@ -1,4 +1,5 @@
-//! Physical ranges: the checked constructor and the comparisons.
+//! Physical ranges: the checked constructor, the bounds and the
+//! comparisons.
 //!
 //! Feature: krepi.kernel.kernel-memory
 
@@ -15,6 +16,18 @@ impl PhysRange {
             Some(_) => Ok(PhysRange { start, len }),
             None => Err(OwnershipError::AddressOverflow),
         }
+    }
+
+    /// The first address.
+    // Called by the zeroing of frames of the architecture crate.
+    pub fn start(self) -> u64 {
+        self.start
+    }
+
+    /// The number of bytes, which is not 0.
+    // Called by the zeroing of frames of the architecture crate.
+    pub fn size(self) -> u64 {
+        self.len
     }
 
     /// The exclusive end `start + len`, which fits in 64 bits.

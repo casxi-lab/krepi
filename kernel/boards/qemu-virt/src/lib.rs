@@ -1,18 +1,24 @@
 //! The QEMU virt board support of the krepi kernel: the PL011 serial
 //! console, the exception record, the wiring of the interrupt controller
-//! and the timer, and the platform parameters of the machine.
+//! and the timer, the boot wiring of memory, which builds the boot memory
+//! map and the kernel tables and turns the MMU on, and the platform
+//! parameters of the machine.
 //!
 //! Feature: krepi.platform.qemu-virt-boot
 //!
 //! The addresses and values here are those of the QEMU virt machine with one
 //! Cortex-A76. They are not Raspberry Pi 5 values and are never used for it.
 //!
-//! The console logic in [`console`] and the exception record in [`fault`]
-//! are plain code that the host tests run. The PL011 driver, [`uart`], and
-//! the interrupt wiring, `irq`, are compiled only for the bare-metal target.
+//! The console logic in [`console`], the exception record in [`fault`] and
+//! the parts of the boot wiring in [`boot_memory`] that compute the boot
+//! memory map, the layout and the counts of the plans are plain code that
+//! the host tests run. The PL011 driver, [`uart`], the interrupt wiring,
+//! `irq`, and the boot wiring itself, `boot_memory::wire`, are compiled only
+//! for the bare-metal target.
 
 #![cfg_attr(not(test), no_std)]
 
+pub mod boot_memory;
 pub mod console;
 pub mod fault;
 #[cfg(all(target_arch = "aarch64", target_os = "none"))]

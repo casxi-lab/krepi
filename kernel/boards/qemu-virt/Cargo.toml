@@ -19,6 +19,7 @@ bench = false
 
 [dependencies]
 krepi-arch = { path = "../../arch" }
+krepi-kernel = { path = "../../" }
 
 [lints.rust]
 missing_docs = "warn"

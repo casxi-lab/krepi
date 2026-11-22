@@ -491,7 +491,23 @@
       "contract": "docs/domains/memory/page-tables/contract.md"
     },
     {
+      "item": "kernel/arch/src/mmu.rs#Pool::new",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
       "item": "kernel/arch/src/mmu.rs#enable",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
+      "item": "kernel/arch/src/mmu.rs#physical_width",
       "kind": "unsafe",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
@@ -587,12 +603,28 @@
       "contract": "docs/domains/boot-platform/boot/contract.md"
     },
     {
+      "item": "kernel/boards/qemu-virt/src/boot_memory.rs#wire",
+      "kind": "unsafe",
+      "verified_state": "writes",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
       "item": "kernel/boards/qemu-virt/src/irq.rs#GIC",
       "kind": "unsafe",
       "verified_state": "neither",
       "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
       "stage": "0.2",
       "contract": "docs/domains/boot-platform/boot/contract.md"
+    },
+    {
+      "item": "kernel/boards/qemu-virt/src/main.rs#image::boot_memory",
+      "kind": "unsafe",
+      "verified_state": "neither",
+      "carrier": "The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/page-tables/contract.md"
     },
     {
       "item": "kernel/boards/qemu-virt/src/main.rs#image::device_tree",
@@ -808,6 +840,22 @@
       "verified_state": null,
       "carrier": "The refinement proof of the target page-tables",
       "stage": "0.1",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
+      "item": "kernel/src/page_tables/range.rs#PhysRange::size",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
+      "item": "kernel/src/page_tables/range.rs#PhysRange::start",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
       "contract": "docs/domains/memory/page-tables/contract.md"
     },
     {

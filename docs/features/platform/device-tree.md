@@ -1,7 +1,7 @@
 ---
 id: krepi.platform.device-tree
 title: Device tree
-status: partial
+status: implemented
 modules:
   - kernel/src/fdt.rs
   - kernel/src/fdt/cpus.rs
@@ -15,6 +15,8 @@ modules:
   - kernel/src/fdt/plan/available.rs
   - kernel/src/fdt/span.rs
   - kernel/src/fdt/translation.rs
+  - kernel/boards/qemu-virt/src/boot_memory.rs
+  - kernel/boards/qemu-virt/src/main.rs
 tests:
   - kernel/src/fdt/tests.rs
   - kernel/src/fdt/tests/cpus.rs
@@ -34,7 +36,8 @@ tests:
   - kernel/src/fdt/pi5/tests/platform.rs
   - kernel/src/fdt/pi5/tests/selection.rs
   - kernel/src/fdt/plan/tests.rs
-suites: none
+suites:
+  - qemu-boot
 theorems: none
 related:
   - krepi.platform.qemu-virt-boot
@@ -58,9 +61,12 @@ kernel at EL1 and runs on the boot CPU before the secondary CPUs start. It
 reads byte slices and values, never an address, and it allocates, maps and
 changes nothing. It does not apply overlays, resolve aliases or `phandle`
 references, or read the bindings of the Pi 5 devices, which the components
-that use them read through its node access. The feature is partial: no
-board calls the module yet, so the QEMU virt default image reads no device
-tree, and the Pi 5 board crate is planned.
+that use them read through its node access. On QEMU virt the boot wiring
+of the board reads the tree that QEMU's loader places at the start of RAM
+and builds the boot memory map from it, with the image and the tree as boot
+storage, in the default image and in the test images of the memory cases;
+the Pi 5 board crate, which reads the hand-over tree of the firmware, is
+planned.
 
 ## Interface
 
@@ -95,6 +101,12 @@ tree, and the Pi 5 board crate is planned.
   which `Fdt::nodes`, `Fdt::reservations`, `Node::reg` and `Reg::new`, and
   `MemoryPlan::available_ranges` return, give their items through an
   inherent `next(&mut self)`, which never fails.
+- **Boot wiring.** On QEMU virt, `image::device_tree` of the default image
+  forms the slice of the tree at `0x4000_0000`, first of its 40-byte header
+  and then of its `totalsize`, at most 2 MiB, and
+  `krepi_qemu_virt::boot_memory::wire` parses it and builds the boot memory
+  map with `Fdt::discover_memory` and `MemoryPlan::all_ram`, the image and
+  then the tree as boot storage.
 - **Host tests.** `cargo test --locked --manifest-path kernel/Cargo.toml
   -p krepi-kernel` runs the tests of the module. With
   `KREPI_VECTOR_RESULTS` set to a directory, the results test writes the
@@ -269,6 +281,12 @@ reservations, and, with the tree at the start of RAM and the image at
 - `kernel/src/fdt/plan.rs` and `kernel/src/fdt/plan/available.rs`:
   `MemoryPlan` with its entries and queries, and the `next` of
   `AvailableRanges`.
+- `kernel/boards/qemu-virt/src/main.rs`: `image::device_tree`, the slice of
+  the tree that QEMU's loader places at the start of RAM.
+- `kernel/boards/qemu-virt/src/boot_memory.rs`: the parse of the tree and
+  the boot memory map of the boot wiring, `memory_plan` with the boot
+  storage of the image and the tree, written once into a static of the
+  board.
 
 ## Verification
 
@@ -287,8 +305,21 @@ reservations, and, with the tree at the start of RAM and the image at
   the two compile-fail cases below `kernel/compile-fail/`: a tree built
   without the parse, which the private fields refuse, and a byte of the
   input written while a tree lives, which the borrow refuses.
-- **QEMU and board.** None: no board calls the module yet, so no suite
-  covers the feature.
+- **QEMU and board.** The case `boot-memory` of the QEMU boot suite, which
+  `cargo xtask qemu-boot` runs after the check in the `check` workflow of
+  CI and the suite `qemu-boot` of `cargo xtask suite` runs from the images
+  of the image job, boots its test image three times in release on QEMU
+  virt, `virt-8.2` with one Cortex-A76 and 128 MiB, each in a new QEMU
+  process with a tree that holds new seeds in `/chosen`. Each transcript
+  holds the `totalsize` of the tree and the numbers of RAM banks, firmware
+  reservations, spans of boot storage, managed banks and usable ranges of
+  the boot memory map, which equal those that the suite computes from the
+  contract, the runner's RAM and the size of the tree that QEMU dumps for
+  the machine, and the three transcripts are identical. The case
+  `kernel-memory` reads and writes the edges of the usable ranges of the
+  map. They establish the parse and the boot memory map of the tree that
+  QEMU hands over, and that the seeds reach no result, on QEMU virt; they
+  establish nothing for a Pi 5 tree, which a board run checks.
 - **Proofs.** None of the code. The proof target `fdt` is registered as
   planned in `verification/targets.json`, with the roots that the
   [proof path](../../domains/boot-platform/fdt/proof.md) names; it is
@@ -298,12 +329,14 @@ reservations, and, with the tree at the start of RAM and the image at
   not yet compared with the replay of the specification.
 - **Unverified.** The hand-over trees of the 1, 2, 4 and 16 GB models,
   which the tests take from the ranges that the contract infers, and the
-  tree that a board hands over at boot.
+  tree that a Raspberry Pi 5 hands over at boot; the trees of a QEMU other
+  than the one that the case runs, whose size the suite takes from that
+  QEMU.
 
 ## Limitations
 
-- No board calls the module yet: QEMU virt reads no device tree, and the
-  Pi 5 board crate is planned.
+- QEMU virt only: the Pi 5 board crate, with its reading of the hand-over
+  tree, is planned.
 - RAM above 16 GiB in all, a tree above 2 MiB and a Pi 5 hand-over tree
   above 128 KiB are not supported.
 - Overlays, aliases, abbreviated paths and `phandle` references are not

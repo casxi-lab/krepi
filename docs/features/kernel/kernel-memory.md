@@ -1,7 +1,7 @@
 ---
 id: krepi.kernel.kernel-memory
 title: Kernel memory
-status: partial
+status: implemented
 modules:
   - kernel/src/page_tables.rs
   - kernel/src/page_tables/boot.rs
@@ -15,6 +15,9 @@ modules:
   - kernel/src/page_tables/range.rs
   - kernel/src/page_tables/walk.rs
   - kernel/src/page_tables/write.rs
+  - kernel/arch/src/mmu.rs
+  - kernel/boards/qemu-virt/src/boot_memory.rs
+  - kernel/boards/qemu-virt/src/main.rs
 tests:
   - kernel/src/page_tables/tests.rs
   - kernel/src/page_tables/tests/banks.rs
@@ -29,7 +32,10 @@ tests:
   - kernel/src/page_tables/tests/plans.rs
   - kernel/src/page_tables/tests/reservations.rs
   - kernel/src/page_tables/tests/results.rs
-suites: none
+  - kernel/arch/src/mmu/tests.rs
+  - kernel/boards/qemu-virt/src/boot_memory/tests.rs
+suites:
+  - qemu-boot
 theorems: none
 related:
   - krepi.platform.device-tree
@@ -50,13 +56,17 @@ the kernel direct map of the usable RAM of the boot memory map; and the
 page ownership table, which gives every managed page one owner and hands
 pages out against receipts. The module writes no table and touches no
 memory: an entry that changes a set checks every rule and returns a write
-plan, which the architecture crate executes, and the caller zeroes pages
-between two entries. It does not manage the address spaces of processes,
-their ASIDs, VM objects or the authority to map device registers, and it
-never changes the direct map after boot. The feature is partial: no board
-builds the tables or turns the MMU on yet, so the QEMU virt default image
-runs with the MMU off, and the adapter `mmu` of `krepi-arch` that executes
-the plans is planned.
+plan, which the adapter `mmu` of the architecture crate `krepi-arch`
+executes, and the caller zeroes pages between two entries, through the
+adapter's `zero_frames`. The adapter also turns the MMU on with the kernel
+tables. On QEMU virt the boot wiring of the board builds the boot memory
+map, the page ownership table of the kernel root and the two kernel table
+sets on the boot CPU and turns the MMU on with the caches off, in the
+default image and in the test images of its QEMU cases. The feature does
+not manage the address spaces of processes, their ASIDs, VM objects or the
+authority to map device registers, it never changes the direct map after
+boot, and it does not turn the caches on or run on the Raspberry Pi 5, whose
+board crate is planned.
 
 ## Interface
 
@@ -64,7 +74,7 @@ the plans is planned.
   [entry table of the contract](../../domains/memory/page-tables/contract.md#entry-points)
   lists with their callers:
   - `direct_address(range)`, the address of a physical range in the direct
-    map, and `PhysRange::new(start, len)`;
+    map, and `PhysRange::new(start, len)`, `start` and `size`;
   - `Tables::<N, UPPER>::new(pool)`, a `const fn` that takes zero storage
     for a set of `N` tables of the lower region, or of the upper one when
     `UPPER` is true;
@@ -95,8 +105,28 @@ the plans is planned.
   steps through an inherent `next(&mut self)`, which never fails. A step is
   `Zero(t)`, `Store(t, i, d)`, `Fence`, `Sync` or `Invalidate(v)`, with a
   table named by its index in the pool.
+- **Adapter.** The items of `krepi_arch::mmu`, the row of the adapter in
+  the entry table:
+  - `apply(pool, plan)`, which executes a whole plan of a set of `N`
+    tables on its pool: any value of the trait `Plan<N>`, which
+    `KernelMapPlan`, `DirectMapPlan`, `ClonePlan` and `WriteSteps`, the
+    steps of a `WritePlan`, implement;
+  - `Pool::<N>::new(base)`, an `unsafe` `const fn` that names the pool of
+    one set at the address at which the executing CPU reaches it;
+  - `enable(lower, direct, bits, caches)`, `unsafe`, which turns the MMU on
+    with the roots of the lower kernel set and of the direct map for the
+    physical address size `bits`;
+  - `zero_frames(range)`, `unsafe`, which zeroes a physical range through
+    the direct map, and `physical_width()`, the physical address size of
+    the CPU from `ID_AA64MMFR0_EL1`, or none.
+- **Boot wiring.** `krepi_qemu_virt::boot_memory::wire(tree)`, `unsafe`,
+  which the QEMU virt images call once on the boot CPU with the MMU off and
+  which returns `Wired`: the span of the tree, the link symbols, the
+  physical address size, the counts of the two plans and the boot memory
+  map.
 - **Host tests.** `cargo test --locked --manifest-path kernel/Cargo.toml
-  -p krepi-kernel` runs the tests of the module. With
+  -p krepi-kernel` runs the tests of the module, and `-p krepi-arch` and
+  `-p krepi-qemu-virt` those of the adapter and of the boot wiring. With
   `KREPI_VECTOR_RESULTS` set to a directory, the results test writes the
   outputs of the frozen vectors to `memory/page-tables.results` below it
   ([host results](../../formal-verification.md#host-results)).
@@ -127,6 +157,25 @@ the plans is planned.
   valid ends with `Sync`; an unmap stores the invalid entry and then
   invalidates the address; a plan for the kernel tables writes only invalid
   entries.
+- **Execution.** `apply` carries out the steps of a plan in order, each
+  before it asks for the next: it zeroes a new table and stores a descriptor
+  with volatile stores of 8 bytes, executes `DMB ISHST` for `Fence`,
+  `DSB ISH` and `ISB` for `Sync`, and invalidates the TLB entries of a page
+  in the inner-shareable domain for `Invalidate`. `enable` invalidates the
+  TLB entries of the executing CPU, writes `MAIR_EL1`, `TCR_EL1` and the
+  TTBRs, and sets `SCTLR_EL1.M` and `WXN`; with the caches off, as on QEMU
+  virt, Normal memory is Non-cacheable and `C` and `I` stay clear.
+  `enable` and `zero_frames` check nothing and do not fail: a size without
+  an encoding in `TCR_EL1` writes no register, and a range outside the
+  window of the direct map is not written.
+- **Boot.** The boot wiring of QEMU virt gives the boot memory map two
+  spans of boot storage, the image and then the tree, builds the page
+  ownership table of the kernel root, maps the text `ReadExecute`, the
+  read-only data and the pages of the tree `ReadOnly`, the data, BSS and
+  stack `ReadWrite` and the registers of the PL011 and the GICv2 `Device`,
+  with the guard page below the stack left out, executes the plans of
+  `kernel_map` and `direct_map` and turns the MMU on, once, before it
+  returns; a failure panics with a static message.
 - **Kernel mappings.** `kernel_map` maps every page of the at most 16
   ranges of the layout at its physical address with the kind of its range,
   and writes no entry of a guard page. It refuses a range off page
@@ -161,7 +210,9 @@ the plans is planned.
   callers keep the rules that the module cannot check: zero storage for
   `Tables::new` and the tables not in use, the token of a set or of the
   page ownership table, a layout of the four kinds of the kernel, and the
-  zeroing before `assign` and before a packet is published.
+  zeroing before `assign` and before a packet is published. The `unsafe`
+  entries of the adapter and of the boot wiring have obligations that their
+  callers keep, which their `# Safety` sections state.
 
 ## Examples
 
@@ -296,6 +347,14 @@ unchanged. The page `0x8000` of the process, mapped into the target as
   changes while a plan lives. Sets, page ownership tables, reservations and
   packets are neither `Clone` nor `Copy`, and the types whose values keep
   an invariant have private fields; compile-fail cases check each rule.
+- The adapter takes a whole plan through a trait of the architecture crate
+  and writes through a `Pool` that only `unsafe` code makes, so `apply` is
+  safe and the core gives no callback. The two kernel sets are statics of
+  the image in a wrapper of the alignment of a table; `Tables` is
+  `#[repr(C)]` with its pool first, so the address of a static is that of
+  its pool, which the board gives `kernel_map`, `direct_map` and
+  `Pool::new`. `Tables::new` makes the statics part of the data of the
+  image, zero but for the record of the tables in use.
 - The page ownership table records one owner for every page in extents and
   exclusion records, and splits an allocation into a choice, the caller's
   zeroing and an assignment, so that no callback runs inside the table and
@@ -351,8 +410,8 @@ unchanged. The page `0x8000` of the process, mapped into the target as
   `direct_address`, `kernel_map` and `direct_map`.
 - `kernel/src/page_tables/encoding.rs`: the bits of each kind, the table
   and block descriptors and the readers of the fields of a descriptor.
-- `kernel/src/page_tables/range.rs`: `PhysRange::new`, `end`, `contains`
-  and `overlaps`.
+- `kernel/src/page_tables/range.rs`: `PhysRange::new`, `start`, `size`,
+  `end`, `contains` and `overlaps`.
 - `kernel/src/page_tables/walk.rs`: the first checks of an entry, the
   check of a pool, the walk of a set, `Tables::new`, `used`, `lookup_page`
   and `lookup_block`.
@@ -376,6 +435,19 @@ unchanged. The page `0x8000` of the process, mapped into the target as
 - `kernel/src/page_tables/ownership/receipts.rs`: `validate`, `release`,
   `publish`, `cancel`, `Reservation::initialized` and the merge of freed
   extents with their neighbours.
+- `kernel/arch/src/mmu.rs`: the adapter, with the trait `Plan` and its
+  implementations, `WriteSteps`, `Pool`, `apply` with the stores, the
+  barriers and the invalidations of the steps, `enable`, `zero_frames`,
+  `physical_width`, and the values of `TCR_EL1`, `MAIR_EL1` and
+  `SCTLR_EL1`.
+- `kernel/boards/qemu-virt/src/boot_memory.rs`: the boot wiring of QEMU
+  virt, `wire`, with the boot memory map, the banks and exclusions of the
+  page ownership table, the layout of the image, the counts of the steps of
+  a plan, and the statics of the two kernel sets, of the map and of the
+  table.
+- `kernel/boards/qemu-virt/src/main.rs`: `image::device_tree`, the slice of
+  the tree at the start of RAM, and `image::boot_memory`, which calls the
+  wiring between the boot records of the default image.
 
 ## Verification
 
@@ -401,8 +473,31 @@ unchanged. The page `0x8000` of the process, mapped into the target as
   refuses; a map into the source of a copy while its plan lives, which the
   borrow refuses; and an upper set given to `kernel_map`, which its type
   refuses.
-- **QEMU and board.** None: no board builds the tables or turns the MMU on
-  yet, so no suite covers the feature.
+- **QEMU and board.** The cases `kernel-memory` and `boot-memory` of the
+  QEMU boot suite, which `cargo xtask qemu-boot` runs after the check in
+  the `check` workflow of CI and the suite `qemu-boot` of
+  `cargo xtask suite` runs from the images of the image job, boot their
+  test images in release on QEMU virt, `virt-8.2` with one Cortex-A76 and
+  128 MiB under TCG, with the kernel tables of the boot wiring and the
+  caches off. `kernel-memory` runs once: five faults, each with its
+  exception class, fault status code, write bit, address and a return
+  address from the ELF file, a translation fault at level 3 for a read of
+  the last page of the tree and of the first page of the image through the
+  direct map and for a read of the guard, a permission fault for a write to
+  the read-only data, and an instruction abort with a permission fault at
+  level 2 for a branch to a page of the direct map; and twelve self-checks,
+  the six edge pages of the usable ranges written, zeroed by `zero_frames`
+  and read back through the direct map, which translates each to its
+  physical address as Normal memory, the five faults, and the `Device`
+  attribute of the console, through which every later record goes.
+  `boot-memory` runs three times, with identical transcripts whose counts
+  of the tables, blocks and pages of the two plans equal those that the
+  suite computes from the contract, the runner's RAM, the link symbols of
+  the ELF file and the device tree that QEMU dumps for the machine. The
+  case `cold-boot-echo` boots the default image with the wiring. They
+  establish that the tables that the plans build translate and check
+  permissions as the contract says on one CPU of QEMU virt; they establish
+  nothing for the caches on, several CPUs or a board.
 - **Proofs.** None of the code. The proof target `page-tables` is
   registered as planned in `verification/targets.json`, with the functions
   of the core rows of the contract's
@@ -413,15 +508,25 @@ unchanged. The page `0x8000` of the process, mapped into the target as
   specification, not the code. The results that the host tests write are
   not yet compared with the replay of the specification.
 - **Unverified.** The bank shapes of the 1, 2, 4 and 16 GB models, which
-  the tests take from the ranges that the fdt contract infers; the
-  execution of the plans, whose adapter is planned; and the translation of
-  the tables by a CPU.
+  the tests take from the ranges that the fdt contract infers; the tables
+  on a Raspberry Pi 5 and with the caches on; the ordering that the
+  barriers give on several CPUs; the panic of `apply` on a step outside its
+  pool and the panics of the boot wiring, which no test takes; and the
+  argument of the `SAFETY` comments of the stores, that no Rust reference
+  reads an entry after a step writes it, which is not shown under either
+  aliasing model of Rust, Stacked Borrows or Tree Borrows: a plan holds a
+  shared reference to its set while `apply` executes it, and Miri reports
+  undefined behaviour for a host copy of the boot wiring under both models,
+  whether the plan is passed by value or by reference. The open obligations
+  leave it to the proof of the unsafe sites; a later design of the core, in
+  which a plan holds no reference while it executes, removes it.
 
 ## Limitations
 
-- No board builds the tables or turns the MMU on yet: the QEMU virt default
-  image runs with the MMU off, and the adapter `mmu` of `krepi-arch` and
-  the Pi 5 board crate are planned.
+- QEMU virt only: the Pi 5 board crate, with its boot wiring, is planned.
+- The caches stay off: `enable` takes the choice, but no image turns them
+  on, and the cache maintenance that turning them on needs is not
+  provided.
 - RAM above 16 GiB in all, more than 32 banks, a layout of more than 16
   ranges and a direct map of RAM at or above $2^{39}$ are not supported.
 - The direct map is never changed after boot: no page of it is sealed, and

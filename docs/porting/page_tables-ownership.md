@@ -66,8 +66,11 @@ shapes of the [proof path](../domains/memory/page-tables/proof.md).
   and `InitializedPages` is `Initialized`.
 - **Entries.** `pub` is kept only for the rows of the contract's entry
   table that a board calls, `PhysRange::new`, `Ownership::new`, `choose`
-  and `assign`, and for the value types that they take and return; the
-  other rows are `pub(crate)`, since only modules of the core call them.
+  and `assign`, for the value types that they take and return, and for
+  `start` and `size` of `PhysRange`, which the zeroing of frames in
+  `krepi_arch::mmu` reads and which the contract lists as open
+  obligations of their own; the other rows are `pub(crate)`, since only
+  modules of the core call them.
   So these public items of the prototype are `pub(crate)`, under the names
   that the items below give: `end`, `contains` and `overlaps` of
   `PhysRange`; `free`, `stats` and the type `Stats`; the types
@@ -107,8 +110,9 @@ shapes of the [proof path](../domains/memory/page-tables/proof.md).
   `managed`, `free`, `allocated`, `allocations`, `free_extents`,
   `largest_free`, `extents` and `capacity`, and has no peak of allocated
   bytes, which only the byte heap read, and no counts of failures. The
-  functions of `PhysRange` are no longer `const fn`; `start`, `len` and
-  `is_empty` are gone, and `end`, `contains` and `overlaps` serve the core.
+  functions of `PhysRange` are no longer `const fn`; `start` is kept, `len`
+  is `size`, `is_empty` is gone, and `end`, `contains` and `overlaps` serve
+  the core.
 - **Holders.** An extent records its holding as free or as held by an owner
   identity with a generation and a state, reserved or published, in place
   of a generation of 0 for a free extent. The state lets `validate` and
@@ -200,8 +204,8 @@ the page-tables contract. Changed expected values:
   `address_rounding_and_span_end_overflow_do_not_reach_backend`, whose
   vectors the contract does not apply, and the helper that zeroed a byte
   array.
-- `src/memory/types.rs`: the public `PAGE_SIZE`, `PhysRange::start`, `len`
-  and `is_empty`, the accessors of `Allocation`, and the fields
+- `src/memory/types.rs`: the public `PAGE_SIZE`, `PhysRange::is_empty`,
+  the accessors of `Allocation`, and the fields
   `peak_allocated_bytes`, `allocation_failures` and `zero_failures` of
   `Stats`.
 - `src/memory/extents.rs`: `Extents::new` of one range, `reject` and

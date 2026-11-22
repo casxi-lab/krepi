@@ -55,9 +55,12 @@ follow are in the [contract](contract.md).
   board crate for the same target: each links the cold entry, the
   exception vectors, the console and the exception record of the default
   image and adds its own `kernel_main`, dispatch and trigger sequence. The
-  test image of BOOT-R13 turns the MMU on with translation tables of its
-  own and keeps the data and instruction caches off; every other image
-  runs with the MMU and the caches off, as QEMU leaves them.
+  default image and the test images of the cases `boot-memory` and
+  `kernel-memory` read the device tree and turn the MMU on with the kernel
+  tables of the board's boot wiring, with the caches off; the test image of
+  BOOT-R13 turns the MMU on with translation tables of its own and keeps
+  the data and instruction caches off; every other image runs with the MMU
+  and the caches off, as QEMU leaves them.
 - **Host.** The host tests of the console, of the exception record, of
   the exception classes and of the cache-line walks run on the development
   host and in CI.
@@ -95,10 +98,13 @@ after `CASXI_READY`.
 - **Evidence.** The case `cold-boot-echo` of the QEMU boot suite,
   `cargo xtask qemu-boot`, in the `check` workflow of CI. It shows that the
   default image boots on the QEMU virt configuration into EL1, passes its
-  checks, writes the three records and echoes the 16 bytes, and that three
-  cold boots give the same transcript. It does not show the behaviour on a
-  Raspberry Pi 5, on more than one CPU or with the MMU and the caches on,
-  the exception handling, which the requirements below cover, or the bounds
+  checks, runs the boot wiring of the board, which reads the device tree
+  and turns the MMU on with the caches off, writes the three records and
+  echoes the 16 bytes, and that three cold boots give the same transcript.
+  It does not show the behaviour on a Raspberry Pi 5, on more than one CPU
+  or with the caches on, the exception handling, which the requirements
+  below cover, the kernel tables, which the cases `kernel-memory` and
+  `boot-memory` show for the page-tables and fdt requirements, or the bounds
   of a console write, which QEMU's PL011 never reaches.
 
 ### BOOT-R02
@@ -650,9 +656,11 @@ is longer than 64 KiB panics before any maintenance. The criterion: the case
 
 - One CPU of QEMU virt: secondary CPUs park in the cold entry and never run
   kernel code.
-- The MMU and the caches stay off, except that the test image of BOOT-R13
-  turns the MMU on with tables of its own; the caches stay off in every
-  image. The device tree is not read.
+- The caches stay off in every image. The default image and the test
+  images of the cases `boot-memory` and `kernel-memory` read the device
+  tree and turn the MMU on with the kernel tables of the board's boot
+  wiring, and the test image of BOOT-R13 turns it on with tables of its
+  own; the other test images run with the MMU off.
 - Cache and TLB maintenance on behalf of another CPU, with its
   acknowledgement, is not provided.
 - The vectors of the current level with `SP_EL0` and of a lower level halt

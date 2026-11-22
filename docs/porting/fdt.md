@@ -218,8 +218,9 @@ These are the 55 vectors of the contract. Changed expected values:
 ## Hardware evidence to re-obtain
 
 - On QEMU virt: the parse and the boot memory map of the hand-over tree on
-  three cold boots, with the same results, once a board wires the module
-  into its boot code.
+  three cold boots, with the same results, through the boot wiring of the
+  board ([boot_memory](boot_memory.md)): the case `boot-memory` of
+  `cargo xtask qemu-boot`, in CI.
 - On a Raspberry Pi 5 of 8 GB: the hand-over tree that the firmware leaves,
   its three RAM ranges and two reserved regions, and the boot memory map
   built from it, with the firmware, EEPROM and BL31 versions of the bench.

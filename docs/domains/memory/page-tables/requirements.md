@@ -171,11 +171,12 @@ of the mapped and the excluded ranges behave as the map says.
   [ex4](../../../features/kernel/kernel-memory.md#ex4-the-direct-map-of-qemu-virt)
   and
   [ex5](../../../features/kernel/kernel-memory.md#ex5-the-direct-map-of-the-raspberry-pi-5-of-8-gb),
-  on the host; the criterion on QEMU virt is a case of the QEMU boot suite
-  (planned).
+  on the host; the criterion on QEMU virt is the case `kernel-memory` of
+  the QEMU boot suite, and the counts at three cold boots the case
+  `boot-memory`.
 - **Entry points.** `page_tables::direct_map`, `direct_address`,
   `lookup_page`, `lookup_block` and `used`; `krepi_arch::mmu::apply` and
-  `enable` (planned).
+  `enable`.
 - **Contract.** [Kernel direct map](contract.md#kernel-direct-map),
   [Table pool](contract.md#table-pool) and
   [Check and execute](contract.md#check-and-execute).
@@ -184,10 +185,15 @@ of the mapped and the excluded ranges behave as the map says.
 - **Evidence.** The frozen vectors `dm-01` to `dm-04` as host tests, `dm-04`
   for the 8 GB model; the host tests of the 1, 2, 4 and 16 GB models and of
   the pool at capacity of the [contract](contract.md#testing-obligations);
-  the QEMU tests of the edges of the direct map, and three cold boots with
-  the same counts. On the Pi 5, the board runs of the 8 GB model build the
-  map of the whole RAM. The host tests do not show a CPU translating; the
-  other four models are shown on the host only, from inferred bank shapes.
+  the case `kernel-memory` of `cargo xtask qemu-boot`, in CI, which writes,
+  zeroes and reads back the edge pages of the usable ranges through the
+  direct map and takes the translation fault of a read of two excluded
+  pages, and the case `boot-memory`, three cold boots with the same counts
+  of the boot memory map and of the tables, blocks and pages of the direct
+  map. On the Pi 5, the board runs of the 8 GB model build the map of the
+  whole RAM. The host tests do not show a CPU translating, and the QEMU
+  cases show one CPU of QEMU virt, not a board; the other four models are
+  shown on the host only, from inferred bank shapes.
 
 ### PGT-R06
 
@@ -206,18 +212,22 @@ layout whose text and data share a page is refused.
 
 - **Examples.**
   [ex3](../../../features/kernel/kernel-memory.md#ex3-text-and-data-on-one-page-are-refused),
-  the refusal on the host; the criterion on QEMU virt is a case of the QEMU
-  boot suite (planned).
+  the refusal on the host; the criterion on QEMU virt is the case
+  `kernel-memory` of the QEMU boot suite.
 - **Entry points.** `page_tables::kernel_map`; `krepi_arch::mmu::apply`
-  and `enable` (planned).
+  and `enable`.
 - **Contract.** [Kernel mappings](contract.md#kernel-mappings) and
   [Descriptors and attributes](contract.md#descriptors-and-attributes).
 - **Specification.** [PGT-R06](specification.md#pgt-r06) of the specification.
 - **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
-- **Evidence.** The QEMU tests and the host test of a shared page of the
-  [contract](contract.md#testing-obligations). They show the permissions
-  of the kernel's own mappings on QEMU virt with one CPU; they do not show
-  the mappings of a process.
+- **Evidence.** The case `kernel-memory` of `cargo xtask qemu-boot`, in
+  CI, which takes the permission fault of a write to the read-only data,
+  the instruction abort of a branch to an execute-never page and the
+  translation fault of a read of the guard, and writes its records through
+  the `Device` page of the console, and the host test of a shared page of
+  the [contract](contract.md#testing-obligations). They show the
+  permissions of the kernel's own mappings on QEMU virt with one CPU and
+  the caches off; they do not show the mappings of a process.
 
 ### PGT-R07
 
@@ -236,13 +246,13 @@ order of the contract, written from it.
   [ex2](../../../features/kernel/kernel-memory.md#ex2-a-page-is-mapped-looked-up-and-unmapped)
 - **Entry points.** `map_page`, `map_block`, `unmap_page`,
   `clone_kernel_from`, `kernel_map` and `direct_map`;
-  `krepi_arch::mmu::apply` (planned).
+  `krepi_arch::mmu::apply`.
 - **Contract.** [Write plans and publication](contract.md#write-plans-and-publication).
 - **Specification.** [PGT-R07](specification.md#pgt-r07) of the specification.
 - **Proof path.** The target `page-tables`, registered as planned
   ([proof path](proof.md#page-tables)); the stores, the barriers and the
   register writes are [open obligations](contract.md#open-obligations).
-- **Evidence.** The host tests of the plans; the QEMU tests of PGT-R05 and
+- **Evidence.** The host tests of the plans; the QEMU cases of PGT-R05 and
   PGT-R06, which run with the tables that the plans built. They show the
   order of the steps and that the tables work on one CPU of QEMU virt; they
   do not show the ordering that the barriers give on several CPUs.
@@ -288,7 +298,7 @@ criterion: the frozen vectors hold.
 - **Examples.**
   [ex6](../../../features/kernel/kernel-memory.md#ex6-an-allocation-in-one-step)
 - **Entry points.** `Ownership::choose`, `assign`, `release`, `validate`
-  and `stats`; `krepi_arch::mmu::zero_frames` (planned).
+  and `stats`; `krepi_arch::mmu::zero_frames`.
 - **Contract.** [Page ownership](contract.md#page-ownership) and
   [Check and execute](contract.md#check-and-execute).
 - **Specification.** [PGT-R09](specification.md#pgt-r09) of the specification.

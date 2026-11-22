@@ -46,8 +46,10 @@ classifies them: the descriptors, the walk, the checks and their errors
 are kept except for the changes below, and the code is written again in
 the [provable Rust subset](../conventions/provable-subset.md), in the code
 shapes of the [proof path](../domains/memory/page-tables/proof.md). The
-other parts of `src/mmu.rs` belong to the boot wiring of the boards and to
-the module `mmu` of `krepi-arch` (planned), whose records take them.
+other parts of `src/mmu.rs` belong to the boot wiring of QEMU virt, to its
+test images and to the module `mmu` of `krepi-arch`, whose records
+[boot_memory](boot_memory.md), [qemu-virt](qemu-virt.md) and [mmu](mmu.md)
+take them.
 
 | Legacy path | krepi path |
 | --- | --- |
@@ -93,9 +95,13 @@ the module `mmu` of `krepi-arch` (planned), whose records take them.
 - **Storage.** `Tables::new(pool)` takes the zero storage of the pool by
   value and sets the record of the tables in use to 1; it is a `const fn`,
   so that a board can build a set in a static. It replaces `new()`, which
-  built zero tables itself, and the `Default` implementation. The type has
-  no `#[repr(C, align(4096))]`: the board places the pool, and `base` names
-  its physical address, as before.
+  built zero tables itself, and the `Default` implementation. The type is
+  `#[repr(C)]` with the pool as its first field, so that the address of a
+  set is the address of its table 0: a board that places the set in a
+  static aligned to 4 KiB names `base` by the address of that static. The
+  prototype's `#[repr(C, align(4096))]` also aligned the set itself, which
+  the board's static does here, so the sets of the host tests need no
+  alignment of 4 KiB.
 - **Record of tables.** A set records only the number of its tables in
   use, those of the lowest indices; the array `free` and the reuse of a
   freed table are gone with the sealing of the direct map, so a table
@@ -202,12 +208,13 @@ no expected value changes.
 
 ## Hardware evidence to re-obtain
 
-- On QEMU virt, `virt-8.2` with one Cortex-A76 and 128 MiB, once a board
-  builds the tables and turns the MMU on: a write to a `ReadOnly` page, an
-  execution from an execute-never page and an access to a guard page each
-  take the fault of the contract, a `Device` page of the console is
-  written, the edges of the direct map behave as the map says, and three
-  cold boots give the same counts.
+- On QEMU virt, `virt-8.2` with one Cortex-A76 and 128 MiB, with the
+  tables that the boot wiring builds and the MMU on: a write to a
+  `ReadOnly` page, an execution from an execute-never page and an access to
+  a guard page each take the fault of the contract, a `Device` page of the
+  console is written and the edges of the direct map behave as the map
+  says, the case `kernel-memory` of `cargo xtask qemu-boot`, and three cold
+  boots give the same counts, the case `boot-memory`, both in CI.
 - On a Raspberry Pi 5 of 8 GB: the direct map of the whole RAM, 11 tables,
   4,092 blocks and 581 pages, with the MMU on and the caches that the board
   chooses, with the firmware, EEPROM and BL31 versions of the bench.
@@ -232,9 +239,10 @@ no expected value changes.
   branches of the feature profiles, the call that turns the MMU on, the
   checks after it, and the declarations and re-exports of `address_space`,
   `code`, `direct` and `fault`. The boot wiring, the test images and the
-  module `mmu` of `krepi-arch` (planned) take or leave them in their own
-  records.
+  module `mmu` of `krepi-arch` take or leave them in their records,
+  [boot_memory](boot_memory.md), [qemu-virt](qemu-virt.md) and
+  [mmu](mmu.md).
 - `src/arch/aarch64/address.rs`: `translation_control` with its test
-  `both_walk_regions_have_matching_policies_and_ttbr0_asids`, which belong
-  to the module `mmu` of `krepi-arch` (planned), and the public constants
+  `both_walk_regions_have_matching_policies_and_ttbr0_asids`, which the
+  module `mmu` of `krepi-arch` takes ([mmu](mmu.md)), and the public constants
   `VA_BITS` and `DIRECT_LIMIT`.

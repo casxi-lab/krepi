@@ -16,16 +16,24 @@
 //! with 0, or with 2 after a usage error or a failure, which it reports on
 //! standard error; `--help` prints the help and exits with 0.
 //!
-//! The one source today is the test image of the host tooling crate,
-//! `test-elf`, which `krepi_tools::test_elf::write` writes. A downstream job
-//! takes the image with the digest that the record gives, as
-//! `cargo xtask suite --images` does.
+//! The first source is the test image of the host tooling crate,
+//! `test-elf`, which `krepi_tools::test_elf::write` writes. The others are
+//! the kernel images that the QEMU boot suite boots, the QEMU virt default
+//! image and the test images of its cases, each named by its Cargo target
+//! and written to `<target>.elf`: the command builds them in `kernel/` with
+//! the build command of `cargo xtask qemu-boot`
+//! (`krepi_tools::qemu_boot::build_command`), once for all of them, and
+//! copies the executable that Cargo's artifact message gives for each
+//! target, so that a later run of that suite in the same checkout finds them
+//! built. A downstream job takes each image with the digest that the record
+//! gives, as `cargo xtask suite --images` does.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 
 use clap::{Arg, value_parser};
+use krepi_tools::qemu_boot;
 use serde::{Deserialize, Serialize};
 
 use crate::formal::toolchain::sha256;
@@ -36,20 +44,63 @@ pub const FORMAT: u32 = 1;
 /// The record in the output directory.
 pub const RECORD: &str = "images.json";
 
-/// A source of an image: its name, the file it is written to and the
-/// function that writes it to a new file.
+/// A source of an image: its name, the file it is written to and where the
+/// image comes from.
+#[derive(Clone, Copy)]
 pub struct Source {
     pub name: &'static str,
     pub file: &'static str,
-    pub write: fn(&Path) -> Result<(), String>,
+    pub origin: Origin,
 }
 
-/// Every image source, in the order of the record.
-pub const SOURCES: [Source; 1] = [Source {
+/// Where the image of a source comes from.
+#[derive(Clone, Copy)]
+pub enum Origin {
+    /// This function writes it to a new file.
+    Writer(fn(&Path) -> Result<(), String>),
+    /// It is the executable of the Cargo target of the source's name, built
+    /// by the build command of the QEMU boot suite.
+    Kernel,
+}
+
+impl Source {
+    /// The kernel image of the Cargo target `name`, in the file `file`.
+    const fn kernel(name: &'static str, file: &'static str) -> Source {
+        Source {
+            name,
+            file,
+            origin: Origin::Kernel,
+        }
+    }
+}
+
+/// The test image of the host tooling crate.
+pub const TEST_ELF: Source = Source {
     name: "test-elf",
     file: "test-elf.elf",
-    write: |path| krepi_tools::test_elf::write(path).map_err(|failure| failure.0),
-}];
+    origin: Origin::Writer(|path| krepi_tools::test_elf::write(path).map_err(|failure| failure.0)),
+};
+
+/// Every image source, in the order of the record: the test image, then the
+/// default image and the test images of the QEMU boot suite in the order of
+/// its cases.
+pub const SOURCES: [Source; 15] = [
+    TEST_ELF,
+    Source::kernel("krepi-qemu-virt", "krepi-qemu-virt.elf"),
+    Source::kernel("el1-brk", "el1-brk.elf"),
+    Source::kernel("injected-serror", "injected-serror.elf"),
+    Source::kernel("el1-fp-trap", "el1-fp-trap.elf"),
+    Source::kernel("timer-irq", "timer-irq.elf"),
+    Source::kernel("irq-registers", "irq-registers.elf"),
+    Source::kernel("sp-el0-brk", "sp-el0-brk.elf"),
+    Source::kernel("unexpected-irq", "unexpected-irq.elf"),
+    Source::kernel("clean-code-to-pou", "clean-code-to-pou.elf"),
+    Source::kernel("invalidate-to-poc", "invalidate-to-poc.elf"),
+    Source::kernel("invalidate-tlb-page", "invalidate-tlb-page.elf"),
+    Source::kernel("code-publication", "code-publication.elf"),
+    Source::kernel("boot-memory", "boot-memory.elf"),
+    Source::kernel("kernel-memory", "kernel-memory.elf"),
+];
 
 /// The source named `name`, if there is one.
 pub fn source(name: &str) -> Option<&'static Source> {
@@ -133,14 +184,61 @@ pub fn create_new(output: &Path) -> Result<(), String> {
     })
 }
 
+/// Builds the kernel images in `kernel` with the build command of the QEMU
+/// boot suite, its standard error passed on: the messages of Cargo.
+fn build(kernel: &Path) -> Result<String, String> {
+    let command = qemu_boot::build_command();
+    let output = Command::new(&command[0])
+        .args(&command[1..])
+        .current_dir(kernel)
+        .stdin(Stdio::null())
+        .stderr(Stdio::inherit())
+        .output()
+        .map_err(|error| format!("cannot run {} in {}: {error}", command[0], kernel.display()))?;
+    if !output.status.success() {
+        return Err(format!(
+            "the build of the kernel images failed with {}",
+            output.status
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 /// Writes every image of `sources` and the record into the new directory
-/// `output`, each image with the commit `commit`; the record.
-pub fn write(output: &Path, sources: &[Source], commit: &str) -> Result<Record, String> {
+/// `output`, each image with the commit `commit`, the kernel images built
+/// once in `kernel/` of the repository `root`; the record.
+pub fn write(
+    root: &Path,
+    output: &Path,
+    sources: &[Source],
+    commit: &str,
+) -> Result<Record, String> {
     create_new(output)?;
+    let kernel = sources
+        .iter()
+        .any(|source| matches!(source.origin, Origin::Kernel));
+    let messages = if kernel {
+        build(&root.join("kernel"))?
+    } else {
+        String::new()
+    };
     let mut images = Vec::new();
     for source in sources {
         let path = output.join(source.file);
-        (source.write)(&path)?;
+        match source.origin {
+            Origin::Writer(write) => write(&path)?,
+            Origin::Kernel => {
+                let built = qemu_boot::executable_from_messages(&messages, source.name)
+                    .ok_or_else(|| format!("the build named no executable of {}", source.name))?;
+                fs::copy(&built, &path).map_err(|error| {
+                    format!(
+                        "cannot copy {} to {}: {error}",
+                        built.display(),
+                        path.display()
+                    )
+                })?;
+            }
+        }
         let (sha256, bytes) = digest(&path)?;
         images.push(Image {
             name: source.name.to_string(),
@@ -207,7 +305,7 @@ pub fn command(root: &Path, args: &[&str]) -> ExitCode {
     let output = matches
         .get_one::<PathBuf>("output-dir")
         .expect("the option is required");
-    match commit(root).and_then(|commit| write(output, &SOURCES, &commit)) {
+    match commit(root).and_then(|commit| write(root, output, &SOURCES, &commit)) {
         Ok(record) => {
             for image in &record.images {
                 println!(
@@ -228,6 +326,7 @@ pub fn command(root: &Path, args: &[&str]) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repo::root;
     use crate::scratch::Scratch;
 
     /// The SHA-256 of the test image, from `shasum -a 256` of the file that
@@ -240,7 +339,7 @@ mod tests {
         let scratch = Scratch::temporary("image");
         let output = scratch.0.join("a/b/images");
         let commit = "0123456789abcdef0123456789abcdef01234567";
-        let record = write(&output, &SOURCES, commit).expect("write the images");
+        let record = write(&root(), &output, &[TEST_ELF], commit).expect("write the images");
         let image = Image {
             name: "test-elf".to_string(),
             file: "test-elf.elf".to_string(),
@@ -291,7 +390,7 @@ mod tests {
     fn the_output_directory_must_be_new() {
         let scratch = Scratch::temporary("image-exists");
         let commit = "0".repeat(40);
-        let error = write(&scratch.0, &SOURCES, &commit).expect_err("the directory exists");
+        let error = write(&root(), &scratch.0, &SOURCES, &commit).expect_err("it exists");
         assert!(
             error.ends_with("exists; the directory must be new"),
             "{error}"
@@ -300,17 +399,31 @@ mod tests {
         assert_eq!(fs::read_dir(&scratch.0).expect("the directory").count(), 0);
         let file = scratch.0.join("file");
         fs::write(&file, "").expect("a file");
-        let error = write(&file, &SOURCES, &commit).expect_err("a file exists");
+        let error = write(&root(), &file, &SOURCES, &commit).expect_err("a file exists");
         assert!(error.contains("exists"), "{error}");
         let failing = [Source {
             name: "broken",
             file: "broken.elf",
-            write: |_| Err("no image".to_string()),
+            origin: Origin::Writer(|_| Err("no image".to_string())),
         }];
         let output = scratch.0.join("new");
         assert_eq!(
-            write(&output, &failing, &commit),
+            write(&root(), &output, &failing, &commit),
             Err("no image".to_string())
+        );
+        assert!(!output.join(RECORD).exists());
+        // A kernel image whose build cannot run or fails: no record either.
+        let kernel = [Source::kernel("x", "x.elf")];
+        let output = scratch.0.join("images");
+        let error = write(&scratch.0, &output, &kernel, &commit).expect_err("no kernel/");
+        assert!(error.starts_with("cannot run "), "{error}");
+        assert!(!output.join(RECORD).exists());
+        fs::create_dir(scratch.0.join("kernel")).expect("a directory without a workspace");
+        let output = scratch.0.join("again");
+        let error = write(&scratch.0, &output, &kernel, &commit).expect_err("no workspace");
+        assert!(
+            error.starts_with("the build of the kernel images failed"),
+            "{error}"
         );
         assert!(!output.join(RECORD).exists());
     }
@@ -346,5 +459,19 @@ mod tests {
             Some("test-elf.elf")
         );
         assert!(source("kernel").is_none());
+    }
+
+    #[test]
+    fn the_kernel_sources_are_the_images_of_the_qemu_boot_suite() {
+        let names: Vec<&str> = SOURCES.iter().map(|source| source.name).collect();
+        let mut kernel = vec![qemu_boot::DEFAULT_IMAGE];
+        kernel.extend(qemu_boot::test_images());
+        assert_eq!(names[0], "test-elf");
+        assert_eq!(names[1..], kernel);
+        for source in &SOURCES[1..] {
+            assert!(matches!(source.origin, Origin::Kernel), "{}", source.name);
+            assert_eq!(source.file, format!("{}.elf", source.name));
+        }
+        assert!(matches!(SOURCES[0].origin, Origin::Writer(_)));
     }
 }

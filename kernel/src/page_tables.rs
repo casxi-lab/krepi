@@ -206,7 +206,10 @@ pub struct WritePlan {
 
 /// The tables of one region, the lower when `UPPER` is false, in a pool of
 /// `N` tables with the root at index 0, and the record of the tables in
-/// use: those of the indices below it.
+/// use: those of the indices below it. The layout is that of C, with the
+/// pool first, so that the address of a set is the address of its table 0,
+/// which a board that places the set names as the `base` of its pool.
+#[repr(C)]
 pub struct Tables<const N: usize, const UPPER: bool> {
     /// The storage of the tables.
     pool: [[u64; ENTRIES]; N],

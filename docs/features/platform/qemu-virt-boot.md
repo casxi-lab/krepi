@@ -47,9 +47,12 @@ each in an exception record; the default image then halts, and test images
 of the QEMU boot suite return from the exceptions that they cause, among
 them the timer interrupt, which the GICv2 delivers and the board's
 interrupt wiring acknowledges and ends. The
-feature belongs to the kernel at EL1. It does not boot a Raspberry Pi 5,
-start secondary CPUs, read the device tree, turn the caches on, turn the MMU
-on outside one test image, or handle an exception of EL0.
+feature belongs to the kernel at EL1. Between its boot records the image
+reads the device tree and turns the MMU on with the caches off, through the
+features [`krepi.platform.device-tree`](device-tree.md) and
+[`krepi.kernel.kernel-memory`](../kernel/kernel-memory.md). The feature does
+not boot a Raspberry Pi 5, start secondary CPUs, turn the caches on or
+handle an exception of EL0.
 
 ## Interface
 
@@ -109,8 +112,10 @@ on outside one test image, or handle an exception of EL0.
   Arm Cortex-A76 and FP/SIMD trapping. A check that fails panics: the image
   writes `CASXI_PANIC` with the check's message, the location and
   `CASXI_HALTED`, and halts.
-- **Records.** The boot records hold no count, time or address, so every
-  cold boot of an image writes the same bytes.
+- **Records.** The boot records hold no time or address, and counts only
+  in the count records of the test image of `boot-memory`, which are the
+  same at every cold boot, so every cold boot of an image writes the same
+  bytes.
 - **Echo.** Each received byte comes back unchanged; after a carriage return
   the image also writes a line feed. No received byte triggers anything
   else: the image has no command.
@@ -208,8 +213,9 @@ input of the walk.
   keep the CPU from halting. The bounds are platform parameters of the
   board, not constants tuned on one machine.
 - The records keep the `CASXI_` names of the prototype's records, which
-  the host tools parse, and hold no count, time or address, so that
-  transcripts of cold boots compare byte for byte.
+  the host tools parse, and hold no time or address, and no count but the
+  counts of the test image of `boot-memory`, which are the same at every
+  cold boot, so that transcripts of cold boots compare byte for byte.
 - The exception vectors are the prototype's: one save path for the 16
   entries, a frame of 304 bytes on `SP_EL1` that the dispatch receives and
   may change, and a return that loads the exception registers and every
@@ -377,8 +383,9 @@ input of the walk.
   `SP_EL0` is handled.
 - The default image takes no interrupt; only the timer interrupt is handled,
   in the test images, and device interrupts are not.
-- The MMU and the caches stay off, except that one test image turns the
-  MMU on with tables of its own; the caches stay off in every image, and
-  the device tree is not read.
+- The caches stay off in every image. The MMU is on in the default image
+  and in the test images that build the kernel tables through the boot
+  wiring, and in the test image of the TLB invalidation with tables of its
+  own; the other test images run with it off.
 - No cache or TLB maintenance on behalf of another CPU.
 - The panic record has no backtrace and no build-id.

@@ -100,7 +100,7 @@ evidence, is in the [requirements](requirements.md). The
 ## Entry points
 
 The entries of the core are in the module `page_tables` of `krepi-kernel`;
-the adapter is the module `mmu` of `krepi-arch` (planned).
+the adapter is the module `mmu` of `krepi-arch`.
 
 | Entry point | Kind | Called by | Rules |
 | --- | --- | --- | --- |
@@ -115,7 +115,7 @@ the adapter is the module `mmu` of `krepi-arch` (planned).
 | `Ownership::reserve`, `Reservation::initialized` and `Ownership::publish` | Write entries and a value function, host-testable | The modules of the core that take pages (planned) | [Page ownership](#page-ownership) |
 | `Ownership::cancel` and `Ownership::release` | Write entries, host-testable | The modules of the core that take and return pages (planned) | [Page ownership](#page-ownership) |
 | `Ownership::owner`, `Ownership::validate` and `Ownership::stats` | Read entries, host-testable | The modules of the core that take pages (planned) | [Page ownership](#page-ownership) |
-| `krepi_arch::mmu::apply`, `enable` and `zero_frames` (planned) | Functions; `enable` and `zero_frames` are `unsafe` | `apply`: the boot wiring, and the entry of a system call in `krepi_arch` for the plans that the dispatch of the core returns; `enable`: the boot wiring, once on each CPU; `zero_frames`: the code that zeroes pages for the page ownership table, among them `krepi_arch::frames::apply` (planned), for the frame of a frame plan | [Write plans and publication](#write-plans-and-publication) |
+| `krepi_arch::mmu::apply`, `enable` and `zero_frames` | Functions; `enable` and `zero_frames` are `unsafe` | `apply`: the boot wiring, and the entry of a system call in `krepi_arch` for the plans that the dispatch of the core returns; `enable`: the boot wiring, once on each CPU; `zero_frames`: the code that zeroes pages for the page ownership table, among them `krepi_arch::frames::apply` (planned), for the frame of a frame plan | [Write plans and publication](#write-plans-and-publication) |
 
 ## Extractability
 
@@ -132,8 +132,8 @@ plan, and the zeroing of pages is the caller's, between two entries. It refers
 to the fdt module only for the boot memory map and its spans
 ([module order](../../../architecture.md#module-order-in-the-core)).
 
-The adapter `mmu` of `krepi-arch` (planned), in `kernel/arch/src/mmu.rs`
-(planned), does not follow the subset: it stores descriptors into tables, zeroes
+The adapter `mmu` of `krepi-arch`, in `kernel/arch/src/mmu.rs`,
+does not follow the subset: it stores descriptors into tables, zeroes
 tables and frames, executes the barriers and the invalidation of the local TLB,
 and writes the registers that turn the MMU on; the invalidation of a page and
 the publication of code use the functions of `krepi_arch::cache` that the
@@ -453,10 +453,10 @@ them in order, each completing before the next:
   the boot CPU with the MMU off, into sets that no `TTBR` holds; their order
   is the same, and the barriers are harmless there.
 
-`zero_table` and `store_descriptor` reach a table through the address at
-which the executing CPU sees its pool: its physical address with the MMU
-off; the mapping of the image for the pools of the kernel tables, which lie
-in the BSS of the image; and the direct map for a pool of held pages.
+`zero_table` and `store_descriptor` reach a table through the address at which
+the executing CPU sees its pool: its physical address with the MMU off; the
+mapping of the image for the pools of the kernel tables, which are storage of
+the image, zero when it is loaded; and the direct map for a pool of held pages.
 
 **Turning the MMU on.** `krepi_arch::mmu::enable` takes the roots of the two
 kernel tables, `bits` and whether the board turns the caches on. It runs
@@ -678,8 +678,8 @@ boot memory map, and `Ownership::new` does not check them.
   an empty table in place.
 - **Zero storage.** Every table of a pool that is not in use is zero.
   `new` takes storage that is zero in all its $N$ tables, as the prototype's
-  sets start: the BSS of the image for the kernel tables, and held pages,
-  which are zero before they are published
+  sets start: storage of the image, zero when it is loaded, for the kernel
+  tables, and held pages, which are zero before they are published
   ([zeroing before publication](#page-ownership)), for a process. A table
   leaves use only through `reset` and `clone_kernel_from`, whose plans zero
   every table in use, so the tables not in use stay zero and those plans
@@ -688,9 +688,9 @@ boot memory map, and `Ownership::new` does not check them.
   that it touches and one level 3 table for each 2 MiB slot that it maps
   in part, with pages. For the direct map, a level 3 table belongs to each
   2 MiB block that a usable range covers in part.
-- **Kernel tables.** Both pools are BSS of the image, so their pages are
-  image pages. The pool of the direct map holds 80 tables and the pool of
-  the lower kernel set 32.
+- **Kernel tables.** Both pools are storage of the image, zero when it is
+  loaded, so their pages are image pages. The pool of the direct map holds 80
+  tables and the pool of the lower kernel set 32.
 - **The lower kernel set.** On QEMU virt and on the Pi 5 it needs
   $6 + \lceil (o + S) / 2\,\mathrm{MiB} \rceil$ tables: the root, a level 2
   table for the 1 GiB slot of the image and the device tree, a level 3
@@ -842,26 +842,21 @@ boot contract.
   [Legacy test vectors](#legacy-test-vectors), each with its expected output,
   and write their results for the comparison with the specification
   ([host results](../../../formal-verification.md#host-results)).
-- Four host tests build the direct map of the Pi 5 models with 1, 2, 4 and
-  16 GB from the bank shapes that the fdt contract infers and the exclusions
-  of [Table pool](#table-pool), and check every 2 MiB block against an
-  independent page model as `dm-04` does, with the counts of tables, blocks
-  and pages of that table. The frozen vector `dm-04` models the 8 GB board
-  by its banks, with one page of boot storage and one `no-map` page; the
-  counts of the 8 GB model in [Table pool](#table-pool) are those that the
-  prototype measured on the board, which the board runs check.
-  These models are not run on a board in release 0.1; only the 8 GB model
-  is.
+- Four host tests build the direct map of the Pi 5 models with 1, 2, 4 and 16 GB from the bank
+  shapes that the fdt contract infers and the exclusions of [Table pool](#table-pool), and
+  check every 2 MiB block against an independent page model as `dm-04` does, with the counts of
+  tables, blocks and pages of that table. The frozen vector `dm-04` models the 8 GB board by
+  its banks, with one page of boot storage and one `no-map` page; the counts of the 8 GB model
+  in [Table pool](#table-pool) are those that the prototype measured on the board, which the
+  board runs check. These models are not run on a board in release 0.1; only the 8 GB model is.
 - A host test builds a direct map that needs exactly the 80 tables of the
   pool, and one that needs 81 fails with `OutOfTables` and gives no plan.
-- A host test initializes the page ownership table from the boot memory map
-  of each board shape, QEMU virt and the five Pi 5 models with the
-  exclusions of [Table pool](#table-pool), and checks against an independent
-  page model that every managed page has exactly one owner, and that the
-  free pages are exactly the pages of the direct map; another fills the 160
-  extents exactly and refuses one more with `MetadataExhausted`; and an
-  initialization with 132 exclusions succeeds and one with 133 fails with
-  `MetadataExhausted`.
+- A host test initializes the page ownership table from the boot memory map of each board
+  shape, QEMU virt and the five Pi 5 models with the exclusions of [Table pool](#table-pool),
+  and checks against an independent page model that every managed page has exactly one owner,
+  and that the free pages are exactly the pages of the direct map; another fills the 160
+  extents exactly and refuses one more with `MetadataExhausted`; and an initialization with 132
+  exclusions succeeds and one with 133 fails with `MetadataExhausted`.
 - A host test gives `kernel_map` a layout whose text and data, each on page
   boundaries, share a page, and `kernel_map` refuses it with
   `AlreadyMapped`, so no page is mapped writable and executable.
@@ -869,22 +864,21 @@ boot contract.
   `clone_kernel_from`, `kernel_map` and `direct_map` against the order of
   [Write plans and publication](#write-plans-and-publication), written from
   this page.
-- QEMU tests on QEMU virt with the MMU on read and write pages at the edges
-  of the direct map's ranges and of its excluded ranges through the direct
-  map, and take the fault of a write to a `ReadOnly` page, of an execution
-  from an execute-never page, of an access to a guard and of an access to an
-  excluded page; a `Device` page of the console is written. Three cold
-  boots give the same counts of the direct map and of the kernel tables.
+- The case `kernel-memory` of the QEMU boot suite, on QEMU virt with the MMU on, reads and
+  writes pages at the edges of the direct map's ranges and of its excluded ranges through the
+  direct map, and takes the fault of a write to a `ReadOnly` page, of an execution from an
+  execute-never page, of an access to a guard and of an access to an excluded page; a `Device`
+  page of the console is written. In the case `boot-memory`, three cold boots give the same
+  counts of the direct map and of the kernel tables, which the suite computes from this page.
 - On the Pi 5 with 8 GB, the board runs build the direct map of the whole
   RAM and check its counts against [Table pool](#table-pool).
 
 ## Open obligations
 
-The entries of the page-table logic that later components add, such as the
-entries of the tables of an address space and of their ASIDs, are open
-obligations of the contracts that add them, carried by the proof of
-contexts, user copies and the private VM, by release 0.2; the table below
-lists the obligations of the code of this page.
+The entries of the page-table logic that later components add, such as the entries of the
+tables of an address space and of their ASIDs, are open obligations of the contracts that add
+them, carried by the proof of contexts, user copies and the private VM, by release 0.2; the
+table below lists the obligations of the code of this page.
 
 The target of the page-table logic has one open obligation of its own, which the
 target closes and the table therefore does not list. `kernel_map`, `direct_map`
@@ -902,12 +896,18 @@ the specification gives for its entry, `mapPlan` or the plan of the copy.
 | --- | --- | --- | --- | --- |
 | `kernel/src/page_tables` | `code` | - | The refinement proof of the target page-tables | `0.1` |
 | `kernel/src/page_tables.rs` | `code` | - | The refinement proof of the target page-tables | `0.1` |
-| `kernel/arch/src/mmu.rs#store_descriptor` (planned) | `unsafe` | Writes the translation tables that the page-table logic describes: one descriptor of a write plan | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
-| `kernel/arch/src/mmu.rs#zero_table` (planned) | `unsafe` | Writes the translation tables that the page-table logic describes: the 512 entries of a new table of a write plan | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
-| `kernel/arch/src/mmu.rs#synchronize` (planned) | `unsafe` | Neither (executes `DMB ISHST`, `DSB ISH` and `ISB` for a write plan, and `TLBI VMALLE1`, `DSB NSH` and `ISB` before the MMU is on) | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
-| `kernel/arch/src/mmu.rs#enable` (planned) | `unsafe` | Neither (writes `MAIR_EL1`, `TCR_EL1`, `TTBR0_EL1`, `TTBR1_EL1` and `SCTLR_EL1`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
-| `kernel/arch/src/mmu.rs#zero_frames` (planned) | `unsafe` | Neither (writes zeros into the frames of a range through the direct map) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
-| `kernel/arch/src/mmu.rs` (planned) | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
+| `kernel/arch/src/mmu.rs#store_descriptor` | `unsafe` | Writes the translation tables that the page-table logic describes: one descriptor of a write plan | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
+| `kernel/arch/src/mmu.rs#zero_table` | `unsafe` | Writes the translation tables that the page-table logic describes: the 512 entries of a new table of a write plan | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
+| `kernel/arch/src/mmu.rs#synchronize` | `unsafe` | Neither (executes `DMB ISHST`, `DSB ISH` and `ISB` for a write plan, and `TLBI VMALLE1`, `DSB NSH` and `ISB` before the MMU is on) | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
+| `kernel/arch/src/mmu.rs#enable` | `unsafe` | Neither (writes `MAIR_EL1`, `TCR_EL1`, `TTBR0_EL1`, `TTBR1_EL1` and `SCTLR_EL1`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
+| `kernel/arch/src/mmu.rs#zero_frames` | `unsafe` | Neither (writes zeros into the frames of a range through the direct map) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
+| `kernel/arch/src/mmu.rs` | `code` | Neither | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
+| `kernel/arch/src/mmu.rs#Pool::new` | `unsafe` | Neither (its caller vouches for the pool of one table set as the executing CPU sees it, and for the plans of that set as its only writer) | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
+| `kernel/arch/src/mmu.rs#physical_width` | `unsafe` | Neither (reads `ID_AA64MMFR0_EL1`) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
+| `kernel/boards/qemu-virt/src/boot_memory.rs#wire` | `unsafe` | Writes the translation tables that the page-table logic describes: forms the only references to the two kernel table sets of the image and the handles of their pools, once, before the MMU is on, executes the plans of both sets and turns the MMU on | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
+| `kernel/boards/qemu-virt/src/main.rs#image::boot_memory` | `unsafe` | Neither (calls the boot wiring once, on the boot CPU, with the slice of the device tree) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
+| `kernel/src/page_tables/range.rs#PhysRange::start` | `code` | - | The proof of contexts, user copies and the private VM | `0.2` |
+| `kernel/src/page_tables/range.rs#PhysRange::size` | `code` | - | The proof of contexts, user copies and the private VM | `0.2` |
 
 ## Legacy test vectors
 

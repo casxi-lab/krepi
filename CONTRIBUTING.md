@@ -54,13 +54,15 @@ check run it on the test image of the host tooling crate.
 receipt.
 
 `cargo xtask image --output-dir <dir>` writes the images that the QEMU
-suites boot, today the test image, into a new directory, with a record of
-the size, SHA-256 digest and commit of each in `images.json`.
+suites boot, the test image and the kernel images of the QEMU boot suite,
+which it builds in `kernel/`, into a new directory, with a record of the
+size, SHA-256 digest and commit of each in `images.json`.
 [Testing](docs/conventions/testing.md#entry-points) describes the record.
 
 `cargo xtask suite` runs the QEMU suites of `suites.toml` on QEMU virt
 through the QEMU runner and judges each case by the expected output of its
-image: with `--base <rev>` the smoke cases and the suites that the changed
+image, or a case of a kernel image by the records of the QEMU boot suite:
+with `--base <rev>` the smoke cases and the suites that the changed
 paths select, without it every suite, and with `--slow` also the slow
 cases. Before proposing a change to the host tooling, the suites or a
 workflow, run it after the check.
@@ -90,10 +92,11 @@ month and on a manual run.
 
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
 QEMU virt default image and the test images in `kernel/`, boots the default
-image three times and each test image once on QEMU virt through the QEMU
-runner, sends the default image serial input and judges each transcript
-against the fixed records of the boot contract, and writes the receipts of
-the runs and of the suite into a new directory below `artifacts/`. Before
+image three times, the test image of the boot memory three times and each
+other test image once on QEMU virt through the QEMU runner, sends the default
+image serial input and judges each transcript against the fixed records of the
+boot contract and the counts of the memory contracts, and writes the receipts
+of the runs and of the suite into a new directory below `artifacts/`. Before
 proposing a change to the kernel workspace or to the suite, run it after the
 check. [Testing](docs/conventions/testing.md#entry-points) describes it.
 

@@ -7,16 +7,23 @@ paths:
   - src/fault.rs
   - link.ld
   - .cargo/config.toml
+  - src/mmu.rs
+  - src/boot_memory/banks.rs
 destination:
   - kernel/boards/qemu-virt/Cargo.toml
   - kernel/boards/qemu-virt/build.rs
   - kernel/boards/qemu-virt/link.ld
   - kernel/boards/qemu-virt/src/lib.rs
   - kernel/boards/qemu-virt/src/main.rs
+  - kernel/boards/qemu-virt/examples/kernel-memory.rs
+  - kernel/boards/qemu-virt/examples/boot-memory.rs
+  - kernel/boards/qemu-virt/examples/memory/mod.rs
   - .cargo/config.toml
 treatment: ported
 features:
   - krepi.platform.qemu-virt-boot
+  - krepi.platform.device-tree
+  - krepi.kernel.kernel-memory
 ---
 
 # Porting record: kernel/boards/qemu-virt/src/lib.rs
@@ -47,6 +54,25 @@ runtime, the user domains and the serial diagnostic commands, belongs to the
 areas it served, which are redesigned or retired. The rest of `src/fault.rs`
 is ported with the exception record, in the [fault](fault.md) record, and
 with fault symbolization.
+
+The default image calls the boot wiring of the board between its boot
+records: `image::device_tree` forms the slice of the device tree at the
+start of RAM and `image::boot_memory` calls `boot_memory::wire` on it, whose
+record is [boot_memory](boot_memory.md). Two examples are the test images
+of kernel memory, with a module that only they declare,
+`examples/memory/mod.rs`, which forms the slice of the tree as the default
+image does and calls the wiring: `examples/kernel-memory.rs` takes the probes `memory_probe_load`,
+`memory_probe_store` and `memory_probe_execute` of `src/mmu.rs` with their
+resume labels, written again under the names of the test image, and the
+pattern of the edge pages of `src/boot_memory/banks.rs`, and reads and
+writes the edge pages of the usable ranges, takes the faults of the
+excluded pages, of the read-only data, of an execute-never page and of the
+guard, and checks the `Device` console; `examples/boot-memory.rs` writes
+the counts of the wiring. The test image dispatches its faults itself: the
+fault plans of `src/mmu/fault.rs` and the probe of the publication of code
+of `src/mmu/code.rs`, boot-time probes of the prototype, are not taken. The
+legacy area `src/boot_memory` is classified in
+[boot_memory](boot_memory.md#summary).
 
 ## Changes
 
@@ -84,9 +110,21 @@ with fault symbolization.
   traps, which the legacy kernel made after its initialization, follows
   it.
 - After the checks the image writes `CASXI_BOOT kernel=krepi board=qemu-virt
-  el=<level>` and `CASXI_READY`, the records of the
-  [boot contract](../domains/boot-platform/boot/contract.md#records), and
+  el=<level>`, runs the boot wiring and writes `CASXI_READY`, the records of
+  the [boot contract](../domains/boot-platform/boot/contract.md#records), and
   then echoes its serial input, in place of the legacy banner and runtime.
+- The wiring takes the place of the legacy calls of boot memory, the MMU
+  and the allocators: `image::device_tree` forms the slice of the 40-byte
+  header of the tree at `boot_memory::TREE_BASE`, the legacy `DTB_ADDRESS`,
+  and then of its `totalsize` bytes, at most 2 MiB, and `image::boot_memory`
+  calls `boot_memory::wire` once, which reads the tree, builds the boot
+  memory map, the page ownership table and the kernel tables and turns the
+  MMU on with the caches off ([boot_memory](boot_memory.md)). Each is a
+  function of its own, so that the `unsafe` site of each has its row in
+  the open obligations of the fdt and page-tables contracts and
+  `kernel_main` keeps none but its export. The sizes of the `UART` and
+  `GIC_CPU` spans, one page and 64 KiB, are constants of the layout of the
+  wiring.
 - The panic handler takes from `panic` of `src/fault.rs` the rule that only
   a static message is written, passes that message, if the panic has one,
   and the location to `uart::report_panic`, which writes the panic record
@@ -115,7 +153,9 @@ with fault symbolization.
   unchanged; Cargo reads them when it builds at the root or below it, in
   `kernel/` too. The proof gate refuses Cargo configuration below the root,
   so the kernel workspace has none of its own.
-- The manifest and the build script are new. The build script passes
+- The manifest and the build script are new. The manifest depends on
+  `krepi-arch` and on the provable core `krepi-kernel`, whose `fdt` and
+  `page_tables` the boot wiring calls. The build script passes
   `-T<crate>/link.ld` to the linker for the binaries and the examples of the
   crate when the target OS is `none`, and nothing on the host. The examples,
   the test images, also get `--entry=krepi_test_entry`: each test image
@@ -123,6 +163,33 @@ with fault symbolization.
   EL2, its EL2 entry, so that the default image and its link script keep
   `_start` as the entry. The legacy link script kept a section
   `.text.test_entry` for the entry of a fixture in the same image.
+- The comment of the link script says that the runner gives QEMU virt
+  128 MiB of RAM at `0x4000_0000`, its `-m 128M`, which is also QEMU's
+  default, in place of a minimum; the layout is unchanged.
+- The test images of kernel memory take the slice of the tree and the call
+  of the wiring from `examples/memory/mod.rs`. `kernel-memory` takes every
+  address from the boot memory map and the link symbols, not the fixed
+  addresses of the prototype's probes. It writes the
+  complement of the pattern of `banks.rs`, unchanged, into each edge page
+  through the direct map, zeroes the page with `krepi_arch::mmu::zero_frames`,
+  reads it back as zero and then writes and reads the pattern, where the
+  legacy probe took its pages from the page allocator with high and low
+  placement. Its probes keep the instructions of the legacy probes: a load
+  `ldr x1, [x0]`, a store `str x1, [x0]` and a call `blr x0` with its frame
+  record saved, each followed by its resume label. Its dispatch counts a
+  synchronous exception at the armed site, disarms it, reports it with the
+  exception record and resumes at the label; any other exception is fatal.
+  The absolute symbol `krepi_test_execute_never` names the direct-map page
+  of the execute-never probe, which a word of its read-only data holds, so
+  that the suite reads the return address of that fault from the ELF file.
+- `boot-memory` writes two count records, `CASXI_MEMORY` with the size of
+  the tree and the numbers of RAM banks, firmware reservations, spans of
+  boot storage, managed banks and usable ranges of the boot memory map, and
+  `CASXI_TABLES` with the tables, blocks and pages of the plans of the two
+  kernel sets, from what the wiring returns, and the self-check
+  `stack-depth`, from the lowest word of the stack that is not zero, as the
+  cold entry clears the stack. The legacy `CASXI_MEMORY` of
+  `verify_allocators` had another form.
 
 ## Tests carried over
 
@@ -134,7 +201,9 @@ None: the legacy files held no host tests.
 | --- | --- |
 | The boot writes `CASXI_CPU`, `CASXI_BOOT kernel=krepi board=qemu-virt el=1` and `CASXI_READY`, each with CR LF, in place of the legacy `CASXI_CPU`, `CASXI_KERNEL_ENTRY`, `CASXI_BUILD`, banner lines and `CASXI_READY` | The case `cold-boot-echo` of `cargo xtask qemu-boot` |
 | After `CASXI_READY` the image echoes each received byte, with a line feed after a carriage return, and no byte triggers a command | The same case; `console::tests::examples::ex3_the_echo_adds_lf_after_cr_only` |
-| The image neither discovers memory from the device tree nor turns the MMU or the caches on, so no `MMU=on` or cache mode is reported | The same case, whose transcript holds nothing else |
+| Between `CASXI_BOOT` and `CASXI_READY` the image reads the device tree, builds the boot memory map and the kernel tables and turns the MMU on with the caches off, and reports none of it: no `CASXI_FDT`, `CASXI_MMU`, `CASXI_DIRECT`, `CASXI_MEMORY` or cache mode record | The same case, whose transcript holds nothing else and is the transcript of the image without the wiring |
+| The edge pages of the usable ranges are written and read back through the direct map after a zeroing, the excluded pages, the read-only data, an execute-never page and the guard fault as the layout says, and the console is a `Device` page | The case `kernel-memory` of `cargo xtask qemu-boot` |
+| The counts of the boot memory map and of the kernel tables are written, and are the same at three cold boots | The case `boot-memory` of `cargo xtask qemu-boot` |
 | A panic, such as a check that fails, writes its static message in `CASXI_PANIC`, its location and `CASXI_HALTED`, without `truncated=` and without a frame trace | `console::tests::panic_record::a_static_message_is_written_with_its_location`, `console::tests::panic_record::a_dynamic_message_is_replaced_by_the_fixed_text`, `console::tests::panic_record::a_panic_without_a_location_has_no_location_record` |
 | An exception writes the exception record and `CASXI_HALTED` and halts, without the user, IRQ and MMU recovery steps of the legacy dispatch | `fault::tests::examples::ex5_a_fatal_exception_ends_in_the_halt_record`; the cases `el1-fp-trap` and `injected-serror` of `cargo xtask qemu-boot`, whose test images dispatch as the default image does |
 
@@ -145,6 +214,10 @@ None: the legacy files held no host tests.
   transcripts: the case `cold-boot-echo`, in CI.
 - The exception record and halt of the dispatch: the cases `el1-fp-trap` and
   `injected-serror`, in CI.
+- The edge pages of the usable RAM, the faults of the kernel tables and the
+  `Device` console with the MMU on, and the counts of the boot wiring at
+  three cold boots, with identical transcripts: the cases `kernel-memory`
+  and `boot-memory`, in CI.
 
 ## Not carried over
 
@@ -152,30 +225,49 @@ None: the legacy files held no host tests.
   physical profile with `physical_counter` and interrupt 30, and the
   `smp-el2-test` choice of `CPU_PROFILE`, all feature-profile branches; the
   declarations of `topology` and `memory` and the re-export of
-  `discover_memory`, which come with secondary CPU startup and memory
-  discovery; the re-exports of the MMU configuration of `cached` and
-  `uncached`, which come with the MMU; `fdt::Span`, `fdt::CpuProfile`,
-  `MINIMUM_RAM`, `DTB_ADDRESS` and `CPU_COMPATIBLE`, which come with the
-  device tree; and `LABEL`, `CLOCK_NAME` and `TIMER_NAME`, the names of the
-  legacy diagnostic records.
+  `discover_memory`: `topology` comes with secondary CPU startup, and the
+  memory discovery of `memory` is in [boot_memory](boot_memory.md); the
+  re-exports of the MMU configuration of `cached` and `uncached`, whose
+  register writes [mmu](mmu.md) takes from `cached`; `fdt::Span`, as the
+  core's `fdt` has its own; `fdt::CpuProfile` and `CPU_PROFILE`, which come
+  with secondary CPU startup; `MINIMUM_RAM`, as the runner gives the machine
+  its RAM; `CPU_COMPATIBLE`, whose check of the CPU node is not taken; and
+  `LABEL`, `CLOCK_NAME` and `TIMER_NAME`, the names of the legacy diagnostic
+  records.
 - From `src/entry.rs`: `Info` and `pi5_probe_main`.
 - From `src/main.rs`: the `global_asm!` symbols of the feature profiles; the
-  records `CASXI_KERNEL_ENTRY` and `CASXI_BUILD`; boot memory, the MMU, the
+  records `CASXI_KERNEL_ENTRY` and `CASXI_BUILD`; the calls of boot memory,
+  the MMU and the allocators, which the call of the wiring replaces; the
   resource controller, the runtime and the user domains; the serial
   diagnostic dispatch of lines 217-368; the CPU-local record of the boot
   CPU, `cpu_local::initialize_boot`, which comes with the first code that
   needs CPU-local state; the setup of the interrupt controller and the
   timer, `irq::init`, which the default image does not call, as it takes no
   interrupt, and which the test images of the timer interrupt call; from
-  `exception_dispatch`, the user dispatch, the IRQ branch and the recovery
-  of MMU faults, which come with the user domains, the first image that
-  takes interrupts and the MMU; and the multicore start of `smp_kernel`.
+  `exception_dispatch`, the user dispatch and the IRQ branch, which come
+  with the user domains and the first image that takes interrupts, and the
+  recovery of MMU faults, as every exception of the default image halts and
+  the test image of `kernel-memory` dispatches its own faults; and the
+  multicore start of `smp_kernel`.
 - From `src/fault.rs`: `exception`, the exception record, which the
   [fault](fault.md) record covers; `build_id`, `stack_bounds` and
   `append_trace`, the build-id and the frame trace, which come with fault
   symbolization; `emit` with `TX_ATTEMPTS_PER_BYTE`, the emission of a
   record, which is not carried over; and the parts of `panic` that the
   Changes name. `trace_probe`, a diagnostic probe, is not ported.
+- From `src/mmu.rs`: the arming of the probes in the CPU-local fault plan
+  with their expected syndromes, `expect_read_fault`, `expect_write_fault`
+  and `unarmed_fault`, as the suite judges the syndromes of the exception
+  records, and the probe pages; its other parts are in
+  [boot_memory](boot_memory.md#not-carried-over), [mmu](mmu.md) and
+  [page_tables](page_tables.md).
+- From `src/boot_memory/banks.rs`: `inspect` and `verify`, which took the
+  edge pages of each bank from the page allocator with low and high
+  placement, checked the usable bytes against its free bytes, kept every
+  edge until all patterns were read again, so that an alias across banks
+  showed, and allocated each page again after its release, which come with
+  the first code that allocates from the page ownership table; and the
+  records `CASXI_RAM`, `CASXI_RAM_BANK` and `CASXI_RAM_TEST`.
 - From `link.ld`: the sections `.text.user` and `.text.test_entry` and the
   user probe page with its assertions.
 - From `.cargo/config.toml`: the alias, the vendored sources and the flags

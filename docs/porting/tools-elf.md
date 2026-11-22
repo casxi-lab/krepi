@@ -22,7 +22,8 @@ the function symbols and the file-backed ranges of the executable segments;
 `symbol_at` finds the function that contains an address, with zero-size
 assembly functions ending at the next function or at their section end;
 `symbol_address` and `patch_symbol` locate one symbol and patch one checked
-word of a fixture image into a new file. It is not a loader and never runs
+word of a fixture image into a new file, and `bound_address` locates a link
+symbol that may end its section. It is not a loader and never runs
 what it reads. The module is ported with its bounds, checks and messages;
 four sums over header fields that could exceed 64 bits are now checked or
 reordered, so that such fields fail the check they belong to instead of
@@ -69,6 +70,15 @@ foundations, which exercised this reader on a synthetic image.
   sparse file beyond the bound, and the malformed images include note
   addresses whose placement sums exceed 64 bits, beside a note that is
   accepted at the start of a segment ending at the top of the address space.
+- `symbol_address`, and `patch_symbol` without a destination, also locate an
+  absolute symbol, of the section index `SHN_ABS`, and give its value: the
+  QEMU boot suite reads such a symbol, which a test image defines for an
+  address outside the image, as an expected return address. A patch still
+  refuses it, as it refuses an undefined symbol.
+- `bound_address` is new: a lookup as `symbol_address` that also admits a
+  symbol at the end of its allocated section, as the link script defines
+  the ends of the parts of an image, such as `__text_end` and `__image_end`,
+  which the QEMU boot suite reads.
 
 ## Tests carried over
 
@@ -88,13 +98,16 @@ carried over with that module and recorded in
 Every bound and message of the reader and of the fixture patching is
 unchanged. Header fields whose placement sums exceed 64 bits now fail a check
 or are placed correctly; the legacy arithmetic overflowed on them, which
-panics in a build with overflow checks, such as a test build.
+panics in a build with overflow checks, such as a test build. A lookup also
+takes an absolute symbol, and the new `bound_address` the end of a section.
 
 | Behaviour | Legacy | krepi | Test |
 | --- | --- | --- | --- |
 | A build-id note address within 36 bytes of the top of the address space, or one whose distance into a read-only segment overflows when added to the segment's file offset | Overflow in the mapping check | Rejected: `build-id note is not mapped read-only` | `tests::a_malformed_image_is_rejected_with_its_reason` |
 | A target section file offset whose sum with the distance of the symbol into the section exceeds 64 bits | Overflow before the comparison with the load mapping | Refused: `Target section and unique load mapping disagree` | `tests::a_patch_is_refused_unless_every_check_holds` |
 | A patch target on the top page of the address space | Overflow when the address was added to the section or segment file offset | Patched at its file offset | `tests::a_word_on_the_top_page_of_the_address_space_is_patched` |
+| A lookup of an absolute symbol | Refused: `Undefined or short target symbol` | Its value; a patch still refuses it with that message | `tests::an_absolute_symbol_is_located_but_never_patched` |
+| A lookup of a symbol at the end of its allocated section | Refused: `Symbol is outside its allocated section` | Still refused by `symbol_address`; its address with `bound_address`, which refuses one past the end | `tests::a_symbol_address_is_found_only_for_one_allocated_symbol` |
 
 ## Hardware evidence to re-obtain
 

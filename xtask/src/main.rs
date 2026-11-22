@@ -82,7 +82,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "suite",
-        about: "Run the QEMU suites of suites.toml: the smoke cases and the suites that the paths changed since a base select, or every suite, with the slow cases on request, each case judged by its expected output, with a report in a new directory; --help lists the options",
+        about: "Run the QEMU suites of suites.toml: the smoke cases and the suites that the paths changed since a base select, or every suite, with the slow cases on request, each case judged by its expected output or, for a kernel image, by the records of the QEMU boot suite, with a report in a new directory; --help lists the options",
         subcommands: &[],
     },
     Command {

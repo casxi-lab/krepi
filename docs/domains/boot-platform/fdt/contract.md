@@ -121,7 +121,7 @@ map.
   with no hardware action, `unsafe` code, assembly or access to a register or a
   physical address, and no adapter of `kernel/arch`. The block lists its sources
   and the core's crate root `kernel/src/lib.rs` until the objects contract does.
-- The page-table logic and the `mmu` adapter of `kernel/arch` (planned), which
+- The page-table logic and the `mmu` adapter of `kernel/arch`, which
   turns the MMU on and stores into live tables, belong to the
   [page-tables](../../memory/page-tables/contract.md) component.
 - The board crate obtains the bytes of the hand-over tree and wires the results
@@ -876,9 +876,9 @@ afterwards.
 - For each step of the two error orders of
   [Rejection and error priority](#rejection-and-error-priority), an input
   that breaks that step and a later one gives the error of that step.
-- The QEMU boot suite boots QEMU virt three times, each in a new QEMU
-  process, and the results of the parse and of the boot memory map are the
-  same, although each tree holds other seeds in `/chosen`.
+- The case `boot-memory` of the QEMU boot suite boots QEMU virt three times,
+  each in a new QEMU process, and the results of the parse and of the boot
+  memory map are the same, although each tree holds other seeds in `/chosen`.
 - The tests take their expected values from this page, from the vectors and
   from the trees that they build, never from an earlier run of the code
   under test ([testing](../../../conventions/testing.md#independent-evidence)).
@@ -907,7 +907,7 @@ list that the specification gives for its iterator.
 | --- | --- | --- | --- | --- |
 | `kernel/src/fdt` | `code` | - | The refinement proof of the target fdt | `0.1` |
 | `kernel/src/fdt.rs` | `code` | - | The refinement proof of the target fdt | `0.1` |
-| `kernel/boards/qemu-virt/src/main.rs#image::device_tree` (planned) | `unsafe` | Neither (forms the byte slice of the tree at the start of RAM, where QEMU's loader places it, first of its 40-byte header and then of `totalsize` bytes) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
+| `kernel/boards/qemu-virt/src/main.rs#image::device_tree` | `unsafe` | Neither (forms the byte slice of the tree at the start of RAM, where QEMU's loader places it, first of its 40-byte header and then of `totalsize` bytes) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
 
 ## Legacy test vectors
 

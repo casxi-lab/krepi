@@ -39,8 +39,11 @@ component.
 - **Test image.** An example of the QEMU virt board crate: an image that
   links the production code of the default image and adds its own
   `kernel_main`, dispatch and trigger sequence, for the QEMU boot suite. It
-  is test code, not a production image; the translation tables of the test
-  image that turns the MMU on are test code too.
+  is test code, not a production image. The test image that replaces the
+  entry of a page by break-before-make turns the MMU on with translation
+  tables of its own, which are test code too; the test images of the cases
+  `boot-memory` and `kernel-memory` turn it on with the kernel tables of the
+  boot wiring of the board, which are production code.
 - **Cache-line walk.** The addresses that `krepi_arch::cache_range::lines`
   gives for a range of bytes: one for each cache line that a byte of the
   range lies in, from the line of the first byte to the line of the last.
@@ -267,9 +270,10 @@ the records. Once all have passed, the image writes `CASXI_BOOT` and
 ## Records
 
 Every record is one line that ends in CR LF. The text of a boot record
-holds no count, time or address; the `midr` field is the value that the CPU
-reports, and the fields of the exception record are the registers of the
-exception.
+holds no time or address, and no count but in the count records of the
+test image of `boot-memory`, whose counts are the same at every cold boot
+of that image; the `midr` field is the value that the CPU reports, and the
+fields of the exception record are the registers of the exception.
 
 | Record | Form | Written | Then |
 | --- | --- | --- | --- |
@@ -281,7 +285,9 @@ exception.
 | `CASXI_EXCEPTION` | A line break, then `CASXI_EXCEPTION vector=<n> ESR=0x<16> ELR=0x<16> FAR=0x<16> SPSR=0x<16> class=<class>`: the vector number in decimal, the four registers of the frame in 16 lowercase hexadecimal digits, and the class of the table below | When a dispatch reports an exception | `CASXI_HALTED` on a fatal path; otherwise the dispatch returns |
 | `CASXI_UART_FAIL` | A line break, then `CASXI_UART_FAIL reason=` and `clock`, `length`, `deadline`, `stalled` or `format` | When a console write fails | `CASXI_HALTED` |
 | `CASXI_HALTED` | `CASXI_HALTED` | Last, on a fatal path | The CPU masks every exception and waits forever |
-| `CASXI_TEST` | `CASXI_TEST image=<image>`, the name of the test image | First, in a test image only | The records of the exceptions that the image takes |
+| `CASXI_TEST` | `CASXI_TEST image=<image>`, the name of the test image | First, in a test image only | `CASXI_MEMORY` in the test image of `boot-memory`; otherwise the records of the exceptions that the image takes |
+| `CASXI_MEMORY` | `CASXI_MEMORY tree=<bytes> ram=<n> reserved=<n> boot=<n> managed=<n> usable=<n>`, in decimal: the `totalsize` of the device tree and the numbers of RAM banks, firmware reservations, spans of boot storage, managed banks and usable ranges of the boot memory map | Once, after `CASXI_TEST`, in the test image of `boot-memory` only | `CASXI_TABLES` |
+| `CASXI_TABLES` | `CASXI_TABLES lower=<tables>,<blocks>,<pages> direct=<tables>,<blocks>,<pages>`, in decimal: for the lower kernel set and for the direct map, the tables in use, the root and one for each table that its plan zeroed, and the block and the page descriptors that its plan stored | Once, after `CASXI_MEMORY` | The self-checks of the image |
 | `CASXI_CHECK` | `CASXI_CHECK name=<check> failures=0x<16>`: the name of a self-check and the mask of its failed checks in 16 lowercase hexadecimal digits, 0 when every check held | In a test image only, once for each self-check | The next self-check, `CASXI_RESUMED`, or nothing when the vectors halt after the dispatch that wrote it |
 | `CASXI_RESUMED` | `CASXI_RESUMED` | Last, in a test image only, when its code resumes after the exceptions | The CPU masks every exception and waits forever |
 
@@ -539,14 +545,22 @@ counter as well.
 - The QEMU boot suite boots the default image on QEMU virt and holds its
   transcript against the records of this page, written into the suite, not
   taken from an earlier run. Three cold boots give identical transcripts.
-- The suite also boots the test images, each once, and holds each
-  transcript against an exact sequence of records: the start record
-  `CASXI_TEST image=<image>`, the exception records of the case, and then
-  `CASXI_HALTED`, or the self-check records `CASXI_CHECK name=<check>
-  failures=0x<16>` of the image, each with no failure, and
-  `CASXI_RESUMED`, or, for an image whose vectors halt after its dispatch,
-  those self-check records alone. The return address of each exception
-  record must be that of a symbol of the image, or lie between two. Each
+- The suite also boots each other test image once, and the test image of
+  `boot-memory` three times, whose three transcripts must be identical byte
+  for byte, and holds each transcript against an exact sequence of
+  records: the start record `CASXI_TEST image=<image>`, for the test image
+  of `boot-memory` its two count records, with the counts that the suite
+  computes from the contracts of the fdt and page-tables components, the
+  RAM that the runner gives the machine, the symbols of the ELF file of
+  the image and the `totalsize` of the device tree that QEMU dumps for the
+  same machine with `dumpdtb`, the exception records of the case, and then
+  `CASXI_HALTED`, or the
+  self-check records `CASXI_CHECK name=<check> failures=0x<16>` of the
+  image, each with no failure, and `CASXI_RESUMED`, or, for an image whose
+  vectors halt after its dispatch, those self-check records alone. The
+  return address of each exception record must be that of a symbol of the
+  ELF file of the image, among them an absolute symbol that names an
+  address in the direct map, or lie between two such symbols. Each
   rule of the saved and restored state has one test, a self-check of a test
   image or a case of the suite, named in the
   [open obligations](#open-obligations).
@@ -637,7 +651,7 @@ records of the [console](../../../porting/console.md) and of
   coherency and the scope of the maintenance instructions, the publication
   of code with Non-cacheable memory and the concurrent modification of
   instructions, the TLB maintenance and the attributes of memory with the
-  MMU off; and, for the test image that turns the MMU on, the VMSAv8-64
+  MMU off; and, for the images that turn the MMU on, the VMSAv8-64
   descriptors of the 4 KiB granule, `MAIR_EL1`, `TCR_EL1`, `TTBR0_EL1`,
   `SCTLR_EL1` and `TLBI VMALLE1`.
 - Arm Limited, *Learn the architecture - AArch64 memory management Guide*,
