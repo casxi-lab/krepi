@@ -545,14 +545,16 @@ counter as well.
 - The QEMU boot suite boots the default image on QEMU virt and holds its
   transcript against the records of this page, written into the suite, not
   taken from an earlier run. Three cold boots give identical transcripts.
-- The suite also boots each test image once, and the test image of
+- The suite also boots each other test image once, and the test image of
   `boot-memory` three times, whose three transcripts must be identical byte
   for byte, and holds each transcript against an exact sequence of
   records: the start record `CASXI_TEST image=<image>`, for the test image
   of `boot-memory` its two count records, with the counts that the suite
   computes from the contracts of the fdt and page-tables components, the
-  RAM of the machine and the symbols of the ELF file of the image, the
-  exception records of the case, and then `CASXI_HALTED`, or the
+  RAM that the runner gives the machine, the symbols of the ELF file of
+  the image and the `totalsize` of the device tree that QEMU dumps for the
+  same machine with `dumpdtb`, the exception records of the case, and then
+  `CASXI_HALTED`, or the
   self-check records `CASXI_CHECK name=<check> failures=0x<16>` of the
   image, each with no failure, and `CASXI_RESUMED`, or, for an image whose
   vectors halt after its dispatch, those self-check records alone. The

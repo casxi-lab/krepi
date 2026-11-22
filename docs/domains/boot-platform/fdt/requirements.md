@@ -342,9 +342,11 @@ process, give the same results of the parse and of the boot memory map.
 - **Evidence.** The case `boot-memory` of the QEMU boot suite,
   `cargo xtask qemu-boot`, in CI, which the
   [testing obligations](contract.md#testing-obligations) name, on the QEMU
-  virt configuration: three cold boots write identical counts of the tree
-  and of the boot memory map, which the suite computes from the contract.
-  It shows that the seeds do not reach the results on that machine. It
+  virt configuration: three cold boots write identical records of the size
+  of the tree, which must equal the `totalsize` of the tree that QEMU dumps
+  for the machine with `dumpdtb`, and of the counts of the boot memory map,
+  which the suite computes from the contract and the runner's RAM. It
+  shows that the seeds do not reach the results on that machine. It
   shows nothing for the Pi 5, whose hand-over trees a board run compares.
 
 ## Liveness, time and performance
