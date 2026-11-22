@@ -153,8 +153,8 @@ the plans is planned.
 - **Bounds.** The pool of the direct map holds 80 tables, the lower kernel
   set 32, and the page ownership table of the kernel root 160 extents and
   132 exclusion records over at most 32 banks; a request beyond them fails
-  with `OutOfTables` or `MetadataExhausted` before any change. Each entry
-  ends within the
+  with `OutOfTables` or `MetadataExhausted` before any change. Each entry,
+  and each call of the `next` of a plan, ends within the
   [work bounds](../../domains/memory/page-tables/contract.md#work-bounds)
   of the contract and waits for nothing.
 - **Undefined.** Nothing: every argument has a result or an error. The
@@ -404,10 +404,12 @@ unchanged. The page `0x8000` of the process, mapped into the target as
 - **QEMU and board.** None: no board builds the tables or turns the MMU on
   yet, so no suite covers the feature.
 - **Proofs.** None of the code. The proof target `page-tables` is
-  registered as planned in `verification/targets.json`, with the roots
-  that the [proof path](../../domains/memory/page-tables/proof.md) names;
-  it is extracted and type-checked when a run names it, and its refinement
-  proofs are planned. The statements of the specification are about the
+  registered as planned in `verification/targets.json`, with the functions
+  of the core rows of the contract's
+  [entry table](../../domains/memory/page-tables/contract.md#entry-points)
+  and the `next` of the three plan iterators as its roots; it is extracted
+  and type-checked when a run names it, and its refinement proofs are
+  planned. The statements of the specification are about the
   specification, not the code. The results that the host tests write are
   not yet compared with the replay of the specification.
 - **Unverified.** The bank shapes of the 1, 2, 4 and 16 GB models, which

@@ -64,6 +64,16 @@ shapes of the [proof path](../domains/memory/page-tables/proof.md).
   re-exports nothing. `PageAllocator` with its `Extents` is `Ownership`,
   `memory::Error` is `OwnershipError`, `PageReservation` is `Reservation`
   and `InitializedPages` is `Initialized`.
+- **Entries.** `pub` is kept only for the rows of the contract's entry
+  table that a board calls, `PhysRange::new`, `Ownership::new`, `choose`
+  and `assign`, and for the value types that they take and return; the
+  other rows are `pub(crate)`, since only modules of the core call them.
+  So these public items of the prototype are `pub(crate)`, under the names
+  that the items below give: `end`, `contains` and `overlaps` of
+  `PhysRange`; `free`, `stats` and the type `Stats`; the types
+  `PageReservation` and `InitializedPages`, with `initialize` and the
+  accessor `failures` of a packet; and `reserve`, `reserve_in`,
+  `validate_initialized`, `publish_initialized` and `cancel_unused`.
 - **Initialization.** `Ownership::new(arena, banks, exclusions)` takes the
   banks and the exclusions, each a range with its owner, firmware, image or
   boot storage, and keeps at most `X` exclusion records beside its `E`

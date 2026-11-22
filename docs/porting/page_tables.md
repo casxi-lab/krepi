@@ -80,6 +80,16 @@ the module `mmu` of `krepi-arch` (planned), whose records take them.
   `map_block`; and `used_tables` is `used`. The private `Kind::bits` is
   read through the module function `descriptor(kind, address)`, which takes
   bits 12 to 47 of its address.
+- **Entries.** `pub` is kept only for the rows of the contract's entry
+  table that `krepi-arch` or a board calls, `direct_address`,
+  `Tables::new`, `kernel_map` and `direct_map`, for the `next` of the three
+  plan iterators, and for the value types that these and the adapter take
+  and return; the other rows are `pub(crate)`, since only modules of the
+  core call them. So `used_tables`, `reset`, `clone_kernel_from`,
+  `map_page`, `descriptor`, `unmap_page`, `map_ram_block` and
+  `ram_block_descriptor`, public in the prototype, are `pub(crate)` under
+  the names above, and the public `PAGE_SIZE` and `BLOCK_SIZE` of
+  `paging.rs` are private constants of the module.
 - **Storage.** `Tables::new(pool)` takes the zero storage of the pool by
   value and sets the record of the tables in use to 1; it is a `const fn`,
   so that a board can build a set in a static. It replaces `new()`, which

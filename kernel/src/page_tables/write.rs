@@ -61,7 +61,7 @@ impl<const N: usize, const UPPER: bool> Tables<N, UPPER> {
     /// `kind`, in the set whose pool is at `base`, of physical width
     /// `bits`.
     // Called by the modules vm and creation of the core, which are planned;
-    // the plan of `kernel_map` gives the steps of this plan for one page.
+    // on a layout of one page, `kernel_map` gives the plan of this function.
     #[allow(dead_code)]
     pub(crate) fn map_page(
         &mut self,
@@ -152,8 +152,8 @@ impl<const N: usize, const UPPER: bool> Tables<N, UPPER> {
     /// Maps the block slot `va` to the physical block `pa` as `ReadWrite`
     /// with one level 2 descriptor. It never replaces a level 3 table by a
     /// block.
-    // No module of the core calls it yet; the plan of `direct_map` gives the
-    // steps of this plan for one block.
+    // No module of the core calls it yet; on usable ranges of one block,
+    // `direct_map` gives the plan of this function.
     #[allow(dead_code)]
     pub(crate) fn map_block(
         &mut self,

@@ -106,8 +106,8 @@ the adapter is the module `mmu` of `krepi-arch` (planned).
 | --- | --- | --- | --- |
 | `page_tables::Kind`, `page_tables::descriptor`, `page_tables::direct_address`, `PhysRange::new`, `end`, `contains` and `overlaps`, and `Tables::lookup_page`, `lookup_block` and `used` | Value types and functions that write nothing, host-testable | The entries of this page; `krepi_arch::mmu`, for `direct_address`; the boot wiring, for `PhysRange::new`, with which it gives the page ownership table its banks and exclusions and `kernel_map` its layout; the modules `vm` and `creation` of the core (planned) | [Descriptors and attributes](#descriptors-and-attributes), [Kernel direct map](#kernel-direct-map) |
 | `Tables::new`, `Tables::reset` and `Tables::clone_kernel_from` | Write entries, host-testable; `reset` and `clone_kernel_from` return write plans | `new`: the boot wiring, for the kernel tables; `new`, `reset` and `clone_kernel_from`: the modules `creation` and `lifecycle` of the core (planned), for the lower tables of a process, which `clone_kernel_from` fills from the lower kernel set | [Abstract mapping](#abstract-mapping), [Copying the kernel tables](#copying-the-kernel-tables), [Table pool](#table-pool) |
-| `Tables::map_page` | Write entry, host-testable; returns a write plan | The modules `vm` and `creation` of the core (planned); the plan of `kernel_map` gives the steps of its plan for each page of a layout | [Abstract mapping](#abstract-mapping), [Write plans and publication](#write-plans-and-publication) |
-| `Tables::map_block` | Write entry, host-testable; returns a write plan | None yet: the plan of `direct_map` gives the steps of its plan for each block of the direct map | [Abstract mapping](#abstract-mapping), [Kernel direct map](#kernel-direct-map) |
+| `Tables::map_page` | Write entry, host-testable; returns a write plan | The modules `vm` and `creation` of the core (planned). `kernel_map` does not call it; when the layout is one page, the plan of `kernel_map` is the plan of this entry | [Abstract mapping](#abstract-mapping), [Write plans and publication](#write-plans-and-publication) |
+| `Tables::map_block` | Write entry, host-testable; returns a write plan | None yet. `direct_map` does not call it; when the usable ranges are one block, the plan of `direct_map` is the plan of this entry | [Abstract mapping](#abstract-mapping), [Kernel direct map](#kernel-direct-map) |
 | `Tables::unmap_page` | Write entry, host-testable; returns a write plan | The module `vm` of the core (planned), for a set that is not one of the kernel tables | [Abstract mapping](#abstract-mapping), [Write plans and publication](#write-plans-and-publication) |
 | `page_tables::kernel_map` and `page_tables::direct_map` | Write entries, host-testable; return write plans | The boot wiring, once each, before the MMU is on. Once is needed for `kernel_map`: a fill of the lower kernel set maps an executable kind only at a page of the text of the layout ([W^X](#descriptors-and-attributes)), so a second layout, even a refused one, could name as text a page that the first maps `ReadWrite`, and a fill could then map it `ReadExecute` | [Kernel mappings](#kernel-mappings), [Kernel direct map](#kernel-direct-map) |
 | `Ownership::new` | Write entry, host-testable | The boot wiring, once, for the kernel root | [Page ownership](#page-ownership) |
@@ -774,19 +774,19 @@ or the image covers in part, at most 4.
   once, at most $512 N$ entries, and marks each table once; its plan has
   one `Zero` for each table in use of the target, at most $N$, one `Store`
   for each valid entry of the source, at most $512 N$, and one `Sync`.
-- `kernel_map` checks each of at most 16 ranges against the others and each
-  page of each range once, and its plan has one `Store` for each page and
-  table, one `Zero` for each new table and at most one `Fence` for each
-  table descriptor, before each store that makes new tables reachable.
+- `kernel_map` checks each of at most 16 ranges against the others and each page of each range
+  once, and its plan has one `Store` for each page and table, one `Zero` for each new table and
+  at most one `Fence` for each table descriptor, before each store that makes new tables
+  reachable. The `next` of the plan searches the ranges at most twice, each time from the first.
 - `direct_map` walks each usable range once in steps of a block or a
   page: at most RAM / 2 MiB blocks and, at the two ends of each range, at
   most 511 pages each. Its plan has one `Store` for each block, page and
-  table descriptor, one `Zero` for each new table, at most 80, and at most
-  one `Fence` for each table descriptor, before each store that makes new
-  tables reachable; it runs to its end at boot.
-- `Ownership::new` compares each of at most 32 banks with the others and
-  each of at most 132 exclusions with each bank, and writes at most 132
-  exclusion records; `choose`, `assign`, `reserve`, `publish`, `cancel`,
+  table descriptor, one `Zero` for each new table, at most 80, and at most one `Fence` for
+  each table descriptor, before each store that makes new tables reachable; it runs to its end
+  at boot. Its `next` searches at most twice, from the first usable range of its 1 GiB slot.
+- `Ownership::new` compares each of at most 32 banks with the others; in a bank that $k$
+  exclusions overlap, its cursor makes at most $2k + 2$ passes over the at most 132 exclusions;
+  it writes at most 132 exclusion records; `choose`, `assign`, `reserve`, `publish`, `cancel`,
   `release` and `validate` scan or shift at most the 160 extents once;
   `owner` scans at most the 160 extents and then the 132 exclusion
   records.

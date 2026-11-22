@@ -378,7 +378,8 @@ contract.
 
 ## Liveness, time and performance
 
-- Every entry of the component runs to its end within the bounds of the
+- Every entry of the component, and each call of the `next` of a plan,
+  runs to its end within the bounds of the
   [contract](contract.md#work-bounds); none waits or retries.
 - The direct map is built once at boot, in a number of steps proportional to
   the RAM in 2 MiB blocks and the edges of its ranges; on the 8 GB model,
