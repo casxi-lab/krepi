@@ -1,10 +1,12 @@
 //! The binaries of `cargo xtask image` and `cargo xtask suite` boot the test
 //! image on the QEMU of the host, found on the search path as the commands
 //! find it, as the image and suite jobs of CI do: the image command writes
-//! the image with its digest, and the suite takes it by that digest. The
-//! rules of both commands are tested in their modules with a fake QEMU; this
-//! test starts the binary of this build, the one that `cargo xtask` runs, on
-//! the real QEMU, with its output below the target's temporary directory.
+//! the images with their digests, the test image and the kernel images that
+//! it builds, and the suite takes the test image by its digest for its
+//! smoke case, the one case that runs when no path has changed. The rules
+//! of both commands are tested in their modules with a fake QEMU; this test
+//! starts the binary of this build, the one that `cargo xtask` runs, on the
+//! real QEMU, with its output below the target's temporary directory.
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -65,10 +67,23 @@ fn the_suite_boots_the_image_by_its_digest() {
         serde_json::from_str(&std::fs::read_to_string(scratch.join("images/images.json")).unwrap())
             .unwrap();
     assert_eq!(record["images"][0]["sha256"], IMAGE_SHA256);
+    // Then the default image and the thirteen test images of the kernel.
+    let all = record["images"].as_array().unwrap();
+    assert_eq!(all.len(), 15, "{record:#}");
+    assert_eq!(all[1]["name"], "krepi-qemu-virt");
+    for image in all {
+        let file = scratch.join("images").join(image["file"].as_str().unwrap());
+        assert_eq!(
+            Some(std::fs::metadata(file).unwrap().len()),
+            image["bytes"].as_u64()
+        );
+    }
     let expect = format!("test-elf={IMAGE_SHA256}");
     let output = scratch.join("suite");
     let suite = xtask(&[
         "suite",
+        "--base",
+        "HEAD",
         "--images",
         images,
         "--expect",
@@ -90,11 +105,15 @@ fn the_suite_boots_the_image_by_its_digest() {
     assert_eq!(cases.len(), 1, "{passed:#}");
     assert_eq!(cases[0]["name"], "boot");
     assert_eq!(cases[0]["status"], "PASS");
+    assert_eq!(passed["suites"][1]["name"], "qemu-boot");
+    assert_eq!(passed["suites"][1]["cases"], serde_json::json!([]));
     // Another expected digest: an error before any run.
     let other = format!("test-elf={}", "0".repeat(64));
     let refused = scratch.join("refused");
     let suite = xtask(&[
         "suite",
+        "--base",
+        "HEAD",
         "--images",
         images,
         "--expect",

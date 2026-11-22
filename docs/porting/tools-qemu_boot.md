@@ -102,6 +102,10 @@ command.
   of the fdt and page-tables components, the link symbols of the ELF file
   and the size of the tree that QEMU dumps for the machine with `dumpdtb`
   before the runs; a dump that fails ends the case as an error.
+- The symbols and the dumped tree that a case reads beside its runs come
+  from `case_facts`, which `cargo xtask suite` also calls, with
+  `case_inputs` and `judge_records`, to run the cases of this suite from
+  `suites.toml` on the images of `cargo xtask image`.
 - The receipt of a test image's run must name the machine of its case: the
   machine with EL2 for the SError, the runner's machine for the others.
 - The three runs must use the same image and give identical transcripts; the

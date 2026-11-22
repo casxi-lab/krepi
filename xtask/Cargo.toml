@@ -15,7 +15,9 @@ rust-version = "1.99"
 # The host tooling crate of this repository, whose serial capture is the
 # command `cargo xtask serial-capture` and whose QEMU runner is the command
 # `cargo xtask qemu` and runs the cases of `cargo xtask suite`; its test
-# image is the image that `cargo xtask image` writes.
+# image and the kernel images of the build of its QEMU boot suite are the
+# images that `cargo xtask image` writes, and that suite runs and judges the
+# cases of kernel images of `cargo xtask suite`.
 krepi-tools = { path = "../tools" }
 # The command lines of `cargo xtask check`, `cargo xtask image`,
 # `cargo xtask suite`, `cargo xtask run-record`,

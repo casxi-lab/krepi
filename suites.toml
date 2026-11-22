@@ -1,9 +1,10 @@
 # The QEMU suites that `cargo xtask suite` runs. Each suite names the image
 # source that it boots and the paths below kernel/ or user/ whose change
-# selects it on a pull request; each case says whether every pull request
-# runs it (smoke), whether only the slow runs do (slow), how many cold boots
-# it makes (runs) and the limit of one run in seconds (timeout). The format
-# is described in docs/conventions/testing.md.
+# selects it on a pull request; each case may name another image source
+# (image) and says whether every pull request runs it (smoke), whether only
+# the slow runs do (slow), how many cold boots it makes (runs) and the limit
+# of one run in seconds (timeout). The format is described in
+# docs/conventions/testing.md.
 
 # The test image of the host tooling crate, which writes one line to the
 # PL011 and powers QEMU virt off.
@@ -27,3 +28,123 @@ smoke = false
 slow = true
 runs = 3
 timeout = 30
+
+# The QEMU boot suite of the kernel, as cargo xtask qemu-boot runs it: the
+# default image, then one test image for each other case. Its cases, their
+# machines and their judgments are those of krepi_tools::qemu_boot, in its
+# order; each run ends at the window of that suite, 20 seconds.
+[[suite]]
+name = "qemu-boot"
+image = "krepi-qemu-virt"
+paths = ["kernel/"]
+
+[[suite.case]]
+name = "cold-boot-echo"
+smoke = false
+slow = false
+runs = 3
+timeout = 20
+
+[[suite.case]]
+name = "el1-brk"
+image = "el1-brk"
+smoke = false
+slow = false
+runs = 1
+timeout = 20
+
+[[suite.case]]
+name = "injected-serror"
+image = "injected-serror"
+smoke = false
+slow = false
+runs = 1
+timeout = 20
+
+[[suite.case]]
+name = "el1-fp-trap"
+image = "el1-fp-trap"
+smoke = false
+slow = false
+runs = 1
+timeout = 20
+
+[[suite.case]]
+name = "timer-irq"
+image = "timer-irq"
+smoke = false
+slow = false
+runs = 1
+timeout = 20
+
+[[suite.case]]
+name = "irq-preserves-registers"
+image = "irq-registers"
+smoke = false
+slow = false
+runs = 1
+timeout = 20
+
+[[suite.case]]
+name = "sp-el0-brk"
+image = "sp-el0-brk"
+smoke = false
+slow = false
+runs = 1
+timeout = 20
+
+[[suite.case]]
+name = "unexpected-irq"
+image = "unexpected-irq"
+smoke = false
+slow = false
+runs = 1
+timeout = 20
+
+[[suite.case]]
+name = "clean-code-to-pou"
+image = "clean-code-to-pou"
+smoke = false
+slow = false
+runs = 1
+timeout = 20
+
+[[suite.case]]
+name = "invalidate-to-poc"
+image = "invalidate-to-poc"
+smoke = false
+slow = false
+runs = 1
+timeout = 20
+
+[[suite.case]]
+name = "invalidate-tlb-page"
+image = "invalidate-tlb-page"
+smoke = false
+slow = false
+runs = 1
+timeout = 20
+
+[[suite.case]]
+name = "code-publication"
+image = "code-publication"
+smoke = false
+slow = false
+runs = 1
+timeout = 20
+
+[[suite.case]]
+name = "boot-memory"
+image = "boot-memory"
+smoke = false
+slow = false
+runs = 3
+timeout = 20
+
+[[suite.case]]
+name = "kernel-memory"
+image = "kernel-memory"
+smoke = false
+slow = false
+runs = 1
+timeout = 20

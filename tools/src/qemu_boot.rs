@@ -1607,6 +1607,33 @@ pub fn machine_tree(
     Ok(size)
 }
 
+/// What the judgment of a case reads beside its runs: the symbols of its
+/// image and, for the case of the boot memory, the size of the device tree
+/// of its machine.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Facts {
+    pub symbols: Vec<(String, u64)>,
+    pub tree: Option<u64>,
+}
+
+/// The facts of `case` for the ELF file `image`, which the suite and
+/// `cargo xtask suite` take before the runs of the case: the symbols that
+/// the case needs and, for the case of the boot memory, the size that
+/// [`machine_tree`] dumps into `directory` with the QEMU `qemu`.
+pub fn case_facts(
+    case: &Case,
+    image: &Path,
+    qemu: Option<&Path>,
+    directory: &Path,
+) -> Result<Facts, Failure> {
+    let symbols = case_symbols(case, image)?;
+    let tree = match case.judgment {
+        Judgment::BootMemory(_) => Some(machine_tree(case, image, qemu, directory)?),
+        _ => None,
+    };
+    Ok(Facts { symbols, tree })
+}
+
 /// A lookup of a symbol in an ELF file.
 type Lookup = fn(&Path, &str) -> Result<u64, Failure>;
 
@@ -1712,18 +1739,7 @@ fn run(root: &Path, args: &[String], timing: &Timing, streams: &mut Streams) -> 
                     .find(|(target, _)| *target == case.image.target())
                     .expect("every image of a case is built");
                 let mut lines = Vec::new();
-                let facts = case_symbols(case, &image.path).and_then(|symbols| {
-                    let tree = match case.judgment {
-                        Judgment::BootMemory(_) => Some(machine_tree(
-                            case,
-                            &image.path,
-                            options.qemu.as_deref(),
-                            &output,
-                        )?),
-                        _ => None,
-                    };
-                    Ok((symbols, tree))
-                });
+                let facts = case_facts(case, &image.path, options.qemu.as_deref(), &output);
                 let (entry, outcome) = match facts {
                     Err(Failure(error)) => {
                         lines.push(format!("{}: {}", case.name, render(&error)));
@@ -1735,13 +1751,13 @@ fn run(root: &Path, args: &[String], timing: &Timing, streams: &mut Streams) -> 
                         });
                         (entry, Outcome::Error)
                     }
-                    Ok((symbols, tree)) => run_case(
+                    Ok(facts) => run_case(
                         case,
                         Subject {
                             image: &image.path,
                             sha256: &image.sha256,
-                            symbols: &symbols,
-                            tree,
+                            symbols: &facts.symbols,
+                            tree: facts.tree,
                         },
                         options.qemu.as_deref(),
                         &output,

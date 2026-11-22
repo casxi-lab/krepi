@@ -1,5 +1,6 @@
 //! `cargo xtask suite`: the QEMU suites of `suites.toml`, each case run on
-//! QEMU virt through the QEMU runner and judged by its expected output.
+//! QEMU virt through the QEMU runner and judged by its expected output or,
+//! for a kernel image, by the records of the QEMU boot suite.
 //!
 //! ```sh
 //! cargo xtask suite [--base REV] [--slow] [--images DIR --expect NAME=SHA256]... \
@@ -12,11 +13,16 @@
 //! has a `name`, the `image` source of [`crate::image::SOURCES`] that it
 //! boots, the `paths`, prefixes of repository paths below `kernel/` or
 //! `user/` whose change selects it on a pull request, and its cases. Each
-//! `[[suite.case]]` has a `name`, whether it is a `smoke` case, which every
+//! `[[suite.case]]` has a `name`, optionally the `image` source that it
+//! boots in place of its suite's, whether it is a `smoke` case, which every
 //! pull request runs, whether it is `slow`, which only `--slow` runs, the
 //! cold boots of the case (`runs`, 1 to [`MAX_RUNS`]) and the limit of one
 //! run in seconds (`timeout`, 1 to 600). A case is not both smoke and slow;
-//! names are unique and made of lowercase letters, digits and hyphens.
+//! names are unique and made of lowercase letters, digits and hyphens. A
+//! case of a kernel image is a case of the QEMU boot suite,
+//! `krepi_tools::qemu_boot::CASES`, with its name, image and runs and the
+//! window of that suite as its timeout, and a suite with such a case lists
+//! the cases of the QEMU boot suite in their order and no other case.
 //!
 //! # Selection
 //!
@@ -40,18 +46,24 @@
 //! and requires it to equal the record's and the expected digest; any
 //! difference, a missing entry or file, or a missing `--expect` ends the
 //! run as `ERROR` before QEMU starts. Without `--images`, the command writes
-//! the images into `images/` of its output directory as `cargo xtask image`
-//! does.
+//! the images that the cases to run boot into `images/` of its output
+//! directory as `cargo xtask image` does.
 //!
 //! Each run of a case boots its image in a new QEMU process through
-//! `krepi_tools::qemu_run::run_image`, with the host clock, the case's
+//! `krepi_tools::qemu_run::run_image_on`, with the host clock, the case's
 //! `timeout` and [`MAX_BYTES`] bytes of serial output, into
 //! `<suite>/<case>-<n>` of the output directory. A run passes when its
 //! receipt has no errors, it ended as `guest_shutdown`, it booted the image
 //! with the expected digest, its receipt describes its transcript and the
 //! transcript is the expected output of the image; for the test image that
 //! is `krepi_tools::test_elf::MESSAGE`. A case of more than one run also
-//! needs equal exit reasons and identical transcripts.
+//! needs equal exit reasons and identical transcripts. A case of a kernel
+//! image runs instead as `cargo xtask qemu-boot` runs it, on the machine of
+//! its case and with its input, and is judged by that suite's records
+//! (`krepi_tools::qemu_boot::judge_records`), with the symbols of its image
+//! and, for `boot-memory`, the device tree that QEMU dumps into `<suite>/`,
+//! both taken before its runs, so that a failure there ends the case as
+//! `ERROR` without a run.
 //!
 //! # Report and status
 //!
@@ -60,14 +72,15 @@
 //! [`SUMMARY_FILE`] into it: the status, the times, the commit, the GitHub
 //! Actions run, the selection with the changed paths, the images with their
 //! digests, and each suite with why it runs and its selected cases, each
-//! with why it runs, its runs and its checks. Cases that were not selected
-//! are not listed. It prints a line for each suite, case and run, each
-//! failed check and the status with the path of the report, and exits with
-//! 0 for `PASS`, 1 for `FAIL`, 2 for `ERROR` and for a usage error, 130 for
-//! `INTERRUPTED` and 120 when it cannot write its own output. Changed paths
-//! are printed with their control characters escaped. SIGINT, SIGTERM and
-//! SIGHUP are caught from immediately before the first QEMU starts, as by
-//! the runner, and end the run that is under way and the suite.
+//! with its image, why it runs, its runs and its checks. Cases that were
+//! not selected are not listed. It prints a line for each suite, case and
+//! run, each failed check and the status with the path of the report, and
+//! exits with 0 for `PASS`, 1 for `FAIL`, 2 for `ERROR` and for a usage
+//! error, 130 for `INTERRUPTED` and 120 when it cannot write its own
+//! output. Changed paths are printed with their control characters
+//! escaped. SIGINT, SIGTERM and SIGHUP are caught from immediately before
+//! the first QEMU run starts, as by the runner, and end the run that is
+//! under way and the suite.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -77,7 +90,8 @@ use std::process::{Command, ExitCode};
 use std::sync::atomic::AtomicI32;
 
 use clap::{Arg, ArgAction, value_parser};
-use krepi_tools::qemu::Clock;
+use krepi_tools::qemu::{Clock, Machine};
+use krepi_tools::qemu_boot;
 use krepi_tools::qemu_run::{self, Options};
 use krepi_tools::report::{Value, utc_now};
 use krepi_tools::timing::Timing;
@@ -85,7 +99,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::formal::toolchain::sha256;
-use crate::image::{self, Record};
+use crate::image::{self, Origin, Record};
 
 /// The suite manifest at the repository root.
 pub const MANIFEST: &str = "suites.toml";
@@ -133,6 +147,9 @@ pub struct Suite {
 #[serde(deny_unknown_fields)]
 pub struct Case {
     pub name: String,
+    /// The image source of the case, when it is not that of its suite.
+    #[serde(default)]
+    pub image: Option<String>,
     pub smoke: bool,
     pub slow: bool,
     pub runs: u32,
@@ -150,6 +167,23 @@ fn plain_name(name: &str) -> bool {
     !name.is_empty()
         && (name.bytes())
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+/// The image source that `case` of `suite` boots.
+pub fn image_of<'a>(suite: &'a Suite, case: &'a Case) -> &'a str {
+    case.image.as_deref().unwrap_or(&suite.image)
+}
+
+/// Whether `image` names a kernel image of [`crate::image::SOURCES`].
+fn kernel(image: &str) -> bool {
+    image::source(image).is_some_and(|source| matches!(source.origin, Origin::Kernel))
+}
+
+/// The case of the QEMU boot suite that `case` is, if it boots the kernel
+/// image `image`.
+fn boot_case(image: &str, case: &Case) -> Option<&'static qemu_boot::Case> {
+    let found = qemu_boot::CASES.iter().find(|boot| boot.name == case.name);
+    found.filter(|_| kernel(image))
 }
 
 /// The suites of the manifest `text`, which must keep the rules of the
@@ -203,6 +237,31 @@ pub fn load(text: &str) -> Result<Vec<Suite>, String> {
             if !(1..=qemu_run::MAX_TIMEOUT as u32).contains(&case.timeout) {
                 problems.push(format!("{at}: timeout is not 1 to 600 seconds"));
             }
+            let image = image_of(suite, case);
+            if case.image.is_some() && image::source(image).is_none() {
+                problems.push(format!("{at}: no image source {image}"));
+            }
+            let same = boot_case(image, case).is_some_and(|boot| {
+                boot.image.target() == image
+                    && u32::try_from(boot.runs) == Ok(case.runs)
+                    && f64::from(case.timeout) == qemu_boot::RUN_WINDOW
+            });
+            if kernel(image) && !same {
+                problems.push(format!(
+                    "{at}: not the case of the QEMU boot suite with the image {image}, its runs \
+                     and its window as the timeout"
+                ));
+            }
+        }
+        let names: Vec<&str> = suite.cases.iter().map(|case| case.name.as_str()).collect();
+        let kernels = (suite.cases.iter())
+            .filter(|case| kernel(image_of(suite, case)))
+            .count();
+        if kernels > 0 && (kernels < names.len() || names != qemu_boot::CASES.map(|case| case.name))
+        {
+            problems.push(format!(
+                "suite {name}: the cases are not those of the QEMU boot suite in their order"
+            ));
         }
     }
     if problems.is_empty() {
@@ -468,12 +527,9 @@ impl Check {
     }
 }
 
-/// One run of a case: the receipt of the runner and the transcript.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Run {
-    pub receipt: Value,
-    pub transcript: Vec<u8>,
-}
+/// One run of a case: the receipt of the runner and the transcript, as the
+/// QEMU boot suite keeps it.
+pub use krepi_tools::qemu_boot::Run;
 
 /// The first of `failures` that holds, if one does.
 fn first(failures: impl IntoIterator<Item = (bool, String)>) -> Option<String> {
@@ -577,11 +633,49 @@ impl Outcome {
     }
 }
 
+/// The entry of the report of the case `chosen` of the image `image`.
+fn case_entry(
+    chosen: &Chosen,
+    image: &str,
+    outcome: Outcome,
+    results: Vec<Value>,
+    checks: &[Check],
+) -> Value {
+    let case = chosen.case;
+    json!({
+        "name": case.name,
+        "image": image,
+        "smoke": case.smoke,
+        "slow": case.slow,
+        "runs": case.runs,
+        "timeout": case.timeout,
+        "reasons": chosen.reasons,
+        "status": outcome.name(),
+        "results": results,
+        "checks": checks.iter().map(Check::report).collect::<Vec<_>>(),
+    })
+}
+
+/// The facts of the case `boot` of the QEMU boot suite for `image`, with
+/// the tree of its machine dumped into `<output>/<suite>`.
+fn facts(
+    suite: &Suite,
+    boot: &qemu_boot::Case,
+    image: &Ready,
+    qemu: Option<&Path>,
+    output: &Path,
+) -> Result<qemu_boot::Facts, String> {
+    let directory = output.join(&suite.name);
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+    qemu_boot::case_facts(boot, &image.path, qemu, &directory).map_err(|failure| failure.0)
+}
+
 /// Runs `case` of `suite` on `image` with the QEMU `qemu`, each run into
 /// `<output>/<suite>/<case>-<n>`: its entry of the report and its outcome.
 /// `say` gets a line for each run. A run that cannot start ends the case as
 /// `Error`, and an interrupted run as `Interrupted`, without the runs after
-/// it.
+/// it; so do facts of a kernel image that cannot be taken, before any run.
 #[allow(clippy::too_many_arguments)]
 pub fn run_case<'a>(
     suite: &Suite,
@@ -594,6 +688,27 @@ pub fn run_case<'a>(
     say: &mut dyn FnMut(&str),
 ) -> (Value, Outcome) {
     let case = chosen.case;
+    let kernel = match boot_case(&image.name, case) {
+        None => None,
+        Some(boot) => match facts(suite, boot, image, qemu, output) {
+            Ok(facts) => Some((boot, facts)),
+            Err(error) => {
+                say(&format!(
+                    "{}/{}: {}",
+                    suite.name,
+                    case.name,
+                    printable(&error)
+                ));
+                let mut entry = case_entry(chosen, &image.name, Outcome::Error, Vec::new(), &[]);
+                entry["error"] = error.into();
+                return (entry, Outcome::Error);
+            }
+        },
+    };
+    let (machine, inputs) = match &kernel {
+        Some((boot, _)) => (boot.machine, qemu_boot::case_inputs(boot)),
+        None => (Machine::Virt, Vec::new()),
+    };
     let options = Options {
         image: image.path.clone(),
         timeout: f64::from(case.timeout),
@@ -608,7 +723,8 @@ pub fn run_case<'a>(
     for number in 1..=case.runs {
         let name = format!("{}/{}-{number}", suite.name, case.name);
         let directory = output.join(&name);
-        let receipt = match qemu_run::run_image(&options, &directory, timing, arm) {
+        let result = qemu_run::run_image_on(machine, &options, &inputs, &directory, timing, arm);
+        let receipt = match result {
             Ok(receipt) => receipt,
             Err(failure) => {
                 say(&format!(
@@ -644,24 +760,25 @@ pub fn run_case<'a>(
             break;
         }
     }
-    let checks = judge(&suite.image, &image.sha256, case, &runs);
+    let checks = match &kernel {
+        None => judge(&image.name, &image.sha256, case, &runs),
+        Some((boot, facts)) => {
+            let checks =
+                qemu_boot::judge_records(boot, &image.sha256, &facts.symbols, facts.tree, &runs);
+            (checks.into_iter())
+                .map(|check| Check::of(check.name, check.failure))
+                .collect()
+        }
+    };
     let outcome = stopped.unwrap_or(if checks.iter().all(|check| check.failure.is_none()) {
         Outcome::Pass
     } else {
         Outcome::Fail
     });
-    let entry = json!({
-        "name": case.name,
-        "smoke": case.smoke,
-        "slow": case.slow,
-        "runs": case.runs,
-        "timeout": case.timeout,
-        "reasons": chosen.reasons,
-        "status": outcome.name(),
-        "results": entries,
-        "checks": checks.iter().map(Check::report).collect::<Vec<_>>(),
-    });
-    (entry, outcome)
+    (
+        case_entry(chosen, &image.name, outcome, entries, &checks),
+        outcome,
+    )
 }
 
 /// The options of `cargo xtask suite`.
@@ -889,14 +1006,17 @@ fn run<'a>(
         None => out.say("every suite runs"),
     }
     let needed: BTreeSet<&str> = (plans.iter())
-        .filter(|plan| !plan.cases.is_empty())
-        .map(|plan| plan.suite.image.as_str())
+        .flat_map(|plan| (plan.cases.iter()).map(|chosen| image_of(plan.suite, chosen.case)))
+        .collect();
+    let sources: Vec<image::Source> = (image::SOURCES.iter())
+        .filter(|source| needed.contains(source.name))
+        .copied()
         .collect();
     let images = match &choice.images {
         Some(dir) => take_images(dir, &needed, &choice.expect),
         None => commit
             .clone()
-            .and_then(|commit| image::write(&output.join("images"), &image::SOURCES, &commit))
+            .and_then(|commit| image::write(root, &output.join("images"), &sources, &commit))
             .map(|record| {
                 (record.images.into_iter())
                     .map(|entry| Ready {
@@ -956,7 +1076,8 @@ fn run<'a>(
                     if status == Outcome::Interrupted {
                         break;
                     }
-                    let image = images.iter().find(|image| image.name == plan.suite.image);
+                    let name = image_of(plan.suite, chosen.case);
+                    let image = images.iter().find(|image| image.name == name);
                     let image = image.expect("each needed image is ready");
                     let (entry, outcome) = run_case(
                         plan.suite,

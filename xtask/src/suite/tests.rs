@@ -1,21 +1,29 @@
 //! The manifest rules, each row of the mapping in a test of its own, the
 //! union of rows, the selection of each line, the changed paths of a Git
 //! repository, the digest check of the images, the judge of a case over
-//! hand-written runs, and runs of the command on a fake QEMU.
+//! hand-written runs, runs of the command on a fake QEMU, and a case of a
+//! kernel image run and judged as the QEMU boot suite does.
 
 use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::AtomicI32;
 
 use super::*;
 use crate::scratch::Scratch;
+use krepi_tools::qemu_boot;
 
 /// The test image's line, written by hand.
 const LINE: &[u8] = b"krepi test image: PL011 output, then PSCI SYSTEM_OFF\r\n";
+
+/// The suite of the test image, as the committed manifest gives it.
+const TEST_ELF_SUITE: &str = "[[suite]]\nname = \"test-elf\"\nimage = \"test-elf\"\npaths = []\n\
+    [[suite.case]]\nname = \"boot\"\nsmoke = true\nslow = false\nruns = 1\ntimeout = 30\n\
+    [[suite.case]]\nname = \"repeat\"\nsmoke = false\nslow = true\nruns = 3\ntimeout = 30\n";
 
 /// A case with `runs` runs.
 fn case(name: &str, smoke: bool, slow: bool, runs: u32) -> Case {
     Case {
         name: name.to_string(),
+        image: None,
         smoke,
         slow,
         runs,
@@ -52,19 +60,42 @@ fn strings(paths: &[&str]) -> Vec<String> {
     paths.iter().map(|path| path.to_string()).collect()
 }
 
+/// The QEMU boot suite as a manifest of the suite `name`: each case of
+/// `krepi_tools::qemu_boot::CASES` with its image, runs and window.
+fn boot_suite(name: &str) -> String {
+    let mut text =
+        format!("[[suite]]\nname = \"{name}\"\nimage = \"krepi-qemu-virt\"\npaths = []\n");
+    for boot in &qemu_boot::CASES {
+        text += &format!(
+            "[[suite.case]]\nname = \"{}\"\nimage = \"{}\"\nsmoke = false\nslow = false\n\
+             runs = {}\ntimeout = 20\n",
+            boot.name,
+            boot.image.target(),
+            boot.runs
+        );
+    }
+    text
+}
+
 #[test]
-fn the_manifest_holds_the_suite_of_the_test_image() {
+fn the_manifest_holds_the_suites_of_the_test_image_and_of_the_qemu_boot_suite() {
     let text = fs::read_to_string(crate::repo::root().join(MANIFEST)).expect("the manifest");
     let suites = load(&text).expect("the manifest keeps the rules");
-    assert_eq!(
-        suites,
-        [Suite {
-            name: "test-elf".to_string(),
-            image: "test-elf".to_string(),
-            paths: Vec::new(),
-            cases: vec![case("boot", true, false, 1), case("repeat", false, true, 3)],
-        }]
-    );
+    let test_elf = Suite {
+        name: "test-elf".to_string(),
+        image: "test-elf".to_string(),
+        paths: Vec::new(),
+        cases: vec![case("boot", true, false, 1), case("repeat", false, true, 3)],
+    };
+    assert_eq!(suites[0], test_elf);
+    assert_eq!(load(TEST_ELF_SUITE), Ok(vec![test_elf]));
+    // The fourteen cases of the QEMU boot suite, none smoke or slow, each
+    // with the image of its case but for the default image of the suite.
+    let mut boot = load(&boot_suite("qemu-boot")).expect("the QEMU boot suite");
+    boot[0].paths = vec!["kernel/".to_string()];
+    boot[0].cases[0].image = None;
+    assert_eq!(suites[1..], boot);
+    assert_eq!(suites.len(), 2);
 }
 
 #[test]
@@ -120,6 +151,14 @@ fn a_manifest_against_the_rules_is_refused() {
             "timeout is not 1 to 600 seconds",
         ),
         (good.replace("\"c\"", "\"c_d\""), "the name is not plain"),
+        (
+            good.replace("smoke", "image = \"x\"\nsmoke"),
+            "suite a, case \"c\": no image source x",
+        ),
+        (
+            good.replace("smoke", "image = \"el1-brk\"\nsmoke"),
+            "suite a, case \"c\": not the case of the QEMU boot suite with the image el1-brk",
+        ),
     ];
     for (text, problem) in cases {
         let error = load(&text).expect_err("a manifest against a rule");
@@ -131,6 +170,39 @@ fn a_manifest_against_the_rules_is_refused() {
         "timeout = 30\n[[suite.case]]\nname = \"c\"\nsmoke = false\nslow = false\nruns = 1\ntimeout = 9\n",
     );
     assert!(load(&doubled).is_err_and(|error| error.contains("the case occurs twice")));
+    // A suite of kernel images holds the cases of the QEMU boot suite with
+    // their images, runs and window, in their order, and nothing else.
+    let boot = boot_suite("k");
+    assert_eq!(load(&boot).expect("the QEMU boot suite")[0].cases.len(), 14);
+    let order = "suite k: the cases are not those of the QEMU boot suite in their order";
+    let wrong =
+        |name: &str| format!("suite k, case \"{name}\": not the case of the QEMU boot suite");
+    let last = boot.rfind("[[suite.case]]").expect("a case");
+    let test_elf = good[good.find("[[suite.case]]").expect("a case")..]
+        .replace("smoke", "image = \"test-elf\"\nsmoke");
+    let renamed = boot.replace("\"el1-brk\"\nimage", "\"el1-brake\"\nimage");
+    let cases = [
+        (
+            boot.replacen("timeout = 20", "timeout = 21", 1),
+            wrong("cold-boot-echo"),
+        ),
+        (
+            boot.replacen("runs = 3", "runs = 2", 1),
+            wrong("cold-boot-echo"),
+        ),
+        (
+            boot.replace("image = \"el1-brk\"", "image = \"sp-el0-brk\""),
+            wrong("el1-brk"),
+        ),
+        (renamed.clone(), wrong("el1-brake")),
+        (renamed, order.to_string()),
+        (boot[..last].to_string(), order.to_string()),
+        (format!("{boot}{test_elf}"), order.to_string()),
+    ];
+    for (text, problem) in cases {
+        let error = load(&text).expect_err("a suite against a rule");
+        assert!(error.contains(&problem), "{problem}: {error}");
+    }
 }
 
 /// The suites of the mapping tests: `a` lists a board directory, `b` lists
@@ -293,17 +365,28 @@ fn each_line_runs_its_cases() {
         every[0].cases[2].reasons,
         ["every suite runs", "slow cases run"]
     );
-    // The manifest of the repository: the slow case runs only with --slow.
+    // The manifest of the repository: the slow case runs only with --slow,
+    // and the QEMU boot suite runs all its cases for a change of the kernel
+    // or of the host tools and on main, and none for one of the docs.
     let text = fs::read_to_string(crate::repo::root().join(MANIFEST)).expect("the manifest");
     let manifest = load(&text).expect("the manifest");
-    for (changed, slow, expected) in [
-        (Some(docs.as_slice()), false, &["boot"][..]),
-        (Some(tools.as_slice()), false, &["boot"]),
-        (None, true, &["boot", "repeat"]),
-        (None, false, &["boot"]),
+    let boot: Vec<String> = (qemu_boot::CASES.iter())
+        .map(|boot| boot.name.to_string())
+        .collect();
+    let kernel = strings(&["kernel/boards/qemu-virt/src/main.rs"]);
+    for (changed, slow, expected, boot) in [
+        (Some(docs.as_slice()), false, &["boot"][..], &[][..]),
+        (Some(tools.as_slice()), false, &["boot"], &boot[..]),
+        (Some(kernel.as_slice()), false, &["boot"], &boot[..]),
+        (None, true, &["boot", "repeat"], &boot[..]),
+        (None, false, &["boot"], &boot[..]),
     ] {
         let plans = choose(&manifest, changed, slow);
-        assert_eq!(names(&plans), [("test-elf".to_string(), strings(expected))]);
+        let expected = [
+            ("test-elf".to_string(), strings(expected)),
+            ("qemu-boot".to_string(), boot.to_vec()),
+        ];
+        assert_eq!(names(&plans), expected);
     }
 }
 
@@ -358,9 +441,10 @@ fn the_changed_paths_are_those_since_the_merge_base() {
     assert!(changed(dir, "no-such-branch").is_err_and(|error| error.starts_with("git merge-base")));
 }
 
-/// Writes the images of [`image::SOURCES`] into `dir` with a commit.
+/// Writes the test image into `dir` with a commit.
 fn images(dir: &Path) -> Record {
-    image::write(dir, &image::SOURCES, &"0".repeat(40)).expect("write the images")
+    let root = crate::repo::root();
+    image::write(&root, dir, &[image::TEST_ELF], &"0".repeat(40)).expect("write the images")
 }
 
 #[test]
@@ -512,12 +596,18 @@ fn the_judge_passes_good_runs_and_fails_each_fault() {
 /// A fake QEMU in `scratch` that answers `--version` and otherwise prints
 /// `output` and exits with `status`.
 fn fake_qemu(scratch: &Scratch, output: &str, status: u8) -> PathBuf {
+    script_qemu(scratch, output, &format!("exit {status}"))
+}
+
+/// A fake QEMU in `scratch` that answers `--version` and otherwise prints
+/// `output` and runs the shell command `end`.
+fn script_qemu(scratch: &Scratch, output: &str, end: &str) -> PathBuf {
     let path = scratch.0.join("qemu");
     scratch.write(
         "qemu",
         &format!(
             "#!/bin/sh\nif [ \"$1\" = --version ]; then\n  echo 'QEMU emulator version 0.0.0'\n  \
-             exit 0\nfi\nprintf '{output}'\nexit {status}\n"
+             exit 0\nfi\nprintf '{output}'\n{end}\n"
         ),
     );
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
@@ -563,7 +653,7 @@ fn the_command_runs_the_selected_cases_and_reports_them() {
     let scratch = Scratch::temporary("suite-run");
     let line = "krepi test image: PL011 output, then PSCI SYSTEM_OFF\\r\\n";
     let qemu = fake_qemu(&scratch, line, 0);
-    let manifest = fs::read_to_string(crate::repo::root().join(MANIFEST)).expect("the manifest");
+    let manifest = TEST_ELF_SUITE;
     let output = scratch.0.join("out");
     let (output, qemu) = (
         output.to_str().expect("UTF-8"),
@@ -571,7 +661,7 @@ fn the_command_runs_the_selected_cases_and_reports_them() {
     );
     let (code, report, lines) = command_run(
         &scratch,
-        &manifest,
+        manifest,
         &["--qemu", qemu, "--output-dir", output],
     );
     assert_eq!(code, 0, "{report:#}");
@@ -614,7 +704,7 @@ fn the_command_runs_the_selected_cases_and_reports_them() {
     let output = scratch.0.join("slow");
     let output = output.to_str().expect("UTF-8");
     let args = ["--slow", "--qemu", qemu, "--output-dir", output];
-    let (code, report, _) = command_run(&Scratch::temporary("suite-run-slow"), &manifest, &args);
+    let (code, report, _) = command_run(&Scratch::temporary("suite-run-slow"), manifest, &args);
     assert_eq!(code, 0, "{report:#}");
     let cases = report["suites"][0]["cases"].as_array().expect("the cases");
     let names: Vec<&str> = cases
@@ -631,7 +721,7 @@ fn the_command_runs_the_selected_cases_and_reports_them() {
 
 #[test]
 fn a_wrong_guest_fails_and_a_wrong_image_is_not_booted() {
-    let manifest = fs::read_to_string(crate::repo::root().join(MANIFEST)).expect("the manifest");
+    let manifest = TEST_ELF_SUITE;
     // A guest that writes another line fails its case.
     let scratch = Scratch::temporary("suite-fail");
     let qemu = fake_qemu(&scratch, "another line\\r\\n", 0);
@@ -642,7 +732,7 @@ fn a_wrong_guest_fails_and_a_wrong_image_is_not_booted() {
     );
     let (code, report, _) = command_run(
         &scratch,
-        &manifest,
+        manifest,
         &["--qemu", qemu, "--output-dir", output],
     );
     assert_eq!(code, 1, "{report:#}");
@@ -660,7 +750,7 @@ fn a_wrong_guest_fails_and_a_wrong_image_is_not_booted() {
     );
     let (code, report, _) = command_run(
         &scratch,
-        &manifest,
+        manifest,
         &["--qemu", missing, "--output-dir", output],
     );
     assert_eq!(code, 2, "{report:#}");
@@ -687,7 +777,7 @@ fn a_wrong_guest_fails_and_a_wrong_image_is_not_booted() {
         "--output-dir",
         output,
     ];
-    let (code, report, _) = command_run(&scratch, &manifest, &args);
+    let (code, report, _) = command_run(&scratch, manifest, &args);
     assert_eq!(code, 2, "{report:#}");
     assert_eq!(report["status"], "ERROR");
     assert_eq!(report["suites"], json!([]));
@@ -744,4 +834,97 @@ fn the_command_line_takes_the_options_of_each_line() {
         assert_eq!(error.exit_code(), 2, "{wrong:?}");
     }
     assert_eq!(parse(&["--help"]).expect_err("the help").exit_code(), 0);
+}
+
+/// The time values of a run of a fake kernel image: those of QEMU virt,
+/// with bounds for the end of the process that a slow host never reaches.
+const SLOW_HOST: Timing = Timing {
+    guest_finish: std::time::Duration::from_secs(60),
+    stop_grace: std::time::Duration::from_secs(60),
+    kill_grace: std::time::Duration::from_secs(60),
+    ..Timing::QEMU_VIRT
+};
+
+#[test]
+fn a_case_of_a_kernel_image_runs_and_is_judged_as_the_qemu_boot_suite_does() {
+    let scratch = Scratch::temporary("suite-kernel");
+    let path = scratch.0.join("image.elf");
+    fs::write(&path, b"not an ELF file").expect("the image");
+    let (sha256, bytes) = image::digest(&path).expect("its digest");
+    let ready = |name: &str| Ready {
+        name: name.to_string(),
+        path: path.clone(),
+        bytes,
+        sha256: sha256.clone(),
+        expected: None,
+    };
+    let suite = Suite {
+        name: "qemu-boot".to_string(),
+        image: "krepi-qemu-virt".to_string(),
+        paths: Vec::new(),
+        cases: Vec::new(),
+    };
+    let run = |chosen: &Chosen, image: &Ready, qemu: &Path, output: &str| {
+        let output = scratch.0.join(output);
+        run_case(
+            &suite,
+            chosen,
+            image,
+            Some(qemu),
+            &output,
+            &SLOW_HOST,
+            &mut || Ok(flag()),
+            &mut |_| {},
+        )
+    };
+    // The run ends at its window, shortened here, and the records of the
+    // case are judged: its start record, its self-check and its end.
+    let mut clean = case("clean-code-to-pou", false, false, 1);
+    clean.timeout = 3;
+    let chosen = Chosen {
+        case: &clean,
+        reasons: vec!["every suite runs"],
+    };
+    for (failures, outcome) in [(0, Outcome::Pass), (1, Outcome::Fail)] {
+        let records = format!(
+            "CASXI_TEST image=clean-code-to-pou\\r\\nCASXI_CHECK name=clean-keeps-data \
+             failures=0x{failures:016x}\\r\\nCASXI_RESUMED\\r\\n"
+        );
+        let qemu = script_qemu(&scratch, &records, "exec sleep 60");
+        let (entry, got) = run(
+            &chosen,
+            &ready("clean-code-to-pou"),
+            &qemu,
+            &format!("out-{failures}"),
+        );
+        assert_eq!(got, outcome, "{entry:#}");
+        assert_eq!(entry["image"], "clean-code-to-pou");
+        assert_eq!(entry["results"][0]["exit_reason"], "deadline");
+        let checks: Vec<&str> = (entry["checks"].as_array().into_iter().flatten())
+            .filter_map(|check| check["name"].as_str())
+            .collect();
+        assert_eq!(
+            checks,
+            [
+                "run 1 receipt",
+                "run 1 transcript",
+                "run 1 clean-keeps-data",
+                "runs"
+            ]
+        );
+    }
+    // The symbols of a case with an exception record come from the ELF
+    // file before any run: a file that is not one ends the case as an error.
+    let brk = case("el1-brk", false, false, 1);
+    let chosen = Chosen {
+        case: &brk,
+        reasons: vec!["every suite runs"],
+    };
+    let qemu = fake_qemu(&scratch, "", 0);
+    let (entry, got) = run(&chosen, &ready("el1-brk"), &qemu, "out-brk");
+    assert_eq!(got, Outcome::Error, "{entry:#}");
+    let error = entry["error"].as_str().unwrap_or_default();
+    assert!(error.starts_with("krepi_test_brk_site: "), "{error}");
+    assert_eq!(entry["results"], json!([]));
+    assert!(!scratch.0.join("out-brk/qemu-boot/el1-brk-1").exists());
 }
