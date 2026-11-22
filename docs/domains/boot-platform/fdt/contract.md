@@ -907,7 +907,7 @@ list that the specification gives for its iterator.
 | --- | --- | --- | --- | --- |
 | `kernel/src/fdt` | `code` | - | The refinement proof of the target fdt | `0.1` |
 | `kernel/src/fdt.rs` | `code` | - | The refinement proof of the target fdt | `0.1` |
-| `kernel/boards/qemu-virt/src/main.rs#image::device_tree` (planned) | `unsafe` | Neither (forms the byte slice of the tree at the start of RAM, where QEMU's loader places it, first of its 40-byte header and then of `totalsize` bytes) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
+| `kernel/boards/qemu-virt/src/main.rs#image::device_tree` | `unsafe` | Neither (forms the byte slice of the tree at the start of RAM, where QEMU's loader places it, first of its 40-byte header and then of `totalsize` bytes) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
 
 ## Legacy test vectors
 

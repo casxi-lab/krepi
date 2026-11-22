@@ -22,4 +22,5 @@ name = "krepi-qemu-virt"
 version = "0.0.0"
 dependencies = [
  "krepi-arch",
+ "krepi-kernel",
 ]

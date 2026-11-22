@@ -1,15 +1,20 @@
 //! The QEMU virt default image of krepi.
 //!
 //! Feature: krepi.platform.qemu-virt-boot
+//! Feature: krepi.platform.device-tree
+//! Feature: krepi.kernel.kernel-memory
 //!
 //! The cold entry `_start` of `krepi-arch` calls `kernel_main` at EL1 on
 //! CPU 0, with every exception masked, the exception vectors installed, the
 //! MMU and the caches off, BSS and the stack cleared and FP/SIMD
-//! instructions trapping. The image checks that state, writes its boot
-//! records to the PL011 console and then echoes every byte that it receives.
-//! Its exception dispatch reports every exception that the vectors take and
-//! halts. It holds no diagnostic operation, fault probe or command that a
-//! received byte triggers.
+//! instructions trapping. The image checks that state and writes its boot
+//! record to the PL011 console. It then reads the device tree that QEMU's
+//! loader placed at the start of RAM, builds the boot memory map, the page
+//! ownership table and the kernel tables and turns the MMU on with the
+//! caches off, writes its ready record and echoes every byte that it
+//! receives. Its exception dispatch reports every exception that the vectors
+//! take and halts. It holds no diagnostic operation, fault probe or command
+//! that a received byte triggers.
 //!
 //! The image runs only on the bare-metal target. On the host, where the
 //! repository checks build and lint the crate, the binary is an empty
@@ -20,12 +25,18 @@
 #[cfg(all(target_arch = "aarch64", target_os = "none"))]
 mod image {
     use core::panic::PanicInfo;
-    use core::ptr;
+    use core::{ptr, slice};
 
     use krepi_arch::cpu;
     use krepi_arch::exception::Frame;
+    use krepi_kernel::fdt::MAX_BLOB_SIZE;
+    use krepi_qemu_virt::boot_memory::{TREE_BASE, Wired, wire};
     use krepi_qemu_virt::console::PanicLocation;
     use krepi_qemu_virt::{CPU_MODEL, MIDR_CORTEX_A76, MIDR_PART_MASK, uart};
+
+    /// The size of the header of a device tree, which holds its
+    /// `totalsize` at offset 4.
+    const HEADER_SIZE: usize = 40;
 
     /// The value of [`DATA_PROBE`] in the image.
     const DATA_PATTERN: u64 = 0x4341_5358_4900_0001;
@@ -55,6 +66,7 @@ mod image {
             "CASXI_BOOT kernel=krepi board=qemu-virt el={}\n",
             cpu::exception_level()
         ));
+        let _memory = boot_memory(device_tree());
         uart::print(format_args!("CASXI_READY\n"));
         loop {
             match uart::get() {
@@ -104,6 +116,44 @@ mod image {
         uart::print(format_args!(
             "CASXI_CPU model={CPU_MODEL} midr={midr:#018x}\n"
         ));
+    }
+
+    /// The device tree that QEMU's loader placed at the start of RAM: the
+    /// slice of its 40-byte header, then of its `totalsize` bytes once that
+    /// is at least 40 and at most `MAX_BLOB_SIZE`, 2 MiB, so that the tree
+    /// ends at or below the start of the image, which the link script puts
+    /// 2 MiB above the start of RAM.
+    ///
+    /// # Panics
+    ///
+    /// Panics with `device tree size out of bounds` on another `totalsize`.
+    fn device_tree() -> &'static [u8] {
+        // SAFETY: the 40 bytes at `TREE_BASE` are RAM below the image, where
+        // QEMU's loader places the tree, which the CPU reads with the MMU off
+        // and which nothing writes while the kernel runs; a byte slice needs
+        // no alignment.
+        let header = unsafe { slice::from_raw_parts(TREE_BASE as *const u8, HEADER_SIZE) };
+        let size = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
+        let size = u64::from(size);
+        assert!(
+            (HEADER_SIZE as u64..=MAX_BLOB_SIZE).contains(&size),
+            "device tree size out of bounds"
+        );
+        // SAFETY: the `size` bytes from `TREE_BASE` are RAM below the start
+        // of the image, which the bound above keeps them in, and hold the
+        // tree, which nothing writes while the kernel runs.
+        unsafe { slice::from_raw_parts(TREE_BASE as *const u8, size as usize) }
+    }
+
+    /// Builds the boot memory, the kernel tables and the page ownership
+    /// table from the device tree `tree` and turns the MMU on, through the
+    /// boot wiring of the board.
+    fn boot_memory(tree: &'static [u8]) -> Wired {
+        // SAFETY: `kernel_main` calls this function once, on CPU 0 at EL1,
+        // with every exception masked and the MMU off, which `initialize`
+        // checked, and `tree` is the tree at the start of RAM that
+        // `device_tree` formed, which nothing writes.
+        unsafe { wire(tree) }
     }
 
     /// The exception dispatch of the image, which the vectors of

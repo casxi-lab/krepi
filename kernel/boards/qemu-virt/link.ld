@@ -1,10 +1,11 @@
 /* Feature: krepi.platform.qemu-virt-boot */
 /* The layout of the QEMU virt images: the default image and the test images.
- * QEMU virt has at least 128 MiB of RAM at 0x4000_0000. The image starts
- * 2 MiB above it and leaves the first 2 MiB to the device tree that QEMU
- * places at the start of RAM: QEMU 11.1.2 builds a device tree of 1 MiB and
- * leaves it out when the image leaves too little room. The exception vectors
- * follow the cold entry, aligned to the 2 KiB that VBAR_EL1 requires. */
+ * The runner gives QEMU virt 128 MiB of RAM at 0x4000_0000, which is also
+ * QEMU's default. The image starts 2 MiB above it and leaves the first 2 MiB
+ * to the device tree that QEMU places at the start of RAM: QEMU 11.1.2 builds
+ * a device tree of 1 MiB and leaves it out when the image leaves too little
+ * room. The exception vectors follow the cold entry, aligned to the 2 KiB
+ * that VBAR_EL1 requires. */
 ENTRY(_start)
 MEMORY { RAM (rwx) : ORIGIN = 0x40200000, LENGTH = 0x07e00000 }
 PHDRS {
