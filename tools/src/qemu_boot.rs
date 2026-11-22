@@ -49,10 +49,19 @@
 //! alone; nothing else. The cases of the cache and TLB maintenance expect no
 //! exception record: each passes with its start record, its self-check and
 //! `CASXI_RESUMED`. The return address must be that of a symbol of the
+//! image, among them an absolute symbol that names an address outside the
 //! image, or lie between two of its symbols, which the suite reads from the
 //! ELF file. The expected records are written here from the contract and
 //! from the exception classes of the Arm Architecture Reference Manual, not
 //! taken from an earlier run, and the suite judges no times.
+//!
+//! The case `kernel-memory` boots the test image that turns the MMU on with
+//! the boot wiring of the board and expects the five faults of its probes
+//! of kernel memory, each with the exception class, the fault status code
+//! and the write bit of its syndrome, and then its twelve self-checks. It
+//! also requires the image to start at `0x4020_0000` and to end on a page
+//! boundary below `0x4040_0000`, the edge of the image that the addresses
+//! of its probes assume.
 //!
 //! The suite exits with 0 for `PASS`, 1 for `FAIL`, 2 for `ERROR`, such as
 //! a failed build or a run that could not start, and for a usage error, 130
@@ -388,6 +397,8 @@ pub enum Esr {
     Exact(u64),
     /// Any value with this exception class, bits 26 to 31.
     Class(u64),
+    /// Any value whose bits of the mask, the first value, are the second.
+    Masked(u64, u64),
     /// Any value: the architecture does not define one.
     Any,
 }
@@ -434,6 +445,10 @@ pub enum Judgment {
     /// The records of a test image: the exception records in order and the
     /// end.
     Records(&'static [Exception], End),
+    /// The records of the test image of kernel memory, as `Records`, and
+    /// the edge of its image: `__text_start` at `0x4020_0000` and
+    /// `__image_end` on a page boundary below `0x4040_0000`.
+    KernelMemory(&'static [Exception], End),
 }
 
 /// One case of the suite.
@@ -454,7 +469,7 @@ pub struct Case {
 }
 
 /// The cases of the suite, in the order in which it runs them.
-pub const CASES: [Case; 12] = [
+pub const CASES: [Case; 13] = [
     Case {
         name: CASE,
         criterion: CRITERION,
@@ -600,6 +615,30 @@ pub const CASES: [Case; 12] = [
         runs: 1,
         judgment: Judgment::Records(&[], End::Resumed(&["published-code-runs"])),
     },
+    Case {
+        name: "kernel-memory",
+        criterion: "With the kernel tables of the boot wiring and the MMU on, the six edge pages of the usable ranges of the boot memory map read and write through the direct map, and the last page of the tree and the first page of the image are not mapped there; a write to read-only data, a branch into the direct map and a read of the guard page below the stack fault, each with the syndrome and return address of the Arm Architecture Reference Manual, and resume; the registers of the PL011 translate as Device-nGnRnE memory; the image checks each of the twelve",
+        image: Image::Test("kernel-memory"),
+        machine: Machine::Virt,
+        runs: 1,
+        judgment: Judgment::KernelMemory(
+            &KERNEL_MEMORY,
+            End::Resumed(&[
+                "p1-tree-end",
+                "p2-below-image",
+                "p3-above-image",
+                "p4-below-block",
+                "p5-first-block",
+                "p6-ram-end",
+                "p7-tree-last",
+                "p8-image-first",
+                "a1-read-only",
+                "a2-execute-never",
+                "a3-stack-guard",
+                "a4-device-console",
+            ]),
+        ),
+    },
 ];
 
 /// The exception record of an IRQ that a test image takes while it waits in
@@ -610,6 +649,86 @@ const WAIT_IRQ: Exception = Exception {
     esr: Esr::Any,
     elr: Elr::Within("krepi_test_wait", "krepi_test_wait_end"),
 };
+
+/// The bits of a syndrome that the faults of kernel memory fix: the
+/// exception class, bits 26 to 31, `IL`, bit 25, `WnR`, bit 6, and the fault
+/// status code, bits 0 to 5. The other bits of the ISS, such as `ISV` and
+/// the register of the access, are left out: QEMU versions may fill them
+/// differently.
+const FAULT_BITS: u64 = 0xfe00_007f;
+
+/// The syndrome of a data abort at EL1, EC `0x25`, with `IL` 1.
+const DATA_ABORT: u64 = (0x25 << 26) | (1 << 25);
+
+/// The syndrome of an instruction abort at EL1, EC `0x21`, with `IL` 1.
+const INSTRUCTION_ABORT: u64 = (0x21 << 26) | (1 << 25);
+
+/// A read through `krepi_test_load` of a page that no level 3 entry maps: a
+/// data abort with `WnR` 0 and a translation fault at level 3, FSC `0x07`.
+const UNMAPPED_READ: Exception = Exception {
+    vector: 4,
+    class: "sync",
+    esr: Esr::Masked(FAULT_BITS, DATA_ABORT | 0x07),
+    elr: Elr::At("krepi_test_load"),
+};
+
+/// The faults of the test image of kernel memory, in the order of its
+/// probes: the last page of the tree and the first page of the image read
+/// through the direct map; a write through `krepi_test_store` to read-only
+/// data, a permission fault at level 3, FSC `0x0f`, with `WnR` 1; a branch
+/// to a page of the direct map, an instruction abort with a permission fault
+/// at level 2, FSC `0x0e`, whose return address is that page, the absolute
+/// symbol `krepi_test_execute_never`; and the guard page below the stack.
+const KERNEL_MEMORY: [Exception; 5] = [
+    UNMAPPED_READ,
+    UNMAPPED_READ,
+    Exception {
+        vector: 4,
+        class: "sync",
+        esr: Esr::Masked(FAULT_BITS, DATA_ABORT | (1 << 6) | 0x0f),
+        elr: Elr::At("krepi_test_store"),
+    },
+    Exception {
+        vector: 4,
+        class: "sync",
+        esr: Esr::Masked(FAULT_BITS, INSTRUCTION_ABORT | 0x0e),
+        elr: Elr::At("krepi_test_execute_never"),
+    },
+    UNMAPPED_READ,
+];
+
+/// The start of the images, 2 MiB above the start of the RAM of QEMU virt,
+/// where their link script puts them.
+const IMAGE_BASE: u64 = 0x4020_0000;
+/// A page, 4 KiB.
+const PAGE: u64 = 0x1000;
+/// A block of the translation tables, 2 MiB.
+const BLOCK: u64 = 0x20_0000;
+/// The link symbols that bound an image of kernel memory.
+const EDGE_SYMBOLS: [&str; 2] = ["__text_start", "__image_end"];
+
+/// Whether the image of `symbols` has the edge that the cases of kernel
+/// memory assume: `__text_start` at [`IMAGE_BASE`] and `__image_end` on a
+/// page boundary above it and below the next 2 MiB block, so that the image
+/// lies in one block.
+fn check_edges(symbols: &[(String, u64)]) -> Result<(), Failure> {
+    let (start, end) = (
+        address(symbols, EDGE_SYMBOLS[0])?,
+        address(symbols, EDGE_SYMBOLS[1])?,
+    );
+    require(start == IMAGE_BASE, || {
+        format!("the image starts at {start:#x}, not at {IMAGE_BASE:#x}")
+    })?;
+    require(
+        end.is_multiple_of(PAGE) && start < end && end < IMAGE_BASE + BLOCK,
+        || {
+            format!(
+                "the image ends at {end:#x}, not on a page below {:#x}",
+                IMAGE_BASE + BLOCK
+            )
+        },
+    )
+}
 
 /// The common checks of the receipt of one run of an image with the digest
 /// `image_sha256` on `machine`: no errors; ended at its window by the
@@ -772,6 +891,12 @@ pub fn check_exception(
                 record.esr
             )
         })?,
+        Esr::Masked(mask, value) => require(record.esr & mask == value, || {
+            format!(
+                "the syndrome {:#018x} has not the bits {value:#x} of the mask {mask:#x}",
+                record.esr
+            )
+        })?,
         Esr::Any => {}
     }
     match expected.elr {
@@ -896,16 +1021,20 @@ pub fn check_records<'t>(
 /// digest `image_sha256` and `symbols`: for each run its receipt on the
 /// machine of the case, without input; the records of its transcript; each
 /// expected exception record; and each self-check, which passes when the
-/// image reports no failure; then the count of runs. A case of the default
-/// image is judged by [`judge`].
+/// image reports no failure; then the count of runs, and for the case of
+/// kernel memory the edge of its image. A case of the default image is
+/// judged by [`judge`].
 pub fn judge_records(
     case: &Case,
     image_sha256: &str,
     symbols: &[(String, u64)],
     runs: &[Run],
 ) -> Vec<Check> {
-    let Judgment::Records(exceptions, end) = case.judgment else {
-        return judge(image_sha256, runs);
+    let (exceptions, end) = match case.judgment {
+        Judgment::ColdBootEcho => return judge(image_sha256, runs),
+        Judgment::Records(exceptions, end) | Judgment::KernelMemory(exceptions, end) => {
+            (exceptions, end)
+        }
     };
     let (image, machine) = (case.image.target(), case.machine);
     let mut checks = Vec::new();
@@ -955,6 +1084,9 @@ pub fn judge_records(
             format!("{} runs, not {expected}", runs.len())
         }),
     ));
+    if let Judgment::KernelMemory(..) = case.judgment {
+        checks.push(Check::of("image edges", check_edges(symbols)));
+    }
     checks
 }
 
@@ -1143,6 +1275,19 @@ pub struct Subject<'s> {
     pub symbols: &'s [(String, u64)],
 }
 
+/// The input of each run of `case`: the challenge after the ready record
+/// for the case of the default image, and none for the cases of the test
+/// images.
+pub fn case_inputs(case: &Case) -> Vec<Input> {
+    match case.judgment {
+        Judgment::ColdBootEcho => vec![Input {
+            after: READY.to_vec(),
+            bytes: CHALLENGE.to_vec(),
+        }],
+        Judgment::Records(..) | Judgment::KernelMemory(..) => Vec::new(),
+    }
+}
+
 /// Runs `case` on the image of `subject` with the QEMU `qemu`, each run
 /// into `<output>/<case>-<n>`; the entry of the case in the suite receipt
 /// and its outcome. `progress` gets a line for each run. A run that the
@@ -1165,13 +1310,7 @@ pub fn run_case<'a>(
         qemu: qemu.map(Path::to_path_buf),
         output: None,
     };
-    let inputs: Vec<Input> = match case.judgment {
-        Judgment::ColdBootEcho => vec![Input {
-            after: READY.to_vec(),
-            bytes: CHALLENGE.to_vec(),
-        }],
-        Judgment::Records(..) => Vec::new(),
-    };
+    let inputs = case_inputs(case);
     let mut runs = Vec::new();
     let mut entries = Vec::new();
     let mut stopped = None;
@@ -1245,20 +1384,30 @@ pub fn suite_outcome(outcomes: &[Outcome]) -> Outcome {
         .unwrap_or(Outcome::Pass)
 }
 
+/// A lookup of a symbol in an ELF file.
+type Lookup = fn(&Path, &str) -> Result<u64, Failure>;
+
 /// The symbols that `case` needs from its image, read from the ELF file
-/// `image`.
+/// `image`: those of its exception records, each in its section or
+/// absolute, and for the case of kernel memory the link symbols of the edge
+/// of the image, which may end their section.
 fn case_symbols(case: &Case, image: &Path) -> Result<Vec<(String, u64)>, Failure> {
-    let Judgment::Records(exceptions, _) = case.judgment else {
-        return Ok(Vec::new());
+    let (sites, bounds) = match case.judgment {
+        Judgment::ColdBootEcho => (Vec::new(), Vec::new()),
+        Judgment::Records(exceptions, _) => (symbols_of(exceptions), Vec::new()),
+        Judgment::KernelMemory(exceptions, _) => (symbols_of(exceptions), EDGE_SYMBOLS.to_vec()),
     };
-    symbols_of(exceptions)
-        .into_iter()
-        .map(|name| {
-            let address = elf::symbol_address(image, name)
+    let lookups: [(Vec<&str>, Lookup); 2] =
+        [(sites, elf::symbol_address), (bounds, elf::bound_address)];
+    let mut symbols = Vec::new();
+    for (names, lookup) in lookups {
+        for name in names {
+            let address = lookup(image, name)
                 .map_err(|Failure(error)| Failure::new(format!("{name}: {error}")))?;
-            Ok((name.to_string(), address))
-        })
-        .collect()
+            symbols.push((name.to_string(), address));
+        }
+    }
+    Ok(symbols)
 }
 
 /// The command entry point: the lines go to the standard streams, the

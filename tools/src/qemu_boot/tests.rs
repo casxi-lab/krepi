@@ -341,6 +341,8 @@ fn the_build_command_names_the_images() {
             "invalidate-tlb-page",
             "--example",
             "code-publication",
+            "--example",
+            "kernel-memory",
             "--message-format=json-render-diagnostics",
         ]
     );
@@ -542,6 +544,11 @@ fn symbols() -> Vec<(String, u64)> {
         ("krepi_test_wait_end", 0x4020_1188),
         ("krepi_test_irq_resume", 0x4020_1258),
         ("krepi_test_sp0_site", 0x4020_1178),
+        ("krepi_test_load", 0x4020_1200),
+        ("krepi_test_store", 0x4020_1208),
+        ("krepi_test_execute_never", 0xffff_ff80_47ff_e000),
+        ("__text_start", 0x4020_0000),
+        ("__image_end", 0x4029_0000),
     ]
     .map(|(name, address)| (name.to_string(), address))
     .to_vec()
@@ -1145,6 +1152,227 @@ mod records {
     }
 }
 
+mod memory {
+    use super::*;
+
+    /// The exception records of a good run of `kernel-memory` with the
+    /// addresses of [`symbols`], a tree of 1 MiB and the RAM of the runner,
+    /// in the order of its probes: the last page of the tree and the first
+    /// page of the image read through the direct map, a write to the start
+    /// of the read-only data, a branch to the direct-map page below the last
+    /// page of RAM, and a read of the guard page. The syndromes are those
+    /// of the Arm Architecture Reference Manual: a data abort at EL1, EC
+    /// `0x25`, with `IL` 1 and a translation fault at level 3, FSC `0x07`,
+    /// or with `WnR` 1 and a permission fault at level 3, FSC `0x0f`; an
+    /// instruction abort at EL1, EC `0x21`, with a permission fault at level
+    /// 2, FSC `0x0e`.
+    const FAULTS: [&str; 5] = [
+        "CASXI_EXCEPTION vector=4 ESR=0x0000000096000007 ELR=0x0000000040201200 FAR=0xffffff80400ff000 SPSR=0x00000000600003c5 class=sync",
+        "CASXI_EXCEPTION vector=4 ESR=0x0000000096000007 ELR=0x0000000040201200 FAR=0xffffff8040200000 SPSR=0x00000000600003c5 class=sync",
+        "CASXI_EXCEPTION vector=4 ESR=0x000000009600004f ELR=0x0000000040201208 FAR=0x0000000040210000 SPSR=0x00000000600003c5 class=sync",
+        "CASXI_EXCEPTION vector=4 ESR=0x000000008600000e ELR=0xffffff8047ffe000 FAR=0xffffff8047ffe000 SPSR=0x00000000600003c5 class=sync",
+        "CASXI_EXCEPTION vector=4 ESR=0x0000000096000007 ELR=0x0000000040201200 FAR=0x000000004027f000 SPSR=0x00000000600003c5 class=sync",
+    ];
+
+    /// The self-checks of `kernel-memory`, in order.
+    const CHECKS: [&str; 12] = [
+        "p1-tree-end",
+        "p2-below-image",
+        "p3-above-image",
+        "p4-below-block",
+        "p5-first-block",
+        "p6-ram-end",
+        "p7-tree-last",
+        "p8-image-first",
+        "a1-read-only",
+        "a2-execute-never",
+        "a3-stack-guard",
+        "a4-device-console",
+    ];
+
+    /// The transcript of a run of `kernel-memory` with the exception records
+    /// `faults` and its self-checks with no failure.
+    fn transcript(faults: &[String]) -> Vec<u8> {
+        let checks: Vec<String> = CHECKS
+            .iter()
+            .map(|name| format!("CASXI_CHECK name={name} failures=0x0000000000000000"))
+            .collect();
+        let mut all: Vec<&[u8]> = vec![b"CASXI_TEST image=kernel-memory"];
+        for fault in faults {
+            all.extend([&b""[..], fault.as_bytes()]);
+        }
+        all.extend(checks.iter().map(String::as_bytes));
+        all.push(b"CASXI_RESUMED");
+        lines(&all)
+    }
+
+    /// The good exception records, with `from` replaced by `to` in record
+    /// `index`.
+    fn faults_with(index: usize, from: &str, to: &str) -> Vec<String> {
+        let mut faults = FAULTS.map(str::to_string).to_vec();
+        assert!(faults[index].contains(from), "{from}");
+        faults[index] = faults[index].replace(from, to);
+        faults
+    }
+
+    /// The checks of one run of `kernel-memory` with `transcript` and the
+    /// symbols `symbols`.
+    fn judge_kernel_memory(transcript: Vec<u8>, symbols: &[(String, u64)]) -> Vec<Check> {
+        let run = Run {
+            receipt: image_receipt(&transcript, Machine::Virt),
+            transcript,
+        };
+        judge_records(case("kernel-memory"), IMAGE_SHA256, symbols, &[run])
+    }
+
+    /// A good run passes: its receipt, its records, each fault, each
+    /// self-check, the count of runs and the edge of the image are checks
+    /// of their own. The case boots its image once, without input, and
+    /// reads the symbols of its faults and of the edge.
+    #[test]
+    fn a_good_run_of_kernel_memory_passes() {
+        let checks = judge_kernel_memory(transcript(&faults_with(0, "", "")), &symbols());
+        assert_eq!(failed(&checks), Vec::<&str>::new());
+        let mut names = vec!["run 1 receipt".to_string(), "run 1 transcript".to_string()];
+        names.extend((1..=5).map(|n| format!("run 1 exception {n}")));
+        names.extend(CHECKS.iter().map(|name| format!("run 1 {name}")));
+        names.extend(["runs".to_string(), "image edges".to_string()]);
+        let got: Vec<&str> = checks.iter().map(|check| check.name.as_str()).collect();
+        assert_eq!(got, names);
+        let kernel_memory = case("kernel-memory");
+        assert_eq!(
+            (kernel_memory.runs, kernel_memory.machine),
+            (1, Machine::Virt)
+        );
+        assert_eq!(case_inputs(kernel_memory), Vec::new());
+        assert_eq!(case_inputs(case(CASE)).len(), 1);
+        let Judgment::KernelMemory(exceptions, _) = kernel_memory.judgment else {
+            panic!("the case of kernel memory");
+        };
+        assert_eq!(
+            symbols_of(exceptions),
+            [
+                "krepi_test_load",
+                "krepi_test_store",
+                "krepi_test_execute_never"
+            ]
+        );
+    }
+
+    /// A fault of another class, level, kind or write bit, or with another
+    /// return address, fails the check of its record alone; the other bits
+    /// of the ISS, which QEMU may fill, do not matter.
+    #[test]
+    fn a_fault_of_another_kind_or_address_fails() {
+        for (what, index, from, to) in [
+            (
+                "translation for permission",
+                2,
+                "ESR=0x000000009600004f",
+                "ESR=0x0000000096000047",
+            ),
+            (
+                "a read for the write",
+                2,
+                "ESR=0x000000009600004f",
+                "ESR=0x000000009600000f",
+            ),
+            (
+                "a write for a read",
+                0,
+                "ESR=0x0000000096000007",
+                "ESR=0x0000000096000047",
+            ),
+            (
+                "level 2",
+                1,
+                "ESR=0x0000000096000007",
+                "ESR=0x0000000096000006",
+            ),
+            (
+                "a lower level",
+                4,
+                "ESR=0x0000000096000007",
+                "ESR=0x0000000092000007",
+            ),
+            (
+                "a 16-bit instruction",
+                4,
+                "ESR=0x0000000096000007",
+                "ESR=0x0000000094000007",
+            ),
+            (
+                "level 3",
+                3,
+                "ESR=0x000000008600000e",
+                "ESR=0x000000008600000f",
+            ),
+            (
+                "a data abort",
+                3,
+                "ESR=0x000000008600000e",
+                "ESR=0x000000009600000e",
+            ),
+            (
+                "another page",
+                3,
+                "ELR=0xffffff8047ffe000",
+                "ELR=0xffffff8047fff000",
+            ),
+            (
+                "another probe",
+                2,
+                "ELR=0x0000000040201208",
+                "ELR=0x0000000040201200",
+            ),
+            ("another class", 0, "class=sync", "class=brk"),
+        ] {
+            let checks = judge_kernel_memory(transcript(&faults_with(index, from, to)), &symbols());
+            let own = format!("run 1 exception {}", index + 1);
+            assert_eq!(failed(&checks), [own.as_str()], "{what}");
+        }
+        // ISV, SAS, SRT and SF of the data abort are not judged.
+        let filled = faults_with(0, "ESR=0x0000000096000007", "ESR=0x00000000978f0007");
+        let checks = judge_kernel_memory(transcript(&filled), &symbols());
+        assert_eq!(failed(&checks), Vec::<&str>::new());
+        // A missing fault fails the transcript and every record with it.
+        let mut missing = FAULTS.map(str::to_string).to_vec();
+        missing.remove(3);
+        let checks = judge_kernel_memory(transcript(&missing), &symbols());
+        assert!(failed(&checks).contains(&"run 1 transcript"));
+        assert!(failed(&checks).contains(&"run 1 a4-device-console"));
+        let text = String::from_utf8(transcript(&faults_with(0, "", ""))).unwrap();
+        let failing = text.replace(
+            "name=a2-execute-never failures=0x0000000000000000",
+            "name=a2-execute-never failures=0x0000000000000001",
+        );
+        let checks = judge_kernel_memory(failing.into_bytes(), &symbols());
+        assert_eq!(failed(&checks), ["run 1 a2-execute-never"]);
+    }
+
+    /// The image must start at `0x4020_0000` and end on a page boundary
+    /// inside that 2 MiB block, or the edge check fails.
+    #[test]
+    fn the_image_must_lie_in_its_block() {
+        let good = transcript(&faults_with(0, "", ""));
+        let with = |name: &str, address: u64| {
+            let mut symbols = symbols();
+            symbols.retain(|(symbol, _)| symbol != name);
+            symbols.push((name.to_string(), address));
+            failed(&judge_kernel_memory(good.clone(), &symbols)).join(", ")
+        };
+        assert_eq!(with("__image_end", 0x403f_f000), "");
+        assert_eq!(with("__text_start", 0x4020_1000), "image edges");
+        assert_eq!(with("__image_end", 0x4040_0000), "image edges");
+        assert_eq!(with("__image_end", 0x4029_0800), "image edges");
+        assert_eq!(with("__image_end", 0x4020_0000), "image edges");
+        let mut without = symbols();
+        without.retain(|(symbol, _)| symbol != "__image_end");
+        let checks = judge_kernel_memory(good, &without);
+        assert_eq!(failed(&checks), ["image edges"]);
+    }
+}
+
 /// The cases name each symbol once, the test images once each, and the
 /// suite takes the worst outcome of its cases.
 #[test]
@@ -1169,7 +1397,8 @@ fn the_cases_name_their_symbols_images_and_outcome() {
             "clean-code-to-pou",
             "invalidate-to-poc",
             "invalidate-tlb-page",
-            "code-publication"
+            "code-publication",
+            "kernel-memory"
         ]
     );
     let all = |outcomes: &[Outcome]| suite_outcome(outcomes);
