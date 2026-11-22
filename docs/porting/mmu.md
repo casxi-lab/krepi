@@ -66,9 +66,16 @@ are in that record, in [page_tables](page_tables.md) and in
   writer; a `Pool` is neither `Clone` nor `Copy`, and `apply` takes it
   mutably. The `SAFETY` comments of the stores state why no Rust reference
   reads an entry after a step writes it: a plan reads an entry only before
-  its own steps write it. That argument holds location by location, as Tree
-  Borrows checks accesses, and is not shown under Stacked Borrows, which the
-  open obligations of the module leave to the proof of its unsafe sites.
+  its own steps write it. That argument is not shown under either aliasing
+  model of Rust, Stacked Borrows or Tree Borrows: a plan that `apply` takes
+  by value holds a shared reference to its set, which the entry of `apply`
+  protects for the whole call, and the helpers of the plans of the core
+  reborrow the whole set after stores into it. Miri reports undefined
+  behaviour for a host copy of the boot wiring under both models, whether
+  the plan is passed by value or by reference. The open obligations of the
+  module leave the question to the proof of its unsafe sites; a later design
+  of the core, in which a plan holds no reference while it executes, removes
+  it.
 - **Turning the MMU on.** `enable(lower, direct, bits, caches)` takes the
   roots of the two kernel sets, the physical address size in bits and the
   choice of the caches, in place of the root of the lower tables, the root

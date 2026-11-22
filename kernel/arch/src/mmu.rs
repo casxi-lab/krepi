@@ -135,7 +135,16 @@ impl<const N: usize> Pool<N> {
     /// No Rust reference to the set that exists when a step of a plan writes an
     /// entry accesses that entry afterwards: the borrow that a plan of the core
     /// holds reads an entry only before the plan's own steps write it, and a
-    /// later access forms a new reference from the storage of the set.
+    /// later access forms a new reference from the storage of the set. That
+    /// argument is not shown under either aliasing model of Rust, Stacked
+    /// Borrows or Tree Borrows: a plan that `apply` takes by value holds a
+    /// shared reference to the set, which the entry of `apply` protects for the
+    /// whole call, and the helpers of the plans of the core reborrow the whole
+    /// set after stores into it. Miri reports undefined behaviour for a host
+    /// copy of the boot wiring under both models, whether the plan is passed by
+    /// value or by reference. The open obligations of this module leave the
+    /// question to the proof of its unsafe sites; a later design of the core,
+    /// in which a plan holds no reference while it executes, removes it.
     pub const unsafe fn new(base: u64) -> Pool<N> {
         Pool { base }
     }
@@ -197,12 +206,18 @@ fn store_descriptor<const N: usize>(
     // gives the step borrows the set through a shared reference reborrowed
     // from the caller's reference to the storage, and reads an entry only
     // before a step of its own writes it, the entries of a slot at the first
-    // step of the slot; so no reference reads this entry after the store,
-    // which holds location by location, as Tree Borrows checks accesses.
-    // Under Stacked Borrows, where an earlier store into another entry would
-    // invalidate a helper of the plan that reborrows the whole pool, the
-    // argument is not shown; the open obligations of this module leave that
-    // question to the proof of their unsafe sites.
+    // step of the slot; so no reference reads this entry after the store.
+    // That argument is not shown under either aliasing model of Rust, Stacked
+    // Borrows or Tree Borrows. The plan, which `apply` takes by value, holds
+    // the shared reference, which the entry of `apply` protects for the whole
+    // call, so that a store through the exposed provenance conflicts with it;
+    // and the helpers of the plans of the core reborrow the whole set at the
+    // first step of a slot, after stores into it. Miri reports undefined
+    // behaviour for a host copy of the boot wiring under both models, whether
+    // the plan is passed by value or by reference. The open obligations of
+    // this module leave the question to the proof of their unsafe sites; a
+    // later design of the core, in which a plan holds no reference while it
+    // executes, removes it.
     unsafe { ptr::with_exposed_provenance_mut::<u64>(address as usize).write_volatile(descriptor) };
 }
 
@@ -228,10 +243,10 @@ fn zero_table<const N: usize>(pool: &mut Pool<N>, table: usize) {
         // new tables of `kernel_map` and `direct_map`, which their plans
         // only write, and the tables of `reset` and of the target of a copy,
         // which their plans do not borrow; so no reference reads these
-        // entries after the stores, which holds location by location, as
-        // Tree Borrows checks accesses. Under Stacked Borrows the argument is
-        // not shown, as for `store_descriptor`. No table walk reaches a new
-        // table before a later step stores its table descriptor.
+        // entries after the stores. That argument is not shown under either
+        // aliasing model of Rust, as for `store_descriptor`. No table walk
+        // reaches a new table before a later step stores its table
+        // descriptor.
         unsafe {
             ptr::with_exposed_provenance_mut::<u64>((start + 8 * entry) as usize).write_volatile(0)
         };

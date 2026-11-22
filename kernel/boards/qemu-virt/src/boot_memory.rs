@@ -444,7 +444,15 @@ pub unsafe fn wire(tree: &'static [u8]) -> Wired {
     // range of the layout that holds the data of the image. Only the plans of
     // `kernel_map` and `direct_map` write the pools, through these handles;
     // a plan reads an entry only before its own steps write it, and the
-    // references are not used after the plans.
+    // references are not used after the plans. That argument is not shown
+    // under either aliasing model of Rust, Stacked Borrows or Tree Borrows:
+    // each plan holds its shared reference to its set while `apply` stores
+    // into the set, and Miri reports undefined behaviour for a host copy of
+    // these calls under both models, whether the plan is passed by value or
+    // by reference, as the `SAFETY` comments of the stores of
+    // `krepi_arch::mmu` state. The open obligations leave the question to the
+    // proof of the unsafe sites; a later design of the core, in which a plan
+    // holds no reference while it executes, removes it.
     let (set_lower, set_direct, mut pool_lower, mut pool_direct) = unsafe {
         (
             &mut (*lower).0,

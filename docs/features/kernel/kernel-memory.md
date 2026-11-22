@@ -512,9 +512,14 @@ unchanged. The page `0x8000` of the process, mapped into the target as
   on a Raspberry Pi 5 and with the caches on; the ordering that the
   barriers give on several CPUs; the panic of `apply` on a step outside its
   pool and the panics of the boot wiring, which no test takes; and the
-  argument of the `SAFETY` comments of the stores under the Stacked Borrows
-  model, which the open obligations leave to the proof of the unsafe
-  sites.
+  argument of the `SAFETY` comments of the stores, that no Rust reference
+  reads an entry after a step writes it, which is not shown under either
+  aliasing model of Rust, Stacked Borrows or Tree Borrows: a plan holds a
+  shared reference to its set while `apply` executes it, and Miri reports
+  undefined behaviour for a host copy of the boot wiring under both models,
+  whether the plan is passed by value or by reference. The open obligations
+  leave it to the proof of the unsafe sites; a later design of the core, in
+  which a plan holds no reference while it executes, removes it.
 
 ## Limitations
 
