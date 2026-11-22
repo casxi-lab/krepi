@@ -173,7 +173,7 @@ jobs:
       contents: read
     outputs:
       artifact: images-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
-      test-elf-sha256: ${{ steps.image.outputs.test-elf-sha256 }}
+      digests: ${{ steps.image.outputs.digests }}
     steps:
       - name: Check out the candidate commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -206,9 +206,12 @@ jobs:
       - name: Write the images
         run: exec bash .github/scripts/deadline.sh 3m 60s cargo xtask image --output-dir artifacts/images
 
-      - name: Give the digests of the images as outputs
+      # One output, a JSON list of NAME=SHA256, one entry for each image.
+      - name: Give the digests of the images as an output
         id: image
-        run: jq -r '.images[] | "\(.name)-sha256=\(.sha256)"' artifacts/images/images.json >> "$GITHUB_OUTPUT"
+        run: |
+          digests=$(jq -c '[.images[] | "\(.name)=\(.sha256)"]' artifacts/images/images.json)
+          echo "digests=$digests" >> "$GITHUB_OUTPUT"
 
       - name: Upload the images
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -283,9 +286,10 @@ jobs:
       - name: Run the QEMU suites
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          TEST_ELF_SHA256: ${{ needs.image.outputs.test-elf-sha256 }}
+          DIGESTS: ${{ needs.image.outputs.digests }}
         run: |
-          args=(--images artifacts/images --expect "test-elf=$TEST_ELF_SHA256" --output-dir artifacts/suite)
+          mapfile -t expect < <(jq -r '.[] | "--expect", .' <<< "$DIGESTS")
+          args=(--images artifacts/images "${expect[@]}" --output-dir artifacts/suite)
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             args+=(--base "$BASE_SHA")
           fi

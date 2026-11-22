@@ -267,6 +267,41 @@ fn only_the_full_and_nightly_lines_run_the_slow_tests() {
 }
 
 #[test]
+fn every_line_takes_each_image_by_its_digest() {
+    for path in &LINES[..4] {
+        let document = workflow(path);
+        let image = &document["jobs"]["image"];
+        assert_eq!(
+            image["outputs"]["digests"].as_str(),
+            Some("${{ steps.image.outputs.digests }}"),
+            "{path}"
+        );
+        let written = script_with_id(image, "image");
+        let list = r#"digests=$(jq -c '[.images[] | "\(.name)=\(.sha256)"]' "#;
+        assert!(written.contains(list), "{path}: {written}");
+        // The suite step passes an --expect for each entry of that list.
+        let steps = document["jobs"]["suite"]["steps"].as_vec().into_iter();
+        let mut steps = steps
+            .flatten()
+            .filter(|step| !step["env"]["DIGESTS"].is_badvalue());
+        let step = steps.next().expect("the step of the suite");
+        assert_eq!(
+            step["env"]["DIGESTS"].as_str(),
+            Some("${{ needs.image.outputs.digests }}"),
+            "{path}"
+        );
+        let script = step["run"].as_str().expect("a script");
+        let expect = r#"mapfile -t expect < <(jq -r '.[] | "--expect", .' <<< "$DIGESTS")"#;
+        assert!(script.starts_with(expect), "{path}: {script}");
+        assert!(script.contains("\"${expect[@]}\""), "{path}: {script}");
+        assert!(
+            !scripts(&document).join("\n").contains("test-elf="),
+            "{path}"
+        );
+    }
+}
+
+#[test]
 fn the_record_workflow_lists_every_other_workflow() {
     let all = workflows();
     let record = &all
