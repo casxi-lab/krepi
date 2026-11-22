@@ -262,6 +262,15 @@ fn mapping_row_4_the_manifest_and_the_workflows_but_the_formal_ones_select_every
 }
 
 #[test]
+fn mapping_row_4_the_scripts_of_the_workflows_select_every_suite() {
+    assert_eq!(selected(&[".github/scripts/deadline.sh"]), every());
+    assert_eq!(
+        mapping(".github/scripts/deadline.sh"),
+        Selects::Every(".github/scripts/")
+    );
+}
+
+#[test]
 fn mapping_row_5_the_kernel_and_user_space_select_the_suites_that_list_the_path() {
     assert_eq!(selected(&["kernel/boards/a/src/main.rs"]), ["a"]);
     assert_eq!(

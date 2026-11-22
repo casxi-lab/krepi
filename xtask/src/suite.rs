@@ -30,13 +30,14 @@
 //! and the paths that `git diff --name-only --no-renames` gives between it
 //! and `HEAD`, both sides of a rename or deletion included, and maps each
 //! path by prefix as [`mapping`] does: a path below `tools/` or `xtask/`, the
-//! toolchain files, `.cargo/`, the manifest or `.github/workflows/` other
-//! than the files that start with `.github/workflows/formal` selects every
-//! suite; a path below `kernel/` or `user/` selects the suites that list a
-//! prefix of it; any other path selects none. The smoke cases run whatever
-//! the paths, and a selected suite runs its other cases that are not slow.
-//! Without `--base`, every suite runs its cases that are not slow. `--slow`
-//! adds the slow cases of the suites that run.
+//! toolchain files, `.cargo/`, the manifest, `.github/scripts/` or
+//! `.github/workflows/` other than the files that start with
+//! `.github/workflows/formal` selects every suite; a path below `kernel/` or
+//! `user/` selects the suites that list a prefix of it; any other path
+//! selects none. The smoke cases run whatever the paths, and a selected
+//! suite runs its other cases that are not slow. Without `--base`, every
+//! suite runs its cases that are not slow. `--slow` adds the slow cases of
+//! the suites that run.
 //!
 //! # Images and runs
 //!
@@ -116,14 +117,16 @@ const OUTPUT_DIR: &str = "artifacts/suite";
 
 /// The prefixes of the paths whose change selects every suite: the host
 /// tooling, the repository tasks, the toolchain files, the Cargo
-/// configuration, the manifest and the workflows other than the formal ones.
-pub const EVERY_SUITE: [&str; 7] = [
+/// configuration, the manifest, the scripts of the workflows and the
+/// workflows other than the formal ones.
+pub const EVERY_SUITE: [&str; 8] = [
     "tools/",
     "xtask/",
     "rust-toolchain.toml",
     "toolchains.toml",
     ".cargo/",
     MANIFEST,
+    ".github/scripts/",
     ".github/workflows/",
 ];
 /// The prefix of the workflows of the proof tooling, which select no suite.
