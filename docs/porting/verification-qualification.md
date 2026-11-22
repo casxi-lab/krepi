@@ -47,7 +47,7 @@ state for the tooling taken from the CAS project.
 
 New in krepi, and not taken from the CAS project:
 
-- the 28 cases after `division-walk` in `cases.json` and their modules at
+- the 29 cases after `division-walk` in `cases.json` and their modules at
   the end of `src/lib.rs`: `cfg-shape` and `const-generic`, one case for each
   of the items R1 to R7 of the
   [provable Rust subset](../conventions/provable-subset.md#constructs-and-alternatives),
@@ -67,7 +67,8 @@ New in krepi, and not taken from the CAS project:
   `or-chain-helper`, `negation-in-condition`, `element-enum-match` and
   `element-enum-by-value`, which record three constructs of that module
   that the provable Rust subset lists among those that the tools do not
-  support, each with its alternative;
+  support, each with its alternative, and `repr-c-array-field`, which
+  records the layout of C that the table sets of that module take;
 - the reviewed external types of `r7-private-enum`,
   `verification/externals/Qual/R7PrivateEnum/TypesExternal.lean`;
 - the definitions in `verification/Krepi/Qualification/Models/`
@@ -119,7 +120,7 @@ New in krepi, and not taken from the CAS project:
   - the documentation of `term_layout_cut` says that the case installs
     reviewed external declarations in which `Arc` is a structure, in place
     of the structure model of `Arc`.
-- The 28 new modules are appended after `division_walk`: `cfg_shape`,
+- The 29 new modules are appended after `division_walk`: `cfg_shape`,
   `const_generic`, `r1_function_item_value`, `r2_iterator_any`,
   `r3_iterator_flatten`, `r4_closure_callback`,
   `r5_stop_path_borrow_join`, `r6_same_enum_name` with the modules `objects`
@@ -129,13 +130,13 @@ New in krepi, and not taken from the CAS project:
   `byte_string_return`, `const_bool_parameter`, `nested_array_index`,
   `plan_iterator_from_mut`, `iterator_in_iterator`, `iterator_driven_loop`,
   `or_chain_let`, `negation_flag`, `or_chain_helper`,
-  `negation_in_condition`, `element_enum_match` and
-  `element_enum_by_value`. Each defines the types it uses.
+  `negation_in_condition`, `element_enum_match`, `element_enum_by_value`
+  and `repr_c_array_field`. Each defines the types it uses.
 
 ### The cases
 
 `cases.json` keeps schema 1 and the formatting of the CAS project. Its
-cases are the 103 kept cases in the order of the CAS project, then the 28
+cases are the 103 kept cases in the order of the CAS project, then the 29
 new ones. In the CAS project the kept cases are 67 translated, 28 rejected and
 8 ill-typed (5 with their type errors in `Funs.lean`, 3 in `Types.lean`); 4
 have `opaque`, 2 `loop_sources`, 3 `models` and 3 `proof`. After the
@@ -202,6 +203,7 @@ each page-table case also built with `lake build --wfail` on
 | `negation-in-condition` | The alternative to a `bool` that the arms of a `match` give as a negation and a literal, which Lean cannot decide: the `match` updates counts and gives no value, and the negation is the condition of an `if` | Translated, without external items or loops |
 | `element-enum-match` | A `match` that binds the fields of a variant of an enumeration field of an array element borrowed through `&self` | Rejected: `Not allowed to expand enumerations with several variants` in that function; no external items or loops |
 | `element-enum-by-value` | The alternative of `element-enum-match`: the field is passed by value to a function that matches on it | Translated, without external items or loops |
+| `repr-c-array-field` | A structure with `#[repr(C)]` whose first field is a pool held inline as `[[u64; 512]; N]`, before a count, as a set of the page tables fixes its layout so that a board names the address of its pool; a `const fn` constructor and methods that read and write through the fields | Translated, without external items or loops |
 
 `r6-same-enum-name` has a form that no case of the CAS project has: its
 `start_from` is empty and its `parts` list two modules, each with its own

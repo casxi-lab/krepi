@@ -93,9 +93,13 @@ the module `mmu` of `krepi-arch` (planned), whose records take them.
 - **Storage.** `Tables::new(pool)` takes the zero storage of the pool by
   value and sets the record of the tables in use to 1; it is a `const fn`,
   so that a board can build a set in a static. It replaces `new()`, which
-  built zero tables itself, and the `Default` implementation. The type has
-  no `#[repr(C, align(4096))]`: the board places the pool, and `base` names
-  its physical address, as before.
+  built zero tables itself, and the `Default` implementation. The type is
+  `#[repr(C)]` with the pool as its first field, so that the address of a
+  set is the address of its table 0: a board that places the set in a
+  static aligned to 4 KiB names `base` by the address of that static. The
+  prototype's `#[repr(C, align(4096))]` also aligned the set itself, which
+  the board's static does here, so the sets of the host tests need no
+  alignment of 4 KiB.
 - **Record of tables.** A set records only the number of its tables in
   use, those of the lowest indices; the array `free` and the reuse of a
   freed table are gone with the sealing of the direct map, so a table

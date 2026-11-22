@@ -10184,3 +10184,49 @@ pub mod element_enum_by_value {
         }
     }
 }
+
+/// A structure with the layout of C whose first field is an array of
+/// arrays, as the table sets of the page-table logic fix their layout so
+/// that a board can name the address of their pool: built by a `const fn`
+/// from its storage, and read and written through its fields.
+pub mod repr_c_array_field {
+    /// The entries of a table.
+    pub const ENTRIES: usize = 512;
+
+    /// `N` tables, the first field, and the number in use.
+    #[repr(C)]
+    pub struct Pool<const N: usize> {
+        tables: [[u64; ENTRIES]; N],
+        used: usize,
+    }
+
+    impl<const N: usize> Pool<N> {
+        /// The pool of the storage `tables`, its first table in use.
+        pub const fn new(tables: [[u64; ENTRIES]; N]) -> Self {
+            Pool { tables, used: 1 }
+        }
+
+        /// The number of tables in use.
+        pub fn used(&self) -> usize {
+            self.used
+        }
+
+        /// Entry `entry` of table `table`, or 0 outside the tables in use.
+        pub fn entry(&self, table: usize, entry: usize) -> u64 {
+            if table >= self.used || table >= N || entry >= ENTRIES {
+                return 0;
+            }
+            self.tables[table][entry]
+        }
+
+        /// Writes `d` into entry `entry` of table `table`; whether the table
+        /// is in use.
+        pub fn store(&mut self, table: usize, entry: usize, d: u64) -> bool {
+            if table >= self.used || table >= N || entry >= ENTRIES {
+                return false;
+            }
+            self.tables[table][entry] = d;
+            true
+        }
+    }
+}

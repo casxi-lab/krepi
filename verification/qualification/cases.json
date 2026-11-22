@@ -2031,6 +2031,18 @@
       "external_functions": [],
       "external_types": [],
       "loop_sources": []
+    },
+    {
+      "name": "repr-c-array-field",
+      "module": "Qual.ReprCArrayField",
+      "start_from": [
+        "crate::repr_c_array_field"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
     }
   ]
 }
