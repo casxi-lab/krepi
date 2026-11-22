@@ -24,8 +24,11 @@ module itself: its root declares `boot`, `cache`, `cpu`, `gic` and
 `timer`, each compiled only for `target_arch = "aarch64"` with
 `target_os = "none"`, as the legacy root compiled `cache` and `cpu`, and
 `exception` and `cache_range`, compiled on the host too, as the legacy root
-compiled them. The records of the two cache modules are
-[cache](cache.md) and [cache_range](cache_range.md). The manifest makes the
+compiled them, and `mmu`, the adapter of the page tables, compiled on the
+host too, with the parts that touch the hardware compiled only for the
+bare-metal target. The records of the two cache modules are
+[cache](cache.md) and [cache_range](cache_range.md), that of the adapter
+[mmu](mmu.md). The manifest makes the
 crate a member of the kernel workspace. The legacy area `src/arch` is
 ported, as
 [porting](../conventions/porting.md#classification-of-the-legacy-areas)
@@ -34,12 +37,14 @@ classifies it.
 ## Changes
 
 - The two legacy module levels, `arch` and `arch::aarch64`, become the crate
-  root of `krepi-arch`, a library of the kernel workspace without
-  dependencies, with `missing_docs` warned and undocumented `unsafe` blocks
-  denied.
+  root of `krepi-arch`, a library of the kernel workspace whose one
+  dependency is the provable core `krepi-kernel`, for the plans and the
+  values that `mmu` takes, with `missing_docs` warned and undocumented
+  `unsafe` blocks denied.
 - The crate is `no_std` outside its tests. On the host, where the
   repository checks build it, it holds the exception frame, the classes of
-  exceptions and the cache-line walks, whose tests run there.
+  exceptions, the cache-line walks and the plan cursors of `mmu`, whose
+  tests run there with the register values of the adapter.
 - The cold entry `boot`, which the legacy kernel included from `src/boot.S`
   at the root of the prototype's kernel, is a module of this crate; its
   record is [boot](boot.md).
@@ -50,7 +55,9 @@ classifies it.
   interrupt code of `src/board/qemu/irq.rs` and have the records
   [gic](gic.md) and [timer](timer.md). The description of the manifest and
   the crate documentation say so, in place of processor primitives alone,
-  and name the cache and TLB maintenance of the executing CPU.
+  and name the cache and TLB maintenance of the executing CPU and the
+  adapter that executes the write plans of the page tables and turns the
+  MMU on.
 
 ## Tests carried over
 
@@ -74,6 +81,7 @@ None of its own; the records of the declared modules name theirs.
   module `exception` is public, and its frame is `Frame`. Page tables,
   user contexts, user addresses and ASIDs, the GIC-400 and the physical timer
   of the Pi 5 path, SGIs and the CPU-local and transaction adapters are
-  ported or redesigned with the code that needs them.
+  ported or redesigned with the code that needs them; the page tables are
+  in the provable core, and their adapter is `mmu`.
 - The module documentation, which described the legacy modules; the crate
   documentation describes this crate.

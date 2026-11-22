@@ -876,9 +876,9 @@ afterwards.
 - For each step of the two error orders of
   [Rejection and error priority](#rejection-and-error-priority), an input
   that breaks that step and a later one gives the error of that step.
-- The QEMU boot suite boots QEMU virt three times, each in a new QEMU
-  process, and the results of the parse and of the boot memory map are the
-  same, although each tree holds other seeds in `/chosen`.
+- The case `boot-memory` of the QEMU boot suite boots QEMU virt three times,
+  each in a new QEMU process, and the results of the parse and of the boot
+  memory map are the same, although each tree holds other seeds in `/chosen`.
 - The tests take their expected values from this page, from the vectors and
   from the trees that they build, never from an earlier run of the code
   under test ([testing](../../../conventions/testing.md#independent-evidence)).

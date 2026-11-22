@@ -47,9 +47,12 @@ each in an exception record; the default image then halts, and test images
 of the QEMU boot suite return from the exceptions that they cause, among
 them the timer interrupt, which the GICv2 delivers and the board's
 interrupt wiring acknowledges and ends. The
-feature belongs to the kernel at EL1. It does not boot a Raspberry Pi 5,
-start secondary CPUs, read the device tree, turn the caches on, turn the MMU
-on outside one test image, or handle an exception of EL0.
+feature belongs to the kernel at EL1. Between its boot records the image
+reads the device tree and turns the MMU on with the caches off, through the
+features [`krepi.platform.device-tree`](device-tree.md) and
+[`krepi.kernel.kernel-memory`](../kernel/kernel-memory.md). The feature does
+not boot a Raspberry Pi 5, start secondary CPUs, turn the caches on or
+handle an exception of EL0.
 
 ## Interface
 
@@ -377,8 +380,9 @@ input of the walk.
   `SP_EL0` is handled.
 - The default image takes no interrupt; only the timer interrupt is handled,
   in the test images, and device interrupts are not.
-- The MMU and the caches stay off, except that one test image turns the
-  MMU on with tables of its own; the caches stay off in every image, and
-  the device tree is not read.
+- The caches stay off in every image. The MMU is on in the default image
+  and in the test images that build the kernel tables through the boot
+  wiring, and in the test image of the TLB invalidation with tables of its
+  own; the other test images run with it off.
 - No cache or TLB maintenance on behalf of another CPU.
 - The panic record has no backtrace and no build-id.

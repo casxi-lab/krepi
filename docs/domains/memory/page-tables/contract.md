@@ -864,12 +864,12 @@ boot contract.
   `clone_kernel_from`, `kernel_map` and `direct_map` against the order of
   [Write plans and publication](#write-plans-and-publication), written from
   this page.
-- QEMU tests on QEMU virt with the MMU on read and write pages at the edges
-  of the direct map's ranges and of its excluded ranges through the direct
-  map, and take the fault of a write to a `ReadOnly` page, of an execution
-  from an execute-never page, of an access to a guard and of an access to an
-  excluded page; a `Device` page of the console is written. Three cold
-  boots give the same counts of the direct map and of the kernel tables.
+- The case `kernel-memory` of the QEMU boot suite, on QEMU virt with the MMU on, reads and
+  writes pages at the edges of the direct map's ranges and of its excluded ranges through the
+  direct map, and takes the fault of a write to a `ReadOnly` page, of an execution from an
+  execute-never page, of an access to a guard and of an access to an excluded page; a `Device`
+  page of the console is written. In the case `boot-memory`, three cold boots give the same
+  counts of the direct map and of the kernel tables, which the suite computes from this page.
 - On the Pi 5 with 8 GB, the board runs build the direct map of the whole
   RAM and check its counts against [Table pool](#table-pool).
 

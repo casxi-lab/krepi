@@ -276,7 +276,9 @@ kernel workspace for the bare-metal target `aarch64-unknown-none-softfloat`
 as well as for the host, so it also lints the modules that are compiled only
 for that target. The `test` and `test-release` steps build the kernel
 workspace for the host only and do not test those modules; only
-`cargo xtask qemu-boot` builds them into the images and runs those.
+`cargo xtask qemu-boot` and `cargo xtask image`, which a test of the
+`xtask` binary in the `test` step runs, build them into the images, and
+only the QEMU suites run those.
 
 A slow test is a Cargo test marked `#[ignore = "slow"]` whose function name
 starts with `slow_`. `cargo xtask check --slow` runs the slow tests in the
@@ -329,15 +331,16 @@ CI runs in lines, each a workflow of `.github/workflows/` on GitHub-hosted
   described below, and uploads that directory as the artifact
   `qemu-boot-<commit>-<attempt>`, also when the suite fails. The job `image`
   runs `cargo xtask image`, uploads the images as
-  `images-<commit>-<attempt>` and gives the SHA-256 of each as an output;
-  the job `suite` downloads them and runs `cargo xtask suite --images` with
-  those digests, with `--base` and the base commit of the pull request on a
-  pull request, so that a pull request runs the smoke cases and the suites
-  that it selects and `main` every suite, both without the slow cases, and
-  uploads its report as `suite-<commit>-<attempt>`. The job `check summary`
-  runs after the other three whatever their outcome and succeeds only if
-  each of them did. A push to a pull request cancels the run of its earlier
-  head; runs on `main` are not cancelled.
+  `images-<commit>-<attempt>` and gives the SHA-256 of each in one output,
+  `digests`, a JSON list of `<name>=<SHA-256>` from the record; the job
+  `suite` downloads them and runs `cargo xtask suite --images` with an
+  `--expect` for each, with `--base` and the base commit of the pull request
+  on a pull request, so that a pull request runs the smoke cases and the
+  suites that it selects and `main` every suite, both without the slow
+  cases, and uploads its report as `suite-<commit>-<attempt>`. The job
+  `check summary` runs after the other three whatever their outcome and
+  succeeds only if each of them did. A push to a pull request cancels the
+  run of its earlier head; runs on `main` are not cancelled.
 - The full line, `full.yml`, runs only when the label `full-check` is added
   to a pull request to `main`, on its head, and never on a push to it: its
   first job fails unless the head contains the `main` of that moment, and
@@ -657,12 +660,23 @@ suites boot into the new directory `<dir>`, which must not exist, and then
 `images.json`, the record of their digests. Its `format` is 1, and `images`
 lists each image with its `name`, its `file` in the directory, its `bytes`,
 the SHA-256 of the file as written (`sha256`) and the `commit` that
-`git rev-parse HEAD` names. The one image today is the test image, named
-`test-elf`, in the file `test-elf.elf`. The command prints the size and
+`git rev-parse HEAD` names. The first image is the test image, named
+`test-elf`, in the file `test-elf.elf`; the others are the kernel images
+that `cargo xtask qemu-boot` boots, the default image `krepi-qemu-virt` and
+the 13 test images of its cases, each named by its Cargo target and written
+to `<target>.elf`. The command builds them once, with the build command of
+that suite in `kernel/`, described below, passing on the standard error of
+the build, and copies the executable that Cargo's artifact message gives
+for each target, so that a later run of that suite in the same checkout
+finds them built. The command prints the size and
 digest of each image and the path of the record, and exits with 0, or with
-2 after a usage error or a failure. It is not part of the check. Its unit
-tests run in the `test` step above and compare the record with the file and
-with the digest of the test image computed with `shasum -a 256`.
+2 after a usage error or a failure, such as a build that fails. It is not
+part of the check. Its unit tests run in the `test` step above and compare
+the record with the file and with the digest of the test image computed
+with `shasum -a 256`, on a list of sources without kernel images, and check
+that a kernel image whose build fails or cannot start writes no record and
+that the sources are the default image and the test images of the QEMU boot
+suite in its order.
 
 The QEMU suites are listed in `suites.toml` at the repository root. Each
 `[[suite]]` has a `name`, the `image` that it boots, by its name in the
@@ -671,11 +685,18 @@ below `kernel/` or `user/` whose change selects it on a pull request, and its
 cases. Each `[[suite.case]]` has a `name`, `smoke`, whether every pull
 request runs it, `slow`, whether only the slow runs do, `runs`, the cold
 boots of the case from 1 to 10, each in a new QEMU process, and `timeout`,
-the limit of one run in seconds from 1 to 600. No case is both smoke and
-slow, and names are unique and made of lowercase letters, digits and
-hyphens. The one suite today, `test-elf`, boots the test image and lists no
+the limit of one run in seconds from 1 to 600, and optionally an `image`
+that it boots in place of its suite's. No case is both smoke and slow, and
+names are unique and made of lowercase letters, digits and hyphens. A case
+of a kernel image is a case of the QEMU boot suite, with its name, image
+and runs and the window of that suite, 20 s, as its `timeout`, and a suite
+with such a case lists the cases of the QEMU boot suite in their order and
+no other case. The suite `test-elf` boots the test image and lists no
 paths; its case `boot` is a smoke case of one run, and `repeat`, a slow
-case, makes three.
+case, makes three. The suite `qemu-boot` boots the default image, lists the
+path `kernel/` and holds the 14 cases of `cargo xtask qemu-boot`, none of
+them smoke or slow, each but `cold-boot-echo` with the image of its case,
+and of one run but `cold-boot-echo` and `boot-memory`, which make three.
 
 `cargo xtask suite` runs the cases of `suites.toml` on QEMU virt through the
 library entry of the QEMU runner, with the command line of
@@ -687,9 +708,10 @@ depends on its options:
   `git diff --name-only --no-renames` gives between it and `HEAD`, both
   sides of a rename or a deletion included. Each path selects suites by
   prefix: one below `tools/` or `xtask/`, `rust-toolchain.toml`,
-  `toolchains.toml`, a path below `.cargo/`, `suites.toml` or a path below
-  `.github/workflows/` that does not start with `.github/workflows/formal`
-  selects every suite; one below `kernel/` or `user/` selects the suites that
+  `toolchains.toml`, a path below `.cargo/`, `suites.toml`, a path below
+  `.github/scripts/` or one below `.github/workflows/` that does not start
+  with `.github/workflows/formal` selects every suite; one below `kernel/`
+  or `user/` selects the suites that
   list a prefix of it; any other path, such as one below `docs/` or
   `verification/`, selects none. The smoke cases run whatever the paths, and
   a selected suite runs its other cases that are not slow.
@@ -701,12 +723,18 @@ of `cargo xtask image`, and each image that a case to run boots needs
 `--expect <name>=<SHA-256>`: the command computes the SHA-256 of the file,
 and a digest that differs from the record's or the expected one, a missing
 entry, file or `--expect` ends the command as `ERROR` before any QEMU starts.
-Without `--images`, it writes the images into `images/` of its output
-directory. A run passes when its receipt has no `errors`, it ended as
+Without `--images`, it writes the images that the cases to run boot into
+`images/` of its output directory, as `cargo xtask image` does. A run of the
+test image passes when its receipt has no `errors`, it ended as
 `guest_shutdown`, it booted the image with the expected digest, its receipt
-describes its transcript, and the transcript is what the image writes, for
-the test image its line; a case of more than one run also needs equal exit
-reasons and identical transcripts. Each run writes the directory
+describes its transcript, and the transcript is its line; a case of more
+than one run also needs equal exit reasons and identical transcripts. A
+case of a kernel image runs as `cargo xtask qemu-boot` runs it, on the
+machine of its case and with its input, each run ending at its window, and
+is judged by the records of that suite, described below, with the symbols
+of its image and, for `boot-memory`, the device tree that QEMU dumps into
+`<suite>/`, both taken before its runs, so that a failure there ends the
+case as `ERROR` without a run. Each run writes the directory
 `<suite>/<case>-<n>` of `cargo xtask qemu`. The command writes the report
 `summary.json` into the new directory `--output-dir`, by default
 `artifacts/suite/<UTC time>Z-<process ID>`: the status `PASS`, `FAIL`,
@@ -714,23 +742,28 @@ reasons and identical transcripts. Each run writes the directory
 Actions run (`GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_EVENT_NAME`,
 `GITHUB_REF`, `GITHUB_SHA`), the base, merge base and changed paths, the
 images with their digests, and each suite with why it runs, the paths that
-select it, and the cases that run, each with why, its runs, their exit
-reasons and the digests of their receipts and transcripts, and its checks.
+select it, and the cases that run, each with its image, why it runs, its
+runs, their exit reasons and the digests of their receipts and transcripts,
+and its checks.
 A case that does not run is not listed. The command prints a line for each
 suite, run and case, each failed check and the status with the path of the
 report, with control characters escaped, and exits with 0 for `PASS`, 1 for
 `FAIL`, 2 for `ERROR` and for a usage error, 130 for `INTERRUPTED` and 120
 when it cannot write its own output; `--qemu` names the QEMU executable as
 for `cargo xtask qemu`. SIGINT, SIGTERM and SIGHUP are caught from
-immediately before the first QEMU starts. Its unit tests run in the `test`
-step above: one per row of the mapping and per line of CI, on manifests
-written for them; the changed paths of a Git repository that they create;
-the digest check of the images; the judge over hand-written receipts and
-transcripts and weakened forms of them; and the command on a fake QEMU, a
-shell script that prints a line and exits. A test of the `xtask` binary runs
-`cargo xtask image` and then `cargo xtask suite` on the image by its digest,
-and with another digest, with the QEMU of the host, as the image and suite
-jobs of CI do.
+immediately before the first QEMU run starts. Its unit tests run in the
+`test` step above: one per row of the mapping and per line of CI, on
+manifests written for them and on the committed manifest; the rules of the
+cases of a kernel image; the changed paths of a Git repository that they
+create; the digest check of the images; the judge over hand-written
+receipts and transcripts and weakened forms of them; the command on a fake
+QEMU, a shell script that prints a line and exits; and a case of a kernel
+image on a fake QEMU that writes its records and runs until the runner
+stops it at a shortened window. A test of the `xtask` binary runs
+`cargo xtask image`, whose record must hold the 15 images, and then
+`cargo xtask suite --base HEAD`, which runs only the smoke case, on the test
+image by its digest, and with another digest, with the QEMU of the host, as
+the image and suite jobs of CI do.
 
 `cargo xtask run-record --input <run.json> --output <dir>` writes the record
 of one run of a workflow from the data of the GitHub API; it is not part of
@@ -851,13 +884,17 @@ krepi-qemu-virt --example el1-brk --example injected-serror --example
 el1-fp-trap --example timer-irq --example irq-registers --example
 sp-el0-brk --example unexpected-irq --example clean-code-to-pou --example
 invalidate-to-poc --example invalidate-tlb-page --example code-publication
+--example boot-memory --example kernel-memory
 --message-format=json-render-diagnostics` in `kernel/`, where
 the `.cargo/config.toml` of the repository root gives the target its flags,
 takes each image from Cargo's artifact message and records `rustc -vV`.
 The test images are the examples of `kernel/boards/qemu-virt/examples`:
 each links the production code of the default image and adds its own
 `kernel_main`, exception dispatch and trigger sequence, and on the host it
-is an empty program. The cases run in order, each run in a new QEMU process
+is an empty program. The default image and the test images of
+`boot-memory` and `kernel-memory` run the boot wiring of the board, which
+turns the MMU on with the caches off. The cases run in order, each run in a
+new QEMU process
 with the command line of `cargo xtask qemu` and the host clock, with a
 window of 20 s and a limit of 4,096 bytes of serial output, the QEMU virt
 values of the suite. No image stops by itself, so each run ends at its
@@ -889,18 +926,42 @@ each self-check of the image in order, each with no failure, and
 `CASXI_RESUMED`, or, for `sp-el0-brk`, whose vectors halt after its
 dispatch, its self-check records alone. Each exception record must have
 the vector, class and syndrome of the case and a return address at a
-symbol of the image's ELF file, or between two of them. The cases
+symbol of the image's ELF file, among them an absolute symbol that names
+an address outside the image, or between two of them. The cases
 `clean-code-to-pou`, `invalidate-to-poc`, `invalidate-tlb-page` and
 `code-publication` run the test image of their own name once each on the
 runner's machine and are judged in the same way, with no exception record:
 the transcript holds the start record, the self-check of the image with no
-failure and `CASXI_RESUMED`. The expected
+failure and `CASXI_RESUMED`. The case `kernel-memory` runs its test image
+once on the runner's machine and is judged in the same way, with the five
+faults of its probes and its twelve self-checks: the syndrome of each fault
+must hold the exception class, `IL`, `WnR` and the fault status code of the
+case, bits 0 to 6 and 25 to 31, whatever the other bits of its ISS, and the
+return address of its instruction abort is the absolute symbol
+`krepi_test_execute_never`; the link symbols of the ELF file must also put
+the start of the image at `0x4020_0000` and its end on a page boundary
+below `0x4040_0000`, as the addresses of its probes assume. The case
+`boot-memory` runs its test image three times on the runner's machine and
+passes when each run holds the start record, the count records
+`CASXI_MEMORY tree=<bytes> ram=<n> reserved=<n> boot=<n> managed=<n>
+usable=<n>` and `CASXI_TABLES lower=<tables>,<blocks>,<pages>
+direct=<tables>,<blocks>,<pages>`, the self-check `stack-depth` with no
+failure and `CASXI_RESUMED`, and when the three transcripts are identical.
+The counts must be those that the suite computes from the boot memory map
+of the fdt contract and the table pool and the direct map of the
+page-tables contract, for the runner's RAM, the seven link symbols of the
+ELF file and the `totalsize` of the device tree that QEMU builds for the
+machine, which the suite has QEMU dump with the machine option `dumpdtb`
+before the runs, so that the expectation does not rest on the parse under
+test; a dump that fails ends the case as `ERROR`. The expected
 records are written into the suite from the contract and the exception
 classes of the Arm Architecture Reference Manual; each record and each
 self-check is a check of its own.
 
 Each run writes a directory `<case>-<n>` with the files and the receipt of
-`cargo xtask qemu`; the receipt of a run of `cold-boot-echo` has one more
+`cargo xtask qemu`, and the dump of `boot-memory` writes
+`boot-memory-tree.dtb`, with QEMU's standard error in
+`boot-memory-tree.log`; the receipt of a run of `cold-boot-echo` has one more
 key, `input`: for each input, its trigger `after` and its `bytes`, in the
 escapes of `<[u8]>::escape_ascii`, and `sent_at`, the count of serial bytes
 that had arrived when the runner sent it, or null when it did not. A send

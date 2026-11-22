@@ -25,13 +25,17 @@ the target architecture, the documentation conventions, empty proof
 registries, a commit-message hook and the build tooling: a pinned Rust
 toolchain, the kernel and user-space Cargo workspaces and the repository
 checks. The kernel workspace holds an empty ABI crate, the AArch64 processor
-primitives with the cold entry of an image, the exception vectors of EL1
-and the cache and TLB maintenance of the executing CPU, and the QEMU virt
-board support with its PL011 serial console, its exception record, its
-default image, which boots on QEMU virt into EL1, writes its boot records
-and echoes its serial input, and test images that take exceptions at EL1
-and report them and that exercise the cache and TLB maintenance; the
-user-space workspace holds an empty SDK crate. A host tooling crate for
+primitives with the cold entry of an image, the exception vectors of EL1,
+the cache and TLB maintenance of the executing CPU and the adapter that
+executes the write plans of the page tables and turns the MMU on, and the
+QEMU virt board support with its PL011 serial console, its exception
+record, its boot wiring of memory, its default image, which boots on QEMU
+virt into EL1, reads the device tree, builds the boot memory map and the
+kernel tables, turns the MMU on with the caches off, writes its boot
+records and echoes its serial input, and test images that take exceptions
+at EL1 and report them, that exercise the cache and TLB maintenance and
+that check the kernel memory with the MMU on; the user-space workspace
+holds an empty SDK crate. A host tooling crate for
 tests holds an ELF reader, report values, a serial port transport, a serial
 link, the serial capture behind `cargo xtask serial-capture`, the QEMU
 runner behind `cargo xtask qemu`, the QEMU boot suite behind
@@ -63,7 +67,8 @@ cargo xtask formal check
 ```
 
 The QEMU boot suite builds the default image and the test images, boots
-the default image three times and each test image once on QEMU virt; the
+the default image and the test image of the boot memory three times each
+and every other test image once on QEMU virt; the
 default image can also be built in `kernel/` and run with the QEMU runner,
 which records its serial output until the timeout:
 

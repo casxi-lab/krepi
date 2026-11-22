@@ -332,18 +332,20 @@ process, give the same results of the parse and of the boot memory map.
 
 - **Examples.**
   [ex7](../../../features/platform/device-tree.md#ex7-seeds-in-the-chosen-node-change-no-result),
-  on the host; the criterion is the case of the QEMU boot suite.
+  on the host; the criterion is the case `boot-memory` of the QEMU boot
+  suite.
 - **Entry points.** `Fdt::parse`, `Fdt::discover_memory` and
-  `MemoryPlan::all_ram`, as the boot code of QEMU virt is to call them
-  (planned).
+  `MemoryPlan::all_ram`, as the boot code of QEMU virt calls them.
 - **Contract.** [Determinism](contract.md#determinism).
 - **Specification.** [FDT-R10](specification.md#fdt-r10) of the specification.
 - **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
-- **Evidence.** The case of the QEMU boot suite that the
+- **Evidence.** The case `boot-memory` of the QEMU boot suite,
+  `cargo xtask qemu-boot`, in CI, which the
   [testing obligations](contract.md#testing-obligations) name, on the QEMU
-  virt configuration. It shows that the seeds do not reach the results on
-  that machine. It shows nothing for the Pi 5, whose hand-over trees a
-  board run compares.
+  virt configuration: three cold boots write identical counts of the tree
+  and of the boot memory map, which the suite computes from the contract.
+  It shows that the seeds do not reach the results on that machine. It
+  shows nothing for the Pi 5, whose hand-over trees a board run compares.
 
 ## Liveness, time and performance
 
