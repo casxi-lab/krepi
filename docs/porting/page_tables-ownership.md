@@ -71,9 +71,9 @@ shapes of the [proof path](../domains/memory/page-tables/proof.md).
   So these public items of the prototype are `pub(crate)`, under the names
   that the items below give: `end`, `contains` and `overlaps` of
   `PhysRange`; `free`, `stats` and the type `Stats`; the types
-  `PageReservation` and `InitializedPages`, with `initialize` and the
-  accessor `failures` of a packet; and `reserve`, `reserve_in`,
-  `validate_initialized`, `publish_initialized` and `cancel_unused`.
+  `PageReservation` and `InitializedPages`, with `initialize`; and
+  `reserve`, `reserve_in`, `validate_initialized`, `publish_initialized`
+  and `cancel_unused`.
 - **Initialization.** `Ownership::new(arena, banks, exclusions)` takes the
   banks and the exclusions, each a range with its owner, firmware, image or
   boot storage, and keeps at most `X` exclusion records beside its `E`
