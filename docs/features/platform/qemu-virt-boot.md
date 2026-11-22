@@ -112,8 +112,10 @@ handle an exception of EL0.
   Arm Cortex-A76 and FP/SIMD trapping. A check that fails panics: the image
   writes `CASXI_PANIC` with the check's message, the location and
   `CASXI_HALTED`, and halts.
-- **Records.** The boot records hold no count, time or address, so every
-  cold boot of an image writes the same bytes.
+- **Records.** The boot records hold no time or address, and counts only
+  in the count records of the test image of `boot-memory`, which are the
+  same at every cold boot, so every cold boot of an image writes the same
+  bytes.
 - **Echo.** Each received byte comes back unchanged; after a carriage return
   the image also writes a line feed. No received byte triggers anything
   else: the image has no command.
@@ -211,8 +213,9 @@ input of the walk.
   keep the CPU from halting. The bounds are platform parameters of the
   board, not constants tuned on one machine.
 - The records keep the `CASXI_` names of the prototype's records, which
-  the host tools parse, and hold no count, time or address, so that
-  transcripts of cold boots compare byte for byte.
+  the host tools parse, and hold no time or address, and no count but the
+  counts of the test image of `boot-memory`, which are the same at every
+  cold boot, so that transcripts of cold boots compare byte for byte.
 - The exception vectors are the prototype's: one save path for the 16
   entries, a frame of 304 bytes on `SP_EL1` that the dispatch receives and
   may change, and a return that loads the exception registers and every
