@@ -487,7 +487,8 @@ unchanged. The page `0x8000` of the process, mapped into the target as
   the read-only data, and an instruction abort with a permission fault at
   level 2 for a branch to a page of the direct map; and twelve self-checks,
   the six edge pages of the usable ranges written, zeroed by `zero_frames`
-  and read back through the direct map, the five faults, and the `Device`
+  and read back through the direct map, which translates each to its
+  physical address as Normal memory, the five faults, and the `Device`
   attribute of the console, through which every later record goes.
   `boot-memory` runs three times, with identical transcripts whose counts
   of the tables, blocks and pages of the two plans equal those that the

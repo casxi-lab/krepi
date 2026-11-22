@@ -16,19 +16,21 @@
 //! must lie in a usable range; the image writes it, zeroes it with
 //! `mmu::zero_frames`, reads it back as zero, writes it with a pattern of
 //! its physical address and reads the pattern back, through the direct
-//! map. The pages P7 and P8, below `T` and at `__text_start`, are excluded,
-//! and a read of each through the direct map is a translation fault at
-//! level 3. A write to `__rodata_start` is a permission fault at level 3; a
-//! branch to the direct-map page below P6, which must equal the absolute
-//! symbol `krepi_test_execute_never`, is an instruction abort with a
-//! permission fault at level 2; a read of `__stack_guard` is a translation
-//! fault at level 3. For each fault the image arms the address of the
-//! faulting instruction and the label at which its code resumes, and its
-//! dispatch reports the exception and resumes there; any other exception
-//! halts. Last, `AT S1E1W` of the PL011 gives Device-nGnRnE memory at its
-//! address. Every record after the start record goes through that `Device`
-//! page. The image then writes one self-check for each of the twelve items
-//! and `CASXI_RESUMED`. On the host it is an empty program.
+//! map, and `AT S1E1W` of its direct-map address must translate to its
+//! physical address as Normal memory. The pages P7 and P8, below `T` and at
+//! `__text_start`, are excluded, and a read of each through the direct map
+//! is a translation fault at level 3. A write to `__rodata_start` is a
+//! permission fault at level 3; a branch to the direct-map page below P6,
+//! which must equal the absolute symbol `krepi_test_execute_never`, is an
+//! instruction abort with a permission fault at level 2; a read of
+//! `__stack_guard` is a translation fault at level 3. For each fault the
+//! image arms the address of the faulting instruction and the label at
+//! which its code resumes, and its dispatch reports the exception and
+//! resumes there; any other exception halts. Last, `AT S1E1W` of the PL011
+//! gives Device-nGnRnE memory at its address. Every record after the start
+//! record goes through that `Device` page. The image then writes one
+//! self-check for each of the twelve items and `CASXI_RESUMED`. On the host
+//! it is an empty program.
 
 #![cfg_attr(all(target_arch = "aarch64", target_os = "none"), no_std, no_main)]
 
@@ -78,7 +80,8 @@ mod image {
     const PAR_ADDRESS: u64 = 0x0000_ffff_ffff_f000;
     /// The first bit of the memory attribute of a translation in
     /// `PAR_EL1`, bits 56 to 63, in the encoding of `MAIR_EL1`: `0x00` for
-    /// Device-nGnRnE memory.
+    /// Device-nGnRnE memory, `0x44` for Normal memory, inner and outer
+    /// Non-cacheable.
     const PAR_ATTRIBUTE_SHIFT: u64 = 56;
 
     /// A fault that the next probe must take: the address of the faulting
@@ -241,17 +244,18 @@ mod image {
 
     /// The checks of the edge page `page`: it lies in a usable range of
     /// `map`; after the complement of its pattern and `zero_frames`, every
-    /// word reads 0; and after its pattern, every word reads it back. A page
-    /// that is not usable is not touched.
-    fn edge(map: &MemoryPlan, page: u64) -> [bool; 3] {
+    /// word reads 0; after its pattern, every word reads it back; and its
+    /// direct-map address translates, to `page`, with the attribute of
+    /// Normal memory. A page that is not usable is not touched.
+    fn edge(map: &MemoryPlan, page: u64) -> [bool; 6] {
         if !usable(map, page) {
-            return [false; 3];
+            return [false; 6];
         }
         for word in 0..WORDS {
             write_word(page, word, !pattern(page, word));
         }
         let Ok(range) = PhysRange::new(page, PAGE) else {
-            return [true, false, false];
+            return [true, false, false, false, false, false];
         };
         // SAFETY: the MMU is on with the direct map, which maps the usable
         // page `range` `ReadWrite`; at boot nothing else uses it, and no
@@ -262,7 +266,15 @@ mod image {
             write_word(page, word, pattern(page, word));
         }
         let back = (0..WORDS).all(|word| read_word(page, word) == pattern(page, word));
-        [true, zero, back]
+        let par = translate(DIRECT_BASE | page);
+        [
+            true,
+            zero,
+            back,
+            par & PAR_FAILED == 0,
+            par & PAR_ADDRESS == page,
+            par >> PAR_ATTRIBUTE_SHIFT == 0x44,
+        ]
     }
 
     /// Runs `probe` with the fault at `site` armed, resuming at `resume`;
@@ -342,10 +354,9 @@ mod image {
         [named, usable, one, far, class, fsc, read]
     }
 
-    /// The checks of `AT S1E1W` of the registers of the PL011: the
-    /// translation succeeds, to their own address, with the attribute of
-    /// Device-nGnRnE memory.
-    fn device_console() -> [bool; 3] {
+    /// `AT S1E1W` of `address`: the value of `PAR_EL1` after the
+    /// translation.
+    fn translate(address: u64) -> u64 {
         let par: u64;
         // SAFETY: `AT S1E1W` translates the address as a write at EL1 would,
         // with the tables of the current regime, without accessing it, and
@@ -356,11 +367,19 @@ mod image {
                 "at s1e1w, {address}",
                 "isb",
                 "mrs {par}, par_el1",
-                address = in(reg) UART_BASE as u64,
+                address = in(reg) address,
                 par = out(reg) par,
                 options(nostack, preserves_flags)
             )
         };
+        par
+    }
+
+    /// The checks of `AT S1E1W` of the registers of the PL011: the
+    /// translation succeeds, to their own address, with the attribute of
+    /// Device-nGnRnE memory.
+    fn device_console() -> [bool; 3] {
+        let par = translate(UART_BASE as u64);
         [
             par & PAR_FAILED == 0,
             par & PAR_ADDRESS == UART_BASE as u64,
