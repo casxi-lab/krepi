@@ -1165,7 +1165,7 @@ mod tests {
             "unwrap-in-helper",
             "division-walk",
         ];
-        const NEW: [&str; 17] = [
+        const NEW: [&str; 28] = [
             "cfg-shape",
             "const-generic",
             "r1-function-item-value",
@@ -1183,16 +1183,27 @@ mod tests {
             "option-slice-join",
             "option-slice-arms",
             "byte-string-return",
+            "const-bool-parameter",
+            "nested-array-index",
+            "plan-iterator-from-mut",
+            "iterator-in-iterator",
+            "iterator-driven-loop",
+            "or-chain-let",
+            "negation-flag",
+            "or-chain-helper",
+            "negation-in-condition",
+            "element-enum-match",
+            "element-enum-by-value",
         ];
         let text = include_str!("../../../verification/qualification/cases.json");
         let cases = load_cases(text, &Layout::PRODUCTION).expect("the committed cases are valid");
         let names: Vec<&str> = cases.iter().map(|case| case.name.as_str()).collect();
         let frozen: Vec<&str> = KEPT.iter().chain(&NEW).copied().collect();
         assert_eq!(names, frozen);
-        assert_eq!(names.len(), 120);
+        assert_eq!(names.len(), 131);
         let unique: BTreeSet<&str> = frozen.iter().copied().collect();
-        assert_eq!(unique.len(), 120);
-        assert_eq!(units(&cases).len(), 123);
+        assert_eq!(unique.len(), 131);
+        assert_eq!(units(&cases).len(), 134);
     }
 
     /// The extraction of the captured `shape`, of the case `module`, with

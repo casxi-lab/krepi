@@ -72,12 +72,12 @@ directory, the EL0 controls, and the kernel stacks and blocking calls.
 
 | Feature | Scope | Feature documents | Components |
 | --- | --- | --- | --- |
-| [Physical page ownership](#physical-page-ownership) | The owner of every managed page, allocation, staged reservation and release with receipts | - | [page-tables](page-tables/requirements.md) |
-| [Page tables and the kernel direct map](#page-tables-and-the-kernel-direct-map) | Descriptors and kinds, table sets and their writes, the kernel's mappings of its image and devices, the direct map | - | [page-tables](page-tables/requirements.md) |
+| [Physical page ownership](#physical-page-ownership) | The owner of every managed page, allocation, staged reservation and release with receipts | [Kernel memory](../../features/kernel/kernel-memory.md) | [page-tables](page-tables/requirements.md) |
+| [Page tables and the kernel direct map](#page-tables-and-the-kernel-direct-map) | Descriptors and kinds, table sets and their writes, the kernel's mappings of its image and devices, the direct map | [Kernel memory](../../features/kernel/kernel-memory.md) | [page-tables](page-tables/requirements.md) |
 | [ASIDs](#asids) | The tags of the translations of an address space, their allocation and reuse | - | [address-space](address-space/requirements.md) |
 | [VM objects and their kinds](#vm-objects-and-their-kinds) | Regions and VM objects, their kinds, commit and release, the mappings that are not VM objects | - | [vm](vm/requirements.md) |
 | [User-buffer access](#user-buffer-access) | How the kernel reads and writes memory that a process can write | - | The user copies of the kernel; [address-space](address-space/requirements.md), for the range of a buffer |
-| [W^X and code publication](#wx-and-code-publication) | The rule against writable executable frames and the publication of code | - | [page-tables](page-tables/requirements.md) |
+| [W^X and code publication](#wx-and-code-publication) | The rule against writable executable frames and the publication of code | [Kernel memory](../../features/kernel/kernel-memory.md) | [page-tables](page-tables/requirements.md) |
 | [Reclamation barriers](#reclamation-barriers) | The acknowledgements that precede the reuse of pages, tables and ASIDs | - | The reclamation of address spaces and VM objects; [address-space](address-space/requirements.md), for the release of ASIDs |
 
 ## Physical page ownership

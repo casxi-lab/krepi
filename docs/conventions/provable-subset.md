@@ -900,8 +900,8 @@ sequential refinement:
 ## Constructs the tools do not support
 
 - This convention covers the constructs of the list, the shape rules
-  stated above, such as the loop shapes, and the two constructs of the last
-  point below. They are coding rules: new code avoids the listed constructs
+  stated above, such as the loop shapes, and the constructs of the last two
+  points below. They are coding rules: new code avoids the listed constructs
   and follows the shape rules, code taken from the prototype tree is
   brought to them in the change that ports it, and merged code is brought
   to them as the next two points state.
@@ -979,6 +979,42 @@ sequential refinement:
     returns a literal, the alternative changes its interface and is a
     design change. Qualification: `byte-string-return` (rejected) and
     `byte-string-slice` (translated).
+- Three constructs joined the list in this way when the port of the
+  page-table module met them. The pinned tools translate the first two, but
+  their generated code does not type-check in Lean, so their qualification
+  cases expect type errors; Aeneas rejects the third. Their alternatives
+  are local, as those of R1 to R3 and R5 are:
+  - A chain of `||` that ends in a comparison, wherever it is not the
+    condition of an `if` or the value that the function returns: bound by a
+    `let` and then tested by an `if` or used in a `&&`, passed as an
+    argument, or stored in a field and tested. Lean takes the value for a
+    proposition and reports `failed to synthesize Decidable` where it is
+    tested, or `Application type mismatch` where it is passed. The chain
+    translates as the condition of an `if` and in the value that the
+    function returns, also through a `let`, in a tuple or from an arm of an
+    `if`. Alternative: the chain is the value of a helper function that
+    returns `bool`, called in the condition. Qualification: `or-chain-let`
+    (ill-typed) and `or-chain-helper` (translated).
+  - A `bool` that the arms of a `match` give, alone or in a tuple, where an
+    arm gives a comparison or a negation and the others a literal or a
+    comparison, then bound to a local and tested by an `if`, or passed as an
+    argument. Lean reports `failed to synthesize Decidable` at the test,
+    or `Application type mismatch` at the call. The value of such a `match`
+    translates when the function returns it, and so does a `bool` that the
+    arms of an `if` give. Alternative: the `match` gives no value, and the
+    comparison or the negation is the condition of an `if` itself.
+    Qualification: `negation-flag` (ill-typed) and `negation-in-condition`
+    (translated).
+  - A `match` or an `if let` that binds the fields of a variant of an
+    enumeration at a place reached through an array index, such as
+    `match self.extents[index].holding` or `match holds[i]`, whether the
+    array is reached through `&self` or `&mut self`, is a reference
+    parameter or a local, or is a field of a structure passed by value, also
+    when it binds integer fields alone. Aeneas reports `Not allowed to
+    expand enumerations with several variants` and leaves the function
+    without its body. Alternative: the enumeration is passed by value to a
+    function that matches on it. Qualification: `element-enum-match`
+    (rejected) and `element-enum-by-value` (translated).
 
 ## Mechanical checks
 

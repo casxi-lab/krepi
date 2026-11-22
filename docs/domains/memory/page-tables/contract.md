@@ -99,51 +99,51 @@ evidence, is in the [requirements](requirements.md). The
 
 ## Entry points
 
-The entries of the core are in the module `page_tables` of `krepi-kernel`
-(planned); the adapter is the module `mmu` of `krepi-arch` (planned).
+The entries of the core are in the module `page_tables` of `krepi-kernel`;
+the adapter is the module `mmu` of `krepi-arch` (planned).
 
 | Entry point | Kind | Called by | Rules |
 | --- | --- | --- | --- |
-| `page_tables::Kind`, `page_tables::descriptor`, `page_tables::direct_address`, `PhysRange::new`, `end`, `contains` and `overlaps`, and `Tables::lookup_page`, `lookup_block` and `used` (planned) | Value types and functions that write nothing, host-testable | The entries of this page; `krepi_arch::mmu`, for `direct_address`; the modules `vm` and `creation` of the core (planned) | [Descriptors and attributes](#descriptors-and-attributes), [Kernel direct map](#kernel-direct-map) |
-| `Tables::new`, `Tables::reset` and `Tables::clone_kernel_from` (planned) | Write entries, host-testable; `reset` and `clone_kernel_from` return write plans | `new`: the boot wiring, for the kernel tables; `new`, `reset` and `clone_kernel_from`: the modules `creation` and `lifecycle` of the core (planned), for the lower tables of a process, which `clone_kernel_from` fills from the lower kernel set | [Abstract mapping](#abstract-mapping), [Copying the kernel tables](#copying-the-kernel-tables), [Table pool](#table-pool) |
-| `Tables::map_page` (planned) | Write entry, host-testable; returns a write plan | `kernel_map`; the modules `vm` and `creation` of the core (planned) | [Abstract mapping](#abstract-mapping), [Write plans and publication](#write-plans-and-publication) |
-| `Tables::map_block` (planned) | Write entry, host-testable; returns a write plan | `direct_map` | [Abstract mapping](#abstract-mapping), [Kernel direct map](#kernel-direct-map) |
-| `Tables::unmap_page` (planned) | Write entry, host-testable; returns a write plan | The module `vm` of the core (planned), for a set that is not one of the kernel tables | [Abstract mapping](#abstract-mapping), [Write plans and publication](#write-plans-and-publication) |
-| `page_tables::kernel_map` and `page_tables::direct_map` (planned) | Write entries, host-testable; return write plans | The boot wiring, once each, before the MMU is on | [Kernel mappings](#kernel-mappings), [Kernel direct map](#kernel-direct-map) |
-| `Ownership::new` (planned) | Write entry, host-testable | The boot wiring, once, for the kernel root | [Page ownership](#page-ownership) |
-| `Ownership::choose` and `Ownership::assign` (planned) | A read entry and a write entry, host-testable | The modules of the core that take pages (planned) | [Page ownership](#page-ownership) |
-| `Ownership::reserve`, `Reservation::initialized` and `Ownership::publish` (planned) | Write entries and a value function, host-testable | The modules of the core that take pages (planned) | [Page ownership](#page-ownership) |
-| `Ownership::cancel` and `Ownership::release` (planned) | Write entries, host-testable | The modules of the core that take and return pages (planned) | [Page ownership](#page-ownership) |
-| `Ownership::owner`, `Ownership::validate` and `Ownership::stats` (planned) | Read entries, host-testable | The modules of the core that take pages (planned) | [Page ownership](#page-ownership) |
-| `krepi_arch::mmu::apply`, `enable` and `zero_frames` (planned) | Functions; `enable` and `zero_frames` are `unsafe` | `apply`: the boot wiring, and the entry of a system call in `krepi_arch` for the plans that the dispatch of the core returns; `enable`: the boot wiring, once on each CPU; `zero_frames`: the code that zeroes pages for the page ownership table | [Write plans and publication](#write-plans-and-publication) |
+| `page_tables::Kind`, `page_tables::descriptor`, `page_tables::direct_address`, `PhysRange::new`, `end`, `contains` and `overlaps`, and `Tables::lookup_page`, `lookup_block` and `used` | Value types and functions that write nothing, host-testable | The entries of this page; `krepi_arch::mmu`, for `direct_address`; the boot wiring, for `PhysRange::new`, with which it gives the page ownership table its banks and exclusions and `kernel_map` its layout; the modules `vm` and `creation` of the core (planned) | [Descriptors and attributes](#descriptors-and-attributes), [Kernel direct map](#kernel-direct-map) |
+| `Tables::new`, `Tables::reset` and `Tables::clone_kernel_from` | Write entries, host-testable; `reset` and `clone_kernel_from` return write plans | `new`: the boot wiring, for the kernel tables; `new`, `reset` and `clone_kernel_from`: the modules `creation` and `lifecycle` of the core (planned), for the lower tables of a process, which `clone_kernel_from` fills from the lower kernel set | [Abstract mapping](#abstract-mapping), [Copying the kernel tables](#copying-the-kernel-tables), [Table pool](#table-pool) |
+| `Tables::map_page` | Write entry, host-testable; returns a write plan | The modules `vm` and `creation` of the core (planned). `kernel_map` does not call it; when the layout is one page, the plan of `kernel_map` is the plan of this entry | [Abstract mapping](#abstract-mapping), [Write plans and publication](#write-plans-and-publication) |
+| `Tables::map_block` | Write entry, host-testable; returns a write plan | None yet. `direct_map` does not call it; when the usable ranges are one block, the plan of `direct_map` is the plan of this entry | [Abstract mapping](#abstract-mapping), [Kernel direct map](#kernel-direct-map) |
+| `Tables::unmap_page` | Write entry, host-testable; returns a write plan | The module `vm` of the core (planned), for a set that is not one of the kernel tables | [Abstract mapping](#abstract-mapping), [Write plans and publication](#write-plans-and-publication) |
+| `page_tables::kernel_map` and `page_tables::direct_map` | Write entries, host-testable; return write plans | The boot wiring, once each, before the MMU is on. Once is needed for `kernel_map`: a fill of the lower kernel set maps an executable kind only at a page of the text of the layout ([W^X](#descriptors-and-attributes)), so a second layout, even a refused one, could name as text a page that the first maps `ReadWrite`, and a fill could then map it `ReadExecute` | [Kernel mappings](#kernel-mappings), [Kernel direct map](#kernel-direct-map) |
+| `Ownership::new` | Write entry, host-testable | The boot wiring, once, for the kernel root | [Page ownership](#page-ownership) |
+| `Ownership::choose` and `Ownership::assign` | A read entry and a write entry, host-testable | The boot wiring, for the storage that it carves at boot: the storage of the objects, the pools of the tables of address spaces, the root's private pages, the page pool and the frame metadata; the modules of the core that take pages (planned) | [Page ownership](#page-ownership) |
+| `Ownership::reserve`, `Reservation::initialized` and `Ownership::publish` | Write entries and a value function, host-testable | The modules of the core that take pages (planned) | [Page ownership](#page-ownership) |
+| `Ownership::cancel` and `Ownership::release` | Write entries, host-testable | The modules of the core that take and return pages (planned) | [Page ownership](#page-ownership) |
+| `Ownership::owner`, `Ownership::validate` and `Ownership::stats` | Read entries, host-testable | The modules of the core that take pages (planned) | [Page ownership](#page-ownership) |
+| `krepi_arch::mmu::apply`, `enable` and `zero_frames` (planned) | Functions; `enable` and `zero_frames` are `unsafe` | `apply`: the boot wiring, and the entry of a system call in `krepi_arch` for the plans that the dispatch of the core returns; `enable`: the boot wiring, once on each CPU; `zero_frames`: the code that zeroes pages for the page ownership table, among them `krepi_arch::frames::apply` (planned), for the frame of a frame plan | [Write plans and publication](#write-plans-and-publication) |
 
 ## Extractability
 
-The module `page_tables` of the core (planned), below `kernel/src/`
-(planned), follows the
-[provable Rust subset](../../../conventions/provable-subset.md): the
-descriptors and kinds, the address arithmetic, the table sets with their
-pools, the write entries with their plans, the kernel's mappings, the direct
-map and the page ownership table. Its items are `pub(crate)` except the
-rows of the entry table that the architecture crate or a board crate
-calls, with the value types that those rows take and return, among them
-`WritePlan` and its steps
+The module `page_tables` of the core, below `kernel/src/`, follows the
+[provable Rust subset](../../../conventions/provable-subset.md): the descriptors
+and kinds, the address arithmetic, the table sets with their pools, the write
+entries with their plans, the kernel's mappings, the direct map and the page
+ownership table. Its items are `pub(crate)` except the rows of the entry table
+that the architecture crate or a board crate calls, with the value types that
+those rows take and return, among them `WritePlan` and its steps
 ([provable core](../../../architecture.md#the-provable-core)). It defines no
-callback for a hardware action: every entry that changes a table returns a
-write plan, and the zeroing of pages is the caller's, between two entries.
-It refers to the fdt module only for the boot memory map and its spans
+callback for a hardware action: every entry that changes a table returns a write
+plan, and the zeroing of pages is the caller's, between two entries. It refers
+to the fdt module only for the boot memory map and its spans
 ([module order](../../../architecture.md#module-order-in-the-core)).
 
 The adapter `mmu` of `krepi-arch` (planned), in `kernel/arch/src/mmu.rs`
-(planned), does not follow the subset: it stores descriptors into tables,
-zeroes tables and frames, executes the barriers and the invalidation of the
-local TLB, and writes the registers that turn the MMU on; the invalidation
-of a page and the publication of code use the functions of
-`krepi_arch::cache` that the
+(planned), does not follow the subset: it stores descriptors into tables, zeroes
+tables and frames, executes the barriers and the invalidation of the local TLB,
+and writes the registers that turn the MMU on; the invalidation of a page and
+the publication of code use the functions of `krepi_arch::cache` that the
 [boot contract](../../boot-platform/boot/contract.md#cache-and-tlb-maintenance)
-governs. The boot wiring is code of the board crates. The contract is
-written before its code, so this section lists no source paths; the change
-that adds the module writes its `paths` block here.
+governs. The boot wiring is code of the board crates.
+
+```paths
+kernel/src/page_tables.rs
+kernel/src/page_tables
+```
 
 ## Descriptors and attributes
 
@@ -398,8 +398,8 @@ them in order, each completing before the next:
 - The check phase of an entry fixes its whole plan: every step follows from
   the state and the arguments by the rules of this page, and no step fails.
   `kernel_map`, `direct_map` and `clone_kernel_from` give their steps one
-  at a time, by an iterator of the core over their input (planned), so
-  that a plan needs no storage in proportion to the map; the other plans
+  at a time, by an iterator of the core over their input, so that a plan
+  needs no storage in proportion to the map; the other plans
   have at most seven steps, apart from `reset`.
 - The caller holds the token of the set from the entry to the last step of
   its plan, and executes nothing else on the set in between.
@@ -526,9 +526,9 @@ The page ownership table records one owner for every managed page:
 | Boot storage | Every page of the other spans of boot storage, such as the device tree and the boot bundle, a segment of the image in a span of its own | `Ownership::new`; never changed |
 | A holder, $\mathrm{held}(o, n, s)$ | The pages of one allocation or reservation: owner identity $o$, a 64-bit value that the holder's component gives, generation $n$ and state $s$, reserved or published | `assign`, `reserve`, `publish` |
 
-The holders of release 0.1 are the pools of the tables of address spaces,
-the pools that the capacity record carves at boot and the pages of VM
-objects; the component of each names its owner identities.
+The holders of release 0.1 are the pools of the tables of address spaces, the root's private
+pages (`OWNER_ROOT_PAGES`), the pools that the capacity record carves at boot, the page pool
+and its frame metadata, and the pages of VM objects; each component names its owner identities.
 
 **Invariants.**
 
@@ -774,19 +774,19 @@ or the image covers in part, at most 4.
   once, at most $512 N$ entries, and marks each table once; its plan has
   one `Zero` for each table in use of the target, at most $N$, one `Store`
   for each valid entry of the source, at most $512 N$, and one `Sync`.
-- `kernel_map` checks each of at most 16 ranges against the others and each
-  page of each range once, and its plan has one `Store` for each page and
-  table, one `Zero` for each new table and at most one `Fence` for each
-  table descriptor, before each store that makes new tables reachable.
+- `kernel_map` checks each of at most 16 ranges against the others and each page of each range
+  once, and its plan has one `Store` for each page and table, one `Zero` for each new table and
+  at most one `Fence` for each table descriptor, before each store that makes new tables
+  reachable. The `next` of the plan searches the ranges at most twice, each time from the first.
 - `direct_map` walks each usable range once in steps of a block or a
   page: at most RAM / 2 MiB blocks and, at the two ends of each range, at
   most 511 pages each. Its plan has one `Store` for each block, page and
-  table descriptor, one `Zero` for each new table, at most 80, and at most
-  one `Fence` for each table descriptor, before each store that makes new
-  tables reachable; it runs to its end at boot.
-- `Ownership::new` compares each of at most 32 banks with the others and
-  each of at most 132 exclusions with each bank, and writes at most 132
-  exclusion records; `choose`, `assign`, `reserve`, `publish`, `cancel`,
+  table descriptor, one `Zero` for each new table, at most 80, and at most one `Fence` for
+  each table descriptor, before each store that makes new tables reachable; it runs to its end
+  at boot. Its `next` searches at most twice, from the first usable range of its 1 GiB slot.
+- `Ownership::new` compares each of at most 32 banks with the others; in a bank that $k$
+  exclusions overlap, its cursor makes at most $2k + 2$ passes over the at most 132 exclusions;
+  it writes at most 132 exclusion records; `choose`, `assign`, `reserve`, `publish`, `cancel`,
   `release` and `validate` scan or shift at most the 160 extents once;
   `owner` scans at most the 160 extents and then the 132 exclusion
   records.
@@ -886,22 +886,22 @@ obligations of the contracts that add them, carried by the proof of
 contexts, user copies and the private VM, by release 0.2; the table below
 lists the obligations of the code of this page.
 
-The target of the page-table logic has one open obligation of its own,
-which the target closes and the table therefore does not list.
-`kernel_map`, `direct_map` and `clone_kernel_from` give their plans by
-iterators of the core
-([write plans and publication](#write-plans-and-publication)), and the
-entry table names these functions but not the iterator types, so the roots
-of the target hold no `next`. The `next` of each plan iterator type joins
-the roots once the implementation names the types, and before the
-implementation merges, so that the refinement proof relates the steps that
-each iteration gives to the plan of the specification
-([proof path](proof.md#page-tables)). It is carried by the implementation,
-which names the types and adds their `next` to the roots, and by the
-refinement proof of the target.
+The target of the page-table logic has one open obligation of its own, which the
+target closes and the table therefore does not list. `kernel_map`, `direct_map`
+and `clone_kernel_from` give their plans by iterators of the core
+([write plans and publication](#write-plans-and-publication)), and the module
+names their iterator types, `KernelMapPlan`, `DirectMapPlan` and `ClonePlan`,
+each of which gives its steps through `next` alone. The `next` of each type is a
+root of the target, so that the refinement proof relates the steps that each
+iteration gives to the plan of the specification
+([proof path](proof.md#page-tables)). It is carried by the refinement proof of
+the target, which relates the `next` of each of the three types to the plan that
+the specification gives for its entry, `mapPlan` or the plan of the copy.
 
 | Obligation | Kind | Verified state | Carrier | Stage |
 | --- | --- | --- | --- | --- |
+| `kernel/src/page_tables` | `code` | - | The refinement proof of the target page-tables | `0.1` |
+| `kernel/src/page_tables.rs` | `code` | - | The refinement proof of the target page-tables | `0.1` |
 | `kernel/arch/src/mmu.rs#store_descriptor` (planned) | `unsafe` | Writes the translation tables that the page-table logic describes: one descriptor of a write plan | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
 | `kernel/arch/src/mmu.rs#zero_table` (planned) | `unsafe` | Writes the translation tables that the page-table logic describes: the 512 entries of a new table of a write plan | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
 | `kernel/arch/src/mmu.rs#synchronize` (planned) | `unsafe` | Neither (executes `DMB ISHST`, `DSB ISH` and `ISB` for a write plan, and `TLBI VMALLE1`, `DSB NSH` and `ISB` before the MMU is on) | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |

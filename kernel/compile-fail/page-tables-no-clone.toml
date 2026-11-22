@@ -1,0 +1,7 @@
+# A set is neither `Clone` nor `Copy`: once `Tables` derives `Clone`, the
+# assertion of rule 6 on it is ambiguous and the module does not compile,
+# so no copy keeps a record of tables in use that its pool no longer has.
+file = "kernel/src/page_tables.rs"
+find = "pub struct Tables<const N: usize, const UPPER: bool> {"
+replace = "#[derive(Clone)]\npub struct Tables<const N: usize, const UPPER: bool> {"
+error = "E0283"

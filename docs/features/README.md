@@ -10,6 +10,12 @@ a feature document.
 The [subject domains](../domains/README.md) describe the target scope,
 whether krepi provides a feature or not.
 
+## kernel
+
+| Feature | Title | Status | Modules | Theorems |
+| --- | --- | --- | --- | --- |
+| [`krepi.kernel.kernel-memory`](kernel/kernel-memory.md) | Kernel memory | `partial` | `kernel/src/page_tables.rs`, `kernel/src/page_tables/boot.rs`, `kernel/src/page_tables/boot/direct.rs`, `kernel/src/page_tables/boot/layout.rs`, `kernel/src/page_tables/copy.rs`, `kernel/src/page_tables/encoding.rs`, `kernel/src/page_tables/ownership.rs`, `kernel/src/page_tables/ownership/placement.rs`, `kernel/src/page_tables/ownership/receipts.rs`, `kernel/src/page_tables/range.rs`, `kernel/src/page_tables/walk.rs`, `kernel/src/page_tables/write.rs` | none |
+
 ## platform
 
 | Feature | Title | Status | Modules | Theorems |

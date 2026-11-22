@@ -1,0 +1,7 @@
+# The plan of a copy borrows its source for its lifetime: a write to the
+# source while the plan lives does not compile, so no entry changes the
+# source between the checks of the copy and its last step.
+file = "kernel/src/lib.rs"
+find = "pub mod page_tables;"
+replace = "pub mod page_tables;\n\n/// Maps a page of the source of a copy while its plan lives.\npub fn overwrite() -> usize {\n    let mut source = page_tables::Tables::<2, false>::new([[0; 512]; 2]);\n    let mut target = page_tables::Tables::<2, false>::new([[0; 512]; 2]);\n    let plan = target.clone_kernel_from(&source, 0x1_0000_0000, 0x1_0000_2000, 40);\n    let _ = source.map_page(0, 0, page_tables::Kind::ReadWrite, 0x1_0000_0000, 40);\n    match plan {\n        Ok(mut plan) => match plan.next() {\n            Some(_) => 1,\n            None => 0,\n        },\n        Err(_) => 0,\n    }\n}"
+error = "E0502"
