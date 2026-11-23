@@ -51,11 +51,15 @@ on the statement side, and needs no label `spec`.
    Lean of its `backends/lean/lean-toolchain`, its Lake lock with the
    Mathlib commit, the Charon of its `charon-pin` and the nightly of that
    Charon's `charon/rust-toolchain`, with the release archives and the
-   channel manifest that belong to them. The artifact of a canary run on
-   that commit holds all of them: each derived field with its committed
-   value in `derive.txt` and in the data of `verdict.json`, the derived
-   manifest in `toolchain.json`, the changes of the Lake project in
-   `derived.diff` and the `versions.json` of the image that the run built.
+   channel manifest that belong to them. The artifact of the qualification
+   row of a canary run on that commit,
+   `formal-canary-part-qualification-<run>-<attempt>`, holds all of them:
+   each derived field with its committed value in `derive.txt`, the
+   derived manifest in `toolchain.json`, the changes of the Lake project
+   in `derived.diff` and the `versions.json` of the image that the row
+   built. The data of `verdict.json`, in the artifact
+   `formal-canary-<run>-<attempt>` of the run, also records each derived
+   field with its committed value.
    The derived manifest is written in the layout of `serde_json`; write its
    values into the committed file, so that the diff shows only what moved.
 2. **Port the patch.** When the reviewed patch does not apply to the new
@@ -138,13 +142,19 @@ shows it.
 
 ## Canary verdicts
 
-The canary writes one verdict per run, the finding of the first part that
-did not pass at the first step of its row that did not pass, into
-`verdict.json` of its artifact, the summary of the workflow run and one
-annotation; [toolchain canary](formal-verification.md#toolchain-canary)
-defines the findings. Its detail starts with the step, after the part for
-the row of a formal target, and the commit of `main` that the run tested.
-Triage each run:
+The canary writes one verdict per run into `verdict.json` of its
+artifact, the summary of the workflow run and one annotation. It judges
+the result of the job `canary limits` and whether the receipts of its
+parts are of one commit, tree, run and attempt before the parts one by
+one, and then gives the finding of the first part that did not pass at
+the first step of its row that did not pass;
+[toolchain canary](formal-verification.md#toolchain-canary) defines the
+findings. Its detail starts with the step, after the part for the row of
+a formal target, and the commit of `main` that the run tested; it starts
+instead with `limits` when the job `canary limits` did not succeed, with
+`parts` when the registry cannot be read, the receipts disagree or the
+run passed, and with the part of the row, without a step, when a row left
+no record or more than one. Triage each run:
 
 | Verdict | What it means | What follows |
 | --- | --- | --- |

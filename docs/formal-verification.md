@@ -683,9 +683,12 @@ run or attempt are a defect of the canary. Otherwise the run gets the
 finding of the first part that did not pass, in that order with the
 shards by name, at the first step of its row that did not pass, or else
 that of the part, with the step, after the part for a shard, and the
-commit of `main` in its detail; the job passes only on `PASSED`. A run is
-repeated whole, never by its failed jobs alone, so that its parts are of
-one attempt:
+commit of `main` in its detail. The detail starts instead with `limits`
+when the job `canary limits` did not succeed, with `parts` when the
+registry cannot be read, the receipts disagree or the run passed, and
+with the part of the row, without a step, when a row left no record or
+more than one. The job passes only on `PASSED`. A run is repeated whole,
+never by its failed jobs alone, so that its parts are of one attempt:
 
 | Finding | When |
 | --- | --- |
