@@ -397,7 +397,7 @@ const BY_RECORD: &str = "${{ steps.record.outputs.retention }}";
 
 /// Every upload step of the tracked workflows: the file, the key of the
 /// job, the name of the step and its `retention-days` as written.
-const RETENTION: [(&str, &str, &str, &str); 30] = [
+const RETENTION: [(&str, &str, &str, &str); 31] = [
     (
         ".github/workflows/check.yml",
         "check",
@@ -455,8 +455,14 @@ const RETENTION: [(&str, &str, &str, &str); 30] = [
     (
         ".github/workflows/formal-canary.yml",
         "canary",
-        "Upload the canary record",
+        "Upload the record of the part",
         "90",
+    ),
+    (
+        ".github/workflows/formal-canary.yml",
+        "verdict",
+        "Upload the canary record",
+        BY_REF,
     ),
     (
         ".github/workflows/formal-image-build.yml",
@@ -1326,6 +1332,7 @@ fn the_comparator_runs_after_the_gate_in_a_container_of_its_own() {
         unconfined,
         [
             (CALIBRATION, "calibration", COMPARATOR_STEP),
+            (CANARY, "canary", COMPARATOR_STEP),
             (MEASURE, "comparator", measured),
             (FORMAL, "gate", COMPARATOR_STEP),
         ]
@@ -2230,6 +2237,7 @@ fn every_job_with_a_computed_limit_writes_it_in_a_notice() {
     let expected = [
         (CALIBRATION, "calibration"),
         (CALIBRATION, "shard"),
+        (CANARY, "canary"),
         (FORMAL, "scoped"),
         (FORMAL, "shard"),
     ];
@@ -2629,7 +2637,7 @@ fn the_deadline_script_writes_the_status_of_the_command_when_asked() {
 /// or build the image, under [`DEADLINE`]: the file, the job, the step, and
 /// the minutes of its deadline, or `None` where the matrix of the job gives
 /// them.
-const CONTAINER_STEPS: [(&str, &str, &str, Option<i64>); 14] = [
+const CONTAINER_STEPS: [(&str, &str, &str, Option<i64>); 16] = [
     (FORMAL, "gate", "Run the gate in the image", Some(135)),
     (FORMAL, "gate", COMPARATOR_STEP, Some(35)),
     (FORMAL, "shard", "Run the shard in the image", None),
@@ -2654,7 +2662,9 @@ const CONTAINER_STEPS: [(&str, &str, &str, Option<i64>); 14] = [
         Some(245),
     ),
     (CANARY, "canary", "Build the image", Some(52)),
-    (CANARY, "canary", "Run the gate in the image", Some(125)),
+    (CANARY, "canary", "Run the gate in the image", Some(135)),
+    (CANARY, "canary", COMPARATOR_STEP, Some(35)),
+    (CANARY, "canary", "Run the shard in the image", None),
     (
         MEASURE,
         "leanchecker",
@@ -2802,12 +2812,17 @@ fn the_main_commands_of_the_formal_workflows_run_under_their_deadlines() {
         .collect();
     expected.sort();
     assert_eq!(checked, expected);
-    // The canary keeps the status of the build and of the gate for its
+    // The canary keeps the status of the build and of each part for its
     // verdict.
     let canary = workflow(CANARY);
     for (name, file) in [
         ("Build the image", "artifacts/canary/build-status"),
         ("Run the gate in the image", "artifacts/canary/gate-status"),
+        (COMPARATOR_STEP, "artifacts/canary/comparator-status"),
+        (
+            "Run the shard in the image",
+            "artifacts/canary/shard-status",
+        ),
     ] {
         let script = step_named(&canary["jobs"]["canary"], name)["run"]
             .as_str()

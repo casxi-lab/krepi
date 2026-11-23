@@ -1,20 +1,24 @@
 //! `cargo xtask formal canary STEP`: the steps of the toolchain canary,
 //! `.github/workflows/formal-canary.yml`, as "Toolchain canary" in
-//! `docs/formal-verification.md` describes them. The job runs the gate once
-//! a week with the tools of Aeneas main. It fetches the trees and the
-//! downloads; this module derives the tool manifest from the committed one
-//! and those files, checks that the patch applies, fills the build fact of
-//! the image and the statement hash, and concludes the run. It fetches
-//! nothing itself.
+//! `docs/formal-verification.md` describes them. The workflow runs the gate
+//! once a week with the tools of Aeneas main, in parts: a job for the
+//! qualification job and the comparator part, and one for the shard of each
+//! formal target. Its jobs fetch the trees and the downloads; this module
+//! gives the parts and their limits, derives the tool manifest from the
+//! committed one and those files, checks that the patch applies, fills the
+//! build fact of the image and the statement hash, and concludes the run.
+//! It fetches nothing itself.
 //!
 //! Each step writes `artifacts/canary/<step>.json`, a [`Record`] with its
-//! [`Finding`], and exits with 0 only when it passed. `verdict` gives the
-//! run the finding of the first step of the job that did not pass: a
+//! [`Finding`], and exits with 0 only when it passed. `limits` gives the
+//! parts of a run and the limits of their jobs from the registry. `verdict`
+//! reads the records and receipts of the parts and gives the run the
+//! finding of the first step of the first part that did not pass: a
 //! breakage of the tools, a defect of the canary or a failure of the run.
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command as Process, ExitCode};
 
 use clap::builder::PossibleValuesParser;
@@ -26,17 +30,30 @@ use super::guard::{self, Standalone};
 use super::outcome::{self, Status};
 use super::receipt::Receipt;
 use super::toolchain::{self, HOSTS, Sources};
-use super::{Layout, run};
+use super::{Layout, comparator, merge, qualify, registry, run};
 use crate::Command;
 
 /// The directory of the canary's own files, below the repository root: the
 /// trees of Aeneas main and of its Charon, the downloads, the exit statuses
-/// of the build and of the gate, and the record of each step.
+/// of the build and of the part, the record of each step and [`PART`].
 pub const DIR: &str = "artifacts/canary";
 
 /// The directory of the files of the steps copied from the image build: the
 /// checkouts that the image is built from, `build.log` and `versions.json`.
 pub const IMAGE: &str = "artifacts/image";
+
+/// The directory below which a job uploads what a part leaves; [`DIR`],
+/// [`IMAGE`] and [`run::RUNS`] lie below it.
+const ARTIFACTS: &str = "artifacts";
+
+/// The file of a part in [`DIR`]: the part, and the outcome of each step of
+/// its job as `<id>=<outcome>` words.
+pub const PART: &str = "part.json";
+
+/// The directory into which the job of the verdict downloads the artifacts
+/// of the parts: each holds what its part uploaded from [`ARTIFACTS`], in a
+/// directory of its own or, as a single artifact, in this one.
+pub const PARTS: &str = "artifacts/canary/parts";
 
 /// The fields of the tool manifest that follow Aeneas main: its commit and
 /// Lake lock, the Lean release that it names with the archives of that
@@ -51,9 +68,15 @@ pub const RESOLVED: &str = "/aeneas/commit /aeneas/lake_manifest_sha256 /aeneas/
 /// first build of a changed switch, and the built switch for the gate.
 pub const BUILT: &str = "/hosts/linux-aarch64/switch_export_sha256";
 
-/// The ids of the steps of the job, in their order.
-pub const STEPS: &str = "runner disk sampler xtask resolve derive fetch toolchain-check patch build \
-    record fill probe gate";
+/// The ids of the steps of the job of the parts, in their order: those of
+/// every row, then the gate and the comparator part of the qualification
+/// row and the shard of the row of a formal target.
+pub const STEPS: &str = "runner disk sampler xtask copy resolve derive fetch toolchain-check patch \
+    build record fill probe gate comparator shard";
+
+/// The steps that run a part, each of which writes `<id>-status` in [`DIR`]
+/// and leaves one receipt of its part.
+const RUNS_PART: &str = "gate comparator shard";
 
 /// The steps whose record this module writes.
 pub const RECORDED: &str = "resolve derive patch fill";
@@ -77,6 +100,94 @@ const FAILURES: &str = "No space left on device|no space left on device|context 
 /// The stages of the recipe whose failure the tools cause: the patch and
 /// the Lake lock, Lean, the nightly, Charon, Aeneas and its Lean library.
 const TOOL_STAGES: &str = "aeneas-source lean rust-toolchain charon-build aeneas-build backend";
+
+/// The minutes after which a GitHub-hosted runner ends a job.
+pub const HOSTED_JOB: u64 = 360;
+
+/// The minutes of a job of the canary beyond the limits of its steps.
+pub const JOB_MARGIN: u64 = 5;
+
+/// The minutes of a step beyond the deadline of its command and receipt:
+/// `deadline.sh` kills the command a minute after the deadline, and the
+/// step ends a minute later.
+pub const STEP_MARGIN: u64 = 2;
+
+/// The sum of the limits of the steps that every row of the job of the
+/// parts runs, in minutes: those that prepare the image and probe it, and
+/// those that summarize, record and upload the part.
+pub const EVERY_ROW: u64 = 107;
+
+/// The limit of a step that removes the container of a part, in minutes.
+pub const REMOVAL: u64 = 1;
+
+/// A row of the job of the parts: the qualification row, which runs the
+/// qualification job and then the comparator part, or the row of the shard
+/// of a formal target; with the limits of its main step and of its job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Row {
+    /// The target of the shard, or `qualification`.
+    pub name: String,
+    /// The part: `qualification` or `target/<name>`.
+    pub part: String,
+    /// The part in the names of its artifact, `/` written `-`.
+    pub key: String,
+    /// The limit of the step that runs the part, in minutes.
+    pub step: u64,
+    /// The limit of the job, in minutes.
+    pub job: u64,
+}
+
+/// The limit of the step that runs `part` with `seconds` of registered
+/// budgets: the minutes of the deadline of the part, its budget in place of
+/// the gate's and those seconds, and of its receipt, rounded up, and
+/// [`STEP_MARGIN`].
+pub fn step_minutes(part: &str, seconds: u64) -> u64 {
+    let deadline = merge::budget(part).as_secs().saturating_add(seconds);
+    let deadline = deadline.saturating_add(run::RECEIPT_MARGIN.as_secs());
+    deadline.div_ceil(60) + STEP_MARGIN
+}
+
+/// The rows of a run on the target registry `text`: the qualification row,
+/// with the steps of the gate and of the comparator part, and the row of
+/// the shard of each formal target, by name, with the sum of the budgets of
+/// the shard ([`merge::shards`]); each job has [`EVERY_ROW`], the limits of
+/// its own steps and [`JOB_MARGIN`]. Planned targets have no row. A
+/// registry that cannot be read, a target name outside the registry's rule
+/// and a job of more than [`HOSTED_JOB`] minutes are errors.
+pub fn rows(text: &str) -> Result<Vec<Row>, String> {
+    let targets = registry::parse(text)?.targets;
+    let row = |part: &str, name: &str, step: u64, own: u64| Row {
+        name: name.to_string(),
+        part: part.to_string(),
+        key: part.replace('/', "-"),
+        step,
+        job: EVERY_ROW + own + JOB_MARGIN,
+    };
+    let gate = step_minutes(qualify::PHASE, 0);
+    let own = gate + REMOVAL + step_minutes(comparator::PHASE, 0) + REMOVAL;
+    let mut rows = vec![row(qualify::PHASE, qualify::PHASE, gate, own)];
+    for (part, budget) in merge::shards(&targets) {
+        let name = merge::target(&part).unwrap_or_default();
+        let letter = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
+        if !name.starts_with(letter) || !name.chars().all(|c| letter(c) || c == '-') {
+            return Err(format!(
+                "target name {name:?} does not match [a-z0-9][a-z0-9-]*"
+            ));
+        }
+        let step = step_minutes(&part, budget);
+        rows.push(row(&part, name, step, step + REMOVAL));
+    }
+    let long = rows.iter().filter(|row| row.job > HOSTED_JOB);
+    let long = Vec::from_iter(long.map(|row| format!("{} needs {} minutes", row.part, row.job)));
+    if long.is_empty() {
+        return Ok(rows);
+    }
+    Err(format!(
+        "the job of {}, more than the {HOSTED_JOB} minutes of a job of a hosted runner",
+        long.join(", of ")
+    ))
+}
 
 /// The finding of a step, and of the run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,35 +227,38 @@ fn found(verdict: Finding, detail: impl Into<String>) -> Record {
 /// The entry of `cargo xtask formal canary` among the commands of `formal`.
 pub const COMMAND: Command = Command {
     name: "canary",
-    about: "Run STEP of the weekly toolchain canary on what its job fetched and built: resolve, derive, patch, fill, or verdict, which with --outcomes TEXT concludes the run",
+    about: "Run STEP of the weekly toolchain canary on what its jobs fetched and built: limits, the parts of the run from the registry, resolve, derive, patch, fill, or verdict, which concludes the run from its parts and, with --outcomes TEXT, the results of its jobs",
     subcommands: &[],
 };
 
 /// The command line of `cargo xtask formal canary`, with `about`.
 pub fn cli(about: &'static str) -> clap::Command {
-    let steps = PossibleValuesParser::new(["resolve", "derive", "patch", "fill", "verdict"]);
+    let steps = ["limits", "resolve", "derive", "patch", "fill", "verdict"];
+    let steps = PossibleValuesParser::new(steps);
     let step = Arg::new("step").value_name("STEP").required(true);
     let outcomes = Arg::new("outcomes").long("outcomes").value_name("TEXT");
-    let outcomes = outcomes.help("The outcome of each step of the job, as <id>=<outcome> words");
+    let outcomes =
+        outcomes.help("The result of each job that the verdict needs, as <id>=<result> words");
     let command = clap::Command::new("canary").about(about);
     command.arg(step.value_parser(steps)).arg(outcomes)
 }
 
 /// Entry point of `cargo xtask formal canary` in the repository `root`: it
 /// runs the step, writes and prints its record, and exits with 0 only when
-/// the record is written and passed. The verdict names the commit of main
-/// that `GITHUB_SHA` gives.
+/// the record is written and passed. The verdict reads the parts below
+/// [`PARTS`] and names the commit of main that `GITHUB_SHA` gives.
 pub fn command(root: &Path, layout: &Layout, matches: &ArgMatches) -> ExitCode {
     let text = |name| matches.get_one::<String>(name).map_or("", String::as_str);
     let step = text("step");
     let record = match step {
+        "limits" => limits(root, layout),
         "resolve" => resolve(root, layout),
         "derive" => derive(root, layout),
         "patch" => Ok(patch(root, layout)),
         "fill" => fill(root, layout),
         _ => {
             let main = std::env::var("GITHUB_SHA").unwrap_or_else(|_| "unknown".to_string());
-            Ok(verdict(root, &outcomes(text("outcomes")), &main))
+            Ok(verdict(root, layout, &outcomes(text("outcomes")), &main))
         }
     };
     let record = record.unwrap_or_else(|record| record);
@@ -163,8 +277,8 @@ pub fn command(root: &Path, layout: &Layout, matches: &ArgMatches) -> ExitCode {
     }
 }
 
-/// The outcomes of the steps of the job, given as `<id>=<outcome>` words;
-/// an empty outcome counts as none.
+/// The outcomes of the steps of a job, or the results of jobs, given as
+/// `<id>=<outcome>` words; an empty outcome counts as none.
 pub fn outcomes(text: &str) -> BTreeMap<String, String> {
     let pairs = (text.split_whitespace()).filter_map(|word| word.split_once('='));
     let pairs = pairs.filter(|(_, outcome)| !outcome.is_empty());
@@ -277,6 +391,20 @@ fn trees(root: &Path, layout: &Layout) -> Result<BTreeMap<&'static str, String>,
         ("/hosts/linux-aarch64/lean/url", linux?),
         ("/hosts/darwin-arm64/lean/url", darwin?),
     ]))
+}
+
+/// `limits`: the rows of a run on the registry of the checkout, in its data;
+/// a registry that the canary cannot run fails the run.
+fn limits(root: &Path, layout: &Layout) -> Result<Record, Record> {
+    let path = root.join(layout.registry);
+    let text = fs::read_to_string(&path).map_err(|error| io(&path, error))?;
+    let rows = rows(&text).map_err(|why| found(Finding::Failed, why))?;
+    let parts = Vec::from_iter(rows.iter().map(|row| row.part.as_str()));
+    let detail = format!("{} parts: {}", parts.len(), parts.join(", "));
+    Ok(Record {
+        data: json!({ "parts": rows }),
+        ..found(Finding::Passed, detail)
+    })
 }
 
 /// `resolve`: the fields that the trees give, and in its data the URLs of
@@ -517,39 +645,134 @@ fn fill(root: &Path, layout: &Layout) -> Result<Record, Record> {
     })
 }
 
-/// `verdict`: the finding of the run, with the commit `main` and the step in
-/// its detail: that of the first of [`STEPS`] that did not pass, or else
-/// that of the gate. A step passes when its outcome is `success` and, for
-/// one of [`RECORDED`], its record passed. A failed build is classed by its
-/// log, the gate by its exit status and receipt, a step of [`RECORDED`] by
-/// a record that did not pass, and the tool checks, which compare the
-/// derived manifest with the trees, as a defect; any other failure, and a
-/// step that was cancelled, skipped or has no outcome, fails the run. The
-/// data holds those of `derive` and `fill`.
-pub fn verdict(root: &Path, outcomes: &BTreeMap<String, String>, main: &str) -> Record {
-    let dir = root.join(DIR);
-    let record = |step: &str| {
-        let value = json(&dir.join(format!("{step}.json"))).ok()?;
-        serde_json::from_value::<Record>(value).ok()
+/// The path of `path`, a path below [`ARTIFACTS`] of the checkout, in the
+/// directory `dir` that holds what a part left there.
+fn within(dir: &Path, path: &str) -> PathBuf {
+    let path = Path::new(path);
+    dir.join(path.strip_prefix(ARTIFACTS).unwrap_or(path))
+}
+
+/// A part that the job of the verdict downloaded: the directory of what it
+/// left, and the outcomes of the steps of its job.
+struct Part {
+    dir: PathBuf,
+    outcomes: BTreeMap<String, String>,
+}
+
+/// The parts below [`PARTS`], by the name in their [`PART`] file, each with
+/// every directory that names it: [`PARTS`] itself and each directory in
+/// it.
+fn parts(root: &Path) -> BTreeMap<String, Vec<Part>> {
+    let base = root.join(PARTS);
+    let dirs = fs::read_dir(&base).into_iter().flatten().flatten();
+    let dirs = std::iter::once(base.clone()).chain(dirs.map(|entry| entry.path()));
+    let mut parts = BTreeMap::<String, Vec<Part>>::new();
+    for dir in dirs {
+        let Ok(value) = json(&within(&dir, DIR).join(PART)) else {
+            continue;
+        };
+        let name = value["part"].as_str().unwrap_or_default().to_string();
+        let outcomes = outcomes(value["outcomes"].as_str().unwrap_or_default());
+        parts.entry(name).or_default().push(Part { dir, outcomes });
+    }
+    parts
+}
+
+/// The record of the step `step` that the part in `dir` left, if it can be
+/// read.
+fn record_of(dir: &Path, step: &str) -> Option<Record> {
+    let value = json(&within(dir, DIR).join(format!("{step}.json"))).ok()?;
+    serde_json::from_value(value).ok()
+}
+
+/// The receipts that the part in `dir` left, by path, each read or why not.
+fn receipts(dir: &Path) -> Vec<(PathBuf, Result<Receipt, String>)> {
+    let runs = fs::read_dir(within(dir, run::RUNS)).into_iter().flatten();
+    let paths = runs.flatten().map(|run| run.path().join("receipt.json"));
+    let mut paths = Vec::from_iter(paths.filter(|path| path.is_file()));
+    paths.sort();
+    let read = |path: PathBuf| {
+        let text = fs::read_to_string(&path).map_err(|error| error.to_string());
+        let parse = |text: String| serde_json::from_str(&text).map_err(|e| e.to_string());
+        (path, text.and_then(parse))
     };
-    let data = json!({
-        "derive": record("derive").map(|record| record.data),
-        "fill": record("fill").map(|record| record.data),
-    });
+    Vec::from_iter(paths.into_iter().map(read))
+}
+
+/// Why the receipts of `parts` are not of one run: each commit, tree, run
+/// and attempt that they name, with the parts of the receipts, when they
+/// name more than one. A receipt without a commit, whose run did not reach
+/// its snapshot, and one that cannot be read are left out.
+fn disagreement(parts: &BTreeMap<String, Vec<Part>>) -> Option<String> {
+    let mut named = BTreeMap::<String, Vec<String>>::new();
+    let dirs = parts.values().flatten().map(|part| part.dir.as_path());
+    for (_, receipt) in dirs.flat_map(receipts) {
+        let Ok(receipt) = receipt else {
+            continue;
+        };
+        let Some(commit) = &receipt.commit else {
+            continue;
+        };
+        let none = |text: &Option<String>| text.clone().unwrap_or("none".to_string());
+        let (tree, trigger) = (none(&receipt.tree), &receipt.trigger);
+        let (run, attempt) = (none(&trigger.run_id), none(&trigger.attempt));
+        let of = format!("commit {commit}, tree {tree}, run {run}, attempt {attempt}");
+        named.entry(of).or_default().push(none(&receipt.shard));
+    }
+    let each = named
+        .iter()
+        .map(|(of, parts)| format!("{} at {of}", parts.join(", ")));
+    let each = Vec::from_iter(each);
+    let why = "the receipts of the parts are not of one commit, tree, run and attempt";
+    (each.len() > 1).then(|| format!("{why}: {}", each.join("; ")))
+}
+
+/// The steps of [`STEPS`] that judge the part `part`: those of its row
+/// without the steps that run its other parts, or for the comparator part,
+/// which the qualification row runs after the gate, its step alone.
+fn steps_of(part: &str) -> Vec<&'static str> {
+    let others: &[&str] = match part {
+        qualify::PHASE => &["comparator", "shard"],
+        comparator::PHASE => return vec!["comparator"],
+        _ => &["gate", "comparator"],
+    };
+    let steps = STEPS.split_whitespace();
+    Vec::from_iter(steps.filter(|step| !others.contains(step)))
+}
+
+/// The first of `steps` of the part `part` that did not pass, with its
+/// finding, given the part's directory `dir` and the `outcomes` of the
+/// steps of its job. A step passes when its outcome is `success` and, for
+/// one of [`RECORDED`], its record passed; a step of [`RUNS_PART`] passes
+/// when it ran the part and its receipt passed ([`ran`]). A failed build is
+/// classed by its log, a step of [`RECORDED`] by a record that did not
+/// pass, and the tool checks, which compare the derived manifest with the
+/// trees, as a defect; any other failure, and a step that was cancelled,
+/// skipped or has no outcome, fails the run.
+fn first<'a>(
+    dir: &Path,
+    part: &str,
+    outcomes: &BTreeMap<String, String>,
+    steps: &[&'a str],
+) -> Option<(&'a str, Record)> {
     let failed = |why: &str| found(Finding::Failed, why);
     let passed = |record: &Record| record.verdict == Finding::Passed;
-    let first = STEPS.split_whitespace().find_map(|step| {
+    steps.iter().find_map(|&step| {
         let recorded = RECORDED.split(' ').any(|it| it == step);
-        let own = recorded.then(|| record(step));
+        let runs = RUNS_PART.split(' ').any(|it| it == step);
+        let own = recorded.then(|| record_of(dir, step));
         let finding = match (outcomes.get(step).map(String::as_str), step, own) {
+            (Some("success" | "failure"), _, _) if runs => {
+                Some(ran(dir, step, part)).filter(|ran| !passed(ran))?
+            }
             (Some("success"), _, None) => return None,
             (Some("success"), _, Some(Some(record))) if passed(&record) => return None,
             (Some("success"), _, Some(_)) => failed("it succeeded without a record that passed"),
-            (Some("failure"), "build", _) => build(root),
-            (Some("failure"), "gate", _) => gate(root),
+            (Some("failure"), "build", _) => build(dir),
             (Some("failure"), _, Some(Some(record))) if !passed(&record) => record,
             (Some("failure"), "toolchain-check", _) => {
-                let log = fs::read_to_string(dir.join("toolchain-check.txt")).unwrap_or_default();
+                let log = within(dir, DIR).join("toolchain-check.txt");
+                let log = fs::read_to_string(log).unwrap_or_default();
                 let lines = Vec::from_iter(log.lines());
                 let tail = lines[lines.len().saturating_sub(12)..].join("\n");
                 let why = format!("the tool checks fail on the derived manifest:\n{tail}");
@@ -559,14 +782,75 @@ pub fn verdict(root: &Path, outcomes: &BTreeMap<String, String>, main: &str) -> 
             (None, _, _) => failed("the step has no outcome"),
         };
         Some((step, finding))
+    })
+}
+
+/// `verdict`: the finding of the run, with the commit `main` and where it
+/// was found in its detail. The job `limits` must have the result `success`
+/// in `outcomes`, and the registry of the checkout must be readable, or the
+/// run failed; receipts of the parts below [`PARTS`] that are not of one
+/// commit, tree, run and attempt are a defect of the canary
+/// ([`disagreement`]). Then the parts are judged in their order: the
+/// qualification row up to its gate, the comparator part of that row, and
+/// the row of each formal target of the registry ([`merge::shards`]) by
+/// name, each by the first of its steps that did not pass ([`first`]); a
+/// row without one record, or with more, fails the run. The run passed when
+/// every part did. The data holds the records of `derive` and `fill` of the
+/// qualification row.
+pub fn verdict(
+    root: &Path,
+    layout: &Layout,
+    outcomes: &BTreeMap<String, String>,
+    main: &str,
+) -> Record {
+    let parts = parts(root);
+    let row = (parts.get(qualify::PHASE)).and_then(|parts| parts.first());
+    let record = |step| row.and_then(|row| record_of(&row.dir, step));
+    let data = json!({
+        "derive": record("derive").map(|record| record.data),
+        "fill": record("fill").map(|record| record.data),
     });
-    let (step, finding) = first.unwrap_or_else(|| ("gate", gate(root)));
-    let detail = format!("{step} (main {main}): {}", finding.detail);
-    Record {
-        detail,
-        data,
+    let at = |place: &str, finding: Record| Record {
+        detail: format!("{place} (main {main}): {}", finding.detail),
+        data: data.clone(),
         ..finding
+    };
+    let failed = |why: String| found(Finding::Failed, why);
+    match outcomes.get("limits").map(String::as_str) {
+        Some("success") => {}
+        Some(result) => return at("limits", failed(format!("the job ended with {result}"))),
+        None => return at("limits", failed("the job has no result".to_string())),
     }
+    let path = root.join(layout.registry);
+    let text = fs::read_to_string(&path).map_err(|error| error.to_string());
+    let targets = match text.and_then(|text| registry::parse(&text)) {
+        Ok(registry) => registry.targets,
+        Err(why) => return at("parts", failed(format!("{}: {why}", path.display()))),
+    };
+    if let Some(why) = disagreement(&parts) {
+        return at("parts", found(Finding::Defect, why));
+    }
+    let own = [qualify::PHASE, comparator::PHASE].map(str::to_string);
+    let names = Vec::from_iter(own.into_iter().chain(merge::shards(&targets).into_keys()));
+    for name in &names {
+        let row = [name.as_str(), qualify::PHASE][usize::from(name == comparator::PHASE)];
+        let rows = parts.get(row).map_or(&[][..], Vec::as_slice);
+        let [part] = rows else {
+            return at(
+                row,
+                failed(format!("the part left {} records, not one", rows.len())),
+            );
+        };
+        if let Some((step, finding)) = first(&part.dir, name, &part.outcomes, &steps_of(name)) {
+            let place = [format!("{name} {step}"), step.to_string()];
+            return at(&place[usize::from(row == qualify::PHASE)], finding);
+        }
+    }
+    let why = format!(
+        "the receipts of {} are VERIFIED and complete",
+        names.join(", ")
+    );
+    at("parts", found(Finding::Passed, why))
 }
 
 /// The finding of the failure `text`: a defect or a failure of the run when
@@ -596,19 +880,20 @@ fn of_step(line: &str) -> Option<&str> {
     (!digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())).then_some(rest)
 }
 
-/// A failed image build, by its exit status in `build-status` and its log:
-/// the limit, and a log without a failure block after its first error, fail
-/// the run. Otherwise the block names the stage; it is a defect or a
-/// failure by the error and the output of the step that it shows, else a
-/// breakage in a stage of [`TOOL_STAGES`] and a failure of the run in
-/// another. The first line of the block, and the script that the error of
-/// a process quotes, hold the recipe's own texts and are not read.
-fn build(root: &Path) -> Record {
+/// A failed image build of the part in `dir`, by its exit status in
+/// `build-status` and its log: the limit, and a log without a failure block
+/// after its first error, fail the run. Otherwise the block names the
+/// stage; it is a defect or a failure by the error and the output of the
+/// step that it shows, else a breakage in a stage of [`TOOL_STAGES`] and a
+/// failure of the run in another. The first line of the block, and the
+/// script that the error of a process quotes, hold the recipe's own texts
+/// and are not read.
+fn build(dir: &Path) -> Record {
     let failed = |why: String| found(Finding::Failed, why);
-    let Ok(status) = fs::read_to_string(root.join(DIR).join("build-status")) else {
+    let Ok(status) = fs::read_to_string(within(dir, DIR).join("build-status")) else {
         return failed("the runner or the step limit ended the build".to_string());
     };
-    let log = fs::read_to_string(root.join(IMAGE).join("build.log")).unwrap_or_default();
+    let log = fs::read_to_string(within(dir, IMAGE).join("build.log")).unwrap_or_default();
     let lines = Vec::from_iter(log.lines());
     if matches!(status.trim(), "124" | "137") {
         let started = lines.iter().rev().find_map(|line| stage(of_step(line)?));
@@ -641,28 +926,27 @@ fn build(root: &Path) -> Record {
     found(by_text(&read, otherwise), why)
 }
 
-/// The gate, by its exit status in `gate-status` and its one receipt:
+/// The step `step` of [`RUNS_PART`] that ran the part `part` in `dir`, by
+/// its exit status in `<step>-status` and the one receipt of the part:
 /// passed for 0 and a complete `VERIFIED` receipt; for 1 and a receipt with
 /// a verdict, a breakage unless the texts of its failures and of the units
 /// that are not `VERIFIED` make it a defect or a failure of the run; and a
 /// failure of the run for any other status, which is an error of the run
-/// and not a verdict.
-fn gate(root: &Path) -> Record {
+/// and not a verdict, and for a receipt that cannot be read.
+fn ran(dir: &Path, step: &str, part: &str) -> Record {
     let failed = |why: String| found(Finding::Failed, why);
-    let Ok(status) = fs::read_to_string(root.join(DIR).join("gate-status")) else {
-        return failed("the gate step wrote no exit status".to_string());
+    let status = within(dir, DIR).join(format!("{step}-status"));
+    let Ok(status) = fs::read_to_string(status) else {
+        return failed(format!("the {step} step wrote no exit status"));
     };
-    let runs = fs::read_dir(root.join(run::RUNS)).into_iter().flatten();
-    let receipts = runs.flatten().map(|run| run.path().join("receipt.json"));
-    let receipts = Vec::from_iter(receipts.filter(|path| path.is_file()));
-    let [path] = receipts.as_slice() else {
-        return failed(format!("the gate left {} receipts", receipts.len()));
-    };
-    let text = fs::read_to_string(path).map_err(|error| error.to_string());
-    let parse = |text: String| serde_json::from_str::<Receipt>(&text).map_err(|e| e.to_string());
-    let receipt = match text.and_then(parse) {
-        Ok(receipt) => receipt,
-        Err(error) => return failed(format!("{}: {error}", path.display())),
+    let receipts = receipts(dir);
+    if let Some((path, Err(error))) = receipts.iter().find(|(_, receipt)| receipt.is_err()) {
+        return failed(format!("{}: {error}", path.display()));
+    }
+    let own = (receipts.into_iter()).filter_map(|(_, receipt)| receipt.ok());
+    let own = Vec::from_iter(own.filter(|receipt| receipt.shard.as_deref() == Some(part)));
+    let [receipt] = own.as_slice() else {
+        return failed(format!("the {step} left {} receipts of {part}", own.len()));
     };
     let word = outcome::word(&receipt.status);
     let open = (receipt.units.iter()).filter(|(_, unit)| unit.status != Status::Verified);
@@ -679,14 +963,14 @@ fn gate(root: &Path) -> Record {
         }
         ("1", Status::Rejected | Status::ToolFailure | Status::Budget | Status::Stale) => {
             let detail = format!(
-                "the gate exited with 1, {word}; units that are not VERIFIED: {}; failures: {}",
+                "the {step} exited with 1, {word}; units that are not VERIFIED: {}; failures: {}",
                 units.join(", "),
                 failures.join("; ")
             );
             found(by_text(&texts, Finding::Broken), detail)
         }
         (status, _) => failed(format!(
-            "the gate exited with `{status}`, receipt {word}, complete {}",
+            "the {step} exited with `{status}`, receipt {word}, complete {}",
             receipt.complete
         )),
     }
@@ -1185,28 +1469,77 @@ mod tests {
         scratch
     }
 
-    /// The outcomes of a job whose steps succeeded up to `step`, which
-    /// ended with `outcome`, and were skipped after it.
-    fn ended_at(step: &str, outcome: &str) -> BTreeMap<String, String> {
-        let mut at = "success";
-        let words = STEPS.split_whitespace().map(|id| {
-            let word = if id == step { outcome } else { at };
-            if id == step {
-                at = "skipped";
-            }
-            format!("{id}={word}")
+    /// The outcomes of the steps of the row of the part `part` that
+    /// succeeded up to `step`, which ended with `outcome`, and were skipped
+    /// after it; the steps of the other row were skipped.
+    fn row_at(part: &str, step: &str, outcome: &str) -> BTreeMap<String, String> {
+        let others = [&["gate", "comparator"][..], &["shard"]];
+        let others = others[usize::from(part == qualify::PHASE)];
+        let ids = Vec::from_iter(STEPS.split_whitespace());
+        let at = ids.iter().position(|id| *id == step).unwrap_or(ids.len());
+        let words = ids.iter().enumerate().map(|(index, id)| {
+            let reached = ["success", outcome][usize::from(index == at)];
+            let skipped = others.contains(id) || index > at;
+            format!("{id}={}", [reached, "skipped"][usize::from(skipped)])
         });
         outcomes(&Vec::from_iter(words).join(" "))
     }
 
-    /// Writes the record of the step `step`: `verdict`, `detail` and `data`.
-    fn record(root: &Path, step: &str, (verdict, detail, data): (Finding, &str, Value)) {
-        fs::create_dir_all(root.join(DIR)).expect("the directory");
+    /// The outcomes of the steps of the qualification row that succeeded up
+    /// to `step`, which ended with `outcome`, and were skipped after it.
+    fn ended_at(step: &str, outcome: &str) -> BTreeMap<String, String> {
+        row_at(qualify::PHASE, step, outcome)
+    }
+
+    /// Writes the record of the step `step` into the directory `dir` of a
+    /// part: `verdict`, `detail` and `data`.
+    fn record(dir: &Path, step: &str, (verdict, detail, data): (Finding, &str, Value)) {
+        fs::create_dir_all(within(dir, DIR)).expect("the directory");
         let record = Record {
             data,
             ..found(verdict, detail)
         };
-        write(&root.join(DIR).join(format!("{step}.json")), &json!(record)).expect("written");
+        let path = within(dir, DIR).join(format!("{step}.json"));
+        write(&path, &json!(record)).expect("written");
+    }
+
+    /// Writes the file of the part `part` into its directory `dir`, as its
+    /// job does, with the `outcomes` of its steps.
+    fn left(dir: &Path, part: &str, outcomes: &BTreeMap<String, String>) {
+        let words = outcomes
+            .iter()
+            .map(|(id, outcome)| format!("{id}={outcome}"));
+        let value = json!({"part": part, "outcomes": Vec::from_iter(words).join(" ")});
+        fs::create_dir_all(within(dir, DIR)).expect("the directory");
+        write(&within(dir, DIR).join(PART), &value).expect("the file of the part");
+    }
+
+    /// The result of the job `limits` that the verdict reads.
+    fn limited() -> BTreeMap<String, String> {
+        outcomes("limits=success")
+    }
+
+    /// The exit code and the record of the step `limits` on the registry
+    /// `text`.
+    fn limits_of(text: &str) -> (ExitCode, Value) {
+        let scratch = Scratch::temporary("canary-limits");
+        scratch.write(layout().registry, text);
+        let matches = cli("").try_get_matches_from(["canary", "limits"]);
+        let code = command(&scratch.0, &layout(), &matches.expect("a command line"));
+        (
+            code,
+            json(&scratch.0.join(DIR).join("limits.json")).expect("the record"),
+        )
+    }
+
+    /// Writes into the directory `dir` of a part the exit status and the
+    /// log of a build that failed in the stage `charon-build`.
+    fn broken_build(dir: &Path) {
+        let cargo = ["error[E0425]: cannot find value `x` in this scope"];
+        fs::create_dir_all(within(dir, IMAGE)).expect("the directory");
+        fs::write(within(dir, DIR).join("build-status"), "1\n").expect("the status");
+        let log = failure("charon-build 2/2", &cargo);
+        fs::write(within(dir, IMAGE).join("build.log"), log).expect("the log");
     }
 
     #[test]
@@ -1224,12 +1557,15 @@ mod tests {
         scratch.write(&patch_path(), "not a patch\n");
         let failed = patch(root, &layout);
         assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
-        // The verdict of the job that ended there.
+        // The verdict of the run whose qualification row ended there.
+        scratch.write(layout.registry, &registry_text(&[], true));
+        let dir = root.join(PARTS).join("qualification");
         for step in ["resolve", "derive"] {
-            record(root, step, (Finding::Passed, "", Value::Null));
+            record(&dir, step, (Finding::Passed, "", Value::Null));
         }
-        record(root, "patch", (broken.verdict, &broken.detail, Value::Null));
-        let verdict = verdict(root, &ended_at("patch", "failure"), "abc");
+        record(&dir, "patch", (broken.verdict, &broken.detail, Value::Null));
+        left(&dir, "qualification", &ended_at("patch", "failure"));
+        let verdict = verdict(root, &layout, &limited(), "abc");
         assert_eq!(verdict.verdict, Finding::Broken, "{verdict:?}");
         assert_eq!(
             verdict.detail,
@@ -1255,12 +1591,16 @@ mod tests {
         scratch.write(&format!("{IMAGE}/aeneas/a.txt"), "two\n");
         assert_eq!(run(&["patch"]), ExitCode::SUCCESS);
         assert_eq!(written("patch").expect("the record")["verdict"], "PASSED");
-        let outcomes = "runner=success disk=failure";
+        let outcomes = "limits=failure";
         assert_eq!(run(&["verdict", "--outcomes", outcomes]), ExitCode::FAILURE);
         let verdict = written("verdict").expect("the verdict");
         assert_eq!(verdict["verdict"], "FAILED");
         let detail = verdict["detail"].as_str().expect("a detail");
-        assert!(detail.starts_with("disk (main "), "{detail}");
+        assert!(detail.starts_with("limits (main "), "{detail}");
+        assert!(
+            detail.ends_with("): the job ended with failure"),
+            "{detail}"
+        );
         assert_eq!(verdict["data"], json!({"derive": null, "fill": null}));
         // A record that cannot be written fails the step that passed.
         fs::remove_dir_all(root.join(DIR)).expect("remove the records");
@@ -1291,7 +1631,7 @@ mod tests {
         fixture.commit_all();
         fixture.write(&format!("{IMAGE}/versions.json"), fixture::VERSIONS);
         let data = json!({"built_committed": "the committed digest"});
-        record(root, "derive", (Finding::Passed, "", data));
+        record(&root.join(ARTIFACTS), "derive", (Finding::Passed, "", data));
         let filled = fill(root, &layout).expect("filled");
         assert_eq!(filled.verdict, Finding::Passed);
         let export = value(fixture::VERSIONS)["opam"]["switch_export_sha256"].clone();
@@ -1331,7 +1671,7 @@ mod tests {
             scratch.write(&format!("{DIR}/build-status"), &format!("{status}\n"));
         }
         scratch.write(&format!("{IMAGE}/build.log"), log);
-        build(&scratch.0)
+        build(&scratch.0.join(ARTIFACTS))
     }
 
     /// A plain BuildKit log of a build whose step `step`, `[<stage> i/k]`,
@@ -1538,9 +1878,11 @@ mod tests {
         assert_eq!(stages.len(), listed.len());
     }
 
-    /// The text of a receipt of `status`, complete or not, with `units` of
-    /// their status and reason and `failures`.
+    /// The text of a receipt of the part `part`, of the commit `c`, the tree
+    /// `t` and the first attempt of the run 1, of `status`, complete or not,
+    /// with `units` of their status and reason and `failures`.
     fn receipt(
+        part: &str,
         status: Status,
         complete: bool,
         units: &[(&str, Status, &str)],
@@ -1565,16 +1907,26 @@ mod tests {
                 message,
             }
         });
+        let trigger = receipt::Trigger {
+            run_id: Some("1".to_string()),
+            attempt: Some("1".to_string()),
+            ..receipt::Trigger::default()
+        };
         receipt::render(&Receipt {
             status,
             complete,
+            trigger,
+            shard: Some(part.to_string()),
+            commit: Some("c".to_string()),
+            tree: Some("t".to_string()),
             units: units.collect(),
             failures: failures.collect(),
             ..Receipt::default()
         })
     }
 
-    /// The finding of a gate that exited with `status` and left `receipts`.
+    /// The finding of a gate of the qualification row that exited with
+    /// `status` and left `receipts`.
     fn gated(status: Option<&str>, receipts: &[&str]) -> Record {
         let scratch = Scratch::temporary("canary-gate");
         if let Some(status) = status {
@@ -1584,12 +1936,17 @@ mod tests {
             scratch.write(&format!("{}/{run}/receipt.json", run::RUNS), text);
         }
         fs::create_dir_all(scratch.0.join(run::RUNS).join("vectors/logs")).expect("a run");
-        gate(&scratch.0)
+        ran(&scratch.0.join(ARTIFACTS), "gate", "qualification")
     }
 
     #[test]
     fn the_gate_is_classed_by_its_status_and_receipt() {
         use Status::{Rejected, ToolFailure, Verified};
+        // The receipt of another part is not that of the gate.
+        let other = receipt("comparator", Verified, true, &[], &[]);
+        let receipt = |status, complete, units: &[_], failures: &[_]| {
+            receipt("qualification", status, complete, units, failures)
+        };
         let verified = receipt(Verified, true, &[("base", Verified, "")], &[]);
         let record = gated(Some("0"), &[&verified]);
         assert_eq!(record.verdict, Finding::Passed, "{record:?}");
@@ -1634,28 +1991,64 @@ mod tests {
             gated(None, &[&rejected]),
             gated(Some("1"), &[&rejected, &rejected]),
             gated(Some("1"), &[]),
+            gated(Some("0"), &[&other]),
             gated(Some("1"), &["{\"status\": \"REJECTED\"}\n"]),
             gated(Some("1"), &[&rejected, "not a receipt"]),
         ];
         for record in failed {
             assert_eq!(record.verdict, Finding::Failed, "{record:?}");
         }
+        let two = "the gate left 2 receipts of qualification";
+        assert_eq!(gated(Some("1"), &[&rejected, &rejected]).detail, two);
+    }
+
+    /// A root with the formal targets `formal` and a planned target, below
+    /// whose [`PARTS`] each row left what a row that passed leaves: the
+    /// records of its steps, and of each of its parts the exit status 0 and
+    /// a complete `VERIFIED` receipt. Its directories, by part.
+    fn passed_parts(formal: &[&str]) -> (Scratch, BTreeMap<String, PathBuf>) {
+        let scratch = Scratch::temporary("canary-verdict");
+        let registry = Vec::from_iter(formal.iter().map(|name| (*name, None)));
+        scratch.write(layout().registry, &registry_text(&registry, true));
+        let mut dirs = BTreeMap::new();
+        let parts = formal.iter().map(|name| format!("target/{name}"));
+        for part in std::iter::once("qualification".to_string()).chain(parts) {
+            let dir = scratch.0.join(PARTS).join(part.replace('/', "-"));
+            for step in RECORDED.split(' ') {
+                record(&dir, step, (Finding::Passed, "", json!({"step": step})));
+            }
+            let verified = |part: &str| receipt(part, Status::Verified, true, &[], &[]);
+            let runs = within(&dir, run::RUNS);
+            let steps = match part.as_str() {
+                "qualification" => vec![("gate", "qualification"), ("comparator", "comparator")],
+                part => vec![("shard", part)],
+            };
+            for (at, (step, of)) in steps.iter().enumerate() {
+                fs::create_dir_all(runs.join(at.to_string())).expect("a run");
+                let path = runs.join(at.to_string()).join("receipt.json");
+                fs::write(path, verified(of)).expect("the receipt");
+                let status = within(&dir, DIR).join(format!("{step}-status"));
+                fs::write(status, "0\n").expect("the status");
+            }
+            left(&dir, &part, &row_at(&part, "none", "none"));
+            dirs.insert(part, dir);
+        }
+        (scratch, dirs)
     }
 
     #[test]
     fn a_step_that_passes_without_its_record_or_is_skipped_fails_the_run() {
-        let scratch = Scratch::temporary("canary-verdict");
-        let root = scratch.0.as_path();
-        let verified = receipt(Status::Verified, true, &[], &[]);
-        scratch.write(&format!("{}/1/receipt.json", run::RUNS), &verified);
-        scratch.write(&format!("{DIR}/gate-status"), "0\n");
-        for step in RECORDED.split(' ') {
-            record(root, step, (Finding::Passed, "", json!({"step": step})));
-        }
+        let (scratch, dirs) = passed_parts(&[]);
+        let (root, dir) = (scratch.0.as_path(), &dirs["qualification"]);
         let all = ended_at("none", "none");
-        let passed = verdict(root, &all, "abc");
+        let judged = |outcomes: &BTreeMap<String, String>| {
+            left(dir, "qualification", outcomes);
+            verdict(root, &layout(), &limited(), "abc")
+        };
+        let passed = judged(&all);
         assert_eq!(passed.verdict, Finding::Passed, "{passed:?}");
-        assert!(passed.detail.starts_with("gate (main abc): "), "{passed:?}");
+        let why = "parts (main abc): the receipts of qualification, comparator are VERIFIED";
+        assert!(passed.detail.starts_with(why), "{passed:?}");
         let data = json!({"derive": {"step": "derive"}, "fill": {"step": "fill"}});
         assert_eq!(passed.data, data);
         let with = |step: &str, outcome: Option<&str>| {
@@ -1670,11 +2063,12 @@ mod tests {
             (with("probe", Some("skipped")), "probe"),
             (with("build", Some("cancelled")), "build"),
             (with("sampler", None), "sampler"),
+            (with("copy", Some("failure")), "copy"),
             (ended_at("fetch", "failure"), "fetch"),
             (ended_at("resolve", "failure"), "resolve"),
         ];
         for (outcomes, step) in failed {
-            let record = verdict(root, &outcomes, "abc");
+            let record = judged(&outcomes);
             assert_eq!(record.verdict, Finding::Failed, "{record:?}");
             let why = format!("{step} (main abc): ");
             assert!(record.detail.starts_with(&why), "{record:?}");
@@ -1682,27 +2076,27 @@ mod tests {
         // Failed tool checks are a defect; a failed derivation gives its
         // record.
         let checks = "ok    patch: ...\nFAIL  hosts: no\n";
-        scratch.write(&format!("{DIR}/toolchain-check.txt"), checks);
-        let defect = verdict(root, &ended_at("toolchain-check", "failure"), "abc");
+        fs::write(within(dir, DIR).join("toolchain-check.txt"), checks).expect("the log");
+        let defect = judged(&ended_at("toolchain-check", "failure"));
         assert_eq!(defect.verdict, Finding::Defect, "{defect:?}");
         assert!(defect.detail.ends_with("FAIL  hosts: no"), "{defect:?}");
         let why = "Aeneas names no release";
-        record(root, "derive", (Finding::Broken, why, Value::Null));
-        let broken = verdict(root, &ended_at("derive", "failure"), "abc");
+        record(dir, "derive", (Finding::Broken, why, Value::Null));
+        let broken = judged(&ended_at("derive", "failure"));
         assert_eq!(broken.verdict, Finding::Broken, "{broken:?}");
         assert_eq!(broken.detail, format!("derive (main abc): {why}"));
         // A step that succeeded without a record that passed.
         for text in ["{", ""] {
-            scratch.write(&format!("{DIR}/derive.json"), text);
-            let failed = verdict(root, &all, "abc");
+            fs::write(within(dir, DIR).join("derive.json"), text).expect("the record");
+            let failed = judged(&all);
             assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
             assert!(
                 failed.detail.starts_with("derive (main abc): "),
                 "{failed:?}"
             );
         }
-        fs::remove_file(root.join(DIR).join("resolve.json")).expect("remove the record");
-        let failed = verdict(root, &all, "abc");
+        fs::remove_file(within(dir, DIR).join("resolve.json")).expect("remove the record");
+        let failed = judged(&all);
         assert!(
             failed.detail.starts_with("resolve (main abc): "),
             "{failed:?}"
@@ -1710,47 +2104,264 @@ mod tests {
         // A failed build is classed by its log, and a failed gate by its
         // status and receipt.
         for step in ["resolve", "derive"] {
-            record(root, step, (Finding::Passed, "", Value::Null));
+            record(dir, step, (Finding::Passed, "", Value::Null));
         }
-        let cargo = ["error[E0425]: cannot find value `x` in this scope"];
-        scratch.write(&format!("{DIR}/build-status"), "1\n");
-        scratch.write(
-            &format!("{IMAGE}/build.log"),
-            &failure("charon-build 2/2", &cargo),
-        );
-        let broken = verdict(root, &ended_at("build", "failure"), "abc");
+        broken_build(dir);
+        let broken = judged(&ended_at("build", "failure"));
         assert_eq!(broken.verdict, Finding::Broken, "{broken:?}");
         let why = "build (main abc): the stage charon-build failed:\n";
         assert!(broken.detail.starts_with(why), "{broken:?}");
-        let receipts = root.join(run::RUNS).join("1/receipt.json");
-        let rejected = receipt(
-            Status::Rejected,
-            true,
-            &[("base", Status::Rejected, "")],
-            &[],
-        );
+        let receipts = within(dir, run::RUNS).join("0/receipt.json");
+        let units = [("base", Status::Rejected, "")];
+        let rejected = receipt("qualification", Status::Rejected, true, &units, &[]);
         fs::write(&receipts, &rejected).expect("the receipt");
-        scratch.write(&format!("{DIR}/gate-status"), "1\n");
-        let broken = verdict(root, &ended_at("gate", "failure"), "abc");
+        let status = within(dir, DIR).join("gate-status");
+        fs::write(&status, "1\n").expect("the status");
+        let broken = judged(&ended_at("gate", "failure"));
         assert_eq!(broken.verdict, Finding::Broken, "{broken:?}");
         let why = "gate (main abc): the gate exited with 1, REJECTED; ";
         assert!(broken.detail.starts_with(why), "{broken:?}");
         // After the last step, the gate must still have exited with 0 and
         // left one complete VERIFIED receipt.
-        scratch.write(&format!("{DIR}/gate-status"), "0\n");
-        let incomplete = receipt(Status::Verified, false, &[], &[]);
+        fs::write(&status, "0\n").expect("the status");
+        let incomplete = receipt("qualification", Status::Verified, false, &[], &[]);
         for receipt in [Some(incomplete), Some(rejected), None] {
             match &receipt {
                 Some(receipt) => fs::write(&receipts, receipt).expect("the receipt"),
                 None => fs::remove_file(&receipts).expect("remove the receipt"),
             }
-            let failed = verdict(root, &all, "abc");
+            let failed = judged(&all);
             assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
             assert!(failed.detail.starts_with("gate (main abc): "), "{failed:?}");
         }
     }
 
-    /// The steps of the only job of `workflow`: the name and lines of each.
+    #[test]
+    fn a_comparator_that_exits_with_1_makes_the_run_broken() {
+        let (scratch, dirs) = passed_parts(&[]);
+        let (root, dir) = (scratch.0.as_path(), &dirs["qualification"]);
+        // The gate passed; the comparator part rejected its unit.
+        let units = [(
+            "comparator",
+            Status::Rejected,
+            "error: the statements differ",
+        )];
+        let rejected = receipt("comparator", Status::Rejected, true, &units, &[]);
+        fs::write(within(dir, run::RUNS).join("1/receipt.json"), rejected).expect("the receipt");
+        fs::write(within(dir, DIR).join("comparator-status"), "1\n").expect("the status");
+        left(dir, "qualification", &ended_at("comparator", "failure"));
+        let broken = verdict(root, &layout(), &limited(), "abc");
+        assert_eq!(broken.verdict, Finding::Broken, "{broken:?}");
+        let why = "comparator (main abc): the comparator exited with 1, REJECTED; units that are not VERIFIED: comparator REJECTED";
+        assert!(broken.detail.starts_with(why), "{broken:?}");
+        // A comparator step that did not run after a gate that passed fails
+        // the run.
+        left(dir, "qualification", &ended_at("comparator", "skipped"));
+        let failed = verdict(root, &layout(), &limited(), "abc");
+        assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
+        let why = "comparator (main abc): the step ended with the outcome skipped";
+        assert_eq!(failed.detail, why);
+    }
+
+    #[test]
+    fn the_verdict_reads_one_record_and_one_receipt_of_each_part() {
+        let (scratch, dirs) = passed_parts(&["a", "b"]);
+        let root = scratch.0.as_path();
+        let judged = || verdict(root, &layout(), &limited(), "abc");
+        let passed = judged();
+        assert_eq!(passed.verdict, Finding::Passed, "{passed:?}");
+        let why = "parts (main abc): the receipts of qualification, comparator, target/a, target/b are VERIFIED and complete";
+        assert_eq!(passed.detail, why);
+        // The job `limits` did not succeed.
+        for (results, why) in [
+            ("limits=failure", "the job ended with failure"),
+            ("", "the job has no result"),
+        ] {
+            let failed = verdict(root, &layout(), &outcomes(results), "abc");
+            assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
+            assert_eq!(failed.detail, format!("limits (main abc): {why}"));
+        }
+        // A part of a formal target: its build, and its shard by its status
+        // and receipt.
+        let dir = &dirs["target/b"];
+        broken_build(dir);
+        left(dir, "target/b", &row_at("target/b", "build", "failure"));
+        let broken = judged();
+        assert_eq!(broken.verdict, Finding::Broken, "{broken:?}");
+        let why = "target/b build (main abc): the stage charon-build failed:\n";
+        assert!(broken.detail.starts_with(why), "{broken:?}");
+        let units = [("target/b", Status::Rejected, "")];
+        let rejected = receipt("target/b", Status::Rejected, true, &units, &[]);
+        fs::write(within(dir, run::RUNS).join("0/receipt.json"), rejected).expect("the receipt");
+        fs::write(within(dir, DIR).join("shard-status"), "1\n").expect("the status");
+        left(dir, "target/b", &row_at("target/b", "shard", "failure"));
+        let broken = judged();
+        assert_eq!(broken.verdict, Finding::Broken, "{broken:?}");
+        let why = "target/b shard (main abc): the shard exited with 1, REJECTED; ";
+        assert!(broken.detail.starts_with(why), "{broken:?}");
+        // The comparator part comes before the shards; restored, b is first again.
+        let dir = &dirs["qualification"];
+        let units = [("comparator", Status::Rejected, "")];
+        let rejected = receipt("comparator", Status::Rejected, true, &units, &[]);
+        let verified = receipt("comparator", Status::Verified, true, &[], &[]);
+        let place = "comparator (main abc): ";
+        for (status, text, at) in [("1", rejected, place), ("0", verified, why)] {
+            fs::write(within(dir, run::RUNS).join("1/receipt.json"), text).expect("the receipt");
+            fs::write(within(dir, DIR).join("comparator-status"), status).expect("the status");
+            let finding = judged();
+            assert_eq!(finding.verdict, Finding::Broken, "{finding:?}");
+            assert!(finding.detail.starts_with(at), "{finding:?}");
+        }
+        // The parts come in their order: the shard of a before that of b.
+        fs::write(within(&dirs["target/a"], DIR).join("shard-status"), "125\n").expect("status");
+        let failed = judged();
+        assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
+        let why = "target/a shard (main abc): the shard exited with `125`";
+        assert!(failed.detail.starts_with(why), "{failed:?}");
+        // A receipt of another tree, run, attempt or commit, also with a part
+        // that failed, is a defect of the canary.
+        let receipts = within(&dirs["target/a"], run::RUNS).join("0/receipt.json");
+        let text = fs::read_to_string(&receipts).expect("the receipt");
+        let keys = ["tree", "run_id", "attempt", "commit"].into_iter();
+        for (key, value) in keys.zip(["t", "1", "1", "c"]) {
+            let field = |to: &str| format!("\"{key}\": \"{to}\"");
+            fs::write(&receipts, text.replace(&field(value), &field("d"))).expect("the receipt");
+            let defect = judged();
+            assert_eq!(defect.verdict, Finding::Defect, "{key}: {defect:?}");
+        }
+        let defect = judged();
+        let why = "parts (main abc): the receipts of the parts are not of one commit, tree, run and attempt: qualification, comparator, target/b at commit c, tree t, run 1, attempt 1; target/a at commit d, tree t, run 1, attempt 1";
+        assert_eq!(defect.detail, why);
+        fs::write(&receipts, text).expect("the receipt");
+        // A part without its record fails the run.
+        let file = within(&dirs["target/a"], DIR).join(PART);
+        fs::remove_file(&file).expect("remove the record");
+        let failed = judged();
+        assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
+        let why = "target/a (main abc): the part left 0 records, not one";
+        assert_eq!(failed.detail, why);
+        // The only artifact of a run without formal targets may lie in the
+        // directory of the parts itself.
+        let (scratch, dirs) = passed_parts(&[]);
+        let base = scratch.0.join(PARTS);
+        let entries = fs::read_dir(&dirs["qualification"]).expect("the part");
+        for entry in entries.flatten() {
+            fs::rename(entry.path(), base.join(entry.file_name())).expect("move a directory");
+        }
+        let passed = verdict(&scratch.0, &layout(), &limited(), "abc");
+        assert_eq!(passed.verdict, Finding::Passed, "{passed:?}");
+    }
+
+    /// The text of a target registry with the formal targets `formal`, each
+    /// with its budget or the default, and, when `planned`, a planned target
+    /// `later` with the default budget.
+    fn registry_text(formal: &[(&str, Option<u64>)], planned: bool) -> String {
+        let target = |name: &str, state: &str, budget: Option<u64>| {
+            let budget = budget.map_or(String::new(), |budget| format!(", \"budget\": {budget}"));
+            format!("{{\"name\": \"{name}\", \"state\": \"{state}\"{budget}}}")
+        };
+        let targets = (formal.iter()).map(|(name, budget)| target(name, "formal", *budget));
+        let later = planned.then(|| target("later", "planned", None));
+        let targets = Vec::from_iter(targets.chain(later));
+        format!("{{\"schema\": 2, \"targets\": [{}]}}\n", targets.join(", "))
+    }
+
+    /// The rows of the registry of the formal targets `names`, with the
+    /// default budget, and a planned target, which hold to the rule: the
+    /// qualification row with the steps of the gate and the comparator, the
+    /// row of each shard with the limits that the job `formal limits` gives
+    /// it, and each job at most the 360 minutes of a hosted runner. The
+    /// planned target has no row and changes no limit.
+    fn checked_rows(names: &[&str]) -> Vec<Row> {
+        let formal = Vec::from_iter(names.iter().map(|name| (*name, None)));
+        let rows = rows(&registry_text(&formal, true)).expect("the rows");
+        assert_eq!(
+            rows,
+            super::rows(&registry_text(&formal, false)).expect("the rows")
+        );
+        let (gate, comparator) = ((7_200 + 600 + 300) / 60 + 2, (1_800 + 300) / 60 + 2);
+        let job = EVERY_ROW + gate + REMOVAL + comparator + REMOVAL + JOB_MARGIN;
+        let first = [&rows[0].name, &rows[0].part, &rows[0].key].map(String::as_str);
+        assert_eq!(first, ["qualification"; 3]);
+        assert_eq!((rows[0].step, rows[0].job), (gate, job));
+        let shards = Vec::from_iter(rows[1..].iter().map(|row| row.name.as_str()));
+        assert_eq!(shards, names);
+        for row in &rows[1..] {
+            assert_eq!(row.part, format!("target/{}", row.name));
+            assert_eq!(row.key, format!("target-{}", row.name));
+            // 300 s of the shard, 1,800 s of the target and 300 s of the
+            // receipt, and 2 minutes.
+            assert_eq!(row.step, 42, "{row:?}");
+            assert_eq!(row.job, EVERY_ROW + 42 + REMOVAL + JOB_MARGIN, "{row:?}");
+        }
+        for row in &rows {
+            assert!(row.job <= HOSTED_JOB, "{row:?}");
+        }
+        // The other jobs have limits of their own, which hold to the rule.
+        fixed_jobs();
+        rows
+    }
+
+    #[test]
+    fn the_limits_of_no_formal_target_give_the_qualification_row_alone() {
+        assert_eq!(checked_rows(&[]).len(), 1);
+    }
+
+    #[test]
+    fn the_limits_of_one_formal_target_give_one_shard_row_of_42_minutes() {
+        let rows = checked_rows(&["a"]);
+        assert_eq!(rows.len(), 2);
+        // The step writes the rows into its record, which the workflow
+        // gives the job of the parts.
+        let (code, record) = limits_of(&registry_text(&[("a", None)], true));
+        assert_eq!(
+            (code, &record["verdict"]),
+            (ExitCode::SUCCESS, &json!("PASSED"))
+        );
+        assert_eq!(record["detail"], "2 parts: qualification, target/a");
+        assert_eq!(record["data"], json!({ "parts": rows }));
+    }
+
+    #[test]
+    fn the_limits_of_four_formal_targets_give_four_shard_rows_of_42_minutes() {
+        assert_eq!(checked_rows(&["a", "b", "c", "d"]).len(), 5);
+    }
+
+    #[test]
+    fn a_shard_whose_job_needs_more_than_360_minutes_fails_the_limits() {
+        // 300 s of the shard, 20,000 s of the target and 300 s of the
+        // receipt make a step of 346 minutes.
+        assert_eq!(step_minutes("target/big", 20_000), 346);
+        let formal = registry_text(&[("a", None), ("big", Some(20_000))], true);
+        let error = rows(&formal).expect_err("a job too long");
+        let job = EVERY_ROW + 346 + REMOVAL + JOB_MARGIN;
+        let why = format!(
+            "the job of target/big needs {job} minutes, more than the 360 minutes of a job of a hosted runner"
+        );
+        assert_eq!(error, why);
+        let (code, record) = limits_of(&formal);
+        assert_eq!(
+            (code, &record["verdict"]),
+            (ExitCode::FAILURE, &json!("FAILED"))
+        );
+        assert_eq!(record["detail"], why);
+        // A name that the registry's rule refuses has no row either.
+        let named = rows(&registry_text(&[("A b", None)], false));
+        let why = "target name \"A b\" does not match [a-z0-9][a-z0-9-]*";
+        assert_eq!(named.expect_err("a name"), why);
+    }
+
+    /// The text of the job `key` of `workflow`, up to the comment or the key
+    /// of the next job.
+    fn job<'a>(workflow: &'a str, key: &str) -> &'a str {
+        let start = workflow.find(&format!("\n  {key}:\n")).expect(key) + 1;
+        let rest = &workflow[start..];
+        let next = (rest.match_indices("\n  ")).find(|(at, _)| !rest[at + 3..].starts_with(' '));
+        &rest[..next.map_or(rest.len(), |(at, _)| at + 1)]
+    }
+
+    /// The steps of `workflow`, or of one of its jobs: the name and lines of
+    /// each.
     fn steps(workflow: &str) -> Vec<(&str, Vec<&str>)> {
         let steps = workflow.split("\n      - name: ").skip(1);
         let steps = steps.map(|step| step.split_once('\n').unwrap_or((step, "")));
@@ -1778,34 +2389,140 @@ mod tests {
         kept
     }
 
+    /// The value of the key `key` of the step whose lines are `lines`.
+    fn key<'a>(lines: &[&'a str], key: &str) -> Option<&'a str> {
+        let key = format!("        {key}: ");
+        lines
+            .iter()
+            .find_map(|line| line.strip_prefix(key.as_str()))
+    }
+
+    /// The limit of the step `name` of `workflow`, as written.
+    fn limit<'a>(workflow: &'a str, name: &str) -> &'a str {
+        let found = steps(workflow).into_iter().find(|(step, _)| *step == name);
+        key(&found.expect(name).1, "timeout-minutes").expect(name)
+    }
+
+    /// The jobs `limits` and `verdict` of the canary, whose limits do not
+    /// depend on the registry, with them: each has the limits of its steps
+    /// and [`JOB_MARGIN`], at most [`HOSTED_JOB`].
+    fn fixed_jobs() -> Vec<(&'static str, u64)> {
+        let jobs = ["limits", "verdict"].map(|name| {
+            let text = job(CANARY, name);
+            let own = text
+                .lines()
+                .find_map(|line| line.strip_prefix("    timeout-minutes: "));
+            let own = own.expect(name).parse::<u64>().expect("minutes");
+            let steps = steps(text).into_iter().map(|(step, lines)| {
+                let minutes = key(&lines, "timeout-minutes").expect(step);
+                minutes.parse::<u64>().expect(step)
+            });
+            assert_eq!(own, steps.sum::<u64>() + JOB_MARGIN, "{name}");
+            assert!(own <= HOSTED_JOB, "{name}");
+            (name, own)
+        });
+        Vec::from(jobs)
+    }
+
     #[test]
-    fn the_job_ends_at_the_first_step_that_does_not_pass() {
-        let steps = steps(CANARY);
+    fn each_job_has_the_limits_of_its_steps_and_ends_at_the_first_that_fails() {
+        assert_eq!(fixed_jobs(), [("limits", 15), ("verdict", 24)]);
+        let parts = job(CANARY, "canary");
+        let steps = steps(parts);
         let names = Vec::from_iter(steps.iter().map(|(name, _)| *name));
-        assert_eq!(names.len(), 20);
-        let always = (steps.iter()).filter(|(_, lines)| lines.contains(&"        if: always()"));
+        assert_eq!(names.len(), 25);
+        let condition = |lines: &[&str]| key(lines, "if").unwrap_or_default().to_string();
+        // The steps that remove the containers, after each part, and those
+        // that record the part, at the end, run always.
+        let always = (steps.iter()).filter(|(_, lines)| condition(lines).starts_with("always()"));
         let always = Vec::from_iter(always.map(|(name, _)| *name));
-        assert_eq!(always, names[15..], "the steps that record the run");
-        for (name, lines) in &steps[..15] {
-            let condition = (lines.iter()).any(|line| line.trim_start().starts_with("if:"));
-            assert!(
-                !condition,
-                "{name} runs only when each step before it passed"
-            );
+        let removals =
+            ["gate", "comparator", "shard"].map(|of| format!("Remove the container of the {of}"));
+        assert_eq!(always[..3], removals);
+        assert_eq!(always[3..], names[21..], "the steps that record the part");
+        // Every other step runs only when each step before it passed, on the
+        // rows that its condition names; the comparator part also runs after
+        // a gate that failed, unless the run was cancelled or the probe
+        // failed.
+        let rows = [
+            "",
+            " && matrix.part == 'qualification'",
+            " && matrix.part != 'qualification'",
+        ];
+        let comparator = "${{ !cancelled() && matrix.part == 'qualification' && steps.probe.outcome == 'success' }}";
+        for (name, lines) in &steps {
+            let condition = condition(lines);
+            if *name == "Run the comparator in its own container" {
+                assert_eq!(condition, comparator);
+            } else if let Some(row) = condition.strip_prefix("always()") {
+                assert!(rows.contains(&row), "{name}: {condition}");
+            } else {
+                let row = format!(" && {condition}");
+                let only = condition.is_empty() || rows.contains(&row.as_str());
+                assert!(only, "{name} runs only when each step before it passed");
+            }
         }
         assert!(!CANARY.contains("continue-on-error"));
-        let ids = (CANARY.lines()).filter_map(|line| line.strip_prefix("        id: "));
+        let ids = (parts.lines()).filter_map(|line| line.strip_prefix("        id: "));
         let ids = Vec::from_iter(ids);
         assert_eq!(ids, Vec::from_iter(STEPS.split_whitespace()));
-        let first = (steps[1..15].iter()).map(|(_, lines)| lines.first().copied());
-        let first = Vec::from_iter(first.map(|line| line.unwrap_or_default()));
+        let first = (steps[1..].iter()).filter(|(name, _)| !always.contains(name));
+        let first = Vec::from_iter(first.map(|(_, lines)| lines.first().copied().unwrap_or("")));
         let named = Vec::from_iter(ids.iter().map(|id| format!("        id: {id}")));
-        assert_eq!(first, named, "steps 2 to 15 have an id");
-        // The verdict reads the outcome of each of them.
-        for id in &ids {
-            let outcome = format!("{id}=${{{{ steps.{id}.outcome }}}}");
-            assert!(CANARY.contains(&outcome), "{outcome}");
+        assert_eq!(first, named, "every step that a part runs has an id");
+        // The record of the part holds the outcome of each of them, and the
+        // verdict judges a part by the steps of its row. The job of a row has
+        // the limits of the steps that every row runs, of those of its part
+        // and 5 minutes.
+        let mut sums = [0; 3];
+        for (name, lines) in &steps {
+            let row = condition(lines);
+            let ours = !row.contains("!= 'qualification'");
+            let theirs = !row.contains("== '");
+            if let Some(id) = key(lines, "id") {
+                let outcome = format!("{id}=${{{{ steps.{id}.outcome }}}}");
+                assert!(parts.contains(&outcome), "{outcome}");
+                let judged = |part| steps_of(part).contains(&id);
+                let qualification = judged("qualification") || judged("comparator");
+                assert_eq!(qualification, ours, "{name}");
+                assert_eq!(judged("target/a"), theirs, "{name}");
+            }
+            let minutes = key(lines, "timeout-minutes").expect(name);
+            let Ok(minutes) = minutes.parse::<u64>() else {
+                assert_eq!(*name, "Run the shard in the image");
+                assert_eq!(minutes, "${{ matrix.step }}");
+                continue;
+            };
+            sums[usize::from(ours) + usize::from(!theirs)] += minutes;
         }
+        let [shard, every, qualification] = sums;
+        assert_eq!(every, EVERY_ROW);
+        let gate = step_minutes("qualification", 0);
+        let comparator = step_minutes("comparator", 0);
+        assert_eq!(qualification, gate + comparator + 2 * REMOVAL);
+        assert_eq!(shard, REMOVAL);
+        let rows = super::rows(&registry_text(&[("a", None)], false)).expect("the rows");
+        assert!(parts.contains("    timeout-minutes: ${{ matrix.job }}\n"));
+        assert_eq!(rows[0].job, every + qualification + JOB_MARGIN);
+        assert_eq!(rows[1].job, every + shard + rows[1].step + JOB_MARGIN);
+        // The job reads the fields of its row, which the job `limits` gives
+        // it with the head of Aeneas main, resolved once.
+        let read = parts
+            .match_indices("matrix.")
+            .map(|(at, _)| &parts[at + 7..]);
+        let read = read.map(|rest| rest.split(|c: char| !c.is_ascii_alphanumeric()).next());
+        let row = json!(rows[0]);
+        let fields = row.as_object().expect("a row").keys().map(String::as_str);
+        let read = BTreeSet::from_iter(read.map(Option::unwrap_or_default));
+        assert_eq!(read, BTreeSet::from_iter(fields));
+        let limits = job(CANARY, "limits");
+        let output = "echo \"parts=$(jq -c .data.parts artifacts/canary/limits.json)\" | tee -a \"$GITHUB_OUTPUT\"";
+        assert!(limits.contains("xtask/target/debug/xtask formal canary limits\n"));
+        assert!(limits.contains(output));
+        assert!(parts.contains("        include: ${{ fromJSON(needs.limits.outputs.parts) }}\n"));
+        assert!(parts.contains("      AENEAS_MAIN: ${{ needs.limits.outputs.aeneas }}\n"));
+        assert_eq!(CANARY.matches("=$(git ls-remote ").count(), 1);
+        assert!(limits.contains("main=$(git ls-remote --exit-code \"$url\" refs/heads/main"));
     }
 
     #[test]
@@ -1820,11 +2537,24 @@ mod tests {
             "a weekly and a manual run"
         );
         let once = |text: &str| CANARY.matches(text).count() == 1;
-        assert!(once("\non:") && once("cron:") && once("permissions:"));
-        let job = "    timeout-minutes: 240\n    permissions:\n      contents: read\n    env:\n";
-        assert!(CANARY.contains(job), "the job may only read the contents");
+        assert!(once("\non:") && once("cron:"));
+        // Each job may only read the contents and tests main only; the
+        // verdict runs after the parts, also when one of them failed.
         let main = "    if: github.ref == 'refs/heads/main'\n    runs-on: ubuntu-24.04-arm\n";
-        assert!(CANARY.contains(main), "a run tests main only");
+        let after = "    if: ${{ always() && github.ref == 'refs/heads/main' }}\n";
+        let jobs = [("limits", main), ("canary", main), ("verdict", after)];
+        assert_eq!(CANARY.matches("permissions:").count(), jobs.len());
+        for (key, condition) in jobs {
+            let text = job(CANARY, key);
+            assert!(text.contains(condition), "{key}: a run tests main only");
+            let read = "    permissions:\n      contents: read\n";
+            assert!(
+                text.contains(read),
+                "{key}: the job may only read the contents"
+            );
+        }
+        assert!(job(CANARY, "canary").contains("\n    needs: limits\n"));
+        assert!(job(CANARY, "verdict").contains("\n    needs: [limits, canary]\n"));
         // Charon is fetched for a charon-pin of one line that is not a
         // comment, the lines that `toolchain::pinned_charon` reads.
         let lines = "grep -Ev '^[[:space:]]*(#|$)' \"$pin\"";
@@ -1832,89 +2562,92 @@ mod tests {
         let one = "if [ \"$(grep -cEv '^[[:space:]]*(#|$)' \"$pin\")\" = 1 ]; then";
         let pinned = CANARY.contains(&fetched) && CANARY.contains(one);
         assert!(pinned, "the lines of charon-pin");
-        let limits =
-            (CANARY.lines()).filter_map(|line| line.trim().strip_prefix("timeout-minutes: "));
-        let limits = Vec::from_iter(limits.map(|limit| limit.parse::<u32>().expect("minutes")));
-        assert_eq!(limits[0], 240);
-        assert_eq!(
-            limits.len() - 1,
-            steps(CANARY).len(),
-            "each step has a limit"
-        );
-        assert!(limits[1..].iter().sum::<u32>() <= 235, "{limits:?}");
         let words = "docker login|docker push|packages:|secrets|ghcr.io|KREPI_FORMAL_IMAGE|\
             : write|write-all|id-token";
         for word in words.split('|') {
             assert!(!CANARY.contains(word), "{word}");
         }
-        // The steps copied from the image build and from the job of the gate.
+        // The verdict downloads the artifacts that the parts upload, with
+        // the file of each part, of this attempt only.
+        let (parts, verdict) = (job(CANARY, "canary"), job(CANARY, "verdict"));
+        let run = "${{ github.run_id }}-${{ github.run_attempt }}";
+        let upload = format!("name: formal-canary-part-${{{{ matrix.key }}}}-{run}\n");
+        assert!(parts.contains(&upload));
+        let file = format!("| tee {DIR}/{PART}\n");
+        assert!(parts.contains(&file) && parts.contains(&format!("{DIR}/*.json\n")));
+        let keys = "--arg part \"$PART\" --arg outcomes \"$OUTCOMES\" '{$part, $outcomes}'";
+        assert!(parts.contains(keys), "the keys that `parts` reads");
+        assert!(verdict.contains(&format!("pattern: formal-canary-part-*-{run}\n")));
+        assert!(verdict.contains(&format!("path: {PARTS}\n")));
+        assert!(verdict.contains(&format!("name: formal-canary-{run}\n")));
+        let outcomes = "OUTCOMES: limits=${{ needs.limits.result }}\n";
+        assert!(verdict.contains(outcomes));
+        let command = "xtask/target/debug/xtask formal canary verdict --outcomes \"$OUTCOMES\"";
+        assert!(verdict.contains(command));
+        // The steps copied from the image build and from the jobs of the gate.
+        let (gate, shard) = (job(FORMAL, "gate"), job(FORMAL, "shard"));
         let copied = [
             (BUILD, "Record the disk and remove preinstalled software"),
             (BUILD, "Sample the disk every 15 seconds"),
             (BUILD, "Fetch the pinned Aeneas and Charon sources"),
             (BUILD, "Record the image"),
             (BUILD, "Summarize the disk measurement"),
-            (FORMAL, "Build xtask"),
-            (FORMAL, "Probe the container of the gate"),
-            (FORMAL, "Remove the container of the gate"),
-            (FORMAL, "Summarize the receipt"),
+            (gate, "Build xtask"),
+            (gate, "Copy xtask for the comparator"),
+            (gate, "Probe the container of the gate"),
+            (gate, "Remove the container of the gate"),
+            (gate, "Remove the container of the comparator"),
         ];
         for (source, name) in copied {
-            assert_eq!(step(CANARY, name, &[]), step(source, name, &[]), "{name}");
+            assert_eq!(step(parts, name, &[]), step(source, name, &[]), "{name}");
         }
+        let removal = "Remove the container of the shard";
+        let theirs = step(shard, "Remove the container of the gate", &[]);
+        assert_eq!(step(parts, removal, &[]), theirs);
+        let summary = "Summarize the receipt";
+        let outcome = "GATE_OUTCOME: ${{ matrix.part == 'qualification' && steps.gate.outcome || steps.shard.outcome }}";
+        let theirs = step(gate, summary, &["GATE_OUTCOME: ${{ steps.gate.outcome }}"]);
+        assert_eq!(step(parts, summary, &[outcome]), theirs);
         let check = "Check the sources and the patch against the manifest";
         let tee = ["2>&1 | tee artifacts/canary/toolchain-check.txt"];
-        assert_eq!(step(CANARY, check, &tee), step(BUILD, check, &[]));
-        let gate = "Run the gate in the image";
+        assert_eq!(step(parts, check, &tee), step(BUILD, check, &[]));
+        // The gate, the comparator part and the shard are those of the jobs
+        // `formal run` and `formal shard`, with their limits, but for two
+        // lines: the canary gives no reference of the image, which its
+        // receipts do not record, and `deadline.sh` writes the exit status
+        // of the part for the verdict.
         let image = "--env KREPI_FORMAL_IMAGE=\"$IMAGE\" \\";
-        // The deadline and the command line alone differ: the canary runs
-        // the whole gate, whose deadline is the gate's, the budgets of the
-        // formal targets, which it selects, and that of its receipt, and
-        // keeps its exit status for the verdict; the job of `formal` runs
-        // the qualification part, whose deadline adds the extraction of the
-        // formal targets. Each step ends a minute after `deadline.sh` kills
-        // the gate. Registering a formal target thus fails this test until
-        // the deadline and the limits of the canary grow by its budget.
-        let xtask = "\"$IMAGE\" \"$GITHUB_WORKSPACE/xtask/target/debug/xtask\" formal run";
-        let (whole, part) = (
-            xtask.to_string(),
-            format!("{xtask} --shard qualification --keep"),
+        let deadline = "exec bash .github/scripts/deadline.sh --stop-commands ";
+        for (source, name, id) in [
+            (gate, "Run the gate in the image", "gate"),
+            (
+                gate,
+                "Run the comparator in its own container",
+                "comparator",
+            ),
+            (shard, "Run the shard in the image", "shard"),
+        ] {
+            let status = format!("{deadline}--status {DIR}/{id}-status ");
+            let theirs = step(source, name, &[image]).into_iter();
+            let theirs = Vec::from_iter(theirs.map(|line| line.replacen(deadline, &status, 1)));
+            assert_eq!(step(parts, name, &[]), theirs, "{name}");
+            assert_eq!(limit(parts, name), limit(source, name), "{name}");
+        }
+        // Their limits follow the budgets of the parts and their receipts.
+        for (part, name) in [
+            ("qualification", "Run the gate in the image"),
+            ("comparator", "Run the comparator in its own container"),
+        ] {
+            let minutes = step_minutes(part, 0);
+            assert_eq!(limit(parts, name), minutes.to_string());
+            let deadline = format!(" {}m 1m \\", minutes - STEP_MARGIN);
+            let lines = step(parts, name, &[]);
+            assert!(lines.iter().any(|line| line.ends_with(&deadline)), "{name}");
+        }
+        assert_eq!(
+            limit(parts, "Run the shard in the image"),
+            "${{ matrix.step }}"
         );
-        let minutes = |seconds: u64| seconds.div_ceil(60);
-        let gate_seconds = run::GATE_BUDGET.as_secs() + run::RECEIPT_MARGIN.as_secs();
-        let extraction = crate::formal::merge::EXTRACTION_MARGIN.as_secs();
-        let registry = include_str!("../../../verification/targets.json");
-        let targets = crate::formal::registry::parse(registry)
-            .expect("the registry")
-            .targets;
-        let formal = targets
-            .iter()
-            .filter(|t| t.state == crate::formal::registry::State::Formal);
-        let budgets = formal.map(|target| target.budget).sum::<u64>();
-        let own = minutes(gate_seconds + budgets);
-        let theirs = minutes(gate_seconds + extraction);
-        let deadline = |options: &str, minutes: u64| {
-            format!("exec bash .github/scripts/deadline.sh {options} {minutes}m 1m \\")
-        };
-        let status = "--stop-commands --status artifacts/canary/gate-status";
-        let (canary, formal) = (deadline(status, own), deadline("--stop-commands", theirs));
-        let has = |workflow, line: &str| {
-            let lines = step(workflow, gate, &[]);
-            lines.iter().any(|l| l.trim_start() == line)
-        };
-        assert!(has(CANARY, &whole) && has(FORMAL, &part));
-        assert!(has(CANARY, &canary) && has(FORMAL, &formal), "{canary}");
-        let limit = |workflow: &str, minutes: u64| {
-            let (_, lines) = (steps(workflow).into_iter())
-                .find(|(name, _)| *name == gate)
-                .expect(gate);
-            lines.contains(&format!("        timeout-minutes: {}", minutes + 2).as_str())
-        };
-        assert!(limit(CANARY, own) && limit(FORMAL, theirs));
-        let formal_lines = step(FORMAL, gate, &[image]).into_iter();
-        let formal_lines =
-            formal_lines.map(|line| line.replace(&part, &whole).replace(&formal, &canary));
-        assert_eq!(step(CANARY, gate, &[]), Vec::from_iter(formal_lines));
         let build = |workflow: &'static str| {
             let start = workflow
                 .find("docker build --progress=plain")
