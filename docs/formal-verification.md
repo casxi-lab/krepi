@@ -1766,7 +1766,7 @@ it allows:
 | --- | --- | --- |
 | Specification | Own modules below `Krepi` outside `Krepi.Proofs` that are not the proof module of a qualification case | Nothing |
 | Qualification | The proof module of a qualification case, and the reviewed external declarations installed for the case | The axioms that the case's generated files declare |
-| Target | Modules below `Krepi.Proofs` | The names in `axioms.json`; the axioms of the native decisions of a declaration that a `native-decision` item of `tcb.json` names, declared in the module of the item's `file`; and an axiom that a generated or reviewed external file of the stage declares and whose name starts with the `prefix` of an `axiom-pattern` item, in whole components |
+| Target | Modules below `Krepi.Proofs` | The names in `axioms.json`; the axioms of the native decisions of a declaration that a `native-decision` item of `tcb.json` names, declared in the module of the item's `file`; the axioms of the native decisions of a lemma of the Aeneas Lean library that a `library-native-decision` item names, `_private.<source>.0.<declaration>._native.<tactic>.ax_<i>_<j>` declared in the item's `source`; and an axiom that a generated or reviewed external file of the stage declares and whose name starts with the `prefix` of an `axiom-pattern` item, in whole components |
 
 `sorryAx` is in no row. The case audits of the qualification use the same
 table with the qualification kind. A theorem of a proof module of a target
@@ -1784,10 +1784,13 @@ Lean 4.35.0 gives each native
 decision an axiom of its own, `<declaration>._native.<tactic>.ax_<i>_<j>`,
 where the tactic is `native_decide`, `decide` or `bv_decide`, with
 `_private.<module>.0.` before it in a module file. A name with a component
-`_native` is such an axiom: only a `native-decision` item allows it, for a
-target theorem, and `axioms.json` refuses such names. Any module could
-declare an axiom of such a name without the kernel, so the item allows it
-only when the audit finds it declared in the module of the item's `file`.
+`_native` is such an axiom: only a `native-decision` or a
+`library-native-decision` item allows it, for a target theorem, and
+`axioms.json` refuses such names. Any module could declare an axiom of
+such a name without the kernel, so the item allows it only when the audit
+finds it declared in the module of the item's `file`, or, for a
+`library-native-decision` item, in its `source`; such an item allows
+the axioms of its lemma alone, not those of another lemma of the module.
 A pull request that adds an item to `tcb.json` or changes the reason of
 one needs the label `spec`, by the registry rules of the [guard](#guard).
 
@@ -1796,8 +1799,11 @@ one needs the label `spec`, by the registry rules of the [guard](#guard).
 axiom, and `reason`. `verification/tcb.json` has schema 1 and a list
 `items`, each with the `kind` `native-decision`, with `file`, a tracked
 hand-written file, `declaration` and `reason`, or `axiom-pattern`, with
-`prefix` and `reason`. Other kinds are refused until the trusted base is
-classified, and unknown fields are refused in both files.
+`prefix` and `reason`, or `library-native-decision`, with `source`, the
+module of the Aeneas Lean library that declares a lemma proved by a
+native decision, `declaration`, the lemma, and `reason`. Other kinds are
+refused until the trusted base is classified, and unknown fields are
+refused in both files.
 
 **Replay.** `leanchecker --fresh Krepi` imports the root module and checks
 again in the kernel, starting from an empty environment, every declaration
@@ -1906,8 +1912,10 @@ module, so it rejects a theorem whose proof makes a native decision in a
 proof module, even when a `native-decision` item admits the axiom in the
 audit. The Aeneas Lean
 library itself declares the native-decision axioms of some of its lemmas,
-among them those behind `bv_tac`; no registry admits them yet, so a target
-theorem that depends on them fails the audit.
+among them the `bv_mod_size` lemmas that `bv_tac` uses; a target theorem
+that depends on one of them passes the audit only with the
+`library-native-decision` item of that lemma, and the comparator then
+permits it.
 
 ### Comparator
 
@@ -2136,7 +2144,7 @@ one table, to which later checks add theirs; each rule from
 | `registry-formal-made-planned` | A formal target of the merge base is planned at the head |
 | `registry-unconstrained-added` | A target of the head lists a function in `unconstrained` that it does not list at the merge base |
 | `registry-opaque-added` | A target of the head has a cut point, by its pattern, that it does not have at the merge base |
-| `registry-trusted-axiom-added` | A target of the head has a trusted axiom, by its name, that it does not have at the merge base, or `tcb.json` has an item, by its kind and its file and declaration or its prefix, that it does not have there |
+| `registry-trusted-axiom-added` | A target of the head has a trusted axiom, by its name, that it does not have at the merge base, or `tcb.json` has an item, by its kind and its file and declaration, its source and declaration or its prefix, that it does not have there |
 | `registry-model-added` | `models.json` has a model, by its name, an item of a model or a target in the `used_by` of a model that it does not have at the merge base, or a target of the head names a `models` directory that it does not name there |
 | `registry-obligation-changed` | A target of both commits has other obligations, compared by `id`, `statement` and the set of their theorems |
 | `registry-start-from-changed` | A target of both commits has another set of roots in `start_from` |
@@ -3741,7 +3749,7 @@ they serve only the type checking of three qualification cases
 | Charon, the Rust nightly and Aeneas with reviewed patches | Translation of the production source into Lean | Pinned sources and binaries; qualification regression; mutants |
 | Unconstrained declarations | External functions and types without a model | Theorems hold for every interpretation; listed per target |
 | Cut points (`opaque`) | Items translated without their bodies, modelled as deterministic functions of their arguments | Each cut point has a source and a reason, which states that no statement depends on two calls with the same arguments agreeing; review checks this for a function that reads hardware or global state |
-| Trusted axioms | Reviewed exceptions | Items of `verification/tcb.json`, each with a reason |
+| Trusted axioms | Reviewed exceptions, among them the native decisions of lemmas of the Aeneas Lean library | Items of `verification/tcb.json`, each with a reason; an item of a library lemma admits the axioms of that lemma alone, private to the library module that declares it |
 | Library models (`models.json`) | Behaviour of items that are not extracted | Compared with the real implementation in every qualification |
 | Compiler, linker and the production toolchain | The binary that runs | Not proved; the architecture and binary layer narrows this item |
 | Assembly, `unsafe` code, atomics and IRQ paths | Entry, context switch, page-table and cache maintenance, synchronization | Not covered by the sequential refinement; separate obligations |

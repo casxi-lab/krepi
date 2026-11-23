@@ -488,7 +488,7 @@ mod tests {
         let fixture = checkout("comparator-native", &[COUNTER], json!({}));
         let job = job(&fixture);
         // The audit admitted a native decision of `T` in its proof module,
-        // and one of a library module, which no registry admits today.
+        // and one of a library module.
         let own = format!("_private.{COUNTER}.0.{T}._native.native_decide.ax_1_1");
         let library = "_private.Aeneas.Std.Core.0.Aeneas.Std.x._native.bv_decide.ax_1_1";
         edit(&job, |receipt| {
@@ -510,6 +510,61 @@ mod tests {
         assert_eq!(classes, [Class::ProofFailure]);
         assert_eq!(status(&done, "comparator"), (Status::Verified, None));
         assert_eq!(done.receipt.status, Status::Rejected);
+    }
+
+    #[test]
+    fn a_native_decision_of_a_library_lemma_that_an_item_names_passes_the_audit_and_the_comparator()
+    {
+        // As a refinement proof: the statement side reaches the Aeneas Lean
+        // library through the generated definitions of a planned target
+        // alone, and the proof uses a lemma of the library that `bv_tac`
+        // proved by a native decision.
+        let mut fixture = fixtures::base("comparator-library-native");
+        root_package(&fixture, "krepi-kernel", "");
+        let planned =
+            json!({"name": "p", "state": "planned", "module": "P", "start_from": ["crate::f"]});
+        fixtures::targets(&fixture, &json!([planned]));
+        let statement = "module\n\npublic import KrepiGen.P.Funs\n\n\
+            @[expose] public def Krepi.Statements.P.V : Prop := True\n";
+        fixture.write("verification/Krepi/Statements/P.lean", statement);
+        let proof = "module\n\npublic import Krepi.Statements.P\n\n\
+            public theorem v : Krepi.Statements.P.V := by bv_tac 8\n";
+        fixture.write("verification/Krepi/Proofs/P.lean", proof);
+        let (v, theorem) = ("Krepi.Statements.P.V", "Krepi.Proofs.P.v");
+        fixtures::register(&fixture, &[(S, T, "proved"), (v, theorem, "proved")]);
+        hashed(&mut fixture);
+        let (source, lemma) = (
+            "Aeneas.Tactic.Solver.BvTac.Lemmas",
+            "Aeneas.Std.U8.bv_mod_size",
+        );
+        let axiom = format!("_private.{source}.0.{lemma}._native.bv_decide.ax_1_5");
+        axioms(&fixture, theorem, &axiom);
+        lake_script(
+            &fixture,
+            "audit",
+            &format!("echo 'krepi-audit native {axiom} {source}'\n"),
+        );
+        // Without an item, the audit rejects the theorem.
+        let rejected = fixtures::job(&fixture).written();
+        let record = rejected.base.expect("a base record");
+        let depends = format!("{theorem} depends on {axiom}");
+        assert_eq!(record.theorems[theorem].problems, [depends]);
+        // The item of its lemma admits it, and the comparator permits it.
+        let item = json!({"kind": "library-native-decision", "source": source,
+            "declaration": lemma, "reason": "Reviewed."});
+        let tcb = json!({"schema": 1, "items": [item]});
+        fixture.write(LAYOUT.tcb, &format!("{tcb}\n"));
+        hashed(&mut fixture);
+        let job = job(&fixture);
+        let record = job.written().base.expect("a base record");
+        assert_eq!(record.theorems[theorem].status, Status::Verified);
+        let done = compared(&fixture);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(status(&done, PHASE), (Status::Verified, None));
+        assert_eq!(permitted(&job, "C0"), with_standard(&[&axiom]));
+        let (text, _) = challenge(&job, "C0");
+        assert!(text.contains("public import KrepiGen.P.Funs\n"), "{text}");
+        assert!(!text.contains("import Krepi.Proofs"), "{text}");
     }
 
     #[test]

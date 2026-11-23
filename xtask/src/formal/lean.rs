@@ -404,6 +404,13 @@ pub enum Item {
     },
     /// The axioms below `prefix` that a generated or external file declares.
     AxiomPattern { prefix: String, reason: String },
+    /// The native decisions of the lemma `declaration` of the module `source`
+    /// of the Aeneas Lean library.
+    LibraryNativeDecision {
+        source: String,
+        declaration: String,
+        reason: String,
+    },
 }
 
 /// The items of `verification/tcb.json`, `text`.
@@ -449,7 +456,9 @@ pub struct Sources {
 
 /// Whether a theorem of `kind` may depend on `axiom` with `sources`. Only a
 /// `native-decision` item admits the axiom of a native decision, of its
-/// declaration and declared in the module of its file.
+/// declaration and declared in the module of its file, and a
+/// `library-native-decision` item one of its lemma, private to its source
+/// and declared there.
 pub fn allows(kind: Kind, axiom: &str, sources: &Sources) -> bool {
     let below = |name: &str, prefix: &str| {
         let rest = name.strip_prefix(prefix);
@@ -461,10 +470,25 @@ pub fn allows(kind: Kind, axiom: &str, sources: &Sources) -> bool {
     let native = is_native(axiom);
     let module = (sources.native.get(axiom)).map(|module| format!("/{}", module_file(module)));
     let declared_in = |file: &str| module.as_ref().is_some_and(|module| file.ends_with(module));
+    // `<tactic>.ax_<i>_<j>`, the rest of the name of a native decision.
+    let number = |n: &str| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit());
+    let decided = |rest: &str| {
+        let (tactic, rest) = rest.split_once(".ax_").unwrap_or_default();
+        let (i, j) = rest.split_once('_').unwrap_or_default();
+        ["native_decide", "decide", "bv_decide"].contains(&tactic) && number(i) && number(j)
+    };
     let item = |item: &Item| match item {
         Item::NativeDecision { file: f, .. } if !declared_in(f) => false,
         Item::NativeDecision { declaration: d, .. } => below(public, &format!("{d}._native")),
         Item::AxiomPattern { prefix: p, .. } => !native && below(axiom, p),
+        Item::LibraryNativeDecision {
+            source,
+            declaration,
+            ..
+        } => {
+            let rest = axiom.strip_prefix(&format!("_private.{source}.0.{declaration}._native."));
+            sources.native.get(axiom) == Some(source) && rest.is_some_and(decided)
+        }
     };
     let declared = sources.declared.contains(axiom);
     let admitted = [
@@ -1621,6 +1645,64 @@ mod tests {
             "Krepi.Proofs.Forged"
         );
         assert!(!allowed("Krepi.Proofs.Native.n_bv_decide.helper", &sources));
+    }
+
+    #[test]
+    fn a_library_native_decision_item_admits_the_native_decisions_of_its_lemma_alone() {
+        // The axioms that the Aeneas Lean library declares for the native
+        // decisions of its lemmas, as the audit places them.
+        let source = "Aeneas.Tactic.Solver.BvTac.Lemmas";
+        let axiom = |lemma: &str| {
+            format!("_private.{source}.0.Aeneas.Std.{lemma}._native.bv_decide.ax_1_5")
+        };
+        let (u8, u16) = (axiom("U8.bv_mod_size"), axiom("U16.bv_mod_size"));
+        let mut sources = Sources {
+            native: BTreeMap::from([
+                (u8.clone(), source.to_string()),
+                (u16.clone(), source.to_string()),
+            ]),
+            ..Sources::default()
+        };
+        let item = |source: &str| Item::LibraryNativeDecision {
+            source: source.to_string(),
+            declaration: "Aeneas.Std.U8.bv_mod_size".to_string(),
+            reason: "Reviewed.".to_string(),
+        };
+        // Without an item, the audit rejects it.
+        assert!(!allows(Kind::Target, &u8, &sources));
+        sources.tcb = vec![item(source)];
+        assert!(allows(Kind::Target, &u8, &sources));
+        for kind in [Kind::Specification, Kind::Qualification] {
+            assert!(!allows(kind, &u8, &sources));
+        }
+        // Another lemma of the same module is not the item's.
+        assert!(!allows(Kind::Target, &u16, &sources));
+        // Nor is an axiom of the name that another module declares, an item
+        // whose source is not the module that declares it, or another form.
+        sources
+            .native
+            .insert(u8.clone(), "Krepi.Proofs.Forged".to_string());
+        assert!(!allows(Kind::Target, &u8, &sources));
+        sources.native.insert(u8.clone(), source.to_string());
+        sources.tcb = vec![item("Aeneas.Tactic.Solver.BvTac")];
+        assert!(!allows(Kind::Target, &u8, &sources));
+        sources.tcb = vec![item(source)];
+        for other in [
+            "Aeneas.Std.U8.bv_mod_size._native.bv_decide.ax_1_5".to_string(),
+            u8.replace("bv_decide", "omega"),
+            u8.replace("ax_1_5", "ax_1"),
+        ] {
+            sources.native.insert(other.clone(), source.to_string());
+            assert!(!allows(Kind::Target, &other, &sources), "{other}");
+        }
+        // The registry reads the kind, with its fields alone.
+        let text = |extra: &str| {
+            format!(
+                "{{\"schema\": 1, \"items\": [{{\"kind\": \"library-native-decision\", \"source\": \"{source}\", \"declaration\": \"Aeneas.Std.U8.bv_mod_size\", \"reason\": \"Reviewed.\"{extra}}}]}}"
+            )
+        };
+        assert_eq!(load_tcb(&text("")), Ok(vec![item(source)]));
+        assert!(load_tcb(&text(", \"file\": \"f\"")).is_err());
     }
 
     #[test]

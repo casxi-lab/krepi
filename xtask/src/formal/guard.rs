@@ -236,6 +236,14 @@ fn facts(side: &Registries) -> Vec<(&'static str, String, Vec<String>)> {
                 reason,
             } => (format!("native-decision {file} {declaration}"), reason),
             Item::AxiomPattern { prefix, reason } => (format!("axiom-pattern {prefix}"), reason),
+            Item::LibraryNativeDecision {
+                source,
+                declaration,
+                reason,
+            } => (
+                format!("library-native-decision {source} {declaration}"),
+                reason,
+            ),
         };
         facts.push(("trusted", "tcb.json".to_string(), vec![key.clone()]));
         facts.push(("reasons", format!("{key} in tcb.json"), vec![reason]));
@@ -1803,6 +1811,20 @@ mod tests {
                    Krepi.Proofs.Table.lookup_bound in tcb.json without the label spec";
         registry_change(
             "trusted-item-added",
+            |r| list(&mut r[2], "items").push(item),
+            &[("registry-trusted-axiom-added", why)],
+        );
+        let item = json!({
+            "kind": "library-native-decision",
+            "source": "Aeneas.Tactic.Solver.BvTac.Lemmas",
+            "declaration": "Aeneas.Std.U8.bv_mod_size",
+            "reason": "Reviewed."
+        });
+        let why = "it adds the trusted axioms library-native-decision \
+                   Aeneas.Tactic.Solver.BvTac.Lemmas Aeneas.Std.U8.bv_mod_size in tcb.json \
+                   without the label spec";
+        registry_change(
+            "library-item-added",
             |r| list(&mut r[2], "items").push(item),
             &[("registry-trusted-axiom-added", why)],
         );
