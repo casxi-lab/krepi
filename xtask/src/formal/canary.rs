@@ -8,9 +8,11 @@
 //! nothing itself.
 //!
 //! Each step writes `artifacts/canary/<step>.json`, a [`Record`] with its
-//! [`Finding`], and exits with 0 only when it passed. `verdict` gives the
-//! run the finding of the first step of the job that did not pass: a
-//! breakage of the tools, a defect of the canary or a failure of the run.
+//! [`Finding`], and exits with 0 only when it passed. `limits` gives the
+//! parts of a run and the limits of their jobs from the registry. `verdict`
+//! gives the run the finding of the first step of the job that did not
+//! pass: a breakage of the tools, a defect of the canary or a failure of
+//! the run.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -26,7 +28,7 @@ use super::guard::{self, Standalone};
 use super::outcome::{self, Status};
 use super::receipt::Receipt;
 use super::toolchain::{self, HOSTS, Sources};
-use super::{Layout, run};
+use super::{Layout, comparator, merge, qualify, registry, run};
 use crate::Command;
 
 /// The directory of the canary's own files, below the repository root: the
@@ -78,6 +80,94 @@ const FAILURES: &str = "No space left on device|no space left on device|context 
 /// the Lake lock, Lean, the nightly, Charon, Aeneas and its Lean library.
 const TOOL_STAGES: &str = "aeneas-source lean rust-toolchain charon-build aeneas-build backend";
 
+/// The minutes after which a GitHub-hosted runner ends a job.
+pub const HOSTED_JOB: u64 = 360;
+
+/// The minutes of a job of the canary beyond the limits of its steps.
+pub const JOB_MARGIN: u64 = 5;
+
+/// The minutes of a step beyond the deadline of its command and receipt:
+/// `deadline.sh` kills the command a minute after the deadline, and the
+/// step ends a minute later.
+pub const STEP_MARGIN: u64 = 2;
+
+/// The sum of the limits of the steps that every row of the job of the
+/// parts runs, in minutes: those that prepare the image and probe it, and
+/// those that summarize, record and upload the part.
+pub const EVERY_ROW: u64 = 107;
+
+/// The limit of a step that removes the container of a part, in minutes.
+pub const REMOVAL: u64 = 1;
+
+/// A row of the job of the parts: the qualification row, which runs the
+/// qualification job and then the comparator part, or the row of the shard
+/// of a formal target; with the limits of its main step and of its job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Row {
+    /// The target of the shard, or `qualification`.
+    pub name: String,
+    /// The part: `qualification` or `target/<name>`.
+    pub part: String,
+    /// The part in the names of its artifact, `/` written `-`.
+    pub key: String,
+    /// The limit of the step that runs the part, in minutes.
+    pub step: u64,
+    /// The limit of the job, in minutes.
+    pub job: u64,
+}
+
+/// The limit of the step that runs `part` with `seconds` of registered
+/// budgets: the minutes of the deadline of the part, its budget in place of
+/// the gate's and those seconds, and of its receipt, rounded up, and
+/// [`STEP_MARGIN`].
+pub fn step_minutes(part: &str, seconds: u64) -> u64 {
+    let deadline = merge::budget(part).as_secs().saturating_add(seconds);
+    let deadline = deadline.saturating_add(run::RECEIPT_MARGIN.as_secs());
+    deadline.div_ceil(60) + STEP_MARGIN
+}
+
+/// The rows of a run on the target registry `text`: the qualification row,
+/// with the steps of the gate and of the comparator part, and the row of
+/// the shard of each formal target, by name, with the sum of the budgets of
+/// the shard ([`merge::shards`]); each job has [`EVERY_ROW`], the limits of
+/// its own steps and [`JOB_MARGIN`]. Planned targets have no row. A
+/// registry that cannot be read, a target name outside the registry's rule
+/// and a job of more than [`HOSTED_JOB`] minutes are errors.
+pub fn rows(text: &str) -> Result<Vec<Row>, String> {
+    let targets = registry::parse(text)?.targets;
+    let row = |part: &str, name: &str, step: u64, own: u64| Row {
+        name: name.to_string(),
+        part: part.to_string(),
+        key: part.replace('/', "-"),
+        step,
+        job: EVERY_ROW + own + JOB_MARGIN,
+    };
+    let gate = step_minutes(qualify::PHASE, 0);
+    let own = gate + REMOVAL + step_minutes(comparator::PHASE, 0) + REMOVAL;
+    let mut rows = vec![row(qualify::PHASE, qualify::PHASE, gate, own)];
+    for (part, budget) in merge::shards(&targets) {
+        let name = merge::target(&part).unwrap_or_default();
+        let letter = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
+        if !name.starts_with(letter) || !name.chars().all(|c| letter(c) || c == '-') {
+            return Err(format!(
+                "target name {name:?} does not match [a-z0-9][a-z0-9-]*"
+            ));
+        }
+        let step = step_minutes(&part, budget);
+        rows.push(row(&part, name, step, step + REMOVAL));
+    }
+    let long = rows.iter().filter(|row| row.job > HOSTED_JOB);
+    let long = Vec::from_iter(long.map(|row| format!("{} needs {} minutes", row.part, row.job)));
+    if long.is_empty() {
+        return Ok(rows);
+    }
+    Err(format!(
+        "the job of {}, more than the {HOSTED_JOB} minutes of a job of a hosted runner",
+        long.join(", of ")
+    ))
+}
+
 /// The finding of a step, and of the run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -116,13 +206,14 @@ fn found(verdict: Finding, detail: impl Into<String>) -> Record {
 /// The entry of `cargo xtask formal canary` among the commands of `formal`.
 pub const COMMAND: Command = Command {
     name: "canary",
-    about: "Run STEP of the weekly toolchain canary on what its job fetched and built: resolve, derive, patch, fill, or verdict, which with --outcomes TEXT concludes the run",
+    about: "Run STEP of the weekly toolchain canary on what its jobs fetched and built: limits, the parts of the run from the registry, resolve, derive, patch, fill, or verdict, which with --outcomes TEXT concludes the run",
     subcommands: &[],
 };
 
 /// The command line of `cargo xtask formal canary`, with `about`.
 pub fn cli(about: &'static str) -> clap::Command {
-    let steps = PossibleValuesParser::new(["resolve", "derive", "patch", "fill", "verdict"]);
+    let steps = ["limits", "resolve", "derive", "patch", "fill", "verdict"];
+    let steps = PossibleValuesParser::new(steps);
     let step = Arg::new("step").value_name("STEP").required(true);
     let outcomes = Arg::new("outcomes").long("outcomes").value_name("TEXT");
     let outcomes = outcomes.help("The outcome of each step of the job, as <id>=<outcome> words");
@@ -138,6 +229,7 @@ pub fn command(root: &Path, layout: &Layout, matches: &ArgMatches) -> ExitCode {
     let text = |name| matches.get_one::<String>(name).map_or("", String::as_str);
     let step = text("step");
     let record = match step {
+        "limits" => limits(root, layout),
         "resolve" => resolve(root, layout),
         "derive" => derive(root, layout),
         "patch" => Ok(patch(root, layout)),
@@ -277,6 +369,20 @@ fn trees(root: &Path, layout: &Layout) -> Result<BTreeMap<&'static str, String>,
         ("/hosts/linux-aarch64/lean/url", linux?),
         ("/hosts/darwin-arm64/lean/url", darwin?),
     ]))
+}
+
+/// `limits`: the rows of a run on the registry of the checkout, in its data;
+/// a registry that the canary cannot run fails the run.
+fn limits(root: &Path, layout: &Layout) -> Result<Record, Record> {
+    let path = root.join(layout.registry);
+    let text = fs::read_to_string(&path).map_err(|error| io(&path, error))?;
+    let rows = rows(&text).map_err(|why| found(Finding::Failed, why))?;
+    let parts = Vec::from_iter(rows.iter().map(|row| row.part.as_str()));
+    let detail = format!("{} parts: {}", parts.len(), parts.join(", "));
+    Ok(Record {
+        data: json!({ "parts": rows }),
+        ..found(Finding::Passed, detail)
+    })
 }
 
 /// `resolve`: the fields that the trees give, and in its data the URLs of
@@ -1748,6 +1854,116 @@ mod tests {
             assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
             assert!(failed.detail.starts_with("gate (main abc): "), "{failed:?}");
         }
+    }
+
+    /// The text of a target registry with the formal targets `formal`, each
+    /// with its budget or the default, and, when `planned`, a planned target
+    /// `later` with the default budget.
+    fn registry_text(formal: &[(&str, Option<u64>)], planned: bool) -> String {
+        let target = |name: &str, state: &str, budget: Option<u64>| {
+            let budget = budget.map_or(String::new(), |budget| format!(", \"budget\": {budget}"));
+            format!("{{\"name\": \"{name}\", \"state\": \"{state}\"{budget}}}")
+        };
+        let targets = (formal.iter()).map(|(name, budget)| target(name, "formal", *budget));
+        let later = planned.then(|| target("later", "planned", None));
+        let targets = Vec::from_iter(targets.chain(later));
+        format!("{{\"schema\": 2, \"targets\": [{}]}}\n", targets.join(", "))
+    }
+
+    /// The rows of the registry of the formal targets `names`, each with the
+    /// default budget, and a planned target, which hold to the rule of the
+    /// limits: the qualification row with the steps of the gate and of the
+    /// comparator part, and the row of each shard with the limits that the
+    /// job `formal limits` of `formal` gives it; each job has the limits of
+    /// the steps that it runs and 5 minutes, at most the 360 of a hosted
+    /// runner. The planned target has no row and changes no limit.
+    fn checked_rows(names: &[&str]) -> Vec<Row> {
+        let formal = Vec::from_iter(names.iter().map(|name| (*name, None)));
+        let rows = rows(&registry_text(&formal, true)).expect("the rows");
+        assert_eq!(
+            rows,
+            super::rows(&registry_text(&formal, false)).expect("the rows")
+        );
+        let (gate, comparator) = ((7_200 + 600 + 300) / 60 + 2, (1_800 + 300) / 60 + 2);
+        let qualification = Row {
+            name: "qualification".to_string(),
+            part: "qualification".to_string(),
+            key: "qualification".to_string(),
+            step: gate,
+            job: EVERY_ROW + gate + REMOVAL + comparator + REMOVAL + JOB_MARGIN,
+        };
+        assert_eq!(rows[0], qualification);
+        let shards = Vec::from_iter(rows[1..].iter().map(|row| row.name.as_str()));
+        assert_eq!(shards, names);
+        for row in &rows[1..] {
+            assert_eq!(row.part, format!("target/{}", row.name));
+            assert_eq!(row.key, format!("target-{}", row.name));
+            // 300 s of the shard, 1,800 s of the target and 300 s of the
+            // receipt, and 2 minutes.
+            assert_eq!(row.step, 42, "{row:?}");
+            assert_eq!(row.job, EVERY_ROW + 42 + REMOVAL + JOB_MARGIN, "{row:?}");
+        }
+        for row in &rows {
+            assert!(row.job <= HOSTED_JOB, "{row:?}");
+        }
+        rows
+    }
+
+    #[test]
+    fn the_limits_of_no_formal_target_give_the_qualification_row_alone() {
+        assert_eq!(checked_rows(&[]).len(), 1);
+    }
+
+    #[test]
+    fn the_limits_of_one_formal_target_give_one_shard_row_of_42_minutes() {
+        let rows = checked_rows(&["a"]);
+        assert_eq!(rows.len(), 2);
+        // The step writes the rows into its record, which the workflow
+        // gives the job of the parts.
+        let scratch = Scratch::temporary("canary-limits");
+        let formal = registry_text(&[("a", None)], true);
+        scratch.write(layout().registry, &formal);
+        let matches = cli("").try_get_matches_from(["canary", "limits"]);
+        let matches = matches.expect("a command line");
+        assert_eq!(command(&scratch.0, &layout(), &matches), ExitCode::SUCCESS);
+        let path = scratch.0.join(DIR).join("limits.json");
+        let record = json(&path).expect("the record");
+        assert_eq!(record["verdict"], "PASSED");
+        assert_eq!(record["detail"], "2 parts: qualification, target/a");
+        assert_eq!(record["data"], json!({ "parts": rows }));
+    }
+
+    #[test]
+    fn the_limits_of_four_formal_targets_give_four_shard_rows_of_42_minutes() {
+        assert_eq!(checked_rows(&["a", "b", "c", "d"]).len(), 5);
+    }
+
+    #[test]
+    fn a_shard_whose_job_needs_more_than_360_minutes_fails_the_limits() {
+        // 300 s of the shard, 20,000 s of the target and 300 s of the
+        // receipt make a step of 346 minutes.
+        assert_eq!(step_minutes("target/big", 20_000), 346);
+        let formal = registry_text(&[("a", None), ("big", Some(20_000))], true);
+        let error = rows(&formal).expect_err("a job too long");
+        let job = EVERY_ROW + 346 + REMOVAL + JOB_MARGIN;
+        let why = format!(
+            "the job of target/big needs {job} minutes, more than the 360 minutes of a job of a hosted runner"
+        );
+        assert_eq!(error, why);
+        let scratch = Scratch::temporary("canary-limits");
+        scratch.write(layout().registry, &formal);
+        let matches = cli("").try_get_matches_from(["canary", "limits"]);
+        let matches = matches.expect("a command line");
+        assert_eq!(command(&scratch.0, &layout(), &matches), ExitCode::FAILURE);
+        let record = json(&scratch.0.join(DIR).join("limits.json")).expect("the record");
+        assert_eq!(
+            (&record["verdict"], &record["detail"]),
+            (&json!("FAILED"), &json!(why))
+        );
+        // A name that the registry's rule refuses has no row either.
+        let named = rows(&registry_text(&[("A b", None)], false));
+        let why = "target name \"A b\" does not match [a-z0-9][a-z0-9-]*";
+        assert_eq!(named.expect_err("a name"), why);
     }
 
     /// The steps of the only job of `workflow`: the name and lines of each.
