@@ -1,15 +1,20 @@
 # Runs the proof gate once a week, on Saturdays at 09:17 UTC, and on a
 # manual run of main, with the tools of Aeneas main: the Lean release that
 # its backends/lean/lean-toolchain names, and the Charon of its charon-pin
-# with that Charon's Rust nightly, resolved when the job runs. The job
-# derives the tool manifest from verification/toolchain.json, builds the
-# proof-tool image with the recipe of verification/image/ without
-# publishing it, and runs the gate in that image on local commits of the
-# derived files. It records what breaks and changes nothing: it is not a
-# required check, logs in to no registry and pushes nothing. Each step has
-# a limit, and the limits add up to less than the job's, so the steps that
-# record the run always run. Actions are pinned to full commit SHAs; the
-# comment names the release.
+# with that Charon's Rust nightly, resolved when the run starts. It runs the
+# gate in parts, as the workflow `formal` does: the job `canary limits`
+# resolves the head of Aeneas main once and computes the parts and their
+# limits from the registry; for each part, the job `toolchain canary
+# <part>` derives the tool manifest from verification/toolchain.json,
+# builds the proof-tool image with the recipe of verification/image/
+# without publishing it and runs the part in that image on local commits of
+# the derived files; and the job `toolchain canary verdict` concludes the
+# run from the records and receipts of the parts. It records what breaks
+# and changes nothing: it is not a required check, logs in to no registry
+# and pushes nothing. Each step has a limit, and each job the limits of the
+# steps that it runs and 5 minutes more, so the steps that record a part
+# always run. Actions are pinned to full commit SHAs; the comment names the
+# release.
 name: formal canary
 
 on:
@@ -28,14 +33,80 @@ defaults:
     shell: bash
 
 jobs:
-  canary:
-    name: toolchain canary
-    # A manual run of another branch is skipped: the canary tests main.
+  # The head of Aeneas main, which `git ls-remote` gives, resolved once for
+  # every part, and the parts with their limits from the registry:
+  # `cargo xtask formal canary limits` gives the qualification row and one
+  # row for the shard of each formal target, whose shard step has the limit
+  # that the job `formal limits` of formal.yml computes, and fails when a
+  # job would need more than the 360 minutes of a hosted runner. A manual
+  # run of another branch skips every job: the canary tests main.
+  limits:
+    name: canary limits
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 240
+    timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      aeneas: ${{ steps.aeneas.outputs.commit }}
+      parts: ${{ steps.limits.outputs.parts }}
+    steps:
+      - name: Check out main
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Build xtask
+        timeout-minutes: 5
+        run: |
+          rustup toolchain install
+          cargo build --locked --manifest-path xtask/Cargo.toml
+
+      - name: Resolve the head of Aeneas main
+        id: aeneas
+        timeout-minutes: 2
+        run: |
+          url=$(jq -er .aeneas.source_url verification/toolchain.json)
+          main=$(git ls-remote --exit-code "$url" refs/heads/main | cut -f 1)
+          echo "Aeneas main: $main"
+          if ! [[ "$main" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "git ls-remote names no commit of the main of $url" >&2
+            exit 1
+          fi
+          echo "commit=$main" >> "$GITHUB_OUTPUT"
+
+      - name: Compute the parts and their limits from the registry
+        id: limits
+        timeout-minutes: 1
+        run: |
+          xtask/target/debug/xtask formal canary limits
+          echo "parts=$(jq -c .data.parts artifacts/canary/limits.json)" | tee -a "$GITHUB_OUTPUT"
+
+  # One job for each row that `canary limits` gives. Every row prepares the
+  # image as the earlier single job of the canary did and commits the
+  # derived files with a fixed identity and time, so that the rows run on
+  # the same commits; the qualification row then runs the qualification job
+  # and the comparator part as the job `formal run` of formal.yml does, and
+  # the row of a formal target its shard as the job `formal shard` does,
+  # each without the reference of the image and with `deadline.sh` keeping
+  # its exit status for the verdict. A row ends at the first step that
+  # fails, but for the comparator part, which also runs when the gate
+  # failed, and for the steps that remove the containers and record the
+  # part. The job writes its limit in a notice for the record of the run.
+  canary:
+    name: toolchain canary ${{ matrix.part }}
+    needs: limits
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: ${{ matrix.job }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.limits.outputs.parts) }}
     env:
       # The image that the job builds, by a local tag that names no registry.
       IMAGE_REF: krepi-formal-canary:${{ github.sha }}
@@ -44,6 +115,10 @@ jobs:
       HEAD_SHA: ${{ github.sha }}
       # The flags of every container that runs the gate, as in formal.yml.
       GATE_FLAGS: "--pull never --init --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --network none"
+      AENEAS_MAIN: ${{ needs.limits.outputs.aeneas }}
+      PART: ${{ matrix.part }}
+      NAME: ${{ matrix.name }}
+      LIMIT: ${{ matrix.job }}
     steps:
       - name: Check out main with its history
         timeout-minutes: 2
@@ -57,11 +132,12 @@ jobs:
         id: runner
         timeout-minutes: 2
         run: |
+          echo "::notice title=timeout-minutes::$LIMIT"
           mkdir -p artifacts/formal artifacts/canary
           {
             echo "== prepare started $(date -u +%FT%TZ)"
             echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
-              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT"
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, part $PART"
             echo "user: $(id)"
             echo "processors: $(nproc)"
             free -b
@@ -132,11 +208,21 @@ jobs:
             ls -l xtask/target/debug/xtask
           } 2>&1 | tee -a artifacts/formal/job.txt
 
-      # The head of Aeneas main, its tree, and the tree of Charon at the
-      # commit of its charon-pin, without submodules; then `resolve` names
-      # the downloads, the two Lean archives of the release that Aeneas names
-      # and the channel manifest of Charon's nightly, and the version line of
-      # the linux archive's `lean` is recorded.
+      # The comparator part runs this copy of xtask, mounted read-only: the
+      # gate, whose container mounts only the checkout, cannot change it.
+      - name: Copy xtask for the comparator
+        id: copy
+        timeout-minutes: 1
+        run: |
+          cp xtask/target/debug/xtask "$RUNNER_TEMP/xtask"
+          sha256sum "$RUNNER_TEMP/xtask" | tee -a artifacts/formal/job.txt
+
+      # The head of Aeneas main that the job `canary limits` resolved, its
+      # tree, and the tree of Charon at the commit of its charon-pin,
+      # without submodules; then `resolve` names the downloads, the two Lean
+      # archives of the release that Aeneas names and the channel manifest
+      # of Charon's nightly, and the version line of the linux archive's
+      # `lean` is recorded.
       - name: Resolve the tools of Aeneas main
         id: resolve
         timeout-minutes: 6
@@ -154,7 +240,7 @@ jobs:
             }
             pins=verification/toolchain.json
             url=$(jq -er .aeneas.source_url "$pins")
-            main=$(git ls-remote --exit-code "$url" refs/heads/main | cut -f 1)
+            main=$AENEAS_MAIN
             echo "Aeneas main: $main"
             fetch artifacts/canary/aeneas "$url" "$main"
             # Charon is fetched for a charon-pin of one line that is not a
@@ -252,13 +338,18 @@ jobs:
 
       # Two local commits, which are never pushed: the derived files, then
       # the switch export of the image and the statement hash of the first.
+      # Both have the identity of the canary and the commit time of main, so
+      # that the rows, whose images give the same switch export, make the
+      # same commits.
       - name: Fill the build fact and commit the derived files
         id: fill
         timeout-minutes: 3
         run: |
+          stamp=$(git show --no-patch --format=%cI HEAD)
           commit() {
             git add verification
-            git -c user.name="formal canary" -c user.email=formal-canary@invalid \
+            GIT_AUTHOR_DATE="$stamp" GIT_COMMITTER_DATE="$stamp" \
+              git -c user.name="formal canary" -c user.email=formal-canary@invalid \
               commit --quiet --allow-empty --message "$1"
           }
           commit "Derive the tool manifest from Aeneas main"
@@ -267,6 +358,7 @@ jobs:
           cp verification/toolchain.json artifacts/canary/toolchain.json
           git diff HEAD~2 -- verification > artifacts/canary/derived.diff
           git status --porcelain | tee artifacts/canary/status.txt
+          git log -2 --format='%H %T' | tee artifacts/canary/commits.txt
 
       - name: Probe the container of the gate
         id: probe
@@ -313,31 +405,29 @@ jobs:
           echo "== the probe passed; prepare ended $(date -u +%FT%TZ)" \
             | tee -a artifacts/formal/job.txt
 
-      # As the job `formal run` of formal.yml runs the gate, but the whole
-      # gate and in the image that this job built, which the gate is not
-      # given as a reference: the receipt records none and compares no pin.
-      # Its deadline is the gate's 7,200 s, the budgets of the formal
-      # targets, none yet, and the 300 s of its receipt; a unit test fails
-      # once a formal target is registered until the deadline and the limits
-      # grow by its budget. `deadline.sh` keeps its exit status for the
-      # verdict. The canary does not run the comparator part.
+      # The qualification row: the qualification job, as the job `formal
+      # run` of formal.yml runs it, but in the image that this job built,
+      # which the gate is not given as a reference: the receipt records none
+      # and compares no pin. `deadline.sh` keeps its exit status for the
+      # verdict.
       - name: Run the gate in the image
         id: gate
-        timeout-minutes: 127
+        if: matrix.part == 'qualification'
+        timeout-minutes: 137
         run: |
           read -r -a gate_flags <<< "$GATE_FLAGS"
           echo "== gate started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
-          exec bash .github/scripts/deadline.sh --stop-commands --status artifacts/canary/gate-status 125m 1m \
+          exec bash .github/scripts/deadline.sh --stop-commands --status artifacts/canary/gate-status 135m 1m \
             docker run --rm --name "formal-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --env GITHUB_EVENT_NAME --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
             --env KREPI_FORMAL_TRIGGER \
             --env GITHUB_EVENT_PATH="$GITHUB_WORKSPACE/artifacts/formal/event.json" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard qualification --keep
 
       - name: Remove the container of the gate
-        if: always()
+        if: always() && matrix.part == 'qualification'
         timeout-minutes: 1
         run: |
           if docker rm --force "formal-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1; then
@@ -346,11 +436,96 @@ jobs:
             echo "no container of the gate is left"
           fi
 
+      # The comparator part on the stage that the gate kept, as the job
+      # `formal run` runs it, also when the gate failed; `deadline.sh` keeps
+      # its exit status for the verdict. It runs `lake comparator` only on
+      # the units whose statements the base round verified and audited, and
+      # records each other unit as NOT_RUN.
+      - name: Run the comparator in its own container
+        id: comparator
+        if: ${{ !cancelled() && matrix.part == 'qualification' && steps.probe.outcome == 'success' }}
+        timeout-minutes: 37
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          relaxed=(--security-opt seccomp=unconfined --security-opt apparmor=unconfined
+            --tmpfs /run/user --security-opt systempaths=unconfined)
+          printf '[safe]\n\tdirectory = *\n' > "$RUNNER_TEMP/gitconfig"
+          mkdir -p artifacts/formal/runs
+          echo "== probe: docker run $GATE_FLAGS ${relaxed[*]} --user $(id -u):$(id -g)" \
+            | tee -a artifacts/formal/job.txt
+          docker run --rm -i "${gate_flags[@]}" "${relaxed[@]}" --user "$(id -u):$(id -g)" \
+            "$IMAGE" bash -s 2>&1 <<'PROBE' | tee -a artifacts/formal/job.txt
+          status=0
+          fail() { echo "FAILED: $*"; status=1; }
+          echo "user: $(id)"
+          [ "$(id -u)" != 0 ] || fail "the container runs as root"
+          root=$(awk '$2 == "/" { line = $0 } END { print line }' /proc/self/mounts)
+          echo "root file system: $root"
+          case ",$(echo "$root" | awk '{ print $4 }')," in
+            *,ro,*) ;;
+            *) fail "the root file system is not read-only" ;;
+          esac
+          grep -E '^(CapBnd|CapEff|NoNewPrivs):' /proc/self/status
+          grep -q '^CapBnd:[[:space:]]*0*$' /proc/self/status || fail "capabilities are left"
+          grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/self/status || fail "new privileges are allowed"
+          echo "network interfaces: $(ls /sys/class/net)"
+          [ "$(ls /sys/class/net)" = lo ] || fail "the container has a network"
+          exit "$status"
+          PROBE
+          echo "== comparator started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
+          exec bash .github/scripts/deadline.sh --stop-commands --status artifacts/canary/comparator-status 35m 1m \
+            docker run --rm --name "formal-comparator-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" "${relaxed[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$GITHUB_WORKSPACE/artifacts/formal/runs:/krepi-runs" --env KREPI_FORMAL_RUNS=/krepi-runs \
+            --volume "$RUNNER_TEMP/gitconfig:/etc/gitconfig:ro" \
+            --volume "$RUNNER_TEMP/xtask:/krepi-xtask:ro" \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
+            "$IMAGE" /krepi-xtask formal run --shard comparator
+
+      - name: Remove the container of the comparator
+        if: always() && matrix.part == 'qualification'
+        timeout-minutes: 1
+        run: |
+          if docker rm --force "formal-comparator-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1; then
+            echo "removed the container of the comparator"
+          else
+            echo "no container of the comparator is left"
+          fi
+
+      # The row of a formal target: its shard, as the job `formal shard` of
+      # formal.yml runs it, with the limit of the step from the matrix and
+      # without the reference of the image; `deadline.sh` stops the command
+      # at the deadline of the shard and its receipt, kills it a minute later
+      # and keeps its exit status for the verdict.
+      - name: Run the shard in the image
+        id: shard
+        if: matrix.part != 'qualification'
+        timeout-minutes: ${{ matrix.step }}
+        env:
+          STEP: ${{ matrix.step }}
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          limit=$(( (STEP - 2) * 60 ))s
+          exec bash .github/scripts/deadline.sh --stop-commands --status artifacts/canary/shard-status "$limit" 1m \
+            docker run --rm --name "formal-shard-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard "target/$NAME"
+
+      - name: Remove the container of the shard
+        if: always() && matrix.part != 'qualification'
+        timeout-minutes: 1
+        run: |
+          docker rm --force "formal-shard-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
+
       - name: Summarize the receipt
         if: always()
         timeout-minutes: 2
         env:
-          GATE_OUTCOME: ${{ steps.gate.outcome }}
+          GATE_OUTCOME: ${{ matrix.part == 'qualification' && steps.gate.outcome || steps.shard.outcome }}
         run: |
           shopt -s nullglob
           # The receipt holds text of Lean, Lake and the registries of the
@@ -424,59 +599,42 @@ jobs:
             } | tee -a artifacts/image/disk.txt | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
-      # The verdict: the finding of the first step that did not pass, or of
-      # the gate. The job passes only when the gate verified krepi with the
-      # tools of Aeneas main; a breakage, a defect of the canary and a
-      # failure of the run each fail it, with the finding in verdict.json,
-      # the summary and one annotation. The outcomes reach the command
-      # through the environment, never through the script's text.
-      - name: Conclude the canary run
+      # The part and the outcome of each step of the row, for the verdict.
+      # The outcomes reach the file through the environment, never through
+      # the script's text.
+      - name: Record the outcomes of the part
         if: always()
-        timeout-minutes: 2
+        timeout-minutes: 1
         env:
           OUTCOMES: >-
             runner=${{ steps.runner.outcome }} disk=${{ steps.disk.outcome }}
             sampler=${{ steps.sampler.outcome }} xtask=${{ steps.xtask.outcome }}
+            copy=${{ steps.copy.outcome }}
             resolve=${{ steps.resolve.outcome }} derive=${{ steps.derive.outcome }}
             fetch=${{ steps.fetch.outcome }} toolchain-check=${{ steps.toolchain-check.outcome }}
             patch=${{ steps.patch.outcome }} build=${{ steps.build.outcome }}
             record=${{ steps.record.outcome }} fill=${{ steps.fill.outcome }}
             probe=${{ steps.probe.outcome }} gate=${{ steps.gate.outcome }}
+            comparator=${{ steps.comparator.outcome }} shard=${{ steps.shard.outcome }}
         run: |
-          if [ ! -x xtask/target/debug/xtask ]; then
-            echo "::error title=formal canary FAILED::xtask was not built"
-            exit 1
-          fi
-          status=0
-          xtask/target/debug/xtask formal canary verdict --outcomes "$OUTCOMES" || status=$?
-          {
-            echo "## formal canary"
-            echo
-            jq -r '"`\(.verdict)` \(.detail)"' artifacts/canary/verdict.json
-            if [ -f artifacts/canary/derive.txt ]; then
-              echo
-              echo "Derived fields, committed and derived:"
-              echo
-              grep -E '^/[a-z0-9/_-]+: ' artifacts/canary/derive.txt | sed 's/^/- /' || true
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
-          jq -r '({"PASSED": "notice", "BROKEN": "warning"}[.verdict] // "error") as $level
-            | "::\($level) title=formal canary \(.verdict)::\(.detail | split("\n")[0])"' \
-            artifacts/canary/verdict.json
-          exit "$status"
+          mkdir -p artifacts/canary
+          jq -n --arg part "$PART" --arg outcomes "$OUTCOMES" '{$part, $outcomes}' \
+            | tee artifacts/canary/part.json
 
-      - name: Upload the canary record
+      - name: Upload the record of the part
         if: always()
         timeout-minutes: 5
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: formal-canary-${{ github.run_id }}-${{ github.run_attempt }}
+          name: formal-canary-part-${{ matrix.key }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             artifacts/canary/*.json
             artifacts/canary/*.txt
             artifacts/canary/*.diff
             artifacts/canary/build-status
             artifacts/canary/gate-status
+            artifacts/canary/comparator-status
+            artifacts/canary/shard-status
             artifacts/image/disk.txt
             artifacts/image/disk-samples.tsv
             artifacts/image/inspect.json
@@ -491,3 +649,82 @@ jobs:
             artifacts/formal/runs/*/logs/
           if-no-files-found: warn
           retention-days: 90
+
+  # The verdict: `cargo xtask formal canary verdict` reads the records and
+  # receipts of the parts of this attempt itself, not through `cargo xtask
+  # formal merge`, as the receipts of the canary name no image. It gives the
+  # finding of the first part that did not pass, or a defect when the
+  # receipts of the parts are not of one commit, tree, run and attempt. The
+  # job runs after the parts, also when one of them failed or did not run,
+  # and passes only when the gate, the comparator part and every shard
+  # verified krepi with the tools of Aeneas main; the finding goes into
+  # verdict.json, the summary and one annotation. The results reach the
+  # command through the environment, never through the script's text.
+  verdict:
+    name: toolchain canary verdict
+    needs: [limits, canary]
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 24
+    permissions:
+      contents: read
+    steps:
+      - name: Check out main
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Build xtask
+        timeout-minutes: 5
+        run: |
+          rustup toolchain install
+          cargo build --locked --manifest-path xtask/Cargo.toml
+
+      # A single artifact may go to the path itself and several each to a
+      # directory of its own, named after it; the verdict reads both.
+      - name: Download the parts of the run
+        timeout-minutes: 5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: formal-canary-part-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/canary/parts
+
+      - name: Conclude the canary run
+        if: always()
+        timeout-minutes: 2
+        env:
+          OUTCOMES: limits=${{ needs.limits.result }}
+        run: |
+          if [ ! -x xtask/target/debug/xtask ]; then
+            echo "::error title=formal canary FAILED::xtask was not built"
+            exit 1
+          fi
+          status=0
+          xtask/target/debug/xtask formal canary verdict --outcomes "$OUTCOMES" || status=$?
+          {
+            echo "## formal canary"
+            echo
+            jq -r '"`\(.verdict)` \(.detail)"' artifacts/canary/verdict.json
+            echo
+            echo "Derived fields of the qualification row, committed and derived:"
+            echo
+            jq -r '.data.derive.fields // {} | to_entries[]
+              | "- \(.key): \(.value[0] // "null") -> \(.value[1])"' artifacts/canary/verdict.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          jq -r '({"PASSED": "notice", "BROKEN": "warning"}[.verdict] // "error") as $level
+            | "::\($level) title=formal canary \(.verdict)::\(.detail | split("\n")[0])"' \
+            artifacts/canary/verdict.json
+          exit "$status"
+
+      - name: Upload the canary record
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-canary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            artifacts/canary/verdict.json
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}

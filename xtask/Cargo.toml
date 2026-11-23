@@ -66,7 +66,7 @@ libc = { version = "=0.2.191", default-features = false }
 # that `cargo xtask formal guard` reads, `cargo xtask formal check` writes
 # `verification/open.json` with its keys in order, `cargo xtask formal canary`
 # reads and writes the tool manifest, the Lake locks, the statement
-# registry, the records of its steps and the receipt of the gate, the
+# registry, the records of its steps and the receipts of its parts, the
 # comparator part of `cargo xtask formal run` reads the receipts of the
 # qualification job and writes the configurations of `lake comparator`,
 # and the test of `cargo xtask qemu` reads the receipt of a run. All are
