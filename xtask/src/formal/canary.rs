@@ -2199,20 +2199,37 @@ mod tests {
         assert_eq!(broken.verdict, Finding::Broken, "{broken:?}");
         let why = "target/b shard (main abc): the shard exited with 1, REJECTED; ";
         assert!(broken.detail.starts_with(why), "{broken:?}");
+        // The comparator part comes before the shards; restored, b is first again.
+        let dir = &dirs["qualification"];
+        let units = [("comparator", Status::Rejected, "")];
+        let rejected = receipt("comparator", Status::Rejected, true, &units, &[]);
+        let verified = receipt("comparator", Status::Verified, true, &[], &[]);
+        let place = "comparator (main abc): ";
+        for (status, text, at) in [("1", rejected, place), ("0", verified, why)] {
+            fs::write(within(dir, run::RUNS).join("1/receipt.json"), text).expect("the receipt");
+            fs::write(within(dir, DIR).join("comparator-status"), status).expect("the status");
+            let finding = judged();
+            assert_eq!(finding.verdict, Finding::Broken, "{finding:?}");
+            assert!(finding.detail.starts_with(at), "{finding:?}");
+        }
         // The parts come in their order: the shard of a before that of b.
         fs::write(within(&dirs["target/a"], DIR).join("shard-status"), "125\n").expect("status");
         let failed = judged();
         assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
         let why = "target/a shard (main abc): the shard exited with `125`";
         assert!(failed.detail.starts_with(why), "{failed:?}");
-        // A receipt of another commit, also with a part that failed, is a
-        // defect of the canary.
+        // A receipt of another tree, run, attempt or commit, also with a part
+        // that failed, is a defect of the canary.
         let receipts = within(&dirs["target/a"], run::RUNS).join("0/receipt.json");
         let text = fs::read_to_string(&receipts).expect("the receipt");
-        let other = text.replace("\"commit\": \"c\"", "\"commit\": \"d\"");
-        fs::write(&receipts, other).expect("the receipt");
+        let keys = ["tree", "run_id", "attempt", "commit"].into_iter();
+        for (key, value) in keys.zip(["t", "1", "1", "c"]) {
+            let field = |to: &str| format!("\"{key}\": \"{to}\"");
+            fs::write(&receipts, text.replace(&field(value), &field("d"))).expect("the receipt");
+            let defect = judged();
+            assert_eq!(defect.verdict, Finding::Defect, "{key}: {defect:?}");
+        }
         let defect = judged();
-        assert_eq!(defect.verdict, Finding::Defect, "{defect:?}");
         let why = "parts (main abc): the receipts of the parts are not of one commit, tree, run and attempt: qualification, comparator, target/b at commit c, tree t, run 1, attempt 1; target/a at commit d, tree t, run 1, attempt 1";
         assert_eq!(defect.detail, why);
         fs::write(&receipts, text).expect("the receipt");
@@ -2558,6 +2575,8 @@ mod tests {
         assert!(parts.contains(&upload));
         let file = format!("| tee {DIR}/{PART}\n");
         assert!(parts.contains(&file) && parts.contains(&format!("{DIR}/*.json\n")));
+        let keys = "--arg part \"$PART\" --arg outcomes \"$OUTCOMES\" '{$part, $outcomes}'";
+        assert!(parts.contains(keys), "the keys that `parts` reads");
         assert!(verdict.contains(&format!("pattern: formal-canary-part-*-{run}\n")));
         assert!(verdict.contains(&format!("path: {PARTS}\n")));
         assert!(verdict.contains(&format!("name: formal-canary-{run}\n")));
