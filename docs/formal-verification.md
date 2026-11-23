@@ -841,15 +841,18 @@ in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
    selects are every formal target of the registry for a whole run, and
    those that `--target` names, planned ones included, for a run with
    `--target`; a run with a base round extracts these and, for the base
-   round, the formal targets that it does not select, so a whole run
-   extracts no planned target, and a run of
+   round, the formal targets that it does not select and the planned
+   targets whose generated modules a hand-written module imports
+   ([proof targets](#proof-targets)), so a whole run extracts no other
+   planned target, and a run of
    `cargo xtask formal run --target` extracts the named targets alone.
    The qualification job selects no target and extracts every
    formal target for the base round but those of the waivers that hold
-   ([waivers](#waivers)); the shard of a target selects its target and
-   extracts no other. A whole run whose registry has no formal
-   target selects and extracts none, and the workspace may then have no
-   root package. When the run selects targets, it takes the inventory of
+   ([waivers](#waivers)), and those planned targets; the shard of a
+   target selects its target and extracts no other. A whole run whose
+   registry has no formal target and no such planned target selects and
+   extracts none, and the workspace may then have no root package.
+   When the run selects targets, it takes the inventory of
    the exported workspace for their registration checks
    ([legacy inventory and admission](#legacy-inventory-and-admission));
 7. when no earlier step has failed or rejected the run, refuses it unless
@@ -1770,7 +1773,14 @@ table with the qualification kind. A theorem of a proof module of a target
 may also use the declarations that the templates of the target keep, its
 unconstrained and cut items, and the `trusted_axioms` of the target, in
 the audit of the base round as in that of the
-[target](#proof-targets). Lean 4.35.0 gives each native
+[target](#proof-targets). In the base round, a hand-written module that
+no formal target lists belongs to a planned target that the run
+extracted when its imports, directly or through hand-written modules,
+reach the generated modules of that target and of no other, so that its
+theorems may use the same; by
+[R6](conventions/provable-subset.md#r6-enumeration-names-across-targets),
+no module imports the generated definitions of two targets.
+Lean 4.35.0 gives each native
 decision an axiom of its own, `<declaration>._native.<tactic>.ax_<i>_<j>`,
 where the tactic is `native_decide`, `decide` or `bv_decide`, with
 `_private.<module>.0.` before it in a module file. A name with a component
@@ -2841,7 +2851,7 @@ an object; a field that the table does not list is refused:
 | Field | Meaning |
 | --- | --- |
 | `name`, `module`, `feature` | Target name, generated Lean namespace, feature ID (`krepi.<area>.<feature>`) |
-| `state` | `formal`, the default, for a target that the gate verifies, or `planned` for one that it only extracts and type-checks; a run of the whole gate selects the formal targets, and a planned one runs when `--target` names it |
+| `state` | `formal`, the default, for a target that the gate verifies, or `planned` for one that it only extracts and type-checks; a run of the whole gate selects the formal targets, a planned one runs when `--target` names it, and a run with a base round extracts, for that round, each planned one whose generated modules a hand-written module imports |
 | `budget` | The seconds that the unit of the target may take, 1,800 when the field is left out |
 | `description` | What the target proves, in one paragraph |
 | `start_from`, `exclude` | Charon roots and cut points by exclusion; `cargo xtask formal check` refuses `exclude`, which the gate does not support |
@@ -2893,15 +2903,23 @@ whose registered budget per worker is more than the shard limit.
 The targets of the registry run in two phases of the gate. The phase
 `extraction`, before the base round, extracts the targets that the run
 selects and every formal target, since the base round builds every proof
-and so needs the generated definitions of each formal target; the
+and so needs the generated definitions of each formal target; in a run
+with a base round, it also extracts each planned target whose generated
+modules, `KrepiGen.<module>.<file>`, the header of a Lean file below
+`verification/Krepi/` imports, read as the
+[import rule](#statements-and-proofs) reads it, so that the round builds,
+audits and replays the statements and the proofs that use them. The
 selected targets have a unit of their own, `target/<name>`, and the
-formal ones that the run does not select are extracted as commands of
-`base`. A planned target that the run does not select is not extracted:
-a whole run extracts no planned target and records none, so a
-hand-written module that imports the generated definitions of a planned
-target fails the base build of such a run. The shard of a target
-extracts its target alone, and the qualification job every formal target
-but those of the [waivers](#waivers) that hold, as commands of `base`
+others are extracted as commands of `base`. Such a planned target is
+neither checked against its registration nor concluded, runs no mutant
+and has no unit and no shard of its own; its record in the receipt has
+no unit. A planned target that the run does not select and no
+hand-written module imports is not extracted. The phase reads the
+imports from the checkout when the run starts and stops when those of
+the export are other ones. The shard of a target extracts its target
+alone, and the qualification job every formal target but those of the
+[waivers](#waivers) that hold, which leave out no planned target, and
+those planned targets, as commands of `base`
 ([shards and merge](#shards-and-merge)). The phase
 has the budgets of the targets that it extracts, or 600 s in the
 qualification job, and the gate's budget grows by those of the selected

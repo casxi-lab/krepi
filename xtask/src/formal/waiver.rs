@@ -200,7 +200,7 @@ pub(crate) mod tests {
     }
 
     /// A waiver of `scope` until `expires`.
-    fn waiver(scope: &[&str], expires: &str) -> serde_json::Value {
+    pub(crate) fn waiver(scope: &[&str], expires: &str) -> serde_json::Value {
         json!({"reason": "The proofs wait for a fix of the tool.", "scope": scope, "expires": expires, "author": "someone"})
     }
 
