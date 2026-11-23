@@ -1164,7 +1164,9 @@ each through a run of the gate on the target, with a budget of 14,400 s,
 and, when the run is `SCOPED`, writes the list of the survivors
 ([source mutants and survivors](../formal-verification.md#source-mutants-and-survivors)).
 It is not part of the check: the job `calibration mutants` of the workflow
-`formal calibration` runs it on the calibration target. Its unit tests run
+`formal calibration` runs it on the calibration target, and the job
+`formal mutants` of the workflow `formal` on a target of production on a
+manual run of `main`. Its unit tests run
 in the `test` step above: the generation on source texts in memory, the
 judgement of a build on the captured outputs of
 `xtask/src/formal/fixtures/mutants/`, and the runs on the Git repositories

@@ -20,9 +20,11 @@
 # six checks of the gate, which run on every event of a pull request, are
 # skipped only on main and fail on an event or a ref that they do not
 # judge. On a push to main, which is the merge of a pull request, the job
-# `formal receipt review` reviews the merge record of the merged head. The
-# measurement jobs are in the workflow `formal measure`,
-# `formal-measure.yml`.
+# `formal receipt review` reviews the merge record of the merged head. On a
+# manual run of main that names a formal target in the input `mutants`, the
+# job `formal mutants` runs its source mutants with the operators of the
+# input `operators`. The measurement jobs are in the workflow `formal
+# measure`, `formal-measure.yml`.
 # Actions are pinned to full commit SHAs; the comment names the release.
 name: formal
 
@@ -39,6 +41,16 @@ on:
         type: choice
         options: [full, weekly]
         required: true
+      mutants:
+        description: A formal target whose source mutants the run generates, or none
+        type: string
+        required: false
+        default: ""
+      operators:
+        description: The operators of the source mutants, separated by spaces, or all
+        type: string
+        required: false
+        default: ""
   schedule:
     - cron: "37 12 * * 2"
 
@@ -1742,3 +1754,151 @@ jobs:
           exec bash .github/scripts/deadline.sh --stop-commands 1m 30s bash -c \
             'xtask/target/debug/xtask formal receipt "$1" | tee -a "$GITHUB_STEP_SUMMARY"; s=${PIPESTATUS[0]}; [ "$s" = 0 ] || [ "$s" = 3 ]' \
             review "$record"
+
+  # Runs the source mutants of the formal target that the input `mutants`
+  # names, with the operators of the input `operators`, every operator when
+  # it is empty, on a manual run of main beside the gate. The run of `formal
+  # mutants` has a budget of 14,400 s; with the 300 s of its receipt, 245
+  # minutes, its step two more and its job 20 more.
+  mutants:
+    name: formal mutants
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mutants != ''
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 267
+    permissions:
+      contents: read
+    env:
+      TARGET: ${{ inputs.mutants }}
+      OPERATORS: ${{ inputs.operators }}
+    steps:
+      - name: Check out the candidate commit
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Check the target and the operators
+        id: inputs
+        timeout-minutes: 1
+        run: |
+          # A formal target of the registry, and operators of `formal mutants`.
+          jq -e --arg name "$TARGET" \
+            'any(.targets[]; .name == $name and (.state // "formal") == "formal")' \
+            verification/targets.json > /dev/null
+          arguments=()
+          for operator in $OPERATORS; do
+            case " ordering equality arithmetic bitwise logical negation literal condition method " in
+              *" $operator "*) arguments+=(--operator "$operator") ;;
+              *) echo "$operator is not an operator of formal mutants" >&2; exit 1 ;;
+            esac
+          done
+          echo "arguments=${arguments[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Record the runner and pull the image
+        timeout-minutes: 8
+        run: |
+          mkdir -p artifacts/formal
+          {
+            echo "== prepare started $(date -u +%FT%TZ)"
+            echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, job mutants, target $TARGET"
+            echo "processors: $(nproc)"
+            free -b
+            df -B1 /
+            if [ "$(id -u)" = 0 ] || [ "$(stat -c %u "$GITHUB_WORKSPACE")" != "$(id -u)" ]; then
+              echo "the runner's user is root or does not own the checkout" >&2
+              exit 1
+            fi
+            echo "== docker pull $IMAGE"
+            docker pull "$IMAGE"
+            docker image inspect --format 'pulled {{json .RepoDigests}}, {{.Size}} bytes' "$IMAGE"
+          } 2>&1 | tee artifacts/formal/job.txt
+
+      - name: Build xtask
+        timeout-minutes: 3
+        run: |
+          {
+            echo "== build xtask, started $(date -u +%FT%TZ)"
+            rustup toolchain install
+            cargo build --locked --manifest-path xtask/Cargo.toml
+          } 2>&1 | tee -a artifacts/formal/job.txt
+
+      - name: Run the source mutants in the image
+        id: mutants
+        timeout-minutes: 247
+        env:
+          ARGUMENTS: ${{ steps.inputs.outputs.arguments }}
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          read -r -a arguments <<< "$ARGUMENTS"
+          exec bash .github/scripts/deadline.sh --stop-commands 245m 1m \
+            docker run --rm --name "formal-mutants-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
+            --env KREPI_FORMAL_IMAGE="$IMAGE" \
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal mutants "$TARGET" "${arguments[@]}"
+
+      - name: Remove the container of the run
+        if: always()
+        run: |
+          docker rm --force "formal-mutants-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
+
+      - name: Summarize the list of survivors and compress the logs
+        if: always() && steps.inputs.outcome == 'success'
+        env:
+          OUTCOME: ${{ steps.mutants.outcome }}
+        run: |
+          shopt -s nullglob
+          # The receipts hold text of Lean and Lake: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          logs=()
+          for file in artifacts/formal/job.txt artifacts/formal/runs/*/logs; do
+            if [ -e "$file" ]; then logs+=("$file"); fi
+          done
+          if [ "${#logs[@]}" -gt 0 ]; then
+            tar -czf artifacts/formal/logs.tar.gz "${logs[@]}"
+          fi
+          # A run that fails writes no list, and the checkout may hold one
+          # of an earlier run, so only that of a passing run is read. The
+          # target is one of the registry.
+          written=verification/mutants/$TARGET.json
+          list=artifacts/formal/mutants/$TARGET.json
+          if [ "$OUTCOME" = success ] && [ -f "$written" ]; then
+            mkdir -p artifacts/formal/mutants
+            cp "$written" "$list"
+          fi
+          {
+            echo "## formal mutants: $TARGET"
+            echo
+            echo "The run step: $OUTCOME."
+            echo
+            for receipt in artifacts/formal/runs/*/receipt.json; do
+              jq -r --arg path "$receipt" --arg sha "$(sha256sum "$receipt" | cut -d ' ' -f 1)" '
+                "- Receipt `\($path)`, SHA-256 `\($sha)`: `\(.status)`, \(.seconds) s",
+                (.units | to_entries[] | select(.value.status != "VERIFIED") | "- `\(.key)`: \(.value.status)"),
+                (.failures[] | "- \(.status): \(.message | .[0:500])")
+              ' "$receipt"
+            done
+            if [ -f "$list" ]; then
+              jq -r '"- List: \(.generated) generated, \(.killed) killed, \(.survivors | length) survived, \(.unbuildable) do not build, \(.not_unique) without a text that occurs once"' "$list"
+            else
+              echo "- No list of survivors from this run"
+            fi
+          } | tee artifacts/formal/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the list of survivors, the receipt and the logs
+        if: always() && steps.inputs.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-mutants-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            artifacts/formal/mutants/
+            artifacts/formal/summary.md
+            artifacts/formal/logs.tar.gz
+            artifacts/formal/runs/*/receipt.json
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}

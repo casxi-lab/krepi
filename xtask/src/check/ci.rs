@@ -397,7 +397,7 @@ const BY_RECORD: &str = "${{ steps.record.outputs.retention }}";
 
 /// Every upload step of the tracked workflows: the file, the key of the
 /// job, the name of the step and its `retention-days` as written.
-const RETENTION: [(&str, &str, &str, &str); 31] = [
+const RETENTION: [(&str, &str, &str, &str); 32] = [
     (
         ".github/workflows/check.yml",
         "check",
@@ -516,6 +516,12 @@ const RETENTION: [(&str, &str, &str, &str); 31] = [
         ".github/workflows/formal.yml",
         "fast",
         "Upload the list of the changed paths",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal.yml",
+        "mutants",
+        "Upload the list of survivors, the receipt and the logs",
         BY_REF,
     ),
     (
@@ -975,6 +981,28 @@ fn the_jobs_of_the_gate_upload_receipts_summaries_records_and_packed_logs() {
     );
     let written = unwritten.replace("other.tar.gz", PACKED_LOGS);
     assert_eq!(gate_upload_problems(&parse(&written)), Vec::<String>::new());
+}
+
+#[test]
+fn the_source_mutants_of_a_target_run_on_a_manual_run_of_main_alone() {
+    let job = &workflow(FORMAL)["jobs"]["mutants"];
+    let condition = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' \
+                     && inputs.mutants != ''";
+    assert_eq!(job["if"].as_str(), Some(condition));
+    // The inputs are checked before they reach a command: a formal target of
+    // the registry, and the operators of `formal mutants`.
+    let operators = format!("case \" {} \" in", crate::formal::mutants::OPERATORS);
+    let script = script_with_id(job, "inputs");
+    assert!(script.contains(&operators), "{script}");
+    assert!(
+        script.contains(r#"(.state // "formal") == "formal""#),
+        "{script}"
+    );
+    let run = script_with_id(job, "mutants");
+    assert!(
+        run.ends_with("formal mutants \"$TARGET\" \"${arguments[@]}\"\n"),
+        "{run}"
+    );
 }
 
 #[test]
@@ -2637,7 +2665,7 @@ fn the_deadline_script_writes_the_status_of_the_command_when_asked() {
 /// or build the image, under [`DEADLINE`]: the file, the job, the step, and
 /// the minutes of its deadline, or `None` where the matrix of the job gives
 /// them.
-const CONTAINER_STEPS: [(&str, &str, &str, Option<i64>); 16] = [
+const CONTAINER_STEPS: [(&str, &str, &str, Option<i64>); 17] = [
     (FORMAL, "gate", "Run the gate in the image", Some(135)),
     (FORMAL, "gate", COMPARATOR_STEP, Some(35)),
     (FORMAL, "shard", "Run the shard in the image", None),
@@ -2646,6 +2674,12 @@ const CONTAINER_STEPS: [(&str, &str, &str, Option<i64>); 16] = [
         "scoped",
         "Run the planned target in the image",
         None,
+    ),
+    (
+        FORMAL,
+        "mutants",
+        "Run the source mutants in the image",
+        Some(245),
     ),
     (
         CALIBRATION,

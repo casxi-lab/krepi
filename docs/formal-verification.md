@@ -2457,7 +2457,9 @@ of their merge. It runs on every pull request to `main` when it is opened,
 reopened or updated, when a label is added or removed, and when its
 description is edited, since the guard reads the labels and the
 description; on every push to `main`; on a manual run, whose input `mode`
-is `full` or `weekly`; and once a week, on Tuesdays at 12:37 UTC. The runs
+is `full` or `weekly`, and whose inputs `mutants` and `operators` may ask
+for the source mutants of a target; and once a week, on Tuesdays at
+12:37 UTC. The runs
 of one pull request share a concurrency group, and a newer run cancels an
 older one with all its jobs, also those that wait for others, so that no
 older run concludes after a newer event; any other run has a group of its
@@ -2782,6 +2784,21 @@ attempt that has not expired with `gh run download`, and judges it with
 passes, and so does `WAIVED`, whose waivers hold on the UTC date of the
 review; anything else fails, and so does a missing run or record
 ([current and fresh records](#current-and-fresh-records)).
+
+The job `formal mutants` runs on a manual run of `main` whose input
+`mutants` names a target, beside the gate. It fails unless the target is
+a formal target of the registry and each word of the input `operators` is
+an operator of `cargo xtask formal mutants`, and then runs, in the pinned
+image with the flags of the gate,
+`cargo xtask formal mutants <target>` with an `--operator` for each word,
+or every operator when there is none, under `deadline.sh --stop-commands`
+with the 14,400 s of the command and the 300 s of its receipt, 245
+minutes; its step has two minutes more, and the job 20 more than its
+step, 267. It summarizes the receipt with workflow commands turned off and
+uploads the receipt, the summary, the record of the runner and the logs in
+`logs.tar.gz`, and the list of survivors of a run that passed, as the job
+of the mutants of the [calibration target](#calibration-target) does, as
+`formal-mutants-<commit>-<attempt>`.
 
 The measurement jobs `leanchecker fresh`, `leanchecker prefix` and
 `lake comparator` are in the workflow `formal measure`,
@@ -3217,7 +3234,9 @@ path; it names the functions of the survivors of
 class `no-theorem` in its report
 ([legacy inventory and admission](#legacy-inventory-and-admission)). A
 refinement task names the operators that it uses; an operator is added to
-this command, not by the task that uses it.
+this command, not by the task that uses it. In CI, the job
+`formal mutants` runs the command on a target of production on a manual
+run of `main` ([CI job](#ci-job)).
 
 ## Calibration target
 
