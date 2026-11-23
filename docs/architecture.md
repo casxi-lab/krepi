@@ -1457,6 +1457,20 @@ defines no callback for a hardware action: an entry that changes
 translation tables or other hardware state returns a write plan, which the
 architecture crate carries out.
 
+No name in the core names a board: the entries, types, methods, variants,
+constants, modules and private helpers of every component of the core are
+named for what they do, not for a board. What differs from one board to
+another, such as the size limit and the alignment of the device tree that
+its firmware hands over or the PSCI conduit and the affinity level of its
+CPUs, reaches the core from the board crate, as a value that describes the
+board, a profile, or as an argument of an entry. The checks against these
+values stay in the core, whose specifications and proofs hold for every
+value; that a board gives the values of its hardware is shown by the tests
+of the board and its runs on the hardware. Test data may name the board
+whose input it takes, such as a device tree of the Pi 5 in a host test of
+the core or the profile of a board in the specification tests. Review
+checks the names of each component of the core against this rule.
+
 ### Module order in the core
 
 The modules of the roles that the
@@ -1467,12 +1481,13 @@ another module of its own layer. An operation whose effect spans several
 modules, such as revocation, the release of a region or the destruction of
 a process, is composed by a module above all of them or by its entry in
 `dispatch`; each of those modules provides only the checks and the writes
-of its own part. The module names are planned and differ from the names
-of the modules of the other kernel crates
+of its own part. Every item but `fdt` and `page_tables` is planned, and
+the module names differ from the names of the modules of the other kernel
+crates
 ([porting records](conventions/porting.md#porting-records)). From the lowest
 layer:
 
-| Layer | Item (planned) | Role |
+| Layer | Item | Role |
 | --- | --- | --- |
 | 1 | `fdt` | fdt |
 | 1 | `objects` | Objects |
