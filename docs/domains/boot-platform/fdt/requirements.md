@@ -168,7 +168,7 @@ the [testing obligations](contract.md#testing-obligations) pass.
 - **Examples.**
   [ex3](../../../features/platform/device-tree.md#ex3-a-dynamic-reservation-is-counted-and-not-reserved)
 - **Entry points.** `Fdt::discover_memory`, `MemoryMap::dynamic`,
-  `Fdt::discover_pi5_boot_memory` and `Pi5BootMemory::dynamic`.
+  `Fdt::discover_boot_memory` and `BootMemory::dynamic`.
 - **Contract.** [Memory discovery](contract.md#memory-discovery),
   [Behaviour changes](contract.md#behaviour-changes).
 - **Specification.** [FDT-R04](specification.md#fdt-r04) of the specification.
@@ -181,8 +181,9 @@ the [testing obligations](contract.md#testing-obligations) pass.
 
 ### FDT-R05
 
-**Pi 5 hand-over checks.** `Fdt::discover_pi5_boot_memory` accepts a Pi 5
-hand-over tree only when it is at most 128 KiB, its address is a multiple of
+**Pi 5 hand-over checks.** `Fdt::discover_boot_memory` with the hand-over
+profile of the Pi 5 accepts a Pi 5 hand-over tree only when it is at most
+128 KiB, its address is a multiple of
 8, its root has 2 address cells and 2 size cells and a `compatible` that
 names `raspberrypi,5-model-b` and `brcm,bcm2712`, the image is nonempty and
 disjoint from the tree, and the tree and the image each lie inside one RAM
@@ -195,8 +196,8 @@ accepted and one of 1 byte more fails with `LimitExceeded`.
 
 - **Examples.**
   [ex4](../../../features/platform/device-tree.md#ex4-the-boot-memory-map-of-the-pi-5-8-gb-model)
-- **Entry points.** `Fdt::discover_pi5_boot_memory`,
-  `Pi5BootMemory::is_available` and `find_available`.
+- **Entry points.** `Fdt::discover_boot_memory`,
+  `BootMemory::is_available` and `find_available`.
 - **Contract.** [Memory discovery](contract.md#memory-discovery),
   [Boot memory map](contract.md#boot-memory-map).
 - **Specification.** [FDT-R05](specification.md#fdt-r05) of the specification.
@@ -226,8 +227,8 @@ measured ranges.
 
 - **Examples.**
   [ex4](../../../features/platform/device-tree.md#ex4-the-boot-memory-map-of-the-pi-5-8-gb-model)
-- **Entry points.** `Fdt::discover_pi5_boot_memory` and
-  `MemoryPlan::all_ram` and `from_pi5`.
+- **Entry points.** `Fdt::discover_boot_memory` and
+  `MemoryPlan::all_ram` and `from_boot_memory`.
 - **Contract.** [Memory discovery](contract.md#memory-discovery),
   [Boot memory map](contract.md#boot-memory-map),
   [Testing obligations](contract.md#testing-obligations).
@@ -256,8 +257,8 @@ accepted and of 5 fails with `Capacity`.
 
 - **Examples.**
   [ex4](../../../features/platform/device-tree.md#ex4-the-boot-memory-map-of-the-pi-5-8-gb-model)
-- **Entry points.** `MemoryPlan::all_ram`, `new` and `from_pi5`, and its
-  queries and `available_ranges`.
+- **Entry points.** `MemoryPlan::all_ram`, `new` and `from_boot_memory`,
+  and its queries and `available_ranges`.
 - **Contract.** [Boot memory map](contract.md#boot-memory-map).
 - **Specification.** [FDT-R07](specification.md#fdt-r07) of the specification.
 - **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).
@@ -280,14 +281,14 @@ IDs run from 0 to `count - 1` without a gap or a repeat for a count of 1, 2
 or 4, and of 4 on the Pi 5, every CPU but the first uses PSCI, on the Pi 5
 every CPU, and `/psci` has the conduit of the profile and a supported
 `compatible`. The flag bits of `MPIDR_EL1` do
-not change a logical ID. `validate_qemu_timers` accepts only the timer
-records of QEMU virt for the admitted CPUs. The criterion: the vectors of
-the CPU nodes give their expected outputs.
+not change a logical ID. `validate_timers` accepts, for a QEMU virt profile,
+only the timer records of QEMU virt for the admitted CPUs. The criterion:
+the vectors of the CPU nodes give their expected outputs.
 
 - **Examples.**
   [ex6](../../../features/platform/device-tree.md#ex6-the-cpu-topology-of-the-pi-5)
 - **Entry points.** `Fdt::discover_cpus`, `CpuTopology::count`, `profile`,
-  `affinity` and `validate_qemu_timers`, and `CpuProfile::logical_id`.
+  `affinity` and `validate_timers`, and `CpuProfile::logical_id`.
 - **Contract.** [CPU nodes](contract.md#cpu-nodes).
 - **Specification.** [FDT-R08](specification.md#fdt-r08) of the specification.
 - **Proof path.** The target `fdt`, registered as planned ([proof path](proof.md#fdt)).

@@ -6,9 +6,10 @@ flattened device tree that the firmware hands to the kernel, which the
 kernel reads as untrusted input; the access to its nodes and properties and
 the translation of addresses through `reg`, `ranges` and `dma-ranges`; the
 discovery of the RAM ranges, the reserved regions and the dynamic
-reservations of a tree; the CPU nodes and the PSCI conduit of the supported
-boards; the Pi 5 boot memory, which checks the hand-over tree of the
-Raspberry Pi 5 against the storage of the image and of the tree; and the
+reservations of a tree; the CPU nodes and the PSCI conduit, against the CPU
+profile of a board; the boot memory, which checks a hand-over tree against
+the hand-over profile of its board and the storage of the image and of the
+tree; and the
 boot memory map, the RAM banks with the boot storage and the firmware
 reservations excluded by whole pages, which the
 [page-tables](../../memory/page-tables/contract.md) component of the
@@ -83,11 +84,15 @@ evidence, is in the [requirements](requirements.md). The
   of the banks that it manages.
 - **Usable range.** A span of whole pages of a managed bank that no boot
   storage and no firmware reservation touches.
-- **Pi 5 boot memory.** The value `Pi5BootMemory`: the memory map of a Pi 5
-  hand-over tree, checked against the spans of the image and of the tree.
-- **CPU profile.** The value `CpuProfile`: QEMU virt with PSCI over HVC,
-  QEMU virt with EL2 and PSCI over SMC, or the Pi 5. It fixes the affinity
-  level of the CPU IDs and the PSCI conduit.
+- **Hand-over profile.** The value `HandOverProfile` that a board gives:
+  the limit, the alignment and the root `compatible` of its hand-over tree.
+- **Boot memory.** The value `BootMemory`: the memory map of a hand-over
+  tree, checked against the hand-over profile of its board and the spans of
+  the image and of the tree.
+- **CPU profile.** The value `CpuProfile` that a board gives: its PSCI
+  conduit, the affinity level of its CPU IDs, the numbers of CPUs that it
+  allows, whether CPU 0 needs an `enable-method`, and the timer interrupts
+  that the core checks.
 - **RAM model.** One of the five Raspberry Pi 5 models, with 1, 2, 4, 8 or
   16 GB of RAM.
 
@@ -104,14 +109,14 @@ map.
 | `fdt::Fdt::parse` | Function, host-testable | The boot code of a board, once on the boot CPU, with the bytes of the hand-over tree | [Format and bounds](#format-and-bounds), [Rejection and error priority](#rejection-and-error-priority) |
 | `Fdt::nodes`, `find_node`, `reservations` and `total_size`, and `Node::name`, `parent`, `property`, `string_property`, `enabled`, `address_cells`, `size_cells`, `reg`, `ranges`, `dma_ranges` and `translate_reg` | Functions and iterators, host-testable | The entries of this component; the device bindings that the boards and other components read from a tree | [Format and bounds](#format-and-bounds), [Address translation](#address-translation) |
 | `Fdt::discover_memory`, which returns a `MemoryMap` with `ram`, `reserved` and `dynamic` | Function, host-testable | The boot code of a board | [Memory discovery](#memory-discovery) |
-| `Fdt::discover_pi5_boot_memory`, which returns a `Pi5BootMemory` with `ram`, `reserved`, `dynamic`, `dtb`, `image`, `ram_bytes` and `is_available` | Function, host-testable | The boot code of the Pi 5 board | [Memory discovery](#memory-discovery) |
-| `Pi5BootMemory::find_available` | Function, host-testable | The boot code of the Pi 5 board, before the page ownership table exists | [Boot memory map](#boot-memory-map) |
-| `Fdt::discover_cpus`, which returns a `CpuTopology` with `count`, `profile`, `affinity` and `validate_qemu_timers`, and `CpuProfile::logical_id`, `affinity_shift` and `conduit` | Functions, host-testable | The boot code of a board; the start of the secondary CPUs | [CPU nodes](#cpu-nodes) |
+| `Fdt::discover_boot_memory`, which returns a `BootMemory` with `ram`, `reserved`, `dynamic`, `dtb`, `image`, `ram_bytes` and `is_available` | Function, host-testable | The boot code of a board that checks its hand-over tree, such as the Pi 5 | [Memory discovery](#memory-discovery) |
+| `BootMemory::find_available` | Function, host-testable | The boot code of such a board, before the page ownership table exists | [Boot memory map](#boot-memory-map) |
+| `Fdt::discover_cpus`, which returns a `CpuTopology` with `count`, `profile`, `affinity` and `validate_timers`, and `CpuProfile::logical_id`, `affinity_shift` and `conduit` | Functions, host-testable | The boot code of a board; the start of the secondary CPUs | [CPU nodes](#cpu-nodes) |
 | `cells_u64`, `Reg::new`, and `AddressMap::new`, `kind`, `to_parent` and `to_child` | Functions and an iterator, host-testable | The node access of this component; device bindings | [Address translation](#address-translation) |
-| `MemoryPlan::all_ram`, `new` and `from_pi5` | Functions, host-testable | The boot code of a board | [Boot memory map](#boot-memory-map) |
+| `MemoryPlan::all_ram`, `new` and `from_boot_memory` | Functions, host-testable | The boot code of a board | [Boot memory map](#boot-memory-map) |
 | `MemoryPlan::managed_banks`, `ram`, `reservations`, `boot_ranges`, `firmware_ranges`, `described_bytes`, `managed_bytes`, `contains_ram`, `is_available`, `permits_backing` and `available_ranges` | Functions and an iterator, host-testable | The kernel direct map and the page ownership table of the page-tables component; the boot code of a board | [Boot memory map](#boot-memory-map) |
-| `Span::new`, `end` and `contains`, and the value types `Fdt`, `Node`, `Span`, `ReservedRegion`, `MemoryMap`, `Pi5BootMemory`, `CpuProfile`, `CpuTopology`, `MemoryPlan`, `Error` and `PlanError` | Functions and value types | Every caller of the entries above | [Rejection and error priority](#rejection-and-error-priority) |
-| `MAX_BLOB_SIZE`, `MAX_DEPTH`, `MAX_TOKENS`, `MAX_PROPERTIES`, `MAX_PROPERTY_NAME`, `MAX_RESERVATIONS`, `MAX_MEMORY_REGIONS`, `MAX_RESERVED_REGIONS` and `PI5_MAX_BLOB_SIZE` | Constants | The boot code of a board, which bounds the slice of the tree with them | [Format and bounds](#format-and-bounds) |
+| `Span::new`, `end` and `contains`, and the value types `Fdt`, `Node`, `Span`, `ReservedRegion`, `MemoryMap`, `HandOverProfile`, `BootMemory`, `CpuProfile`, `PsciConduit`, `AffinityLevel`, `TimerInterrupts`, `CpuTopology`, `MemoryPlan`, `Error` and `PlanError` | Functions and value types | Every caller of the entries above | [Rejection and error priority](#rejection-and-error-priority) |
+| `MAX_BLOB_SIZE`, `MAX_DEPTH`, `MAX_TOKENS`, `MAX_PROPERTIES`, `MAX_PROPERTY_NAME`, `MAX_RESERVATIONS`, `MAX_MEMORY_REGIONS` and `MAX_RESERVED_REGIONS` | Constants | The boot code of a board, which bounds the slice of the tree with them | [Format and bounds](#format-and-bounds) |
 
 ## Extractability
 
@@ -154,8 +159,8 @@ with version 16 or 17, and checks all of it before it returns a tree:
   header and ends within `totalsize`, and the structure and strings blocks
   do not intersect. The parse reads the bytes one at a time, so the bytes
   may lie at any address of the host; the alignment of the tree in physical
-  memory is a rule of the board, 8 bytes on the Pi 5
-  ([Memory discovery](#memory-discovery)).
+  memory is a rule of the board, which its hand-over profile gives, 8 bytes
+  on the Pi 5 ([Memory discovery](#memory-discovery)).
 - **Reservation map.** Entries of 16 bytes, an address and a size of 64
   bits each, up to an entry of two zeros. No entry, the terminator included,
   intersects the structure or strings block. At most `MAX_RESERVATIONS`
@@ -197,7 +202,7 @@ its values are equal is an inference.
 
 | Limit | Value | Pi 5 | QEMU virt | Margin | Vectors and tests |
 | --- | --- | --- | --- | --- | --- |
-| `totalsize`, `MAX_BLOB_SIZE`; for the Pi 5 also `PI5_MAX_BLOB_SIZE` | 2 MiB; 128 KiB for the Pi 5 | Shipped file 78,770 bytes; hand-over tree 80,588 and 80,596 bytes in the prototype's measurements | 1,048,576 bytes, whose blocks end at byte 7,793; the rest is zero | 2 for QEMU virt; about 1.6 for the Pi 5 hand-over tree | Above the limit: `fdt-parser-2` (2 MiB + 1) and `fdt-pi5-boundaries-2` (above 128 KiB); at the limit, and 1 above for the Pi 5: [Testing obligations](#testing-obligations) |
+| `totalsize`, `MAX_BLOB_SIZE`; for the Pi 5 also the `max_blob_size` of its hand-over profile | 2 MiB; 128 KiB for the Pi 5 | Shipped file 78,770 bytes; hand-over tree 80,588 and 80,596 bytes in the prototype's measurements | 1,048,576 bytes, whose blocks end at byte 7,793; the rest is zero | 2 for QEMU virt; about 1.6 for the Pi 5 hand-over tree | Above the limit: `fdt-parser-2` (2 MiB + 1) and `fdt-pi5-boundaries-2` (above 128 KiB); at the limit, and 1 above for the Pi 5: [Testing obligations](#testing-obligations) |
 | Depth, `MAX_DEPTH` | 32 nodes on a path, so depth 31 at most | Depth 6 | Depth 5 | More than 4 | 33 nodes: `fdt-parser-5`; 32 nodes: [Testing obligations](#testing-obligations) |
 | Tokens, `MAX_TOKENS` | 65,536, the end token included | 2,973 | 343 | About 22 | At the limit and 1 above: [Testing obligations](#testing-obligations) |
 | Properties of one node, `MAX_PROPERTIES` | 512 | 334 in `/__symbols__` | 13 in `/pcie@10000000` | About 1.5 | 334, 512 and 513: `fdt-parser-9` |
@@ -253,7 +258,7 @@ Three rules hold for every entry:
    `memory@0` nodes of which one is disabled, are no error.
 
 The component has two error types. `Error`, of the parse, the node access,
-the translation, the memory discovery, the CPU nodes and the Pi 5 boot
+the translation, the memory discovery, the CPU nodes and the boot
 memory, has 21 variants; `PlanError`, of the boot memory map, has 7. The
 variants keep the names of the two error types of the prototype tree,
 `fdt::Error` and `platform::Error`, which `PlanError` renames. `Overflow`
@@ -269,20 +274,20 @@ which are not part of the component, use it.
 | `Error::BadMagic` | The first word of the header is not `0xd00d_feed` |
 | `Error::UnsupportedVersion` | `version` is below 17, or `last_comp_version` is not 16 or 17 or is above `version` |
 | `Error::BadLayout` | `totalsize` is below 40; a block or the reservation map starts inside the header; the structure block is shorter than 12 bytes; the structure and strings blocks intersect; or a reservation entry intersects one of them |
-| `Error::BadAlignment` | The offset or the size of the structure block is not a multiple of 4 or the offset of the reservation map not a multiple of 8; the address of a Pi 5 hand-over tree is not a multiple of 8; or the alignment of a selection is not a power of two |
+| `Error::BadAlignment` | The offset or the size of the structure block is not a multiple of 4 or the offset of the reservation map not a multiple of 8; the address of a hand-over tree is not a multiple of the alignment of its profile; or the alignment of a selection is not a power of two |
 | `Error::BadToken` | A token other than 1, 2, 3, 4 and 9 |
 | `Error::BadTree` | A second root or a root with a name; a child without a name; a property outside every node or after the first child of its node; an end node without an open node; an end token with open nodes, without a root or before the end of the block; or a node without a parent where an entry needs one |
-| `Error::BadString` | A node name or property name that is not a NUL-terminated UTF-8 string within its block or holds a character outside its set; a property name that is empty or longer than `MAX_PROPERTY_NAME`; a string property without a NUL or not UTF-8; or an entry of the Pi 5 `compatible` that is not UTF-8 |
+| `Error::BadString` | A node name or property name that is not a NUL-terminated UTF-8 string within its block or holds a character outside its set; a property name that is empty or longer than `MAX_PROPERTY_NAME`; a string property without a NUL or not UTF-8; or an entry of the root `compatible` of a hand-over tree that is not UTF-8 |
 | `Error::BadPadding` | A nonzero byte in the padding after a node name |
 | `Error::DuplicateProperty` | Two properties of one name in a node |
-| `Error::LimitExceeded` | A limit of [Format and bounds](#format-and-bounds) is exceeded: the size of the tree, also the Pi 5 limit, the depth, the tokens, the properties of a node, the entries of the reservation map, the RAM ranges or the reserved regions |
-| `Error::UnsupportedCells` | A `reg` or a translation with address cells other than 1 or 2, or size cells above 2; a number of more than 2 cells; a Pi 5 root whose cells are not 2 and 2; or `/cpus` whose address cells are not 1 or 2 |
-| `Error::BadProperty` | A property whose value breaks its binding: a cell count that is not 4 bytes; a `reg` or translation value that is empty where a value is required or not a whole number of entries; a flag with a value; a string property with a byte after its NUL; an enabled node with only one of a memory name and the `device_type` `memory`; a `/reserved-memory` without explicit cells equal to those of the root or without an empty `ranges`; `no-map` with `reusable`; a CPU, PSCI or timer binding of [CPU nodes](#cpu-nodes) that does not hold; or a Pi 5 `compatible` that does not end with a NUL, lacks an entry or has an empty one |
-| `Error::MissingProperty` | A required node or property is absent: the `reg` of a node asked for it; `reg` and `size` alike in an enabled child of `/reserved-memory`; `/cpus`, the `reg` of a CPU node or `/psci`; or the `compatible` of a Pi 5 root |
+| `Error::LimitExceeded` | A limit of [Format and bounds](#format-and-bounds) is exceeded: the size of the tree, also the limit of a hand-over profile, the depth, the tokens, the properties of a node, the entries of the reservation map, the RAM ranges or the reserved regions |
+| `Error::UnsupportedCells` | A `reg` or a translation with address cells other than 1 or 2, or size cells above 2; a number of more than 2 cells; the root of a hand-over tree whose cells are not 2 and 2; or `/cpus` whose address cells are not 1 or 2 |
+| `Error::BadProperty` | A property whose value breaks its binding: a cell count that is not 4 bytes; a `reg` or translation value that is empty where a value is required or not a whole number of entries; a flag with a value; a string property with a byte after its NUL; an enabled node with only one of a memory name and the `device_type` `memory`; a `/reserved-memory` without explicit cells equal to those of the root or without an empty `ranges`; `no-map` with `reusable`; a CPU, PSCI or timer binding of [CPU nodes](#cpu-nodes) that does not hold; or a root `compatible` of a hand-over tree that does not end with a NUL, lacks an entry that its profile requires or has an empty one |
+| `Error::MissingProperty` | A required node or property is absent: the `reg` of a node asked for it; `reg` and `size` alike in an enabled child of `/reserved-memory`; `/cpus`, the `reg` of a CPU node or `/psci`; or the `compatible` of the root of a hand-over tree |
 | `Error::Overflow` | An offset, span, translated address, page rounding or sum leaves 64 bits; or a span of a one-cell address leaves the first 4 GiB |
-| `Error::EmptyRegion` | A reservation entry, RAM range, reserved region, translation window or translation request of size 0; an empty image; a selection of size 0 or with an empty bound; or an empty span asked of the Pi 5 boot memory |
-| `Error::Overlap` | Two reservation entries or two RAM ranges overlap, or the image overlaps the Pi 5 hand-over tree |
-| `Error::Unmapped` | A translation through an absent map, or through windows of which none holds the whole request or one holds part of it; or a Pi 5 hand-over tree or image outside every single RAM range |
+| `Error::EmptyRegion` | A reservation entry, RAM range, reserved region, translation window or translation request of size 0; an empty image; a selection of size 0 or with an empty bound; or an empty span asked of the boot memory |
+| `Error::Overlap` | Two reservation entries or two RAM ranges overlap, or the image overlaps the hand-over tree |
+| `Error::Unmapped` | A translation through an absent map, or through windows of which none holds the whole request or one holds part of it; or a hand-over tree or image outside every single RAM range |
 | `Error::AmbiguousMapping` | A path that matches two sibling nodes, or a request that two windows hold |
 | `Error::BadPath` | A path that is not absolute, ends in `/` other than the root or holds `//` |
 | `Error::NoMemory` | No enabled RAM range |
@@ -296,7 +301,7 @@ which are not part of the component, use it.
 
 When an input breaks several rules, the entry reports the error of the
 first broken rule in the orders below, which are those of the prototype
-tree. An entry that calls another, such as `discover_pi5_boot_memory` with
+tree. An entry that calls another, such as `discover_boot_memory` with
 `discover_memory`, reports the error of the callee at the step where it
 calls it.
 
@@ -351,14 +356,14 @@ The parse and the entries on a tree:
    children, in tree order: `status`, the flags `BadProperty`, neither
    `reg` nor `size` `MissingProperty`, its whole `reg`, and then each of
    its spans `EmptyRegion` or `LimitExceeded`.
-5. `Fdt::discover_pi5_boot_memory`: `totalsize` above `PI5_MAX_BLOB_SIZE`,
-   `LimitExceeded`; the address of the tree, `BadAlignment`; the address
-   cells of the root, a value that is not 4 bytes `BadProperty`, then a
-   number other than 2 `UnsupportedCells`, and then its size cells in the
-   same way; the root `compatible`: absent, `MissingProperty`; a value that
-   does not end with a NUL, `BadProperty`; then each entry in order, not
-   UTF-8 `BadString`, then empty `BadProperty`; then without
-   `raspberrypi,5-model-b` or without `brcm,bcm2712`, `BadProperty`; the
+5. `Fdt::discover_boot_memory`: `totalsize` above the `max_blob_size` of the
+   profile, `LimitExceeded`; the address of the tree, `BadAlignment`; the
+   address cells of the root, a value that is not 4 bytes `BadProperty`,
+   then a number other than 2 `UnsupportedCells`, and then its size cells in
+   the same way; the root `compatible`: absent, `MissingProperty`; a value
+   that does not end with a NUL, `BadProperty`; then each entry in order,
+   not UTF-8 `BadString`, then empty `BadProperty`; then without an entry
+   that the profile requires, `BadProperty`; the
    span of the tree, `Overflow`; the image, `EmptyRegion` then `Overflow`;
    the image on the tree, `Overlap`; `discover_memory`; the tree, then the
    image, outside every single RAM range, `Unmapped`; the sum of the RAM
@@ -399,8 +404,8 @@ The parse and the entries on a tree:
    bus from the nearest, its `ranges` and the translation of the span
    through them; the end of the result, `Overflow`.
 8. `Fdt::find_node`: the path, `BadPath`; each component, `AmbiguousMapping`.
-   `Pi5BootMemory::is_available`: `EmptyRegion`, then `Overflow`.
-   `Pi5BootMemory::find_available`: a size of 0 or a minimum at or above
+   `BootMemory::is_available`: `EmptyRegion`, then `Overflow`.
+   `BootMemory::find_available`: a size of 0 or a minimum at or above
    the limit, `EmptyRegion`; an alignment that is not a power of two,
    `BadAlignment`; then, in the order of the RAM ranges and of the
    candidates in each, a start aligned up beyond 64 bits, `Overflow`: the
@@ -494,23 +499,36 @@ describe them:
   maps usable ranges only, so no `no-map` region is mapped. `reusable` is
   kept too and releases nothing.
 
-`Fdt::discover_pi5_boot_memory(dtb_address, image)` checks the hand-over
-tree of a Raspberry Pi 5 against the spans that the board gives for the
-tree and for the image with its BSS and stacks. The tree is at most
-`PI5_MAX_BLOB_SIZE`, 128 KiB; its address is a multiple of 8, as section 5.6
-of DTSpec v0.4 requires; the root has 2 address cells and 2 size cells
+`Fdt::discover_boot_memory(hand_over, dtb_address, image)` checks a
+hand-over tree against the hand-over profile `hand_over` of its board and
+the spans that the board gives for the tree and for the image with its BSS
+and stacks. A `HandOverProfile` has three public fields: `max_blob_size`,
+the largest `totalsize`; `alignment_log2`, which makes the alignment of the
+address of the tree `2 ^ alignment_log2` bytes, a power of two; and
+`compatible`, bytes whose pieces between NUL bytes are the entries that the
+root `compatible` must hold, an empty piece requiring nothing. Every value
+of these fields is a profile, with the behaviour that these rules give it.
+The tree is at most `max_blob_size`; its address is a multiple of
+`2 ^ alignment_log2`; the root has 2 address cells and 2 size cells
 (`UnsupportedCells`); the root `compatible` is a list of nonempty,
-NUL-terminated UTF-8 strings that holds `raspberrypi,5-model-b` and
-`brcm,bcm2712`, in any order and with other entries. The span of the tree
-is `[dtb_address, dtb_address + totalsize)`. The image is nonempty and
-disjoint from the tree. After `discover_memory`, the tree and the image each
-lie inside one RAM range, and `ram_bytes` is the sum of the RAM ranges.
-`Pi5BootMemory::is_available(span)` is true for a nonempty span inside one
-RAM range that touches neither the tree nor the image nor any reserved
-region, `reusable` ones included. The answer describes memory; it is no
-ownership. These queries know only the image and the tree as the board
-gives them: further boot storage, such as the boot bundle when the board
-gives it as a span of its own, is excluded only by the boot memory map.
+NUL-terminated UTF-8 strings that holds, for each entry that the profile
+requires, an entry of the same bytes, in any order and with other entries.
+The span of the tree is `[dtb_address, dtb_address + totalsize)`. The image
+is nonempty and disjoint from the tree. After `discover_memory`, the tree
+and the image each lie inside one RAM range, and `ram_bytes` is the sum of
+the RAM ranges. A `BootMemory` also keeps the `max_blob_size` and the
+`alignment_log2` of the profile that it was checked with, which no entry
+gives. The hand-over profile of the Pi 5 has the limit 128 KiB, the
+alignment 8, as section 5.6 of DTSpec v0.4 requires, and the entries
+`raspberrypi,5-model-b` and `brcm,bcm2712` ([notation](#notation)); that a
+board gives the values of its hardware is a property of the board, which
+these rules do not state. `BootMemory::is_available(span)` is true for a
+nonempty span inside one RAM range that touches neither the tree nor the
+image nor any reserved region, `reusable` ones included. The answer
+describes memory; it is no ownership. These queries know only the image and
+the tree as the board gives them: further boot storage, such as the boot
+bundle when the board gives it as a span of its own, is excluded only by the
+boot memory map.
 
 A shipped tree is parsed like any other, but its memory node is the
 placeholder of the Raspberry Pi tree, `/memory@0` with `reg` `[0,
@@ -597,13 +615,13 @@ reserved regions of the discovery as firmware reservations:
 `MemoryPlan::new(window, ram, boot, firmware)` builds the same map but
 manages only `window`: a span of whole pages, at most 128 MiB long, inside
 one bank, for a board or a test that manages a part of RAM.
-`MemoryPlan::from_pi5(memory, window, more)` is `new` with the RAM ranges,
-the boot storage of the image, the tree and then the further spans `more`
-of the board, such as the boot bundle, in this order, and the reserved
-regions of a Pi 5 boot memory; more than two further spans fail with
+`MemoryPlan::from_boot_memory(memory, window, more)` is `new` with the RAM
+ranges, the boot storage of the image, the tree and then the further spans
+`more` of the board, such as the boot bundle, in this order, and the
+reserved regions of a boot memory; more than two further spans fail with
 `Capacity`.
 
-`Pi5BootMemory::find_available(size, alignment, minimum, limit)` selects a
+`BootMemory::find_available(size, alignment, minimum, limit)` selects a
 span of `size` bytes, aligned to `alignment`, a power of two, within
 `[minimum, limit)` and inside one RAM range, that touches neither the
 image, nor the tree, nor any reserved region. It takes the RAM ranges in
@@ -621,19 +639,33 @@ reservations as values.
 ## CPU nodes
 
 `Fdt::discover_cpus(profile)` reads the CPUs of a board before any of them
-is started, as sections 3.7 and 3.8 of DTSpec v0.4 describe the nodes:
+is started, as sections 3.7 and 3.8 of DTSpec v0.4 describe the nodes,
+against the CPU profile `profile` of the board. A `CpuProfile` has five
+public fields: `conduit`, the PSCI conduit, a `PsciConduit`, `Hvc` or `Smc`;
+`affinity_level`, the level of `MPIDR_EL1` that holds the CPU IDs, an
+`AffinityLevel`, `Aff0` to `Aff3`, whose fields start at bits 0, 8, 16 and
+32; `cpu_counts`, the numbers of CPUs that the board allows, a set whose bit
+`n` is set when `n` CPUs are allowed, for `n` from 1 to 4, its other bits
+not read; `cpu0_enable_method`, whether CPU 0 needs the `enable-method`
+`psci` as well; and `timer_interrupts`, none or a `TimerInterrupts`, the
+private interrupts of the timer in their order, the first `count` of its
+five `numbers`, all five for a `count` above 5. Every value of these fields
+is a profile, with the behaviour that these rules give it; the profiles of
+the Pi 5 and of QEMU virt are in [notation](#notation):
 
 - `/cpus` exists (`MissingProperty`), is enabled, has a `#size-cells` of 0
   (`BadProperty`) and an `#address-cells` of 1 or 2 (`UnsupportedCells`).
 - Each child with the `device_type` `cpu` is a CPU node. It is enabled, its
   `compatible` is exactly `arm,cortex-a76`, and its `reg`, of the address
   cells of `/cpus`, is the affinity of the CPU. The affinity is
-  `id << affinity_shift` for a logical ID from 0 to 3, where the shift is 8
-  on the Pi 5, whose CPU IDs are affinity level 1 of `MPIDR_EL1`, and 0 on
-  QEMU virt. No two CPU nodes have one ID. Every CPU but ID 0, and on the
-  Pi 5 every CPU, has the `enable-method` `psci`.
-- The IDs are 0 to `count - 1`, where `count` is 1, 2 or 4, and 4 on the
-  Pi 5; any other set fails with `BadProperty`.
+  `id << affinity_shift` for a logical ID from 0 to 3, where the shift is
+  that of the affinity level of the profile: 8 on the Pi 5, whose CPU IDs
+  are affinity level 1 of `MPIDR_EL1`, and 0 on QEMU virt. No two CPU nodes
+  have one ID. Every CPU but ID 0, and CPU 0 as well when the profile sets
+  `cpu0_enable_method`, as on the Pi 5, has the `enable-method` `psci`.
+- The IDs are 0 to `count - 1`, where `count` is a number that the profile
+  allows, 1, 2 or 4 on QEMU virt and 4 on the Pi 5; any other set fails
+  with `BadProperty`.
 - `/psci` exists (`MissingProperty`), is enabled, its `method` is the
   conduit of the profile, `hvc` for QEMU virt without EL2 and `smc` for
   QEMU virt with EL2 and for the Pi 5, and its `compatible` is exactly one
@@ -644,13 +676,15 @@ is started, as sections 3.7 and 3.8 of DTSpec v0.4 describe the nodes:
   bits do not change the ID; it gives none for an affinity that is not
   `id << affinity_shift` with an ID below 4. `CpuTopology::affinity(i)` is
   `i << affinity_shift` for `i` below `count`, and none otherwise.
-- `CpuTopology::validate_qemu_timers(interrupts)` checks the `interrupts` of
-  the timer node of QEMU virt: records of three cells, type 1 for a private
-  interrupt, its number and the flags `((1 << count) - 1) << 8 | 4`, the
-  admitted CPUs and a level-high trigger, for the private interrupts 13, 14,
-  11 and 10 in this order and, with EL2, 12 after them, with nothing else.
-  For the Pi 5 profile it fails with `BadProperty`: the timer of the Pi 5
-  belongs to its board support.
+- `CpuTopology::validate_timers(interrupts)` checks the `interrupts` of the
+  timer node against the timer interrupts of the profile: records of three
+  cells, type 1 for a private interrupt, its number and the flags
+  `((1 << count) - 1) << 8 | 4`, the admitted CPUs and a level-high trigger,
+  for the private interrupts of the profile in their order, with nothing
+  else; on QEMU virt 13, 14, 11 and 10 in this order and, with EL2, 12 after
+  them. For a profile without timer interrupts it fails with `BadProperty`:
+  the profile of the Pi 5 has none, as the timer of the Pi 5 belongs to its
+  board support.
 
 ## Address translation
 
@@ -710,10 +744,10 @@ return of the value, cannot fail
   `Reg::new` the entries of the `Reg`, and the entry that built the boot
   memory map its banks and reservations. Each call of `next` advances only
   the iterator's own cursor and does not fail.
-- `discover_memory`, `discover_pi5_boot_memory`, `discover_cpus`,
-  `MemoryPlan::all_ram`, `new` and `from_pi5` fill their local result value
-  while they check, and may fail with any error of their order in
-  [Rejection and error priority](#rejection-and-error-priority) after
+- `discover_memory`, `discover_boot_memory`, `discover_cpus`,
+  `MemoryPlan::all_ram`, `new` and `from_boot_memory` fill their local
+  result value while they check, and may fail with any error of their
+  order in [Rejection and error priority](#rejection-and-error-priority) after
   they have put a part of it there, such as `BadProperty`, `NoMemory` or
   `MissingProperty` after the RAM ranges of `discover_memory`, or
   `Overflow`, `OutsideRam` or `Overlap` after the RAM banks of `all_ram`.
@@ -753,26 +787,27 @@ $N \le T$ nodes. They bound the number of steps, not the time.
   of the property and parent lookups above for each child and for
   `/reserved-memory` itself. It compares each RAM range with at most $M$
   others.
-- `Fdt::discover_pi5_boot_memory` makes the root lookup of `find_node`, its
-  cell and `compatible` lookups, reads the `compatible` value once, makes a
-  fixed number of comparisons of the tree and the image, calls
+- `Fdt::discover_boot_memory` makes the root lookup of `find_node`, its
+  cell and `compatible` lookups, reads the `compatible` value once and
+  compares each entry that the profile requires with each of its entries
+  once, makes a fixed number of comparisons of the tree and the image, calls
   `discover_memory` once, compares the tree and the image each with at most
-  $M$ RAM ranges and sums at most $M$ ranges. `Pi5BootMemory::is_available`
+  $M$ RAM ranges and sums at most $M$ ranges. `BootMemory::is_available`
   makes at most $M + Q + 2$ comparisons: the span with each RAM range, the
   tree, the image and each reserved region. `find_available` tries, in each
   RAM range, at most $Q + 3$ candidates, each compared with the image, the
   tree and $Q$ regions.
 - `Fdt::discover_cpus` reads the children of `/cpus`, each at most once,
-  with at most five lookups of each; `validate_qemu_timers` reads at most
+  with at most five lookups of each; `validate_timers` reads at most
   5 records; `logical_id` and `affinity` make a fixed number of steps.
 - `MemoryPlan::all_ram` reads at most 32 banks, each compared with the
   earlier ones, and sorts them once; it reads at most 4 boot storage spans,
   each compared with the earlier ones, and at most 128 firmware
   reservations, each compared with the boot storage. `MemoryPlan::new` makes
   a fixed number of checks of its window, calls `all_ram` once and
-  compares the window with at most 32 banks; `from_pi5` builds at most 4
-  spans of boot storage and calls `new` once. The queries compare a range
-  with at most 32 banks and 132 reservations. `available_ranges` yields at
+  compares the window with at most 32 banks; `from_boot_memory` builds at
+  most 4 spans of boot storage and calls `new` once. The queries compare a
+  range with at most 32 banks and 132 reservations. `available_ranges` yields at
   most one range for each managed bank and each reservation, 164 in all.
   Its cursor only moves forward within a bank, so in each bank at most 132
   of its passes over the 132 reservations move the cursor past a
@@ -784,8 +819,8 @@ $N \le T$ nodes. They bound the number of steps, not the time.
   `Node::name`, `Span::new`, `end` and `contains`, `cells_u64`,
   `AddressMap::kind`, `CpuProfile::affinity_shift` and `conduit`,
   `CpuTopology::count` and `profile`, and the accessors of `MemoryMap`,
-  `Pi5BootMemory` and `MemoryPlan`, such as `MemoryMap::ram`,
-  `Pi5BootMemory::dtb` and `MemoryPlan::managed_banks`.
+  `BootMemory` and `MemoryPlan`, such as `MemoryMap::ram`,
+  `BootMemory::dtb` and `MemoryPlan::managed_banks`.
   `MemoryPlan::described_bytes` and `managed_bytes` each sum at most 32
   banks.
 - The component has no long operation: every entry runs to its end on the
@@ -823,7 +858,7 @@ cites no entry of the register of
 | Field | Class | Lock or owner | Linearization point | Publication |
 | --- | --- | --- | --- | --- |
 | The bytes of the hand-over tree | Shared, read-only | No writer while the kernel runs: the firmware or QEMU's loader writes them before the entry of the image, and the boot memory map keeps their pages as boot storage, so that no allocation reuses them | The hand-over, before the cold entry | Once, before the kernel reads them; they never change afterwards |
-| The tree `Fdt`, its `Node` values, a `MemoryMap` and a `Pi5BootMemory` | Per-CPU, of the boot CPU | The boot CPU, which builds them while it boots | - | `none`: their single owner never changes |
+| The tree `Fdt`, its `Node` values, a `MemoryMap` and a `BootMemory` | Per-CPU, of the boot CPU | The boot CPU, which builds them while it boots | - | `none`: their single owner never changes |
 | The boot memory map, a `MemoryPlan` | Shared, immutable once built | The boot CPU builds it; afterwards every CPU only reads it | The return of the entry that builds it | Once, before the secondary CPUs start; it never changes afterwards |
 | The CPU topology, a `CpuTopology` | Shared, immutable once built | The boot CPU builds it; the start of the secondary CPUs reads it | The return of `discover_cpus` on the tree of the hand-over bytes | Once, before the first secondary CPU starts; it never changes afterwards |
 
@@ -854,8 +889,8 @@ afterwards.
   ranges, the image and the tree as boot storage and the reserved regions
   as firmware reservations, whose usable ranges leave out the hole. The
   8 GB model is covered by the vector `fdt-pi5-platform-1`, a tree with
-  its three ranges through `discover_pi5_boot_memory` and
-  `MemoryPlan::from_pi5`.
+  its three ranges through `discover_boot_memory` with the hand-over profile
+  of the Pi 5 and `MemoryPlan::from_boot_memory`.
 - A tree with the three ranges and the two reserved regions of the 8 GB
   hand-over tree is accepted, and the region of 62 bytes, which lies in the
   hole, is kept and excluded. The test may give that region as an entry of
@@ -954,8 +989,9 @@ require:
   for the parse and for every entry on a tree, and `node=<path>` for an
   entry on a node; then the other arguments of the entry, each
   `<name>=<value>`, in the order in which the rule sections of this page
-  write its parameters, such as `discover_pi5_boot_memory(dtb_address,
-  image)` in [Memory discovery](#memory-discovery):
+  write its parameters, such as `discover_boot_memory(hand_over,
+  dtb_address, image)` in [Memory discovery](#memory-discovery), whose
+  profile the name of the entry gives (below):
   `entry=discover_pi5_boot_memory dtb=<bytes> dtb_address=0x200000
   image=0x80000+0x20000`. It ends with `ask=` and the fields and queries
   that the case asks, joined by `,`.
@@ -993,10 +1029,12 @@ require:
   `entries`, its spans, and `end(<i>)`, `Span::end` of its entry `i`,
   counted from 0; an address map gives `kind`, `Absent`, `Identity` or
   `Windows`; `cells_u64` gives `value`; `logical_id` gives `id`, `-` for
-  none. A profile is `QemuHvc`, `QemuSmc` or `Pi5`. `find_available` takes
+  none. A profile is `QemuHvc`, `QemuSmc` or `Pi5`, a CPU profile of the
+  table below, and the field `profile` of a topology gives the name of its
+  profile. `find_available` takes
   the arguments of `discover_pi5_boot_memory` and then its own, and gives
   `span`; `validate_qemu_timers` takes the profile of `discover_cpus` and
-  then `interrupts`. A query of a Pi 5 boot memory is
+  then `interrupts`. A query of a boot memory is
   `is_available(<span>)`, `true` or `false`. `total_size` of the parse,
   the number of dynamic reservations, a count and a logical ID are
   decimal; `ram_bytes`, an affinity and the arguments of `find_available`
@@ -1024,6 +1062,22 @@ require:
   whose cases reach both types names the type, as `fdt-pi5-platform-2`
   does. The rows of the device bindings, which are not part of this
   component, name the owner of each error that is not an `Error`.
+- The vectors keep the names that the prototype tree gave the entries that
+  take the profile of a board: `entry=discover_pi5_boot_memory` is
+  `Fdt::discover_boot_memory` with the hand-over profile of the Pi 5 below,
+  and `find_available` and `from_pi5` are `BootMemory::find_available` and
+  `MemoryPlan::from_boot_memory` on its result; `validate_qemu_timers` is
+  `CpuTopology::validate_timers`. The tables below name the entries of this
+  page.
+
+The profiles of the boards in the vectors, which the tests give the entries:
+
+| Name in the vectors | Profile |
+| --- | --- |
+| `discover_pi5_boot_memory` | The hand-over profile of the Pi 5: `max_blob_size` 128 KiB, `alignment_log2` 3, and the `compatible` entries `raspberrypi,5-model-b` and `brcm,bcm2712`, each followed by a NUL |
+| `Pi5` | The CPU profile of the Pi 5: `Smc`, `Aff1`, `cpu_counts` with bit 4 alone (4 CPUs), `cpu0_enable_method` set, no timer interrupts |
+| `QemuHvc` | The CPU profile of QEMU virt with PSCI over HVC: `Hvc`, `Aff0`, `cpu_counts` with bits 1, 2 and 4, `cpu0_enable_method` not set, the timer interrupts 13, 14, 11 and 10 |
+| `QemuSmc` | The CPU profile of QEMU virt with EL2 and PSCI over SMC: `Smc`, `Aff0`, `cpu_counts` with bits 1, 2 and 4, `cpu0_enable_method` not set, the timer interrupts 13, 14, 11, 10 and 12 |
 
 ### Behaviour changes
 
@@ -1100,7 +1154,7 @@ cells and 0 size cells, unless a case states 1, CPU nodes with the
 | `fdt-cpus-3` | `cpu_status_model_and_enable_method_are_required` | The Pi 5 tree with CPU 2 disabled, with the `enable-method` `spin-table` or with the `compatible` `arm,cortex-a53`: rejected | `Fdt::discover_cpus` |
 | `fdt-cpus-4` | `cpu_reg_cell_width_is_checked_without_truncation` | The Pi 5 tree with 1 and with 2 address cells: count 4. With the ID `0x100000300`: rejected | `Fdt::discover_cpus` |
 | `fdt-cpus-5` | `register_flags_do_not_change_logical_identity` | For IDs 0 to 3 and the flags 0, `0x1000000`, `0x40000000`, `0x80000000` and `0xc1000000`: `logical_id` of the Pi 5 of the flags with `id << 8` is the ID, and of the HVC profile of the flags with the ID is the ID. `logical_id` of the Pi 5 of `0x1`, `0x101`, `0x400`, `0x10000` and `0x100000000`: none | `CpuProfile::logical_id` |
-| `fdt-cpus-6` | `qemu_timer_records_follow_profile_and_admitted_cpus` | For each QEMU profile and 1, 2 or 4 CPUs, the records of type 1 for the private interrupts 13, 14, 11 and 10, and 12 for the SMC profile, with the flags `((1 << count) - 1) << 8 \| 4`: accepted. Rejected: the records cut to 0 bytes, 12 bytes, one byte short and one record short; one record added; any word with its lowest bit inverted; the byte of the CPU mask of the first record with its lowest bit inverted; and the valid records for the Pi 5 topology | `CpuTopology::validate_qemu_timers` |
+| `fdt-cpus-6` | `qemu_timer_records_follow_profile_and_admitted_cpus` | For each QEMU profile and 1, 2 or 4 CPUs, the records of type 1 for the private interrupts 13, 14, 11 and 10, and 12 for the SMC profile, with the flags `((1 << count) - 1) << 8 \| 4`: accepted. Rejected: the records cut to 0 bytes, 12 bytes, one byte short and one record short; one record added; any word with its lowest bit inverted; the byte of the CPU mask of the first record with its lowest bit inverted; and the valid records for the Pi 5 topology | `CpuTopology::validate_timers` |
 
 ### Pi 5 boot memory vectors
 
@@ -1113,28 +1167,28 @@ others.
 
 | Vector | Test | Expected output | Entry |
 | --- | --- | --- | --- |
-| `fdt-pi5-1` | `retains_high_ram_and_excludes_all_boot_and_firmware_storage` | A reservation entry `0x200000+0x20000`; RAM `0x0+0x100000000`, `0x100000000+0x100000000` and `0x300000000+0x100000`; `atf@0` `0x0+0x80000` with `no-map` and `pool@100000000` `0x100000000+0x10000` with `reusable`; a PCIe node of 3 address cells with a child `ethernet@0`, which is no RAM. 3 RAM ranges, the second `0x100000000+0x100000000`; `ram_bytes` `0x200100000`; `dtb` `0x200000+` the length of the tree; `image` `0x80000+0x20000`; reserved regions 0 and 1 `no-map`, 2 `reusable`. Not available: `0x0+0x1000`, the image, `0x200000+0x8`, `0x100000000+0x1000`, `0x200000000+0x1000`, `0xfffff000+0x2000` and `0x1fffff000+0x100002000`; available: `0x100010000+0x1000` | `Fdt::discover_pi5_boot_memory`, `Pi5BootMemory::is_available` |
-| `fdt-pi5-2` | `ignores_disabled_ram_and_disabled_dynamic_reservations` | RAM `0x0+0x200000000` and a second, disabled `memory@0`; a disabled `linux,cma` with a `size` of one cell and `reusable`: `ram_bytes` `0x200000000`, 1 RAM range, no reserved region and no dynamic reservation | `Fdt::discover_pi5_boot_memory` |
-| `fdt-pi5-3` | `compatibility_allows_model_revision_and_extra_compatible_entries` | A root `model` `Raspberry Pi 5 Model B Rev 1.1` and `compatible` `vendor,new-revision`, `raspberrypi,5-model-b`, `brcm,bcm2712`; RAM `0x0+0x200000000`: `ram_bytes` `0x200000000` | `Fdt::discover_pi5_boot_memory` |
-| `fdt-pi5-4` | `rejects_active_dynamic_reservations_and_conflicting_flags` | RAM `0x0+0x200000000`; a child `pool` of `/reserved-memory` with `reusable`: with a `size` of one cell, `0x4000000`, and no `reg`, the prototype gave `DynamicReservation`; this contract expects `result=ok`: `ram_bytes` `0x200000000`, no reserved region, 1 dynamic reservation (behaviour change). With `reg` `0x400000+0x1000` and `no-map`, `BadProperty` | `Fdt::discover_pi5_boot_memory` |
+| `fdt-pi5-1` | `retains_high_ram_and_excludes_all_boot_and_firmware_storage` | A reservation entry `0x200000+0x20000`; RAM `0x0+0x100000000`, `0x100000000+0x100000000` and `0x300000000+0x100000`; `atf@0` `0x0+0x80000` with `no-map` and `pool@100000000` `0x100000000+0x10000` with `reusable`; a PCIe node of 3 address cells with a child `ethernet@0`, which is no RAM. 3 RAM ranges, the second `0x100000000+0x100000000`; `ram_bytes` `0x200100000`; `dtb` `0x200000+` the length of the tree; `image` `0x80000+0x20000`; reserved regions 0 and 1 `no-map`, 2 `reusable`. Not available: `0x0+0x1000`, the image, `0x200000+0x8`, `0x100000000+0x1000`, `0x200000000+0x1000`, `0xfffff000+0x2000` and `0x1fffff000+0x100002000`; available: `0x100010000+0x1000` | `Fdt::discover_boot_memory`, `BootMemory::is_available` |
+| `fdt-pi5-2` | `ignores_disabled_ram_and_disabled_dynamic_reservations` | RAM `0x0+0x200000000` and a second, disabled `memory@0`; a disabled `linux,cma` with a `size` of one cell and `reusable`: `ram_bytes` `0x200000000`, 1 RAM range, no reserved region and no dynamic reservation | `Fdt::discover_boot_memory` |
+| `fdt-pi5-3` | `compatibility_allows_model_revision_and_extra_compatible_entries` | A root `model` `Raspberry Pi 5 Model B Rev 1.1` and `compatible` `vendor,new-revision`, `raspberrypi,5-model-b`, `brcm,bcm2712`; RAM `0x0+0x200000000`: `ram_bytes` `0x200000000` | `Fdt::discover_boot_memory` |
+| `fdt-pi5-4` | `rejects_active_dynamic_reservations_and_conflicting_flags` | RAM `0x0+0x200000000`; a child `pool` of `/reserved-memory` with `reusable`: with a `size` of one cell, `0x4000000`, and no `reg`, the prototype gave `DynamicReservation`; this contract expects `result=ok`: `ram_bytes` `0x200000000`, no reserved region, 1 dynamic reservation (behaviour change). With `reg` `0x400000+0x1000` and `no-map`, `BadProperty` | `Fdt::discover_boot_memory` |
 
 `src/fdt/pi5/tests/boundaries.rs`, 5 vectors.
 
 | Vector | Test | Expected output | Entry |
 | --- | --- | --- | --- |
-| `fdt-pi5-boundaries-1` | `rejects_missing_wrong_and_malformed_compatible_values` | With RAM `0x0+0x200000000`, a root `compatible` that is absent; `raspberrypi,4-model-b`, `brcm,bcm2711`; the Pi 5 list without its last NUL; with an empty entry between the two; with a further entry of the byte `0xff`: each rejected | `Fdt::discover_pi5_boot_memory` |
-| `fdt-pi5-boundaries-2` | `rejects_wrong_root_cells_and_oversized_handoff` | A root with 1 and 1 cells, `UnsupportedCells`; a root property of 128 KiB of zeros, so that the tree is longer than 128 KiB, `LimitExceeded` | `Fdt::discover_pi5_boot_memory` |
-| `fdt-pi5-boundaries-3` | `validates_storage_alignment_overflow_overlap_and_ram_containment` | RAM `0x0+0x400000`. The address of the tree `0x200001`, `BadAlignment`; `0xfffffffffffffff8`, `Overflow`; the image `0x200000+0x1000`, on the tree, `Overlap`; the image `0x0+0x0`, `EmptyRegion`; the image `0xffffffffffffffff+0x1`, `Overflow`; the address of the tree `0x400000`, `Unmapped`; `0x3ffff8`, `Unmapped`; the image `0x3ff000+0x2000`, `Unmapped`. With the default arguments, `is_available` of `0x0+0x0`, `EmptyRegion`, and of `0xffffffffffffffff+0x1`, `Overflow` | `Fdt::discover_pi5_boot_memory`, `Pi5BootMemory::is_available` |
-| `fdt-pi5-boundaries-4` | `rejects_overlapping_ram_aliases_and_out_of_range_regs` | A RAM `reg` `0x0+0x200000000` with `0x100000000+0x100000000`, `Overlap`; `0xffffffffffffffff+0x1`, `Overflow`; `0x0+0x0`, `EmptyRegion` | `Fdt::discover_pi5_boot_memory` |
-| `fdt-pi5-boundaries-5` | `capacity_exhaustion_never_returns_a_partial_memory_map` | One `reg` of 33 RAM ranges of 4 GiB each, `LimitExceeded`; RAM `0x0+0x200000000` and one child of `/reserved-memory` with 129 spans of one page, `LimitExceeded` | `Fdt::discover_pi5_boot_memory` |
+| `fdt-pi5-boundaries-1` | `rejects_missing_wrong_and_malformed_compatible_values` | With RAM `0x0+0x200000000`, a root `compatible` that is absent; `raspberrypi,4-model-b`, `brcm,bcm2711`; the Pi 5 list without its last NUL; with an empty entry between the two; with a further entry of the byte `0xff`: each rejected | `Fdt::discover_boot_memory` |
+| `fdt-pi5-boundaries-2` | `rejects_wrong_root_cells_and_oversized_handoff` | A root with 1 and 1 cells, `UnsupportedCells`; a root property of 128 KiB of zeros, so that the tree is longer than 128 KiB, `LimitExceeded` | `Fdt::discover_boot_memory` |
+| `fdt-pi5-boundaries-3` | `validates_storage_alignment_overflow_overlap_and_ram_containment` | RAM `0x0+0x400000`. The address of the tree `0x200001`, `BadAlignment`; `0xfffffffffffffff8`, `Overflow`; the image `0x200000+0x1000`, on the tree, `Overlap`; the image `0x0+0x0`, `EmptyRegion`; the image `0xffffffffffffffff+0x1`, `Overflow`; the address of the tree `0x400000`, `Unmapped`; `0x3ffff8`, `Unmapped`; the image `0x3ff000+0x2000`, `Unmapped`. With the default arguments, `is_available` of `0x0+0x0`, `EmptyRegion`, and of `0xffffffffffffffff+0x1`, `Overflow` | `Fdt::discover_boot_memory`, `BootMemory::is_available` |
+| `fdt-pi5-boundaries-4` | `rejects_overlapping_ram_aliases_and_out_of_range_regs` | A RAM `reg` `0x0+0x200000000` with `0x100000000+0x100000000`, `Overlap`; `0xffffffffffffffff+0x1`, `Overflow`; `0x0+0x0`, `EmptyRegion` | `Fdt::discover_boot_memory` |
+| `fdt-pi5-boundaries-5` | `capacity_exhaustion_never_returns_a_partial_memory_map` | One `reg` of 33 RAM ranges of 4 GiB each, `LimitExceeded`; RAM `0x0+0x200000000` and one child of `/reserved-memory` with 129 spans of one page, `LimitExceeded` | `Fdt::discover_boot_memory` |
 
 `src/fdt/pi5/tests/selection.rs`, 3 vectors.
 
 | Vector | Test | Expected output | Entry |
 | --- | --- | --- | --- |
-| `fdt-pi5-selection-1` | `selection_skips_boot_storage_reservations_and_bank_holes` | RAM `0x0+0x400000` and `0x100000000+0x10000`; reservation entries `0x4000+0x1001`, `0x0+0x4000` and `0x100000000+0x3000`. `find_available` of size `0x2000`, alignment `0x1000`, in `[0, 0x10000)`: `0x6000+0x2000`; in `[0x80000, 0x200000)`: a span that starts at `0xa0000`, the end of the image; of size `0x1000` in `[0x200000, 0x400000)`: a span at or above the end of the tree that `is_available` accepts; of size `0x2000` in `[0x3ff000, 0x100005000)`: `0x100003000+0x2000`; in `[0x3ff000, 0x100004000)`: none | `Pi5BootMemory::find_available` and `is_available` |
-| `fdt-pi5-selection-2` | `selection_rejects_invalid_bounds_alignment_and_overflow` | RAM `0x0+0x200000000`. Size 0, `EmptyRegion`; minimum equal to the limit, `EmptyRegion`; alignments 0, 3 and 4095, `BadAlignment`; size 4096 with the minimum `0xfffffffffffffffe`, `Overflow`; size `0xffffffffffffffff`, none | `Pi5BootMemory::find_available` |
-| `fdt-pi5-selection-3` | `selection_preserves_reusable_reservations_and_full_capacity` | RAM `0x0+0x200000000` and 128 `reusable` regions of one page each from `0x400000`: accepted. `find_available` of size 32768, alignment 4096, in `[0x400000, 0x10000000)`: a span that starts at `0x480000` and is available | `Fdt::discover_pi5_boot_memory`, `Pi5BootMemory::find_available` and `is_available` |
+| `fdt-pi5-selection-1` | `selection_skips_boot_storage_reservations_and_bank_holes` | RAM `0x0+0x400000` and `0x100000000+0x10000`; reservation entries `0x4000+0x1001`, `0x0+0x4000` and `0x100000000+0x3000`. `find_available` of size `0x2000`, alignment `0x1000`, in `[0, 0x10000)`: `0x6000+0x2000`; in `[0x80000, 0x200000)`: a span that starts at `0xa0000`, the end of the image; of size `0x1000` in `[0x200000, 0x400000)`: a span at or above the end of the tree that `is_available` accepts; of size `0x2000` in `[0x3ff000, 0x100005000)`: `0x100003000+0x2000`; in `[0x3ff000, 0x100004000)`: none | `BootMemory::find_available` and `is_available` |
+| `fdt-pi5-selection-2` | `selection_rejects_invalid_bounds_alignment_and_overflow` | RAM `0x0+0x200000000`. Size 0, `EmptyRegion`; minimum equal to the limit, `EmptyRegion`; alignments 0, 3 and 4095, `BadAlignment`; size 4096 with the minimum `0xfffffffffffffffe`, `Overflow`; size `0xffffffffffffffff`, none | `BootMemory::find_available` |
+| `fdt-pi5-selection-3` | `selection_preserves_reusable_reservations_and_full_capacity` | RAM `0x0+0x200000000` and 128 `reusable` regions of one page each from `0x400000`: accepted. `find_available` of size 32768, alignment 4096, in `[0x400000, 0x10000000)`: a span that starts at `0x480000` and is available | `Fdt::discover_boot_memory`, `BootMemory::find_available` and `is_available` |
 
 `src/fdt/pi5/tests/firmware.rs`, 2 vectors, both ignored tests whose input
 lies outside the prototype tree: the two trees that the Raspberry Pi
@@ -1144,15 +1198,15 @@ trees merged from them with overlays of a boot configuration, `c1.dtb`,
 
 | Vector | Test | Expected output | Entry |
 | --- | --- | --- | --- |
-| `fdt-pi5-firmware-1` | `source_firmware_rejects_dynamic_reservations` | For each of the two shipped trees, the prototype gave `DynamicReservation`; this contract expects `result=ok` with one dynamic reservation (behaviour change). For `bcm2712-rpi-5-b.dtb`, whose bytes are equal in the firmware commits that [References](#references) names: RAM `0x0+0x28000000`, the placeholder; one reserved region, `0x0+0x80000/no-map`; `dtb` `0x200000+0x133b2`; `ram_bytes` 640 MiB. The other fields of `bcm2712d0-rpi-5-b.dtb` follow from that file | `Fdt::discover_pi5_boot_memory` |
-| `fdt-pi5-firmware-2` | `merged_firmware_preserves_placeholder_ram_and_boot_exclusions` | For each merged tree: RAM `0x0+0x28000000`; `ram_bytes` 640 MiB; one reserved region, `0x0+0x80000/no-map`; `image` as given; `dtb` `0x200000+` the length of the file; not available: the region, the image, the tree and `0x28000000+0x1000`; available `0x100000+0x1000`; no reservation entry; `/reserved-memory/linux,cma` disabled. `MemoryPlan::from_pi5` with the window `0x0+0x8000000`: the first RAM bank 640 MiB long; the region, the image and the tree do not permit backing, `0x100000+0x1000` does. Its assertions on the Pi 5 kernel resources, the UART at `0x107d001000`, the GIC distributor at `0x107fff9000` and no high page, are not part of this component: they go with the [Pi 5 board support](../README.md#qemu-virt-and-pi-5-board-support) | `Fdt::discover_pi5_boot_memory`, `Pi5BootMemory::is_available`, `Fdt::reservations`, `find_node`, `Node::enabled`, `MemoryPlan::from_pi5` and `permits_backing` |
+| `fdt-pi5-firmware-1` | `source_firmware_rejects_dynamic_reservations` | For each of the two shipped trees, the prototype gave `DynamicReservation`; this contract expects `result=ok` with one dynamic reservation (behaviour change). For `bcm2712-rpi-5-b.dtb`, whose bytes are equal in the firmware commits that [References](#references) names: RAM `0x0+0x28000000`, the placeholder; one reserved region, `0x0+0x80000/no-map`; `dtb` `0x200000+0x133b2`; `ram_bytes` 640 MiB. The other fields of `bcm2712d0-rpi-5-b.dtb` follow from that file | `Fdt::discover_boot_memory` |
+| `fdt-pi5-firmware-2` | `merged_firmware_preserves_placeholder_ram_and_boot_exclusions` | For each merged tree: RAM `0x0+0x28000000`; `ram_bytes` 640 MiB; one reserved region, `0x0+0x80000/no-map`; `image` as given; `dtb` `0x200000+` the length of the file; not available: the region, the image, the tree and `0x28000000+0x1000`; available `0x100000+0x1000`; no reservation entry; `/reserved-memory/linux,cma` disabled. `MemoryPlan::from_boot_memory` with the window `0x0+0x8000000`: the first RAM bank 640 MiB long; the region, the image and the tree do not permit backing, `0x100000+0x1000` does. Its assertions on the Pi 5 kernel resources, the UART at `0x107d001000`, the GIC distributor at `0x107fff9000` and no high page, are not part of this component: they go with the [Pi 5 board support](../README.md#qemu-virt-and-pi-5-board-support) | `Fdt::discover_boot_memory`, `BootMemory::is_available`, `Fdt::reservations`, `find_node`, `Node::enabled`, `MemoryPlan::from_boot_memory` and `permits_backing` |
 
 `src/fdt/pi5/tests/platform.rs`, 2 vectors, through the boot memory map.
 
 | Vector | Test | Expected output | Entry |
 | --- | --- | --- | --- |
-| `fdt-pi5-platform-1` | `kernel_projection_preserves_discovered_banks_and_excludes_boot_pages` | The three RAM ranges of the 8 GB model, `0x0+0x3fc00000`, `0x40000000+0xc0000000` and `0x100000000+0x100000000`, and a reservation entry `0x0+0x80000`; `from_pi5` with the window `0x0+0x8000000` and no further boot storage: 3 RAM banks; the first boot range is the image, `0x80000+0x20000`; the pages at 0, at the start of the image and at the start of the tree do not permit backing, `0x400000+0x1000` does; `0x3fc00000+0x1000`, in the hole, is not available; `0x100000000+0x1000` is available and does not permit backing | `Fdt::discover_pi5_boot_memory`, `MemoryPlan::from_pi5`, `ram`, `boot_ranges`, `is_available` and `permits_backing` |
-| `fdt-pi5-platform-2` | `kernel_projection_rejects_boot_pages_claimed_by_firmware` | RAM `0x0+0x200000000` and a reservation entry `0x200000+0x20000` on the tree: the discovery accepts it, and `from_pi5` with the window `0x0+0x8000000` fails with `PlanError::Overlap` | `Fdt::discover_pi5_boot_memory`, `MemoryPlan::from_pi5` |
+| `fdt-pi5-platform-1` | `kernel_projection_preserves_discovered_banks_and_excludes_boot_pages` | The three RAM ranges of the 8 GB model, `0x0+0x3fc00000`, `0x40000000+0xc0000000` and `0x100000000+0x100000000`, and a reservation entry `0x0+0x80000`; `from_boot_memory` with the window `0x0+0x8000000` and no further boot storage: 3 RAM banks; the first boot range is the image, `0x80000+0x20000`; the pages at 0, at the start of the image and at the start of the tree do not permit backing, `0x400000+0x1000` does; `0x3fc00000+0x1000`, in the hole, is not available; `0x100000000+0x1000` is available and does not permit backing | `Fdt::discover_boot_memory`, `MemoryPlan::from_boot_memory`, `ram`, `boot_ranges`, `is_available` and `permits_backing` |
+| `fdt-pi5-platform-2` | `kernel_projection_rejects_boot_pages_claimed_by_firmware` | RAM `0x0+0x200000000` and a reservation entry `0x200000+0x20000` on the tree: the discovery accepts it, and `from_boot_memory` with the window `0x0+0x8000000` fails with `PlanError::Overlap` | `Fdt::discover_boot_memory`, `MemoryPlan::from_boot_memory` |
 
 ### Boot memory map vectors
 
