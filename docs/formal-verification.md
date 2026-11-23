@@ -1801,9 +1801,10 @@ axiom, and `reason`. `verification/tcb.json` has schema 1 and a list
 hand-written file, `declaration` and `reason`, or `axiom-pattern`, with
 `prefix` and `reason`, or `library-native-decision`, with `source`, the
 module of the Aeneas Lean library that declares a lemma proved by a
-native decision, `declaration`, the lemma, and `reason`. Other kinds are
-refused until the trusted base is classified, and unknown fields are
-refused in both files.
+native decision, `declaration`, the lemma, and `reason`; a `source` that
+does not start with `Aeneas.` is refused. Other kinds are refused until
+the trusted base is classified, and unknown fields are refused in both
+files.
 
 **Replay.** `leanchecker --fresh Krepi` imports the root module and checks
 again in the kernel, starting from an empty environment, every declaration
@@ -1913,9 +1914,12 @@ proof module, even when a `native-decision` item admits the axiom in the
 audit. The Aeneas Lean
 library itself declares the native-decision axioms of some of its lemmas,
 among them the `bv_mod_size` lemmas that `bv_tac` uses; a target theorem
-that depends on one of them passes the audit only with the
-`library-native-decision` item of that lemma, and the comparator then
-permits it.
+that depends on one of them fails the audit unless an item of `tcb.json`
+admits the axiom, which for such a lemma is its `library-native-decision`
+item, and the comparator then permits it. The gate does not check that
+the `file` of a `native-decision` item is a hand-written file: the review
+that the label `spec` requires checks that each item names what its kind
+is for.
 
 ### Comparator
 
@@ -3745,7 +3749,7 @@ they serve only the type checking of three qualification cases
 | Item | Role | How it is checked |
 | --- | --- | --- |
 | Lean kernel and the three standard axioms | Checks every proof | Axiom audit of every registered theorem |
-| Mathlib and the Aeneas Lean library | Mathematical definitions and models of integers, slices, `Option`, `Result` and other core items | Pinned Lake lock; library axioms appear in the audit and must be registered in `verification/axioms.json` |
+| Mathlib and the Aeneas Lean library | Mathematical definitions and models of integers, slices, `Option`, `Result` and other core items | Pinned Lake lock; library axioms appear in the audit and must be registered in `verification/axioms.json`, but for the native decisions of library lemmas, which `library-native-decision` items of `verification/tcb.json` admit |
 | Charon, the Rust nightly and Aeneas with reviewed patches | Translation of the production source into Lean | Pinned sources and binaries; qualification regression; mutants |
 | Unconstrained declarations | External functions and types without a model | Theorems hold for every interpretation; listed per target |
 | Cut points (`opaque`) | Items translated without their bodies, modelled as deterministic functions of their arguments | Each cut point has a source and a reason, which states that no statement depends on two calls with the same arguments agreeing; review checks this for a function that reads hardware or global state |

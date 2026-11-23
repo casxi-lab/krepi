@@ -1999,6 +1999,23 @@ mod tests {
             |r| r[2]["items"][0]["reason"] = json!("Another."),
             &[(rule, &item)],
         );
+        // Of an item of a library lemma, which the base has.
+        let (mut fixture, _) = registered("library-item-reason");
+        let mut values = registries();
+        let library = json!({"kind": "library-native-decision",
+            "source": "Aeneas.Tactic.Solver.BvTac.Lemmas",
+            "declaration": "Aeneas.Std.U8.bv_mod_size", "reason": "Reviewed."});
+        list(&mut values[2].1, "items").push(library);
+        let base = commit_registries(&fixture, &values);
+        values[2].1["items"][1]["reason"] = json!("Another.");
+        commit_registries(&fixture, &values);
+        let record = guard(&mut fixture, &base, &[], None);
+        let item = why("library-native-decision Aeneas.Tactic.Solver.BvTac.Lemmas \
+             Aeneas.Std.U8.bv_mod_size in tcb.json");
+        assert_eq!(failed(&record), [(rule, item.as_str())]);
+        let hash = hash(&mut fixture, &LAYOUT);
+        let labelled = guard(&mut fixture, &base, &["spec"], Some(&approval(&hash)));
+        assert_eq!(failed(&labelled), []);
     }
 
     #[test]

@@ -413,9 +413,22 @@ pub enum Item {
     },
 }
 
-/// The items of `verification/tcb.json`, `text`.
+/// The items of `verification/tcb.json`, `text`, which refuses a
+/// `library-native-decision` item whose source does not start with `Aeneas.`.
 pub fn load_tcb(text: &str) -> Result<Vec<Item>, String> {
-    registry(text, |file: &Tcb| file.schema).map(|file| file.items)
+    let items = registry(text, |file: &Tcb| file.schema)?.items;
+    let outside = items.iter().find_map(|item| match item {
+        Item::LibraryNativeDecision {
+            source,
+            declaration,
+            ..
+        } if !source.starts_with("Aeneas.") => Some(format!(
+            "library-native-decision {source} {declaration}: its source is not a module \
+             of the Aeneas Lean library"
+        )),
+        _ => None,
+    });
+    outside.map_or(Ok(items), Err)
 }
 
 /// Whether `axiom` is that of a native decision: Lean 4.35.0 adds one for
@@ -436,7 +449,8 @@ pub enum Kind {
 
 /// The allowlist, which every audit reads through [`allows`]: for each kind,
 /// in order, which of the [`Sources`] admit an axiom besides the standard
-/// ones: the case, `axioms.json`, `native-decision` and `axiom-pattern` items.
+/// ones: the case, `axioms.json`, the `native-decision` and
+/// `library-native-decision` items, and the `axiom-pattern` items.
 pub const KINDS: [(Kind, [bool; 4]); 3] = [
     (Kind::Specification, [false, false, false, false]),
     (Kind::Qualification, [true, false, false, false]),
@@ -1695,14 +1709,27 @@ mod tests {
             sources.native.insert(other.clone(), source.to_string());
             assert!(!allows(Kind::Target, &other, &sources), "{other}");
         }
-        // The registry reads the kind, with its fields alone.
-        let text = |extra: &str| {
+        // The registry reads the kind, with its fields alone and a source
+        // that starts with `Aeneas.` alone.
+        let text = |source: &str, extra: &str| {
             format!(
                 "{{\"schema\": 1, \"items\": [{{\"kind\": \"library-native-decision\", \"source\": \"{source}\", \"declaration\": \"Aeneas.Std.U8.bv_mod_size\", \"reason\": \"Reviewed.\"{extra}}}]}}"
             )
         };
-        assert_eq!(load_tcb(&text("")), Ok(vec![item(source)]));
-        assert!(load_tcb(&text(", \"file\": \"f\"")).is_err());
+        assert_eq!(load_tcb(&text(source, "")), Ok(vec![item(source)]));
+        assert!(load_tcb(&text(source, ", \"file\": \"f\"")).is_err());
+        for outside in [
+            "Krepi.Statements.P",
+            "KrepiGen.P.Funs",
+            "Aeneas",
+            "AeneasX.Y",
+        ] {
+            let refused = format!(
+                "library-native-decision {outside} Aeneas.Std.U8.bv_mod_size: its source is not \
+                 a module of the Aeneas Lean library"
+            );
+            assert_eq!(load_tcb(&text(outside, "")), Err(refused));
+        }
     }
 
     #[test]
