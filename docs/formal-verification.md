@@ -1916,10 +1916,11 @@ library itself declares the native-decision axioms of some of its lemmas,
 among them the `bv_mod_size` lemmas that `bv_tac` uses; a target theorem
 that depends on one of them fails the audit unless an item of `tcb.json`
 admits the axiom, which for such a lemma is its `library-native-decision`
-item, and the comparator then permits it. The gate does not check that
-the `file` of a `native-decision` item is a hand-written file: the review
-that the label `spec` requires checks that each item names what its kind
-is for.
+item, and the comparator then permits it. The audit takes the `file` of
+a `native-decision` item for the module that declares the axiom when its
+path ends with the file of that module, and the gate does not check that
+the file is hand-written: the review that the label `spec` requires
+checks that each item names what its kind is for.
 
 ### Comparator
 
