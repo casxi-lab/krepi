@@ -487,7 +487,7 @@ other bits as the cold entry left them, followed by `ISB`.
   writes a block; elsewhere a page. A usable range never spans two
   banks, so a block never does either.
 - The boot memory map is the value that `MemoryPlan::all_ram`, `new` or
-  `from_pi5` of the
+  `from_boot_memory` of the
   [fdt contract](../../boot-platform/fdt/contract.md#boot-memory-map)
   builds, so its usable ranges start and end on page boundaries, are
   disjoint and come in address order: the checks of `direct_map` of the
