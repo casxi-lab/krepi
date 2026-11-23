@@ -16,7 +16,8 @@ FDT-R10, the input that the specification accepts with its result and the
 input that it rejects with its error.
 
 Every theorem here is proved, and `verification/statements.json` registers
-each as `proved`. The tests are decided by the kernel on their concrete
+each as `proved`, but those of FDT-R05, FDT-R06 and FDT-R08, which are
+planned: each proof is `sorry` until a proof pull request proves it. The tests are decided by the kernel on their concrete
 inputs. The tests that parse a tree that `Builder` finishes without overwrites
 rewrite the parse into the walk of its structure block first (`parse_fast` of
 `Krepi.Proofs.Fdt.StpLemmas`), so that no decision copies a whole tree; the
@@ -66,19 +67,19 @@ public theorem discoveryRejectsEmptyStaticReservation : DiscoveryRejectsEmptySta
 
 /-! ## FDT-R05 -/
 
-public theorem pi5AcceptsTreeAtLimit : Pi5AcceptsTreeAtLimit :=
-  StpPi5.pi5AcceptsTreeAtLimit
+public theorem pi5AcceptsTreeAtLimit : Pi5AcceptsTreeAtLimit := by
+  sorry
 
-public theorem pi5RejectsTreeAboveLimit : Pi5RejectsTreeAboveLimit :=
-  StpPi5.pi5RejectsTreeAboveLimit
+public theorem pi5RejectsTreeAboveLimit : Pi5RejectsTreeAboveLimit := by
+  sorry
 
 /-! ## FDT-R06 -/
 
-public theorem pi5ModelsBuildBootMemoryMaps : Pi5ModelsBuildBootMemoryMaps :=
-  StpPi5.pi5ModelsBuildBootMemoryMaps
+public theorem pi5ModelsBuildBootMemoryMaps : Pi5ModelsBuildBootMemoryMaps := by
+  sorry
 
-public theorem bootMemoryMapRejectsRamAboveCapacity : BootMemoryMapRejectsRamAboveCapacity :=
-  StpPi5.bootMemoryMapRejectsRamAboveCapacity
+public theorem bootMemoryMapRejectsRamAboveCapacity : BootMemoryMapRejectsRamAboveCapacity := by
+  sorry
 
 /-! ## FDT-R07 -/
 
@@ -91,10 +92,10 @@ public theorem allRamRejectsExcessBootStorage : AllRamRejectsExcessBootStorage :
 /-! ## FDT-R08 -/
 
 public theorem cpusAcceptsQemuPair : CpusAcceptsQemuPair := by
-  unfold CpusAcceptsQemuPair cpusTree; rw [parse_fast0]; decide +kernel
+  sorry
 
 public theorem cpusRejectsRepeatedId : CpusRejectsRepeatedId := by
-  unfold CpusRejectsRepeatedId cpusTree; rw [parse_fast0]; decide +kernel
+  sorry
 
 /-! ## FDT-R09 -/
 

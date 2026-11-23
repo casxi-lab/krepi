@@ -3,17 +3,23 @@ module
 public import Krepi.Spec.Fdt.Discovery
 
 /-!
-# Device tree: the Pi 5 boot memory
+# Device tree: the boot memory
 
-`Fdt::discover_pi5_boot_memory` of the contract's `Memory discovery`, which
-checks the hand-over tree of a Raspberry Pi 5 against the spans that the board
-gives for the tree and for the image, and the two queries of its result,
-`Pi5BootMemory::is_available` and `find_available`, with steps 5 and 8 of the
-error order of the parse and the entries on a tree.
+`Fdt::discover_boot_memory` of the contract's `Memory discovery`, which
+checks a hand-over tree against the hand-over profile of its board and the
+spans that the board gives for the tree and for the image, and the two
+queries of its result, `BootMemory::is_available` and `find_available`, with
+steps 5 and 8 of the error order of the parse and the entries on a tree.
 
-A `Pi5BootMemory` knows the memory map of the tree, the span of the tree, the
-span of the image with its BSS and stacks, and the sum of the RAM ranges. Its
-queries exclude only the tree, the image and the reserved regions: boot
+A hand-over profile is a value that the board gives: the largest
+`totalsize` of its hand-over tree, the alignment of the address of the tree
+and the entries that the root `compatible` must hold. The specification
+holds for every profile; which values a board gives is not part of it.
+
+A `BootMemory` knows the memory map of the tree, the span of the tree, the
+span of the image with its BSS and stacks, the sum of the RAM ranges, and
+the size limit and the alignment that it was checked with. Its queries
+exclude only the tree, the image and the reserved regions: boot
 storage beyond them, such as a boot bundle that the board gives as a span of
 its own, is excluded by the boot memory map alone. A query describes memory;
 it grants no ownership.
@@ -29,28 +35,45 @@ it touches none of them again, and the bound is never reached.
 
 namespace Krepi.Spec.Fdt
 
+/-! ## The hand-over profile -/
+
+/-- `HandOverProfile`, what a board requires of its hand-over tree: the
+largest `totalsize` (`max_blob_size`); the alignment of the address of the
+tree, `2 ^ alignment_log2` bytes, so that every value is a power of two; and
+the entries that the root `compatible` must hold (`compatible`), the pieces
+of its bytes between NUL bytes, of which the empty ones require nothing.
+Every value is a profile, with the behaviour that these rules give it. -/
+structure HandOverProfile where
+  maxBlobSize : UInt64
+  alignmentLog2 : UInt8
+  compatible : ByteArray
+  deriving DecidableEq, Inhabited
+
 /-! ## The value -/
 
-/-- `Pi5BootMemory`, the result of `Fdt::discover_pi5_boot_memory`: the memory
-map of the tree, the span of the tree (`Pi5BootMemory::dtb`), the span of the
-image (`Pi5BootMemory::image`) and the sum of the RAM ranges
-(`Pi5BootMemory::ram_bytes`). -/
-structure Pi5BootMemory where
+/-- `BootMemory`, the result of `Fdt::discover_boot_memory`: the memory map
+of the tree, the span of the tree (`BootMemory::dtb`), the span of the image
+(`BootMemory::image`) and the sum of the RAM ranges (`BootMemory::ram_bytes`);
+and the size limit and the alignment of the profile that the tree was checked
+with, which no entry gives. -/
+structure BootMemory where
   memory : MemoryMap
   dtb : Span
   image : Span
   ramBytes : UInt64
+  maxBlobSize : UInt64
+  alignmentLog2 : UInt8
   deriving DecidableEq, Repr, Inhabited
 
-/-- `Pi5BootMemory::ram`: the RAM ranges of the memory map. -/
-def Pi5BootMemory.ram (m : Pi5BootMemory) : List Span := m.memory.ram
+/-- `BootMemory::ram`: the RAM ranges of the memory map. -/
+def BootMemory.ram (m : BootMemory) : List Span := m.memory.ram
 
-/-- `Pi5BootMemory::reserved`: the reserved regions of the memory map. -/
-def Pi5BootMemory.reserved (m : Pi5BootMemory) : List ReservedRegion := m.memory.reserved
+/-- `BootMemory::reserved`: the reserved regions of the memory map. -/
+def BootMemory.reserved (m : BootMemory) : List ReservedRegion := m.memory.reserved
 
-/-- `Pi5BootMemory::dynamic`: the number of dynamic reservations of the memory
+/-- `BootMemory::dynamic`: the number of dynamic reservations of the memory
 map. -/
-def Pi5BootMemory.dynamic (m : Pi5BootMemory) : UInt64 := m.memory.dynamic
+def BootMemory.dynamic (m : BootMemory) : UInt64 := m.memory.dynamic
 
 /-! ## The root `compatible` -/
 
@@ -74,40 +97,47 @@ def compatibleEntries : List (List UInt8) → Except Error (List String)
       let more ← compatibleEntries rest
       pure (s :: more)
 
-/-- The root `compatible` of a Pi 5 hand-over tree: a value that does not end
-with a NUL, `BadProperty`; then each entry in order (`compatibleEntries`);
-then a list without `raspberrypi,5-model-b` or without `brcm,bcm2712`,
-`BadProperty`. -/
-def checkPi5Compatible (value : ByteArray) : Except Error Unit := do
+/-- The entries that a profile requires of the root `compatible`: the
+nonempty pieces of `required` between its NUL bytes. -/
+def requiredEntries (required : ByteArray) : List (List UInt8) :=
+  (splitAtNul required.toList).filter (· != [])
+
+/-- The root `compatible` of a hand-over tree, against the entries
+`required` of the profile: a value that does not end with a NUL,
+`BadProperty`; then each entry in order (`compatibleEntries`); then a list
+without an entry of the bytes of each required entry, `BadProperty`. -/
+def checkCompatible (required value : ByteArray) : Except Error Unit := do
   let bytes := value.toList
   if bytes.getLast? != some 0 then throw .badProperty
   let entries ← compatibleEntries (splitAtNul bytes.dropLast)
-  if !(entries.contains "raspberrypi,5-model-b" && entries.contains "brcm,bcm2712") then
+  if !(requiredEntries required).all fun r =>
+      entries.any fun e => String.fromUTF8? ⟨r.toArray⟩ == some e then
     throw .badProperty
 
 /-! ## The discovery -/
 
-/-- `Fdt::discover_pi5_boot_memory(dtb_address, image)`: the Pi 5 boot memory
-of the tree, or the error of the first broken rule of step 5 of the error
-order. `totalsize` above `PI5_MAX_BLOB_SIZE`, `LimitExceeded`; the address of
-the tree not a multiple of 8, `BadAlignment`; the root, and a tree without one,
+/-- `Fdt::discover_boot_memory(hand_over, dtb_address, image)`: the boot
+memory of the tree, or the error of the first broken rule of step 5 of the
+error order. `totalsize` above the `max_blob_size` of the profile,
+`LimitExceeded`; the address of the tree not a multiple of
+`2 ^ alignment_log2`, `BadAlignment`; the root, and a tree without one,
 which the parse never builds, `BadTree`; the address cells of the root, a value
 that is not 4 bytes `BadProperty`, then a number other than 2
 `UnsupportedCells`, and then its size cells in the same way; the root
-`compatible`: absent, `MissingProperty`, then `checkPi5Compatible`; the span of
+`compatible`: absent, `MissingProperty`, then `checkCompatible`; the span of
 the tree, `Overflow`; the image, `EmptyRegion` then `Overflow`; the image
 sharing an address with the tree, `Overlap`; `Fdt::discover_memory`, with its
 errors; the tree, then the image, outside every single RAM range, `Unmapped`;
 the sum of the RAM ranges, `Overflow`. -/
-def Fdt.discoverPi5BootMemory (t : Fdt) (dtbAddress : UInt64) (image : Span) :
-    Except Error Pi5BootMemory := do
-  if PI5_MAX_BLOB_SIZE < t.totalSize then throw .limitExceeded
-  if dtbAddress % 8 != 0 then throw .badAlignment
+def Fdt.discoverBootMemory (t : Fdt) (handOver : HandOverProfile) (dtbAddress : UInt64)
+    (image : Span) : Except Error BootMemory := do
+  if handOver.maxBlobSize < t.totalSize then throw .limitExceeded
+  if dtbAddress.toNat % 2 ^ handOver.alignmentLog2.toNat != 0 then throw .badAlignment
   let some root ← t.findNode "/" | throw .badTree
   if (← root.addressCells) != 2 then throw .unsupportedCells
   if (← root.sizeCells) != 2 then throw .unsupportedCells
   let some compatible := root.property "compatible" | throw .missingProperty
-  checkPi5Compatible compatible
+  checkCompatible handOver.compatible compatible
   let dtb ← Span.new dtbAddress t.totalSize
   if image.size = 0 then throw .emptyRegion
   let _ ← image.endAddr
@@ -116,20 +146,21 @@ def Fdt.discoverPi5BootMemory (t : Fdt) (dtbAddress : UInt64) (image : Span) :
   if !inOneRange memory.ram dtb then throw .unmapped
   if !inOneRange memory.ram image then throw .unmapped
   let ramBytes ← memory.ram.foldlM (fun sum s => checkedAdd sum s.size.toNat) 0
-  pure { memory, dtb, image, ramBytes := UInt64.ofNat ramBytes }
+  pure { memory, dtb, image, ramBytes := UInt64.ofNat ramBytes,
+         maxBlobSize := handOver.maxBlobSize, alignmentLog2 := handOver.alignmentLog2 }
 
 /-! ## Availability -/
 
-/-- The spans that a query of the Pi 5 boot memory excludes: the image, the
+/-- The spans that a query of the boot memory excludes: the image, the
 tree and every reserved region, `reusable` ones included. -/
-def Pi5BootMemory.exclusions (m : Pi5BootMemory) : List Span :=
+def BootMemory.exclusions (m : BootMemory) : List Span :=
   m.image :: m.dtb :: m.reserved.map (·.span)
 
-/-- `Pi5BootMemory::is_available(span)`: a span of size 0, `EmptyRegion`; then
+/-- `BootMemory::is_available(span)`: a span of size 0, `EmptyRegion`; then
 one whose end leaves 64 bits, `Overflow`; otherwise whether it lies inside one
 RAM range and touches neither the tree, nor the image, nor any reserved
 region. -/
-def Pi5BootMemory.isAvailable (m : Pi5BootMemory) (s : Span) : Except Error Bool :=
+def BootMemory.isAvailable (m : BootMemory) (s : Span) : Except Error Bool :=
   if s.size = 0 then .error .emptyRegion
   else if ¬ s.Valid then .error .overflow
   else .ok (inOneRange m.ram s && !m.exclusions.any (·.touches s))
@@ -155,7 +186,7 @@ exclusion that it touches, aligned up (`alignUp`, which fails with
 `Overflow`): every start before that end touches that exclusion too. Out of
 fuel, `LimitExceeded`, which `findAvailable` never reaches: each candidate
 after the first lies past every exclusion that an earlier one touched. -/
-def Pi5BootMemory.searchRange (m : Pi5BootMemory) (size alignment bound : Nat) :
+def BootMemory.searchRange (m : BootMemory) (size alignment bound : Nat) :
     (fuel start : Nat) → Except Error (Option Span)
   | 0, _ => .error .limitExceeded
   | fuel + 1, start =>
@@ -172,7 +203,7 @@ def Pi5BootMemory.searchRange (m : Pi5BootMemory) (size alignment bound : Nat) :
 candidate is the greater of the start of the range and `minimum`, aligned up
 (`alignUp`, which fails with `Overflow`), and the search tries at most
 `Q + 3` candidates; the first range that has a span gives it. -/
-def Pi5BootMemory.searchRanges (m : Pi5BootMemory) (size alignment minimum limit : Nat) :
+def BootMemory.searchRanges (m : BootMemory) (size alignment minimum limit : Nat) :
     List Span → Except Error (Option Span)
   | [] => .ok none
   | r :: rest => do
@@ -181,7 +212,7 @@ def Pi5BootMemory.searchRanges (m : Pi5BootMemory) (size alignment minimum limit
     | some s => pure (some s)
     | none => m.searchRanges size alignment minimum limit rest
 
-/-- `Pi5BootMemory::find_available(size, alignment, minimum, limit)`: a size
+/-- `BootMemory::find_available(size, alignment, minimum, limit)`: a size
 of 0 or an empty bound, `minimum` at or above `limit`, `EmptyRegion`; an
 alignment that is not a power of two, `BadAlignment`; then the search, whose
 alignments fail with `Overflow`. The span has `size` bytes, starts at a
@@ -189,7 +220,7 @@ multiple of `alignment`, lies within `[minimum, limit)` and inside one RAM
 range, and touches neither the image, nor the tree, nor any reserved region;
 it is the one with the lowest start in the first RAM range, in tree order,
 that has one, and none when no range has one. -/
-def Pi5BootMemory.findAvailable (m : Pi5BootMemory) (size alignment minimum limit : UInt64) :
+def BootMemory.findAvailable (m : BootMemory) (size alignment minimum limit : UInt64) :
     Except Error (Option Span) := do
   if size = 0 || limit ≤ minimum then throw .emptyRegion
   if !isPowerOfTwo alignment then throw .badAlignment

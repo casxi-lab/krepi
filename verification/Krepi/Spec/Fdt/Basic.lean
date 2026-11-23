@@ -7,7 +7,7 @@ The values that every part of the specification of the `fdt` component
 shares, as its contract (`docs/domains/boot-platform/fdt/contract.md`) states
 them:
 
-- the nine limits of the entry table, with the values of `Format and bounds`;
+- the eight limits of the entry table, with the values of `Format and bounds`;
 - the two error types of `Rejection and error priority`, `Error` with 21
   variants and `PlanError` with 7;
 - the value type `Span` with `Span::new`, `end` and `contains`, and the
@@ -56,14 +56,10 @@ the entries of the reservation map and the spans of `/reserved-memory`
 together. -/
 def MAX_RESERVED_REGIONS : UInt64 := 128
 
-/-- `PI5_MAX_BLOB_SIZE`: the largest `totalsize` of a Pi 5 hand-over tree,
-128 KiB. -/
-def PI5_MAX_BLOB_SIZE : UInt64 := 0x2_0000
-
 /-! ## Errors -/
 
 /-- `Error`: the 21 errors of the parse, the node access, the translation, the
-memory discovery, the CPU nodes and the Pi 5 boot memory, in the order of the
+memory discovery, the CPU nodes and the boot memory, in the order of the
 error table of the contract. -/
 inductive Error where
   | truncated

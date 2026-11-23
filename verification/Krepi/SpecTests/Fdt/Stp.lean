@@ -1,6 +1,7 @@
 module
 
 public import Krepi.SpecTests.Fdt.Builder
+public import Krepi.SpecTests.Fdt.Boards
 
 /-!
 # Device tree: specification tests
@@ -30,7 +31,9 @@ QEMU virt tree, makes the discovery fail (FDT-R10), so that the values of
 
 All inputs are below 1 KiB, except the two trees of FDT-R05, which are the
 limit itself: 128 KiB and 128 KiB and 1 byte, the tree of the 8 GB model
-followed by zero bytes up to that `totalsize`.
+followed by zero bytes up to that `totalsize`. The tests of the Pi 5 and of
+QEMU virt give the entries the profiles of those boards
+(`Krepi.SpecTests.Fdt.Boards`).
 -/
 
 @[expose] public section
@@ -199,11 +202,12 @@ def pi5Builder (entries ranges : List (Nat × Nat)) : Builder :=
 def ram8GB : List (Nat × Nat) :=
   [(0, 0x3fc0_0000), (0x4000_0000, 0xc000_0000), (0x1_0000_0000, 0x1_0000_0000)]
 
-/-- The Pi 5 boot memory of the tree of the 8 GB model at `PI5_DTB`, with the
-image `PI5_IMAGE`, at a `totalsize` of `size`. -/
-def pi5BootOfSize (size : Nat) : Except Error Pi5BootMemory :=
+/-- The boot memory of the tree of the 8 GB model at `PI5_DTB`, with the
+image `PI5_IMAGE` and the hand-over profile of the Pi 5, at a `totalsize` of
+`size`. -/
+def pi5BootOfSize (size : Nat) : Except Error BootMemory :=
   (Fdt.parse ((pi5Builder [(0x3fd2_31e0, 0x3e)] ram8GB).finishTo size)).bind
-    (·.discoverPi5BootMemory PI5_DTB PI5_IMAGE)
+    (·.discoverBootMemory pi5HandOver PI5_DTB PI5_IMAGE)
 
 /-- **FDT-R05, accepted.** Criterion: "a hand-over tree of exactly 128 KiB is
 accepted". The tree of the 8 GB model, with its three measured RAM ranges,
@@ -211,13 +215,15 @@ accepted". The tree of the 8 GB model, with its three measured RAM ranges,
 below 1 GiB, padded to a `totalsize` of `0x2_0000`, is accepted at
 `0x800_0000` with the image `[0x20_0000, 0x60_0000)`: the memory map keeps
 both reserved regions, the entry of the map first; the tree spans its 128 KiB;
-and `ram_bytes` is 8 GiB less 4 MiB. The input is 128 KiB long. -/
+and `ram_bytes` is 8 GiB less 4 MiB; the value holds the limit and the
+alignment of the profile. The input is 128 KiB long. -/
 def Pi5AcceptsTreeAtLimit : Prop :=
   pi5BootOfSize 0x2_0000 =
     .ok { memory := { ram := ram8GB.map spanOf,
                       reserved := [⟨⟨0x3fd2_31e0, 0x3e⟩, true, false⟩, ⟨⟨0, 0x8_0000⟩, true, false⟩],
                       dynamic := 0 },
-          dtb := ⟨0x800_0000, 0x2_0000⟩, image := PI5_IMAGE, ramBytes := 0x1_ffc0_0000 }
+          dtb := ⟨0x800_0000, 0x2_0000⟩, image := PI5_IMAGE, ramBytes := 0x1_ffc0_0000,
+          maxBlobSize := 0x2_0000, alignmentLog2 := 3 }
 
 /-- **FDT-R05, rejected.** Criterion: "one of 1 byte more fails with
 `LimitExceeded`": the same tree at a `totalsize` of `0x2_0001`, which the
@@ -253,12 +259,14 @@ def ramModels : List RamModel :=
    ⟨[(0, 0x3fc0_0000), (0x4000_0000, 0xc000_0000), (0x1_0000_0000, 0x3_0000_0000)], 0x3_ffc0_0000,
      firstRangeUsable ++ [⟨0x4000_0000, 0xc000_0000⟩, ⟨0x1_0000_0000, 0x3_0000_0000⟩]⟩]
 
-/-- The Pi 5 boot memory of the hand-over tree with the RAM ranges `ranges` and
-`atf@0` at `PI5_DTB`, with the image `PI5_IMAGE`, and the boot memory map that
-the testing obligations build from it: `MemoryPlan::all_ram` with its RAM
-ranges, the image and the tree as boot storage, and its reserved regions. -/
-def pi5Plan (ranges : List (Nat × Nat)) : Except Error (Pi5BootMemory × Except PlanError MemoryPlan) :=
-  ((Fdt.parse (pi5Builder [] ranges).finish).bind (·.discoverPi5BootMemory PI5_DTB PI5_IMAGE)).map
+/-- The boot memory of the hand-over tree with the RAM ranges `ranges` and
+`atf@0` at `PI5_DTB`, with the image `PI5_IMAGE` and the hand-over profile of
+the Pi 5, and the boot memory map that the testing obligations build from it:
+`MemoryPlan::all_ram` with its RAM ranges, the image and the tree as boot
+storage, and its reserved regions. -/
+def pi5Plan (ranges : List (Nat × Nat)) : Except Error (BootMemory × Except PlanError MemoryPlan) :=
+  ((Fdt.parse (pi5Builder [] ranges).finish).bind
+    (·.discoverBootMemory pi5HandOver PI5_DTB PI5_IMAGE)).map
     fun m => (m, MemoryPlan.allRam m.ram [m.image, m.dtb] m.reserved)
 
 /-- **FDT-R06, accepted.** Criterion: "for each of the 1, 2, 4 and 16 GB
@@ -344,17 +352,17 @@ profile with PSCI over HVC accepts the two CPUs, whose IDs are affinity level
 of QEMU virt for two CPUs, type 1, the interrupts 13, 14, 11 and 10 and the
 flags `0x304`, are accepted for that topology. -/
 def CpusAcceptsQemuPair : Prop :=
-  ((Fdt.parse (cpusTree 1)).bind (·.discoverCpus .qemuHvc)).map
-      (fun t => (t, t.validateQemuTimers
+  ((Fdt.parse (cpusTree 1)).bind (·.discoverCpus qemuHvcCpus)).map
+      (fun t => (t, t.validateTimers
         (bytesOf (cellBytes [1, 13, 0x304, 1, 14, 0x304, 1, 11, 0x304, 1, 10, 0x304])))) =
-    .ok (⟨.qemuHvc, 2⟩, .ok ())
+    .ok (⟨qemuHvcCpus, 2⟩, .ok ())
 
 /-- **FDT-R08, rejected.** Criterion: the logical IDs "run from 0 to
 `count - 1` without a gap or a repeat": the same tree with the `reg` 0 for
 `cpu@1` repeats the ID 0 and fails with `BadProperty`, where keeping one of
 the two would give a count of 1. -/
 def CpusRejectsRepeatedId : Prop :=
-  (Fdt.parse (cpusTree 0)).bind (·.discoverCpus .qemuHvc) = .error .badProperty
+  (Fdt.parse (cpusTree 0)).bind (·.discoverCpus qemuHvcCpus) = .error .badProperty
 
 /-! ## FDT-R09: address translation -/
 

@@ -1,11 +1,11 @@
 module
 
-public import Krepi.Spec.Fdt.Pi5
+public import Krepi.Spec.Fdt.BootMemory
 
 /-!
 # Device tree: the boot memory map
 
-`MemoryPlan::all_ram`, `new` and `from_pi5` of the contract's
+`MemoryPlan::all_ram`, `new` and `from_boot_memory` of the contract's
 `Boot memory map`, with the eight steps of its error order in
 `Rejection and error priority`, and the queries of the value that they build:
 `MemoryPlan::managed_banks`, `ram`, `reservations`, `boot_ranges`,
@@ -181,12 +181,12 @@ def MemoryPlan.new (window : Span) (ram boot : List Span) (firmware : List Reser
   if !plan.containsRam window then throw .outsideRam
   pure { plan with managed := [window] }
 
-/-- `MemoryPlan::from_pi5(memory, window, more)`: `MemoryPlan::new` with the
-RAM ranges of the Pi 5 boot memory, the boot storage of its image, its tree
+/-- `MemoryPlan::from_boot_memory(memory, window, more)`: `MemoryPlan::new`
+with the RAM ranges of the boot memory, the boot storage of its image, its tree
 and the further spans `more` of the board, such as the boot bundle, and its
 reserved regions as firmware reservations. More than two further spans make
 more than 4 spans of boot storage, `Capacity`. -/
-def MemoryPlan.fromPi5 (memory : Pi5BootMemory) (window : Span) (more : List Span) :
+def MemoryPlan.fromBootMemory (memory : BootMemory) (window : Span) (more : List Span) :
     Except PlanError MemoryPlan :=
   MemoryPlan.new window memory.ram (memory.image :: memory.dtb :: more) memory.reserved
 

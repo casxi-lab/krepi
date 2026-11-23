@@ -6,7 +6,7 @@ specifications:
   - Krepi.Spec.Fdt.Nodes
   - Krepi.Spec.Fdt.Translate
   - Krepi.Spec.Fdt.Discovery
-  - Krepi.Spec.Fdt.Pi5
+  - Krepi.Spec.Fdt.BootMemory
   - Krepi.Spec.Fdt.Cpus
   - Krepi.Spec.Fdt.Plan
   - Krepi.Spec.Fdt.Boot
@@ -252,7 +252,7 @@ step 4 of the error order.
 
 ### Pi5
 
-[`Pi5.lean`](../../../../verification/Krepi/Spec/Fdt/Pi5.lean):
+[`BootMemory.lean`](../../../../verification/Krepi/Spec/Fdt/BootMemory.lean):
 `Fdt::discover_pi5_boot_memory` of
 [memory discovery](contract.md#memory-discovery), its queries
 `Pi5BootMemory::is_available` and `find_available` of

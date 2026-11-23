@@ -12,7 +12,8 @@ about the boot state, whose type is exactly that statement: that the cold
 entry establishes the invariants of the boot state and that each of its
 transactions preserves them.
 
-Every theorem here is proved. The cold entry publishes nothing, so each
+Every theorem here is planned: its proof is `sorry` until a proof pull
+request proves it, from the lemmas below. The cold entry publishes nothing, so each
 invariant holds of it trivially. An enabled transaction changes one field
 and keeps the hand-over bytes: the publication of the boot memory map
 publishes a map that its entry built, well-formed by the well-formedness
@@ -79,72 +80,39 @@ theorem startSecondaries_ok {token : BootToken} {s s' : BootState}
     exact ⟨hc.1.2, hc.2, h.symm⟩
 
 public theorem coldEntryWellFormed : ColdEntryWellFormed := by
-  intro _ _ p hp
-  simp [BootState.coldEntry] at hp
+  sorry
 
 public theorem coldEntryFromHandOver : ColdEntryFromHandOver := by
-  intro _ _ t ht
-  simp [BootState.coldEntry] at ht
+  sorry
 
 public theorem coldEntryStartOrder : ColdEntryStartOrder := by
-  intro _ _ h
-  simp [BootState.coldEntry] at h
+  sorry
 
 public theorem publishPlanFromHandOver : PublishPlanFromHandOver := by
-  intro _ s _ s' hs h
-  obtain ⟨_, p, _, rfl⟩ := publishPlan_ok h
-  exact hs
+  sorry
 
 public theorem publishPlanStartOrder : PublishPlanStartOrder := by
-  intro _ s _ s' _ h
-  obtain ⟨hsec, p, _, rfl⟩ := publishPlan_ok h
-  intro h'
-  exact absurd (hsec ▸ h') (by simp)
+  sorry
 
 public theorem publishTopologyFromHandOver : PublishTopologyFromHandOver := by
-  intro _ s profile s' _ h
-  obtain ⟨_, t, ht, rfl⟩ := publishTopology_ok h
-  intro t' ht'
-  simp only [Option.some.injEq] at ht'
-  subst ht'
-  exact ⟨profile, ht⟩
+  sorry
 
 public theorem publishTopologyStartOrder : PublishTopologyStartOrder := by
-  intro _ s _ s' _ h
-  obtain ⟨hsec, t, _, rfl⟩ := publishTopology_ok h
-  intro h'
-  exact absurd (hsec ▸ h') (by simp)
+  sorry
 
 public theorem startSecondariesFromHandOver : StartSecondariesFromHandOver := by
-  intro _ s s' hs h
-  obtain ⟨_, _, rfl⟩ := startSecondaries_ok h
-  exact hs
+  sorry
 
 public theorem startSecondariesStartOrder : StartSecondariesStartOrder := by
-  intro _ s s' _ h
-  obtain ⟨hp, ht, rfl⟩ := startSecondaries_ok h
-  exact fun _ => ⟨hp, ht⟩
+  sorry
 
 public theorem publishPlanWellFormed : PublishPlanWellFormed := by
-  intro _ s build s' _ h
-  obtain ⟨_, p, hp, rfl⟩ := publishPlan_ok h
-  intro q hq
-  simp only [Option.some.injEq] at hq
-  subst hq
-  cases build with
-  | allRam ram boot firmware => exact Plan.allRamWellFormed ram boot firmware _ hp
-  | new window ram boot firmware =>
-    exact Plan.memoryPlanNewWellFormed window ram boot firmware _ hp
-  | fromPi5 memory window more => exact Plan.fromPi5WellFormed memory window more _ hp
+  sorry
 
 public theorem publishTopologyWellFormed : PublishTopologyWellFormed := by
-  intro _ s _ s' hs h
-  obtain ⟨_, t, _, rfl⟩ := publishTopology_ok h
-  exact hs
+  sorry
 
 public theorem startSecondariesWellFormed : StartSecondariesWellFormed := by
-  intro _ s s' hs h
-  obtain ⟨_, _, rfl⟩ := startSecondaries_ok h
-  exact hs
+  sorry
 
 end Krepi.Proofs.Fdt.Boot

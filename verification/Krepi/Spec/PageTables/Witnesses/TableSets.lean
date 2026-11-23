@@ -895,7 +895,7 @@ the branch, with its reason; a planned theorem below
 branch is witnessed above where another branch of the same entry gives it. -/
 
 /-- A boot memory map that an entry of the fdt specification builds:
-`MemoryPlan::all_ram`, or `MemoryPlan::new`, which `from_pi5` calls. -/
+`MemoryPlan::all_ram`, or `MemoryPlan::new`, which `from_boot_memory` calls. -/
 def BuiltPlan (p : Fdt.MemoryPlan) : Prop :=
   (∃ ram boot firmware, Fdt.MemoryPlan.allRam ram boot firmware = .ok p) ∨
     ∃ window ram boot firmware, Fdt.MemoryPlan.new window ram boot firmware = .ok p

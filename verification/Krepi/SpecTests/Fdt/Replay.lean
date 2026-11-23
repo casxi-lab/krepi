@@ -2,8 +2,10 @@ module
 
 public import Krepi.Spec.Fdt.Plan
 public import Krepi.Spec.Fdt.Cpus
+public import Krepi.SpecTests.Fdt.Boards
 public meta import Krepi.Spec.Fdt.Plan
 public meta import Krepi.Spec.Fdt.Cpus
+public meta import Krepi.SpecTests.Fdt.Boards
 
 /-!
 # Replay of the device-tree vectors
@@ -41,19 +43,24 @@ gives `Error::<variant>` as its value.
   queries `to_parent(<span>)` and `to_child(<span>)`.
 - `entry=cells_u64 bytes=<bytes> cells=<n>` asks `value`.
 - `entry=discover_memory` asks `ram`, `reserved` and `dynamic`.
-- `entry=discover_pi5_boot_memory dtb_address=<address> image=<span>` asks
+- `entry=discover_pi5_boot_memory dtb_address=<address> image=<span>` is
+  `Fdt::discover_boot_memory` with the hand-over profile of the Pi 5, and asks
   `ram`, `reserved`, `dynamic`, `dtb`, `image`, `ram_bytes` and the query
   `is_available(<span>)`; `entry=find_available` with the same arguments and
   then `size`, `alignment`, `minimum` and `limit` asks `span`, `-` for none,
-  and the same query of the Pi 5 boot memory.
+  and the same query of the boot memory.
 - `entry=discover_cpus profile=<profile>` asks `count`, `profile` and
-  `affinity(<i>)`, `-` for none; `entry=validate_qemu_timers` with the same
-  argument and then `interrupts=<bytes>` asks nothing;
+  `affinity(<i>)`, `-` for none; `entry=validate_qemu_timers` is
+  `CpuTopology::validate_timers`, with the same argument and then
+  `interrupts=<bytes>`, and asks nothing;
   `entry=logical_id profile=<profile> mpidr=<value>` asks `id`, `-` for none.
-  A profile is `QemuHvc`, `QemuSmc` or `Pi5`.
+  A profile is `QemuHvc`, `QemuSmc` or `Pi5`, the names of the CPU profiles of
+  `Krepi.SpecTests.Fdt.Boards`, and `profile` gives the name of the profile
+  that the topology holds.
 - `entry=all_ram ram=<spans> boot=<spans> firmware=<regions>` and
   `entry=MemoryPlan::new` with `window=<span>` before them, and
-  `entry=from_pi5` with the arguments of `discover_pi5_boot_memory` and then
+  `entry=from_pi5`, `MemoryPlan::from_boot_memory` on the boot memory of the
+  arguments of `discover_pi5_boot_memory`, with those arguments and then
   `window=<span> more=<spans>`, ask the fields `ram`, `managed`, `boot`,
   `firmware`, `reservations` and `available`, lists of spans;
   `described_bytes`, `managed_bytes` and `available_bytes`, the sum of the
@@ -160,12 +167,13 @@ def query (s : String) : Option (String × String) :=
     | _ => none
   | _ => none
 
+/-- The CPU profiles of the vectors with their names. -/
+def profiles : List (String × CpuProfile) :=
+  [("QemuHvc", qemuHvcCpus), ("QemuSmc", qemuSmcCpus), ("Pi5", pi5Cpus)]
+
 /-- A CPU profile by its name. -/
-def profile : String → Option CpuProfile
-  | "QemuHvc" => some .qemuHvc
-  | "QemuSmc" => some .qemuSmc
-  | "Pi5" => some .pi5
-  | _ => none
+def profile (name : String) : Option CpuProfile :=
+  (profiles.find? (·.1 == name)).map (·.2)
 
 /-! ## Writing the output -/
 
@@ -190,11 +198,9 @@ def regionsText (regions : List ReservedRegion) : String :=
 /-- A truth value. -/
 def boolText (b : Bool) : String := if b then "true" else "false"
 
-/-- The name of a CPU profile. -/
-def profileText : CpuProfile → String
-  | .qemuHvc => "QemuHvc"
-  | .qemuSmc => "QemuSmc"
-  | .pi5 => "Pi5"
+/-- The name of a CPU profile of the vectors, `-` for another. -/
+def profileText (p : CpuProfile) : String :=
+  ((profiles.find? (·.2 == p)).map (·.1)).getD "-"
 
 /-- The name of the kind of an address map. -/
 def kindText : MappingKind → String
@@ -263,8 +269,8 @@ def memoryAnswer (m : MemoryMap) : String → Option String
   | "dynamic" => some (toString m.dynamic.toNat)
   | _ => none
 
-/-- The fields and queries of a Pi 5 boot memory. -/
-def pi5Answer (m : Pi5BootMemory) : String → Option String
+/-- The fields and queries of a boot memory. -/
+def bootMemoryAnswer (m : BootMemory) : String → Option String
   | "dtb" => some (spanText m.dtb)
   | "image" => some (spanText m.image)
   | "ram_bytes" => some (hex m.ramBytes.toNat)
@@ -364,14 +370,14 @@ def treeCase (t : Fdt) (entry : String) (fs : List (String × String)) (ask : Li
   | "discover_pi5_boot_memory" | "find_available" | "from_pi5" =>
     let some dtbAddress := (field fs "dtb_address").bind number64 | return "result=malformed dtb_address"
     let some image := (field fs "image").bind span | return "result=malformed image"
-    let memory := t.discoverPi5BootMemory dtbAddress image
-    if entry == "discover_pi5_boot_memory" then return outcome memory ask pi5Answer
+    let memory := t.discoverBootMemory pi5HandOver dtbAddress image
+    if entry == "discover_pi5_boot_memory" then return outcome memory ask bootMemoryAnswer
     if entry == "from_pi5" then
       let some window := (field fs "window").bind span | return "result=malformed window"
       let some more := (field fs "more").bind spans | return "result=malformed more"
       let plan : Except String MemoryPlan := match memory with
         | .error e => .error ("Error::" ++ e.name)
-        | .ok m => (MemoryPlan.fromPi5 m window more).mapError ("PlanError::" ++ ·.name)
+        | .ok m => (MemoryPlan.fromBootMemory m window more).mapError ("PlanError::" ++ ·.name)
       return outcomeAs id plan ask planAnswer
     let some size := (field fs "size").bind number64 | return "result=malformed size"
     let some alignment := (field fs "alignment").bind number64 | return "result=malformed alignment"
@@ -381,13 +387,13 @@ def treeCase (t : Fdt) (entry : String) (fs : List (String × String)) (ask : Li
       let m ← memory
       pure (m, ← m.findAvailable size alignment minimum limit)
     return outcome selected ask fun (m, s) a =>
-      if a == "span" then some (s.elim "-" spanText) else pi5Answer m a
+      if a == "span" then some (s.elim "-" spanText) else bootMemoryAnswer m a
   | "discover_cpus" | "validate_qemu_timers" =>
     let some p := (field fs "profile").bind profile | return "result=malformed profile"
     let topology := t.discoverCpus p
     if entry == "discover_cpus" then return outcome topology ask topologyAnswer
     let some interrupts := (field fs "interrupts").bind hexBytes | return "result=malformed interrupts"
-    return outcome (topology.bind (·.validateQemuTimers interrupts)) ask fun _ _ => none
+    return outcome (topology.bind (·.validateTimers interrupts)) ask fun _ _ => none
   | _ => return nodeCase t entry fs ask
 
 /-- The cells argument `key` of an entry without a tree. -/
