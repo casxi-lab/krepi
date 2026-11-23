@@ -59,6 +59,12 @@ const MUTANT: &str = "/mutant/";
 /// in its work directory, before the receipt is written.
 pub const DRAFT: &str = "mutants.json";
 
+/// The build directory of a Lake project, below the project.
+const BUILD: &str = ".lake/build";
+
+/// The build of a target that the stage of each of its mutants starts from.
+const SEED: &str = "the build that seeded the mutants";
+
 /// The unit of the registered mutant `mutant` of the target `target`.
 pub fn unit(target: &str, mutant: &str) -> String {
     format!("{}{MUTANT}{mutant}", run::target_unit(target))
@@ -246,13 +252,15 @@ fn at(path: &Path) -> impl Fn(std::io::Error) -> String + '_ {
     move |error| format!("{}: {error}", path.display())
 }
 
-/// A mutant: an edit of a file of the package of its target, and the
-/// theorems of which one must fail.
+/// A mutant: an edit of a file of the package of its target, the theorems
+/// of which one must fail, and the build of the target that its stage
+/// starts from, if there is one.
 struct Mutation<'a> {
     file: &'a str,
     find: &'a str,
     replace: &'a str,
     fails: &'a [String],
+    seed: Option<&'a Path>,
 }
 
 /// What a mutant tells.
@@ -270,10 +278,11 @@ enum Judged {
 /// Copies the package of `target` from the export into `work`, with the
 /// Cargo configuration of the export, edits it, and, when `check`, checks
 /// that Cargo builds it; then extracts it, installs what the tools generated
-/// in a stage and builds the proofs there, all as commands of `unit`, and
-/// judges the build with `ranges`. A pattern that does not occur once, an
-/// extraction that fails and generated files that cannot be installed are
-/// rejections.
+/// in a stage, copies the build of the target there, so that Lake builds
+/// again only the modules whose sources or imports differ, and builds the
+/// proofs there, all as commands of `unit`, and judges the build with
+/// `ranges`. A pattern that does not occur once, an extraction that fails
+/// and generated files that cannot be installed are rejections.
 fn build(
     gate: &mut Gate,
     target: &Target,
@@ -361,6 +370,9 @@ fn build(
         ));
     }
     let project = stage.join(Path::new(layout.project).file_name().unwrap_or_default());
+    if let Some(seed) = mutation.seed {
+        copy_tree(seed, &project.join(BUILD))?;
+    }
     let (ran, verdict) = prove(gate, unit, &project, &target.proof_modules)?;
     let modules = &target.proof_modules;
     let judged = ran.map(|ran| self::verdict(&ran, modules, ranges, mutation.fails));
@@ -416,7 +428,9 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
 /// The declaration ranges of that build, printed as a command of the
 /// target's unit, attribute the errors of every mutant's build; when they
 /// make no table, every mutant is inconclusive, and the tool failure of the
-/// target is returned.
+/// target is returned. Each mutant starts from that build, which is listed
+/// before the first and after the last: a change is the tool failure of the
+/// target.
 pub fn after(
     gate: &mut Gate,
     target: &Target,
@@ -444,8 +458,12 @@ pub fn after(
             return Ok(Some(why));
         }
     };
+    let seed = Some(project.join(BUILD)).filter(|seed| seed.is_dir());
+    let listed = |before| lean::listing_of(SEED, &Vec::from_iter(seed.clone()), before);
+    let before = listed(None)?;
     if let Some(operators) = operators {
-        return generated(gate, target, &ranges, operators).map(|()| None);
+        generated(gate, target, &ranges, operators, seed.as_deref())?;
+        return Ok(listed(Some(&before)).err());
     }
     let work = gate
         .work()
@@ -463,6 +481,7 @@ pub fn after(
                     find,
                     replace,
                     fails,
+                    seed: seed.as_deref(),
                 };
                 let work = work.join(&mutant.name);
                 match build(gate, target, &unit, &mutation, &ranges, &work, false)? {
@@ -475,7 +494,7 @@ pub fn after(
         };
         gate.conclude(&unit, conclusion);
     }
-    Ok(None)
+    Ok(listed(Some(&before)).err())
 }
 
 /// A source mutant: the point of its edit, `<file>:<line>:<column>` with
@@ -791,8 +810,9 @@ pub fn generate(
 }
 
 /// Generates the source mutants of `target` with `operators` from the
-/// export and runs each in a stage of its own, with the theorems of all its
-/// obligations to fail, as commands of its unit; concludes the unit, and
+/// export and runs each in a stage of its own, which starts from the build
+/// of the target, `seed`, with the theorems of all its obligations to
+/// fail, as commands of its unit; concludes the unit, and
 /// writes the draft of its list of survivors when every mutant was decided.
 /// A theorem of the obligations outside the top-level theorems of the
 /// proofs rejects the unit before any mutant runs.
@@ -801,6 +821,7 @@ fn generated(
     target: &Target,
     ranges: &Ranges,
     operators: &[String],
+    seed: Option<&Path>,
 ) -> Result<(), String> {
     let (layout, unit) = (*gate.layout(), generated_unit(&target.name));
     let fails = Vec::from_iter(target.obligations.iter().flat_map(|o| o.theorems.clone()));
@@ -838,6 +859,7 @@ fn generated(
                 find,
                 replace,
                 fails,
+                seed,
             },
             ranges,
             &work,

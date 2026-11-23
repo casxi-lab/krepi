@@ -2382,6 +2382,65 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_mutant_starts_from_the_build_of_its_target_which_must_not_change() {
+        let fixture = with_targets("seeded", &two_targets(1_800, 2));
+        // Aeneas writes other definitions for a mutant than for its target.
+        let bin = fixture.root().join("artifacts/formal/tools/bin");
+        fs::rename(bin.join("aeneas"), bin.join("aeneas-stand-in")).expect("rename");
+        let wrapper = "\"$(dirname \"$0\")/aeneas-stand-in\" \"$@\" || exit\n\
+            while [ $# -gt 0 ]; do\n  \
+              case \"$1\" in -subdir) subdir=$2 ;; -dest) dest=$2 ;; esac\n  shift\n\
+            done\n\
+            case $PWD in */mutants/*) echo '-- mutant' >> \"$dest/$subdir/Funs.lean\" ;; esac";
+        fixture.tool("aeneas", wrapper);
+        // The build of the target writes its output below the build
+        // directory of its stage; that of a mutant records the output that it
+        // finds there and the generated definitions of its stage, which Lake
+        // reads to decide what to build again, and fails in the theorem that
+        // the mutant names.
+        let olean = ".lake/build/lib/lean/KrepiGen/T/Funs.olean";
+        let failed = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
+        let failing = fixture::failing("Krepi.Proofs.T", &[failed], 1);
+        let mutant = |extra: &str| {
+            format!(
+                "case $PWD in\n  */mutants/*) cat {olean} KrepiGen/T/Funs.lean >> \"$lake/seen\"\n\
+                 {extra}{failing};;\n  \
+                 *) mkdir -p \"$(dirname {olean})\" && echo 'target build' > {olean} ;;\nesac\n"
+            )
+        };
+        fixture::lake_script(&fixture, "+Krepi", &mutant(""));
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        let seen = fs::read_to_string(fixture.root().join("artifacts/lake/seen")).expect("seen");
+        assert_eq!(seen, "target build\n-- mutant\n".repeat(2));
+        let target = done.run.path.join("work/targets/t/stage/verification");
+        let built = fs::read_to_string(target.join(olean)).expect("the build of the target");
+        assert_eq!(built, "target build\n");
+        // A mutant whose build writes the build of the target leaves the
+        // mutants judged and fails the target.
+        let fixture = with_targets("seed-changed", &two_targets(1_800, 1));
+        let write = format!("echo changed >> ../../../../stage/verification/{olean}\n");
+        fixture::lake_script(&fixture, "+Krepi", &mutant(&write));
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(done.receipt.status, Status::ToolFailure);
+        let mutant = (Status::Verified, None);
+        assert_eq!(fixture::status(&done, "target/t/mutant/m0"), mutant);
+        let (status, reason) = fixture::status(&done, "target/t");
+        let changed = "the build that seeded the mutants changed during the phase; \
+                       changed paths (1)";
+        assert_eq!(status, Status::ToolFailure);
+        assert!(
+            reason.is_some_and(|reason| reason.starts_with(changed)),
+            "{reason:?}"
+        );
+    }
+
+    #[test]
     fn a_target_is_rejected_for_each_problem_of_its_unit() {
         // Each case gives the target `t` its `registry` entries, makes Lake
         // run a `script` for a key and names the reason of `target/t`.

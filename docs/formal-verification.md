@@ -1005,7 +1005,9 @@ gate, 3,600 s, less the time of the merge, 300 s. `cargo xtask formal check`
 refuses a shard whose registered budget, divided by the workers of a shard,
 one, and rounded up, is more than the shard limit, in either layout
 ([proof targets](#proof-targets)). A shard has one worker, which builds the
-mutants of its target one after another, each in a stage of its own: on a
+mutants of its target one after another, each in a stage of its own that
+starts from the build of its target ([registered
+mutants](#registered-mutants)): on a
 standard `ubuntu-24.04-arm` runner the shard of the calibration target, with
 its 30 mutants, took about 400 s, against the registered budget of its
 target of 3,000 s, and the parts of
@@ -3050,7 +3052,13 @@ commands share the budget of the target:
    roots and its cut points, and what the tools generated is installed in a
    new stage of its own; an extraction that is not complete and generated
    files that cannot be installed make the mutant inconclusive;
-5. the proofs are built there as those of the target, with the hand-written
+5. the build directory of the stage of the target, `.lake/build` below its
+   Lake project, is copied into the new stage: Lake replays a module whose
+   source and imported modules are those of the build of the target, such
+   as a module of the specification or a generated module that the edit
+   leaves as it was, and builds again every other one, since it reads
+   each source to decide;
+6. the proofs are built there as those of the target, with the hand-written
    Lean of the export, the root module of its proof modules and
    `lake build --no-cache --wfail +Krepi`, at the call site of the target
    builds, and the build is judged.
@@ -3062,7 +3070,10 @@ in the two cases before its build; a build that Lake or a Lean process it
 ran did not finish makes it `TOOL_FAILURE`. Each of them but `VERIFIED`
 fails the run. The mutants of a target that is not verified are `NOT_RUN`.
 When the ranges make no table, the target is a tool failure and its mutants
-are inconclusive.
+are inconclusive. The run lists the build directory of the stage of the
+target, as it lists the installation, before the first mutant and after
+the last; a change of it makes the target a tool failure, which fails the
+run whatever its mutants concluded.
 
 ### Judging the build of a mutant
 
