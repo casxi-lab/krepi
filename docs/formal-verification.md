@@ -194,9 +194,10 @@ without a receipt, and keeps all of it: `logs/`, and in `work/` the
 home and temporary directories, its stage, the vector file `vectors` and
 the result file `results` of the replay; the host tests write their result
 files below `artifacts/formal/vectors/` ([test vectors](#test-vectors)).
-The job of the toolchain canary keeps its trees, downloads and records
-below `artifacts/canary/`, and its image build, as the image workflows do,
-below `artifacts/image/` ([toolchain canary](#toolchain-canary)).
+The jobs of the toolchain canary keep their trees, downloads and records
+below `artifacts/canary/`, the parts that its verdict reads below
+`artifacts/canary/parts/`, and their image builds, as the image workflows
+do, below `artifacts/image/` ([toolchain canary](#toolchain-canary)).
 `cargo xtask formal merge` writes its record and summary to
 `artifacts/formal/merge/` ([shards and merge](#shards-and-merge)), where
 `cargo xtask formal receipt` reads the record by default
@@ -560,27 +561,43 @@ Aeneas main would break.
 
 The workflow `formal canary`, `.github/workflows/formal-canary.yml`, runs
 the gate once a week, on Saturdays at 09:17 UTC, and on a manual run of
-`main`; a manual run of another branch skips the job. It runs the gate with
+`main`; a manual run of another branch skips its jobs. It runs the gate with
 the tools that the pins follow upstream: the head of Aeneas's `main`, the
 Lean release that its `backends/lean/lean-toolchain` names, the Charon
 commit of its `charon-pin` and the Rust nightly of that Charon's
-`charon/rust-toolchain`, each resolved when the job runs. It records what
+`charon/rust-toolchain`, each resolved when the run starts. It records what
 an upgrade to them would break, and changes nothing: it is not a required
-check, runs on no pull request and blocks no merge. Its one job,
-`toolchain canary`, runs on a GitHub-hosted `ubuntu-24.04-arm` runner, may
-only read the repository's contents, logs in to no registry, publishes no
-image and pushes nothing. The job has 240 minutes, and every step a limit
-of its own; the limits add up to 235 minutes, so a step's limit, never the
-job's, ends a long step, and the steps that record the run always run.
+check, runs on no pull request and blocks no merge. It runs the gate in
+the parts of the [CI job](#ci-job) ([shards and merge](#shards-and-merge)),
+in jobs on GitHub-hosted `ubuntu-24.04-arm` runners, which may only read
+the repository's contents, log in to no registry, publish no image and
+push nothing:
 
-These steps end the job at the first that fails, each by its id:
+- `canary limits` resolves the head of Aeneas's `main` once, with
+  `git ls-remote`, and `cargo xtask formal canary limits` gives the rows of
+  the run from `verification/targets.json`: the qualification row, and the
+  row of the shard of each formal target, by its unit, with the sum of the
+  budgets of the shard; planned targets have none. The shard step has the
+  limit that the job `formal limits` of the CI job gives a shard, and every
+  job the limits of the steps that it runs and 5 minutes, so a step's
+  limit, never the job's, ends a long step, and the steps that record a
+  part always run. A row whose job would need more than the 360 minutes of
+  a hosted runner fails the step.
+- `toolchain canary <part>`, one job for each row, builds the image and
+  runs its part in the steps below, and uploads what it leaves as the
+  artifact `formal-canary-part-<part>-<run>-<attempt>`, with `-` for `/`.
+- `toolchain canary verdict` concludes the run from those artifacts after
+  the rows, also when one of them failed.
 
-1. `runner`, `disk`, `sampler` and `xtask`: record the runner and refuse a
-   root user or a checkout of another owner, record the disk, remove
-   preinstalled software and sample the disk every 15 seconds as the image
-   workflows do, here until the end of the gate, and build xtask;
-2. `resolve`: fetch the head of Aeneas's `main`, which `git ls-remote`
-   gives, into `artifacts/canary/aeneas/`, and, when its `charon-pin` has
+The steps of a row end its job at the first that fails, each by its id:
+
+1. `runner`, `disk`, `sampler`, `xtask` and `copy`: record the runner and
+   refuse a root user or a checkout of another owner, record the disk,
+   remove preinstalled software and sample the disk every 15 seconds as the
+   image workflows do, here until the end of the part, build xtask and copy
+   it for the comparator part as the job `formal run` does;
+2. `resolve`: fetch the head of Aeneas's `main` that `canary limits`
+   resolved into `artifacts/canary/aeneas/`, and, when its `charon-pin` has
    one line that is not a comment, that Charon commit, without submodules,
    into `artifacts/canary/charon/`;
    `cargo xtask formal canary resolve` reads the trees and names the
@@ -608,19 +625,21 @@ These steps end the job at the first that fails, each by its id:
    `linux-aarch64` to the `opam.switch_export_sha256` of the image and
    writes the statement hash of that commit into
    `verification/statements.json` where it differs, and a second commit
-   holds both. The commits are local and never pushed;
-8. `probe` and `gate`: probe a container of the image and run the whole
-   gate, `cargo xtask formal run` without `--shard`, in it as the job
-   `formal run` of the [CI job](#ci-job) runs its part, with its flags and
-   variables but without `KREPI_FORMAL_IMAGE` and without a trigger, under
-   `deadline.sh` with the gate's 7,200 s and the 300 s of its receipt, 125
-   minutes, in a step of 127, which writes its exit status for the
-   verdict as well. The whole gate adds the budget of each formal target
-   to its deadline, and a unit test adds those of the registry to the
-   canary's, so that registering a formal target fails `cargo xtask check`
-   until the deadline and the limits of the canary grow by its budget. The
-   canary does not run the [comparator](#comparator) part, so it does not
-   exercise `lake comparator` ([formal
+   holds both. Both commits have the identity of the canary and the commit
+   time of `main`, so rows whose images give the same switch export make
+   the same commits. The commits are local and never pushed;
+8. `probe` and the part: probe a container of the image and run the part
+   in it with the flags, variables and deadlines of the CI job, but
+   without `KREPI_FORMAL_IMAGE` and without a trigger, under `deadline.sh`,
+   which writes its exit status for the verdict as well. The qualification
+   row runs `gate`, the qualification job, `cargo xtask formal run --shard
+   qualification --keep`, as the job `formal run` does, and then
+   `comparator`, the [comparator](#comparator) part, on the stage that it
+   kept, in a container of its own as that job does, also when the gate
+   failed; the row of a formal target runs `shard`, its shard, as the job
+   `formal shard <name>` does. The comparator runs `lake comparator` only
+   on the units whose statements the base round verified and audited, and
+   records each other unit as `NOT_RUN` ([formal
    upgrade](formal-upgrade.md#canary-verdicts)).
 
 The derived fields, each of the manifest of the build:
@@ -653,17 +672,27 @@ guess a layout of the lock that Lake may refuse.
 
 Each step of `cargo xtask formal canary` writes
 `artifacts/canary/<step>.json`, with `verdict`, `detail` and `data`, and
-exits with 0 only when its verdict is `PASSED`. The step `verdict` reads
-the outcome of every step of the job and gives the run the finding of the
-first that did not pass, or else that of the gate, with the step and the
-commit of `main` in its detail; the job passes only on `PASSED`:
+exits with 0 only when its verdict is `PASSED`. A row writes the outcome
+of each of its steps into `artifacts/canary/part.json`. The step `verdict`
+reads what the rows of the attempt uploaded itself, not through
+`cargo xtask formal merge`, as the receipts of the canary name no image:
+the qualification job, the comparator part and the shard of each formal
+target of the registry are its parts, and each row must have left one
+record and each part one receipt. Receipts of more than one commit, tree,
+run or attempt are a defect of the canary. Otherwise the run gets the
+finding of the first part that did not pass, in that order with the
+shards by name, at the first step of its row that did not pass, or else
+that of the part, with the step, after the part for a shard, and the
+commit of `main` in its detail; the job passes only on `PASSED`. A run is
+repeated whole, never by its failed jobs alone, so that its parts are of
+one attempt:
 
 | Finding | When |
 | --- | --- |
-| `PASSED` | Every step passed, and the gate exited with 0 and left one complete `VERIFIED` receipt |
-| `BROKEN` | The patch does not apply; Aeneas main has a form that the committed checks refuse too; the build failed in a stage of the tools, `aeneas-source`, `lean`, `rust-toolchain`, `charon-build`, `aeneas-build` or `backend`; or the gate exited with 1 and left one receipt that is `REJECTED`, `TOOL_FAILURE`, `BUDGET` or `STALE`; each without a text of the two rows below |
-| `DEFECT` | The tool checks fail on the derived manifest; a field cannot be derived; or the error or the output of the step that the failure block of the build log shows, or a failure or the reason of a unit that is not `VERIFIED` in the receipt, holds a check of what was installed against a pin, such as `lean reports` or `the switch export has SHA-256` of the recipe, a failure of the gate that starts with `image:`, or a statement hash that the snapshot does not have |
-| `FAILED` | A step was cancelled or skipped, has no outcome, or succeeded without a record that passed; any other step failed; the build reached its limit, or the runner ended it, or it failed in another stage or without a BuildKit failure block after its first error; the text holds a full disk, a network error or a cancelled build, or a check of the gate's own inputs; or the gate wrote no exit status, left no single receipt that can be read, exited with 1 and left a receipt that is `NOT_RUN`, which the [disk guard](#shard-plan-and-disk-guard) refused, or exited with another status, which is an error of the run and not a verdict |
+| `PASSED` | Every step of every row passed, and each part exited with 0 and left one complete `VERIFIED` receipt |
+| `BROKEN` | The patch does not apply; Aeneas main has a form that the committed checks refuse too; the build failed in a stage of the tools, `aeneas-source`, `lean`, `rust-toolchain`, `charon-build`, `aeneas-build` or `backend`; or a part exited with 1 and left one receipt that is `REJECTED`, `TOOL_FAILURE`, `BUDGET` or `STALE`; each without a text of the two rows below |
+| `DEFECT` | The receipts of the parts are not of one commit, tree, run and attempt; the tool checks fail on the derived manifest; a field cannot be derived; or the error or the output of the step that the failure block of the build log shows, or a failure or the reason of a unit that is not `VERIFIED` in a receipt, holds a check of what was installed against a pin, such as `lean reports` or `the switch export has SHA-256` of the recipe, a failure of the gate that starts with `image:`, or a statement hash that the snapshot does not have |
+| `FAILED` | The job `canary limits` did not succeed, or a row left no record or more than one; a step was cancelled or skipped, has no outcome, or succeeded without a record that passed; any other step failed; the build reached its limit, or the runner ended it, or it failed in another stage or without a BuildKit failure block after its first error; the text holds a full disk, a network error or a cancelled build, or a check of the gate's own inputs; or a part wrote no exit status, left no single receipt that can be read, exited with 1 and left a receipt that is `NOT_RUN`, which the [disk guard](#shard-plan-and-disk-guard) refused, or exited with another status, which is an error of the run and not a verdict |
 
 A text of an unknown shape is never a breakage: a breakage needs a failed
 stage of the tools without the text of a defect or a failure, or a verdict
@@ -673,25 +702,26 @@ the failure block are read; only the script that the error line of a failed
 process quotes, which the first line of the block also names, is left out,
 since it holds the recipe's own texts. The summary of the workflow run and
 one annotation give the finding, and the artifact
-`formal-canary-<run>-<attempt>` holds, from `artifacts/canary/`, the
-records, the outputs of `resolve`, `derive` and `toolchain-check`, the
-manifest of the build and that of the gate, the diff of the derived files
-and the exit statuses of the build and the gate; from `artifacts/image/`,
-the build log, `versions.json`, the switch export, the layers and the disk
+`formal-canary-<run>-<attempt>` holds `verdict.json`. The artifact of each
+part holds, from `artifacts/canary/`, the records, the outputs of
+`resolve`, `derive` and `toolchain-check`, the manifest of the build and
+that of the gate, the diff of the derived files, the two commits and the
+exit statuses of the build and of its parts; from `artifacts/image/`, the
+build log, `versions.json`, the switch export, the layers and the disk
 measurement, whose least available space and largest Docker root, which its
-summary calls those of the build, cover the probe and the gate too; and the
-record of the job, the event, the receipt and the logs of the gate.
+summary calls those of the build, cover the probe and the parts too; and
+the record of the job, the event, the receipts and the logs of its parts.
 
 The canary leaves out the notice check of the image workflows, which does
 not depend on the tools, and `verification/image/non-root-check.sh`,
 which is written for the committed nightly; the probe and the gate's check
 of the image cover what the gate needs. The build takes Mathlib's build
 cache for the Mathlib commit of the new lock; without one, it builds
-Mathlib from source and reaches its limit, which fails the run. The
-receipt of the canary has the mode `MANUAL`, the event `schedule` or
-`workflow_dispatch` and no image reference, and the gate compares the
-image with the derived manifest. It is no evidence about krepi, which
-only the gate in the pinned image gives. [Formal
+Mathlib from source and reaches its limit, which fails the run. Each row
+builds the image itself, as the image is not passed between jobs. The
+receipts of the canary have the mode `MANUAL` and no image reference, and
+the gate compares the image with the derived manifest. They are no
+evidence about krepi, which only the gate in the pinned image gives. [Formal
 upgrade](formal-upgrade.md#canary-verdicts) says what follows each
 finding.
 
@@ -712,7 +742,7 @@ others are planned.
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs, sources and registries ([guard](#guard)) |
 | `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)) and of the waiver record ([waivers](#waivers)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
-| `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its job fetched and built: `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from the outcomes of the steps of the job ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
+| `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its jobs fetched and built: give the rows of the run and their `limits` from the registry, `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from what its parts left and, with `--outcomes`, the result of the job `canary limits` ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
 | `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration, and `--keep` keeps the work directory of the run, as for `run` |
 | `cargo xtask formal impact --base REV` | Lists, one item per line, the merge base of `REV` and `HEAD`, each path changed since with its Git status, without rename detection, the decision, `unaffected` when no changed path lies within a [gate input](#gate-inputs-and-snapshot) and `affected` otherwise, and the registered targets that the change affects, with their states: every target when an input of extraction changed, and otherwise each whose entry in `verification/targets.json` changed and each with a changed file of its `proof_modules`. A registry that cannot be read at the merge base, as after a change of its schema, counts as one without targets, so that every target is listed, after a line `unreadable verification/targets.json at the merge base: <why>`. Paths, names and that reason are printed escaped, so that none splits a line. It decides nothing, and exits with 1 only on a base that is not a revision or when Git or the registry at the head cannot be read |
 | `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job, of the comparator part and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, which passes when every unit and part outside the [waivers](#waivers) that hold is `VERIFIED`, and of its three hard gates, the axiom audits, the replay of `leanchecker` and the comparator, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
@@ -1007,14 +1037,15 @@ formal target of the registry, `cargo xtask formal run --shard
 target/<name>`, which `cargo xtask formal merge` combines into the
 conclusion of the whole gate. A run without `--shard` and `--target` has
 every phase in one process; local runs, the measurement jobs of the workflow
-`formal measure` such as `leanchecker fresh` ([CI job](#ci-job)), the
-[toolchain canary](#toolchain-canary) and `formal mutants` use it, and its
-receipt is no part of a merge. `--shard` cannot be given with `--target`.
+`formal measure` such as `leanchecker fresh` ([CI job](#ci-job)) and
+`formal mutants` use it, and its receipt is no part of a merge. `--shard`
+cannot be given with `--target`.
 In CI the jobs `formal run`, which runs the comparator part after the
 qualification job, `formal shard <name>` and `formal parts` of the
 workflow `formal` run these parts and their merge, and the workflow
 `formal calibration` runs those of the calibration
-([CI job](#ci-job), [calibration target](#calibration-target)). These parts
+([CI job](#ci-job), [calibration target](#calibration-target)); the
+[toolchain canary](#toolchain-canary) runs the parts without a merge. These parts
 and their merge are the default way of running the gate in CI, and the
 jobs `formal merge`, `formal axioms`, `formal leanchecker` and
 `formal comparator` of the workflow `formal`, which judge the record of
@@ -1319,8 +1350,8 @@ once the waiver has expired, the record is not current
 ([current and fresh records](#current-and-fresh-records)). The
 [source rules](#source-rules) still apply to every tracked Lean file, those
 left out included. The shard of a waived target runs as any other. A run
-without `--shard`, the shard of a target, the calibration target and the
-[toolchain canary](#toolchain-canary) do not read the record.
+without `--shard`, the shard of a target and the calibration target do
+not read the record.
 
 `cargo xtask formal merge` reads the record of the checkout and judges it
 on the UTC date of the clock of its host; a record that breaks its rules,
