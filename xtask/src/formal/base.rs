@@ -21,7 +21,7 @@ use super::outcome::{Class, Site, Status};
 use super::paths::Files;
 use super::process::Ran;
 use super::qualify::{self, conclusion, lake};
-use super::registry::{self, declared_axioms};
+use super::registry::{self, Target, declared_axioms};
 use super::run::{self, Gate, Phase, Request};
 use super::toolchain::sha256;
 use super::waiver;
@@ -149,6 +149,84 @@ pub fn handwritten(
         }
     }
     Ok((files, problems))
+}
+
+/// The header imports of the Lean file `path`.
+fn header(path: &Path) -> Result<Vec<String>, String> {
+    Ok(guard::header_imports(&lean::tokens(&read(path)?)).1)
+}
+
+/// The targets of `targets` whose generated modules, `<generated>.<module>.`
+/// and a file, `imports` names, by name.
+fn generating(layout: &Layout, imports: &[String], targets: &[Target]) -> BTreeSet<String> {
+    let of = |import: &String| {
+        let (prefix, _) = import.rsplit_once('.')?;
+        let module = prefix.strip_prefix(&format!("{}.", layout.generated))?;
+        (targets.iter()).find(|target| target.module.as_deref() == Some(module))
+    };
+    let names = imports.iter().filter_map(of);
+    BTreeSet::from_iter(names.map(|target| target.name.clone()))
+}
+
+/// The planned targets of `targets` whose generated modules a Lean file below
+/// the namespace of the Lake project in `dir`, a checkout or an export,
+/// imports, by name; links are not followed.
+pub fn planned_imports(
+    dir: &Path,
+    layout: &Layout,
+    targets: &[Target],
+) -> Result<BTreeSet<String>, String> {
+    let mine = dir.join(layout.project).join(layout.namespace);
+    let mut found = BTreeSet::new();
+    let planned = (targets.iter()).filter(|t| t.state == registry::State::Planned);
+    let planned = Vec::from_iter(planned.cloned());
+    if !mine.is_dir() {
+        return Ok(found);
+    }
+    for entry in walkdir::WalkDir::new(&mine) {
+        let entry = entry.map_err(|error| format!("cannot list {}: {error}", mine.display()))?;
+        if entry.file_type().is_file() && entry.path().extension().is_some_and(|e| e == "lean") {
+            found.extend(generating(layout, &header(entry.path())?, &planned));
+        }
+    }
+    Ok(found)
+}
+
+/// The target of `targets` whose generated modules each hand-written module
+/// file of `files` in `project` reaches alone, directly or through the
+/// hand-written modules that it imports, by module.
+fn owners(
+    layout: &Layout,
+    project: &Path,
+    files: &[String],
+    targets: &[Target],
+) -> Result<BTreeMap<String, String>, String> {
+    let module = |file: &String| file.trim_end_matches(".lean").replace('/', ".");
+    let (mut imports, mut reach) = (BTreeMap::new(), BTreeMap::new());
+    for file in files {
+        let header = header(&project.join(file))?;
+        reach.insert(module(file), generating(layout, &header, targets));
+        imports.insert(module(file), header);
+    }
+    // Each pass adds the targets of the imported modules, until none is added.
+    loop {
+        let before = reach.clone();
+        for (module, header) in &imports {
+            let of = (header.iter())
+                .filter_map(|i| before.get(i))
+                .flatten()
+                .cloned();
+            reach.get_mut(module).expect("each module").extend(of);
+        }
+        if reach == before {
+            break;
+        }
+    }
+    let alone = |(module, found): (String, BTreeSet<String>)| {
+        let [target] = <[String; 1]>::try_from(Vec::from_iter(found)).ok()?;
+        Some((module, target))
+    };
+    Ok(reach.into_iter().filter_map(alone).collect())
 }
 
 /// Runs `request` as a command of `base` whose files `read` reads, unless
@@ -286,6 +364,7 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
         let read = registry::parse(&text).map_err(|e| format!("{}: {e}", layout.registry))?;
         registered = read.targets;
     }
+    let mut planned = BTreeMap::new();
     for (name, target) in gate.receipt.proof_targets.clone() {
         let lacks = format!("the target {name} has no generated definitions that type-check");
         if !target.typed {
@@ -302,7 +381,17 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
         let trusted = own.flat_map(|registered| &registered.trusted_axioms);
         let mut allowed = target.declarations.clone();
         allowed.extend(trusted.map(|axiom| axiom.name.clone()));
+        if target.state == registry::State::Planned {
+            planned.insert(name, allowed.clone());
+        }
         targets.extend((target.proof_modules.into_iter()).map(|m| (m, allowed.clone())));
+    }
+    // A module that reaches the generated modules of one planned target alone
+    // may use what a proof module of the target could.
+    for (module, owner) in owners(&layout, &project, &gate.handwritten, &registered)? {
+        if let Some(allowed) = (planned.get(&owner)).filter(|_| !targets.contains_key(&module)) {
+            targets.insert(module, allowed.clone());
+        }
     }
     // A case whose commands force its conclusion forces the round's.
     let forced = |unit: &&String| {
@@ -1825,19 +1914,44 @@ pub(crate) mod tests {
         fixture.write(LAYOUT.models, "{\"schema\": 1, \"models\": []}\n");
     }
 
+    /// The planned target `p` of the module `P`, and `r` of `R`.
+    fn planned(name: &str) -> Value {
+        let module = name.to_uppercase();
+        json!({"name": name, "state": "planned", "module": module, "start_from": ["crate::f"]})
+    }
+
+    /// Makes Aeneas write for the module `P` its definitions and a template
+    /// that keeps the declaration `KrepiGen.P.ext`.
+    fn shape_with_template(fixture: &Fixture) {
+        let shape = fixture.root().join("artifacts/shape-p");
+        for (file, text) in [
+            ("KrepiGen/P/Types.lean", "module\n"),
+            ("KrepiGen/P/Funs.lean", "module\n"),
+            (
+                "KrepiGen/P/FunsExternal_Template.lean",
+                "module\n\naxiom KrepiGen.P.ext : Nat\n",
+            ),
+            ("translation.json", "{\"functions\": [], \"types\": []}\n"),
+        ] {
+            fixture.write(&format!("artifacts/shape-p/{file}"), text);
+        }
+        let from = shape.to_str().expect("a UTF-8 path");
+        fixture.write("artifacts/shapes/KrepiGen.P.from", from);
+    }
+
     #[test]
-    fn a_whole_run_builds_no_planned_target_and_a_run_that_names_it_does() {
+    fn a_whole_run_builds_the_planned_targets_that_hand_written_modules_import() {
         // The generated definitions of the planned target do not type-check,
         // and its kernel workspace is still virtual.
         let mut fixture = base("planned-target");
-        let planned =
-            json!({"name": "p", "state": "planned", "module": "P", "start_from": ["crate::f"]});
-        targets(&fixture, &json!([planned]));
+        targets(&fixture, &json!([planned("p")]));
         let error = "error: KrepiGen/P/Funs.lean:3:8: type mismatch";
         let script = fixture::failing("KrepiGen.P.Funs", &[error], 1);
         lake_script(&fixture, "KrepiGen.P.Funs", &script);
         hashed(&mut fixture);
-        let done = gate(&fixture, &[], run::tests::every_phase(fixture.root(), &[]));
+        let whole =
+            |fixture: &Fixture| gate(fixture, &[], run::tests::every_phase(fixture.root(), &[]));
+        let done = whole(&fixture);
         assert_eq!(
             done.receipt.status,
             Status::Verified,
@@ -1846,26 +1960,138 @@ pub(crate) mod tests {
         );
         assert!(done.receipt.complete && done.receipt.proof_targets.is_empty());
         assert_eq!(status(&done, PHASE), (Status::Verified, None));
-        assert!(
+        let extracted = |done: &Done| {
             (done.receipt.commands.iter())
-                .all(|c| c.site != Site::Charon || c.unit != Some(PHASE.to_string()))
+                .any(|c| c.site == Site::Charon && c.unit == Some(PHASE.to_string()))
+        };
+        assert!(!extracted(&done));
+        // A statement module imports them: a whole run extracts the target,
+        // from a root package, as commands of `base`, whose definitions that
+        // do not type-check reject the round.
+        let statement = "verification/Krepi/Statements/P.lean";
+        fixture.write(statement, "module\n\npublic import KrepiGen.P.Funs\n");
+        hashed(&mut fixture);
+        let done = whole(&fixture);
+        assert_eq!(done.receipt.status, Status::Rejected);
+        let failure = done.failures().concat();
+        assert!(
+            failure.starts_with("the run extracts kernel targets"),
+            "{failure}"
         );
-        // Extracted for the base round, from a root package, its definitions
-        // that do not type-check reject the round.
         run::tests::root_package(&fixture, "krepi-kernel", "");
         hashed(&mut fixture);
+        let done = whole(&fixture);
+        let lacks = "the target p has no generated definitions that type-check";
+        assert_eq!(status(&done, PHASE), (Status::Rejected, Some(lacks)));
+        assert!(extracted(&done) && !done.receipt.units.contains_key("target/p"));
+        let entry = &done.receipt.proof_targets["p"];
+        assert_eq!(
+            (&entry.unit, entry.state),
+            (&None, registry::State::Planned)
+        );
+        // Once they type-check, the round builds, audits and replays the
+        // statement module with them, and the target has no unit or verdict.
+        fs::remove_file(fixture.root().join("artifacts/lake/KrepiGen.P.Funs.sh"))
+            .expect("remove the script");
+        let done = whole(&fixture);
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        let modules = &record(&done).modules;
+        for module in ["Krepi.Statements.P", "KrepiGen.P.Funs", "KrepiGen.P.Types"] {
+            assert!(modules.iter().any(|m| m == module), "{modules:?}");
+        }
+        assert_eq!(class(&done, LEANCHECKER), Class::Passed);
+        assert!(!done.receipt.units.contains_key("target/p"));
+        // A statement that names what the generated modules lack fails the
+        // base build in its module.
+        let unknown = "error: Krepi/Statements/P.lean:3:7: unknown identifier 'KrepiGen.P.f'";
+        let failed = fixture::failing("Krepi.Statements.P", &[unknown], 1);
+        lake_script(&fixture, "build", &failed);
+        let done = whole(&fixture);
+        let reason = "the base build failed: Krepi/Statements/P.lean:3:7";
+        assert_eq!(status(&done, PHASE), (Status::Rejected, Some(reason)));
+        fs::remove_file(fixture.root().join("artifacts/lake/build.sh")).expect("remove the script");
+        // The run stops when the export imports other planned targets than
+        // the checkout at its start, which Git takes for unchanged.
+        fixture.git(&["update-index", "--skip-worktree", statement]);
+        fixture.write(statement, "module\n");
+        let done = whole(&fixture);
+        let other = "the phase extraction stopped: the hand-written modules of the export \
+                     import other planned targets than at the start";
+        assert_eq!(done.failures(), [other]);
+        fixture.git(&["update-index", "--no-skip-worktree", statement]);
+        fixture.git(&["checkout", "--", statement]);
+        // A run that names it extracts it alone, in its own unit.
+        lake_script(&fixture, "KrepiGen.P.Funs", &script);
         let done = gate(
             &fixture,
             &["p"],
             run::tests::every_phase(fixture.root(), &["p"]),
         );
-        let lacks = "the target p has no generated definitions that type-check";
         assert_eq!(status(&done, PHASE), (Status::Rejected, Some(lacks)));
         let reason =
             format!("its generated definitions do not type-check: {error} | error: build failed");
         assert_eq!(
             status(&done, "target/p"),
             (Status::Rejected, Some(reason.as_str()))
+        );
+    }
+
+    #[test]
+    fn a_module_that_reaches_one_planned_target_alone_may_use_what_its_templates_keep() {
+        // The proof module reaches the generated modules of `p` through the
+        // statement module, and its theorem uses a declaration of the template.
+        let mut fixture = base("planned-owner");
+        run::tests::root_package(&fixture, "krepi-kernel", "");
+        targets(&fixture, &json!([planned("p"), planned("r")]));
+        shape_with_template(&fixture);
+        fixture.write(
+            "verification/Krepi/Statements/P.lean",
+            "module\n\npublic import KrepiGen.P.Funs\n",
+        );
+        let proof =
+            "module\n\npublic import Krepi.Statements.P\n\npublic theorem q : True := trivial\n";
+        fixture.write("verification/Krepi/Proofs/P.lean", proof);
+        axioms(&fixture, "Krepi.Proofs.P.q", "KrepiGen.P.ext");
+        hashed(&mut fixture);
+        let whole =
+            |fixture: &Fixture| gate(fixture, &[], run::tests::every_phase(fixture.root(), &[]));
+        let done = whole(&fixture);
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        // It extracts `p`, which a module imports, and not `r`.
+        assert_eq!(Vec::from_iter(done.receipt.proof_targets.keys()), ["p"]);
+        assert_eq!(
+            done.receipt.proof_targets["p"].declarations,
+            ["KrepiGen.P.ext"]
+        );
+        let audited = &record(&done).theorems["Krepi.Proofs.P.q"];
+        assert_eq!(
+            (audited.kind, audited.status),
+            (Kind::Target, Status::Verified)
+        );
+        // A module that also imports the generated modules of `r` belongs to
+        // neither, and its theorem may not use the declaration.
+        let both = proof.replace(
+            "\n\npublic theorem",
+            "\npublic import KrepiGen.R.Funs\n\npublic theorem",
+        );
+        fixture.write("verification/Krepi/Proofs/P.lean", &both);
+        hashed(&mut fixture);
+        let done = whole(&fixture);
+        let depends = "Krepi.Proofs.P.q depends on KrepiGen.P.ext";
+        assert_eq!(status(&done, PHASE), (Status::Rejected, Some(depends)));
+        assert_eq!(
+            Vec::from_iter(done.receipt.proof_targets.keys()),
+            ["p", "r"]
         );
     }
 

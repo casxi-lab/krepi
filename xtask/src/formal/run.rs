@@ -653,9 +653,9 @@ fn export_and_check(
             return Err(format!("image: {}", problems.join("; ")));
         }
     }
-    let states = fs::read_to_string(source.join(registry))
+    let (states, registered) = fs::read_to_string(source.join(registry))
         .map_err(|error| error.to_string())
-        .and_then(|text| registry::states(&text))
+        .and_then(|text| Ok((registry::states(&text)?, registry::parse(&text)?.targets)))
         .map_err(|error| format!("cannot read {registry}: {error}"))?;
     let (targets, shard) = (&gate.receipt.targets, gate.receipt.shard.is_some());
     // The target of a shard is a formal one.
@@ -670,8 +670,13 @@ fn export_and_check(
         return Err(error);
     }
     let chosen = selected(&states, targets, shard);
-    // The qualification job extracts every formal target for the base round.
-    let extracts = !chosen.is_empty() || states.values().any(|(state, _)| *state == State::Formal);
+    // A run with a base round extracts every formal target for it, and the
+    // planned ones that hand-written modules import.
+    let part = gate.receipt.shard.as_deref();
+    let round = !alone(part, !targets.is_empty(), gate.fixed);
+    let imported = round && !base::planned_imports(&source, &gate.layout, &registered)?.is_empty();
+    let formal = states.values().any(|(state, _)| *state == State::Formal);
+    let extracts = !chosen.is_empty() || formal || imported;
     // The gate's budget grows by the budget of each target that it selects.
     let budget = |name: &str| Duration::from_secs(states[name].1);
     let all: Duration =
@@ -839,13 +844,15 @@ pub fn target_project(gate: &Gate, name: &str) -> PathBuf {
 }
 
 /// The phases of the targets of the registry of the checkout `root`:
-/// `extraction`, before the base round, which extracts the selected targets
-/// and the formal ones, whose proofs the base round builds, and concludes
+/// `extraction`, before the base round, which extracts the selected targets,
+/// the formal ones and the planned ones whose generated modules a
+/// hand-written module imports, which the base round builds, and concludes
 /// the selected planned ones; and `targets`, after it, which concludes the
 /// selected formal ones and their mutants, the source mutants of `generate`
-/// in a run that generates them. The first stops on another registry in the
-/// export; a run of targets [`alone`] extracts them alone, and the
-/// qualification job no target of a waiver that holds.
+/// in a run that generates them. The first stops on another registry, or
+/// other imports of planned targets, in the export; a run of targets
+/// [`alone`] extracts them alone, and the qualification job no formal
+/// target of a waiver that holds.
 pub(super) fn target_phases<'a>(
     root: &Path,
     layout: &Layout,
@@ -863,7 +870,15 @@ pub(super) fn target_phases<'a>(
     let chosen = selected(&states, &named, shard.is_some()).into_iter();
     let chosen = BTreeSet::from_iter(chosen.map(String::from));
     let alone = alone(shard, !named.is_empty(), generate.is_some());
-    all.retain(|t| (t.state == State::Formal && !alone) || chosen.contains(&t.name));
+    // The base round builds the planned targets that hand-written modules import.
+    let imports = move |dir: &Path, layout: &Layout, targets: &[Target]| match alone {
+        true => Ok(BTreeSet::new()),
+        false => base::planned_imports(dir, layout, targets),
+    };
+    let start = (read.clone()).and_then(|(targets, _)| imports(root, layout, &targets));
+    let imported = start.clone().unwrap_or_default();
+    let extracted = |t: &Target| chosen.contains(&t.name) || imported.contains(&t.name);
+    all.retain(|t| (t.state == State::Formal && !alone) || extracted(t));
     let pick = |t: &&Target, state| t.state == state && chosen.contains(&t.name);
     let formal = Vec::from_iter(all.iter().filter(|t| pick(t, State::Formal)).cloned());
     let planned = Vec::from_iter(all.iter().filter(|t| pick(t, State::Planned)).cloned());
@@ -891,10 +906,14 @@ pub(super) fn target_phases<'a>(
             if base::read(&gate.source().join(path))? != text {
                 return Err(format!("{path} differs from the one read at the start"));
             }
+            if imports(&gate.source(), &gate.layout, &registered)? != start? {
+                let other = "import other planned targets than at the start";
+                return Err(format!("the hand-written modules of the export {other}"));
+            }
             if margin {
                 let waivers = waiver::read(&gate.source(), &gate.layout, &registered)?;
                 let waived = waiver::holding(&waivers, &waiver::today(SystemTime::now())?);
-                all.retain(|target| !waived.contains(&target.name));
+                all.retain(|t| t.state != State::Formal || !waived.contains(&t.name));
                 gate.waived = waiver::left_out(&gate.layout, &registered, &waived);
             }
             (all.iter()).try_for_each(|t| extract_target(gate, t, chosen.contains(&t.name)))
@@ -1978,6 +1997,16 @@ pub(crate) mod tests {
         assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
         assert!(receipt.proof_targets.is_empty() && !charon);
         assert!(receipt.phases["extraction"].ran);
+        // No waiver leaves out a planned target that a hand-written module
+        // imports.
+        let both = serde_json::json!({"schema": 1, "waivers": [waiver::tests::waiver(&["t", "p"], "9999-12-31")]});
+        fixture.write(Layout::PRODUCTION.waivers, &format!("{both}\n"));
+        let statement = "module\n\npublic import KrepiGen.P.Funs\n";
+        fixture.write("verification/Krepi/Statements/P.lean", statement);
+        fixture.commit_all();
+        let (receipt, _) = job(&fixture);
+        assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
+        assert_eq!(Vec::from_iter(receipt.proof_targets.keys()), ["p"]);
         // A record that breaks its rules stops the extraction.
         fixture.write(
             Layout::PRODUCTION.waivers,
@@ -2122,6 +2151,46 @@ pub(crate) mod tests {
         assert_eq!(done.receipt.budgets.gate_seconds, 14_400);
         let verified = (Status::Verified, None);
         assert_eq!(fixture::status(&done, "mutants/t"), verified);
+    }
+
+    #[test]
+    fn only_a_run_with_a_base_round_extracts_a_planned_target_that_a_module_imports() {
+        // A statement module imports the generated modules of the planned
+        // target `p`.
+        let fixture = with_targets("imported-planned", &two_targets(1_800, 1));
+        let statement = "module\n\npublic import KrepiGen.P.Funs\n";
+        fixture.write("verification/Krepi/Statements/P.lean", statement);
+        fixture.commit_all();
+        let extracted = |done: &Done| Vec::from_iter(done.receipt.proof_targets.keys().cloned());
+        // A run of named targets and the shard of a target extract theirs
+        // alone.
+        let done = named_run(&fixture, &["t"]);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(extracted(&done), ["t"]);
+        let phases = shard_phases(fixture.root(), "target/t");
+        let done = gate_shard(&fixture, "target/t", phases, plenty);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(extracted(&done), ["t"]);
+        // A whole run extracts it for the base round, without a unit, and
+        // its extraction has the budgets of both targets.
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(extracted(&done), ["p", "t"]);
+        assert_eq!(done.receipt.proof_targets["p"].unit, None);
+        assert!(!done.receipt.units.contains_key("target/p"));
+        assert_eq!(done.receipt.phases["extraction"].budget_seconds, 3_600);
+        // So does a run of `formal mutants`.
+        let context = Context {
+            budget: Some(mutants::RUN_BUDGET),
+            ..shard_context(fixture.root(), None, &no_variable, plenty)
+        };
+        let named = BTreeSet::from(["t".to_string()]);
+        let run = RunDir::create(fixture.root()).expect("create the run directory");
+        let phases = generating_run(&fixture, &["t"], Some(vec!["literal".to_string()]));
+        let done = gate_with(&context, run, &named, phases, Box::new(io::sink()));
+        assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.failures());
+        assert_eq!(extracted(&done), ["p", "t"]);
+        assert!(!done.receipt.units.contains_key("target/p"));
     }
 
     #[test]

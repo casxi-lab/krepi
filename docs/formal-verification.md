@@ -37,7 +37,8 @@ them, applies their rules, runs its phases and writes a receipt. Its phases
 are the [qualification](#qualification) of the tools on the code shapes of
 the qualification crate, with the three proofs about them; the extraction
 of the [proof targets](#proof-targets), of which only two planned ones are
-registered, which a whole run does not extract; the
+registered, which a whole run extracts only when a hand-written module
+imports their generated modules, as none does yet; the
 [base round](#base-round), which builds, audits and replays krepi's own
 Lean: today the qualification proofs and the definitions that they use,
 and the specifications of the device tree and of the page tables with
@@ -841,15 +842,18 @@ in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
    selects are every formal target of the registry for a whole run, and
    those that `--target` names, planned ones included, for a run with
    `--target`; a run with a base round extracts these and, for the base
-   round, the formal targets that it does not select, so a whole run
-   extracts no planned target, and a run of
+   round, the formal targets that it does not select and the planned
+   targets whose generated modules a hand-written module imports
+   ([proof targets](#proof-targets)), so a whole run extracts no other
+   planned target, and a run of
    `cargo xtask formal run --target` extracts the named targets alone.
    The qualification job selects no target and extracts every
    formal target for the base round but those of the waivers that hold
-   ([waivers](#waivers)); the shard of a target selects its target and
-   extracts no other. A whole run whose registry has no formal
-   target selects and extracts none, and the workspace may then have no
-   root package. When the run selects targets, it takes the inventory of
+   ([waivers](#waivers)), and those planned targets; the shard of a
+   target selects its target and extracts no other. A whole run whose
+   registry has no formal target and no such planned target selects and
+   extracts none, and the workspace may then have no root package.
+   When the run selects targets, it takes the inventory of
    the exported workspace for their registration checks
    ([legacy inventory and admission](#legacy-inventory-and-admission));
 7. when no earlier step has failed or rejected the run, refuses it unless
@@ -1763,21 +1767,30 @@ it allows:
 | --- | --- | --- |
 | Specification | Own modules below `Krepi` outside `Krepi.Proofs` that are not the proof module of a qualification case | Nothing |
 | Qualification | The proof module of a qualification case, and the reviewed external declarations installed for the case | The axioms that the case's generated files declare |
-| Target | Modules below `Krepi.Proofs` | The names in `axioms.json`; the axioms of the native decisions of a declaration that a `native-decision` item of `tcb.json` names, declared in the module of the item's `file`; and an axiom that a generated or reviewed external file of the stage declares and whose name starts with the `prefix` of an `axiom-pattern` item, in whole components |
+| Target | Modules below `Krepi.Proofs` | The names in `axioms.json`; the axioms of the native decisions of a declaration that a `native-decision` item of `tcb.json` names, declared in the module of the item's `file`; the axioms of the native decisions of a lemma of the Aeneas Lean library that a `library-native-decision` item names, `_private.<source>.0.<declaration>._native.<tactic>.ax_<i>_<j>` declared in the item's `source`; and an axiom that a generated or reviewed external file of the stage declares and whose name starts with the `prefix` of an `axiom-pattern` item, in whole components |
 
 `sorryAx` is in no row. The case audits of the qualification use the same
 table with the qualification kind. A theorem of a proof module of a target
 may also use the declarations that the templates of the target keep, its
 unconstrained and cut items, and the `trusted_axioms` of the target, in
 the audit of the base round as in that of the
-[target](#proof-targets). Lean 4.35.0 gives each native
+[target](#proof-targets). In the base round, a module below
+`Krepi.Proofs` that no formal target lists belongs to a planned target
+that the run extracted when its imports, directly or through hand-written
+modules, reach the generated modules of that target and of no other, and
+its theorems may then use the same; a module that reaches those of two
+or more targets, such as a composition proof, belongs to none.
+Lean 4.35.0 gives each native
 decision an axiom of its own, `<declaration>._native.<tactic>.ax_<i>_<j>`,
 where the tactic is `native_decide`, `decide` or `bv_decide`, with
 `_private.<module>.0.` before it in a module file. A name with a component
-`_native` is such an axiom: only a `native-decision` item allows it, for a
-target theorem, and `axioms.json` refuses such names. Any module could
-declare an axiom of such a name without the kernel, so the item allows it
-only when the audit finds it declared in the module of the item's `file`.
+`_native` is such an axiom: only a `native-decision` or a
+`library-native-decision` item allows it, for a target theorem, and
+`axioms.json` refuses such names. Any module could declare an axiom of
+such a name without the kernel, so the item allows it only when the audit
+finds it declared in the module of the item's `file`, or, for a
+`library-native-decision` item, in its `source`; such an item allows
+the axioms of its lemma alone, not those of another lemma of the module.
 A pull request that adds an item to `tcb.json` or changes the reason of
 one needs the label `spec`, by the registry rules of the [guard](#guard).
 
@@ -1786,8 +1799,12 @@ one needs the label `spec`, by the registry rules of the [guard](#guard).
 axiom, and `reason`. `verification/tcb.json` has schema 1 and a list
 `items`, each with the `kind` `native-decision`, with `file`, a tracked
 hand-written file, `declaration` and `reason`, or `axiom-pattern`, with
-`prefix` and `reason`. Other kinds are refused until the trusted base is
-classified, and unknown fields are refused in both files.
+`prefix` and `reason`, or `library-native-decision`, with `source`, the
+module of the Aeneas Lean library that declares a lemma proved by a
+native decision, `declaration`, the lemma, and `reason`; a `source` that
+does not start with `Aeneas.` is refused. Other kinds are refused until
+the trusted base is classified, and unknown fields are refused in both
+files.
 
 **Replay.** `leanchecker --fresh Krepi` imports the root module and checks
 again in the kernel, starting from an empty environment, every declaration
@@ -1896,8 +1913,14 @@ module, so it rejects a theorem whose proof makes a native decision in a
 proof module, even when a `native-decision` item admits the axiom in the
 audit. The Aeneas Lean
 library itself declares the native-decision axioms of some of its lemmas,
-among them those behind `bv_tac`; no registry admits them yet, so a target
-theorem that depends on them fails the audit.
+among them the `bv_mod_size` lemmas that `bv_tac` uses; a target theorem
+that depends on one of them fails the audit unless an item of `tcb.json`
+admits the axiom, which for such a lemma is its `library-native-decision`
+item, and the comparator then permits it. The audit takes the `file` of
+a `native-decision` item for the module that declares the axiom when its
+path ends with the file of that module, and the gate does not check that
+the file is hand-written: the review that the label `spec` requires
+checks that each item names what its kind is for.
 
 ### Comparator
 
@@ -2126,7 +2149,7 @@ one table, to which later checks add theirs; each rule from
 | `registry-formal-made-planned` | A formal target of the merge base is planned at the head |
 | `registry-unconstrained-added` | A target of the head lists a function in `unconstrained` that it does not list at the merge base |
 | `registry-opaque-added` | A target of the head has a cut point, by its pattern, that it does not have at the merge base |
-| `registry-trusted-axiom-added` | A target of the head has a trusted axiom, by its name, that it does not have at the merge base, or `tcb.json` has an item, by its kind and its file and declaration or its prefix, that it does not have there |
+| `registry-trusted-axiom-added` | A target of the head has a trusted axiom, by its name, that it does not have at the merge base, or `tcb.json` has an item, by its kind and its file and declaration, its source and declaration or its prefix, that it does not have there |
 | `registry-model-added` | `models.json` has a model, by its name, an item of a model or a target in the `used_by` of a model that it does not have at the merge base, or a target of the head names a `models` directory that it does not name there |
 | `registry-obligation-changed` | A target of both commits has other obligations, compared by `id`, `statement` and the set of their theorems |
 | `registry-start-from-changed` | A target of both commits has another set of roots in `start_from` |
@@ -2841,7 +2864,7 @@ an object; a field that the table does not list is refused:
 | Field | Meaning |
 | --- | --- |
 | `name`, `module`, `feature` | Target name, generated Lean namespace, feature ID (`krepi.<area>.<feature>`) |
-| `state` | `formal`, the default, for a target that the gate verifies, or `planned` for one that it only extracts and type-checks; a run of the whole gate selects the formal targets, and a planned one runs when `--target` names it |
+| `state` | `formal`, the default, for a target that the gate verifies, or `planned` for one that it only extracts and type-checks; a run of the whole gate selects the formal targets, a planned one runs when `--target` names it, and a run with a base round extracts, for that round, each planned one whose generated modules a hand-written module imports |
 | `budget` | The seconds that the unit of the target may take, 1,800 when the field is left out |
 | `description` | What the target proves, in one paragraph |
 | `start_from`, `exclude` | Charon roots and cut points by exclusion; `cargo xtask formal check` refuses `exclude`, which the gate does not support |
@@ -2893,15 +2916,23 @@ whose registered budget per worker is more than the shard limit.
 The targets of the registry run in two phases of the gate. The phase
 `extraction`, before the base round, extracts the targets that the run
 selects and every formal target, since the base round builds every proof
-and so needs the generated definitions of each formal target; the
+and so needs the generated definitions of each formal target; in a run
+with a base round, it also extracts each planned target whose generated
+modules, `KrepiGen.<module>.<file>`, the header of a Lean file below
+`verification/Krepi/` imports, read as the
+[import rule](#statements-and-proofs) reads it, so that the round builds,
+audits and replays the statements and the proofs that use them. The
 selected targets have a unit of their own, `target/<name>`, and the
-formal ones that the run does not select are extracted as commands of
-`base`. A planned target that the run does not select is not extracted:
-a whole run extracts no planned target and records none, so a
-hand-written module that imports the generated definitions of a planned
-target fails the base build of such a run. The shard of a target
-extracts its target alone, and the qualification job every formal target
-but those of the [waivers](#waivers) that hold, as commands of `base`
+others are extracted as commands of `base`. Such a planned target is
+neither checked against its registration nor concluded, runs no mutant
+and has no unit and no shard of its own; its record in the receipt has
+no unit. A planned target that the run does not select and no
+hand-written module imports is not extracted. The phase reads the
+imports from the checkout when the run starts and stops when those of
+the export are other ones. The shard of a target extracts its target
+alone, and the qualification job every formal target but those of the
+[waivers](#waivers) that hold, which leave out no planned target, and
+those planned targets, as commands of `base`
 ([shards and merge](#shards-and-merge)). The phase
 has the budgets of the targets that it extracts, or 600 s in the
 qualification job, and the gate's budget grows by those of the selected
@@ -3719,11 +3750,11 @@ they serve only the type checking of three qualification cases
 | Item | Role | How it is checked |
 | --- | --- | --- |
 | Lean kernel and the three standard axioms | Checks every proof | Axiom audit of every registered theorem |
-| Mathlib and the Aeneas Lean library | Mathematical definitions and models of integers, slices, `Option`, `Result` and other core items | Pinned Lake lock; library axioms appear in the audit and must be registered in `verification/axioms.json` |
+| Mathlib and the Aeneas Lean library | Mathematical definitions and models of integers, slices, `Option`, `Result` and other core items | Pinned Lake lock; library axioms appear in the audit and must be registered in `verification/axioms.json`, but for the native decisions of library lemmas, which `library-native-decision` items of `verification/tcb.json` admit |
 | Charon, the Rust nightly and Aeneas with reviewed patches | Translation of the production source into Lean | Pinned sources and binaries; qualification regression; mutants |
 | Unconstrained declarations | External functions and types without a model | Theorems hold for every interpretation; listed per target |
 | Cut points (`opaque`) | Items translated without their bodies, modelled as deterministic functions of their arguments | Each cut point has a source and a reason, which states that no statement depends on two calls with the same arguments agreeing; review checks this for a function that reads hardware or global state |
-| Trusted axioms | Reviewed exceptions | Items of `verification/tcb.json`, each with a reason |
+| Trusted axioms | Reviewed exceptions, among them the native decisions of lemmas of the Aeneas Lean library | Items of `verification/tcb.json`, each with a reason; an item of a library lemma admits the axioms of that lemma alone, private to the library module that declares it |
 | Library models (`models.json`) | Behaviour of items that are not extracted | Compared with the real implementation in every qualification |
 | Compiler, linker and the production toolchain | The binary that runs | Not proved; the architecture and binary layer narrows this item |
 | Assembly, `unsafe` code, atomics and IRQ paths | Entry, context switch, page-table and cache maintenance, synchronization | Not covered by the sequential refinement; separate obligations |

@@ -236,6 +236,14 @@ fn facts(side: &Registries) -> Vec<(&'static str, String, Vec<String>)> {
                 reason,
             } => (format!("native-decision {file} {declaration}"), reason),
             Item::AxiomPattern { prefix, reason } => (format!("axiom-pattern {prefix}"), reason),
+            Item::LibraryNativeDecision {
+                source,
+                declaration,
+                reason,
+            } => (
+                format!("library-native-decision {source} {declaration}"),
+                reason,
+            ),
         };
         facts.push(("trusted", "tcb.json".to_string(), vec![key.clone()]));
         facts.push(("reasons", format!("{key} in tcb.json"), vec![reason]));
@@ -1806,6 +1814,20 @@ mod tests {
             |r| list(&mut r[2], "items").push(item),
             &[("registry-trusted-axiom-added", why)],
         );
+        let item = json!({
+            "kind": "library-native-decision",
+            "source": "Aeneas.Tactic.Solver.BvTac.Lemmas",
+            "declaration": "Aeneas.Std.U8.bv_mod_size",
+            "reason": "Reviewed."
+        });
+        let why = "it adds the trusted axioms library-native-decision \
+                   Aeneas.Tactic.Solver.BvTac.Lemmas Aeneas.Std.U8.bv_mod_size in tcb.json \
+                   without the label spec";
+        registry_change(
+            "library-item-added",
+            |r| list(&mut r[2], "items").push(item),
+            &[("registry-trusted-axiom-added", why)],
+        );
     }
 
     #[test]
@@ -1977,6 +1999,23 @@ mod tests {
             |r| r[2]["items"][0]["reason"] = json!("Another."),
             &[(rule, &item)],
         );
+        // Of an item of a library lemma, which the base has.
+        let (mut fixture, _) = registered("library-item-reason");
+        let mut values = registries();
+        let library = json!({"kind": "library-native-decision",
+            "source": "Aeneas.Tactic.Solver.BvTac.Lemmas",
+            "declaration": "Aeneas.Std.U8.bv_mod_size", "reason": "Reviewed."});
+        list(&mut values[2].1, "items").push(library);
+        let base = commit_registries(&fixture, &values);
+        values[2].1["items"][1]["reason"] = json!("Another.");
+        commit_registries(&fixture, &values);
+        let record = guard(&mut fixture, &base, &[], None);
+        let item = why("library-native-decision Aeneas.Tactic.Solver.BvTac.Lemmas \
+             Aeneas.Std.U8.bv_mod_size in tcb.json");
+        assert_eq!(failed(&record), [(rule, item.as_str())]);
+        let hash = hash(&mut fixture, &LAYOUT);
+        let labelled = guard(&mut fixture, &base, &["spec"], Some(&approval(&hash)));
+        assert_eq!(failed(&labelled), []);
     }
 
     #[test]
