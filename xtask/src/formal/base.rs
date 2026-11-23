@@ -2067,6 +2067,8 @@ pub(crate) mod tests {
             "{:?}",
             done.failures()
         );
+        // It extracts `p`, which a module imports, and not `r`.
+        assert_eq!(Vec::from_iter(done.receipt.proof_targets.keys()), ["p"]);
         assert_eq!(
             done.receipt.proof_targets["p"].declarations,
             ["KrepiGen.P.ext"]

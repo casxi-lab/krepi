@@ -2154,6 +2154,46 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn only_a_run_with_a_base_round_extracts_a_planned_target_that_a_module_imports() {
+        // A statement module imports the generated modules of the planned
+        // target `p`.
+        let fixture = with_targets("imported-planned", &two_targets(1_800, 1));
+        let statement = "module\n\npublic import KrepiGen.P.Funs\n";
+        fixture.write("verification/Krepi/Statements/P.lean", statement);
+        fixture.commit_all();
+        let extracted = |done: &Done| Vec::from_iter(done.receipt.proof_targets.keys().cloned());
+        // A run of named targets and the shard of a target extract theirs
+        // alone.
+        let done = named_run(&fixture, &["t"]);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(extracted(&done), ["t"]);
+        let phases = shard_phases(fixture.root(), "target/t");
+        let done = gate_shard(&fixture, "target/t", phases, plenty);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(extracted(&done), ["t"]);
+        // A whole run extracts it for the base round, without a unit, and
+        // its extraction has the budgets of both targets.
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(extracted(&done), ["p", "t"]);
+        assert_eq!(done.receipt.proof_targets["p"].unit, None);
+        assert!(!done.receipt.units.contains_key("target/p"));
+        assert_eq!(done.receipt.phases["extraction"].budget_seconds, 3_600);
+        // So does a run of `formal mutants`.
+        let context = Context {
+            budget: Some(mutants::RUN_BUDGET),
+            ..shard_context(fixture.root(), None, &no_variable, plenty)
+        };
+        let named = BTreeSet::from(["t".to_string()]);
+        let run = RunDir::create(fixture.root()).expect("create the run directory");
+        let phases = generating_run(&fixture, &["t"], Some(vec!["literal".to_string()]));
+        let done = gate_with(&context, run, &named, phases, Box::new(io::sink()));
+        assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.failures());
+        assert_eq!(extracted(&done), ["p", "t"]);
+        assert!(!done.receipt.units.contains_key("target/p"));
+    }
+
+    #[test]
     fn no_other_budget_of_a_run_equals_that_of_formal_mutants() {
         // A run is one of `formal mutants`, whose budget its targets do not
         // grow, by its budget alone.

@@ -37,7 +37,8 @@ them, applies their rules, runs its phases and writes a receipt. Its phases
 are the [qualification](#qualification) of the tools on the code shapes of
 the qualification crate, with the three proofs about them; the extraction
 of the [proof targets](#proof-targets), of which only two planned ones are
-registered, which a whole run does not extract; the
+registered, which a whole run extracts only when a hand-written module
+imports their generated modules, as none does yet; the
 [base round](#base-round), which builds, audits and replays krepi's own
 Lean: today the qualification proofs and the definitions that they use,
 and the specifications of the device tree and of the page tables with
@@ -1773,13 +1774,12 @@ table with the qualification kind. A theorem of a proof module of a target
 may also use the declarations that the templates of the target keep, its
 unconstrained and cut items, and the `trusted_axioms` of the target, in
 the audit of the base round as in that of the
-[target](#proof-targets). In the base round, a hand-written module that
-no formal target lists belongs to a planned target that the run
-extracted when its imports, directly or through hand-written modules,
-reach the generated modules of that target and of no other, so that its
-theorems may use the same; by
-[R6](conventions/provable-subset.md#r6-enumeration-names-across-targets),
-no module imports the generated definitions of two targets.
+[target](#proof-targets). In the base round, a module below
+`Krepi.Proofs` that no formal target lists belongs to a planned target
+that the run extracted when its imports, directly or through hand-written
+modules, reach the generated modules of that target and of no other, and
+its theorems may then use the same; a module that reaches those of two
+or more targets, such as a composition proof, belongs to none.
 Lean 4.35.0 gives each native
 decision an axiom of its own, `<declaration>._native.<tactic>.ax_<i>_<j>`,
 where the tactic is `native_decide`, `decide` or `bv_decide`, with
