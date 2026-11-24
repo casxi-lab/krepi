@@ -2,7 +2,8 @@
 //! minimal tree of the parser tests, the profiles of the boards and the test
 //! modules of the parse, the node access, the translation, the memory
 //! discovery, the CPU nodes, the limits, the dynamic reservations, the error
-//! orders, the frozen vectors and the examples of the feature document.
+//! orders, the frozen vectors, the examples of the feature document and the
+//! profiles that no board gives.
 //!
 //! Feature: krepi.platform.device-tree
 //!
@@ -15,6 +16,7 @@ use super::format::{HEADER_SIZE, MAGIC, padded_end, u32_at};
 use super::*;
 use std::{vec, vec::Vec};
 
+mod any_profile;
 mod cpus;
 mod discovery;
 mod dynamic;
