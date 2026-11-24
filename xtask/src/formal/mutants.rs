@@ -311,7 +311,7 @@ fn prepare(
             mutation.file
         ));
     }
-    copy_tree(&from, &package)?;
+    copy_tree("the package", &from, &package)?;
     if source.join(paths::CARGO_CONFIG).is_file() {
         let config = root.join(paths::CARGO_CONFIG);
         fs::create_dir_all(root.join(".cargo")).map_err(at(&root))?;
@@ -376,7 +376,7 @@ fn prepare(
     }
     let project = stage.join(Path::new(layout.project).file_name().unwrap_or_default());
     if let Some(seed) = mutation.seed {
-        copy_tree(seed, &project.join(BUILD))?;
+        copy_tree(SEED, seed, &project.join(BUILD))?;
     }
     Ok(Ready::Stage(project))
 }
@@ -427,10 +427,11 @@ fn judge(
     )
 }
 
-/// Copies the files below `from` to the same paths below `to`.
-fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
+/// Copies the files below `from`, which `what` names, to the same paths
+/// below `to`.
+fn copy_tree(what: &str, from: &Path, to: &Path) -> Result<(), String> {
     for entry in WalkDir::new(from) {
-        let entry = entry.map_err(|error| format!("cannot copy the package: {error}"))?;
+        let entry = entry.map_err(|error| format!("cannot copy {what}: {error}"))?;
         let path = to.join(entry.path().strip_prefix(from).unwrap_or(entry.path()));
         let copied = match entry.file_type().is_dir() {
             true => fs::create_dir_all(&path),
