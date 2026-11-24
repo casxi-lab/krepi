@@ -11,8 +11,9 @@ import Krepi.Proofs.Fdt.UnreadLemmas
 One theorem for each registered statement of `Krepi.SpecProperties.Fdt`
 about memory discovery and the boot memory, whose type is exactly that
 statement: that the memory map of a well-formed tree is well-formed, that a
-boot memory is consistent, and that the values that the discoveries
-leave unread do not reach their results.
+boot memory is consistent and holds the size limit and the alignment of its
+hand-over profile, and that the values that the discoveries leave unread do
+not reach their results.
 
 Every theorem here is proved, from the lemmas of
 `Krepi.Proofs.Fdt.DiscoveryLemmas` (the steps of a successful discovery)

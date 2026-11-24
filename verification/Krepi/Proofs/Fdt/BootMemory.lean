@@ -12,9 +12,9 @@ One theorem for each registered statement of `Krepi.SpecProperties.Fdt`
 about the boot memory, whose type is exactly that statement: that
 `BootMemory::find_available` gives a well-formed span, available and of the
 lowest aligned start in the first RAM range that has one, and that
-`MemoryPlan::from_boot_memory` gives a well-formed plan. The last one is here
-and not with the other entries of the plan in `Krepi.Proofs.Fdt.Plan`, which
-other proofs import.
+`MemoryPlan::from_boot_memory` gives a well-formed plan. The last one is
+registered in this module, not with the other entries of the plan in
+`Krepi.Proofs.Fdt.Plan`.
 
 Every theorem here is proved. The two about the selection come from the
 lemmas about the search of `Krepi.Proofs.Fdt.BootMemoryLemmas`: in each RAM
