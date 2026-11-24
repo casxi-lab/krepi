@@ -94,11 +94,11 @@ jobs:
   # receipt, rounded up, and two more, as `deadline.sh` kills its command a
   # minute after its deadline; its job 15 minutes before the step, the step
   # and 3 minutes after it. Every formal target is a shard of its own, named
-  # by its unit, whose registered budget per worker may be at most the
-  # shard limit, 3,300 s, as `cargo xtask formal check` requires; a job of
-  # the hosted runners ends after 360 minutes. Target names are checked
-  # before they are passed on. The limits of the qualification job do not
-  # depend on the registry and are written in it.
+  # by its unit, whose registered budget may be at most the shard limit,
+  # 3,300 s, whatever its workers, as `cargo xtask formal check` requires;
+  # a job of the hosted runners ends after 360 minutes. Target names are
+  # checked before they are passed on. The limits of the qualification job
+  # do not depend on the registry and are written in it.
   limits:
     name: formal limits
     needs: fast
@@ -127,7 +127,6 @@ jobs:
           shard_margin=300
           receipt_margin=300
           shard_limit=3300
-          workers=1
           registry=verification/targets.json
           jq -e 'all(.targets[]; .name | test("^[a-z0-9][a-z0-9-]*$"))' "$registry" > /dev/null
           # The targets of the state $1 with a name of the list $2, or with
@@ -145,10 +144,10 @@ jobs:
           # target that the pull request affects, which runs it alone.
           shards=$(rows formal null)
           scoped=$(rows planned "$SCOPED")
-          over=$(jq -r --argjson limit "$shard_limit" --argjson workers "$workers" \
-            '[.[] | select((.budget + $workers - 1) / $workers | floor > $limit) | .name] | join(" ")' <<< "$shards")
+          over=$(jq -r --argjson limit "$shard_limit" \
+            '[.[] | select(.budget > $limit) | .name] | join(" ")' <<< "$shards")
           if [ -n "$over" ]; then
-            echo "the registered budget per worker of the shard of $over is more than $shard_limit s" >&2
+            echo "the registered budget of the shard of $over is more than $shard_limit s" >&2
             exit 1
           fi
           long=$(jq -r '[.[] | select(.job > 360) | .name] | join(" ")' <<< "$scoped")

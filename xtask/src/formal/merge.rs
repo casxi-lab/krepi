@@ -1,8 +1,8 @@
 //! The shards of the proof gate and their merge, as "Shards and merge" in
 //! `docs/formal-verification.md` describes: beside the qualification job and
 //! the comparator part, every formal target is a shard of its own, named by
-//! its unit, whose registered budget, over its workers, is at most the shard
-//! limit, the wall-clock limit of the gate less the time of the merge; and
+//! its unit, whose registered budget is at most the shard limit, the
+//! wall-clock limit of the gate less the time of the merge; and
 //! `cargo xtask formal merge` combines the receipts of these parts of one
 //! commit into the conclusions of the gate and its hard gates, with waivers.
 
@@ -33,9 +33,6 @@ pub const MERGE: Duration = Duration::from_secs(300);
 
 /// The longest that a shard may take: the wall-clock limit less the merge.
 pub const SHARD_LIMIT: Duration = Duration::from_secs(WALL_CLOCK.as_secs() - MERGE.as_secs());
-
-/// The workers of a shard, among which its registered budget is divided.
-pub const WORKERS: u64 = 1;
 
 /// The margin of the run of the shard of a target beyond its budget, for
 /// its start and its closing steps.
@@ -70,14 +67,13 @@ pub fn shards(targets: &[Target]) -> BTreeMap<String, u64> {
 }
 
 /// The problems of the shards of `targets`: a shard whose registered
-/// budget per worker, rounded up, is more than the shard limit.
+/// budget, whatever its workers, is more than the shard limit.
 pub fn budget_problems(targets: &[Target]) -> Vec<String> {
     let limit = SHARD_LIMIT.as_secs();
     let over = shards(targets).into_iter().filter_map(|(shard, budget)| {
-        let seconds = budget.div_ceil(WORKERS);
-        (seconds > limit).then(|| {
+        (budget > limit).then(|| {
             format!(
-                "shard {shard}: its registered budget of {budget} s is {seconds} s per worker, more than the shard limit of {limit} s"
+                "shard {shard}: its registered budget of {budget} s is more than the shard limit of {limit} s"
             )
         })
     });
@@ -1159,7 +1155,6 @@ pub(crate) mod tests {
     fn the_shard_limit_is_the_wall_clock_limit_of_the_gate_less_the_merge() {
         assert_eq!(SHARD_LIMIT, Duration::from_secs(3_300));
         assert_eq!(MERGE + SHARD_LIMIT, WALL_CLOCK);
-        assert_eq!(WORKERS, 1);
     }
 
     #[test]
@@ -1192,12 +1187,15 @@ pub(crate) mod tests {
             ])
         );
         assert_eq!(budget_problems(&registry(3_300)), Vec::<String>::new());
-        assert_eq!(
-            budget_problems(&registry(3_301)),
-            [
-                "shard target/a: its registered budget of 3301 s is 3301 s per worker, more than the shard limit of 3300 s"
-            ]
-        );
+        // However many workers a shard has, they do not divide its budget.
+        for budget in [3_301, 6_600] {
+            assert_eq!(
+                budget_problems(&registry(budget)),
+                [format!(
+                    "shard target/a: its registered budget of {budget} s is more than the shard limit of 3300 s"
+                )]
+            );
+        }
     }
 
     /// The receipts of the qualification job and of the shard of `a`, whose

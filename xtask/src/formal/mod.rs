@@ -919,8 +919,8 @@ mod tests {
         };
         let (native, sourceless) = (axiom("A._native.d.ax_1_1", "s"), axiom("A.ax", " "));
         let hashless = r#"{"schema": 1, "hash": "0", "statements": []}"#;
-        let shard = "shard target/table: its registered budget of 3301 s is 3301 s per worker, \
-                     more than the shard limit of 3300 s";
+        let shard = "shard target/table: its registered budget of 3301 s is more than the shard \
+                     limit of 3300 s";
         let unregistered = r#"waiver 0: "slots" is no registered target"#;
         let broken = [
             (

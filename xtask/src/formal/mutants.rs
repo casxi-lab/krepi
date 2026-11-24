@@ -1682,7 +1682,7 @@ mod tests { fn t() { let _ = 1 + 1; } }
 
     #[test]
     fn the_limits_of_the_workflows_cover_the_deadlines_of_their_gates_and_receipts() {
-        use crate::formal::merge::{self, EXTRACTION_MARGIN, SHARD_LIMIT, SHARD_MARGIN, WORKERS};
+        use crate::formal::merge::{self, EXTRACTION_MARGIN, SHARD_LIMIT, SHARD_MARGIN};
         use crate::formal::run::{GATE_BUDGET, RECEIPT_MARGIN, target_unit};
         use yaml_rust2::{Yaml, YamlLoader};
         let minutes = |seconds: u64| seconds.div_ceil(60);
@@ -1695,7 +1695,6 @@ mod tests { fn t() { let _ = 1 + 1; } }
             ("shard_margin", shard_margin),
             ("receipt_margin", margin),
             ("shard_limit", SHARD_LIMIT.as_secs()),
-            ("workers", WORKERS),
         ] {
             let line = format!("{name}={value}\n");
             assert!(formal.contains(&line), "{line}");
@@ -1714,8 +1713,8 @@ mod tests { fn t() { let _ = 1 + 1; } }
             r"| map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 3)' \",
             "shards=$(rows formal null)",
             r#"scoped=$(rows planned "$SCOPED")"#,
-            r#"over=$(jq -r --argjson limit "$shard_limit" --argjson workers "$workers" \"#,
-            r#"'[.[] | select((.budget + $workers - 1) / $workers | floor > $limit) | .name] | join(" ")' <<< "$shards")"#,
+            r#"over=$(jq -r --argjson limit "$shard_limit" \"#,
+            r#"'[.[] | select(.budget > $limit) | .name] | join(" ")' <<< "$shards")"#,
             r#"long=$(jq -r '[.[] | select(.job > 360) | .name] | join(" ")' <<< "$scoped")"#,
             r#"echo "shards=$shards""#,
             r#"echo "scoped=$scoped""#,

@@ -1002,17 +1002,17 @@ problem, as a target is measured once it is registered.
 Every formal target is a shard of its own, named by its unit; a planned
 target is no shard. The shard limit is 3,300 s: the wall-clock limit of the
 gate, 3,600 s, less the time of the merge, 300 s. `cargo xtask formal check`
-refuses a shard whose registered budget, divided by the workers of a shard,
-one, and rounded up, is more than the shard limit, in either layout
-([proof targets](#proof-targets)). A shard has one worker, which builds the
-mutants of its target one after another, each in a stage of its own that
-starts from the build of its target ([registered
-mutants](#registered-mutants)): on a
-standard `ubuntu-24.04-arm` runner the shard of the calibration target, with
-its 30 mutants, took about 400 s, against the registered budget of its
-target of 3,000 s, and the parts of
-the gate stayed well within the wall-clock limit, the memory and the disk of
-the runner.
+refuses a shard whose registered budget is more than the shard limit,
+whatever the workers of the shard, in either layout
+([proof targets](#proof-targets)): the run of a shard has a deadline of
+300 s and that budget from its start. A shard has one worker, which builds
+the mutants of its target one after another, each in a stage of its own
+that starts from the build of its target
+([registered mutants](#registered-mutants)): on a standard
+`ubuntu-24.04-arm` runner the shard of the calibration target, with its 30
+mutants, took about 400 s, against the registered budget of its target of
+3,000 s, and the parts of the gate stayed well within the wall-clock
+limit, the memory and the disk of the runner.
 
 The disk guard of a run, after the steps of the gate inputs and before the
 first phase, reads the plan of the export. The parts of a run are
@@ -2628,8 +2628,8 @@ has the minutes of its deadline and receipt, rounded up, and two more, as
 `deadline.sh` kills its command a minute after its deadline, and its job
 15 minutes before that step, the step and 3 minutes after it. So the
 receipt of each part is written before its step ends, however many formal
-targets the registry has. A shard whose registered budget per worker is
-more than the shard limit of 3,300 s fails the job, as
+targets the registry has. A shard whose registered budget is more than
+the shard limit of 3,300 s fails the job, as
 `cargo xtask formal check` refuses it ([shards and merge](#shards-and-merge)),
 so a shard job has at most 85 minutes. A job of a hosted runner ends after
 360 minutes; when the budget of a planned target needs a longer job, or a
@@ -2921,8 +2921,8 @@ a tool, and each broken rule is a problem:
   `derived` is a key `file#Type::method` of a method that a
   `#[derive(..)]` of a production type in the file defines, not a
   production function;
-- the registered budget of each shard, divided by the workers of a shard,
-  one, and rounded up, is at most the shard limit of 3,300 s
+- the registered budget of each shard, whatever its workers, is at most
+  the shard limit of 3,300 s
   ([shard plan and disk guard](#shard-plan-and-disk-guard)).
 
 `cargo xtask formal check` also checks the shard plan
@@ -2930,7 +2930,7 @@ a tool, and each broken rule is a problem:
 
 The job `formal limits` of the workflow `formal` ([CI job](#ci-job)) also
 fails on another target name before the names reach a gate, and on a shard
-whose registered budget per worker is more than the shard limit.
+whose registered budget is more than the shard limit.
 
 The targets of the registry run in two phases of the gate. The phase
 `extraction`, before the base round, extracts the targets that the run
