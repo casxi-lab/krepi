@@ -149,15 +149,16 @@ pub struct Request<'a> {
 }
 
 /// What the commands of a run write while they run, which threads that
-/// run commands side by side share: the commands that ended, in the order in
+/// run commands side by side share: the commands recorded, in the order in
 /// which they ended, the conclusions, the number of commands started and,
-/// by its sequence, the unit and the start of each command that runs.
+/// by its sequence, the unit, the start and, once it has ended, the end of
+/// each command that is not recorded yet.
 #[derive(Default)]
 pub(super) struct Records {
     pub(super) commands: Vec<receipt::Command>,
     conclusions: Vec<(String, Conclusion)>,
     started: u32,
-    running: BTreeMap<u32, (Option<String>, f64)>,
+    running: BTreeMap<u32, (Option<String>, f64, Option<f64>)>,
 }
 
 impl Records {
@@ -167,9 +168,9 @@ impl Records {
     fn spent(&self, owner: &str, now: f64) -> f64 {
         let mine = |unit: &Option<String>| unit.as_deref().map(mutants::owner) == Some(owner);
         let ended = (self.commands.iter()).filter(|c| mine(&c.unit));
-        let running = (self.running.values()).filter(|(unit, _)| mine(unit));
+        let running = (self.running.values()).filter(|(unit, ..)| mine(unit));
         let ended = ended.map(|c| (c.started, c.started + c.seconds));
-        covered(ended.chain(running.map(|(_, start)| (*start, now))))
+        covered(ended.chain(running.map(|(_, start, end)| (*start, end.unwrap_or(now)))))
     }
 }
 
@@ -276,7 +277,7 @@ impl Gate {
         // The receipt writes a limit below half a millisecond as 0.
         let starts = receipt::seconds(limit.duration) > 0.0 && skip.is_none();
         if starts {
-            let running = (unit.map(str::to_string), at.as_secs_f64());
+            let running = (unit.map(str::to_string), receipt::seconds(at), None);
             records.running.insert(sequence, running);
         }
         drop(records);
@@ -302,6 +303,7 @@ impl Gate {
                         logs: &self.run.path.join("logs"),
                         sequence,
                         limit,
+                        begin: now,
                     })
                 })
                 .map_err(|error| {
@@ -309,7 +311,11 @@ impl Gate {
                     (Class::ToolFailure, reason)
                 })
         };
-        self.records().running.remove(&sequence);
+        // A command that ended counts by its interval until it is recorded.
+        let seconds = receipt::seconds(ran.as_ref().map_or(Duration::ZERO, |ran| ran.seconds));
+        if let Some((.., end)) = self.records().running.get_mut(&sequence) {
+            *end = Some(receipt::seconds(at) + seconds);
+        }
         let own = |ran: &Ran| lean::proof_messages(&ran.output, &self.own).len();
         let verdict = match &ran {
             Ok(ran) => outcome::classify(request.site, ran, own(ran), read(ran).as_deref()),
@@ -335,7 +341,9 @@ impl Gate {
                 sha256: log.sha256.clone(),
             })
         };
-        self.records().commands.push(receipt::Command {
+        let mut records = self.records();
+        records.running.remove(&sequence);
+        records.commands.push(receipt::Command {
             sequence,
             started: receipt::seconds(at),
             phase: self.phase.as_ref().map(|(phase, _)| phase.clone()),
@@ -353,7 +361,7 @@ impl Gate {
             timed_out: done.is_some_and(|ran| ran.ended == Ended::TimedOut),
             limit_seconds: receipt::seconds(limit.duration),
             limit: limit.by,
-            seconds: done.map_or(0.0, |ran| receipt::seconds(ran.seconds)),
+            seconds,
             group_survived: done.is_some_and(|ran| ran.survivors),
             stdout: done.and_then(|ran| log(&ran.stdout)),
             stderr: done.and_then(|ran| log(&ran.stderr)),
@@ -1543,6 +1551,16 @@ pub(crate) mod tests {
     /// Runs the shell script `script` as a command of `unit` at the base
     /// build.
     fn shell(run: &Gate, unit: &str, script: &str) -> Verdict {
+        shell_reading(run, unit, script, |_| Ok(()))
+    }
+
+    /// [`shell`], with `read` reading what the command wrote.
+    fn shell_reading(
+        run: &Gate,
+        unit: &str,
+        script: &str,
+        read: impl FnMut(&Ran) -> Result<(), String>,
+    ) -> Verdict {
         let source = run.source();
         let args = vec!["-c".to_string(), script.to_string()];
         let request = Request {
@@ -1553,7 +1571,7 @@ pub(crate) mod tests {
             cwd: &source,
             stdin: None,
         };
-        run.run(unit, &request, |_| Ok(())).1
+        run.run(unit, &request, read).1
     }
 
     #[test]
@@ -2530,6 +2548,7 @@ pub(crate) mod tests {
             covered([(0.0, 2.0), (1.5, 2.5), (1.0, 3.0), (3.0, 4.0)]),
             4.0
         );
+        assert_eq!(covered([(0.0, 4.0), (1.0, 2.0), (3.0, 5.0)]), 5.0);
         // The command of the target waits for that of its mutant, which
         // starts while it runs.
         let fixture = Fixture::new("overlap");
@@ -2624,6 +2643,58 @@ pub(crate) mod tests {
         for unit in [target, mutant] {
             assert_eq!(fixture::status(&done, unit).0, Status::Budget);
         }
+        // A command of another unit runs before the target's, which counts
+        // while it is read and recorded: a command of the mutant that starts
+        // then has only what the target's left, and is recorded first.
+        let fixture = Fixture::new("overlap-window");
+        let (other, ended) = ("target/u", fixture.root().join("artifacts/ended"));
+        let phases = vec![phase("targets", LONG, &[other, target, mutant], |run| {
+            run.budgets
+                .insert(target.to_string(), Duration::from_secs(1));
+            let record = receipt::Target {
+                unit: Some(target.to_string()),
+                ..receipt::Target::default()
+            };
+            run.receipt.proof_targets.insert("t".to_string(), record);
+            let gate = &*run;
+            shell(gate, other, "sleep 0.3");
+            let read = |_: &Ran| {
+                let recorded = gate.records().commands.len();
+                fs::write(&ended, "").expect("the mark");
+                fixture::wait_until(|| gate.records().commands.len() > recorded, "no mutant");
+                Ok(())
+            };
+            std::thread::scope(|scope| {
+                scope.spawn(|| shell_reading(gate, target, "sleep 0.7", read));
+                fixture::wait_until(|| ended.exists(), "the target's command did not end");
+                shell(gate, mutant, "sleep 0.6");
+            });
+            for unit in [other, target, mutant] {
+                run.conclude(unit, (Status::Verified, None));
+            }
+            Ok(())
+        })];
+        let done = gate(&fixture, &[], phases);
+        let [a, b] = [target, mutant].map(|unit| fixture::commands(&done, unit)[0].clone());
+        assert_eq!((a.limit, a.limit_seconds), (LimitBy::Target, 1.0), "{a:?}");
+        assert!(
+            b.limit_seconds <= (1.0 - a.seconds).max(0.0) + 0.0025,
+            "{a:?} {b:?}"
+        );
+        let intervals = [&a, &b].map(|c| (c.started, c.started + c.seconds));
+        assert_eq!(
+            done.receipt.proof_targets["t"].seconds,
+            receipt::seconds(Duration::from_secs_f64(covered(intervals)))
+        );
+        let status = (fixture::status(&done, mutant).0, done.receipt.status);
+        assert_eq!(status, (Status::Budget, Status::Budget));
+        // The receipt lists the commands in the order in which they started.
+        let commands = &done.receipt.commands;
+        assert!(
+            (commands.windows(2))
+                .all(|w| w[0].sequence < w[1].sequence && w[0].started <= w[1].started),
+            "{commands:?}"
+        );
     }
 
     #[test]

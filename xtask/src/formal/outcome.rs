@@ -613,6 +613,7 @@ mod tests {
                 logs: &logs,
                 sequence,
                 limit: row.limit,
+                begin: std::time::Instant::now(),
             });
             assert!((row.ends)(&ran.ended), "{}: {:?}", row.name, ran.ended);
             assert!(!row.sites.is_empty(), "{} applies nowhere", row.name);

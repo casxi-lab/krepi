@@ -70,6 +70,9 @@ pub struct Spec<'a> {
     pub logs: &'a Path,
     pub sequence: u32,
     pub limit: Limit,
+    /// When the command counts as started, from which its limit and its
+    /// seconds count.
+    pub begin: Instant,
 }
 
 /// How a command ended.
@@ -99,7 +102,7 @@ pub struct Ran {
     pub group: Option<i32>,
     pub ended: Ended,
     pub limit: Limit,
-    /// The time from the start of the command until it was collected.
+    /// The time from [`Spec::begin`] until the command was collected.
     pub seconds: Duration,
     pub stdout: Option<Log>,
     pub stderr: Option<Log>,
@@ -170,7 +173,7 @@ pub fn stop_if_asked() {
 pub(super) fn run(spec: &Spec) -> Ran {
     stop_if_asked();
     let paths = [log_path(spec, "stdout"), log_path(spec, "stderr")];
-    let begin = Instant::now();
+    let begin = spec.begin;
     let (mut ended, group) = match start(spec, &paths) {
         Err(message) => (Ended::Failed(message), None),
         Ok(mut child) => {
@@ -438,6 +441,7 @@ pub(crate) mod tests {
             logs: &logs,
             sequence: 7,
             limit,
+            begin: Instant::now(),
         })
     }
 

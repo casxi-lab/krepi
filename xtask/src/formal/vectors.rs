@@ -123,6 +123,7 @@ pub fn vectors(root: &Path, layout: &Layout, tree: &Tree, name: &str, end: Insta
             logs,
             sequence,
             limit: run::limit(site.cap(), left, left),
+            begin: Instant::now(),
         });
         let spoke = (ran.stderr.as_ref()).is_some_and(|log| name == "replay" && log.bytes > 0);
         let own = lean::proof_messages(&ran.output, std::slice::from_ref(&module)).len();
