@@ -7,10 +7,10 @@ modules:
   - kernel/src/fdt/cpus.rs
   - kernel/src/fdt/discovery.rs
   - kernel/src/fdt/format.rs
+  - kernel/src/fdt/hand_over.rs
+  - kernel/src/fdt/hand_over/selection.rs
   - kernel/src/fdt/nodes.rs
   - kernel/src/fdt/parser.rs
-  - kernel/src/fdt/pi5.rs
-  - kernel/src/fdt/pi5/selection.rs
   - kernel/src/fdt/plan.rs
   - kernel/src/fdt/plan/available.rs
   - kernel/src/fdt/span.rs
@@ -28,13 +28,13 @@ tests:
   - kernel/src/fdt/tests/parser.rs
   - kernel/src/fdt/tests/results.rs
   - kernel/src/fdt/tests/translation.rs
-  - kernel/src/fdt/pi5/tests.rs
-  - kernel/src/fdt/pi5/tests/boundaries.rs
-  - kernel/src/fdt/pi5/tests/builder.rs
-  - kernel/src/fdt/pi5/tests/firmware.rs
-  - kernel/src/fdt/pi5/tests/models.rs
-  - kernel/src/fdt/pi5/tests/platform.rs
-  - kernel/src/fdt/pi5/tests/selection.rs
+  - kernel/src/fdt/hand_over/tests.rs
+  - kernel/src/fdt/hand_over/tests/boundaries.rs
+  - kernel/src/fdt/hand_over/tests/builder.rs
+  - kernel/src/fdt/hand_over/tests/firmware.rs
+  - kernel/src/fdt/hand_over/tests/models.rs
+  - kernel/src/fdt/hand_over/tests/platform.rs
+  - kernel/src/fdt/hand_over/tests/selection.rs
   - kernel/src/fdt/plan/tests.rs
 suites:
   - qemu-boot
@@ -276,7 +276,7 @@ reservations, and, with the tree at the start of RAM and the image at
 - `kernel/src/fdt/discovery.rs`: `Fdt::discover_memory` and `MemoryMap`.
 - `kernel/src/fdt/cpus.rs`: `Fdt::discover_cpus`, `CpuTopology` and
   `CpuProfile`.
-- `kernel/src/fdt/pi5.rs` and `kernel/src/fdt/pi5/selection.rs`:
+- `kernel/src/fdt/hand_over.rs` and `kernel/src/fdt/hand_over/selection.rs`:
   `Fdt::discover_pi5_boot_memory`, `Pi5BootMemory` and `find_available`.
 - `kernel/src/fdt/plan.rs` and `kernel/src/fdt/plan/available.rs`:
   `MemoryPlan` with its entries and queries, and the `next` of

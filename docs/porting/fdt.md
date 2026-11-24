@@ -65,16 +65,16 @@ shapes of the [proof path](../domains/boot-platform/fdt/proof.md).
 | `src/fdt/translation.rs` | `kernel/src/fdt/translation.rs` |
 | `src/fdt/discovery.rs` | `kernel/src/fdt/discovery.rs` |
 | `src/fdt/cpus.rs` | `kernel/src/fdt/cpus.rs` |
-| `src/fdt/pi5.rs` | `kernel/src/fdt/pi5.rs` |
-| `src/fdt/pi5/selection.rs` | `kernel/src/fdt/pi5/selection.rs` |
+| `src/fdt/pi5.rs` | `kernel/src/fdt/hand_over.rs` |
+| `src/fdt/pi5/selection.rs` | `kernel/src/fdt/hand_over/selection.rs` |
 | `src/platform/memory.rs`, with `range` of `src/platform/mod.rs` | `kernel/src/fdt/plan.rs` |
 | `src/platform/memory/available.rs` | `kernel/src/fdt/plan/available.rs` |
 | `src/fdt/tests/mod.rs` | `kernel/src/fdt/tests.rs` |
-| `src/fdt/pi5/tests.rs` | `kernel/src/fdt/pi5/tests.rs` |
+| `src/fdt/pi5/tests.rs` | `kernel/src/fdt/hand_over/tests.rs` |
 | `src/platform/tests.rs`, the tests of the memory plan | `kernel/src/fdt/plan/tests.rs` |
 
 The other test files keep their names below `kernel/src/fdt/tests/` and
-`kernel/src/fdt/pi5/tests/`.
+`kernel/src/fdt/hand_over/tests/`.
 
 ## Changes
 
@@ -169,11 +169,11 @@ The other test files keep their names below `kernel/src/fdt/tests/` and
 | `src/fdt/tests/translation.rs`, 5 tests | The same names in `kernel/src/fdt/tests/translation.rs` |
 | `src/fdt/tests/discovery.rs`, 6 tests | The same names in `kernel/src/fdt/tests/discovery.rs` |
 | `src/fdt/tests/cpus.rs`, 6 tests | The same names in `kernel/src/fdt/tests/cpus.rs` |
-| `src/fdt/pi5/tests.rs`, 4 tests | The same names in `kernel/src/fdt/pi5/tests.rs` |
-| `src/fdt/pi5/tests/boundaries.rs`, 5 tests | The same names in `kernel/src/fdt/pi5/tests/boundaries.rs` |
-| `src/fdt/pi5/tests/selection.rs`, 3 tests | The same names in `kernel/src/fdt/pi5/tests/selection.rs` |
-| `src/fdt/pi5/tests/platform.rs`, 2 tests | The same names in `kernel/src/fdt/pi5/tests/platform.rs` |
-| `src/fdt/pi5/tests/firmware.rs`, 2 ignored tests | The same names in `kernel/src/fdt/pi5/tests/firmware.rs`, ignored |
+| `src/fdt/pi5/tests.rs`, 4 tests | The same names in `kernel/src/fdt/hand_over/tests.rs` |
+| `src/fdt/pi5/tests/boundaries.rs`, 5 tests | The same names in `kernel/src/fdt/hand_over/tests/boundaries.rs` |
+| `src/fdt/pi5/tests/selection.rs`, 3 tests | The same names in `kernel/src/fdt/hand_over/tests/selection.rs` |
+| `src/fdt/pi5/tests/platform.rs`, 2 tests | The same names in `kernel/src/fdt/hand_over/tests/platform.rs` |
+| `src/fdt/pi5/tests/firmware.rs`, 2 ignored tests | The same names in `kernel/src/fdt/hand_over/tests/firmware.rs`, ignored |
 | `src/platform/tests.rs`, the 13 tests of the memory plan | The same names in `kernel/src/fdt/plan/tests.rs` |
 
 These are the 55 vectors of the contract. Changed expected values:
@@ -203,7 +203,7 @@ These are the 55 vectors of the contract. Changed expected values:
 - A dynamic reservation, an enabled child of `/reserved-memory` with a
   `size` and no `reg`, is counted and accepted, whatever the cells of its
   `size`: `fdt::tests::discovery`, `fdt::tests::dynamic`,
-  `fdt::pi5::tests::rejects_active_dynamic_reservations_and_conflicting_flags`
+  `fdt::hand_over::tests::rejects_active_dynamic_reservations_and_conflicting_flags`
   and the ignored `source_firmware_rejects_dynamic_reservations`.
 - Boot storage of 4 spans is accepted and of 5 fails with `Capacity`:
   `boot_storage_of_four_spans_is_accepted` and
