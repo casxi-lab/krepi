@@ -1543,6 +1543,43 @@ mod tests {
         receipt.status = Status::Rejected;
         assert_eq!(write(&done, &receipt), ExitCode::FAILURE);
         assert!(!path.exists());
+        // A source mutant of `f`, which the target proves, Aeneas translates
+        // and Cargo checks, whose build writes the build of the target that
+        // seeded it, makes the target a tool failure.
+        let mut registry: serde_json::Value = serde_json::from_str(&two_targets(1_800, 1)).unwrap();
+        registry[0]["proves"] = serde_json::json!(["kernel/src/lib.rs#f"]);
+        let source = "#![no_std]\npub fn f() -> u32 {\n    1\n}\n";
+        fixture.write("kernel/src/lib.rs", source);
+        register(&fixture, &registry.to_string());
+        let shape = fixture.root().join("artifacts/shapes/t");
+        let from = shape.to_str().expect("UTF-8");
+        fixture.write("artifacts/shapes/KrepiGen.T.from", from);
+        let function = r#"{"rust_name": "krepi_kernel::f", "lean_name": "KrepiGen.T.f",
+            "lean_file": "KrepiGen/T/Funs.lean", "is_local": true, "is_opaque": false,
+            "source": {"file": "src/lib.rs"}}"#;
+        let translation = format!("{{\"functions\": [{function}], \"types\": []}}");
+        fixture.write("artifacts/shapes/t/translation.json", &translation);
+        for file in ["Types", "Funs"] {
+            fixture.write(&format!("artifacts/shapes/t/KrepiGen/T/{file}.lean"), "");
+        }
+        let cargo = "artifacts/formal/tools/cargo/bin/cargo";
+        let real = fs::read_to_string(fixture.root().join(cargo)).expect("the Cargo stand-in");
+        let checks = real.replacen("\n", "\n[ \"$1\" = check ] && exit 0\n", 1);
+        fixture.write(cargo, &checks);
+        fixture.chmod(cargo, 0o755);
+        let seed = "${PWD%/mutants/*}/targets/t/stage/verification/.lake/build";
+        let script =
+            format!("case $PWD in */mutants/*) : > {seed}/x ;; *) mkdir -p {BUILD} ;; esac");
+        fixture::lake_script(&fixture, "+Krepi", &script);
+        let run = generating_run(&fixture, &["t"], operators.clone());
+        let done = gate(&fixture, &["t"], run);
+        assert_eq!(done.receipt.status, Status::ToolFailure);
+        let (status, reason) = fixture::status(&done, "target/t");
+        assert!(status == Status::ToolFailure && reason.is_some_and(|r| r.starts_with(SEED)));
+        let sites = Vec::from_iter(fixture::commands(&done, "mutants/t").iter().map(|c| c.site));
+        assert!(sites.contains(&Site::TargetBuild), "{sites:?}");
+        assert_eq!(write(&done, &done.receipt), ExitCode::FAILURE);
+        assert!(!path.exists());
         // A theorem of the obligations that the ranges do not hold as a
         // theorem rejects the unit before a mutant runs.
         let ranges = "echo 'krepi-ranges-module Krepi.Proofs.T 0'; exit 0\n";
