@@ -19,6 +19,9 @@ use super::{
     AffinityLevel, CpuProfile, CpuTopology, Error, Fdt, NodeAt, PsciConduit, TOKENS, cells_u64,
 };
 
+#[cfg(test)]
+pub(super) mod tests;
+
 /// The affinity fields of `MPIDR_EL1`: bits 0 to 23 and 32 to 39, without
 /// the U, MT and other flag bits.
 const AFFINITY_MASK: u64 = 0xff_00ff_ffff;
