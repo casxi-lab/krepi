@@ -2558,7 +2558,8 @@ pub(crate) mod tests {
         );
     }
 
-    /// A shell loop that waits at most 60 s for `path` to exist.
+    /// A shell loop that waits for `path` to exist, looking 6,000 times, 10 ms
+    /// apart: a minute or more.
     fn waits_for(path: &Path) -> String {
         let path = path.display();
         format!("i=0; while [ ! -e {path} ] && [ $i -lt 6000 ]; do sleep 0.01; i=$((i+1)); done\n")

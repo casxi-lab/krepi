@@ -47,7 +47,7 @@ on:
         required: false
         default: ""
       operators:
-        description: The operators of the source mutants, separated by spaces, or all
+        description: The operators of the source mutants, separated by spaces, or empty for every operator
         type: string
         required: false
         default: ""
