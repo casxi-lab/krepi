@@ -2199,5 +2199,11 @@ mod tests { fn t() { let _ = 1 + 1; } }
                 .as_i64()
                 .is_some_and(|job| (deadline as i64 + 20..=270).contains(&job))
         );
+        // `formal.yml` runs it with the same deadline, in a step two minutes
+        // longer and a job 20 minutes longer than the step.
+        let job = &jobs["mutants"];
+        assert!(formal.contains(&format!("deadline.sh --stop-commands {deadline}m 1m")));
+        assert_eq!(limit(&find_step(job, "id", "mutants")), Some(deadline + 2));
+        assert_eq!(limit(job), Some(deadline + 22));
     }
 }
