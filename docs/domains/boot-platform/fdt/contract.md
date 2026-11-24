@@ -6,11 +6,11 @@ flattened device tree that the firmware hands to the kernel, which the
 kernel reads as untrusted input; the access to its nodes and properties and
 the translation of addresses through `reg`, `ranges` and `dma-ranges`; the
 discovery of the RAM ranges, the reserved regions and the dynamic
-reservations of a tree; the CPU nodes and the PSCI conduit, against the CPU
-profile of a board; the boot memory, which checks a hand-over tree against
-the hand-over profile of its board and the storage of the image and of the
-tree; and the
-boot memory map, the RAM banks with the boot storage and the firmware
+reservations of a tree; the CPU nodes and the PSCI conduit,
+against the CPU profile of a board; the boot memory, which
+checks a hand-over tree against the hand-over profile of its
+board and the storage of the image and of the tree; and the boot
+memory map, the RAM banks with the boot storage and the firmware
 reservations excluded by whole pages, which the
 [page-tables](../../memory/page-tables/contract.md) component of the
 [memory domain](../../memory/README.md) takes as its input. The bindings of
@@ -503,32 +503,32 @@ describe them:
 hand-over tree against the hand-over profile `hand_over` of its board and
 the spans that the board gives for the tree and for the image with its BSS
 and stacks. A `HandOverProfile` has three public fields: `max_blob_size`,
-the largest `totalsize`; `alignment_log2`, which makes the alignment of the
-address of the tree `2 ^ alignment_log2` bytes, a power of two; and
-`compatible`, bytes whose pieces between NUL bytes are the entries that the
-root `compatible` must hold, an empty piece requiring nothing. Every value
-of these fields is a profile, with the behaviour that these rules give it.
-The tree is at most `max_blob_size`; its address is a multiple of
-`2 ^ alignment_log2`; the root has 2 address cells and 2 size cells
-(`UnsupportedCells`); the root `compatible` is a list of nonempty,
-NUL-terminated UTF-8 strings that holds, for each entry that the profile
-requires, an entry of the same bytes, in any order and with other entries.
-The span of the tree is `[dtb_address, dtb_address + totalsize)`. The image
-is nonempty and disjoint from the tree. After `discover_memory`, the tree
-and the image each lie inside one RAM range, and `ram_bytes` is the sum of
-the RAM ranges. A `BootMemory` also keeps the `max_blob_size` and the
-`alignment_log2` of the profile that it was checked with, which no entry
-gives. The hand-over profile of the Pi 5 has the limit 128 KiB, the
-alignment 8, as section 5.6 of DTSpec v0.4 requires, and the entries
-`raspberrypi,5-model-b` and `brcm,bcm2712` ([notation](#notation)); that a
-board gives the values of its hardware is a property of the board, which
-these rules do not state. `BootMemory::is_available(span)` is true for a
-nonempty span inside one RAM range that touches neither the tree nor the
-image nor any reserved region, `reusable` ones included. The answer
-describes memory; it is no ownership. These queries know only the image and
-the tree as the board gives them: further boot storage, such as the boot
-bundle when the board gives it as a span of its own, is excluded only by the
-boot memory map.
+the largest `totalsize`; `alignment_log2`, the exponent of the alignment of
+the address of the tree; and `compatible`, bytes that, split at each NUL,
+the first and last pieces too, give the entries that the root `compatible`
+must hold, an empty piece requiring nothing and one that is not UTF-8
+matching none. Every value of these fields is a profile, with the behaviour
+that these rules give it. The tree is at most `max_blob_size`; its address
+is a multiple of `2 ^ alignment_log2`, only 0 from an exponent of 64 up; the
+root has 2 address cells and 2 size cells (`UnsupportedCells`); the root
+`compatible` is a list of nonempty, NUL-terminated UTF-8 strings that holds,
+for each entry that the profile requires, an entry of the same bytes, in any
+order and with other entries. The span of the tree is
+`[dtb_address, dtb_address + totalsize)`. The image is nonempty and disjoint
+from the tree. After `discover_memory`, the tree and the image each lie
+inside one RAM range, and `ram_bytes` is the sum of the RAM ranges. A
+`BootMemory` also keeps the `max_blob_size` and the `alignment_log2` of the
+profile that it was checked with, which no entry gives.
+The hand-over profile of the Pi 5 has the limit 128 KiB, the alignment 8, as
+section 5.6 of DTSpec v0.4 requires, and the entries `raspberrypi,5-model-b`
+and `brcm,bcm2712` ([notation](#notation)); that a board gives the values of
+its hardware is a property of the board, which these rules do not state.
+`BootMemory::is_available(span)` is true for a nonempty span inside one RAM
+range that touches neither the tree nor the image nor any reserved region,
+`reusable` ones included. The answer describes memory; it is no ownership.
+These queries know only the image and the tree as the board gives them:
+further boot storage, such as the boot bundle when the board gives it as a
+span of its own, is excluded only by the boot memory map.
 
 A shipped tree is parsed like any other, but its memory node is the
 placeholder of the Raspberry Pi tree, `/memory@0` with `reg` `[0,
@@ -679,12 +679,12 @@ the Pi 5 and of QEMU virt are in [notation](#notation):
 - `CpuTopology::validate_timers(interrupts)` checks the `interrupts` of the
   timer node against the timer interrupts of the profile: records of three
   cells, type 1 for a private interrupt, its number and the flags
-  `((1 << count) - 1) << 8 | 4`, the admitted CPUs and a level-high trigger,
-  for the private interrupts of the profile in their order, with nothing
-  else; on QEMU virt 13, 14, 11 and 10 in this order and, with EL2, 12 after
-  them. For a profile without timer interrupts it fails with `BadProperty`:
-  the profile of the Pi 5 has none, as the timer of the Pi 5 belongs to its
-  board support.
+  `((1 << count) - 1) << 8 | 4`, which admit the `count` CPUs of the
+  topology with a level-high trigger, for the private interrupts of the
+  profile in their order, with nothing else; on QEMU virt 13, 14, 11 and 10
+  in this order and, with EL2, 12 after them. For a profile without timer
+  interrupts it fails with `BadProperty`: the profile of the Pi 5 has none,
+  as the timer of the Pi 5 belongs to its board support.
 
 ## Address translation
 
@@ -746,8 +746,8 @@ return of the value, cannot fail
   the iterator's own cursor and does not fail.
 - `discover_memory`, `discover_boot_memory`, `discover_cpus`,
   `MemoryPlan::all_ram`, `new` and `from_boot_memory` fill their local
-  result value while they check, and may fail with any error of their
-  order in [Rejection and error priority](#rejection-and-error-priority) after
+  result value while they check, and may fail with any error of their order
+  in [Rejection and error priority](#rejection-and-error-priority) after
   they have put a part of it there, such as `BadProperty`, `NoMemory` or
   `MissingProperty` after the RAM ranges of `discover_memory`, or
   `Overflow`, `OutsideRam` or `Overlap` after the RAM banks of `all_ram`.

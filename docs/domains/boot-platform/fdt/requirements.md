@@ -280,10 +280,10 @@ level 1 of `MPIDR_EL1` on the Pi 5 and level 0 on QEMU virt, the logical
 IDs run from 0 to `count - 1` without a gap or a repeat for a count of 1, 2
 or 4, and of 4 on the Pi 5, every CPU but the first uses PSCI, on the Pi 5
 every CPU, and `/psci` has the conduit of the profile and a supported
-`compatible`. The flag bits of `MPIDR_EL1` do
-not change a logical ID. `validate_timers` accepts, for a QEMU virt profile,
-only the timer records of QEMU virt for the admitted CPUs. The criterion:
-the vectors of the CPU nodes give their expected outputs.
+`compatible`. The flag bits of `MPIDR_EL1` do not change a logical ID.
+`validate_timers` accepts, for a QEMU virt profile, only the timer records
+of QEMU virt for the admitted CPUs, and none for the profile of the Pi 5.
+The criterion: the vectors of the CPU nodes give their expected outputs.
 
 - **Examples.**
   [ex6](../../../features/platform/device-tree.md#ex6-the-cpu-topology-of-the-pi-5)

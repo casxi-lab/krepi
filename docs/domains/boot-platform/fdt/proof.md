@@ -370,19 +370,26 @@ qualification cases that record the outcome of the shape in
     climb of `Node::translate_reg` over at most `MAX_DEPTH` buses, which is
     a loop with a count rather than a recursion
     ([rule 4](../../../conventions/provable-subset.md#4-bounded-work-per-entry)).
-12. **Profiles.** `HandOverProfile`, `CpuProfile` and `TimerInterrupts`
-    are structures with public fields, `Copy`, passed by value; every
-    value of their fields has the behaviour that the contract gives it, so
-    no entry checks a profile before it uses it. `HandOverProfile` holds
-    its `compatible` entries as one byte slice, separated by NUL bytes, not
-    as a slice of slices, and its alignment as the exponent `alignment_log2`;
-    a `BootMemory` keeps the limit and that exponent in private fields, not
-    the slice. `CpuProfile` holds no borrow, since a `CpuTopology` holds it
-    and the topology is published in the boot state: its affinity level is
-    the enumeration `AffinityLevel`, its CPU counts the bits of a `u8`, and
-    its timer interrupts an `Option` of a `TimerInterrupts`, an array of
-    five `u32` and a `u8` count. A function that reads an enumeration of a
-    profile takes it by value, never through an array index
+12. **Profiles.** `HandOverProfile`, `CpuProfile` and `TimerInterrupts` are
+    structures with public fields, `Copy`, passed by value; every value of
+    their fields has the behaviour that the contract gives it, so no entry
+    checks a profile before it uses it. Each field has the width of the
+    specification ([widths](specification.md#widths-and-quantifiers)).
+    `HandOverProfile` holds its limit `max_blob_size` as a `u64`, its
+    alignment as the exponent `alignment_log2`, a `u8`, and its `compatible`
+    entries as one `&[u8]`, separated by NUL bytes, not as a slice of
+    slices; a `BootMemory` keeps the limit and that exponent in private
+    fields of the same types, a `u64` and a `u8`, not the slice. The check
+    of the alignment does not compute `1 << alignment_log2` in 64 bits,
+    which overflows from an exponent of 64: it takes an exponent of 64 or
+    more apart, for which only the address 0 is aligned, and tests the other
+    exponents with a mask, as in shape 8. `CpuProfile` holds no borrow,
+    since a `CpuTopology` holds it and the topology is published in the boot
+    state: its affinity level is the enumeration `AffinityLevel`, its CPU
+    counts the bits of a `u8`, and its timer interrupts an `Option` of a
+    `TimerInterrupts`, an array of five `u32` and a `u8` count. A function
+    that reads an enumeration of a profile takes it by value, never through
+    an array index
     ([constructs the tools do not support](../../../conventions/provable-subset.md#constructs-the-tools-do-not-support)).
 
 The qualification cases cover these shapes. A shape of the implementation
