@@ -529,8 +529,8 @@ pub fn after(
 /// [`merge::WORKERS`] workers, of which the `w`-th takes every
 /// `WORKERS`-th item from the `w`-th on, in order, through [`pipeline`]. A
 /// worker that stops at an error or panics stops the others before their
-/// next item; once all have ended, the first error, in the order of the
-/// workers, is returned.
+/// next item, even while its own next item is prepared; once all have
+/// ended, the first error, in the order of the workers, is returned.
 fn workers<T: Sync, P: Send>(
     items: &[T],
     prepare: impl Fn(&T) -> Result<P, String> + Sync,
@@ -554,7 +554,12 @@ fn workers_of<T: Sync, P: Send>(
         let workers = Vec::from_iter((0..count).map(|first| {
             let part = Vec::from_iter(items.iter().skip(first).step_by(count));
             scope.spawn(move || {
-                let run = || pipeline(&part, stopped, |item| prepare(item), |i, p| finish(i, p));
+                let finish = |item: &&T, prepared: Result<P, String>| {
+                    let ended = run::caught(|| finish(item, prepared)).and_then(|ended| ended);
+                    failed.fetch_or(ended.is_err(), Ordering::SeqCst);
+                    ended
+                };
+                let run = || pipeline(&part, stopped, |item| prepare(item), finish);
                 let ended = run::caught(run).and_then(|ended| ended);
                 failed.fetch_or(ended.is_err(), Ordering::SeqCst);
                 ended
@@ -1899,21 +1904,23 @@ mod tests { fn t() { let _ = 1 + 1; } }
     #[test]
     fn a_worker_that_stops_at_an_error_stops_the_others_before_their_next_item() {
         // Of two workers, the first takes a and c, and the second b and d.
-        // The preparation of b fails once a runs, which waits for it.
+        // b fails once a runs, which waits for it, while d is prepared.
         let (failed, ran) = (AtomicBool::new(false), Mutex::new(Vec::new()));
         let runs = AtomicBool::new(false);
+        let has_failed = || fixture::wait_until(|| failed.load(Ordering::SeqCst), "b never failed");
         let prepare = |&name: &&str| {
-            if name == "b" {
-                fixture::wait_until(|| runs.load(Ordering::SeqCst), "a never ran");
+            if name == "d" {
+                has_failed();
             }
-            (name != "b")
-                .then_some(())
-                .ok_or(format!("cannot copy {name}"))
+            Ok(())
         };
         let finish = |&name: &&'static str, ready: Result<(), String>| {
             if name == "a" {
                 runs.store(true, Ordering::SeqCst);
-                fixture::wait_until(|| failed.load(Ordering::SeqCst), "b never failed");
+                has_failed();
+            } else if name == "b" {
+                fixture::wait_until(|| runs.load(Ordering::SeqCst), "a never ran");
+                return Err(format!("cannot copy {name}"));
             }
             ready?;
             ran.lock().expect("ran").push(name);
