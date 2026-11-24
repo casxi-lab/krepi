@@ -505,7 +505,7 @@ fn blank(context: &Context, targets: &BTreeSet<String>, run: &str, directory: &s
 }
 
 /// Runs `f`, and makes a panic in it an error with the panic's text.
-fn caught<T>(f: impl FnOnce() -> T) -> Result<T, String> {
+pub(super) fn caught<T>(f: impl FnOnce() -> T) -> Result<T, String> {
     panic::catch_unwind(AssertUnwindSafe(f)).map_err(|payload| {
         let text = payload
             .downcast_ref::<&str>()
@@ -2628,8 +2628,9 @@ pub(crate) mod tests {
 
     #[test]
     fn a_mutant_is_extracted_while_the_one_before_it_builds() {
-        let fixture = with_targets("pipeline", &two_targets(1_800, 2));
-        let next = "m1";
+        // The mutant after m0 on its worker, `next`, is extracted while m0 builds.
+        let fixture = with_targets("pipeline", &two_targets(1_800, merge::WORKERS + 1));
+        let next = format!("m{}", merge::WORKERS);
         let extracted = fixture.root().join("artifacts/extracted");
         let mark = format!(
             "case $PWD in */mutants/{next}/*) touch {} ;; esac",
@@ -2689,6 +2690,98 @@ pub(crate) mod tests {
         assert_eq!(Vec::from_iter(sites), [Site::Charon, Site::Aeneas]);
         for unit in ["target/t", "target/t/mutant/m0", "target/t/mutant/m2"] {
             assert_eq!(fixture::status(&done, unit), (Status::Verified, None));
+        }
+    }
+
+    #[test]
+    fn a_worker_that_stops_at_an_error_fails_the_run_and_keeps_what_ran() {
+        // The second mutant of the first worker edits a file that the
+        // package does not have.
+        let mut targets: serde_json::Value =
+            serde_json::from_str(&two_targets(1_800, merge::WORKERS + 1)).expect("JSON");
+        targets[0]["mutants"][merge::WORKERS]["file"] = "src/missing.rs".into();
+        let fixture = with_targets("worker-failed", &targets.to_string());
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(
+            (done.receipt.status, done.receipt.complete),
+            (Status::ToolFailure, false)
+        );
+        let stopped = done
+            .failures()
+            .into_iter()
+            .find(|f| f.starts_with("the phase targets stopped"));
+        let stopped = stopped.expect("the phase stopped");
+        assert!(stopped.contains("No such file or directory"), "{stopped}");
+        // The mutant before it is concluded; the failed one ran nothing.
+        assert_eq!(
+            fixture::status(&done, "target/t/mutant/m0"),
+            (Status::Verified, None)
+        );
+        let failed = format!("target/t/mutant/m{}", merge::WORKERS);
+        assert_eq!(
+            fixture::status(&done, &failed),
+            (Status::NotRun, Some(stopped))
+        );
+        assert!(fixture::commands(&done, &failed).is_empty());
+        for unit in (1..merge::WORKERS).map(|index| format!("target/t/mutant/m{index}")) {
+            let (status, _) = fixture::status(&done, &unit);
+            assert!(
+                matches!(status, Status::Verified | Status::NotRun),
+                "{status:?}"
+            );
+        }
+        assert_eq!(
+            fixture::status(&done, "target/t"),
+            (Status::NotRun, Some(stopped))
+        );
+    }
+
+    #[test]
+    fn the_workers_of_a_target_share_no_stage_cargo_directory_or_work_directory() {
+        let count = 2 * merge::WORKERS;
+        let fixture = with_targets("workers", &two_targets(1_800, count));
+        // Charon records its Cargo target directory; the build of each
+        // mutant records a file that it finds in its stage and leaves one.
+        let lake = fixture.root().join("artifacts/lake");
+        let cargo = format!(
+            "echo \"$CARGO_TARGET_DIR\" >> {}",
+            lake.join("cargo").display()
+        );
+        after_tool(
+            &fixture,
+            "charon",
+            &format!("case $PWD in */mutants/*) {cargo} ;; esac"),
+        );
+        let failed = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
+        let failing = fixture::failing("Krepi.Proofs.T", &[failed], 1);
+        let script = format!(
+            "case $PWD in */mutants/*) if [ -e leaked ]; then : > \"$lake/leaked\"; fi\n\
+             echo \"$PWD\" > leaked\n{failing};; esac\n"
+        );
+        fixture::lake_script(&fixture, "+Krepi", &script);
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        assert!(!lake.join("leaked").exists());
+        // Each mutant runs its commands in its own work directory, and
+        // Charon builds there.
+        let run = relative(fixture.root(), &done.run.path);
+        let cargo = fs::read_to_string(lake.join("cargo")).expect("the target directories");
+        let cargo = BTreeSet::from_iter(cargo.lines());
+        assert_eq!(cargo.len(), count, "{cargo:?}");
+        for name in (0..count).map(|index| format!("m{index}")) {
+            let own = format!("{run}/work/targets/t/mutants/{name}/");
+            let commands = fixture::commands(&done, &format!("target/t/mutant/{name}"));
+            assert!(
+                commands.iter().all(|c| c.cwd.starts_with(&own)),
+                "{commands:?}"
+            );
+            let target = fixture.root().join(&own).join("extract/target");
+            assert!(cargo.contains(target.to_str().expect("UTF-8")), "{cargo:?}");
         }
     }
 

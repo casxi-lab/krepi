@@ -1007,9 +1007,9 @@ refuses a shard whose registered budget is more than the shard limit,
 whatever the workers of the shard, in either layout
 ([proof targets](#proof-targets)): the budget counts the time during which
 a command of its target runs, whichever worker runs it, and the run of a
-shard has a deadline of 300 s and that budget from its start. A shard
-prepares each mutant of its target while it builds the one before, each
-in a stage of its own that starts from the build of its target
+shard has a deadline of 300 s and that budget from its start. Two workers
+build the mutants of a target side by side, each in a stage of its own
+that starts from the build of its target
 ([registered mutants](#registered-mutants)). On a standard
 `ubuntu-24.04-arm` runner the shard of the calibration target, with its 30
 mutants built one after another, took about 400 s, against the registered
@@ -3065,14 +3065,17 @@ Once the phase `targets` has verified a formal target, the run prints the
 declaration ranges of its proof modules in its stage, as a command of the
 target's unit, and takes each of its registered mutants in a unit of its
 own, `target/<name>/mutant/<mutant>`, whose commands share the budget of
-the target, in the order of the registry. The run prepares the next
-mutant, steps 1 to 5, while it builds the one before, step 6, and a mutant
-that a step before the build concludes is not built. So two mutants of a
-target are prepared or built at once, each in its own work directory,
-stage and Cargo target directory. An error that stops the preparation or
-the build of a mutant stops the phase, a tool failure of the run: the
-mutants concluded so far keep their conclusions, and the others are
-`NOT_RUN`. For each mutant:
+the target. Two workers take them in turn, the first the first, the
+third and so on, and the second the second, the fourth and so on, each in
+the order of the registry. Each worker prepares its next mutant, steps 1
+to 5, while it builds the one before, step 6, and a mutant that a step
+before the build concludes is not built. So up to four mutants of a target
+are prepared or built at once, each in its own work directory, stage and
+Cargo target directory; they share only the home and temporary
+directories of the run, as all its commands do. A worker that stops at an
+error, or panics, stops the other before its next mutant, and the phase
+stops, a tool failure of the run: the mutants concluded so far keep their
+conclusions, and the others are `NOT_RUN`. For each mutant:
 
 1. a mutant whose `fails` names a theorem that the ranges do not give as a
    top-level theorem of the proof modules is rejected, without a command;
@@ -3212,8 +3215,8 @@ point without such a text is not generated and is counted. Each mutant is
 copied, edited and checked with
 `cargo check --lib --locked --quiet --target aarch64-unknown-none` at the
 call site `cargo-check`, in the environment of Charon, then extracted,
-staged, built and judged as a registered mutant, in the order of their
-points. A mutant that
+staged, built and judged as a registered mutant, on two workers as those
+are, in the order of their points. A mutant that
 `cargo check` does not build is not run and is counted. A mutant whose
 build is rejected is killed, and one whose build is accepted survives. An
 inconclusive mutant, and one with a command that fails as a tool or meets

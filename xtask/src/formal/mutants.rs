@@ -8,7 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
 use proc_macro2::{LineColumn, Span};
@@ -25,7 +26,7 @@ use super::receipt::{self, Receipt};
 use super::registry::{self, Mutant, Target};
 use super::run::{self, Gate, Request, RunDir};
 use super::toolchain::{environment::Tool, sha256};
-use super::{externals, extract, inventory, paths, qualify};
+use super::{externals, extract, inventory, merge, paths, qualify};
 use crate::repo::Tree;
 
 /// The budget of a run of `cargo xtask formal mutants`, in place of that of
@@ -490,9 +491,8 @@ pub fn after(
         .join(&target.name)
         .join("mutants");
     let (gate, unit) = (&*gate, |mutant: &Mutant| unit(&target.name, &mutant.name));
-    pipeline(
+    workers(
         &target.mutants,
-        || false,
         |mutant| match unknown_failures(&mutant.fails, &ranges) {
             Some(problem) => Ok(Ready::Told(Judged::Failed(Status::Rejected, problem))),
             None => {
@@ -520,6 +520,47 @@ pub fn after(
         },
     )?;
     Ok(listed(Some(&before)).err())
+}
+
+/// Runs `finish` on each of `items` with what `prepare` gave for it on
+/// [`merge::WORKERS`] workers, of which the `w`-th takes every
+/// `WORKERS`-th item from the `w`-th on, in order, through [`pipeline`]. A
+/// worker that stops at an error or panics stops the others before their
+/// next item; once all have ended, the first error, in the order of the
+/// workers, is returned.
+fn workers<T: Sync, P: Send>(
+    items: &[T],
+    prepare: impl Fn(&T) -> Result<P, String> + Sync,
+    finish: impl Fn(&T, Result<P, String>) -> Result<(), String> + Sync,
+) -> Result<(), String> {
+    let failed = AtomicBool::new(false);
+    workers_of(merge::WORKERS, &failed, items, &prepare, &finish)
+}
+
+/// [`workers`] with `count` workers, which stop once `failed` holds and set
+/// it when one of them stops at an error.
+fn workers_of<T: Sync, P: Send>(
+    count: usize,
+    failed: &AtomicBool,
+    items: &[T],
+    prepare: &(impl Fn(&T) -> Result<P, String> + Sync),
+    finish: &(impl Fn(&T, Result<P, String>) -> Result<(), String> + Sync),
+) -> Result<(), String> {
+    let stopped = || failed.load(Ordering::SeqCst);
+    let ended = std::thread::scope(|scope| {
+        let workers = Vec::from_iter((0..count).map(|first| {
+            let part = Vec::from_iter(items.iter().skip(first).step_by(count));
+            scope.spawn(move || {
+                let run = || pipeline(&part, stopped, |item| prepare(item), |i, p| finish(i, p));
+                let ended = run::caught(run).and_then(|ended| ended);
+                failed.fetch_or(ended.is_err(), Ordering::SeqCst);
+                ended
+            })
+        }));
+        let ended = workers.into_iter().map(|worker| worker.join());
+        Vec::from_iter(ended.map(|ended| ended.unwrap_or(Err("a worker panicked".into()))))
+    });
+    ended.into_iter().collect()
 }
 
 /// Runs `run` on each of `items` in order, with what `prepare` gave for
@@ -919,11 +960,10 @@ fn generated(
         ..List::default()
     };
     let (mut failed, work) = (Vec::new(), gate.work().join("mutants").join(&target.name));
-    let (gate, mut judged) = (&*gate, BTreeMap::new());
+    let (gate, judged) = (&*gate, Mutex::new(BTreeMap::new()));
     let points = Vec::from_iter(points.into_iter().enumerate());
-    pipeline(
+    workers(
         &points,
-        || false,
         |(index, point)| {
             let file = point.point.split(':').next().unwrap_or_default();
             let file = file
@@ -948,10 +988,12 @@ fn generated(
         |(index, _), ready| {
             let told = judge(gate, target, &unit, &fails, ranges, ready?)?;
             let _ = fs::remove_dir_all(work.join(index.to_string()));
+            let mut judged = judged.lock().unwrap_or_else(PoisonError::into_inner);
             judged.insert(*index, told);
             Ok(())
         },
     )?;
+    let mut judged = judged.into_inner().unwrap_or_else(PoisonError::into_inner);
     for (index, point) in points {
         let Some(told) = judged.remove(&index) else {
             failed.push(format!("{}: it was not judged", point.point));
@@ -1115,8 +1157,7 @@ mod tests {
     //! tests of `lean.rs` describe; the runs are those of the fixture of the
     //! targets of `run.rs`.
 
-    use std::sync::Mutex;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
 
     use super::*;
@@ -1853,6 +1894,48 @@ mod tests { fn t() { let _ = 1 + 1; } }
             Ok(())
         });
         assert_eq!((ran, result), (vec!["a"], Ok(())));
+    }
+
+    #[test]
+    fn a_worker_that_stops_at_an_error_stops_the_others_before_their_next_item() {
+        // Of two workers, the first takes a and c, and the second b and d.
+        // The preparation of b fails once a runs, which waits for it.
+        let (failed, ran) = (AtomicBool::new(false), Mutex::new(Vec::new()));
+        let runs = AtomicBool::new(false);
+        let prepare = |&name: &&str| {
+            if name == "b" {
+                fixture::wait_until(|| runs.load(Ordering::SeqCst), "a never ran");
+            }
+            (name != "b")
+                .then_some(())
+                .ok_or(format!("cannot copy {name}"))
+        };
+        let finish = |&name: &&'static str, ready: Result<(), String>| {
+            if name == "a" {
+                runs.store(true, Ordering::SeqCst);
+                fixture::wait_until(|| failed.load(Ordering::SeqCst), "b never failed");
+            }
+            ready?;
+            ran.lock().expect("ran").push(name);
+            Ok(())
+        };
+        let result = workers_of(2, &failed, &["a", "b", "c", "d"], &prepare, &finish);
+        assert_eq!(result, Err("cannot copy b".to_string()));
+        assert_eq!(*ran.lock().expect("ran"), ["a"]);
+        // Without an error each item runs on its worker, and a worker that
+        // panics stops the run.
+        let failed = AtomicBool::new(false);
+        let ok = |_: &&str| Ok(());
+        let finish = |&name: &&str, _| match name {
+            "d" => panic!("asked to by the test"),
+            _ => Ok(()),
+        };
+        assert_eq!(
+            workers_of(3, &failed, &["a", "b", "c"], &ok, &finish),
+            Ok(())
+        );
+        let result = workers_of(3, &failed, &["a", "b", "c", "d"], &ok, &finish);
+        assert_eq!(result, Err("panicked: asked to by the test".to_string()));
     }
 
     #[test]

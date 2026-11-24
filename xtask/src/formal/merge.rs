@@ -34,6 +34,9 @@ pub const MERGE: Duration = Duration::from_secs(300);
 /// The longest that a shard may take: the wall-clock limit less the merge.
 pub const SHARD_LIMIT: Duration = Duration::from_secs(WALL_CLOCK.as_secs() - MERGE.as_secs());
 
+/// The workers of a run that build the mutants of a target side by side.
+pub const WORKERS: usize = 2;
+
 /// The margin of the run of the shard of a target beyond its budget, for
 /// its start and its closing steps.
 pub const SHARD_MARGIN: Duration = Duration::from_secs(300);
@@ -1156,6 +1159,7 @@ pub(crate) mod tests {
     fn the_shard_limit_is_the_wall_clock_limit_of_the_gate_less_the_merge() {
         assert_eq!(SHARD_LIMIT, Duration::from_secs(3_300));
         assert_eq!(MERGE + SHARD_LIMIT, WALL_CLOCK);
+        assert_eq!(WORKERS, 2);
     }
 
     #[test]
