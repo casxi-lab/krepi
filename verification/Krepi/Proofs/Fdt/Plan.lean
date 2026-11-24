@@ -14,14 +14,14 @@ entries of the boot memory map give well-formed maps, and that their usable
 ranges are well-formed and exact.
 
 Every theorem here is proved but `FromBootMemoryWellFormed`, which is
-planned: its proof is `sorry` until a proof pull request proves it. The steps of the entries and of the usable
-ranges are in `Krepi.Proofs.Fdt.PlanLemmas`: the entries keep each rule of
-`MemoryPlan.WellFormed` while they fold over their inputs, and the usable
-ranges of a managed bank start at the bank or at the end of a reservation,
-end at the bank or at the start of a reservation, and cover every address
-that no reservation holds, since the fuel of `usableFrom` exceeds twice the
-reservations that end past its cursor. Mathlib is imported so that the gate
-counts the heartbeats of each theorem.
+planned: its proof is `sorry` until a proof pull request proves it. The steps of
+the entries and of the usable ranges are in `Krepi.Proofs.Fdt.PlanLemmas`: the
+entries keep each rule of `MemoryPlan.WellFormed` while they fold over their
+inputs, and the usable ranges of a managed bank start at the bank or at the end
+of a reservation, end at the bank or at the start of a reservation, and cover
+every address that no reservation holds, since the fuel of `usableFrom` exceeds
+twice the reservations that end past its cursor. Mathlib is imported so that the
+gate counts the heartbeats of each theorem.
 -/
 
 namespace Krepi.Proofs.Fdt.Plan

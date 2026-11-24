@@ -195,13 +195,14 @@ relies on the boot memory map of the [fdt](../../boot-platform/fdt/proof.md)
 component, which it reads as values: `direct_map` relies on the usable
 ranges of a map that the fdt entries built (`BuiltPlan`), so this target
 and the `fdt` target form a cluster connected by premises, in which the
-theorems of the `fdt` target about `MemoryPlan::all_ram`, `new`, `from_boot_memory`
-and `available_ranges` are restated over the generated types of this
-target. The gate does not check premises yet, so `cargo xtask formal check`
-refuses them ([proof targets](../../../formal-verification.md#proof-targets)),
-and the two targets are registered without them until it does. A Lean
-module never imports the generated definitions of both targets: their
-enumerations and external declarations would clash
+theorems of the `fdt` target about `MemoryPlan::all_ram`, `new`,
+`from_boot_memory` and `available_ranges` are restated over the generated
+types of this target. The gate does not check premises yet, so
+`cargo xtask formal check` refuses them
+([proof targets](../../../formal-verification.md#proof-targets)), and the
+two targets are registered without them until it does. A Lean module never
+imports the generated definitions of both targets: their enumerations and
+external declarations would clash
 ([R6](../../../conventions/provable-subset.md#r6-enumeration-names-across-targets)).
 Within the target, the premises of the table sets and those of the page
 ownership table are not connected ([premises](#premises)), so their proofs

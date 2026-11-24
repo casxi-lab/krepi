@@ -401,10 +401,10 @@ transactions that publish each field once and hold the boot token.
 - **The publications.** `BootState.publishPlan` runs the entry of a
   `PlanBuild`, `MemoryPlan::all_ram`, `new` or `from_boot_memory`, and
   `BootState.publishTopology` runs `Fdt::discover_cpus` with a profile on
-  the tree of the hand-over bytes. Each is enabled only while its field is none and no
-  secondary CPU has started, and gives none otherwise; at the return of its
-  entry it publishes the result, or gives the error of the entry and no
-  state, so the state stays as it was.
+  the tree of the hand-over bytes. Each is enabled only while its field is
+  none and no secondary CPU has started, and gives none otherwise; at the
+  return of its entry it publishes the result, or gives the error of the
+  entry and no state, so the state stays as it was.
 - **The start of the secondary CPUs.** `BootState.startSecondaries` is
   enabled once both results are published and before the secondary CPUs
   have started; from then on no publication is enabled, and every CPU only
@@ -1053,10 +1053,10 @@ by `sortByStart`, and their complete pages as managed banks in `admitBank`;
 inside one bank and on pages of its own in `addBoot`; at most 128 firmware
 reservations, rounded outward, none on a page of boot storage in
 `addFirmware`; `MemoryPlan.new`, which manages a window of whole pages, at
-most 128 MiB, inside one bank; and `MemoryPlan.fromBootMemory`. The usable ranges
-of `MemoryPlan.availableRanges` leave out every page of every reservation,
-`reusable` ones included, since `addFirmware` keeps no flag, and lie each
-inside one managed bank. The replay answers the cases of
+most 128 MiB, inside one bank; and `MemoryPlan.fromBootMemory`. The usable
+ranges of `MemoryPlan.availableRanges` leave out every page of every
+reservation, `reusable` ones included, since `addFirmware` keeps no flag,
+and lie each inside one managed bank. The replay answers the cases of
 `fdt-pi5-platform-1` and `-2` and of `platform-1` to `platform-13`, with the
 change of `platform-10`, where three spans of boot storage that are all the
 image fail with `Overlap`; `platform-2` and `platform-11` are replayed in
@@ -1083,14 +1083,14 @@ of the first, and `/psci` with the conduit of the profile and a
 flag bits of `MPIDR_EL1`; and `CpuTopology.validateTimers`, which accepts
 only the timer records of the profile for the admitted CPUs. The profiles
 of the Pi 5 and of QEMU virt give the levels, the counts, the
-`enable-method` of CPU 0 and the timer records that the requirement names. The replay answers
-the cases of `fdt-cpus-1` to `fdt-cpus-6`. `DiscoverCpusSupported` states the
-counts of a topology, `AffinityRoundTrip` that the affinity of each CPU gives
-back its logical ID whatever the flag bits, and `NoChoiceAmongDuplicates`
-that no two CPU nodes of an accepted `/cpus` have one `reg`. The
-specification test `CpusAcceptsQemuPair` takes two CPUs of QEMU virt, the
-first without an `enable-method`, with their timer records and the profile
-`QemuHvc`, and
+`enable-method` of CPU 0 and the timer records that the requirement names.
+The replay answers the cases of `fdt-cpus-1` to `fdt-cpus-6`.
+`DiscoverCpusSupported` states the counts of a topology, `AffinityRoundTrip`
+that the affinity of each CPU gives back its logical ID whatever the flag
+bits, and `NoChoiceAmongDuplicates` that no two CPU nodes of an accepted
+`/cpus` have one `reg`. The specification test `CpusAcceptsQemuPair` takes
+two CPUs of QEMU virt, the first without an `enable-method`, with their
+timer records and the profile `QemuHvc`, and
 `CpusRejectsRepeatedId` the same tree with one ID twice.
 
 ### FDT-R09
