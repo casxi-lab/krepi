@@ -158,9 +158,15 @@ pub(crate) fn stop_signal() -> Option<i32> {
 /// Ends the gate by the stop signal that reached it, if one did, after it
 /// kills the group of each command that another thread watches.
 pub fn stop_if_asked() {
+    stop_watching(&watched());
+}
+
+/// [`stop_if_asked`] with the lock of the watched groups, which it holds
+/// until the gate ends, so that no command starts after the kill.
+fn stop_watching(watched: &[libc::pid_t]) {
     let signal = STOP.load(Ordering::SeqCst);
     if signal != 0 {
-        watched().iter().for_each(|group| kill_group(*group));
+        watched.iter().for_each(|group| kill_group(*group));
         let _ = signal_hook::low_level::emulate_default_handler(signal as libc::c_int);
         std::process::abort();
     }
@@ -171,10 +177,18 @@ pub fn stop_if_asked() {
 /// to start the command, to watch it or to keep its output is an
 /// [`Ended::Failed`]; a command that did not start has no output files.
 pub(super) fn run(spec: &Spec) -> Ran {
-    stop_if_asked();
     let paths = [log_path(spec, "stdout"), log_path(spec, "stderr")];
     let begin = spec.begin;
-    let (mut ended, group) = match start(spec, &paths) {
+    // A stop signal ends the gate before the command starts, or finds its
+    // group watched.
+    let mut watched = watched();
+    stop_watching(&watched);
+    let started = start(spec, &paths);
+    if let Ok(child) = &started {
+        watched.push(child.id() as libc::pid_t);
+    }
+    drop(watched);
+    let (mut ended, group) = match started {
         Err(message) => (Ended::Failed(message), None),
         Ok(mut child) => {
             // Process numbers are positive and below 2^31.
@@ -258,9 +272,9 @@ fn start(spec: &Spec, paths: &[PathBuf; 2]) -> Result<Child, String> {
 /// Waits until the command `child`, the leader of `group`, has ended or
 /// `deadline` has passed, kills the group and collects the command. A stop
 /// signal kills the group, collects the command and ends the gate. The
-/// group is watched until its leader is collected.
+/// group, which [`run`] watches from its start, is watched until its
+/// leader is collected.
 fn supervise(child: &mut Child, group: libc::pid_t, deadline: Instant) -> Ended {
-    watched().push(group);
     let unwatch = || watched().retain(|watched| *watched != group);
     let timed_out = loop {
         match leader_ended(group) {
