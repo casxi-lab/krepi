@@ -504,12 +504,15 @@ pub fn after(
                     seed: seed.as_deref(),
                 };
                 let work = work.join(&mutant.name);
-                prepare(gate, target, &unit(mutant), &mutation, &work, false)
+                run::in_work(&work, || {
+                    prepare(gate, target, &unit(mutant), &mutation, &work, false)
+                })
             }
         },
         |mutant, ready| {
             let unit = unit(mutant);
-            let conclusion = match judge(gate, target, &unit, &mutant.fails, &ranges, ready?)? {
+            let judged = || judge(gate, target, &unit, &mutant.fails, &ranges, ready?);
+            let conclusion = match run::in_work(&work.join(&mutant.name), judged)? {
                 Judged::Rejected => (Status::Verified, None),
                 Judged::Survived(why) => (Status::Rejected, Some(why)),
                 Judged::Unbuildable => (Status::Rejected, Some("it does not build".into())),
@@ -976,18 +979,15 @@ fn generated(
                 replace,
                 seed,
             };
-            prepare(
-                gate,
-                target,
-                &unit,
-                &mutation,
-                &work.join(index.to_string()),
-                true,
-            )
+            let work = work.join(index.to_string());
+            run::in_work(&work, || {
+                prepare(gate, target, &unit, &mutation, &work, true)
+            })
         },
         |(index, _), ready| {
-            let told = judge(gate, target, &unit, &fails, ranges, ready?)?;
-            let _ = fs::remove_dir_all(work.join(index.to_string()));
+            let work = work.join(index.to_string());
+            let told = run::in_work(&work, || judge(gate, target, &unit, &fails, ranges, ready?))?;
+            let _ = fs::remove_dir_all(work);
             let mut judged = judged.lock().unwrap_or_else(PoisonError::into_inner);
             judged.insert(*index, told);
             Ok(())

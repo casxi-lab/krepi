@@ -3,6 +3,7 @@
 //! `docs/formal-verification.md` describes. Every command runs through
 //! [`Gate::command`], which limits, classifies, records and prints it.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::env::consts::{ARCH, OS};
 use std::fs;
@@ -289,7 +290,8 @@ impl Gate {
         } else {
             let (manifest, _) = (self.manifest.as_ref()).expect("commands run after the start");
             let host = self.receipt.host.as_deref().unwrap_or_default();
-            let [home, tmp] = ["home", "tmp"].map(|dir| self.run.path.join("work").join(dir));
+            let work = WORK.with_borrow(Clone::clone).unwrap_or(self.work());
+            let [home, tmp] = ["home", "tmp"].map(|dir| work.join(dir));
             let dirs = RunDirs { home, tmp };
             environment::environment(request.tool, manifest, host, &self.root, &dirs)
                 .map(|env| {
@@ -510,6 +512,28 @@ fn blank(context: &Context, targets: &BTreeSet<String>, run: &str, directory: &s
         failures: Vec::from_iter(mode.err().map(|message| Failure { status, message })),
         ..Receipt::default()
     }
+}
+
+thread_local! {
+    /// The work directory of the mutant whose commands this thread runs,
+    /// whose `home` and `tmp` they take in place of those of the run.
+    static WORK: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+/// Runs `f` with the commands that it runs on this thread in the home and
+/// temporary directories `home` and `tmp` of `work`, which it creates.
+pub(super) fn in_work<T>(work: &Path, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    for dir in ["home", "tmp"].map(|dir| work.join(dir)) {
+        fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+    }
+    struct Restore(Option<PathBuf>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            WORK.set(self.0.take());
+        }
+    }
+    let _restore = Restore(WORK.replace(Some(work.to_path_buf())));
+    f()
 }
 
 /// Runs `f`, and makes a panic in it an error with the panic's text.
@@ -2811,11 +2835,12 @@ pub(crate) mod tests {
     fn the_workers_of_a_target_share_no_stage_cargo_directory_or_work_directory() {
         let count = 2 * merge::WORKERS;
         let fixture = with_targets("workers", &two_targets(1_800, count));
-        // Charon records its Cargo target directory; the build of each
-        // mutant records a file that it finds in its stage and leaves one.
+        // Charon records its Cargo target directory and both its home and
+        // temporary directories, as the build of each mutant does; that build
+        // also records a file that it finds in its stage and leaves one.
         let lake = fixture.root().join("artifacts/lake");
         let cargo = format!(
-            "echo \"$CARGO_TARGET_DIR\" >> {}",
+            "echo \"$CARGO_TARGET_DIR $HOME $TMPDIR\" >> {}",
             lake.join("cargo").display()
         );
         after_tool(
@@ -2827,7 +2852,7 @@ pub(crate) mod tests {
         let failing = fixture::failing("Krepi.Proofs.T", &[failed], 1);
         let script = format!(
             "case $PWD in */mutants/*) if [ -e leaked ]; then : > \"$lake/leaked\"; fi\n\
-             echo \"$PWD\" > leaked\n{failing};; esac\n"
+             echo \"$PWD\" > leaked; echo \"$HOME $TMPDIR\" >> \"$lake/homes\"\n{failing};; esac\n"
         );
         fixture::lake_script(&fixture, "+Krepi", &script);
         let done = gate(&fixture, &[], target_run(&fixture, &[]));
@@ -2838,12 +2863,14 @@ pub(crate) mod tests {
             done.failures()
         );
         assert!(!lake.join("leaked").exists());
-        // Each mutant runs its commands in its own work directory, and
-        // Charon builds there.
+        // Each mutant runs its commands in its own work directory, where
+        // Charon builds and its commands have their home and temporary
+        // directories.
         let run = relative(fixture.root(), &done.run.path);
-        let cargo = fs::read_to_string(lake.join("cargo")).expect("the target directories");
-        let cargo = BTreeSet::from_iter(cargo.lines());
-        assert_eq!(cargo.len(), count, "{cargo:?}");
+        let read = |file| fs::read_to_string(lake.join(file)).expect(file);
+        let lines = |file| BTreeSet::from_iter(read(file).lines().map(str::to_string));
+        let (cargo, homes) = (lines("cargo"), lines("homes"));
+        assert_eq!((cargo.len(), homes.len()), (count, count), "{cargo:?}");
         for name in (0..count).map(|index| format!("m{index}")) {
             let own = format!("{run}/work/targets/t/mutants/{name}/");
             let commands = fixture::commands(&done, &format!("target/t/mutant/{name}"));
@@ -2851,8 +2878,11 @@ pub(crate) mod tests {
                 commands.iter().all(|c| c.cwd.starts_with(&own)),
                 "{commands:?}"
             );
-            let target = fixture.root().join(&own).join("extract/target");
-            assert!(cargo.contains(target.to_str().expect("UTF-8")), "{cargo:?}");
+            let path = |dir| fixture.root().join(&own).join(dir).display().to_string();
+            let dirs = format!("{} {}", path("home"), path("tmp"));
+            assert!(homes.contains(&dirs), "{homes:?}");
+            let target = format!("{} {dirs}", path("extract/target"));
+            assert!(cargo.contains(&target), "{cargo:?}");
         }
     }
 

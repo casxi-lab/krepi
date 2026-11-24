@@ -166,8 +166,9 @@ gate inputs, the home and temporary directories of the tools; in
 `targets/<name>/`, the extraction of each target that the run extracts
 in `extract/` and its stage in `stage/`, with the root module, the audit
 file and the range printer `Ranges.lean` of a selected formal target, and
-the copied package, the extraction and the stage of each registered mutant
-in `mutants/<mutant>/`; in `mutants/<target>/`, those of each source
+the copied package, the extraction, the stage and the home and temporary
+directories of each registered mutant in `mutants/<mutant>/`; in
+`mutants/<target>/`, those of each source
 mutant of a run of `formal mutants`, removed once it is judged; in `base/`, the stage of the base
 round with the root module `Krepi.lean` that the run writes, its audit
 file `Audit.lean` and its heartbeat copies in `.heartbeats/`, and
@@ -460,8 +461,8 @@ variables that `xtask/src/formal/toolchain.rs` gives it:
 | `GIT_CONFIG_KEY_0` | `safe.directory` | All |
 | `GIT_CONFIG_VALUE_0` | `*` | All |
 | `PATH` | `lean/bin`, `bin` and `cargo/bin` of the installation, then `/usr/bin:/bin:/usr/sbin:/sbin` | All |
-| `HOME` | A new, empty directory of the run | All |
-| `TMPDIR` | A directory of the run | All |
+| `HOME` | A new, empty directory of the run, or of the mutant whose command it is | All |
+| `TMPDIR` | A directory of the run, or of the mutant whose command it is | All |
 | `CARGO_INCREMENTAL` | `0` | Charon and Aeneas, the extraction |
 | `CARGO_TARGET_DIR` | A directory of the run for this extraction alone, removed when the extraction ends | Charon and Aeneas, the extraction |
 
@@ -3070,12 +3071,12 @@ third and so on, and the second the second, the fourth and so on, each in
 the order of the registry. Each worker prepares its next mutant, steps 1
 to 5, while it builds the one before, step 6, and a mutant that a step
 before the build concludes is not built. So up to four mutants of a target
-are prepared or built at once, each in its own work directory, stage and
-Cargo target directory; they share only the home and temporary
-directories of the run, as all its commands do. A worker that stops at an
-error, or panics, stops the other before its next mutant, and the phase
-stops, a tool failure of the run: the mutants concluded so far keep their
-conclusions, and the others are `NOT_RUN`. For each mutant:
+are prepared or built at once, each in its own work directory, with its
+own home and temporary directories, stage and Cargo target directory. A
+worker that stops at an error, or panics, stops the other before its next
+mutant, and the phase stops, a tool failure of the run: the mutants
+concluded so far keep their conclusions, and the others are `NOT_RUN`.
+For each mutant:
 
 1. a mutant whose `fails` names a theorem that the ranges do not give as a
    top-level theorem of the proof modules is rejected, without a command;
