@@ -3,6 +3,7 @@
 //! `docs/formal-verification.md` describes. Every command runs through
 //! [`Gate::command`], which limits, classifies, records and prints it.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::env::consts::{ARCH, OS};
 use std::fs;
@@ -11,7 +12,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc;
+use std::sync::{Mutex, MutexGuard, PoisonError, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::Layout;
@@ -148,6 +149,44 @@ pub struct Request<'a> {
     pub stdin: Option<&'a Path>,
 }
 
+/// What the commands of a run write while they run, which threads that
+/// run commands side by side share: the commands recorded, in the order in
+/// which they ended, the conclusions, the number of commands started and,
+/// by its sequence, the unit, the start and, once it has ended, the end of
+/// each command that is not recorded yet.
+#[derive(Default)]
+pub(super) struct Records {
+    pub(super) commands: Vec<receipt::Command>,
+    conclusions: Vec<(String, Conclusion)>,
+    started: u32,
+    running: BTreeMap<u32, (Option<String>, f64, Option<f64>)>,
+}
+
+impl Records {
+    /// The seconds, up to `now`, during which a command of a unit whose
+    /// budget is that of `owner` ran: the length of the union of their
+    /// intervals, from the run's start.
+    fn spent(&self, owner: &str, now: f64) -> f64 {
+        let mine = |unit: &Option<String>| unit.as_deref().map(mutants::owner) == Some(owner);
+        let ended = (self.commands.iter()).filter(|c| mine(&c.unit));
+        let running = (self.running.values()).filter(|(unit, ..)| mine(unit));
+        let ended = ended.map(|c| (c.started, c.started + c.seconds));
+        covered(ended.chain(running.map(|(_, start, end)| (*start, end.unwrap_or(now)))))
+    }
+}
+
+/// The length of the union of `intervals`, each its start and its end.
+pub fn covered(intervals: impl IntoIterator<Item = (f64, f64)>) -> f64 {
+    let mut intervals = Vec::from_iter(intervals);
+    intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut length, mut reached) = (0.0, f64::NEG_INFINITY);
+    for (start, end) in intervals {
+        length += (end - start.max(reached)).max(0.0);
+        reached = reached.max(end);
+    }
+    length
+}
+
 /// The state of a run, through which the body of a phase runs its commands.
 pub struct Gate {
     root: PathBuf,
@@ -155,12 +194,14 @@ pub struct Gate {
     run: RunDir,
     /// The tool manifest that the run read from the checkout, and its text.
     manifest: Option<(Manifest, String)>,
+    /// The start of the run, from which the receipt gives the start of each command.
+    start: Instant,
     deadline: Instant,
     /// Whether it is a run of `formal mutants`, whose targets do not grow its budget.
     fixed: bool,
     /// The phase that runs, and its deadline.
     phase: Option<(String, Instant)>,
-    conclusions: Vec<(String, Conclusion)>,
+    records: Mutex<Records>,
     /// Phases fill only their own records and read the rest; commands, units
     /// and failures are written by the gate.
     pub(super) receipt: Receipt,
@@ -179,7 +220,7 @@ pub struct Gate {
     pub(super) waived: waiver::LeftOut,
     /// Whether the run keeps its work directory and what it extracted.
     pub(super) keep: bool,
-    progress: Box<dyn Write>,
+    progress: Mutex<Box<dyn Write + Send>>,
     /// The site, limit and program that a test gives the commands there.
     #[cfg(test)]
     pub(crate) overrides: Option<(Site, Limit, String)>,
@@ -190,12 +231,18 @@ impl Gate {
         self.receipt.failures.push(Failure { status, message });
     }
 
+    /// The records of the commands, as a thread that panicked with them left them.
+    pub(super) fn records(&self) -> MutexGuard<'_, Records> {
+        self.records.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Runs `request` unless its limit is used up or `skip` says why it does
     /// not start, reads with `read` what it wrote, which returns why a file
     /// could not be read, then classifies, records and prints it; a line
-    /// that cannot be printed is left out.
+    /// that cannot be printed is left out. Threads may run commands side by
+    /// side.
     fn command(
-        &mut self,
+        &self,
         unit: Option<&str>,
         request: &Request,
         skip: Option<&str>,
@@ -208,26 +255,33 @@ impl Gate {
             program: (overridden.as_ref()).map_or(request.program, |(_, _, program)| program),
             ..*request
         };
-        let sequence = self.receipt.commands.len() as u32 + 1;
-        let now = Instant::now();
+        let mut records = self.records();
+        records.started += 1;
+        let (sequence, now) = (records.started, Instant::now());
+        let at = now.saturating_duration_since(self.start);
         let left = |end: Instant| end.saturating_duration_since(now);
         let phase_end = self.phase.as_ref().map_or(self.deadline, |(_, end)| *end);
         let mut limit = limit(request.site.cap(), left(phase_end), left(self.deadline));
-        // The commands of a target's unit, and of its mutants, share its budget.
+        // The commands of a target's unit, and of its mutants, share its
+        // budget, which counts the time during which any of them runs.
         let owner = unit.map(mutants::owner);
-        let mine = |c: &&receipt::Command| {
-            owner.is_some() && c.unit.as_deref().map(mutants::owner) == owner
-        };
-        let spent = (self.receipt.commands.iter().filter(mine)).map(|command| command.seconds);
-        let spent = Duration::from_secs_f64(spent.sum());
-        let rest = (owner.and_then(|unit| self.budgets.get(unit))).map(|b| b.saturating_sub(spent));
-        if let Some(rest) = rest.filter(|rest| *rest < limit.duration) {
-            (limit.duration, limit.by) = (rest, LimitBy::Target);
+        if let Some((owner, budget)) = owner.and_then(|o| Some((o, self.budgets.get(o)?))) {
+            let spent = Duration::from_secs_f64(records.spent(owner, at.as_secs_f64()));
+            let rest = budget.saturating_sub(spent);
+            if rest < limit.duration {
+                (limit.duration, limit.by) = (rest, LimitBy::Target);
+            }
         }
         #[cfg(test)]
         let limit = overridden.as_ref().map_or(limit, |(_, set, _)| *set);
         let name = word(&request.site);
         // The receipt writes a limit below half a millisecond as 0.
+        let starts = receipt::seconds(limit.duration) > 0.0 && skip.is_none();
+        if starts {
+            let running = (unit.map(str::to_string), receipt::seconds(at), None);
+            records.running.insert(sequence, running);
+        }
+        drop(records);
         let ran = if receipt::seconds(limit.duration) <= 0.0 {
             let used_up = format!("the {} budget was used up", word(&limit.by));
             Err((Class::NotRun, used_up))
@@ -236,7 +290,8 @@ impl Gate {
         } else {
             let (manifest, _) = (self.manifest.as_ref()).expect("commands run after the start");
             let host = self.receipt.host.as_deref().unwrap_or_default();
-            let [home, tmp] = ["home", "tmp"].map(|dir| self.run.path.join("work").join(dir));
+            let work = WORK.with_borrow(Clone::clone).unwrap_or(self.work());
+            let [home, tmp] = ["home", "tmp"].map(|dir| work.join(dir));
             let dirs = RunDirs { home, tmp };
             environment::environment(request.tool, manifest, host, &self.root, &dirs)
                 .map(|env| {
@@ -250,6 +305,7 @@ impl Gate {
                         logs: &self.run.path.join("logs"),
                         sequence,
                         limit,
+                        begin: now,
                     })
                 })
                 .map_err(|error| {
@@ -257,6 +313,11 @@ impl Gate {
                     (Class::ToolFailure, reason)
                 })
         };
+        // A command that ended counts by its interval until it is recorded.
+        let seconds = receipt::seconds(ran.as_ref().map_or(Duration::ZERO, |ran| ran.seconds));
+        if let Some((.., end)) = self.records().running.get_mut(&sequence) {
+            *end = Some(receipt::seconds(at) + seconds);
+        }
         let own = |ran: &Ran| lean::proof_messages(&ran.output, &self.own).len();
         let verdict = match &ran {
             Ok(ran) => outcome::classify(request.site, ran, own(ran), read(ran).as_deref()),
@@ -272,7 +333,9 @@ impl Gate {
         let (shown, class) = (argv.join(" "), word(&verdict.class));
         let reason = verdict.reason.as_ref().map(|reason| format!(": {reason}"));
         let reason = reason.unwrap_or_default();
-        let _ = writeln!(self.progress, "[{sequence:04}] {shown}: {class}{reason}");
+        let mut progress = self.progress.lock().unwrap_or_else(PoisonError::into_inner);
+        let _ = writeln!(progress, "[{sequence:04}] {shown}: {class}{reason}");
+        drop(progress);
         let log = |log: &Option<process::Log>| {
             log.as_ref().map(|log| receipt::Log {
                 path: relative(&self.run.path, &log.path),
@@ -280,8 +343,11 @@ impl Gate {
                 sha256: log.sha256.clone(),
             })
         };
-        self.receipt.commands.push(receipt::Command {
+        let mut records = self.records();
+        records.running.remove(&sequence);
+        records.commands.push(receipt::Command {
             sequence,
+            started: receipt::seconds(at),
             phase: self.phase.as_ref().map(|(phase, _)| phase.clone()),
             unit: unit.map(str::to_string),
             site: request.site,
@@ -297,7 +363,7 @@ impl Gate {
             timed_out: done.is_some_and(|ran| ran.ended == Ended::TimedOut),
             limit_seconds: receipt::seconds(limit.duration),
             limit: limit.by,
-            seconds: done.map_or(0.0, |ran| receipt::seconds(ran.seconds)),
+            seconds,
             group_survived: done.is_some_and(|ran| ran.survivors),
             stdout: done.and_then(|ran| log(&ran.stdout)),
             stderr: done.and_then(|ran| log(&ran.stderr)),
@@ -307,7 +373,7 @@ impl Gate {
 
     /// Runs a command of the gate itself and returns its standard output, or
     /// why it did not pass.
-    fn output(&mut self, request: &Request) -> Result<Vec<u8>, String> {
+    fn output(&self, request: &Request) -> Result<Vec<u8>, String> {
         let (ran, verdict) = self.command(None, request, None, &mut |_| None);
         match ran.and_then(|ran| ran.stdout) {
             Some(log) if verdict.class == Class::Passed => fs::read(&log.path)
@@ -321,7 +387,7 @@ impl Gate {
     /// cannot read makes it a tool failure; returns what it gave, if it ran,
     /// its class, and what `read` read.
     pub fn run<T>(
-        &mut self,
+        &self,
         unit: &str,
         request: &Request,
         mut read: impl FnMut(&Ran) -> Result<T, String>,
@@ -335,25 +401,26 @@ impl Gate {
     /// Records `request` as a command of `unit` that does not start because
     /// of `reason`, such as a missing input: `NOT_RUN`, with the limit that
     /// it would have had.
-    pub fn skip(&mut self, unit: &str, request: &Request, reason: &str) {
+    pub fn skip(&self, unit: &str, request: &Request, reason: &str) {
         self.command(Some(unit), request, Some(reason), &mut |_| None);
     }
 
     /// Concludes `unit` with `conclusion`, unless a command of the unit
     /// forces another one ([`outcome::forced`]), and returns its status.
-    pub fn conclude(&mut self, unit: &str, conclusion: Conclusion) -> Status {
+    pub fn conclude(&self, unit: &str, conclusion: Conclusion) -> Status {
         self.conclude_from(unit, unit, conclusion)
     }
 
     /// Concludes `unit` as [`Gate::conclude`] does, from the commands of the
     /// unit `of`, such as a theorem from those of its case.
-    pub fn conclude_from(&mut self, unit: &str, of: &str, conclusion: Conclusion) -> Status {
+    pub fn conclude_from(&self, unit: &str, of: &str, conclusion: Conclusion) -> Status {
         // A command skipped with its limit left forces nothing: the command
         // that should have written its input decides.
         let skipped = |command: &receipt::Command| {
             command.class == Class::NotRun && command.limit_seconds > 0.0
         };
-        let own: Vec<Verdict> = (self.receipt.commands.iter())
+        let mut records = self.records();
+        let own: Vec<Verdict> = (records.commands.iter())
             .filter(|command| command.unit.as_deref() == Some(of) && !skipped(command))
             .map(|command| Verdict {
                 class: command.class,
@@ -361,7 +428,8 @@ impl Gate {
             })
             .collect();
         let conclusion = outcome::forced(&own).unwrap_or(conclusion);
-        self.conclusions
+        records
+            .conclusions
             .push((unit.to_string(), conclusion.clone()));
         conclusion.0
     }
@@ -446,8 +514,30 @@ fn blank(context: &Context, targets: &BTreeSet<String>, run: &str, directory: &s
     }
 }
 
+thread_local! {
+    /// The work directory of the mutant whose commands this thread runs,
+    /// whose `home` and `tmp` they take in place of those of the run.
+    static WORK: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+/// Runs `f` with the commands that it runs on this thread in the home and
+/// temporary directories `home` and `tmp` of `work`, which it creates.
+pub(super) fn in_work<T>(work: &Path, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    for dir in ["home", "tmp"].map(|dir| work.join(dir)) {
+        fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+    }
+    struct Restore(Option<PathBuf>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            WORK.set(self.0.take());
+        }
+    }
+    let _restore = Restore(WORK.replace(Some(work.to_path_buf())));
+    f()
+}
+
 /// Runs `f`, and makes a panic in it an error with the panic's text.
-fn caught<T>(f: impl FnOnce() -> T) -> Result<T, String> {
+pub(super) fn caught<T>(f: impl FnOnce() -> T) -> Result<T, String> {
     panic::catch_unwind(AssertUnwindSafe(f)).map_err(|payload| {
         let text = payload
             .downcast_ref::<&str>()
@@ -468,7 +558,7 @@ pub(crate) fn execute(
     run: &RunDir,
     targets: &BTreeSet<String>,
     phases: Vec<Phase<'_>>,
-    progress: Box<dyn Write>,
+    progress: Box<dyn Write + Send>,
 ) -> (Receipt, Option<String>) {
     let start = Instant::now();
     let directory = relative(context.root, &run.path);
@@ -477,10 +567,11 @@ pub(crate) fn execute(
         layout: *context.layout,
         run: run.clone(),
         manifest: None,
+        start,
         deadline: start + context.budget.unwrap_or(GATE_BUDGET),
         fixed: context.budget == Some(mutants::RUN_BUDGET),
         phase: None,
-        conclusions: Vec::new(),
+        records: Mutex::default(),
         receipt: blank(context, targets, &run.id, &directory),
         own: Vec::new(),
         budgets: BTreeMap::new(),
@@ -488,7 +579,7 @@ pub(crate) fn execute(
         handwritten: Vec::new(),
         waived: waiver::LeftOut::new(),
         keep: context.keep,
-        progress,
+        progress: Mutex::new(progress),
         #[cfg(test)]
         overrides: None,
     };
@@ -573,7 +664,10 @@ pub(crate) fn execute(
             gate.fail(Status::ToolFailure, late.to_string());
         }
     }
+    let mut commands = std::mem::take(&mut gate.records().commands);
+    commands.sort_by_key(|command| command.sequence);
     let mut receipt = gate.receipt;
+    receipt.commands = commands;
     mutants::seconds(&mut receipt);
     receipt.resources.largest_process_max_rss = process::largest_child_rss();
     receipt.resources.cgroup_memory_peak = process::cgroup_memory_peak();
@@ -1033,7 +1127,7 @@ fn finish_target(
     generate: Option<&[String]>,
 ) -> Result<(), String> {
     let (layout, source, unit) = (gate.layout, gate.source(), target_unit(&target.name));
-    if (gate.conclusions.iter()).any(|(concluded, _)| *concluded == unit) {
+    if (gate.records().conclusions.iter()).any(|(concluded, _)| *concluded == unit) {
         return mutants::after(gate, target, None, generate).map(|_| ());
     }
     let mut record = gate.receipt.proof_targets[&target.name].clone();
@@ -1134,7 +1228,7 @@ fn run_phases(gate: &mut Gate, phases: Vec<Phase<'_>>) {
         };
         gate.receipt.phases.insert(name, phase);
     }
-    let conclusions = std::mem::take(&mut gate.conclusions);
+    let conclusions = std::mem::take(&mut gate.records().conclusions);
     let (units, problems) = outcome::account(&registered, conclusions, stopped.as_deref());
     for problem in problems {
         gate.fail(Status::ToolFailure, problem);
@@ -1421,7 +1515,7 @@ pub(crate) mod tests {
         targets: &BTreeSet<String>,
         phases: Vec<Phase<'_>>,
         host: Option<&str>,
-        progress: Box<dyn Write>,
+        progress: Box<dyn Write + Send>,
     ) -> Done {
         let context = Context {
             root,
@@ -1449,7 +1543,7 @@ pub(crate) mod tests {
         run: RunDir,
         targets: &BTreeSet<String>,
         phases: Vec<Phase<'_>>,
-        progress: Box<dyn Write>,
+        progress: Box<dyn Write + Send>,
     ) -> Done {
         let (receipt, draft) = execute(context, &run, targets, phases, progress);
         let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
@@ -1480,7 +1574,17 @@ pub(crate) mod tests {
 
     /// Runs the shell script `script` as a command of `unit` at the base
     /// build.
-    fn shell(run: &mut Gate, unit: &str, script: &str) -> Verdict {
+    fn shell(run: &Gate, unit: &str, script: &str) -> Verdict {
+        shell_reading(run, unit, script, |_| Ok(()))
+    }
+
+    /// [`shell`], with `read` reading what the command wrote.
+    fn shell_reading(
+        run: &Gate,
+        unit: &str,
+        script: &str,
+        read: impl FnMut(&Ran) -> Result<(), String>,
+    ) -> Verdict {
         let source = run.source();
         let args = vec!["-c".to_string(), script.to_string()];
         let request = Request {
@@ -1491,7 +1595,7 @@ pub(crate) mod tests {
             cwd: &source,
             stdin: None,
         };
-        run.run(unit, &request, |_| Ok(())).1
+        run.run(unit, &request, read).1
     }
 
     #[test]
@@ -2382,6 +2486,408 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_mutant_starts_from_the_build_of_its_target_which_must_not_change() {
+        let fixture = with_targets("seeded", &two_targets(1_800, 2));
+        // Aeneas writes other definitions for a mutant than for its target.
+        let bin = fixture.root().join("artifacts/formal/tools/bin");
+        fs::rename(bin.join("aeneas"), bin.join("aeneas-stand-in")).expect("rename");
+        let wrapper = "\"$(dirname \"$0\")/aeneas-stand-in\" \"$@\" || exit\n\
+            while [ $# -gt 0 ]; do\n  \
+              case \"$1\" in -subdir) subdir=$2 ;; -dest) dest=$2 ;; esac\n  shift\n\
+            done\n\
+            case $PWD in */mutants/*) echo '-- mutant' >> \"$dest/$subdir/Funs.lean\" ;; esac";
+        fixture.tool("aeneas", wrapper);
+        // The build of the target writes its output below the build
+        // directory of its stage; that of a mutant records the output that it
+        // finds there and the generated definitions of its stage, which Lake
+        // reads to decide what to build again, and fails in the theorem that
+        // the mutant names.
+        let olean = ".lake/build/lib/lean/KrepiGen/T/Funs.olean";
+        let failed = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
+        let failing = fixture::failing("Krepi.Proofs.T", &[failed], 1);
+        let mutant = |extra: &str| {
+            format!(
+                "case $PWD in\n  */mutants/*) cat {olean} KrepiGen/T/Funs.lean > \"$lake/seen-$$\"\n\
+                 {extra}{failing};;\n  \
+                 *) mkdir -p \"$(dirname {olean})\" && echo 'target build' > {olean} ;;\nesac\n"
+            )
+        };
+        fixture::lake_script(&fixture, "+Krepi", &mutant(""));
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        let seen = fs::read_dir(fixture.root().join("artifacts/lake")).expect("the calls");
+        let seen = seen.map(|entry| entry.expect("a file").path());
+        let seen = seen.filter(|path| path.to_string_lossy().contains("/seen-"));
+        let seen = Vec::from_iter(seen.map(|path| fs::read_to_string(path).expect("seen")));
+        assert_eq!(seen, ["target build\n-- mutant\n"; 2]);
+        let target = done.run.path.join("work/targets/t/stage/verification");
+        let built = fs::read_to_string(target.join(olean)).expect("the build of the target");
+        assert_eq!(built, "target build\n");
+        // A mutant whose build writes the build of the target leaves the
+        // mutants judged and fails the target.
+        let fixture = with_targets("seed-changed", &two_targets(1_800, 1));
+        let write = format!("echo changed >> ../../../../stage/verification/{olean}\n");
+        fixture::lake_script(&fixture, "+Krepi", &mutant(&write));
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(done.receipt.status, Status::ToolFailure);
+        let mutant = (Status::Verified, None);
+        assert_eq!(fixture::status(&done, "target/t/mutant/m0"), mutant);
+        let (status, reason) = fixture::status(&done, "target/t");
+        let changed = "the build that seeded the mutants changed during the phase; \
+                       changed paths (1)";
+        assert_eq!(status, Status::ToolFailure);
+        assert!(
+            reason.is_some_and(|reason| reason.starts_with(changed)),
+            "{reason:?}"
+        );
+    }
+
+    /// Makes the stand-in `tool` of `fixture` run `script` after it passes.
+    fn after_tool(fixture: &Fixture, tool: &str, script: &str) {
+        let bin = fixture.root().join("artifacts/formal/tools/bin");
+        let stand_in = format!("{tool}-stand-in");
+        fs::rename(bin.join(tool), bin.join(&stand_in)).expect("rename");
+        fixture.tool(
+            tool,
+            &format!("\"$(dirname \"$0\")/{stand_in}\" \"$@\" || exit\n{script}\n"),
+        );
+    }
+
+    /// A shell loop that waits for `path` to exist, looking 6,000 times, 10 ms
+    /// apart: a minute or more.
+    fn waits_for(path: &Path) -> String {
+        let path = path.display();
+        format!("i=0; while [ ! -e {path} ] && [ $i -lt 6000 ]; do sleep 0.01; i=$((i+1)); done\n")
+    }
+
+    #[test]
+    fn the_commands_of_a_target_and_its_mutants_share_its_budget_by_the_time_that_any_runs() {
+        assert_eq!(covered([]), 0.0);
+        assert_eq!(covered([(2.0, 3.0), (0.0, 1.0), (4.0, 4.0)]), 2.0);
+        assert_eq!(
+            covered([(0.0, 2.0), (1.5, 2.5), (1.0, 3.0), (3.0, 4.0)]),
+            4.0
+        );
+        assert_eq!(covered([(0.0, 4.0), (1.0, 2.0), (3.0, 5.0)]), 5.0);
+        // The command of the target waits for that of its mutant, which
+        // starts while it runs.
+        let fixture = Fixture::new("overlap");
+        let [first, second] =
+            ["first", "second"].map(|file| fixture.root().join("artifacts").join(file));
+        let (target, mutant) = ("target/t", "target/t/mutant/m0");
+        let phases = vec![phase("targets", LONG, &[target, mutant], |run| {
+            run.budgets
+                .insert(target.to_string(), Duration::from_secs(1_800));
+            let record = receipt::Target {
+                unit: Some(target.to_string()),
+                ..receipt::Target::default()
+            };
+            run.receipt.proof_targets.insert("t".to_string(), record);
+            let waits = format!("touch {}; {}", first.display(), waits_for(&second));
+            let started = format!("sleep 0.1; touch {}", second.display());
+            let gate = &*run;
+            std::thread::scope(|scope| {
+                scope.spawn(|| shell(gate, target, &waits));
+                fixture::wait_until(|| first.exists(), "the first command did not start");
+                scope.spawn(|| shell(gate, mutant, &started));
+            });
+            // A command of the mutant once the budget is used up.
+            let spent = run
+                .records()
+                .spent(target, run.start.elapsed().as_secs_f64());
+            run.budgets
+                .insert(target.to_string(), Duration::from_secs_f64(spent));
+            assert_eq!(shell(run, mutant, "exit 0").class, Class::NotRun);
+            for unit in [target, mutant] {
+                run.conclude(unit, (Status::Verified, None));
+            }
+            Ok(())
+        })];
+        let done = gate(&fixture, &[], phases);
+        let [a, b] = [target, mutant].map(|unit| fixture::commands(&done, unit)[0].clone());
+        let late = fixture::commands(&done, mutant)[1].clone();
+        // Both reach the limit of the target together.
+        assert_eq!((a.limit, b.limit), (LimitBy::Target, LimitBy::Target));
+        let end = |c: &receipt::Command| c.started + c.limit_seconds;
+        assert!((end(&a) - end(&b)).abs() < 0.0025, "{a:?} {b:?}");
+        assert!(b.started > a.started && b.limit_seconds < a.limit_seconds);
+        // The time during which both ran counts once.
+        let t = &done.receipt.proof_targets["t"];
+        let intervals = [&a, &b, &late].map(|c| (c.started, c.started + c.seconds));
+        assert_eq!(
+            t.seconds,
+            receipt::seconds(Duration::from_secs_f64(covered(intervals)))
+        );
+        assert!(t.seconds < a.seconds + b.seconds, "{t:?} {a:?} {b:?}");
+        assert_eq!(t.mutants, BTreeMap::from([("m0".to_string(), b.seconds)]));
+        let used_up = Some("the target budget was used up");
+        assert_eq!(
+            (late.class, late.reason.as_deref()),
+            (Class::NotRun, used_up)
+        );
+        assert_eq!(fixture::status(&done, mutant), (Status::Budget, used_up));
+        assert_eq!(done.receipt.status, Status::Budget);
+        // Two commands that hang side by side meet the limit together, and
+        // each concludes its unit BUDGET.
+        let fixture = Fixture::new("overlap-budget");
+        let started = fixture.root().join("artifacts/started");
+        let phases = vec![phase("targets", LONG, &[target, mutant], |run| {
+            run.budgets
+                .insert(target.to_string(), Duration::from_secs(1));
+            let hangs = format!("touch {}; exec sleep 30", started.display());
+            let gate = &*run;
+            std::thread::scope(|scope| {
+                scope.spawn(|| shell(gate, target, &hangs));
+                fixture::wait_until(|| started.exists(), "the first command did not start");
+                scope.spawn(|| shell(gate, mutant, "exec sleep 30"));
+            });
+            for unit in [target, mutant] {
+                run.conclude(unit, (Status::Verified, None));
+            }
+            Ok(())
+        })];
+        let done = gate(&fixture, &[], phases);
+        let [a, b] = [target, mutant].map(|unit| fixture::commands(&done, unit)[0].clone());
+        let stopped = |c: &receipt::Command| {
+            c.timed_out && (c.limit, c.class) == (LimitBy::Target, Class::Budget)
+        };
+        assert!(stopped(&a), "{a:?}");
+        // A thread that started its command after the limit finds it used
+        // up, which is the other outcome at the limit.
+        if b.class != Class::NotRun {
+            assert!(
+                stopped(&b) && (end(&a) - end(&b)).abs() < 0.0025,
+                "{a:?} {b:?}"
+            );
+        }
+        for unit in [target, mutant] {
+            assert_eq!(fixture::status(&done, unit).0, Status::Budget);
+        }
+        // A command of another unit runs before the target's, which counts
+        // while it is read and recorded: a command of the mutant that starts
+        // then has only what the target's left, and is recorded first.
+        let fixture = Fixture::new("overlap-window");
+        let (other, ended) = ("target/u", fixture.root().join("artifacts/ended"));
+        let phases = vec![phase("targets", LONG, &[other, target, mutant], |run| {
+            run.budgets
+                .insert(target.to_string(), Duration::from_secs(1));
+            let record = receipt::Target {
+                unit: Some(target.to_string()),
+                ..receipt::Target::default()
+            };
+            run.receipt.proof_targets.insert("t".to_string(), record);
+            let gate = &*run;
+            shell(gate, other, "sleep 0.3");
+            let read = |_: &Ran| {
+                let recorded = gate.records().commands.len();
+                fs::write(&ended, "").expect("the mark");
+                fixture::wait_until(|| gate.records().commands.len() > recorded, "no mutant");
+                Ok(())
+            };
+            std::thread::scope(|scope| {
+                scope.spawn(|| shell_reading(gate, target, "sleep 0.7", read));
+                fixture::wait_until(|| ended.exists(), "the target's command did not end");
+                shell(gate, mutant, "sleep 0.6");
+            });
+            for unit in [other, target, mutant] {
+                run.conclude(unit, (Status::Verified, None));
+            }
+            Ok(())
+        })];
+        let done = gate(&fixture, &[], phases);
+        let [a, b] = [target, mutant].map(|unit| fixture::commands(&done, unit)[0].clone());
+        assert_eq!((a.limit, a.limit_seconds), (LimitBy::Target, 1.0), "{a:?}");
+        assert!(
+            b.limit_seconds <= (1.0 - a.seconds).max(0.0) + 0.0025,
+            "{a:?} {b:?}"
+        );
+        let intervals = [&a, &b].map(|c| (c.started, c.started + c.seconds));
+        assert_eq!(
+            done.receipt.proof_targets["t"].seconds,
+            receipt::seconds(Duration::from_secs_f64(covered(intervals)))
+        );
+        let status = (fixture::status(&done, mutant).0, done.receipt.status);
+        assert_eq!(status, (Status::Budget, Status::Budget));
+        // The receipt lists the commands in the order in which they started.
+        let commands = &done.receipt.commands;
+        assert!(
+            (commands.windows(2))
+                .all(|w| w[0].sequence < w[1].sequence && w[0].started <= w[1].started),
+            "{commands:?}"
+        );
+    }
+
+    #[test]
+    fn a_mutant_is_extracted_while_the_one_before_it_builds() {
+        // The mutant after m0 on its worker, `next`, is extracted while m0 builds.
+        let fixture = with_targets("pipeline", &two_targets(1_800, merge::WORKERS + 1));
+        let next = format!("m{}", merge::WORKERS);
+        let extracted = fixture.root().join("artifacts/extracted");
+        let mark = format!(
+            "case $PWD in */mutants/{next}/*) touch {} ;; esac",
+            extracted.display()
+        );
+        after_tool(&fixture, "aeneas", &mark);
+        let failed = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
+        let failing = fixture::failing("Krepi.Proofs.T", &[failed], 1);
+        let wait = waits_for(&extracted);
+        let script = format!("case $PWD in */mutants/m0/*) {wait};; esac\n{failing}");
+        fixture::lake_script(
+            &fixture,
+            "+Krepi",
+            &format!("case $PWD in */mutants/*) {script};; esac\n"),
+        );
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        let site = |unit: &str, site| {
+            fixture::commands(&done, unit)
+                .into_iter()
+                .find(|c| c.site == site)
+        };
+        let built = site("target/t/mutant/m0", Site::TargetBuild).expect("the build of m0");
+        let aeneas = site(&format!("target/t/mutant/{next}"), Site::Aeneas).expect("Aeneas");
+        assert!(
+            aeneas.started < built.started + built.seconds,
+            "{aeneas:?} {built:?}"
+        );
+    }
+
+    #[test]
+    fn a_mutant_whose_extraction_fails_is_not_built_and_the_run_is_not_verified() {
+        let fixture = with_targets("pipeline-failed", &two_targets(1_800, 3));
+        after_tool(
+            &fixture,
+            "aeneas",
+            "case $PWD in */mutants/m1/*) exit 1 ;; esac",
+        );
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(
+            done.receipt.status,
+            Status::Rejected,
+            "{:?}",
+            done.failures()
+        );
+        let (status, reason) = fixture::status(&done, "target/t/mutant/m1");
+        let inconclusive = "inconclusive, its extraction failed";
+        assert!(status == Status::Rejected && reason.is_some_and(|r| r.starts_with(inconclusive)));
+        let sites = fixture::commands(&done, "target/t/mutant/m1")
+            .into_iter()
+            .map(|c| c.site);
+        assert_eq!(Vec::from_iter(sites), [Site::Charon, Site::Aeneas]);
+        for unit in ["target/t", "target/t/mutant/m0", "target/t/mutant/m2"] {
+            assert_eq!(fixture::status(&done, unit), (Status::Verified, None));
+        }
+    }
+
+    #[test]
+    fn a_worker_that_stops_at_an_error_fails_the_run_and_keeps_what_ran() {
+        // The second mutant of the first worker edits a file that the
+        // package does not have.
+        let mut targets: serde_json::Value =
+            serde_json::from_str(&two_targets(1_800, merge::WORKERS + 1)).expect("JSON");
+        targets[0]["mutants"][merge::WORKERS]["file"] = "src/missing.rs".into();
+        let fixture = with_targets("worker-failed", &targets.to_string());
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(
+            (done.receipt.status, done.receipt.complete),
+            (Status::ToolFailure, false)
+        );
+        let stopped = done
+            .failures()
+            .into_iter()
+            .find(|f| f.starts_with("the phase targets stopped"));
+        let stopped = stopped.expect("the phase stopped");
+        assert!(stopped.contains("No such file or directory"), "{stopped}");
+        // The mutant before it is concluded; the failed one ran nothing.
+        assert_eq!(
+            fixture::status(&done, "target/t/mutant/m0"),
+            (Status::Verified, None)
+        );
+        let failed = format!("target/t/mutant/m{}", merge::WORKERS);
+        assert_eq!(
+            fixture::status(&done, &failed),
+            (Status::NotRun, Some(stopped))
+        );
+        assert!(fixture::commands(&done, &failed).is_empty());
+        for unit in (1..merge::WORKERS).map(|index| format!("target/t/mutant/m{index}")) {
+            let (status, _) = fixture::status(&done, &unit);
+            assert!(
+                matches!(status, Status::Verified | Status::NotRun),
+                "{status:?}"
+            );
+        }
+        assert_eq!(
+            fixture::status(&done, "target/t"),
+            (Status::NotRun, Some(stopped))
+        );
+    }
+
+    #[test]
+    fn the_workers_of_a_target_share_no_stage_cargo_directory_or_work_directory() {
+        let count = 2 * merge::WORKERS;
+        let fixture = with_targets("workers", &two_targets(1_800, count));
+        // Charon records its Cargo target directory and both its home and
+        // temporary directories, as the build of each mutant does; that build
+        // also records a file that it finds in its stage and leaves one.
+        let lake = fixture.root().join("artifacts/lake");
+        let cargo = format!(
+            "echo \"$CARGO_TARGET_DIR $HOME $TMPDIR\" >> {}",
+            lake.join("cargo").display()
+        );
+        after_tool(
+            &fixture,
+            "charon",
+            &format!("case $PWD in */mutants/*) {cargo} ;; esac"),
+        );
+        let failed = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
+        let failing = fixture::failing("Krepi.Proofs.T", &[failed], 1);
+        let script = format!(
+            "case $PWD in */mutants/*) if [ -e leaked ]; then : > \"$lake/leaked\"; fi\n\
+             echo \"$PWD\" > leaked; echo \"$HOME $TMPDIR\" >> \"$lake/homes\"\n{failing};; esac\n"
+        );
+        fixture::lake_script(&fixture, "+Krepi", &script);
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        assert!(!lake.join("leaked").exists());
+        // Each mutant runs its commands in its own work directory, where
+        // Charon builds and its commands have their home and temporary
+        // directories.
+        let run = relative(fixture.root(), &done.run.path);
+        let read = |file| fs::read_to_string(lake.join(file)).expect(file);
+        let lines = |file| BTreeSet::from_iter(read(file).lines().map(str::to_string));
+        let (cargo, homes) = (lines("cargo"), lines("homes"));
+        assert_eq!((cargo.len(), homes.len()), (count, count), "{cargo:?}");
+        for name in (0..count).map(|index| format!("m{index}")) {
+            let own = format!("{run}/work/targets/t/mutants/{name}/");
+            let commands = fixture::commands(&done, &format!("target/t/mutant/{name}"));
+            assert!(
+                commands.iter().all(|c| c.cwd.starts_with(&own)),
+                "{commands:?}"
+            );
+            let path = |dir| fixture.root().join(&own).join(dir).display().to_string();
+            let dirs = format!("{} {}", path("home"), path("tmp"));
+            assert!(homes.contains(&dirs), "{homes:?}");
+            let target = format!("{} {dirs}", path("extract/target"));
+            assert!(cargo.contains(&target), "{cargo:?}");
+        }
+    }
+
+    #[test]
     fn a_target_is_rejected_for_each_problem_of_its_unit() {
         // Each case gives the target `t` its `registry` entries, makes Lake
         // run a `script` for a key and names the reason of `target/t`.
@@ -2773,17 +3279,24 @@ pub(crate) mod tests {
     #[test]
     fn a_stop_signal_kills_the_running_command_and_ends_the_run_without_a_receipt() {
         if let Some(root) = std::env::var_os(STOPPED) {
-            // The gate that the test stops: its command writes the number
-            // of its group and waits.
+            // The gate that the test stops: its two commands, which run
+            // side by side, write the numbers of their groups and wait.
             process::init();
             let root = PathBuf::from(root);
-            let group = root.join("artifacts/group");
-            let script = format!(
-                "sleep 240 & echo $$ > {0}.new && mv {0}.new {0}; wait",
-                group.display()
-            );
+            let script = |group: &str| {
+                let group = root.join("artifacts").join(group);
+                format!(
+                    "sleep 240 & echo $$ > {0}.new && mv {0}.new {0}; wait",
+                    group.display()
+                )
+            };
             let phases = vec![phase("base", LONG, &["u1"], |run| {
-                shell(run, "u1", &script);
+                std::thread::scope(|scope| {
+                    for script in [script("group"), script("other")] {
+                        let run = &*run;
+                        scope.spawn(move || shell(run, "u1", &script));
+                    }
+                });
                 Ok(())
             })];
             let run = RunDir::create(&root).expect("create the run directory");
@@ -2814,9 +3327,12 @@ pub(crate) mod tests {
             // A bound for a gate that hangs before its command, not a
             // bound on how long a step takes.
             let deadline = Instant::now() + Duration::from_secs(120);
-            let group: i32 = loop {
-                if let Ok(text) = fs::read_to_string(fixture.root().join("artifacts/group")) {
-                    break text.trim().parse().expect("a process number");
+            let read = |group| fs::read_to_string(fixture.root().join("artifacts").join(group));
+            let groups: Vec<i32> = loop {
+                if let (Ok(group), Ok(other)) = (read("group"), read("other")) {
+                    break Vec::from_iter(
+                        [group, other].map(|g| g.trim().parse().expect("a group")),
+                    );
                 }
                 let ended = child.try_wait().expect("look at the gate").is_some();
                 assert!(!ended && Instant::now() < deadline, "{}", said());
@@ -2827,7 +3343,13 @@ pub(crate) mod tests {
             unsafe { libc::kill(child.id() as libc::pid_t, signal) };
             let status = child.wait().expect("collect the gate");
             assert_eq!(status.signal(), Some(signal), "{}", said());
-            assert_eq!(process::tests::probe(group), Some(libc::ESRCH));
+            // The leader of a group that the gate did not collect may take a
+            // moment to be collected by another process.
+            let gone = |group| process::tests::probe(group) == Some(libc::ESRCH);
+            for group in groups {
+                let failed = format!("the group {group} of a command was left behind");
+                fixture::wait_until(|| gone(group), &failed);
+            }
             let runs: Vec<PathBuf> = fs::read_dir(fixture.root().join(RUNS))
                 .expect("the runs are listed")
                 .map(|entry| entry.expect("a run").path())

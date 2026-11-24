@@ -1,8 +1,8 @@
 //! The shards of the proof gate and their merge, as "Shards and merge" in
 //! `docs/formal-verification.md` describes: beside the qualification job and
 //! the comparator part, every formal target is a shard of its own, named by
-//! its unit, whose registered budget, over its workers, is at most the shard
-//! limit, the wall-clock limit of the gate less the time of the merge; and
+//! its unit, whose registered budget is at most the shard limit, the
+//! wall-clock limit of the gate less the time of the merge; and
 //! `cargo xtask formal merge` combines the receipts of these parts of one
 //! commit into the conclusions of the gate and its hard gates, with waivers.
 
@@ -34,8 +34,8 @@ pub const MERGE: Duration = Duration::from_secs(300);
 /// The longest that a shard may take: the wall-clock limit less the merge.
 pub const SHARD_LIMIT: Duration = Duration::from_secs(WALL_CLOCK.as_secs() - MERGE.as_secs());
 
-/// The workers of a shard, among which its registered budget is divided.
-pub const WORKERS: u64 = 1;
+/// The workers of a run that build the mutants of a target side by side.
+pub const WORKERS: usize = 2;
 
 /// The margin of the run of the shard of a target beyond its budget, for
 /// its start and its closing steps.
@@ -70,14 +70,13 @@ pub fn shards(targets: &[Target]) -> BTreeMap<String, u64> {
 }
 
 /// The problems of the shards of `targets`: a shard whose registered
-/// budget per worker, rounded up, is more than the shard limit.
+/// budget, whatever its workers, is more than the shard limit.
 pub fn budget_problems(targets: &[Target]) -> Vec<String> {
     let limit = SHARD_LIMIT.as_secs();
     let over = shards(targets).into_iter().filter_map(|(shard, budget)| {
-        let seconds = budget.div_ceil(WORKERS);
-        (seconds > limit).then(|| {
+        (budget > limit).then(|| {
             format!(
-                "shard {shard}: its registered budget of {budget} s is {seconds} s per worker, more than the shard limit of {limit} s"
+                "shard {shard}: its registered budget of {budget} s is more than the shard limit of {limit} s"
             )
         })
     });
@@ -459,6 +458,7 @@ pub(crate) mod tests {
     pub(crate) fn tool(unit: &str, site: Site, argv: &str, class: Class) -> Command {
         Command {
             sequence: 1,
+            started: 0.0,
             phase: None,
             unit: Some(unit.to_string()),
             site,
@@ -1016,7 +1016,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_receipt_that_cannot_be_read_or_is_not_of_a_shard_of_schema_5_gives_no_conclusion() {
+    fn a_receipt_that_cannot_be_read_or_is_not_of_a_shard_of_schema_6_gives_no_conclusion() {
         let fixture = checkout("merge-receipts", r#"[{"name": "a"}]"#);
         let q = write(&fixture, "q", &qualification(&fixture));
         let shard = receipt(&fixture, "target/a", &units_of("a"));
@@ -1048,21 +1048,21 @@ pub(crate) mod tests {
             no_conclusion(&merged, &[first, unit, none("target/a")]);
             assert_eq!(merged.parts[1].sha256, sha256);
         }
-        // A receipt of schema 4, which has no shard, still concludes its
+        // A receipt of schema 5, which has no shard, still concludes its
         // units, but is no receipt of its part.
         let mut old = serde_json::to_value(qualification(&fixture)).expect("JSON");
-        old["schema"] = 4.into();
+        old["schema"] = 5.into();
         old.as_object_mut().expect("an object").remove("shard");
         fixture.write("artifacts/parts/old.json", &old.to_string());
         let old = fixture.root().join("artifacts/parts/old.json");
         let shown = old.display();
         let merged = merge_in(&fixture, &[old.clone(), write(&fixture, "t", &shard)]);
-        let schema = format!("{shown}: schema 4 where 5 is expected");
+        let schema = format!("{shown}: schema 5 where 6 is expected");
         no_conclusion(
             &merged,
             &[schema, none("comparator"), none("qualification")],
         );
-        // A receipt of schema 5 without a shard.
+        // A receipt of schema 6 without a shard.
         let mut unnamed = shard;
         unnamed.shard = None;
         let unnamed = write(&fixture, "unnamed", &unnamed);
@@ -1159,7 +1159,7 @@ pub(crate) mod tests {
     fn the_shard_limit_is_the_wall_clock_limit_of_the_gate_less_the_merge() {
         assert_eq!(SHARD_LIMIT, Duration::from_secs(3_300));
         assert_eq!(MERGE + SHARD_LIMIT, WALL_CLOCK);
-        assert_eq!(WORKERS, 1);
+        assert_eq!(WORKERS, 2);
     }
 
     #[test]
@@ -1192,12 +1192,15 @@ pub(crate) mod tests {
             ])
         );
         assert_eq!(budget_problems(&registry(3_300)), Vec::<String>::new());
-        assert_eq!(
-            budget_problems(&registry(3_301)),
-            [
-                "shard target/a: its registered budget of 3301 s is 3301 s per worker, more than the shard limit of 3300 s"
-            ]
-        );
+        // However many workers a shard has, they do not divide its budget.
+        for budget in [3_301, 6_600] {
+            assert_eq!(
+                budget_problems(&registry(budget)),
+                [format!(
+                    "shard target/a: its registered budget of {budget} s is more than the shard limit of 3300 s"
+                )]
+            );
+        }
     }
 
     /// The receipts of the qualification job and of the shard of `a`, whose

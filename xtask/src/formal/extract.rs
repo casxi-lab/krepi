@@ -311,7 +311,7 @@ pub fn diagnostics(log: &str) -> Vec<String> {
 /// Aeneas in the work directory, with the Cargo target directory `target` of
 /// the work directory, removed when they have ended. An error is an internal
 /// error of the gate, which stops the phase.
-pub fn extract(gate: &mut Gate, request: &Request) -> Result<Extraction, String> {
+pub fn extract(gate: &Gate, request: &Request) -> Result<Extraction, String> {
     let generated = gate.layout().generated;
     let namespace = format!("{generated}.{}", request.module);
     if request.start_from.is_empty() {

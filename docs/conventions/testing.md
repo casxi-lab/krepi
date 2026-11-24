@@ -1164,7 +1164,9 @@ each through a run of the gate on the target, with a budget of 14,400 s,
 and, when the run is `SCOPED`, writes the list of the survivors
 ([source mutants and survivors](../formal-verification.md#source-mutants-and-survivors)).
 It is not part of the check: the job `calibration mutants` of the workflow
-`formal calibration` runs it on the calibration target. Its unit tests run
+`formal calibration` runs it on the calibration target, and the job
+`formal mutants` of the workflow `formal` on a target of production on a
+manual run of `main`. Its unit tests run
 in the `test` step above: the generation on source texts in memory, the
 judgement of a build on the captured outputs of
 `xtask/src/formal/fixtures/mutants/`, and the runs on the Git repositories
@@ -1454,16 +1456,19 @@ In the tests of `cargo xtask formal run`, a fake tool that hangs gets a
 limit of 1 s, which only decides that it is stopped, and any other fake
 tool a limit of 3,600 s. A fake tool that hangs sleeps for 30 s, and so does
 a process that a test leaves behind in the group of a command that ends.
+A test that waits for another command waits at most 60 s, and a fake tool
+that waits for one looks 6,000 times, 10 ms apart, which takes a minute or
+more; only a failing test reaches either bound.
 The test of a stop signal waits at most 120 s for the gate that it starts
-to reach its command, which only a failing test reaches; that command
-sleeps for 240 s. The test of the reading of the free space reads every
-10 ms and waits at most 60 s for its third reading, which only a failing
-test reaches. In the tests of `cargo xtask formal vectors`, a Lake
-stand-in that hangs gets a budget of 1 s, which only decides that it is
-stopped, and sleeps for 30 s, and any other a budget of 1,800 s or
-3,600 s; the ignored replay with the pinned Lean has 300 s. Each sleep is a
-small multiple of the bound of its test, so that it outlasts every wait
-that a passing test makes.
+to reach its two commands, which only a failing test reaches, and 60 s for
+the group of each to be gone; those commands sleep for 240 s. The test of
+the reading of the free space reads every 10 ms and waits at most 60 s for
+its third reading, which only a failing test reaches. In the tests of
+`cargo xtask formal vectors`, a Lake stand-in that hangs gets a budget of
+1 s, which only decides that it is stopped, and sleeps for 30 s, and any
+other a budget of 1,800 s or 3,600 s; the ignored replay with the pinned
+Lean has 300 s. Each sleep is a small multiple of the bound of its test, so
+that it outlasts every wait that a passing test makes.
 
 In the tests of `cargo xtask check`, a step that the check is to cancel runs
 a shell that starts a sleep of 240 s, writes the number of its process group
@@ -1508,7 +1513,7 @@ to an exact version in the manifest of the crate that uses it:
 | `xtask/Cargo.toml` | `tar` without default features | MIT OR Apache-2.0 | Unpacking the tar archive of the gate inputs that `git archive` writes for `cargo xtask formal run` and `cargo xtask formal mutants` |
 | `xtask/Cargo.toml` | `time` without default features | MIT OR Apache-2.0 | The calendar dates that `cargo xtask formal check` requires of the expiry of each waiver of `verification/waivers.json`, and the UTC date of the Unix time of the host's clock on which the qualification job of `cargo xtask formal run` and `cargo xtask formal merge` judge whether a waiver holds, and `cargo xtask formal receipt` whether the waivers that a record used still hold |
 | `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `suites.toml`, `toolchains.toml`, `rust-toolchain.toml`, Charon's `rust-toolchain`, `verification/extraction.toml`, the compile-fail cases of the `subset` step, the `vectors` blocks of the contracts, and Charon's `charon/Cargo.toml` and the channel manifest of a nightly that `cargo xtask formal canary` reads |
-| `xtask/Cargo.toml` | `walkdir` | MIT OR Unlicense | The listing of the tool installation that `cargo xtask formal run` takes at the start and at the end of a phase and of the run, without following symbolic links, and the copy of the package of a target for each of its mutants |
+| `xtask/Cargo.toml` | `walkdir` | MIT OR Unlicense | The listing of the tool installation that `cargo xtask formal run` takes at the start and at the end of a phase and of the run, without following symbolic links, the listing of the build of a target before its first mutant and after its last, and the copies of the package and of that build for each of its mutants |
 | `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step, and the YAML loader with which that step reads the actions that the steps of a workflow use, `cargo xtask run-record` reads the limits of the jobs of a workflow and the unit tests of the check read the committed workflows, and the YAML emitter with which a unit test of the check compares the steps of the shard and merge jobs of the two formal workflows |
 
 No test has a development dependency yet. Development dependencies are added

@@ -166,8 +166,9 @@ gate inputs, the home and temporary directories of the tools; in
 `targets/<name>/`, the extraction of each target that the run extracts
 in `extract/` and its stage in `stage/`, with the root module, the audit
 file and the range printer `Ranges.lean` of a selected formal target, and
-the copied package, the extraction and the stage of each registered mutant
-in `mutants/<mutant>/`; in `mutants/<target>/`, those of each source
+the copied package, the extraction, the stage and the home and temporary
+directories of each registered mutant in `mutants/<mutant>/`; in
+`mutants/<target>/`, those of each source
 mutant of a run of `formal mutants`, removed once it is judged; in `base/`, the stage of the base
 round with the root module `Krepi.lean` that the run writes, its audit
 file `Audit.lean` and its heartbeat copies in `.heartbeats/`, and
@@ -460,8 +461,8 @@ variables that `xtask/src/formal/toolchain.rs` gives it:
 | `GIT_CONFIG_KEY_0` | `safe.directory` | All |
 | `GIT_CONFIG_VALUE_0` | `*` | All |
 | `PATH` | `lean/bin`, `bin` and `cargo/bin` of the installation, then `/usr/bin:/bin:/usr/sbin:/sbin` | All |
-| `HOME` | A new, empty directory of the run | All |
-| `TMPDIR` | A directory of the run | All |
+| `HOME` | A new, empty directory of the run, or of the mutant whose command it is | All |
+| `TMPDIR` | A directory of the run, or of the mutant whose command it is | All |
 | `CARGO_INCREMENTAL` | `0` | Charon and Aeneas, the extraction |
 | `CARGO_TARGET_DIR` | A directory of the run for this extraction alone, removed when the extraction ends | Charon and Aeneas, the extraction |
 
@@ -929,8 +930,9 @@ command wrote is kept. Its limit is the smallest of:
   budgets of its targets for the shard of a target and for a run of
   `cargo xtask formal run --target` ([shards and merge](#shards-and-merge));
 - for a command of the unit of a target, the rest of the budget of the
-  target: the budget less the seconds of the earlier commands of the unit,
-  whichever phase ran them.
+  target: the budget less the time during which a command of the unit or
+  of a unit of its mutants has run so far, whichever phase ran it
+  ([proof targets](#proof-targets)).
 
 The steps after the phases, the second snapshot, the removal of the work
 directory and the receipt, have 300 s beyond the gate's budget. A command
@@ -946,9 +948,9 @@ when it ends.
 A signal from the terminal does not reach a running tool, whose group is
 its own. SIGINT and SIGTERM stop the run instead, also when they were
 ignored when it started, and so does SIGHUP unless it was ignored then, as
-`nohup` leaves it: the run kills the group of the command that is running,
-collects the command, waits for its group as above, and ends by the same
-signal, without a receipt. A signal that comes
+`nohup` leaves it: the run kills the group of each command that is
+running, collects one of these commands, waits for its group as above,
+and ends by the same signal, without a receipt. A signal that comes
 between two commands takes effect before the next command starts or before
 the receipt is written.
 
@@ -1002,15 +1004,18 @@ problem, as a target is measured once it is registered.
 Every formal target is a shard of its own, named by its unit; a planned
 target is no shard. The shard limit is 3,300 s: the wall-clock limit of the
 gate, 3,600 s, less the time of the merge, 300 s. `cargo xtask formal check`
-refuses a shard whose registered budget, divided by the workers of a shard,
-one, and rounded up, is more than the shard limit, in either layout
-([proof targets](#proof-targets)). A shard has one worker, which builds the
-mutants of its target one after another, each in a stage of its own: on a
-standard `ubuntu-24.04-arm` runner the shard of the calibration target, with
-its 30 mutants, took about 400 s, against the registered budget of its
-target of 3,000 s, and the parts of
-the gate stayed well within the wall-clock limit, the memory and the disk of
-the runner.
+refuses a shard whose registered budget is more than the shard limit,
+whatever the workers of the shard, in either layout
+([proof targets](#proof-targets)): the budget counts the time during which
+a command of its target runs, whichever worker runs it, and the run of a
+shard has a deadline of 300 s and that budget from its start. Two workers
+build the mutants of a target side by side, each in a stage of its own
+that starts from the build of its target
+([registered mutants](#registered-mutants)). On a standard
+`ubuntu-24.04-arm` runner the shard of the calibration target, with its 30
+mutants built one after another, took about 400 s, against the registered
+budget of its target of 3,000 s, and the parts of the gate stayed well
+within the wall-clock limit, the memory and the disk of the runner.
 
 The disk guard of a run, after the steps of the gate inputs and before the
 first phase, reads the plan of the export. The parts of a run are
@@ -1104,7 +1109,7 @@ receipt without a numeric attempt counts as the earliest, and two receipts
 of one part and one attempt are two receipts of the part. It gives the
 conclusion of the whole gate only when:
 
-1. every receipt can be read and parses, has schema 5 and a part, and its
+1. every receipt can be read and parses, has schema 6 and a part, and its
    commit and tree are those of the checkout, whose gate inputs are clean,
    whose registry, `statements.json` and qualification cases can be read
    and keep their rules and whose waiver record, where it can be read,
@@ -2313,13 +2318,13 @@ writes the receipt to standard error and exits with 120.
 
 ### Receipt
 
-`receipt.json` has schema 5. It is the pretty form of `serde_json`, with
+`receipt.json` has schema 6. It is the pretty form of `serde_json`, with
 the fields in the order of the tables below and every map sorted by its
 keys; times are seconds, rounded to milliseconds.
 
 | Field | Content |
 | --- | --- |
-| `schema` | `5` |
+| `schema` | `6` |
 | `command` | `cargo xtask formal run` |
 | `status` | `VERIFIED`, `REJECTED`, `STALE`, `TOOL_FAILURE`, `BUDGET`, `NOT_RUN` or `SCOPED` |
 | `complete` | Whether the run is complete, as defined above |
@@ -2340,7 +2345,7 @@ keys; times are seconds, rounded to milliseconds.
 | `base` | What the base round found, below, or `null` when the round stopped before it recorded it |
 | `proof_targets` | What the run found for each target that the phase `extraction` took, below, by its name: those that it selects and the formal ones, or in the shard of a target and in a run of `cargo xtask formal run --target` those that it selects alone, also one that it did not extract since it registers more than 30 mutants or its module is not a Lean module path |
 | `guard` | What the guard found on a pull request, below, or `null` without a pull request event or when its phase did not finish |
-| `commands` | Every command, in the order in which they ran |
+| `commands` | Every command, in the order of its `sequence` |
 | `failures` | Every failure that is not the conclusion of a unit, with its `status` and `message` |
 
 The `image` record has these fields:
@@ -2372,7 +2377,8 @@ Each command has these fields:
 
 | Field | Content |
 | --- | --- |
-| `sequence` | The number of the command in the run, from 1 |
+| `sequence` | The number of the command in the run, from 1, in the order in which the commands started |
+| `started` | When the command started, or was found not to start, in seconds from the start of the run |
 | `phase`, `unit` | The phase and the unit of the command, or `null` for the commands of the gate itself |
 | `site` | `charon`, `aeneas`, `qualification-build`, `ill-typed-build`, `case-audit`, `base-build`, `target-build`, `axiom-audit`, `leanchecker`, `comparator`, `git` or `cargo-metadata` |
 | `argv` | The program and its arguments |
@@ -2414,13 +2420,13 @@ Each record of `proof_targets` has these fields:
 | --- | --- |
 | `unit` | The unit of the target, `target/<name>`, or `null` for a target that the run did not select and extracted for the base round alone |
 | `state` | `formal` or `planned`, as the registry gives it |
-| `budget_seconds`, `seconds` | The budget of the target, and the seconds of the commands of its unit and of the units of its registered mutants, or 0 without a unit |
+| `budget_seconds`, `seconds` | The budget of the target, and the seconds during which a command of its unit or of the units of its registered mutants ran, the length of the union of their intervals, each from its `started` for its `seconds`, or 0 without a unit |
 | `observed` | What the extraction gave, as for a qualification case |
 | `generated` | The SHA-256 of each Lean file that Aeneas wrote, by its path below the output of Aeneas |
 | `declarations` | The declarations of its templates that stay axioms once its reviewed external declarations are installed |
 | `proof_modules` | Its proof modules, as the registry gives them |
 | `typed` | Whether its generated definitions type-check with warnings as errors |
-| `mutants` | The seconds of the commands of each registered mutant that the run ran, by its name; they count in `seconds` too |
+| `mutants` | The seconds of the commands of each registered mutant that the run ran, by its name, which run one after another; their intervals count in `seconds`, so these may add up to more than it |
 | `problems` | The problems that reject the target |
 
 The `guard` record has these fields:
@@ -2455,7 +2461,9 @@ of their merge. It runs on every pull request to `main` when it is opened,
 reopened or updated, when a label is added or removed, and when its
 description is edited, since the guard reads the labels and the
 description; on every push to `main`; on a manual run, whose input `mode`
-is `full` or `weekly`; and once a week, on Tuesdays at 12:37 UTC. The runs
+is `full` or `weekly`, and whose inputs `mutants` and `operators` may ask
+for the source mutants of a target; and once a week, on Tuesdays at
+12:37 UTC. The runs
 of one pull request share a concurrency group, and a newer run cancels an
 older one with all its jobs, also those that wait for others, so that no
 older run concludes after a newer event; any other run has a group of its
@@ -2624,8 +2632,8 @@ has the minutes of its deadline and receipt, rounded up, and two more, as
 `deadline.sh` kills its command a minute after its deadline, and its job
 15 minutes before that step, the step and 3 minutes after it. So the
 receipt of each part is written before its step ends, however many formal
-targets the registry has. A shard whose registered budget per worker is
-more than the shard limit of 3,300 s fails the job, as
+targets the registry has. A shard whose registered budget is more than
+the shard limit of 3,300 s fails the job, as
 `cargo xtask formal check` refuses it ([shards and merge](#shards-and-merge)),
 so a shard job has at most 85 minutes. A job of a hosted runner ends after
 360 minutes; when the budget of a planned target needs a longer job, or a
@@ -2781,6 +2789,21 @@ passes, and so does `WAIVED`, whose waivers hold on the UTC date of the
 review; anything else fails, and so does a missing run or record
 ([current and fresh records](#current-and-fresh-records)).
 
+The job `formal mutants` runs on a manual run of `main` whose input
+`mutants` names a target, beside the gate. It fails unless the target is
+a formal target of the registry and each word of the input `operators` is
+an operator of `cargo xtask formal mutants`, and then runs, in the pinned
+image with the flags of the gate,
+`cargo xtask formal mutants <target>` with an `--operator` for each word,
+or every operator when there is none, under `deadline.sh --stop-commands`
+with the 14,400 s of the command and the 300 s of its receipt, 245
+minutes; its step has two minutes more, and the job 20 more than its
+step, 267. It summarizes the receipt with workflow commands turned off and
+uploads the receipt, the summary, the record of the runner and the logs in
+`logs.tar.gz`, and the list of survivors of a run that passed, as the job
+of the mutants of the [calibration target](#calibration-target) does, as
+`formal-mutants-<commit>-<attempt>`.
+
 The measurement jobs `leanchecker fresh`, `leanchecker prefix` and
 `lake comparator` are in the workflow `formal measure`,
 `.github/workflows/formal-measure.yml`, which has the variables `IMAGE` and
@@ -2902,8 +2925,8 @@ a tool, and each broken rule is a problem:
   `derived` is a key `file#Type::method` of a method that a
   `#[derive(..)]` of a production type in the file defines, not a
   production function;
-- the registered budget of each shard, divided by the workers of a shard,
-  one, and rounded up, is at most the shard limit of 3,300 s
+- the registered budget of each shard, whatever its workers, is at most
+  the shard limit of 3,300 s
   ([shard plan and disk guard](#shard-plan-and-disk-guard)).
 
 `cargo xtask formal check` also checks the shard plan
@@ -2911,7 +2934,7 @@ a tool, and each broken rule is a problem:
 
 The job `formal limits` of the workflow `formal` ([CI job](#ci-job)) also
 fails on another target name before the names reach a gate, and on a shard
-whose registered budget per worker is more than the shard limit.
+whose registered budget is more than the shard limit.
 
 The targets of the registry run in two phases of the gate. The phase
 `extraction`, before the base round, extracts the targets that the run
@@ -2981,14 +3004,20 @@ model code that did not build. Once the target is verified, each of its
 registered [mutants](#mutants) runs in a unit of its own.
 
 The commands of the unit of a target and of the units of its registered
-mutants share its `budget`, 1,800 s unless the registry gives another: each
-runs for at most the budget less the seconds of the earlier commands of
-these units, in either phase, and the base round between them does not
-count. A command that meets that limit concludes its own unit `BUDGET`:
-the unit of the target while the target is extracted, built and checked,
-or that of a mutant, which leaves the target as it was concluded; the run
-is `BUDGET` either way. The calibration target registers a
-budget of 3,000 s, within the shard limit
+mutants share its `budget`, 1,800 s unless the registry gives another,
+which counts the time during which at least one of them runs, in either
+phase: the length of the union of their intervals. Commands that run one
+after another count their seconds, commands that run side by side count
+the time that they share once, and the base round between them, or any
+other time when none of them runs, does not count. A command that starts
+when these units have used `c` seconds runs for at most the budget less
+`c`, so commands that run side by side reach that limit together. A
+command that meets it concludes its own unit `BUDGET`: the unit of the
+target while the target is extracted, built and checked, or that of a
+mutant, which leaves the target as it was concluded. A command that would
+start once the budget is used up does not start, is `NOT_RUN` and
+concludes its unit `BUDGET` too; the run is `BUDGET` either way. The
+calibration target registers a budget of 3,000 s, within the shard limit
 ([calibration target](#calibration-target)); a target of the kernel keeps
 the default.
 
@@ -3035,9 +3064,19 @@ built and judged the same way.
 
 Once the phase `targets` has verified a formal target, the run prints the
 declaration ranges of its proof modules in its stage, as a command of the
-target's unit, and takes each of its registered mutants, in the order of
-the registry, in a unit of its own, `target/<name>/mutant/<mutant>`, whose
-commands share the budget of the target:
+target's unit, and takes each of its registered mutants in a unit of its
+own, `target/<name>/mutant/<mutant>`, whose commands share the budget of
+the target. Two workers take them in turn, the first the first, the
+third and so on, and the second the second, the fourth and so on, each in
+the order of the registry. Each worker prepares its next mutant, steps 1
+to 5, while it builds the one before, step 6, and a mutant that a step
+before the build concludes is not built. So up to four mutants of a target
+are prepared or built at once, each in its own work directory, with its
+own home and temporary directories, stage and Cargo target directory. A
+worker that stops at an error, or panics, stops the other before its next
+mutant, and the phase stops, a tool failure of the run: the mutants
+concluded so far keep their conclusions, and the others are `NOT_RUN`.
+For each mutant:
 
 1. a mutant whose `fails` names a theorem that the ranges do not give as a
    top-level theorem of the proof modules is rejected, without a command;
@@ -3050,7 +3089,13 @@ commands share the budget of the target:
    roots and its cut points, and what the tools generated is installed in a
    new stage of its own; an extraction that is not complete and generated
    files that cannot be installed make the mutant inconclusive;
-5. the proofs are built there as those of the target, with the hand-written
+5. the build directory of the stage of the target, `.lake/build` below its
+   Lake project, is copied into the new stage: Lake replays a module whose
+   source and imported modules are those of the build of the target, such
+   as a module of the specification or a generated module that the edit
+   leaves as it was, and builds again every other one, since it reads
+   each source to decide;
+6. the proofs are built there as those of the target, with the hand-written
    Lean of the export, the root module of its proof modules and
    `lake build --no-cache --wfail +Krepi`, at the call site of the target
    builds, and the build is judged.
@@ -3062,7 +3107,10 @@ in the two cases before its build; a build that Lake or a Lean process it
 ran did not finish makes it `TOOL_FAILURE`. Each of them but `VERIFIED`
 fails the run. The mutants of a target that is not verified are `NOT_RUN`.
 When the ranges make no table, the target is a tool failure and its mutants
-are inconclusive.
+are inconclusive. The run lists the build directory of the stage of the
+target, as it lists the installation, before the first mutant and after
+the last; a change of it makes the target a tool failure, which fails the
+run whatever its mutants concluded.
 
 ### Judging the build of a mutant
 
@@ -3168,7 +3216,8 @@ point without such a text is not generated and is counted. Each mutant is
 copied, edited and checked with
 `cargo check --lib --locked --quiet --target aarch64-unknown-none` at the
 call site `cargo-check`, in the environment of Charon, then extracted,
-staged, built and judged as a registered mutant. A mutant that
+staged, built and judged as a registered mutant, on two workers as those
+are, in the order of their points. A mutant that
 `cargo check` does not build is not run and is counted. A mutant whose
 build is rejected is killed, and one whose build is accepted survives. An
 inconclusive mutant, and one with a command that fails as a tool or meets
@@ -3206,7 +3255,9 @@ path; it names the functions of the survivors of
 class `no-theorem` in its report
 ([legacy inventory and admission](#legacy-inventory-and-admission)). A
 refinement task names the operators that it uses; an operator is added to
-this command, not by the task that uses it.
+this command, not by the task that uses it. In CI, the job
+`formal mutants` runs the command on a target of production on a manual
+run of `main` ([CI job](#ci-job)).
 
 ## Calibration target
 

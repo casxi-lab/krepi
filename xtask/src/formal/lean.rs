@@ -1087,11 +1087,20 @@ pub type Listing = BTreeMap<PathBuf, (u32, u64, [[i64; 2]; 2], Option<PathBuf>)>
 /// may write: each entry below each root, without following links below it.
 /// With the listing `before`, it fails, naming up to 20 paths, if they differ.
 pub fn listing(roots: &[PathBuf], before: Option<&Listing>) -> Result<Listing, String> {
+    listing_of("the tool installation", roots, before)
+}
+
+/// The listing of `roots`, `what`, as [`listing`] takes it.
+pub fn listing_of(
+    what: &str,
+    roots: &[PathBuf],
+    before: Option<&Listing>,
+) -> Result<Listing, String> {
     let mut listing = Listing::new();
     for root in roots {
         let at = |error: std::io::Error| format!("{}: {error}", root.display());
         for entry in WalkDir::new(fs::canonicalize(root).map_err(at)?) {
-            let entry = entry.map_err(|error| format!("cannot list the installation: {error}"))?;
+            let entry = entry.map_err(|error| format!("cannot list {what}: {error}"))?;
             let data = entry.metadata().map_err(|error| error.to_string())?;
             let link = entry.path_is_symlink().then(|| fs::read_link(entry.path()));
             let modified = [data.mtime(), data.mtime_nsec()];
@@ -1104,7 +1113,7 @@ pub fn listing(roots: &[PathBuf], before: Option<&Listing>) -> Result<Listing, S
     let mut paths = Vec::from_iter(BTreeSet::from_iter(before.keys().chain(listing.keys())));
     paths.retain(|p| before.get(*p) != listing.get(*p));
     let (count, shown) = (paths.len(), &paths[..paths.len().min(20)]);
-    let error = format!("the tool installation changed during the phase; changed paths ({count})");
+    let error = format!("{what} changed during the phase; changed paths ({count})");
     let error = format!("{error}: {shown:?}");
     let listing = (count == 0).then_some(listing);
     listing.ok_or(error)

@@ -1230,7 +1230,8 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
     }
 
     /// The problem of a shard of 3,301 s.
-    const OVER: &str = "shard target/a: its registered budget of 3301 s is 3301 s per worker, more than the shard limit of 3300 s";
+    const OVER: &str =
+        "shard target/a: its registered budget of 3301 s is more than the shard limit of 3300 s";
 
     #[test]
     fn a_shard_whose_registered_budget_exceeds_the_shard_limit_fails_the_check() {

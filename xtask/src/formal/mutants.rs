@@ -6,8 +6,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
 use proc_macro2::{LineColumn, Span};
@@ -21,10 +23,10 @@ use super::lean::{self, Ranges};
 use super::outcome::{self, Class, Site, Status};
 use super::process::Ran;
 use super::receipt::{self, Receipt};
-use super::registry::{self, Target};
+use super::registry::{self, Mutant, Target};
 use super::run::{self, Gate, Request, RunDir};
 use super::toolchain::{environment::Tool, sha256};
-use super::{externals, extract, inventory, paths, qualify};
+use super::{externals, extract, inventory, merge, paths, qualify};
 use crate::repo::Tree;
 
 /// The budget of a run of `cargo xtask formal mutants`, in place of that of
@@ -59,6 +61,12 @@ const MUTANT: &str = "/mutant/";
 /// in its work directory, before the receipt is written.
 pub const DRAFT: &str = "mutants.json";
 
+/// The build directory of a Lake project, below the project.
+const BUILD: &str = ".lake/build";
+
+/// The build of a target that the stage of each of its mutants starts from.
+const SEED: &str = "the build that seeded the mutants";
+
 /// The unit of the registered mutant `mutant` of the target `target`.
 pub fn unit(target: &str, mutant: &str) -> String {
     format!("{}{MUTANT}{mutant}", run::target_unit(target))
@@ -92,7 +100,8 @@ pub fn list_path(layout: &Layout, target: &str) -> String {
 }
 
 /// Fills in the seconds of each target of `receipt` that has a unit, those
-/// of the commands of its unit and of its mutants, and those of each mutant.
+/// during which a command of its unit or of its mutants ran, the length of
+/// the union of their intervals, and those of the commands of each mutant.
 pub fn seconds(receipt: &mut Receipt) {
     let mut by_unit: BTreeMap<&str, f64> = BTreeMap::new();
     for command in &receipt.commands {
@@ -105,8 +114,10 @@ pub fn seconds(receipt: &mut Receipt) {
         let Some(own) = target.unit.as_deref() else {
             continue;
         };
-        let mine = by_unit.iter().filter(|(unit, _)| owner(unit) == own);
-        target.seconds = round(mine.map(|(_, seconds)| seconds).sum());
+        let mine = (receipt.commands.iter()).filter(|c| c.unit.as_deref().map(owner) == Some(own));
+        target.seconds = round(run::covered(
+            mine.map(|c| (c.started, c.started + c.seconds)),
+        ));
         let mutants = by_unit.iter().filter_map(|(unit, seconds)| {
             let name = unit.strip_prefix(own)?.strip_prefix(MUTANT)?;
             Some((name.to_string(), round(*seconds)))
@@ -223,7 +234,7 @@ fn messages(output: &str) -> String {
 /// hand-written Lean of the export and the root module that imports them,
 /// with warnings as errors, as a command of `unit`.
 pub fn prove(
-    gate: &mut Gate,
+    gate: &Gate,
     unit: &str,
     project: &Path,
     modules: &[String],
@@ -246,13 +257,13 @@ fn at(path: &Path) -> impl Fn(std::io::Error) -> String + '_ {
     move |error| format!("{}: {error}", path.display())
 }
 
-/// A mutant: an edit of a file of the package of its target, and the
-/// theorems of which one must fail.
+/// A mutant: an edit of a file of the package of its target, and the build
+/// of the target that its stage starts from, if there is one.
 struct Mutation<'a> {
     file: &'a str,
     find: &'a str,
     replace: &'a str,
-    fails: &'a [String],
+    seed: Option<&'a Path>,
 }
 
 /// What a mutant tells.
@@ -267,26 +278,32 @@ enum Judged {
     Failed(Status, String),
 }
 
+/// A mutant that its preparation made ready: the stage project where its
+/// proofs are to build, or what it told before its build.
+enum Ready {
+    Stage(PathBuf),
+    Told(Judged),
+}
+
 /// Copies the package of `target` from the export into `work`, with the
 /// Cargo configuration of the export, edits it, and, when `check`, checks
 /// that Cargo builds it; then extracts it, installs what the tools generated
-/// in a stage and builds the proofs there, all as commands of `unit`, and
-/// judges the build with `ranges`. A pattern that does not occur once, an
-/// extraction that fails and generated files that cannot be installed are
-/// rejections.
-fn build(
-    gate: &mut Gate,
+/// in a stage and copies the build of the target there, so that Lake builds
+/// again only the modules whose sources or imports differ, all as commands
+/// of `unit`. A pattern that does not occur once, an extraction that fails
+/// and generated files that cannot be installed are rejections.
+fn prepare(
+    gate: &Gate,
     target: &Target,
     unit: &str,
     mutation: &Mutation,
-    ranges: &Ranges,
     work: &Path,
     check: bool,
-) -> Result<Judged, String> {
+) -> Result<Ready, String> {
     let (layout, source) = (*gate.layout(), gate.source());
     let (from, root) = (source.join(layout.kernel), work.join("source"));
     let package = root.join(layout.kernel);
-    let rejected = |why: String| Ok(Judged::Failed(Status::Rejected, why));
+    let rejected = |why: String| Ok(Ready::Told(Judged::Failed(Status::Rejected, why)));
     let text = fs::read_to_string(from.join(mutation.file)).map_err(at(&from))?;
     if text.matches(mutation.find).count() != 1 {
         return rejected(format!(
@@ -294,7 +311,7 @@ fn build(
             mutation.file
         ));
     }
-    copy_tree(&from, &package)?;
+    copy_tree("the package", &from, &package)?;
     if source.join(paths::CARGO_CONFIG).is_file() {
         let config = root.join(paths::CARGO_CONFIG);
         fs::create_dir_all(root.join(".cargo")).map_err(at(&root))?;
@@ -326,15 +343,12 @@ fn build(
         };
         let (_, verdict, _) = gate.run(unit, &request, |_| Ok(()));
         let _ = fs::remove_dir_all(&target_dir);
+        let failed =
+            |why: Option<String>| Judged::Failed(Status::ToolFailure, why.unwrap_or_default());
         match verdict.class {
             Class::Passed => {}
-            Class::ProofFailure => return Ok(Judged::Unbuildable),
-            _ => {
-                return Ok(Judged::Failed(
-                    Status::ToolFailure,
-                    verdict.reason.unwrap_or_default(),
-                ));
-            }
+            Class::ProofFailure => return Ok(Ready::Told(Judged::Unbuildable)),
+            _ => return Ok(Ready::Told(failed(verdict.reason))),
         }
     }
     let opaque = Vec::from_iter(target.opaque.iter().map(|opaque| opaque.pattern.clone()));
@@ -361,17 +375,35 @@ fn build(
         ));
     }
     let project = stage.join(Path::new(layout.project).file_name().unwrap_or_default());
+    if let Some(seed) = mutation.seed {
+        copy_tree(SEED, seed, &project.join(BUILD))?;
+    }
+    Ok(Ready::Stage(project))
+}
+
+/// Builds the proofs of a mutant that `ready` made ready, of which one of
+/// the theorems `fails` must fail, as a command of `unit`, and judges the
+/// build with `ranges`.
+fn judge(
+    gate: &Gate,
+    target: &Target,
+    unit: &str,
+    fails: &[String],
+    ranges: &Ranges,
+    ready: Ready,
+) -> Result<Judged, String> {
+    let project = match ready {
+        Ready::Stage(project) => project,
+        Ready::Told(judged) => return Ok(judged),
+    };
     let (ran, verdict) = prove(gate, unit, &project, &target.proof_modules)?;
     let modules = &target.proof_modules;
-    let judged = ran.map(|ran| self::verdict(&ran, modules, ranges, mutation.fails));
+    let judged = ran.map(|ran| self::verdict(&ran, modules, ranges, fails));
     Ok(
         match judged.unwrap_or_else(|| Verdict::Killed(verdict.reason.unwrap_or_default())) {
             Verdict::Rejected { .. } => Judged::Rejected,
             Verdict::Accepted { outside, .. } => {
-                let mut why = format!(
-                    "the mutant was not rejected by {}",
-                    mutation.fails.join(", ")
-                );
+                let mut why = format!("the mutant was not rejected by {}", fails.join(", "));
                 if !outside.is_empty() {
                     why += &format!(
                         "; errors outside every declaration at {}",
@@ -395,10 +427,11 @@ fn build(
     )
 }
 
-/// Copies the files below `from` to the same paths below `to`.
-fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
+/// Copies the files below `from`, which `what` names, to the same paths
+/// below `to`.
+fn copy_tree(what: &str, from: &Path, to: &Path) -> Result<(), String> {
     for entry in WalkDir::new(from) {
-        let entry = entry.map_err(|error| format!("cannot copy the package: {error}"))?;
+        let entry = entry.map_err(|error| format!("cannot copy {what}: {error}"))?;
         let path = to.join(entry.path().strip_prefix(from).unwrap_or(entry.path()));
         let copied = match entry.file_type().is_dir() {
             true => fs::create_dir_all(&path),
@@ -416,7 +449,9 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
 /// The declaration ranges of that build, printed as a command of the
 /// target's unit, attribute the errors of every mutant's build; when they
 /// make no table, every mutant is inconclusive, and the tool failure of the
-/// target is returned.
+/// target is returned. Each mutant starts from that build, which is listed
+/// before the first and after the last: a change is the tool failure of the
+/// target.
 pub fn after(
     gate: &mut Gate,
     target: &Target,
@@ -444,38 +479,148 @@ pub fn after(
             return Ok(Some(why));
         }
     };
+    let seed = Some(project.join(BUILD)).filter(|seed| seed.is_dir());
+    let listed = |before| lean::listing_of(SEED, &Vec::from_iter(seed.clone()), before);
+    let before = listed(None)?;
     if let Some(operators) = operators {
-        return generated(gate, target, &ranges, operators).map(|()| None);
+        generated(gate, target, &ranges, operators, seed.as_deref())?;
+        return Ok(listed(Some(&before)).err());
     }
     let work = gate
         .work()
         .join("targets")
         .join(&target.name)
         .join("mutants");
-    for mutant in &target.mutants {
-        let (unit, fails) = (unit(&target.name, &mutant.name), &mutant.fails);
-        let conclusion = match unknown_failures(fails, &ranges) {
-            Some(problem) => (Status::Rejected, Some(problem)),
+    let (gate, unit) = (&*gate, |mutant: &Mutant| unit(&target.name, &mutant.name));
+    workers(
+        &target.mutants,
+        |mutant| match unknown_failures(&mutant.fails, &ranges) {
+            Some(problem) => Ok(Ready::Told(Judged::Failed(Status::Rejected, problem))),
             None => {
                 let (file, find, replace) = (&mutant.file, &mutant.find, &mutant.replace);
                 let mutation = Mutation {
                     file,
                     find,
                     replace,
-                    fails,
+                    seed: seed.as_deref(),
                 };
                 let work = work.join(&mutant.name);
-                match build(gate, target, &unit, &mutation, &ranges, &work, false)? {
-                    Judged::Rejected => (Status::Verified, None),
-                    Judged::Survived(why) => (Status::Rejected, Some(why)),
-                    Judged::Unbuildable => (Status::Rejected, Some("it does not build".into())),
-                    Judged::Failed(status, why) => (status, Some(why)),
+                run::in_work(&work, || {
+                    prepare(gate, target, &unit(mutant), &mutation, &work, false)
+                })
+            }
+        },
+        |mutant, ready| {
+            let unit = unit(mutant);
+            let judged = || judge(gate, target, &unit, &mutant.fails, &ranges, ready?);
+            let conclusion = match run::in_work(&work.join(&mutant.name), judged)? {
+                Judged::Rejected => (Status::Verified, None),
+                Judged::Survived(why) => (Status::Rejected, Some(why)),
+                Judged::Unbuildable => (Status::Rejected, Some("it does not build".into())),
+                Judged::Failed(status, why) => (status, Some(why)),
+            };
+            gate.conclude(&unit, conclusion);
+            Ok(())
+        },
+    )?;
+    Ok(listed(Some(&before)).err())
+}
+
+/// Runs `finish` on each of `items` with what `prepare` gave for it on
+/// [`merge::WORKERS`] workers, of which the `w`-th takes every
+/// `WORKERS`-th item from the `w`-th on, in order, through [`pipeline`]. A
+/// worker that stops at an error or panics stops the others before their
+/// next item, even while its own next item is prepared; once all have
+/// ended, the first error, in the order of the workers, is returned.
+fn workers<T: Sync, P: Send>(
+    items: &[T],
+    prepare: impl Fn(&T) -> Result<P, String> + Sync,
+    finish: impl Fn(&T, Result<P, String>) -> Result<(), String> + Sync,
+) -> Result<(), String> {
+    let failed = AtomicBool::new(false);
+    workers_of(merge::WORKERS, &failed, items, &prepare, &finish)
+}
+
+/// [`workers`] with `count` workers, which stop once `failed` holds and set
+/// it when one of them stops at an error.
+fn workers_of<T: Sync, P: Send>(
+    count: usize,
+    failed: &AtomicBool,
+    items: &[T],
+    prepare: &(impl Fn(&T) -> Result<P, String> + Sync),
+    finish: &(impl Fn(&T, Result<P, String>) -> Result<(), String> + Sync),
+) -> Result<(), String> {
+    let stopped = || failed.load(Ordering::SeqCst);
+    let ended = std::thread::scope(|scope| {
+        let workers = Vec::from_iter((0..count).map(|first| {
+            let part = Vec::from_iter(items.iter().skip(first).step_by(count));
+            scope.spawn(move || {
+                let finish = |item: &&T, prepared: Result<P, String>| {
+                    let ended = run::caught(|| finish(item, prepared)).and_then(|ended| ended);
+                    failed.fetch_or(ended.is_err(), Ordering::SeqCst);
+                    ended
+                };
+                let run = || pipeline(&part, stopped, |item| prepare(item), finish);
+                let ended = run::caught(run).and_then(|ended| ended);
+                failed.fetch_or(ended.is_err(), Ordering::SeqCst);
+                ended
+            })
+        }));
+        let ended = workers.into_iter().map(|worker| worker.join());
+        Vec::from_iter(ended.map(|ended| ended.unwrap_or(Err("a worker panicked".into()))))
+    });
+    ended.into_iter().collect()
+}
+
+/// Runs `run` on each of `items` in order, with what `prepare` gave for
+/// it, and stops at the first error, which it returns. A thread of its own
+/// prepares the next item while `run` works on the one before it: the
+/// preparations are made in order, one at a time and at most one item
+/// ahead, and a finished one waits until `run` takes it. `run` must stop at
+/// a preparation that is an error, after which nothing more is prepared;
+/// nor is anything prepared once `run` has stopped at an error of its own.
+/// A preparation then under way finishes and is dropped, and the error is
+/// returned once the preparing thread has ended. A `run` that goes on after
+/// a preparation that is an error ends with an error once no preparation
+/// follows. Once `stopped` holds, no item is prepared or run any more, and
+/// the run ends without an error.
+fn pipeline<T: Sync, P: Send>(
+    items: &[T],
+    stopped: impl Fn() -> bool + Sync,
+    prepare: impl Fn(&T) -> Result<P, String> + Sync,
+    mut run: impl FnMut(&T, Result<P, String>) -> Result<(), String>,
+) -> Result<(), String> {
+    std::thread::scope(|scope| {
+        // A channel without a buffer hands each preparation over only when
+        // `run` asks for it; the next one starts after that.
+        let (sender, receiver) = mpsc::sync_channel(0);
+        let (prepare, stopped) = (&prepare, &stopped);
+        scope.spawn(move || {
+            for item in items.iter().take_while(|_| !stopped()) {
+                let prepared = prepare(item);
+                let stops = prepared.is_err();
+                if sender.send(prepared).is_err() || stops {
+                    break;
                 }
             }
-        };
-        gate.conclude(&unit, conclusion);
-    }
-    Ok(None)
+        });
+        // The receiver is dropped when this closure returns, which ends a
+        // preparing thread that waits to hand over a preparation.
+        for item in items.iter().take_while(|_| !stopped()) {
+            // The preparing thread ends without handing anything over once
+            // `stopped` holds, which never stops holding, or when it
+            // panicked, which the scope then passes on; else `run` went on
+            // after a preparation that was an error.
+            let Ok(prepared) = receiver.recv() else {
+                if stopped() {
+                    break;
+                }
+                return Err("no mutant was prepared after a failed preparation".to_string());
+            };
+            run(item, prepared)?;
+        }
+        Ok(())
+    })
 }
 
 /// A source mutant: the point of its edit, `<file>:<line>:<column>` with
@@ -791,8 +936,9 @@ pub fn generate(
 }
 
 /// Generates the source mutants of `target` with `operators` from the
-/// export and runs each in a stage of its own, with the theorems of all its
-/// obligations to fail, as commands of its unit; concludes the unit, and
+/// export and runs each in a stage of its own, which starts from the build
+/// of the target, `seed`, with the theorems of all its obligations to
+/// fail, as commands of its unit; concludes the unit, and
 /// writes the draft of its list of survivors when every mutant was decided.
 /// A theorem of the obligations outside the top-level theorems of the
 /// proofs rejects the unit before any mutant runs.
@@ -801,6 +947,7 @@ fn generated(
     target: &Target,
     ranges: &Ranges,
     operators: &[String],
+    seed: Option<&Path>,
 ) -> Result<(), String> {
     let (layout, unit) = (*gate.layout(), generated_unit(&target.name));
     let fails = Vec::from_iter(target.obligations.iter().flat_map(|o| o.theorems.clone()));
@@ -822,29 +969,43 @@ fn generated(
         ..List::default()
     };
     let (mut failed, work) = (Vec::new(), gate.work().join("mutants").join(&target.name));
-    for (index, point) in points.into_iter().enumerate() {
-        let file = point.point.split(':').next().unwrap_or_default();
-        let file = file
-            .strip_prefix(&format!("{}/", layout.kernel))
-            .unwrap_or(file);
-        let (find, replace, fails) = (&point.find, &point.replace, &fails[..]);
-        let work = work.join(index.to_string());
-        let judged = build(
-            gate,
-            target,
-            &unit,
-            &Mutation {
+    let (gate, judged) = (&*gate, Mutex::new(BTreeMap::new()));
+    let points = Vec::from_iter(points.into_iter().enumerate());
+    workers(
+        &points,
+        |(index, point)| {
+            let file = point.point.split(':').next().unwrap_or_default();
+            let file = file
+                .strip_prefix(&format!("{}/", layout.kernel))
+                .unwrap_or(file);
+            let (find, replace) = (&point.find, &point.replace);
+            let mutation = Mutation {
                 file,
                 find,
                 replace,
-                fails,
-            },
-            ranges,
-            &work,
-            true,
-        )?;
-        let _ = fs::remove_dir_all(&work);
-        match judged {
+                seed,
+            };
+            let work = work.join(index.to_string());
+            run::in_work(&work, || {
+                prepare(gate, target, &unit, &mutation, &work, true)
+            })
+        },
+        |(index, _), ready| {
+            let work = work.join(index.to_string());
+            let told = run::in_work(&work, || judge(gate, target, &unit, &fails, ranges, ready?))?;
+            let _ = fs::remove_dir_all(work);
+            let mut judged = judged.lock().unwrap_or_else(PoisonError::into_inner);
+            judged.insert(*index, told);
+            Ok(())
+        },
+    )?;
+    let mut judged = judged.into_inner().unwrap_or_else(PoisonError::into_inner);
+    for (index, point) in points {
+        let Some(told) = judged.remove(&index) else {
+            failed.push(format!("{}: it was not judged", point.point));
+            continue;
+        };
+        match told {
             Judged::Rejected => list.killed += 1,
             Judged::Survived(_) => list.survivors.push(point),
             Judged::Unbuildable => list.unbuildable += 1,
@@ -1002,6 +1163,7 @@ mod tests {
     //! tests of `lean.rs` describe; the runs are those of the fixture of the
     //! targets of `run.rs`.
 
+    use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
 
     use super::*;
@@ -1382,6 +1544,43 @@ mod tests {
         receipt.status = Status::Rejected;
         assert_eq!(write(&done, &receipt), ExitCode::FAILURE);
         assert!(!path.exists());
+        // A source mutant of `f`, which the target proves, Aeneas translates
+        // and Cargo checks, whose build writes the build of the target that
+        // seeded it, makes the target a tool failure.
+        let mut registry: serde_json::Value = serde_json::from_str(&two_targets(1_800, 1)).unwrap();
+        registry[0]["proves"] = serde_json::json!(["kernel/src/lib.rs#f"]);
+        let source = "#![no_std]\npub fn f() -> u32 {\n    1\n}\n";
+        fixture.write("kernel/src/lib.rs", source);
+        register(&fixture, &registry.to_string());
+        let shape = fixture.root().join("artifacts/shapes/t");
+        let from = shape.to_str().expect("UTF-8");
+        fixture.write("artifacts/shapes/KrepiGen.T.from", from);
+        let function = r#"{"rust_name": "krepi_kernel::f", "lean_name": "KrepiGen.T.f",
+            "lean_file": "KrepiGen/T/Funs.lean", "is_local": true, "is_opaque": false,
+            "source": {"file": "src/lib.rs"}}"#;
+        let translation = format!("{{\"functions\": [{function}], \"types\": []}}");
+        fixture.write("artifacts/shapes/t/translation.json", &translation);
+        for file in ["Types", "Funs"] {
+            fixture.write(&format!("artifacts/shapes/t/KrepiGen/T/{file}.lean"), "");
+        }
+        let cargo = "artifacts/formal/tools/cargo/bin/cargo";
+        let real = fs::read_to_string(fixture.root().join(cargo)).expect("the Cargo stand-in");
+        let checks = real.replacen("\n", "\n[ \"$1\" = check ] && exit 0\n", 1);
+        fixture.write(cargo, &checks);
+        fixture.chmod(cargo, 0o755);
+        let seed = "${PWD%/mutants/*}/targets/t/stage/verification/.lake/build";
+        let script =
+            format!("case $PWD in */mutants/*) : > {seed}/x ;; *) mkdir -p {BUILD} ;; esac");
+        fixture::lake_script(&fixture, "+Krepi", &script);
+        let run = generating_run(&fixture, &["t"], operators.clone());
+        let done = gate(&fixture, &["t"], run);
+        assert_eq!(done.receipt.status, Status::ToolFailure);
+        let (status, reason) = fixture::status(&done, "target/t");
+        assert!(status == Status::ToolFailure && reason.is_some_and(|r| r.starts_with(SEED)));
+        let sites = Vec::from_iter(fixture::commands(&done, "mutants/t").iter().map(|c| c.site));
+        assert!(sites.contains(&Site::TargetBuild), "{sites:?}");
+        assert_eq!(write(&done, &done.receipt), ExitCode::FAILURE);
+        assert!(!path.exists());
         // A theorem of the obligations that the ranges do not hold as a
         // theorem rejects the unit before a mutant runs.
         let ranges = "echo 'krepi-ranges-module Krepi.Proofs.T 0'; exit 0\n";
@@ -1642,6 +1841,149 @@ mod tests { fn t() { let _ = 1 + 1; } }
     }
 
     #[test]
+    fn a_pipeline_stops_at_the_first_error_with_what_ran_so_far() {
+        let (never, ready) = (|| false, |_: &&str| Ok(()));
+        let (mut ran, prepared) = (Vec::new(), Mutex::new(Vec::new()));
+        let result = pipeline(&["a", "b", "c"], never, ready, |&name, _| {
+            ran.push(name);
+            match name {
+                "b" => Err(format!("{name}: No space left on device")),
+                _ => Ok(()),
+            }
+        });
+        assert_eq!(ran, ["a", "b"]);
+        assert_eq!(result, Err("b: No space left on device".to_string()));
+        // Every item runs in order when none fails, and no items run none.
+        let mut ran = Vec::new();
+        let result = pipeline(&["a", "c"], never, ready, |&name, _| {
+            ran.push(name);
+            Ok(())
+        });
+        assert_eq!((ran, result), (vec!["a", "c"], Ok(())));
+        assert_eq!(
+            pipeline(&[] as &[&str], never, ready, |_, _| Ok(())),
+            Ok(())
+        );
+        // A preparation that fails is handed over, and nothing after it is
+        // prepared.
+        let prepare = |&name: &&'static str| {
+            prepared.lock().expect("prepared").push(name);
+            (name != "b")
+                .then_some(())
+                .ok_or(format!("cannot copy {name}"))
+        };
+        let mut ran = Vec::new();
+        let result = pipeline(&["a", "b", "c"], never, prepare, |&name, ready| {
+            ran.push(name);
+            ready
+        });
+        assert_eq!(
+            (ran, result),
+            (vec!["a", "b"], Err("cannot copy b".to_string()))
+        );
+        assert_eq!(*prepared.lock().expect("prepared"), ["a", "b"]);
+        // A run that goes on after a preparation that failed does not end as
+        // if every item had run.
+        let mut ran = Vec::new();
+        let result = pipeline(&["a", "b", "c"], never, prepare, |&name, _| {
+            ran.push(name);
+            Ok(())
+        });
+        let none = "no mutant was prepared after a failed preparation".to_string();
+        assert_eq!((ran, result), (vec!["a", "b"], Err(none)));
+        // Once the run is told to stop, nothing more is prepared or run, and
+        // it ends without an error.
+        let stop = AtomicBool::new(false);
+        prepared.lock().expect("prepared").clear();
+        let record = |&name: &&'static str| {
+            prepared.lock().expect("prepared").push(name);
+            Ok::<_, String>(())
+        };
+        let mut ran = Vec::new();
+        let stopped = || stop.load(Ordering::SeqCst);
+        let result = pipeline(&["a", "b", "c"], stopped, record, |&name, _| {
+            ran.push(name);
+            stop.store(name == "a", Ordering::SeqCst);
+            Ok(())
+        });
+        assert_eq!((ran, result), (vec!["a"], Ok(())));
+        assert!(!prepared.lock().expect("prepared").contains(&"c"));
+        // It may be told to stop while it waits for the next preparation:
+        // the preparing thread then ends without one. That thread sets the
+        // flag only once the run has looked at it before the second item.
+        let (stop, looks, ahead) = (
+            AtomicBool::new(false),
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+        );
+        let run = std::thread::current().id();
+        let stopped = || {
+            if std::thread::current().id() == run {
+                let stopped = stop.load(Ordering::SeqCst);
+                looks.fetch_add(1, Ordering::SeqCst);
+                return stopped;
+            }
+            if ahead.fetch_add(1, Ordering::SeqCst) == 0 {
+                return false;
+            }
+            let looked = || looks.load(Ordering::SeqCst) == 2;
+            fixture::wait_until(looked, "the run never looked before the second item");
+            stop.store(true, Ordering::SeqCst);
+            true
+        };
+        let mut ran = Vec::new();
+        let result = pipeline(&["a", "b", "c"], stopped, ready, |&name, _| {
+            ran.push(name);
+            Ok(())
+        });
+        assert_eq!((ran, result), (vec!["a"], Ok(())));
+    }
+
+    #[test]
+    fn a_worker_that_stops_at_an_error_stops_the_others_before_their_next_item() {
+        // Of two workers, the first takes a and c, and the second b and d.
+        // b fails once a runs, which waits for it, while d is prepared.
+        let (failed, ran) = (AtomicBool::new(false), Mutex::new(Vec::new()));
+        let runs = AtomicBool::new(false);
+        let has_failed = || fixture::wait_until(|| failed.load(Ordering::SeqCst), "b never failed");
+        let prepare = |&name: &&str| {
+            if name == "d" {
+                has_failed();
+            }
+            Ok(())
+        };
+        let finish = |&name: &&'static str, ready: Result<(), String>| {
+            if name == "a" {
+                runs.store(true, Ordering::SeqCst);
+                has_failed();
+            } else if name == "b" {
+                fixture::wait_until(|| runs.load(Ordering::SeqCst), "a never ran");
+                return Err(format!("cannot copy {name}"));
+            }
+            ready?;
+            ran.lock().expect("ran").push(name);
+            Ok(())
+        };
+        let result = workers_of(2, &failed, &["a", "b", "c", "d"], &prepare, &finish);
+        assert_eq!(result, Err("cannot copy b".to_string()));
+        assert_eq!(*ran.lock().expect("ran"), ["a"]);
+        // Without an error each item runs on its worker, and a worker that
+        // panics stops the run.
+        let failed = AtomicBool::new(false);
+        let ok = |_: &&str| Ok(());
+        let finish = |&name: &&str, _| match name {
+            "d" => panic!("asked to by the test"),
+            _ => Ok(()),
+        };
+        assert_eq!(
+            workers_of(3, &failed, &["a", "b", "c"], &ok, &finish),
+            Ok(())
+        );
+        let result = workers_of(3, &failed, &["a", "b", "c", "d"], &ok, &finish);
+        assert_eq!(result, Err("panicked: asked to by the test".to_string()));
+    }
+
+    #[test]
     fn the_units_of_the_mutants_share_the_budget_of_their_target() {
         assert_eq!(unit("t", "m"), "target/t/mutant/m");
         assert_eq!(owner(&unit("t", "m")), "target/t");
@@ -1660,7 +2002,7 @@ mod tests { fn t() { let _ = 1 + 1; } }
 
     #[test]
     fn the_limits_of_the_workflows_cover_the_deadlines_of_their_gates_and_receipts() {
-        use crate::formal::merge::{self, EXTRACTION_MARGIN, SHARD_LIMIT, SHARD_MARGIN, WORKERS};
+        use crate::formal::merge::{self, EXTRACTION_MARGIN, SHARD_LIMIT, SHARD_MARGIN};
         use crate::formal::run::{GATE_BUDGET, RECEIPT_MARGIN, target_unit};
         use yaml_rust2::{Yaml, YamlLoader};
         let minutes = |seconds: u64| seconds.div_ceil(60);
@@ -1673,7 +2015,6 @@ mod tests { fn t() { let _ = 1 + 1; } }
             ("shard_margin", shard_margin),
             ("receipt_margin", margin),
             ("shard_limit", SHARD_LIMIT.as_secs()),
-            ("workers", WORKERS),
         ] {
             let line = format!("{name}={value}\n");
             assert!(formal.contains(&line), "{line}");
@@ -1692,8 +2033,8 @@ mod tests { fn t() { let _ = 1 + 1; } }
             r"| map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 3)' \",
             "shards=$(rows formal null)",
             r#"scoped=$(rows planned "$SCOPED")"#,
-            r#"over=$(jq -r --argjson limit "$shard_limit" --argjson workers "$workers" \"#,
-            r#"'[.[] | select((.budget + $workers - 1) / $workers | floor > $limit) | .name] | join(" ")' <<< "$shards")"#,
+            r#"over=$(jq -r --argjson limit "$shard_limit" \"#,
+            r#"'[.[] | select(.budget > $limit) | .name] | join(" ")' <<< "$shards")"#,
             r#"long=$(jq -r '[.[] | select(.job > 360) | .name] | join(" ")' <<< "$scoped")"#,
             r#"echo "shards=$shards""#,
             r#"echo "scoped=$scoped""#,
@@ -1858,5 +2199,11 @@ mod tests { fn t() { let _ = 1 + 1; } }
                 .as_i64()
                 .is_some_and(|job| (deadline as i64 + 20..=270).contains(&job))
         );
+        // `formal.yml` runs it with the same deadline, in a step two minutes
+        // longer and a job 20 minutes longer than the step.
+        let job = &jobs["mutants"];
+        assert!(formal.contains(&format!("deadline.sh --stop-commands {deadline}m 1m")));
+        assert_eq!(limit(&find_step(job, "id", "mutants")), Some(deadline + 2));
+        assert_eq!(limit(job), Some(deadline + 22));
     }
 }
