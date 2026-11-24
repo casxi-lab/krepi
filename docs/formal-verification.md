@@ -946,9 +946,9 @@ when it ends.
 A signal from the terminal does not reach a running tool, whose group is
 its own. SIGINT and SIGTERM stop the run instead, also when they were
 ignored when it started, and so does SIGHUP unless it was ignored then, as
-`nohup` leaves it: the run kills the group of the command that is running,
-collects the command, waits for its group as above, and ends by the same
-signal, without a receipt. A signal that comes
+`nohup` leaves it: the run kills the group of each command that is
+running, collects one of these commands, waits for its group as above,
+and ends by the same signal, without a receipt. A signal that comes
 between two commands takes effect before the next command starts or before
 the receipt is written.
 

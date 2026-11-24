@@ -15,6 +15,7 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,14 @@ pub(crate) const PAUSE: Duration = Duration::from_millis(10);
 
 /// The stop signal that reached the gate or `cargo xtask check`, or 0.
 static STOP: AtomicUsize = AtomicUsize::new(0);
+
+/// The groups of the commands that [`run`] watches, on any thread, whose
+/// leaders it has not collected.
+static WATCHED: Mutex<Vec<libc::pid_t>> = Mutex::new(Vec::new());
+
+fn watched() -> MutexGuard<'static, Vec<libc::pid_t>> {
+    WATCHED.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// What set the limit of a command: the cap of its call site, or the rest
 /// of the budget of its phase, of the gate or of the target of its unit.
@@ -143,10 +152,12 @@ pub(crate) fn stop_signal() -> Option<i32> {
     (signal != 0).then_some(signal as i32)
 }
 
-/// Ends the gate by the stop signal that reached it, if one did.
+/// Ends the gate by the stop signal that reached it, if one did, after it
+/// kills the group of each command that another thread watches.
 pub fn stop_if_asked() {
     let signal = STOP.load(Ordering::SeqCst);
     if signal != 0 {
+        watched().iter().for_each(|group| kill_group(*group));
         let _ = signal_hook::low_level::emulate_default_handler(signal as libc::c_int);
         std::process::abort();
     }
@@ -243,20 +254,25 @@ fn start(spec: &Spec, paths: &[PathBuf; 2]) -> Result<Child, String> {
 
 /// Waits until the command `child`, the leader of `group`, has ended or
 /// `deadline` has passed, kills the group and collects the command. A stop
-/// signal kills the group, collects the command and ends the gate.
+/// signal kills the group, collects the command and ends the gate. The
+/// group is watched until its leader is collected.
 fn supervise(child: &mut Child, group: libc::pid_t, deadline: Instant) -> Ended {
+    watched().push(group);
+    let unwatch = || watched().retain(|watched| *watched != group);
     let timed_out = loop {
         match leader_ended(group) {
             Ok(true) => break false,
             Ok(false) => {}
             Err(error) => {
                 // The number may name another process now: nothing is signalled.
+                unwatch();
                 let _ = child.try_wait();
                 return Ended::Failed(format!("cannot watch the command: {error}"));
             }
         }
         if STOP.load(Ordering::SeqCst) != 0 {
             kill_group(group);
+            unwatch();
             let _ = child.wait();
             group_ended(group);
             stop_if_asked();
@@ -268,6 +284,7 @@ fn supervise(child: &mut Child, group: libc::pid_t, deadline: Instant) -> Ended 
         std::thread::sleep(PAUSE.min(deadline - now));
     };
     kill_group(group);
+    unwatch();
     match child.wait() {
         Err(error) => Ended::Failed(format!("cannot collect the command: {error}")),
         Ok(_) if timed_out => Ended::TimedOut,

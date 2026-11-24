@@ -1457,15 +1457,15 @@ limit of 1 s, which only decides that it is stopped, and any other fake
 tool a limit of 3,600 s. A fake tool that hangs sleeps for 30 s, and so does
 a process that a test leaves behind in the group of a command that ends.
 The test of a stop signal waits at most 120 s for the gate that it starts
-to reach its command, which only a failing test reaches; that command
-sleeps for 240 s. The test of the reading of the free space reads every
-10 ms and waits at most 60 s for its third reading, which only a failing
-test reaches. In the tests of `cargo xtask formal vectors`, a Lake
-stand-in that hangs gets a budget of 1 s, which only decides that it is
-stopped, and sleeps for 30 s, and any other a budget of 1,800 s or
-3,600 s; the ignored replay with the pinned Lean has 300 s. Each sleep is a
-small multiple of the bound of its test, so that it outlasts every wait
-that a passing test makes.
+to reach its two commands, which only a failing test reaches, and 60 s for
+the group of each to be gone; those commands sleep for 240 s. The test of
+the reading of the free space reads every 10 ms and waits at most 60 s for
+its third reading, which only a failing test reaches. In the tests of
+`cargo xtask formal vectors`, a Lake stand-in that hangs gets a budget of
+1 s, which only decides that it is stopped, and sleeps for 30 s, and any
+other a budget of 1,800 s or 3,600 s; the ignored replay with the pinned
+Lean has 300 s. Each sleep is a small multiple of the bound of its test, so
+that it outlasts every wait that a passing test makes.
 
 In the tests of `cargo xtask check`, a step that the check is to cancel runs
 a shell that starts a sleep of 240 s, writes the number of its process group

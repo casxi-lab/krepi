@@ -485,3 +485,13 @@ pub fn commands<'a>(done: &'a Done, unit: &str) -> Vec<&'a receipt::Command> {
         .filter(|command| command.unit.as_deref() == Some(unit))
         .collect()
 }
+
+/// Waits until `holds`, failing with `why` after 60 s, which only a failing
+/// test reaches.
+pub fn wait_until(holds: impl Fn() -> bool, why: &str) {
+    let begin = std::time::Instant::now();
+    while !holds() {
+        assert!(begin.elapsed().as_secs() < 60, "{why}");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}

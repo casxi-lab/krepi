@@ -334,9 +334,10 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     {
         let Some(proof) = &case.proof else { continue };
         let unit = qualify::unit(&case.name);
-        let mut commands = (gate.receipt.commands.iter()).filter(|c| c.unit == Some(unit.clone()));
-        let build = commands.find(|command| command.site == Site::QualificationBuild);
-        let built = build.is_some_and(|build| build.class == Class::Passed);
+        let built = (gate.records().commands.iter())
+            .filter(|c| c.unit == Some(unit.clone()))
+            .find(|command| command.site == Site::QualificationBuild)
+            .is_some_and(|build| build.class == Class::Passed);
         let Some(case_record) = qualification.cases.get(&case.name).filter(|_| built) else {
             missing.push((unit.clone(), format!("{unit} did not build its code")));
             continue;
@@ -395,7 +396,8 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     }
     // A case whose commands force its conclusion forces the round's.
     let forced = |unit: &&String| {
-        let mut commands = (gate.receipt.commands.iter()).filter(|c| c.unit.as_ref() == Some(unit));
+        let records = gate.records();
+        let mut commands = (records.commands.iter()).filter(|c| c.unit.as_ref() == Some(unit));
         commands.any(|command| matches!(command.class, Class::ToolFailure | Class::Budget))
     };
     let first = missing
