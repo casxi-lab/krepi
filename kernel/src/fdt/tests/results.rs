@@ -17,6 +17,8 @@ use super::*;
 use std::format;
 use std::string::{String, ToString};
 
+mod differential;
+
 /// The fields `key=value` of an input, in their order; a field without `=`
 /// is not one.
 fn fields(input: &str) -> Vec<(&str, &str)> {
