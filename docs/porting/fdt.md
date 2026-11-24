@@ -107,15 +107,16 @@ The other test files keep their names below `kernel/src/fdt/tests/` and
   place of the library sort, and sums are taken by loops.
 - **Boot storage.** It holds up to 4 spans, where the prototype allowed 2,
   so that a board can give the boot bundle as a span of its own;
-  `MemoryPlan::from_pi5` takes the further spans after the image and the
-  tree as a third argument.
+  `MemoryPlan::from_boot_memory` takes the further spans after the image
+  and the tree as a third argument.
 - **Widths.** The nine limits, `Fdt::total_size`, `CpuTopology::count` and
   the index of `affinity`, and `CpuProfile::logical_id` and
   `affinity_shift` are `u64`, the widths of the specification, where the
-  prototype used `usize` or `u32`. `PI5_MAX_BLOB_SIZE` is defined with the
-  other limits. The functions of `CpuProfile` and `CpuTopology` are no
-  longer `const fn`.
-- **New entries.** `MemoryMap::dynamic` and `Pi5BootMemory::dynamic` give
+  prototype used `usize` or `u32`. The size limit of the Pi 5 tree,
+  `PI5_MAX_BLOB_SIZE` in the prototype, is the `max_blob_size` of a
+  `HandOverProfile`, a `u64`. The functions of `CpuProfile` and
+  `CpuTopology` are no longer `const fn`.
+- **New entries.** `MemoryMap::dynamic` and `BootMemory::dynamic` give
   the number of dynamic reservations, of type `u64`, which the prototype
   rejected.
 - **Names and strings.** `Node::name` gives the checked bytes of the name
@@ -144,10 +145,22 @@ The other test files keep their names below `kernel/src/fdt/tests/` and
 - **CPU nodes.** `discover_cpus` compares the ID of a CPU node with
   `id << affinity_shift` without the mask of `logical_id`, which gives the
   same errors, since a flag bit makes the two values differ.
-  `validate_qemu_timers` takes the shift of its 32-bit CPU mask modulo 32,
+  `validate_timers` takes the shift of its 32-bit CPU mask modulo 32,
   as the specification does; for the supported counts the mask is the same.
+- **Board profiles.** The boards differ in the profiles that they give
+  the entries, not in the entries, and no entry is named after a board:
+  the prototype's `Fdt::discover_pi5_boot_memory`, `Pi5BootMemory`,
+  `MemoryPlan::from_pi5` and `CpuTopology::validate_qemu_timers` are
+  `Fdt::discover_boot_memory`, which takes a `HandOverProfile`,
+  `BootMemory`, `MemoryPlan::from_boot_memory` and
+  `CpuTopology::validate_timers`, which checks the `TimerInterrupts` of the
+  profile; `CpuProfile` is a value of five fields, with an
+  `AffinityLevel`, in place of the variants `QemuHvc`, `QemuSmc` and `Pi5`;
+  and the module `pi5` is `hand_over`. The profiles of the Pi 5 and of
+  QEMU virt that the tests give the entries are in
+  `kernel/src/fdt/tests/profiles.rs`.
 - **Derives.** `Span` no longer derives `Default`; `MemoryMap`,
-  `Pi5BootMemory` and `MemoryPlan` derive `Debug` only, as before, and the
+  `BootMemory` and `MemoryPlan` derive `Debug` only, as before, and the
   views and the small values are `Copy`. No production code calls a derived
   method.
 - **Documentation.** The module documentation and every comment are written
