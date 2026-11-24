@@ -16,7 +16,7 @@ const FIXTURE_IMAGE: Span = Span {
 };
 
 /// The bytes of the file `name` of the directory that `variable` names, of
-/// 40 bytes to [`PI5_MAX_BLOB_SIZE`].
+/// 40 bytes to `PI5_HAND_OVER.max_blob_size`.
 fn fixture(variable: &str, name: &str) -> Vec<u8> {
     let directory = env::var_os(variable)
         .unwrap_or_else(|| panic!("{variable} must name the directory of the device-tree files"));
@@ -24,11 +24,11 @@ fn fixture(variable: &str, name: &str) -> Vec<u8> {
     let file = File::open(&path)
         .unwrap_or_else(|error| panic!("cannot open fixture {}: {error}", path.display()));
     let mut bytes = Vec::new();
-    file.take(PI5_MAX_BLOB_SIZE + 1)
+    file.take(PI5_HAND_OVER.max_blob_size + 1)
         .read_to_end(&mut bytes)
         .unwrap_or_else(|error| panic!("cannot read fixture {}: {error}", path.display()));
     assert!(
-        (40..=PI5_MAX_BLOB_SIZE as usize).contains(&bytes.len()),
+        (40..=PI5_HAND_OVER.max_blob_size as usize).contains(&bytes.len()),
         "invalid fixture size for {}",
         path.display(),
     );
@@ -55,7 +55,7 @@ fn source_firmware_rejects_dynamic_reservations() {
         let bytes = fixture("KREPI_PI5_SOURCE_DTB_DIR", name);
         let tree = Fdt::parse(&bytes).unwrap_or_else(|error| panic!("{name}: {error:?}"));
         let map = tree
-            .discover_pi5_boot_memory(DTB, FIXTURE_IMAGE)
+            .discover_boot_memory(PI5_HAND_OVER, DTB, FIXTURE_IMAGE)
             .unwrap_or_else(|error| panic!("{name}: {error:?}"));
         assert_eq!(map.dynamic(), 1, "{name}");
         assert_eq!(
@@ -81,14 +81,14 @@ fn merged_firmware_preserves_placeholder_ram_and_boot_exclusions() {
         let bytes = fixture("KREPI_PI5_VALIDATED_DTB_DIR", name);
         let tree = Fdt::parse(&bytes).unwrap_or_else(|error| panic!("{name}: {error:?}"));
         let map = tree
-            .discover_pi5_boot_memory(DTB, FIXTURE_IMAGE)
+            .discover_boot_memory(PI5_HAND_OVER, DTB, FIXTURE_IMAGE)
             .unwrap_or_else(|error| panic!("{name}: {error:?}"));
         assert_eq!(map.ram(), &[Span::new(0, 0x28000000).unwrap()], "{name}");
         assert_eq!(map.ram_bytes(), 640 * 1024 * 1024, "{name}");
         assert_eq!(map.reserved(), &[ATF], "{name}");
         assert_eq!(map.image(), FIXTURE_IMAGE, "{name}");
         let window = Span::new(0, 128 * 1024 * 1024).unwrap();
-        let plan = MemoryPlan::from_pi5(&map, window, &[])
+        let plan = MemoryPlan::from_boot_memory(&map, window, &[])
             .unwrap_or_else(|error| panic!("{name}: {error:?}"));
         assert_eq!(plan.ram()[0].size, 640 * 1024 * 1024, "{name}");
         for excluded in [map.reserved()[0].span, map.image(), map.dtb()] {

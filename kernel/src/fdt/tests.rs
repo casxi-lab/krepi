@@ -1,8 +1,8 @@
 //! The host tests of the device tree: the builder of test trees, the
-//! minimal tree of the parser tests and the test modules of the parse, the
-//! node access, the translation, the memory discovery, the CPU nodes, the
-//! limits, the dynamic reservations, the error orders, the frozen vectors
-//! and the examples of the feature document.
+//! minimal tree of the parser tests, the profiles of the boards and the test
+//! modules of the parse, the node access, the translation, the memory
+//! discovery, the CPU nodes, the limits, the dynamic reservations, the error
+//! orders, the frozen vectors and the examples of the feature document.
 //!
 //! Feature: krepi.platform.device-tree
 //!
@@ -22,8 +22,11 @@ mod examples;
 mod limits;
 mod order;
 mod parser;
+mod profiles;
 mod results;
 mod translation;
+
+pub(crate) use profiles::{PI5_CPUS, PI5_HAND_OVER, QEMU_HVC_CPUS, QEMU_SMC_CPUS};
 
 /// A device tree under construction: its structure block, strings block
 /// and reservation map.

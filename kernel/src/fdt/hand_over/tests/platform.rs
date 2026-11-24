@@ -29,7 +29,7 @@ fn kernel_projection_preserves_discovered_banks_and_excludes_boot_pages() {
     b.reservations.push(Span::new(0, 0x80000).unwrap());
     let bytes = finish(b);
     let map = report(&bytes).unwrap();
-    let plan = MemoryPlan::from_pi5(&map, MANAGED, &[]).unwrap();
+    let plan = MemoryPlan::from_boot_memory(&map, MANAGED, &[]).unwrap();
     assert_eq!(plan.ram().len(), 3);
     assert_eq!(plan.boot_ranges()[0], IMAGE);
     assert!(!plan.permits_backing(page(0)));
@@ -51,7 +51,7 @@ fn kernel_projection_rejects_boot_pages_claimed_by_firmware() {
     // The discovery describes overlapping exclusions; the boot memory map
     // cannot both keep a page as boot storage and leave it to the firmware.
     assert_eq!(
-        MemoryPlan::from_pi5(&map, MANAGED, &[]).unwrap_err(),
+        MemoryPlan::from_boot_memory(&map, MANAGED, &[]).unwrap_err(),
         PlanError::Overlap
     );
 }

@@ -136,9 +136,9 @@ fn query(text: &str) -> Option<(&str, &str)> {
 
 fn profile(text: &str) -> Option<CpuProfile> {
     match text {
-        "QemuHvc" => Some(CpuProfile::QemuHvc),
-        "QemuSmc" => Some(CpuProfile::QemuSmc),
-        "Pi5" => Some(CpuProfile::Pi5),
+        "QemuHvc" => Some(QEMU_HVC_CPUS),
+        "QemuSmc" => Some(QEMU_SMC_CPUS),
+        "Pi5" => Some(PI5_CPUS),
         _ => None,
     }
 }
@@ -188,8 +188,18 @@ fn bool_text(value: bool) -> String {
     value.to_string()
 }
 
+/// The name of a profile in the vectors.
 fn profile_text(profile: CpuProfile) -> String {
-    format!("{profile:?}")
+    let name = if profile == QEMU_HVC_CPUS {
+        "QemuHvc"
+    } else if profile == QEMU_SMC_CPUS {
+        "QemuSmc"
+    } else if profile == PI5_CPUS {
+        "Pi5"
+    } else {
+        "unnamed"
+    };
+    name.to_string()
 }
 
 fn kind_text(kind: MappingKind) -> String {
@@ -305,7 +315,7 @@ fn memory_answer(
 }
 
 /// The fields and queries of a Pi 5 boot memory.
-fn pi5_answer(memory: &Pi5BootMemory, asked: &str) -> Option<String> {
+fn pi5_answer(memory: &BootMemory, asked: &str) -> Option<String> {
     match asked {
         "dtb" => return Some(span_text(memory.dtb())),
         "image" => return Some(span_text(memory.image())),
@@ -468,7 +478,7 @@ fn node_case(tree: Fdt<'_>, entry: &str, fields: &[(&str, &str)], ask: &[&str]) 
 fn pi5_case(tree: Fdt<'_>, entry: &str, fields: &[(&str, &str)], ask: &[&str]) -> Option<String> {
     let dtb_address = number64(field(fields, "dtb_address")?)?;
     let image = span(field(fields, "image")?)?;
-    let memory = tree.discover_pi5_boot_memory(dtb_address, image);
+    let memory = tree.discover_boot_memory(PI5_HAND_OVER, dtb_address, image);
     if entry == "discover_pi5_boot_memory" {
         return Some(outcome(memory, ask, pi5_answer));
     }
@@ -477,7 +487,7 @@ fn pi5_case(tree: Fdt<'_>, entry: &str, fields: &[(&str, &str)], ask: &[&str]) -
         let more = spans(field(fields, "more")?)?;
         let plan = match memory {
             Err(error) => Err(format!("Error::{error:?}")),
-            Ok(memory) => MemoryPlan::from_pi5(&memory, window, &more)
+            Ok(memory) => MemoryPlan::from_boot_memory(&memory, window, &more)
                 .map_err(|error| format!("PlanError::{error:?}")),
         };
         return Some(outcome_as(plan, |name| name, ask, plan_answer));
@@ -523,7 +533,7 @@ fn tree_case(tree: Fdt<'_>, entry: &str, fields: &[(&str, &str)], ask: &[&str]) 
             let Some(interrupts) = field(fields, "interrupts").and_then(hex_bytes) else {
                 return "result=malformed interrupts".to_string();
             };
-            let checked = topology.and_then(|topology| topology.validate_qemu_timers(&interrupts));
+            let checked = topology.and_then(|topology| topology.validate_timers(&interrupts));
             outcome(checked, ask, |_, _| None)
         }
         _ => node_case(tree, entry, fields, ask),

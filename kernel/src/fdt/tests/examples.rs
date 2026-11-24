@@ -115,7 +115,9 @@ fn ex4_the_boot_memory_map_of_the_pi5_8gb_model() {
     assert!(bytes.len() < 0x1000);
     let image = span(0x8_0000, 0x2_0000);
     let tree = Fdt::parse(&bytes).unwrap();
-    let memory = tree.discover_pi5_boot_memory(0x20_0000, image).unwrap();
+    let memory = tree
+        .discover_boot_memory(PI5_HAND_OVER, 0x20_0000, image)
+        .unwrap();
     assert_eq!(memory.ram_bytes(), 0x1_ffc0_0000);
     assert_eq!(memory.dtb(), span(0x20_0000, bytes.len() as u64));
     let boot = [memory.image(), memory.dtb()];
@@ -197,20 +199,17 @@ fn ex6_the_cpu_topology_of_the_pi5() {
     b.end();
     let bytes = b.finish();
     let tree = Fdt::parse(&bytes).unwrap();
-    let cpus = tree.discover_cpus(CpuProfile::Pi5).unwrap();
+    let cpus = tree.discover_cpus(PI5_CPUS).unwrap();
     assert_eq!(cpus.count(), 4);
-    assert_eq!(cpus.profile(), CpuProfile::Pi5);
+    assert_eq!(cpus.profile(), PI5_CPUS);
     assert_eq!(cpus.affinity(2), Some(0x200));
     assert_eq!(cpus.affinity(4), None);
-    assert_eq!(CpuProfile::Pi5.affinity_shift(), 8);
-    assert_eq!(CpuProfile::Pi5.conduit(), PsciConduit::Smc);
+    assert_eq!(PI5_CPUS.affinity_shift(), 8);
+    assert_eq!(PI5_CPUS.conduit(), PsciConduit::Smc);
     // The flag bits of `MPIDR_EL1`, bits 31 and 24, change no logical ID.
-    assert_eq!(CpuProfile::Pi5.logical_id(0x8100_0200), Some(2));
+    assert_eq!(PI5_CPUS.logical_id(0x8100_0200), Some(2));
     // The IDs of level 1 are no IDs of the QEMU virt profile.
-    assert_eq!(
-        tree.discover_cpus(CpuProfile::QemuHvc),
-        Err(Error::BadProperty)
-    );
+    assert_eq!(tree.discover_cpus(QEMU_HVC_CPUS), Err(Error::BadProperty));
 }
 
 #[test]

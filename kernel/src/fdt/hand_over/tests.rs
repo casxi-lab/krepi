@@ -8,6 +8,7 @@
 extern crate std;
 
 use super::*;
+use crate::fdt::tests::PI5_HAND_OVER;
 use crate::fdt::{MAX_MEMORY_REGIONS, MAX_RESERVED_REGIONS};
 use std::{vec, vec::Vec};
 
@@ -53,8 +54,8 @@ fn finish(mut builder: Builder) -> Vec<u8> {
     builder.finish()
 }
 
-fn report(bytes: &[u8]) -> Result<Pi5BootMemory, Error> {
-    Fdt::parse(bytes)?.discover_pi5_boot_memory(DTB, IMAGE)
+fn report(bytes: &[u8]) -> Result<BootMemory, Error> {
+    Fdt::parse(bytes)?.discover_boot_memory(PI5_HAND_OVER, DTB, IMAGE)
 }
 
 #[test]

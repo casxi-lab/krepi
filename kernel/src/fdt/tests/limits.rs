@@ -44,21 +44,24 @@ fn a_tree_of_exactly_max_blob_size_is_accepted() {
 
 #[test]
 fn a_pi5_tree_of_exactly_128_kib_is_accepted() {
-    let bytes = padded(pi5(), PI5_MAX_BLOB_SIZE);
+    let bytes = padded(pi5(), PI5_HAND_OVER.max_blob_size);
     let memory = Fdt::parse(&bytes)
         .unwrap()
-        .discover_pi5_boot_memory(DTB, IMAGE)
+        .discover_boot_memory(PI5_HAND_OVER, DTB, IMAGE)
         .unwrap();
-    assert_eq!(memory.dtb(), Span::new(DTB, PI5_MAX_BLOB_SIZE).unwrap());
+    assert_eq!(
+        memory.dtb(),
+        Span::new(DTB, PI5_HAND_OVER.max_blob_size).unwrap()
+    );
 }
 
 #[test]
 fn a_pi5_tree_one_byte_over_128_kib_fails() {
-    let bytes = padded(pi5(), PI5_MAX_BLOB_SIZE + 1);
+    let bytes = padded(pi5(), PI5_HAND_OVER.max_blob_size + 1);
     assert_eq!(
         Fdt::parse(&bytes)
             .unwrap()
-            .discover_pi5_boot_memory(DTB, IMAGE)
+            .discover_boot_memory(PI5_HAND_OVER, DTB, IMAGE)
             .unwrap_err(),
         Error::LimitExceeded
     );
@@ -227,7 +230,7 @@ fn discover_cpus_without_cpus_is_missing_property() {
     assert_eq!(
         Fdt::parse(&bytes)
             .unwrap()
-            .discover_cpus(CpuProfile::QemuHvc)
+            .discover_cpus(QEMU_HVC_CPUS)
             .unwrap_err(),
         Error::MissingProperty
     );

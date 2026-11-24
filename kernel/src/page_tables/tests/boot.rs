@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::fdt::Fdt;
-use crate::fdt::tests::{Builder, set_word};
+use crate::fdt::tests::{Builder, PI5_HAND_OVER, set_word};
 use std::vec;
 
 /// The text of an image.
@@ -203,7 +203,7 @@ fn shapes() -> Vec<(MemoryPlan, u64)> {
         let compatible = b"raspberrypi,5-model-b\0brcm,bcm2712\0";
         let bytes = tree(Some(compatible), banks, true, map, 0x1_3ad4);
         let tree = Fdt::parse(&bytes).unwrap();
-        let memory = tree.discover_pi5_boot_memory(0x20_0000, span(0x8_0000, IMAGE));
+        let memory = tree.discover_boot_memory(PI5_HAND_OVER, 0x20_0000, span(0x8_0000, IMAGE));
         let memory = memory.unwrap();
         assert_eq!(memory.dtb(), span(0x20_0000, 0x1_3ad4));
         let boot = [memory.image(), memory.dtb()];

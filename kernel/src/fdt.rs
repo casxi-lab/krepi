@@ -1,8 +1,9 @@
 //! The device tree: the bounded parsing of the flattened device tree that
 //! the firmware hands to the kernel, the access to its nodes and properties
 //! with the translation of their addresses, the discovery of its memory and
-//! of its CPU nodes, the Pi 5 boot memory, and the boot memory map, which the
-//! page-tables component takes as its input.
+//! of its CPU nodes, the boot memory of a hand-over tree, and the boot memory
+//! map, which the page-tables component takes as its input. The boards
+//! differ in the profiles that they give the entries, not in the entries.
 //!
 //! Feature: krepi.platform.device-tree
 //!
@@ -82,9 +83,6 @@ pub const MAX_MEMORY_REGIONS: u64 = 32;
 /// reservation map and the spans of `/reserved-memory` together.
 pub const MAX_RESERVED_REGIONS: u64 = 128;
 
-/// The largest `totalsize` of a Pi 5 hand-over tree, 128 KiB.
-pub const PI5_MAX_BLOB_SIZE: u64 = 0x2_0000;
-
 /// [`MAX_DEPTH`] as a length.
 const DEPTH: usize = MAX_DEPTH as usize;
 
@@ -107,8 +105,8 @@ const BOOT_SPANS: usize = 4;
 const FIRMWARE: usize = 128;
 
 /// An error of the parse, the node access, the translation, the memory
-/// discovery, the CPU nodes or the Pi 5 boot memory: the rule that the
-/// input breaks, as the error table of the contract names it.
+/// discovery, the CPU nodes or the boot memory: the rule that the input
+/// breaks, as the error table of the contract names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     /// The input holds fewer than 40 bytes or fewer than `totalsize`, or a
@@ -122,8 +120,8 @@ pub enum Error {
     UnsupportedVersion,
     /// The blocks do not lie where the format puts them.
     BadLayout,
-    /// A block, the reservation map, a Pi 5 hand-over tree or a selection is
-    /// not aligned as the rules require.
+    /// A block, the reservation map, a hand-over tree or a selection is not
+    /// aligned as the rules require.
     BadAlignment,
     /// A token other than 1, 2, 3, 4 and 9.
     BadToken,
@@ -136,7 +134,8 @@ pub enum Error {
     BadPadding,
     /// Two properties of one name in a node.
     DuplicateProperty,
-    /// A limit of the format, the discovery or the Pi 5 tree is exceeded.
+    /// A limit of the format, the discovery or a hand-over profile is
+    /// exceeded.
     LimitExceeded,
     /// A number of cells that the entry does not support.
     UnsupportedCells,
@@ -149,11 +148,11 @@ pub enum Error {
     Overflow,
     /// A region, window, request, image or selection of size 0.
     EmptyRegion,
-    /// Two reservation entries or RAM ranges, or the image and a Pi 5
-    /// hand-over tree, share an address.
+    /// Two reservation entries or RAM ranges, or the image and a hand-over
+    /// tree, share an address.
     Overlap,
-    /// A translation that no single window holds, or a Pi 5 hand-over tree
-    /// or image outside every single RAM range.
+    /// A translation that no single window holds, or a hand-over tree or
+    /// image outside every single RAM range.
     Unmapped,
     /// A path that matches two sibling nodes, or a request that two windows
     /// hold.
@@ -348,11 +347,29 @@ pub struct MemoryMap {
     dynamic: u64,
 }
 
-/// The result of [`Fdt::discover_pi5_boot_memory`]: the memory map of a
-/// Pi 5 hand-over tree, checked against the spans of the image and of the
-/// tree.
+/// What a board requires of its hand-over tree, which it gives
+/// [`Fdt::discover_boot_memory`]. Every value is a profile, with the
+/// behaviour that the rules of the entry give it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HandOverProfile<'a> {
+    /// The largest `totalsize` of the tree.
+    pub max_blob_size: u64,
+    /// The exponent of the alignment of the address of the tree: the address
+    /// is a multiple of `2 ^ alignment_log2`, only 0 from an exponent of 64
+    /// up.
+    pub alignment_log2: u8,
+    /// The entries that the root `compatible` must hold: the pieces of these
+    /// bytes split at each NUL, the first and the last piece included, of
+    /// which an empty one requires nothing and one that is not UTF-8 matches
+    /// no entry.
+    pub compatible: &'a [u8],
+}
+
+/// The result of [`Fdt::discover_boot_memory`]: the memory map of a
+/// hand-over tree, checked against the profile of its board and the spans
+/// of the image and of the tree.
 #[derive(Debug)]
-pub struct Pi5BootMemory {
+pub struct BootMemory {
     /// The memory map of the tree.
     memory: MemoryMap,
     /// The span of the tree.
@@ -361,6 +378,15 @@ pub struct Pi5BootMemory {
     image: Span,
     /// The sum of the RAM ranges.
     ram_bytes: u64,
+    /// The `max_blob_size` of the profile that the tree was checked with.
+    // Kept for the proofs, which state the profile of a boot memory; no
+    // entry gives it.
+    #[allow(dead_code)]
+    max_blob_size: u64,
+    /// The `alignment_log2` of the profile that the tree was checked with.
+    // Kept for the proofs, as `max_blob_size`.
+    #[allow(dead_code)]
+    alignment_log2: u8,
 }
 
 /// The PSCI conduit of a CPU profile.
@@ -372,16 +398,47 @@ pub enum PsciConduit {
     Smc,
 }
 
-/// The CPU profile of a board: it fixes the affinity level of the CPU IDs
-/// and the PSCI conduit.
+/// The affinity level of `MPIDR_EL1` that holds the CPU IDs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CpuProfile {
-    /// QEMU virt with PSCI over HVC.
-    QemuHvc,
-    /// QEMU virt with EL2 and PSCI over SMC.
-    QemuSmc,
-    /// The Raspberry Pi 5.
-    Pi5,
+pub enum AffinityLevel {
+    /// Level 0, bits 0 to 7.
+    Aff0,
+    /// Level 1, bits 8 to 15.
+    Aff1,
+    /// Level 2, bits 16 to 23.
+    Aff2,
+    /// Level 3, bits 32 to 39.
+    Aff3,
+}
+
+/// The private interrupts of a timer, in their order: the first `count` of
+/// the five `numbers`, all five for a `count` above 5.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimerInterrupts {
+    /// The numbers of the private interrupts.
+    pub numbers: [u32; 5],
+    /// How many of them the timer has.
+    pub count: u8,
+}
+
+/// The CPU profile of a board, which it gives [`Fdt::discover_cpus`]. Every
+/// value is a profile, with the behaviour that the rules of the entry give
+/// it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CpuProfile {
+    /// The PSCI conduit.
+    pub conduit: PsciConduit,
+    /// The affinity level of the CPU IDs.
+    pub affinity_level: AffinityLevel,
+    /// The numbers of CPUs that the board allows: bit `n` is set when `n`
+    /// CPUs are allowed, for `n` from 1 to 4; the other bits are not read.
+    pub cpu_counts: u8,
+    /// Whether CPU 0 needs the `enable-method` `psci`, as every other CPU
+    /// does.
+    pub cpu0_enable_method: bool,
+    /// The timer interrupts that [`CpuTopology::validate_timers`] checks,
+    /// none when the core does not check the timer of the board.
+    pub timer_interrupts: Option<TimerInterrupts>,
 }
 
 /// The result of [`Fdt::discover_cpus`]: the profile and the number of
@@ -390,7 +447,7 @@ pub enum CpuProfile {
 pub struct CpuTopology {
     /// The profile.
     profile: CpuProfile,
-    /// The number of CPUs: 1, 2 or 4.
+    /// The number of CPUs, 1 to 4, a number that the profile allows.
     count: u64,
 }
 
