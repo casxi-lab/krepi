@@ -23,13 +23,12 @@ one step of its `do` block at a time, without evaluating it:
   extended below by each such lemma);
 - the lists of errors of the reads, cells, spans, regions, maps, the node
   access and the steps of the discoveries (`u32At_errs` to
-  `checkPi5Compatible_errs`);
+  `compatibleEntries_errs`);
 - the walks of the unreachable branches: the header and the tokens never fail
   with `Overflow` (`header_errs`, `walkTokens_errs`, with `header_bounds`),
   and the discoveries of a well-formed tree and the climb of a translation
-  never fail with `BadTree` (`discoverMemory_errs`, `discoverPi5_errs`,
-  `climbRanges_errs`, with `child_parent` and `findNode_root` for the nodes
-  that they read).
+  never fail with `BadTree` (`discoverMemory_errs`, `climbRanges_errs`,
+  with `child_parent` and `findNode_root` for the nodes that they read).
 
 Every step of `errs_auto` unifies at reducible transparency, and the calls
 are tried last: a lemma about a call unified with a whole `do` block can
@@ -505,14 +504,7 @@ theorem compatibleEntries_errs :
     errs_auto
     all_goals exact compatibleEntries_errs rest
 
-theorem checkPi5Compatible_errs (v : ByteArray) :
-    ErrsIn (· ∈ [Error.badProperty, .badString]) (checkPi5Compatible v) := by
-  unfold checkPi5Compatible
-  errs_auto
-  all_goals exact errsIn_sub (compatibleEntries_errs _) (by decide)
-
 macro_rules | `(tactic| errs_leaf) => `(tactic| errs_by (addReservedSpan_errs _ _ _ _))
-macro_rules | `(tactic| errs_leaf) => `(tactic| errs_by (checkPi5Compatible_errs _))
 
 /-- A child of a node of a tree has a parent. -/
 theorem child_parent {t : Fdt} {p c : Node} (hp : p ∈ t.nodes)
@@ -577,15 +569,5 @@ theorem discoverMemory_errs {t : Fdt} (ht : t.WellFormed) :
     exact errsIn_bind (reservedMemory_errs ht _ _) fun _ _ => errsIn_pure _
 
 macro_rules | `(tactic| errs_leaf) => `(tactic| with_reducible exact discoverMemory_errs ‹_›)
-
-/-- The Pi 5 discovery of a well-formed tree never fails with `BadTree`. -/
-theorem discoverPi5_errs {t : Fdt} (ht : t.WellFormed) (a : UInt64) (image : Span) :
-    ErrsIn (· ≠ .badTree) (t.discoverPi5BootMemory a image) := by
-  unfold Fdt.discoverPi5BootMemory
-  refine errsIn_jp (fun _ => by decide) fun _ => ?_
-  refine errsIn_jp (fun _ => by decide) fun _ => ?_
-  refine errsIn_bind (errsIn_sub (findNode_errs _ _) (by decide)) fun x hx => ?_
-  cases findNode_root ht hx
-  errs_auto
 
 end Krepi.Proofs.Fdt

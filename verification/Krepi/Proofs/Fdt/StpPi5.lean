@@ -7,13 +7,13 @@ import Krepi.Proofs.Fdt.StpLemmas
 /-!
 # Device tree: the specification tests of the Pi 5 trees
 
-The specification tests of FDT-R05 and FDT-R06, which `Krepi.Proofs.Fdt.Stp`
-restates. Each parse is the walk of the structure block (`parse_fast` for the
-trees of FDT-R05, finished to a size, and `parse_fast0` for those of FDT-R06),
-so the trees of 128 KiB are never evaluated byte by byte: their zero bytes
-after the strings block only set `totalsize`. The rest is a kernel decision,
-for each of the five RAM models of FDT-R06 in a declaration of its own, so
-that no declaration holds more than one decision.
+The specification tests of FDT-R05 and FDT-R06 on the Pi 5 trees. Each parse is
+the walk of the structure block (`parse_fast` for the trees of FDT-R05, finished
+to a size, and `parse_fast0` for those of FDT-R06), so the trees of 128 KiB are
+never evaluated byte by byte: their zero bytes after the strings block only set
+`totalsize`. The rest is a kernel decision, for each of the five RAM models of
+FDT-R06 in a declaration of its own, so that no declaration holds more than one
+decision.
 -/
 
 public section

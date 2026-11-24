@@ -51,17 +51,17 @@ structure BootState where
   deriving Inhabited
 
 /-- The entry that builds a boot memory map, with its arguments:
-`MemoryPlan::all_ram`, `new` or `from_pi5`. -/
+`MemoryPlan::all_ram`, `new` or `from_boot_memory`. -/
 inductive PlanBuild where
   | allRam (ram boot : List Span) (firmware : List ReservedRegion)
   | new (window : Span) (ram boot : List Span) (firmware : List ReservedRegion)
-  | fromPi5 (memory : Pi5BootMemory) (window : Span) (more : List Span)
+  | fromBootMemory (memory : BootMemory) (window : Span) (more : List Span)
 
 /-- The result of the entry of a `PlanBuild`. -/
 def PlanBuild.run : PlanBuild → Except PlanError MemoryPlan
   | .allRam ram boot firmware => MemoryPlan.allRam ram boot firmware
   | .new window ram boot firmware => MemoryPlan.new window ram boot firmware
-  | .fromPi5 memory window more => MemoryPlan.fromPi5 memory window more
+  | .fromBootMemory memory window more => MemoryPlan.fromBootMemory memory window more
 
 /-! ## Transactions -/
 

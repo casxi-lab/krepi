@@ -1,6 +1,7 @@
 module
 
 public import Krepi.SpecTests.Fdt.Builder
+public import Krepi.SpecTests.Fdt.Boards
 
 /-!
 # Device tree: witnesses
@@ -58,7 +59,9 @@ local instance instDecidableEqExcept {ε α : Type} [DecidableEq ε] [DecidableE
 /-! ## Inputs
 
 The bytes of a device tree for the parse, and trees of records, property
-values, maps, boot memory and topologies for the entries that take them. -/
+values, maps, boot memory and topologies for the entries that take them. The
+entries that take a profile take those of the Pi 5 and of QEMU virt
+(`Krepi.SpecTests.Fdt.Boards`). -/
 
 /-- The root alone, 72 bytes. -/
 def rootBytes : ByteArray := (Builder.empty.beginNode "" |>.endNode).finish
@@ -202,8 +205,9 @@ def pi5Tree (root : List (String × ByteArray) := pi5Root)
 /-- The span of the image given with the Pi 5 hand-over tree. -/
 def image : Span := ⟨0x20_0000, 0x10_0000⟩
 
-/-- The Pi 5 boot memory of `pi5Tree` at `0x10_0000` with `image`. -/
-def pi5Memory : Pi5BootMemory := ⟨memoryMap, ⟨0x10_0000, 0x1000⟩, image, 0x4000_0000⟩
+/-- The boot memory of `pi5Tree` at `0x10_0000` with `image`, checked with the
+hand-over profile of the Pi 5. -/
+def pi5Memory : BootMemory := ⟨memoryMap, ⟨0x10_0000, 0x1000⟩, image, 0x4000_0000, 0x2_0000, 3⟩
 
 /-- The tree of the CPU nodes: the root and `/cpus` with the properties
 `cpus` and the nodes `more` below the root. -/
@@ -211,10 +215,10 @@ def cpusTree (cpus : List (String × ByteArray)) (more : List Line := []) : Fdt 
   outline ((0, "", cells22) :: (1, "cpus", cpus) :: more)
 
 /-- QEMU virt with two CPUs and PSCI over HVC. -/
-def qemuPair : CpuTopology := ⟨.qemuHvc, 2⟩
+def qemuPair : CpuTopology := ⟨qemuHvcCpus, 2⟩
 
 /-- The Pi 5 with four CPUs. -/
-def pi5Four : CpuTopology := ⟨.pi5, 4⟩
+def pi5Four : CpuTopology := ⟨pi5Cpus, 4⟩
 
 /-- A map of one window from `[0, 0x1000)` of 1 child address cell to
 `0xfd00_0000` of 2 parent address cells, with 1 size cell. -/
@@ -744,121 +748,121 @@ theorem discoverMemoryAmbiguousMapping :
     reservedTwinsTree.discoverMemory = .error .ambiguousMapping := by
   decide +kernel
 
-/-! ## `Fdt::discover_pi5_boot_memory`, its readers and `is_available` -/
+/-! ## `Fdt::discover_boot_memory`, its readers and `is_available` -/
 
-/-- The result of the Pi 5 discovery on `pi5Tree` at `0x10_0000` with
-`image`. -/
-def pi5Result : Except Error Pi5BootMemory := pi5Tree.discoverPi5BootMemory 0x10_0000 image
+/-- The result of the discovery with the profile of the Pi 5 on `pi5Tree` at
+`0x10_0000` with `image`. -/
+def pi5Result : Except Error BootMemory := pi5Tree.discoverBootMemory pi5HandOver 0x10_0000 image
 
 /-- The memory map, the span of the tree of `0x1000` bytes, the image and
-the 1 GiB of the RAM range. -/
-theorem discoverPi5BootMemoryOk : pi5Result = .ok pi5Memory := by decide +kernel
+the 1 GiB of the RAM range, with the limit and the alignment of the profile. -/
+theorem discoverBootMemoryOk : pi5Result = .ok pi5Memory := by decide +kernel
 
-/-- `Pi5BootMemory::ram`. -/
-theorem pi5RamOk : pi5Result.map Pi5BootMemory.ram = .ok [⟨0, 0x4000_0000⟩] := by decide +kernel
+/-- `BootMemory::ram`. -/
+theorem bootMemoryRamOk : pi5Result.map BootMemory.ram = .ok [⟨0, 0x4000_0000⟩] := by decide +kernel
 
-/-- `Pi5BootMemory::reserved`. -/
-theorem pi5ReservedOk :
-    pi5Result.map Pi5BootMemory.reserved = .ok [⟨⟨0x1000, 0x1000⟩, true, false⟩] := by
+/-- `BootMemory::reserved`. -/
+theorem bootMemoryReservedOk :
+    pi5Result.map BootMemory.reserved = .ok [⟨⟨0x1000, 0x1000⟩, true, false⟩] := by
   decide +kernel
 
-/-- `Pi5BootMemory::dynamic`. -/
-theorem pi5DynamicOk : pi5Result.map Pi5BootMemory.dynamic = .ok 0 := by decide +kernel
+/-- `BootMemory::dynamic`. -/
+theorem bootMemoryDynamicOk : pi5Result.map BootMemory.dynamic = .ok 0 := by decide +kernel
 
-/-- `Pi5BootMemory::dynamic`: the dynamic reservation `linux,cma` of
+/-- `BootMemory::dynamic`: the dynamic reservation `linux,cma` of
 `pi5DynamicTree`. -/
-theorem pi5DynamicOne :
-    (pi5DynamicTree.discoverPi5BootMemory 0x10_0000 image).map Pi5BootMemory.dynamic = .ok 1 := by
+theorem bootMemoryDynamicOne :
+    (pi5DynamicTree.discoverBootMemory pi5HandOver 0x10_0000 image).map BootMemory.dynamic = .ok 1 := by
   decide +kernel
 
-/-- `Pi5BootMemory::dtb`: `totalsize` bytes from the address of the tree. -/
-theorem pi5DtbOk : pi5Result.map Pi5BootMemory.dtb = .ok ⟨0x10_0000, 0x1000⟩ := by decide +kernel
+/-- `BootMemory::dtb`: `totalsize` bytes from the address of the tree. -/
+theorem bootMemoryDtbOk : pi5Result.map BootMemory.dtb = .ok ⟨0x10_0000, 0x1000⟩ := by decide +kernel
 
-/-- `Pi5BootMemory::image`. -/
-theorem pi5ImageOk : pi5Result.map Pi5BootMemory.image = .ok image := by decide +kernel
+/-- `BootMemory::image`. -/
+theorem bootMemoryImageOk : pi5Result.map BootMemory.image = .ok image := by decide +kernel
 
-/-- `Pi5BootMemory::ram_bytes`. -/
-theorem pi5RamBytesOk : pi5Result.map Pi5BootMemory.ramBytes = .ok 0x4000_0000 := by
+/-- `BootMemory::ram_bytes`. -/
+theorem bootMemoryRamBytesOk : pi5Result.map BootMemory.ramBytes = .ok 0x4000_0000 := by
   decide +kernel
 
-/-- A `totalsize` of 128 KiB and 1 byte, above `PI5_MAX_BLOB_SIZE`. -/
-theorem discoverPi5BootMemoryLimitExceeded :
-    pi5LargeTree.discoverPi5BootMemory 0x10_0000 image = .error .limitExceeded := by
+/-- A `totalsize` of 128 KiB and 1 byte, above the limit of the profile. -/
+theorem discoverBootMemoryLimitExceeded :
+    pi5LargeTree.discoverBootMemory pi5HandOver 0x10_0000 image = .error .limitExceeded := by
   decide +kernel
 
-/-- A tree at `0x10_0004`, not a multiple of 8. -/
-theorem discoverPi5BootMemoryBadAlignment :
-    pi5Tree.discoverPi5BootMemory 0x10_0004 image = .error .badAlignment := by
+/-- A tree at `0x10_0004`, not a multiple of the alignment of the profile, 8. -/
+theorem discoverBootMemoryBadAlignment :
+    pi5Tree.discoverBootMemory pi5HandOver 0x10_0004 image = .error .badAlignment := by
   decide +kernel
 
 /-- A root `#address-cells` of 3 bytes. -/
-theorem discoverPi5BootMemoryBadProperty :
-    pi5ShortCellsTree.discoverPi5BootMemory 0x10_0000 image = .error .badProperty := by
+theorem discoverBootMemoryBadProperty :
+    pi5ShortCellsTree.discoverBootMemory pi5HandOver 0x10_0000 image = .error .badProperty := by
   decide +kernel
 
 /-- A root of 1 address cell. -/
-theorem discoverPi5BootMemoryUnsupportedCells :
-    pi5OneCellTree.discoverPi5BootMemory 0x10_0000 image = .error .unsupportedCells := by
+theorem discoverBootMemoryUnsupportedCells :
+    pi5OneCellTree.discoverBootMemory pi5HandOver 0x10_0000 image = .error .unsupportedCells := by
   decide +kernel
 
 /-- A root without `compatible`. -/
-theorem discoverPi5BootMemoryMissingProperty :
-    pi5NoCompatibleTree.discoverPi5BootMemory 0x10_0000 image = .error .missingProperty := by
+theorem discoverBootMemoryMissingProperty :
+    pi5NoCompatibleTree.discoverBootMemory pi5HandOver 0x10_0000 image = .error .missingProperty := by
   decide +kernel
 
 /-- A `compatible` entry `0xff`, not UTF-8. -/
-theorem discoverPi5BootMemoryBadString :
-    pi5NotUtf8Tree.discoverPi5BootMemory 0x10_0000 image = .error .badString := by
+theorem discoverBootMemoryBadString :
+    pi5NotUtf8Tree.discoverBootMemory pi5HandOver 0x10_0000 image = .error .badString := by
   decide +kernel
 
 /-- A tree at `2 ^ 64 - 0x1000`, whose span leaves 64 bits. -/
-theorem discoverPi5BootMemoryOverflow :
-    pi5Tree.discoverPi5BootMemory 0xffff_ffff_ffff_f000 image = .error .overflow := by
+theorem discoverBootMemoryOverflow :
+    pi5Tree.discoverBootMemory pi5HandOver 0xffff_ffff_ffff_f000 image = .error .overflow := by
   decide +kernel
 
 /-- An image of size 0. -/
-theorem discoverPi5BootMemoryEmptyRegion :
-    pi5Tree.discoverPi5BootMemory 0x10_0000 ⟨0x20_0000, 0⟩ = .error .emptyRegion := by
+theorem discoverBootMemoryEmptyRegion :
+    pi5Tree.discoverBootMemory pi5HandOver 0x10_0000 ⟨0x20_0000, 0⟩ = .error .emptyRegion := by
   decide +kernel
 
 /-- An image that shares `[0x10_0800, 0x10_1000)` with the tree. -/
-theorem discoverPi5BootMemoryOverlap :
-    pi5Tree.discoverPi5BootMemory 0x10_0000 ⟨0x10_0800, 0x1000⟩ = .error .overlap := by
+theorem discoverBootMemoryOverlap :
+    pi5Tree.discoverBootMemory pi5HandOver 0x10_0000 ⟨0x10_0800, 0x1000⟩ = .error .overlap := by
   decide +kernel
 
 /-- A tree at `0x4000_0000`, past the RAM range. -/
-theorem discoverPi5BootMemoryUnmapped :
-    pi5Tree.discoverPi5BootMemory 0x4000_0000 image = .error .unmapped := by
+theorem discoverBootMemoryUnmapped :
+    pi5Tree.discoverBootMemory pi5HandOver 0x4000_0000 image = .error .unmapped := by
   decide +kernel
 
 /-- A hand-over tree without a memory node. -/
-theorem discoverPi5BootMemoryNoMemory :
-    pi5NoMemoryTree.discoverPi5BootMemory 0x10_0000 image = .error .noMemory := by
+theorem discoverBootMemoryNoMemory :
+    pi5NoMemoryTree.discoverBootMemory pi5HandOver 0x10_0000 image = .error .noMemory := by
   decide +kernel
 
 /-- Two siblings `reserved-memory`, as in `discoverMemoryAmbiguousMapping`. -/
-theorem discoverPi5BootMemoryAmbiguousMapping :
-    pi5ReservedTwinsTree.discoverPi5BootMemory 0x10_0000 image = .error .ambiguousMapping := by
+theorem discoverBootMemoryAmbiguousMapping :
+    pi5ReservedTwinsTree.discoverBootMemory pi5HandOver 0x10_0000 image = .error .ambiguousMapping := by
   decide +kernel
 
-/-- `Pi5BootMemory::is_available`: true for a span of the RAM range that
+/-- `BootMemory::is_available`: true for a span of the RAM range that
 touches nothing, false for one on the image. -/
-theorem pi5IsAvailableOk :
+theorem bootMemoryIsAvailableOk :
     pi5Memory.isAvailable ⟨0x40_0000, 0x1000⟩ = .ok true ∧
       pi5Memory.isAvailable ⟨0x20_0000, 0x1000⟩ = .ok false := by
   decide +kernel
 
-/-- `Pi5BootMemory::is_available`: an empty span. -/
-theorem pi5IsAvailableEmptyRegion :
+/-- `BootMemory::is_available`: an empty span. -/
+theorem bootMemoryIsAvailableEmptyRegion :
     pi5Memory.isAvailable ⟨0x40_0000, 0⟩ = .error .emptyRegion := by
   decide +kernel
 
-/-- `Pi5BootMemory::is_available`: a span from `2 ^ 64 - 1` of 2 bytes. -/
-theorem pi5IsAvailableOverflow :
+/-- `BootMemory::is_available`: a span from `2 ^ 64 - 1` of 2 bytes. -/
+theorem bootMemoryIsAvailableOverflow :
     pi5Memory.isAvailable ⟨0xffff_ffff_ffff_ffff, 2⟩ = .error .overflow := by
   decide +kernel
 
-/-! ## `Pi5BootMemory::find_available` -/
+/-! ## `BootMemory::find_available` -/
 
 /-- From `0x10_0000`, the first page past the tree; none for 1 GiB, which the
 exclusions leave no room for. -/
@@ -888,68 +892,68 @@ theorem findAvailableOverflow :
 
 /-- QEMU virt with two CPUs, CPU 0 without an `enable-method`, and `/psci`
 over HVC: the topology `qemuPair`. -/
-theorem discoverCpusOk : qemuPairTree.discoverCpus .qemuHvc = .ok qemuPair := by
+theorem discoverCpusOk : qemuPairTree.discoverCpus qemuHvcCpus = .ok qemuPair := by
   decide +kernel
 
 /-- No `/cpus`. -/
-theorem discoverCpusMissingProperty : rootTree.discoverCpus .qemuHvc = .error .missingProperty := by
+theorem discoverCpusMissingProperty : rootTree.discoverCpus qemuHvcCpus = .error .missingProperty := by
   decide +kernel
 
 /-- A disabled `/cpus`. -/
 theorem discoverCpusBadProperty :
-    cpusDisabledTree.discoverCpus .qemuHvc = .error .badProperty := by
+    cpusDisabledTree.discoverCpus qemuHvcCpus = .error .badProperty := by
   decide +kernel
 
 /-- A `/cpus` of 3 address cells. -/
 theorem discoverCpusUnsupportedCells :
-    cpusThreeCellsTree.discoverCpus .qemuHvc = .error .unsupportedCells := by
+    cpusThreeCellsTree.discoverCpus qemuHvcCpus = .error .unsupportedCells := by
   decide +kernel
 
 /-- A child of `/cpus` whose `device_type` has no NUL. -/
 theorem discoverCpusBadString :
-    cpuTypeWithoutNulTree.discoverCpus .qemuHvc = .error .badString := by
+    cpuTypeWithoutNulTree.discoverCpus qemuHvcCpus = .error .badString := by
   decide +kernel
 
 /-- Two siblings `cpus`. -/
 theorem discoverCpusAmbiguousMapping :
-    cpusTwinsTree.discoverCpus .qemuHvc = .error .ambiguousMapping := by
+    cpusTwinsTree.discoverCpus qemuHvcCpus = .error .ambiguousMapping := by
   decide +kernel
 
 /-- `CpuTopology::count`. -/
 theorem countOk : qemuPair.count = 2 ∧ pi5Four.count = 4 := by decide +kernel
 
 /-- `CpuTopology::profile`. -/
-theorem profileOk : qemuPair.profile = .qemuHvc ∧ pi5Four.profile = .pi5 := by decide +kernel
+theorem profileOk : qemuPair.profile = qemuHvcCpus ∧ pi5Four.profile = pi5Cpus := by decide +kernel
 
 /-- `CpuTopology::affinity`: `3 << 8` for CPU 3 of the Pi 5, none for 4. -/
 theorem affinityOk : pi5Four.affinity 3 = some 0x300 ∧ pi5Four.affinity 4 = none := by
   decide +kernel
 
-/-- `CpuTopology::validate_qemu_timers`: the four records of two CPUs. -/
-theorem validateQemuTimersOk :
-    qemuPair.validateQemuTimers (cells [1, 13, 0x304, 1, 14, 0x304, 1, 11, 0x304, 1, 10, 0x304]) =
+/-- `CpuTopology::validate_timers`: the four records of two CPUs. -/
+theorem validateTimersOk :
+    qemuPair.validateTimers (cells [1, 13, 0x304, 1, 14, 0x304, 1, 11, 0x304, 1, 10, 0x304]) =
       .ok () := by
   decide +kernel
 
-/-- `CpuTopology::validate_qemu_timers`: the flags of four CPUs for two. -/
-theorem validateQemuTimersBadProperty :
-    qemuPair.validateQemuTimers (cells [1, 13, 0xf04, 1, 14, 0xf04, 1, 11, 0xf04, 1, 10, 0xf04]) =
+/-- `CpuTopology::validate_timers`: the flags of four CPUs for two. -/
+theorem validateTimersBadProperty :
+    qemuPair.validateTimers (cells [1, 13, 0xf04, 1, 14, 0xf04, 1, 11, 0xf04, 1, 10, 0xf04]) =
       .error .badProperty := by
   decide +kernel
 
 /-- `CpuProfile::logical_id`: 3 for the affinity `3 << 8` of the Pi 5 with the
 flag bits `0x8100_0000`; none for `4 << 8`. -/
-theorem logicalIdOk : CpuProfile.pi5.logicalId 0x8100_0300 = some 3 ∧
-    CpuProfile.pi5.logicalId 0x400 = none := by
+theorem logicalIdOk : pi5Cpus.logicalId 0x8100_0300 = some 3 ∧
+    pi5Cpus.logicalId 0x400 = none := by
   decide +kernel
 
 /-- `CpuProfile::affinity_shift`: 8 on the Pi 5, 0 on QEMU virt. -/
 theorem affinityShiftOk :
-    CpuProfile.pi5.affinityShift = 8 ∧ CpuProfile.qemuSmc.affinityShift = 0 := by
+    pi5Cpus.affinityShift = 8 ∧ qemuSmcCpus.affinityShift = 0 := by
   decide +kernel
 
 /-- `CpuProfile::conduit`: HVC for QEMU virt without EL2, SMC with it. -/
-theorem conduitOk : CpuProfile.qemuHvc.conduit = .hvc ∧ CpuProfile.qemuSmc.conduit = .smc := by
+theorem conduitOk : qemuHvcCpus.conduit = .hvc ∧ qemuSmcCpus.conduit = .smc := by
   decide +kernel
 
 
@@ -1061,7 +1065,7 @@ theorem toChildUnmapped : windowMap.toChild ⟨0x10, 0x20⟩ = .error .unmapped 
 theorem toChildAmbiguousMapping : twinMap.toChild ⟨0x1010, 0x20⟩ = .error .ambiguousMapping := by
   decide +kernel
 
-/-! ## `MemoryPlan::all_ram`, `new` and `from_pi5` -/
+/-! ## `MemoryPlan::all_ram`, `new` and `from_boot_memory` -/
 
 /-- The banks sorted, the complete pages of each, and the boot storage and the
 firmware reservation rounded outward to pages. -/
@@ -1137,48 +1141,49 @@ theorem newOutsideRam :
     MemoryPlan.new ⟨0x20_0000, 0x1000⟩ banks boot firmware = .error .outsideRam := by
   decide +kernel
 
-/-- `MemoryPlan::from_pi5`: the RAM range, the window, the image and the tree
-as boot storage, and the reserved region as a firmware reservation. -/
-theorem fromPi5Ok :
-    MemoryPlan.fromPi5 pi5Memory ⟨0x40_0000, 0x10_0000⟩ [] =
+/-- `MemoryPlan::from_boot_memory`: the RAM range, the window, the image and
+the tree as boot storage, and the reserved region as a firmware reservation.
+-/
+theorem fromBootMemoryOk :
+    MemoryPlan.fromBootMemory pi5Memory ⟨0x40_0000, 0x10_0000⟩ [] =
       .ok ⟨[⟨0, 0x4000_0000⟩], [⟨0x40_0000, 0x10_0000⟩], [image, ⟨0x10_0000, 0x1000⟩],
         [⟨0x1000, 0x1000⟩]⟩ := by
   decide +kernel
 
-/-- `MemoryPlan::from_pi5`: a window of size 0. -/
-theorem fromPi5InvalidRange :
-    MemoryPlan.fromPi5 pi5Memory ⟨0x40_0000, 0⟩ [] = .error .invalidRange := by
+/-- `MemoryPlan::from_boot_memory`: a window of size 0. -/
+theorem fromBootMemoryInvalidRange :
+    MemoryPlan.fromBootMemory pi5Memory ⟨0x40_0000, 0⟩ [] = .error .invalidRange := by
   decide +kernel
 
-/-- `MemoryPlan::from_pi5`: a window whose end leaves 64 bits. -/
-theorem fromPi5Overflow :
-    MemoryPlan.fromPi5 pi5Memory ⟨0xffff_ffff_ffff_f000, 0x2000⟩ [] = .error .overflow := by
+/-- `MemoryPlan::from_boot_memory`: a window whose end leaves 64 bits. -/
+theorem fromBootMemoryOverflow :
+    MemoryPlan.fromBootMemory pi5Memory ⟨0xffff_ffff_ffff_f000, 0x2000⟩ [] = .error .overflow := by
   decide +kernel
 
-/-- `MemoryPlan::from_pi5`: a window off its page. -/
-theorem fromPi5Alignment :
-    MemoryPlan.fromPi5 pi5Memory ⟨0x40_0010, 0x1000⟩ [] = .error .alignment := by
+/-- `MemoryPlan::from_boot_memory`: a window off its page. -/
+theorem fromBootMemoryAlignment :
+    MemoryPlan.fromBootMemory pi5Memory ⟨0x40_0010, 0x1000⟩ [] = .error .alignment := by
   decide +kernel
 
-/-- `MemoryPlan::from_pi5`: a window of 128 MiB and 4 KiB. -/
-theorem fromPi5ArenaTooLarge :
-    MemoryPlan.fromPi5 pi5Memory ⟨0, 0x800_1000⟩ [] = .error .arenaTooLarge := by
+/-- `MemoryPlan::from_boot_memory`: a window of 128 MiB and 4 KiB. -/
+theorem fromBootMemoryArenaTooLarge :
+    MemoryPlan.fromBootMemory pi5Memory ⟨0, 0x800_1000⟩ [] = .error .arenaTooLarge := by
   decide +kernel
 
-/-- `MemoryPlan::from_pi5`: three further spans, 5 spans of boot storage. -/
-theorem fromPi5Capacity :
-    MemoryPlan.fromPi5 pi5Memory ⟨0x40_0000, 0x10_0000⟩
+/-- `MemoryPlan::from_boot_memory`: three further spans, 5 spans of boot storage. -/
+theorem fromBootMemoryCapacity :
+    MemoryPlan.fromBootMemory pi5Memory ⟨0x40_0000, 0x10_0000⟩
       [⟨0x50_0000, 0x1000⟩, ⟨0x60_0000, 0x1000⟩, ⟨0x70_0000, 0x1000⟩] = .error .capacity := by
   decide +kernel
 
-/-- `MemoryPlan::from_pi5`: a further span on a page of the image. -/
-theorem fromPi5Overlap :
-    MemoryPlan.fromPi5 pi5Memory ⟨0x40_0000, 0x10_0000⟩ [⟨0x20_0800, 0x10⟩] = .error .overlap := by
+/-- `MemoryPlan::from_boot_memory`: a further span on a page of the image. -/
+theorem fromBootMemoryOverlap :
+    MemoryPlan.fromBootMemory pi5Memory ⟨0x40_0000, 0x10_0000⟩ [⟨0x20_0800, 0x10⟩] = .error .overlap := by
   decide +kernel
 
-/-- `MemoryPlan::from_pi5`: a window past the RAM range. -/
-theorem fromPi5OutsideRam :
-    MemoryPlan.fromPi5 pi5Memory ⟨0x4000_0000, 0x1000⟩ [] = .error .outsideRam := by
+/-- `MemoryPlan::from_boot_memory`: a window past the RAM range. -/
+theorem fromBootMemoryOutsideRam :
+    MemoryPlan.fromBootMemory pi5Memory ⟨0x4000_0000, 0x1000⟩ [] = .error .outsideRam := by
   decide +kernel
 
 /-! ## The queries of the boot memory map -/
@@ -1310,12 +1315,12 @@ theorem priorityStep4 : priorityMemoryTree.discoverMemory = .error .overflow := 
 /-- Step 5: an empty image, `EmptyRegion`, before the memory discovery of a
 tree without RAM, `NoMemory`. -/
 theorem priorityStep5 :
-    pi5NoMemoryTree.discoverPi5BootMemory 0x10_0000 ⟨0x20_0000, 0⟩ = .error .emptyRegion := by
+    pi5NoMemoryTree.discoverBootMemory pi5HandOver 0x10_0000 ⟨0x20_0000, 0⟩ = .error .emptyRegion := by
   decide +kernel
 
 /-- Step 6: the size cells of `/cpus`, 1, `BadProperty`, before its 3
 address cells, `UnsupportedCells`. -/
-theorem priorityStep6 : priorityCpusTree.discoverCpus .qemuHvc = .error .badProperty := by
+theorem priorityStep6 : priorityCpusTree.discoverCpus qemuHvcCpus = .error .badProperty := by
   decide +kernel
 
 /-- Step 7: the windows of a translation in order; the first two hold the
@@ -1421,17 +1426,17 @@ well-formed tree: such a tree has a root, and every node whose `reg` the
 discovery reads has a parent. -/
 def DiscoverMemoryNoBadTree : Prop := ∀ t : Fdt, t.WellFormed → t.discoverMemory ≠ .error .badTree
 
-/-- **Planned.** The Pi 5 discovery never fails with `BadTree` on a
-well-formed tree, for the reason of `DiscoverMemoryNoBadTree`. -/
-def DiscoverPi5BootMemoryNoBadTree : Prop :=
-  ∀ (t : Fdt) (dtbAddress : UInt64) (image : Span), t.WellFormed →
-    t.discoverPi5BootMemory dtbAddress image ≠ .error .badTree
+/-- **Planned.** The discovery of the boot memory never fails with `BadTree`
+on a well-formed tree, for the reason of `DiscoverMemoryNoBadTree`. -/
+def DiscoverBootMemoryNoBadTree : Prop :=
+  ∀ (t : Fdt) (handOver : HandOverProfile) (dtbAddress : UInt64) (image : Span), t.WellFormed →
+    t.discoverBootMemory handOver dtbAddress image ≠ .error .badTree
 
 /-- **Planned.** The sum of the RAM ranges of a memory discovery fits in 64
-bits, so the Pi 5 discovery never fails with `Overflow` at that sum: the
-ranges are disjoint spans that end within 64 bits. The discovery adds them
-one at a time with `checkedAdd`, and each partial sum is at most the sum of
-all of them, which this bounds, so no addition fails. -/
+bits, so the discovery of the boot memory never fails with `Overflow` at that
+sum: the ranges are disjoint spans that end within 64 bits. The discovery adds
+them one at a time with `checkedAdd`, and each partial sum is at most the sum
+of all of them, which this bounds, so no addition fails. -/
 def RamBytesFit : Prop :=
   ∀ (t : Fdt) (m : MemoryMap), t.discoverMemory = .ok m → spansBytes m.ram < 2 ^ 64
 
@@ -1465,18 +1470,18 @@ def CpuRegNoUnsupportedCells : Prop :=
   ∀ (profile : CpuProfile) (cells : UInt32) (ids : List UInt64) (n : Node),
     (cells = 1 ∨ cells = 2) → cpuOfChild profile cells ids n ≠ .error .unsupportedCells
 
-/-- **Planned.** `Pi5BootMemory::find_available` never runs out of its fuel:
+/-- **Planned.** `BootMemory::find_available` never runs out of its fuel:
 each candidate after the first lies past every exclusion that an earlier one
 touched, so `Q + 3` candidates for `Q` reserved regions end the search of a
 range first. -/
 def FindAvailableNoLimitExceeded : Prop :=
-  ∀ (m : Pi5BootMemory) (size alignment minimum limit : UInt64),
+  ∀ (m : BootMemory) (size alignment minimum limit : UInt64),
     m.findAvailable size alignment minimum limit ≠ .error .limitExceeded
 
 /-- **Planned.** The banks that pass step 3 of the boot memory map hold fewer
 than `2 ^ 64` bytes, so the sum of step 4 never fails with `Overflow` in
-`all_ram`, `new` or `from_pi5`: they are disjoint spans that end within 64
-bits. Step 4 adds the sorted banks one at a time, and each partial sum is at
+`all_ram`, `new` or `from_boot_memory`: they are disjoint spans that end
+within 64 bits. Step 4 adds the sorted banks one at a time, and each partial sum is at
 most the sum of all of them, which this bounds, so its check of the sum
 never fails. -/
 def BankBytesFit : Prop :=
@@ -1521,11 +1526,11 @@ theorem notAlwaysRejecting :
     (∃ n : Node, ∃ r, n.dmaRanges = .ok r) ∧
     (∃ n : Node, ∃ s r, n.translateReg s = .ok r) ∧
     (∃ t : Fdt, ∃ r, t.discoverMemory = .ok r) ∧
-    (∃ t : Fdt, ∃ a i r, t.discoverPi5BootMemory a i = .ok r) ∧
-    (∃ m : Pi5BootMemory, ∃ s r, m.isAvailable s = .ok r) ∧
-    (∃ m : Pi5BootMemory, ∃ z a lo hi r, m.findAvailable z a lo hi = .ok r) ∧
+    (∃ t : Fdt, ∃ h a i r, t.discoverBootMemory h a i = .ok r) ∧
+    (∃ m : BootMemory, ∃ s r, m.isAvailable s = .ok r) ∧
+    (∃ m : BootMemory, ∃ z a lo hi r, m.findAvailable z a lo hi = .ok r) ∧
     (∃ t : Fdt, ∃ p r, t.discoverCpus p = .ok r) ∧
-    (∃ t : CpuTopology, ∃ b, t.validateQemuTimers b = .ok ()) ∧
+    (∃ t : CpuTopology, ∃ b, t.validateTimers b = .ok ()) ∧
     (∃ b c r, cellsU64 b c = .ok r) ∧
     (∃ b ac sc r, Reg.new b ac sc = .ok r) ∧
     (∃ b cc pc sc r, AddressMap.new b cc pc sc = .ok r) ∧
@@ -1533,7 +1538,7 @@ theorem notAlwaysRejecting :
     (∃ m : AddressMap, ∃ s r, m.toChild s = .ok r) ∧
     (∃ ram boot firmware r, MemoryPlan.allRam ram boot firmware = .ok r) ∧
     (∃ w ram boot firmware r, MemoryPlan.new w ram boot firmware = .ok r) ∧
-    (∃ m w more r, MemoryPlan.fromPi5 m w more = .ok r) ∧
+    (∃ m w more r, MemoryPlan.fromBootMemory m w more = .ok r) ∧
     (∃ a z r, Span.new a z = .ok r) ∧
     (∃ s : Span, ∃ r, s.endAddr = .ok r) ∧
     (∃ s o : Span, ∃ r, s.contains o = .ok r) :=
@@ -1546,12 +1551,12 @@ theorem notAlwaysRejecting :
     (exists_of_atPath rangesOk).elim fun n h => ⟨n, _, h⟩,
     (exists_of_atPath dmaRangesOk).elim fun n h => ⟨n, _, h⟩,
     (exists_of_atPath translateRegOk).elim fun n h => ⟨n, _, _, h⟩,
-    ⟨_, _, discoverMemoryOk⟩, ⟨_, _, _, _, discoverPi5BootMemoryOk⟩,
-    ⟨_, _, _, pi5IsAvailableOk.1⟩, ⟨_, _, _, _, _, _, findAvailableOk.1⟩,
-    ⟨_, _, _, discoverCpusOk⟩, ⟨_, _, validateQemuTimersOk⟩, ⟨_, _, _, cellsU64Ok⟩,
+    ⟨_, _, discoverMemoryOk⟩, ⟨_, _, _, _, _, discoverBootMemoryOk⟩,
+    ⟨_, _, _, bootMemoryIsAvailableOk.1⟩, ⟨_, _, _, _, _, _, findAvailableOk.1⟩,
+    ⟨_, _, _, discoverCpusOk⟩, ⟨_, _, validateTimersOk⟩, ⟨_, _, _, cellsU64Ok⟩,
     ⟨_, _, _, _, regNewOk⟩,
     ⟨_, _, _, _, _, addressMapNewOk⟩, ⟨_, _, _, toParentOk⟩, ⟨_, _, _, toChildOk⟩,
-    ⟨_, _, _, _, allRamOk⟩, ⟨_, _, _, _, _, newOk⟩, ⟨_, _, _, _, fromPi5Ok⟩,
+    ⟨_, _, _, _, allRamOk⟩, ⟨_, _, _, _, _, newOk⟩, ⟨_, _, _, _, fromBootMemoryOk⟩,
     ⟨_, _, _, spanNewOk⟩, ⟨_, _, spanEndOk⟩, ⟨_, _, _, spanContainsOk.1⟩⟩
 
 /-- **The variant that accepts every input is refuted.** Each frozen function
@@ -1568,11 +1573,11 @@ theorem notAlwaysSucceeding :
     (∃ n : Node, ∃ e, n.dmaRanges = .error e) ∧
     (∃ n : Node, ∃ s e, n.translateReg s = .error e) ∧
     (∃ t : Fdt, ∃ e, t.discoverMemory = .error e) ∧
-    (∃ t : Fdt, ∃ a i e, t.discoverPi5BootMemory a i = .error e) ∧
-    (∃ m : Pi5BootMemory, ∃ s e, m.isAvailable s = .error e) ∧
-    (∃ m : Pi5BootMemory, ∃ z a lo hi e, m.findAvailable z a lo hi = .error e) ∧
+    (∃ t : Fdt, ∃ h a i e, t.discoverBootMemory h a i = .error e) ∧
+    (∃ m : BootMemory, ∃ s e, m.isAvailable s = .error e) ∧
+    (∃ m : BootMemory, ∃ z a lo hi e, m.findAvailable z a lo hi = .error e) ∧
     (∃ t : Fdt, ∃ p e, t.discoverCpus p = .error e) ∧
-    (∃ t : CpuTopology, ∃ b e, t.validateQemuTimers b = .error e) ∧
+    (∃ t : CpuTopology, ∃ b e, t.validateTimers b = .error e) ∧
     (∃ b c e, cellsU64 b c = .error e) ∧
     (∃ b ac sc e, Reg.new b ac sc = .error e) ∧
     (∃ b cc pc sc e, AddressMap.new b cc pc sc = .error e) ∧
@@ -1580,7 +1585,7 @@ theorem notAlwaysSucceeding :
     (∃ m : AddressMap, ∃ s e, m.toChild s = .error e) ∧
     (∃ ram boot firmware e, MemoryPlan.allRam ram boot firmware = .error e) ∧
     (∃ w ram boot firmware e, MemoryPlan.new w ram boot firmware = .error e) ∧
-    (∃ m w more e, MemoryPlan.fromPi5 m w more = .error e) ∧
+    (∃ m w more e, MemoryPlan.fromBootMemory m w more = .error e) ∧
     (∃ a z e, Span.new a z = .error e) ∧
     (∃ s : Span, ∃ e, s.endAddr = .error e) ∧
     (∃ s o : Span, ∃ e, s.contains o = .error e) :=
@@ -1593,13 +1598,13 @@ theorem notAlwaysSucceeding :
     (exists_of_atPath rangesBadTree).elim fun n h => ⟨n, _, h⟩,
     (exists_of_atPath dmaRangesBadTree).elim fun n h => ⟨n, _, h⟩,
     (exists_of_atPath translateRegUnmapped).elim fun n h => ⟨n, _, _, h⟩,
-    ⟨_, _, discoverMemoryNoMemory⟩, ⟨_, _, _, _, discoverPi5BootMemoryUnmapped⟩,
-    ⟨_, _, _, pi5IsAvailableEmptyRegion⟩, ⟨_, _, _, _, _, _, findAvailableBadAlignment⟩,
-    ⟨_, _, _, discoverCpusMissingProperty⟩, ⟨_, _, _, validateQemuTimersBadProperty⟩,
+    ⟨_, _, discoverMemoryNoMemory⟩, ⟨_, _, _, _, _, discoverBootMemoryUnmapped⟩,
+    ⟨_, _, _, bootMemoryIsAvailableEmptyRegion⟩, ⟨_, _, _, _, _, _, findAvailableBadAlignment⟩,
+    ⟨_, _, _, discoverCpusMissingProperty⟩, ⟨_, _, _, validateTimersBadProperty⟩,
     ⟨_, _, _, cellsU64BadProperty⟩, ⟨_, _, _, _, regNewOverflow⟩,
     ⟨_, _, _, _, _, addressMapNewEmptyRegion⟩, ⟨_, _, _, toParentUnmapped⟩,
     ⟨_, _, _, toChildUnmapped⟩, ⟨_, _, _, _, allRamCapacity⟩, ⟨_, _, _, _, _, newOutsideRam⟩,
-    ⟨_, _, _, _, fromPi5Capacity⟩, ⟨_, _, _, spanNewOverflow⟩, ⟨_, _, spanEndOverflow⟩,
+    ⟨_, _, _, _, fromBootMemoryCapacity⟩, ⟨_, _, _, spanNewOverflow⟩, ⟨_, _, spanEndOverflow⟩,
     ⟨_, _, _, spanContainsOverflow⟩⟩
 
 end Krepi.Spec.Fdt.Witnesses

@@ -122,7 +122,7 @@ premise of a value true of every value that another module holds.
 | The plan of each write entry on a set runs in full and in order before the next entry on the set, and only the plans change the pool of a set | `krepi_arch::mmu::apply`, which executes each step of a plan that the check of its entry fixed and does not fail, an [open obligation](contract.md#open-obligations); the caller, which holds the token of the set from the entry to the last step of its plan | The token of the set; the borrow of its inputs by a plan iterator (guard 3) | Every entry, whose walk reads the pool that `Tables.apply` of the earlier plans gives; the well-formedness lemmas and `AfterEveryWrite`, which state the set once its plan has run |
 | A plan iterator stands for a list of steps of the specification: its calls of `next` give the steps of `mapPlan`, for `kernel_map` and `direct_map`, or of the plan of `Tables.cloneKernelFrom`, in order, and then none | `kernel_map`, `direct_map` and `clone_kernel_from`, whose refinement theorems relate the iterator that each gives to its list | Each `next`, which advances a private cursor over the checked input and does not fail ([check and execute](contract.md#check-and-execute)) | `krepi_arch::mmu::apply`, which executes the steps; `PlansPublishInOrder` and `KernelTablesOnlyFilled`, which carry over to the steps |
 | A layout of `kernel_map` has at most 16 ranges, each with one of the four kinds of a layout | The board crate, which writes the layout of its image; the type of a layout (code shape 6) | A layout is a constant of the board | `kernel_map`, which checks neither rule ([kernel mappings](contract.md#kernel-mappings)); `Layout`, `layoutKinds` |
-| The boot memory map of `direct_map` is one that the fdt entries built, so it keeps `MemoryPlan.WellFormed` and its usable ranges are on page boundaries, disjoint and in address order (`BuiltPlan`) | `MemoryPlan::all_ram`, `new` and `from_pi5` of the [fdt](../../boot-platform/fdt/proof.md) target (`AllRamWellFormed`, `MemoryPlanNewWellFormed`, `FromPi5WellFormed`, `UsableRangesExact`) | The publication of the boot memory map, which keeps it unchanged | `direct_map`, whose checks of a usable range off pages and of a leaf that an earlier usable range shares never fail (`DirectMapRangesOnPages`, `DirectMapRangesApart`); `BootOwnersMatchDirectMap` |
+| The boot memory map of `direct_map` is one that the fdt entries built, so it keeps `MemoryPlan.WellFormed` and its usable ranges are on page boundaries, disjoint and in address order (`BuiltPlan`) | `MemoryPlan::all_ram`, `new` and `from_boot_memory` of the [fdt](../../boot-platform/fdt/proof.md) target (`AllRamWellFormed`, `MemoryPlanNewWellFormed`, `FromBootMemoryWellFormed`, `UsableRangesExact`) | The publication of the boot memory map, which keeps it unchanged | `direct_map`, whose checks of a usable range off pages and of a leaf that an earlier usable range shares never fail (`DirectMapRangesOnPages`, `DirectMapRangesApart`); `BootOwnersMatchDirectMap` |
 | W^X, the first rule of the boot wiring: `kernel_map` and `direct_map` run at most once each, before the MMU is on | The boot wiring, which calls each once on the boot CPU ([entry points](contract.md#entry-points)); the transactions `Shared.buildKernelMap` and `Shared.buildDirectMap`, which run only before `Shared.enable` | No transaction writes the direct map's set once the MMU is on (`DirectMapUnchangedAfterBoot`) | `NoWritableExecutable`, through `WxPremises` |
 | W^X, the second rule: the boot memory map is well-formed and each `ReadExecute` range of the layout lies in the span of boot storage of the kernel image | The board, which gives the boot memory map the span of the image as boot storage and builds the layout from the symbols of its link ([descriptors and attributes](contract.md#descriptors-and-attributes)) | The boot memory map never changes once published | `NoWritableExecutable`, by which the text has no alias in the direct map; `Ownership::new` of the kernel root, which excludes the image |
 | W^X, the third rule: a plan that fills an invalid entry of the lower kernel set after boot maps an executable kind only at a page of the text of the image, and a page of the text only with `ReadExecute` | The code of the core that fills such an entry under the token of the kernel tables, which the third rule of [W^X](contract.md#descriptors-and-attributes) binds; the [address-space contract](../address-space/contract.md#address-spaces-and-asids) writes no fill after boot | Each fill, which writes only invalid entries (`KernelTablesOnlyFilled`) | `NoWritableExecutable`, through `WxPremises` |
@@ -193,15 +193,15 @@ the adapter, so the module has no `unsafe` code and no assembly
 The target reaches no function of another component and cuts none. It
 relies on the boot memory map of the [fdt](../../boot-platform/fdt/proof.md)
 component, which it reads as values: `direct_map` relies on the usable
-ranges of a map that the fdt entries built (`BuiltPlan`), so this target
-and the `fdt` target form a cluster connected by premises, in which the
-theorems of the `fdt` target about `MemoryPlan::all_ram`, `new`, `from_pi5`
-and `available_ranges` are restated over the generated types of this
-target. The gate does not check premises yet, so `cargo xtask formal check`
-refuses them ([proof targets](../../../formal-verification.md#proof-targets)),
-and the two targets are registered without them until it does. A Lean
-module never imports the generated definitions of both targets: their
-enumerations and external declarations would clash
+ranges of a map that the fdt entries built (`BuiltPlan`), so this target and the
+`fdt` target form a cluster connected by premises, in which the theorems of the
+`fdt` target about `MemoryPlan::all_ram`, `new`, `from_boot_memory` and
+`available_ranges` are restated over the generated types of this target. The
+gate does not check premises yet, so `cargo xtask formal check` refuses them
+([proof targets](../../../formal-verification.md#proof-targets)), and the two
+targets are registered without them until it does. A Lean module never imports
+the generated definitions of both targets: their enumerations and external
+declarations would clash
 ([R6](../../../conventions/provable-subset.md#r6-enumeration-names-across-targets)).
 Within the target, the premises of the table sets and those of the page
 ownership table are not connected ([premises](#premises)), so their proofs

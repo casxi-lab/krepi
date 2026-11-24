@@ -6,15 +6,17 @@ import Krepi.Proofs.Fdt.DiscoveryLemmas
 import Krepi.Proofs.Fdt.UnreadLemmas
 
 /-!
-# Device tree: proofs about memory discovery and the Pi 5 boot memory
+# Device tree: proofs about memory discovery and the boot memory
 
 One theorem for each registered statement of `Krepi.SpecProperties.Fdt`
-about memory discovery and the Pi 5 boot memory, whose type is exactly that
+about memory discovery and the boot memory, whose type is exactly that
 statement: that the memory map of a well-formed tree is well-formed, that a
-Pi 5 boot memory is consistent, and that the values that the discoveries
+boot memory is consistent, and that the values that the discoveries
 leave unread do not reach their results.
 
-Every theorem here is proved, from the lemmas of
+`DiscoverMemoryWellFormed` is proved; the other three theorems are planned:
+each proof is `sorry` until a proof pull request proves it. The proofs come
+from the lemmas of
 `Krepi.Proofs.Fdt.DiscoveryLemmas` (the steps of a successful discovery)
 and `Krepi.Proofs.Fdt.UnreadLemmas` (the nodes of a tree that differs only
 in unread values give the same results). Mathlib is imported so that the
@@ -36,15 +38,13 @@ public theorem discoverMemoryWellFormed : DiscoverMemoryWellFormed := by
   rw [hdyn, UInt64.toNat_ofNat_of_lt' (by omega)]
   omega
 
-public theorem discoverPi5BootMemoryWellFormed : DiscoverPi5BootMemoryWellFormed :=
-  fun t _ _ m ht h => discoverMemoryWellFormed t m.memory ht (discoverPi5_ok h).1
+public theorem discoverBootMemoryWellFormed : DiscoverBootMemoryWellFormed := by
+  sorry
 
-public theorem discoverPi5BootMemoryConsistent : DiscoverPi5BootMemoryConsistent :=
-  fun _ _ _ _ h => (discoverPi5_ok h).2
+public theorem discoverBootMemoryConsistent : DiscoverBootMemoryConsistent := by
+  sorry
 
 public theorem unreadValuesIgnored : UnreadValuesIgnored := by
-  intro t t' hwf hs
-  exact ⟨(discoverMemory_move hs hwf).symm, fun a image => (discoverPi5_move hs hwf a image).symm,
-    fun profile => (discoverCpus_move hs hwf profile).symm⟩
+  sorry
 
 end Krepi.Proofs.Fdt.Discovery

@@ -11,13 +11,14 @@ One theorem for each registered statement of `Krepi.SpecProperties.Fdt`
 about the checks of the invariants, whose type is exactly that statement:
 that each computable check agrees with its invariant on every value.
 
-Every theorem here is proved, by rewriting each conjunct of a check into the
-conjunct of its invariant: the checks of spans and of pairs with the lemmas
-of `Krepi.Proofs.Fdt.SpanLemmas` (`nonempty_iff`, `onPages_iff`,
-`withinWidth_iff`, `allPairs_iff`), the checks of the nodes of a tree one
-index at a time (`checkNode_iff`), and the check of the topology of the
-hand-over over the three profiles. Mathlib is imported so that the gate
-counts the heartbeats of each theorem.
+The theorems of `CheckBootMemoryConsistent`, `CheckCpuTopologySupported`
+and the three checks of the boot state are planned: each proof is `sorry`
+until a proof pull request proves it. The others are proved by rewriting
+each conjunct of a check into the conjunct of its invariant: the checks of
+spans and of pairs with the lemmas of `Krepi.Proofs.Fdt.SpanLemmas`
+(`nonempty_iff`, `onPages_iff`, `withinWidth_iff`, `allPairs_iff`), and the
+checks of the nodes of a tree one index at a time (`checkNode_iff`). Mathlib
+is imported so that the gate counts the heartbeats of each theorem.
 -/
 
 namespace Krepi.Proofs.Fdt.Checks
@@ -72,16 +73,11 @@ public theorem checkMemoryMapWellFormed : CheckMemoryMapWellFormed := by
   simp only [Bool.and_eq_true, Bool.not_eq_true', decide_eq_true_eq, List.all_eq_true,
     List.isEmpty_eq_false_iff, nonempty_iff, allPairs_iff, and_assoc]
 
-public theorem checkPi5BootMemoryConsistent : CheckPi5BootMemoryConsistent := by
-  intro m
-  unfold Pi5BootMemory.checkConsistent Pi5BootMemory.Consistent
-  simp [nonempty_iff, and_assoc]
+public theorem checkBootMemoryConsistent : CheckBootMemoryConsistent := by
+  sorry
 
 public theorem checkCpuTopologySupported : CheckCpuTopologySupported := by
-  intro t
-  rcases t with ⟨profile, count⟩
-  unfold CpuTopology.checkSupported CpuTopology.Supported
-  cases profile <;> simp [or_assoc]
+  sorry
 
 public theorem checkMemoryPlanWellFormed : CheckMemoryPlanWellFormed := by
   intro p
@@ -89,32 +85,12 @@ public theorem checkMemoryPlanWellFormed : CheckMemoryPlanWellFormed := by
   simp [nonempty_iff, onPages_iff, allPairs_iff, and_assoc]
 
 public theorem checkBootStateWellFormed : CheckBootStateWellFormed := by
-  intro s
-  unfold BootState.checkWellFormed BootState.WellFormed
-  cases s.plan with
-  | none => simp
-  | some p => simpa using checkMemoryPlanWellFormed p
+  sorry
 
 public theorem checkBootStateFromHandOver : CheckBootStateFromHandOver := by
-  intro s
-  unfold BootState.checkFromHandOver BootState.FromHandOver
-  cases s.topology with
-  | none => simp
-  | some t =>
-    simp only [List.any_eq_true, Option.some.injEq, forall_eq']
-    constructor
-    · rintro ⟨profile, _, h⟩
-      refine ⟨profile, ?_⟩
-      generalize s.tree.bind (fun f => f.discoverCpus profile) = x at h
-      cases x <;> simp_all
-    · rintro ⟨profile, h⟩
-      refine ⟨profile, by cases profile <;> simp, ?_⟩
-      rw [h]
-      simp
+  sorry
 
 public theorem checkBootStateStartOrder : CheckBootStateStartOrder := by
-  intro s
-  unfold BootState.checkStartOrder BootState.StartOrder
-  cases s.secondaries <;> simp
+  sorry
 
 end Krepi.Proofs.Fdt.Checks

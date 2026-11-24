@@ -9,13 +9,15 @@ public import Krepi.Spec.Fdt.Translate
 order of the parse and the entries on a tree, and the functions of the CPU
 profile and of the topology that it returns: `CpuProfile::logical_id`,
 `affinity_shift` and `conduit`, and `CpuTopology::count`, `profile`,
-`affinity` and `validate_qemu_timers`.
+`affinity` and `validate_timers`.
 
-A CPU profile fixes the affinity level of the CPU IDs and the PSCI conduit:
-QEMU virt with PSCI over HVC, QEMU virt with EL2 and PSCI over SMC, and the
-Pi 5. The discovery reads the children of `/cpus` once each, in tree order,
-and `/psci`; the topology that it returns holds the profile and the number of
-CPUs, whose IDs are `0` to `count - 1`.
+A CPU profile is a value that the board gives: the PSCI conduit, the
+affinity level of the CPU IDs, the numbers of CPUs that the board allows,
+whether CPU 0 needs an `enable-method`, and the timer interrupts that the
+core checks, if any. The specification holds for every profile; which
+values a board gives is not part of it. The discovery reads the children of
+`/cpus` once each, in tree order, and `/psci`; the topology that it returns
+holds the profile and the number of CPUs, whose IDs are `0` to `count - 1`.
 -/
 
 @[expose] public section
@@ -23,14 +25,6 @@ CPUs, whose IDs are `0` to `count - 1`.
 namespace Krepi.Spec.Fdt
 
 /-! ## Profiles -/
-
-/-- `CpuProfile`: QEMU virt with PSCI over HVC, QEMU virt with EL2 and PSCI
-over SMC, and the Pi 5. -/
-inductive CpuProfile where
-  | qemuHvc
-  | qemuSmc
-  | pi5
-  deriving DecidableEq, Repr, Inhabited
 
 /-- The PSCI conduit of a profile. -/
 inductive PsciConduit where
@@ -43,17 +37,57 @@ def PsciConduit.name : PsciConduit → String
   | .hvc => "hvc"
   | .smc => "smc"
 
-/-- `CpuProfile::affinity_shift`: 8 on the Pi 5, whose CPU IDs are affinity
-level 1 of `MPIDR_EL1`, and 0 on QEMU virt. -/
-def CpuProfile.affinityShift : CpuProfile → UInt64
-  | .pi5 => 8
-  | _ => 0
+/-- `AffinityLevel`: the affinity level of `MPIDR_EL1` that holds the CPU
+IDs, one of its four levels. -/
+inductive AffinityLevel where
+  | aff0
+  | aff1
+  | aff2
+  | aff3
+  deriving DecidableEq, Repr, Inhabited
 
-/-- `CpuProfile::conduit`: HVC for QEMU virt without EL2, SMC for QEMU virt
-with EL2 and for the Pi 5. -/
-def CpuProfile.conduit : CpuProfile → PsciConduit
-  | .qemuHvc => .hvc
-  | _ => .smc
+/-- The position of the field of a level in `MPIDR_EL1`: bits 0, 8, 16 and
+32. -/
+def AffinityLevel.shift : AffinityLevel → UInt64
+  | .aff0 => 0
+  | .aff1 => 8
+  | .aff2 => 16
+  | .aff3 => 32
+
+/-- `TimerInterrupts`: the private interrupts of a timer, in their order, the
+first `count` of the five `numbers`; a `count` above 5 stands for all five.
+-/
+structure TimerInterrupts where
+  numbers : Vector UInt32 5
+  count : UInt8
+  deriving DecidableEq, Repr, Inhabited
+
+/-- `CpuProfile`, the CPU profile that the board gives: the PSCI conduit
+(`CpuProfile::conduit`); the affinity level of the CPU IDs
+(`affinity_level`); the numbers of CPUs that the board allows
+(`cpu_counts`), as a set whose bit `n` is set when `n` CPUs are allowed,
+for `n` from 1 to 4, the other bits not read; whether CPU 0 needs the
+`enable-method` `psci` as every other CPU does (`cpu0_enable_method`); and
+the timer interrupts that `CpuTopology::validate_timers` checks
+(`timer_interrupts`), none when the core does not check the timer of the
+board. Every value is a profile, with the behaviour that these rules give
+it. -/
+structure CpuProfile where
+  conduit : PsciConduit
+  affinityLevel : AffinityLevel
+  cpuCounts : UInt8
+  cpu0EnableMethod : Bool
+  timerInterrupts : Option TimerInterrupts
+  deriving DecidableEq, Repr, Inhabited
+
+/-- `CpuProfile::affinity_shift`: the position of the affinity level of the
+profile in `MPIDR_EL1`. -/
+def CpuProfile.affinityShift (p : CpuProfile) : UInt64 := p.affinityLevel.shift
+
+/-- Whether the profile allows `count` CPUs: a count from 1 to 4 whose bit of
+`cpu_counts` is set. -/
+def CpuProfile.allows (p : CpuProfile) (count : Nat) : Bool :=
+  count != 0 && count ≤ 4 && p.cpuCounts.toNat.testBit count
 
 /-- The logical IDs, 0 to 3. -/
 def CPU_IDS : List UInt64 := [0, 1, 2, 3]
@@ -91,27 +125,24 @@ def CpuTopology.affinity (t : CpuTopology) (i : UInt64) : Option UInt64 :=
 def be32 (n : Nat) : List UInt8 :=
   [n / 2 ^ 24, n / 2 ^ 16, n / 2 ^ 8, n].map UInt8.ofNat
 
-/-- The private interrupts of the timer of QEMU virt, in their order: 13, 14,
-11 and 10, and with EL2 12 after them; none for the Pi 5, whose timer belongs
-to its board support. -/
-def CpuProfile.timerInterrupts : CpuProfile → Option (List Nat)
-  | .qemuHvc => some [13, 14, 11, 10]
-  | .qemuSmc => some [13, 14, 11, 10, 12]
-  | .pi5 => none
+/-- The private interrupts of a timer, in their order: the first `count` of
+its numbers. -/
+def TimerInterrupts.list (timer : TimerInterrupts) : List UInt32 :=
+  timer.numbers.toList.take timer.count.toNat
 
-/-- `CpuTopology::validate_qemu_timers(interrupts)`: for the Pi 5 profile,
-`BadProperty`; otherwise the `interrupts` of the timer node of QEMU virt must
+/-- `CpuTopology::validate_timers(interrupts)`: for a profile without timer
+interrupts, `BadProperty`; otherwise the `interrupts` of the timer node must
 be the records of three cells, type 1 for a private interrupt, its number and
 the flags `((1 << count) - 1) << 8 | 4`, the admitted CPUs and a level-high
 trigger, for the private interrupts of the profile in their order, with
 nothing else, or `BadProperty`. The flags are a 32-bit cell, computed at that
-width; a topology of the discovery has 1, 2 or 4 CPUs, so its shift is exact.
+width; a topology of the discovery has 1 to 4 CPUs, so its shift is exact.
 -/
-def CpuTopology.validateQemuTimers (t : CpuTopology) (interrupts : ByteArray) :
+def CpuTopology.validateTimers (t : CpuTopology) (interrupts : ByteArray) :
     Except Error Unit := do
-  let some ppis := t.profile.timerInterrupts | throw .badProperty
+  let some timer := t.profile.timerInterrupts | throw .badProperty
   let flags : UInt32 := (((1 : UInt32) <<< t.count.toUInt32) - 1) <<< 8 ||| 4
-  let records := ppis.flatMap fun ppi => be32 1 ++ be32 ppi ++ be32 flags.toNat
+  let records := timer.list.flatMap fun ppi => be32 1 ++ be32 ppi.toNat ++ be32 flags.toNat
   if interrupts.toList != records then throw .badProperty
 
 /-! ## The discovery -/
@@ -131,9 +162,9 @@ skipped. Then, for a CPU node: disabled, or a `compatible` other than exactly
 `arm,cortex-a76`, `BadProperty`; no `reg`, `MissingProperty`; its value in
 `cells` cells (`cellsU64`), `UnsupportedCells` or `BadProperty`; its ID: a
 value that is not `id << affinity_shift` for an ID below 4, or the ID of an
-earlier CPU node, `BadProperty`; then, for every CPU but ID 0 and on the Pi 5
-for every CPU, an `enable-method` other than `psci`, `BadProperty`. The
-`enable-method` of CPU 0 on QEMU virt is not read. -/
+earlier CPU node, `BadProperty`; then, for every CPU but ID 0, and for CPU 0
+when the profile asks it of CPU 0, an `enable-method` other than `psci`,
+`BadProperty`. The `enable-method` of CPU 0 is otherwise not read. -/
 def cpuOfChild (profile : CpuProfile) (cells : UInt32) (ids : List UInt64) (n : Node) :
     Except Error (List UInt64) := do
   if (← n.stringProperty "device_type") != some "cpu" then return ids
@@ -143,16 +174,16 @@ def cpuOfChild (profile : CpuProfile) (cells : UInt32) (ids : List UInt64) (n : 
   let affinity ← cellsU64 reg cells
   let some id := profile.idOf affinity | throw .badProperty
   if ids.contains id then throw .badProperty
-  if id != 0 || profile == .pi5 then
+  if id != 0 || profile.cpu0EnableMethod then
     let method ← n.stringProperty "enable-method"
     if method != some "psci" then throw .badProperty
   pure (ids ++ [id])
 
 /-- The set of the IDs of the CPU nodes, which are distinct: their number
-`count` is 1, 2 or 4, and 4 on the Pi 5, and they are `0` to `count - 1`. -/
+`count` is one that the profile allows, and they are `0` to `count - 1`. -/
 def idsComplete (profile : CpuProfile) (ids : List UInt64) : Bool :=
   let count := ids.length
-  (count == 1 || count == 2 || count == 4) && (profile != .pi5 || count == 4) &&
+  profile.allows count &&
     (List.range count).all fun i => ids.contains (UInt64.ofNat i)
 
 /-- `Fdt::discover_cpus(profile)`: the CPU topology of the tree, or the error

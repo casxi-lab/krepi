@@ -13,14 +13,16 @@ about the boot memory map, whose type is exactly that statement: that the
 entries of the boot memory map give well-formed maps, and that their usable
 ranges are well-formed and exact.
 
-Every theorem here is proved. The steps of the entries and of the usable
-ranges are in `Krepi.Proofs.Fdt.PlanLemmas`: the entries keep each rule of
-`MemoryPlan.WellFormed` while they fold over their inputs, and the usable
-ranges of a managed bank start at the bank or at the end of a reservation,
-end at the bank or at the start of a reservation, and cover every address
-that no reservation holds, since the fuel of `usableFrom` exceeds twice the
-reservations that end past its cursor. Mathlib is imported so that the gate
-counts the heartbeats of each theorem.
+Every theorem here is proved; the planned `FromBootMemoryWellFormed` is in
+`Krepi.Proofs.Fdt.BootMemory`, so that the proofs that import this module stay
+proved. The steps of
+the entries and of the usable ranges are in `Krepi.Proofs.Fdt.PlanLemmas`: the
+entries keep each rule of `MemoryPlan.WellFormed` while they fold over their
+inputs, and the usable ranges of a managed bank start at the bank or at the end
+of a reservation, end at the bank or at the start of a reservation, and cover
+every address that no reservation holds, since the fuel of `usableFrom` exceeds
+twice the reservations that end past its cursor. Mathlib is imported so that the
+gate counts the heartbeats of each theorem.
 -/
 
 namespace Krepi.Proofs.Fdt.Plan
@@ -32,9 +34,6 @@ public theorem allRamWellFormed : AllRamWellFormed :=
 
 public theorem memoryPlanNewWellFormed : MemoryPlanNewWellFormed :=
   fun _ _ _ _ _ h => new_wellFormed h
-
-public theorem fromPi5WellFormed : FromPi5WellFormed :=
-  fun _ _ _ _ h => new_wellFormed h
 
 public theorem availableRangesWellFormed : AvailableRangesWellFormed := by
   intro p hp
