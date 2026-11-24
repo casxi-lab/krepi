@@ -16,13 +16,13 @@ FDT-R10, the input that the specification accepts with its result and the
 input that it rejects with its error.
 
 Every theorem here is proved, and `verification/statements.json` registers
-each as `proved`, but those of FDT-R05, FDT-R06 and FDT-R08, which are
-planned: each proof is `sorry` until a proof pull request proves it. The tests
-are decided by the kernel on their concrete inputs. The tests that parse a tree
-that `Builder` finishes without overwrites rewrite the parse into the walk of
-its structure block first (`parse_fast` of `Krepi.Proofs.Fdt.StpLemmas`), so
-that no decision copies a whole tree; the small trees of FDT-R01 are decided on
-their bytes. These tests are proved in `Krepi.Proofs.Fdt.StpParse`,
+each as `proved`, but those of FDT-R08, which are planned: each proof is
+`sorry` until a proof pull request proves it. The tests are decided by the
+kernel on their concrete inputs. The tests that parse a tree that `Builder`
+finishes without overwrites rewrite the parse into the walk of its structure
+block first (`parse_fast` of `Krepi.Proofs.Fdt.StpLemmas`), so that no
+decision copies a whole tree; the small trees of FDT-R01 are decided on their
+bytes. These tests are proved in `Krepi.Proofs.Fdt.StpParse`,
 `Krepi.Proofs.Fdt.StpMemory` and `Krepi.Proofs.Fdt.StpPi5`, which keeps each
 module quick to build, and restated here. Mathlib is imported so that the gate
 counts the heartbeats of each theorem.
@@ -68,19 +68,19 @@ public theorem discoveryRejectsEmptyStaticReservation : DiscoveryRejectsEmptySta
 
 /-! ## FDT-R05 -/
 
-public theorem pi5AcceptsTreeAtLimit : Pi5AcceptsTreeAtLimit := by
-  sorry
+public theorem pi5AcceptsTreeAtLimit : Pi5AcceptsTreeAtLimit :=
+  StpPi5.pi5AcceptsTreeAtLimit
 
-public theorem pi5RejectsTreeAboveLimit : Pi5RejectsTreeAboveLimit := by
-  sorry
+public theorem pi5RejectsTreeAboveLimit : Pi5RejectsTreeAboveLimit :=
+  StpPi5.pi5RejectsTreeAboveLimit
 
 /-! ## FDT-R06 -/
 
-public theorem pi5ModelsBuildBootMemoryMaps : Pi5ModelsBuildBootMemoryMaps := by
-  sorry
+public theorem pi5ModelsBuildBootMemoryMaps : Pi5ModelsBuildBootMemoryMaps :=
+  StpPi5.pi5ModelsBuildBootMemoryMaps
 
-public theorem bootMemoryMapRejectsRamAboveCapacity : BootMemoryMapRejectsRamAboveCapacity := by
-  sorry
+public theorem bootMemoryMapRejectsRamAboveCapacity : BootMemoryMapRejectsRamAboveCapacity :=
+  StpPi5.bootMemoryMapRejectsRamAboveCapacity
 
 /-! ## FDT-R07 -/
 

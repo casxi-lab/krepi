@@ -11,9 +11,9 @@ One theorem for each registered statement of `Krepi.SpecProperties.Fdt`
 about the checks of the invariants, whose type is exactly that statement:
 that each computable check agrees with its invariant on every value.
 
-The theorems of `CheckBootMemoryConsistent`, `CheckCpuTopologySupported`
-and the three checks of the boot state are planned: each proof is `sorry`
-until a proof pull request proves it. The others are proved by rewriting
+The theorems of `CheckCpuTopologySupported` and the three checks of the boot
+state are planned: each proof is `sorry` until a proof pull request proves
+it. The others are proved by rewriting
 each conjunct of a check into the conjunct of its invariant: the checks of
 spans and of pairs with the lemmas of `Krepi.Proofs.Fdt.SpanLemmas`
 (`nonempty_iff`, `onPages_iff`, `withinWidth_iff`, `allPairs_iff`), and the
@@ -74,7 +74,9 @@ public theorem checkMemoryMapWellFormed : CheckMemoryMapWellFormed := by
     List.isEmpty_eq_false_iff, nonempty_iff, allPairs_iff, and_assoc]
 
 public theorem checkBootMemoryConsistent : CheckBootMemoryConsistent := by
-  sorry
+  intro m
+  unfold BootMemory.checkConsistent BootMemory.Consistent
+  simp [nonempty_iff, and_assoc]
 
 public theorem checkCpuTopologySupported : CheckCpuTopologySupported := by
   sorry

@@ -9,10 +9,10 @@ import Krepi.Proofs.Fdt.Translate
 /-!
 # Device tree: lemmas about the discoveries
 
-Lemmas about `Fdt::discover_memory` and `Fdt::discover_cpus` of the
-specification of the `fdt` component: what a success tells about each of
-their steps, for the proofs of the statements about the memory map, the boot
-memory and the CPU nodes.
+Lemmas about `Fdt::discover_memory`, `Fdt::discover_boot_memory` and
+`Fdt::discover_cpus` of the specification of the `fdt` component: what a
+success tells about each of their steps, for the proofs of the statements
+about the memory map, the boot memory and the CPU nodes.
 
 - The RAM ranges: `RamOk` (at most `MAX_MEMORY_REGIONS`, nonempty, no two
   touching), kept by each range (`addRam_fold`) and each child of the root
@@ -25,8 +25,11 @@ memory and the CPU nodes.
   `/reserved-memory` (`addReservedSpan_fold`, `reservedOfChild_ok`,
   `reservedOfChild_fold`, `reservedMemory_ok`), whose dynamic reservations
   are at most the nodes of the tree (`nodes_length`).
-- The discoveries: `discoverMemory_ok` (all of the above of a memory map)
-  and `checkedAdd_fold` (the sum of the RAM ranges).
+- The discoveries: `discoverMemory_ok` (all of the above of a memory map),
+  `checkedAdd_fold` (the sum of the RAM ranges), `discoverBootMemory_ok` (the
+  memory map of a boot memory is that of `Fdt::discover_memory`, and the boot
+  memory is consistent and holds the limit and the alignment of its
+  hand-over profile).
 - The CPU nodes: `IsCpu`, `cpuOfChild_ok` and `cpuOfChild_fold` (no two CPU
   nodes of an accepted `/cpus` have one `reg`), `pairwise_mem_ne` and
   `cpus_distinct_regs`.
@@ -343,6 +346,46 @@ theorem checkedAdd_fold : ∀ (l : List Span) (init res : Nat),
     obtain ⟨hlt, he⟩ := checkedAdd_ok.1 h1
     subst he
     exact checkedAdd_fold l _ res h hlt
+
+/-- A boot memory has the memory map of `Fdt::discover_memory`, is
+consistent, and holds the size limit and the alignment of the hand-over
+profile that it was given. -/
+theorem discoverBootMemory_ok {t : Fdt} {handOver : HandOverProfile} {a : UInt64} {image : Span}
+    {m : BootMemory} (h : t.discoverBootMemory handOver a image = .ok m) :
+    t.discoverMemory = .ok m.memory ∧ m.Consistent ∧ m.maxBlobSize = handOver.maxBlobSize ∧
+      m.alignmentLog2 = handOver.alignmentLog2 := by
+  unfold Fdt.discoverBootMemory at h
+  obtain ⟨h1, h⟩ := except_jp_ok h
+  obtain ⟨h2, h⟩ := except_jp_ok h
+  obtain ⟨found, -, h⟩ := except_bind_ok.1 h
+  split at h
+  · obtain ⟨ac, -, h⟩ := except_bind_ok.1 h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    obtain ⟨sc, -, h⟩ := except_bind_ok.1 h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    split at h
+    · obtain ⟨u, -, h⟩ := except_bind_ok.1 h
+      obtain ⟨dtb, hdtb, h⟩ := except_bind_ok.1 h
+      obtain ⟨h3, h⟩ := except_jp_ok h
+      obtain ⟨e, he, h⟩ := except_bind_ok.1 h
+      obtain ⟨h4, h⟩ := except_jp_ok h
+      obtain ⟨mem, hmem, h⟩ := except_bind_ok.1 h
+      obtain ⟨h5, h⟩ := except_jp_ok h
+      obtain ⟨h6, h⟩ := except_jp_ok h
+      obtain ⟨rb, hrb, h⟩ := except_bind_ok.1 h
+      cases except_pure_ok.1 h
+      obtain ⟨hlt, hdtbeq⟩ := span_new_ok.1 hdtb
+      subst hdtbeq
+      obtain ⟨hrb1, hrb2⟩ := checkedAdd_fold _ _ _ hrb (by decide)
+      refine ⟨hmem, ⟨hlt, ?_, ?_, ⟨h3, endAddr_ok he⟩, by simpa using h4,
+        by simpa [BootMemory.ram] using h5, by simpa [BootMemory.ram] using h6, ?_⟩, rfl, rfl⟩
+      · simpa only [bne_iff_ne, ne_eq, Decidable.not_not] using h2
+      · exact UInt64.not_lt.1 h1
+      · show (UInt64.ofNat rb).toNat = _
+        rw [UInt64.toNat_ofNat_of_lt' hrb2, hrb1]
+        rfl
+    · exact absurd h (except_throw_ne _ _)
+  · exact absurd h (except_throw_ne _ _)
 
 /-- The RAM ranges of `Fdt::discover_memory` are the spans of the enabled
 memory nodes below the root, in tree order. -/

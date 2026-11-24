@@ -30,7 +30,7 @@
       "name": "Krepi.SpecProperties.Fdt.CheckBootMemoryConsistent",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkBootMemoryConsistent",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckCpuTopologySupported",
@@ -150,13 +150,13 @@
       "name": "Krepi.SpecProperties.Fdt.DiscoverBootMemoryWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Discovery.discoverBootMemoryWellFormed",
       "module": "Krepi.Proofs.Fdt.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.DiscoverBootMemoryConsistent",
       "theorem": "Krepi.Proofs.Fdt.Discovery.discoverBootMemoryConsistent",
       "module": "Krepi.Proofs.Fdt.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.UnreadValuesIgnored",
@@ -168,13 +168,13 @@
       "name": "Krepi.SpecProperties.Fdt.FindAvailableWellFormed",
       "theorem": "Krepi.Proofs.Fdt.BootMemory.findAvailableWellFormed",
       "module": "Krepi.Proofs.Fdt.BootMemory",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.FindAvailableLowest",
       "theorem": "Krepi.Proofs.Fdt.BootMemory.findAvailableLowest",
       "module": "Krepi.Proofs.Fdt.BootMemory",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.DiscoverCpusSupported",
@@ -204,7 +204,7 @@
       "name": "Krepi.SpecProperties.Fdt.FromBootMemoryWellFormed",
       "theorem": "Krepi.Proofs.Fdt.BootMemory.fromBootMemoryWellFormed",
       "module": "Krepi.Proofs.Fdt.BootMemory",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.AvailableRangesWellFormed",
@@ -348,25 +348,25 @@
       "name": "Krepi.SpecTests.Fdt.Pi5AcceptsTreeAtLimit",
       "theorem": "Krepi.Proofs.Fdt.Stp.pi5AcceptsTreeAtLimit",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.Pi5RejectsTreeAboveLimit",
       "theorem": "Krepi.Proofs.Fdt.Stp.pi5RejectsTreeAboveLimit",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.Pi5ModelsBuildBootMemoryMaps",
       "theorem": "Krepi.Proofs.Fdt.Stp.pi5ModelsBuildBootMemoryMaps",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.BootMemoryMapRejectsRamAboveCapacity",
       "theorem": "Krepi.Proofs.Fdt.Stp.bootMemoryMapRejectsRamAboveCapacity",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.AllRamAcceptsMaxBootStorage",
@@ -450,7 +450,7 @@
       "name": "Krepi.Spec.Fdt.Witnesses.DiscoverBootMemoryNoBadTree",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.discoverBootMemoryNoBadTree",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.RamBytesFit",
@@ -486,7 +486,7 @@
       "name": "Krepi.Spec.Fdt.Witnesses.FindAvailableNoLimitExceeded",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.findAvailableNoLimitExceeded",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.BankBytesFit",

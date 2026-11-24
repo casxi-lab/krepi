@@ -16,9 +16,8 @@ module does not prove itself, whose type is exactly that proposition: for
 each error branch that no input of its entry reaches, that the entry never
 takes it.
 
-Every theorem here is proved but `discoverBootMemoryNoBadTree`,
-`cpuRegNoUnsupportedCells` and `findAvailableNoLimitExceeded`, which are
-planned: each proof is `sorry` until a proof pull request proves it. The
+Every theorem here is proved but `cpuRegNoUnsupportedCells`, which is
+planned: its proof is `sorry` until a proof pull request proves it. The
 proofs evaluate no entry: the errors that
 an entry can give are followed through its steps
 (`Krepi.Proofs.Fdt.ErrorSets`), and the bounds of fuel and of sums come from
@@ -53,8 +52,9 @@ public theorem reservationFuelSuffices : ReservationFuelSuffices := by
 public theorem discoverMemoryNoBadTree : DiscoverMemoryNoBadTree := fun _ ht =>
   ne_of_errsIn (discoverMemory_errs ht) (fun h => h rfl)
 
-public theorem discoverBootMemoryNoBadTree : DiscoverBootMemoryNoBadTree := by
-  sorry
+public theorem discoverBootMemoryNoBadTree : DiscoverBootMemoryNoBadTree :=
+  fun _ handOver a image ht => ne_of_errsIn (discoverBootMemory_errs ht handOver a image)
+    (fun h => h rfl)
 
 public theorem ramBytesFit : RamBytesFit := by
   intro t m h
@@ -92,7 +92,30 @@ public theorem cpuRegNoUnsupportedCells : CpuRegNoUnsupportedCells := by
   sorry
 
 public theorem findAvailableNoLimitExceeded : FindAvailableNoLimitExceeded := by
-  sorry
+  intro m size alignment minimum limit
+  refine ne_of_errsIn (P := (· ≠ .limitExceeded)) ?_ (fun h => h rfl)
+  unfold BootMemory.findAvailable
+  refine errsIn_jp (fun _ => by decide) fun _ => ?_
+  refine errsIn_jp (fun _ => by decide) fun hpow => ?_
+  have hal : 0 < alignment.toNat := by
+    have h2 : isPowerOfTwo alignment = true := by simpa using hpow
+    simp only [isPowerOfTwo, List.any_eq_true, beq_iff_eq] at h2
+    obtain ⟨k, -, hk⟩ := h2
+    rw [hk]
+    exact Nat.two_pow_pos k
+  generalize m.ram = l
+  induction l with
+  | nil => exact errsIn_ok _
+  | cons r rest ih =>
+    rw [BootMemory.searchRanges]
+    refine errsIn_bind (errsIn_sub (alignUp_errs _ _) (by decide)) fun c _ => ?_
+    refine errsIn_bind (searchRange_fuel hal _ _ ?_) fun o _ => ?_
+    · have := List.countP_le_length (p := fun x => decide (c < x.endNat)) (l := m.exclusions)
+      simp only [BootMemory.exclusions, List.length_cons, List.length_map] at this ⊢
+      omega
+    · split
+      · exact errsIn_pure _
+      · exact ih
 
 public theorem bankBytesFit : BankBytesFit := by
   intro ram banks h
