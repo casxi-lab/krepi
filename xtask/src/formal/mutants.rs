@@ -6,8 +6,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::mpsc;
 use std::time::Duration;
 
 use proc_macro2::{LineColumn, Span};
@@ -21,7 +22,7 @@ use super::lean::{self, Ranges};
 use super::outcome::{self, Class, Site, Status};
 use super::process::Ran;
 use super::receipt::{self, Receipt};
-use super::registry::{self, Target};
+use super::registry::{self, Mutant, Target};
 use super::run::{self, Gate, Request, RunDir};
 use super::toolchain::{environment::Tool, sha256};
 use super::{externals, extract, inventory, paths, qualify};
@@ -232,7 +233,7 @@ fn messages(output: &str) -> String {
 /// hand-written Lean of the export and the root module that imports them,
 /// with warnings as errors, as a command of `unit`.
 pub fn prove(
-    gate: &mut Gate,
+    gate: &Gate,
     unit: &str,
     project: &Path,
     modules: &[String],
@@ -255,14 +256,12 @@ fn at(path: &Path) -> impl Fn(std::io::Error) -> String + '_ {
     move |error| format!("{}: {error}", path.display())
 }
 
-/// A mutant: an edit of a file of the package of its target, the theorems
-/// of which one must fail, and the build of the target that its stage
-/// starts from, if there is one.
+/// A mutant: an edit of a file of the package of its target, and the build
+/// of the target that its stage starts from, if there is one.
 struct Mutation<'a> {
     file: &'a str,
     find: &'a str,
     replace: &'a str,
-    fails: &'a [String],
     seed: Option<&'a Path>,
 }
 
@@ -278,27 +277,32 @@ enum Judged {
     Failed(Status, String),
 }
 
+/// A mutant that its preparation made ready: the stage project where its
+/// proofs are to build, or what it told before its build.
+enum Ready {
+    Stage(PathBuf),
+    Told(Judged),
+}
+
 /// Copies the package of `target` from the export into `work`, with the
 /// Cargo configuration of the export, edits it, and, when `check`, checks
 /// that Cargo builds it; then extracts it, installs what the tools generated
-/// in a stage, copies the build of the target there, so that Lake builds
-/// again only the modules whose sources or imports differ, and builds the
-/// proofs there, all as commands of `unit`, and judges the build with
-/// `ranges`. A pattern that does not occur once, an extraction that fails
+/// in a stage and copies the build of the target there, so that Lake builds
+/// again only the modules whose sources or imports differ, all as commands
+/// of `unit`. A pattern that does not occur once, an extraction that fails
 /// and generated files that cannot be installed are rejections.
-fn build(
-    gate: &mut Gate,
+fn prepare(
+    gate: &Gate,
     target: &Target,
     unit: &str,
     mutation: &Mutation,
-    ranges: &Ranges,
     work: &Path,
     check: bool,
-) -> Result<Judged, String> {
+) -> Result<Ready, String> {
     let (layout, source) = (*gate.layout(), gate.source());
     let (from, root) = (source.join(layout.kernel), work.join("source"));
     let package = root.join(layout.kernel);
-    let rejected = |why: String| Ok(Judged::Failed(Status::Rejected, why));
+    let rejected = |why: String| Ok(Ready::Told(Judged::Failed(Status::Rejected, why)));
     let text = fs::read_to_string(from.join(mutation.file)).map_err(at(&from))?;
     if text.matches(mutation.find).count() != 1 {
         return rejected(format!(
@@ -338,15 +342,12 @@ fn build(
         };
         let (_, verdict, _) = gate.run(unit, &request, |_| Ok(()));
         let _ = fs::remove_dir_all(&target_dir);
+        let failed =
+            |why: Option<String>| Judged::Failed(Status::ToolFailure, why.unwrap_or_default());
         match verdict.class {
             Class::Passed => {}
-            Class::ProofFailure => return Ok(Judged::Unbuildable),
-            _ => {
-                return Ok(Judged::Failed(
-                    Status::ToolFailure,
-                    verdict.reason.unwrap_or_default(),
-                ));
-            }
+            Class::ProofFailure => return Ok(Ready::Told(Judged::Unbuildable)),
+            _ => return Ok(Ready::Told(failed(verdict.reason))),
         }
     }
     let opaque = Vec::from_iter(target.opaque.iter().map(|opaque| opaque.pattern.clone()));
@@ -376,17 +377,32 @@ fn build(
     if let Some(seed) = mutation.seed {
         copy_tree(seed, &project.join(BUILD))?;
     }
+    Ok(Ready::Stage(project))
+}
+
+/// Builds the proofs of a mutant that `ready` made ready, of which one of
+/// the theorems `fails` must fail, as a command of `unit`, and judges the
+/// build with `ranges`.
+fn judge(
+    gate: &Gate,
+    target: &Target,
+    unit: &str,
+    fails: &[String],
+    ranges: &Ranges,
+    ready: Ready,
+) -> Result<Judged, String> {
+    let project = match ready {
+        Ready::Stage(project) => project,
+        Ready::Told(judged) => return Ok(judged),
+    };
     let (ran, verdict) = prove(gate, unit, &project, &target.proof_modules)?;
     let modules = &target.proof_modules;
-    let judged = ran.map(|ran| self::verdict(&ran, modules, ranges, mutation.fails));
+    let judged = ran.map(|ran| self::verdict(&ran, modules, ranges, fails));
     Ok(
         match judged.unwrap_or_else(|| Verdict::Killed(verdict.reason.unwrap_or_default())) {
             Verdict::Rejected { .. } => Judged::Rejected,
             Verdict::Accepted { outside, .. } => {
-                let mut why = format!(
-                    "the mutant was not rejected by {}",
-                    mutation.fails.join(", ")
-                );
+                let mut why = format!("the mutant was not rejected by {}", fails.join(", "));
                 if !outside.is_empty() {
                     why += &format!(
                         "; errors outside every declaration at {}",
@@ -473,31 +489,88 @@ pub fn after(
         .join("targets")
         .join(&target.name)
         .join("mutants");
-    for mutant in &target.mutants {
-        let (unit, fails) = (unit(&target.name, &mutant.name), &mutant.fails);
-        let conclusion = match unknown_failures(fails, &ranges) {
-            Some(problem) => (Status::Rejected, Some(problem)),
+    let (gate, unit) = (&*gate, |mutant: &Mutant| unit(&target.name, &mutant.name));
+    pipeline(
+        &target.mutants,
+        || false,
+        |mutant| match unknown_failures(&mutant.fails, &ranges) {
+            Some(problem) => Ok(Ready::Told(Judged::Failed(Status::Rejected, problem))),
             None => {
                 let (file, find, replace) = (&mutant.file, &mutant.find, &mutant.replace);
                 let mutation = Mutation {
                     file,
                     find,
                     replace,
-                    fails,
                     seed: seed.as_deref(),
                 };
                 let work = work.join(&mutant.name);
-                match build(gate, target, &unit, &mutation, &ranges, &work, false)? {
-                    Judged::Rejected => (Status::Verified, None),
-                    Judged::Survived(why) => (Status::Rejected, Some(why)),
-                    Judged::Unbuildable => (Status::Rejected, Some("it does not build".into())),
-                    Judged::Failed(status, why) => (status, Some(why)),
+                prepare(gate, target, &unit(mutant), &mutation, &work, false)
+            }
+        },
+        |mutant, ready| {
+            let unit = unit(mutant);
+            let conclusion = match judge(gate, target, &unit, &mutant.fails, &ranges, ready?)? {
+                Judged::Rejected => (Status::Verified, None),
+                Judged::Survived(why) => (Status::Rejected, Some(why)),
+                Judged::Unbuildable => (Status::Rejected, Some("it does not build".into())),
+                Judged::Failed(status, why) => (status, Some(why)),
+            };
+            gate.conclude(&unit, conclusion);
+            Ok(())
+        },
+    )?;
+    Ok(listed(Some(&before)).err())
+}
+
+/// Runs `run` on each of `items` in order, with what `prepare` gave for
+/// it, and stops at the first error, which it returns. A thread of its own
+/// prepares the next item while `run` works on the one before it: the
+/// preparations are made in order, one at a time and at most one item
+/// ahead, and a finished one waits until `run` takes it. `run` must stop at
+/// a preparation that is an error, after which nothing more is prepared;
+/// nor is anything prepared once `run` has stopped at an error of its own.
+/// A preparation then under way finishes and is dropped, and the error is
+/// returned once the preparing thread has ended. A `run` that goes on after
+/// a preparation that is an error ends with an error once no preparation
+/// follows. Once `stopped` holds, no item is prepared or run any more, and
+/// the run ends without an error.
+fn pipeline<T: Sync, P: Send>(
+    items: &[T],
+    stopped: impl Fn() -> bool + Sync,
+    prepare: impl Fn(&T) -> Result<P, String> + Sync,
+    mut run: impl FnMut(&T, Result<P, String>) -> Result<(), String>,
+) -> Result<(), String> {
+    std::thread::scope(|scope| {
+        // A channel without a buffer hands each preparation over only when
+        // `run` asks for it; the next one starts after that.
+        let (sender, receiver) = mpsc::sync_channel(0);
+        let (prepare, stopped) = (&prepare, &stopped);
+        scope.spawn(move || {
+            for item in items.iter().take_while(|_| !stopped()) {
+                let prepared = prepare(item);
+                let stops = prepared.is_err();
+                if sender.send(prepared).is_err() || stops {
+                    break;
                 }
             }
-        };
-        gate.conclude(&unit, conclusion);
-    }
-    Ok(listed(Some(&before)).err())
+        });
+        // The receiver is dropped when this closure returns, which ends a
+        // preparing thread that waits to hand over a preparation.
+        for item in items.iter().take_while(|_| !stopped()) {
+            // The preparing thread ends without handing anything over once
+            // `stopped` holds, which never stops holding, or when it
+            // panicked, which the scope then passes on; else `run` went on
+            // after a preparation that was an error.
+            let Ok(prepared) = receiver.recv() else {
+                if stopped() {
+                    break;
+                }
+                return Err("no mutant was prepared after a failed preparation".to_string());
+            };
+            run(item, prepared)?;
+        }
+        Ok(())
+    })
 }
 
 /// A source mutant: the point of its edit, `<file>:<line>:<column>` with
@@ -846,30 +919,45 @@ fn generated(
         ..List::default()
     };
     let (mut failed, work) = (Vec::new(), gate.work().join("mutants").join(&target.name));
-    for (index, point) in points.into_iter().enumerate() {
-        let file = point.point.split(':').next().unwrap_or_default();
-        let file = file
-            .strip_prefix(&format!("{}/", layout.kernel))
-            .unwrap_or(file);
-        let (find, replace, fails) = (&point.find, &point.replace, &fails[..]);
-        let work = work.join(index.to_string());
-        let judged = build(
-            gate,
-            target,
-            &unit,
-            &Mutation {
+    let (gate, mut judged) = (&*gate, BTreeMap::new());
+    let points = Vec::from_iter(points.into_iter().enumerate());
+    pipeline(
+        &points,
+        || false,
+        |(index, point)| {
+            let file = point.point.split(':').next().unwrap_or_default();
+            let file = file
+                .strip_prefix(&format!("{}/", layout.kernel))
+                .unwrap_or(file);
+            let (find, replace) = (&point.find, &point.replace);
+            let mutation = Mutation {
                 file,
                 find,
                 replace,
-                fails,
                 seed,
-            },
-            ranges,
-            &work,
-            true,
-        )?;
-        let _ = fs::remove_dir_all(&work);
-        match judged {
+            };
+            prepare(
+                gate,
+                target,
+                &unit,
+                &mutation,
+                &work.join(index.to_string()),
+                true,
+            )
+        },
+        |(index, _), ready| {
+            let told = judge(gate, target, &unit, &fails, ranges, ready?)?;
+            let _ = fs::remove_dir_all(work.join(index.to_string()));
+            judged.insert(*index, told);
+            Ok(())
+        },
+    )?;
+    for (index, point) in points {
+        let Some(told) = judged.remove(&index) else {
+            failed.push(format!("{}: it was not judged", point.point));
+            continue;
+        };
+        match told {
             Judged::Rejected => list.killed += 1,
             Judged::Survived(_) => list.survivors.push(point),
             Judged::Unbuildable => list.unbuildable += 1,
@@ -1027,6 +1115,8 @@ mod tests {
     //! tests of `lean.rs` describe; the runs are those of the fixture of the
     //! targets of `run.rs`.
 
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::time::Duration;
 
     use super::*;
@@ -1664,6 +1754,105 @@ mod tests { fn t() { let _ = 1 + 1; } }
             problems[0].starts_with(&format!("{path}: not a list of survivors: ")),
             "{problems:?}"
         );
+    }
+
+    #[test]
+    fn a_pipeline_stops_at_the_first_error_with_what_ran_so_far() {
+        let (never, ready) = (|| false, |_: &&str| Ok(()));
+        let (mut ran, prepared) = (Vec::new(), Mutex::new(Vec::new()));
+        let result = pipeline(&["a", "b", "c"], never, ready, |&name, _| {
+            ran.push(name);
+            match name {
+                "b" => Err(format!("{name}: No space left on device")),
+                _ => Ok(()),
+            }
+        });
+        assert_eq!(ran, ["a", "b"]);
+        assert_eq!(result, Err("b: No space left on device".to_string()));
+        // Every item runs in order when none fails, and no items run none.
+        let mut ran = Vec::new();
+        let result = pipeline(&["a", "c"], never, ready, |&name, _| {
+            ran.push(name);
+            Ok(())
+        });
+        assert_eq!((ran, result), (vec!["a", "c"], Ok(())));
+        assert_eq!(
+            pipeline(&[] as &[&str], never, ready, |_, _| Ok(())),
+            Ok(())
+        );
+        // A preparation that fails is handed over, and nothing after it is
+        // prepared.
+        let prepare = |&name: &&'static str| {
+            prepared.lock().expect("prepared").push(name);
+            (name != "b")
+                .then_some(())
+                .ok_or(format!("cannot copy {name}"))
+        };
+        let mut ran = Vec::new();
+        let result = pipeline(&["a", "b", "c"], never, prepare, |&name, ready| {
+            ran.push(name);
+            ready
+        });
+        assert_eq!(
+            (ran, result),
+            (vec!["a", "b"], Err("cannot copy b".to_string()))
+        );
+        assert_eq!(*prepared.lock().expect("prepared"), ["a", "b"]);
+        // A run that goes on after a preparation that failed does not end as
+        // if every item had run.
+        let mut ran = Vec::new();
+        let result = pipeline(&["a", "b", "c"], never, prepare, |&name, _| {
+            ran.push(name);
+            Ok(())
+        });
+        let none = "no mutant was prepared after a failed preparation".to_string();
+        assert_eq!((ran, result), (vec!["a", "b"], Err(none)));
+        // Once the run is told to stop, nothing more is prepared or run, and
+        // it ends without an error.
+        let stop = AtomicBool::new(false);
+        prepared.lock().expect("prepared").clear();
+        let record = |&name: &&'static str| {
+            prepared.lock().expect("prepared").push(name);
+            Ok::<_, String>(())
+        };
+        let mut ran = Vec::new();
+        let stopped = || stop.load(Ordering::SeqCst);
+        let result = pipeline(&["a", "b", "c"], stopped, record, |&name, _| {
+            ran.push(name);
+            stop.store(name == "a", Ordering::SeqCst);
+            Ok(())
+        });
+        assert_eq!((ran, result), (vec!["a"], Ok(())));
+        assert!(!prepared.lock().expect("prepared").contains(&"c"));
+        // It may be told to stop while it waits for the next preparation:
+        // the preparing thread then ends without one. That thread sets the
+        // flag only once the run has looked at it before the second item.
+        let (stop, looks, ahead) = (
+            AtomicBool::new(false),
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+        );
+        let run = std::thread::current().id();
+        let stopped = || {
+            if std::thread::current().id() == run {
+                let stopped = stop.load(Ordering::SeqCst);
+                looks.fetch_add(1, Ordering::SeqCst);
+                return stopped;
+            }
+            if ahead.fetch_add(1, Ordering::SeqCst) == 0 {
+                return false;
+            }
+            let looked = || looks.load(Ordering::SeqCst) == 2;
+            fixture::wait_until(looked, "the run never looked before the second item");
+            stop.store(true, Ordering::SeqCst);
+            true
+        };
+        let mut ran = Vec::new();
+        let result = pipeline(&["a", "b", "c"], stopped, ready, |&name, _| {
+            ran.push(name);
+            Ok(())
+        });
+        assert_eq!((ran, result), (vec!["a"], Ok(())));
     }
 
     #[test]

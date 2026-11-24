@@ -2465,7 +2465,7 @@ pub(crate) mod tests {
         let failing = fixture::failing("Krepi.Proofs.T", &[failed], 1);
         let mutant = |extra: &str| {
             format!(
-                "case $PWD in\n  */mutants/*) cat {olean} KrepiGen/T/Funs.lean >> \"$lake/seen\"\n\
+                "case $PWD in\n  */mutants/*) cat {olean} KrepiGen/T/Funs.lean > \"$lake/seen-$$\"\n\
                  {extra}{failing};;\n  \
                  *) mkdir -p \"$(dirname {olean})\" && echo 'target build' > {olean} ;;\nesac\n"
             )
@@ -2478,8 +2478,11 @@ pub(crate) mod tests {
             "{:?}",
             done.failures()
         );
-        let seen = fs::read_to_string(fixture.root().join("artifacts/lake/seen")).expect("seen");
-        assert_eq!(seen, "target build\n-- mutant\n".repeat(2));
+        let seen = fs::read_dir(fixture.root().join("artifacts/lake")).expect("the calls");
+        let seen = seen.map(|entry| entry.expect("a file").path());
+        let seen = seen.filter(|path| path.to_string_lossy().contains("/seen-"));
+        let seen = Vec::from_iter(seen.map(|path| fs::read_to_string(path).expect("seen")));
+        assert_eq!(seen, ["target build\n-- mutant\n"; 2]);
         let target = done.run.path.join("work/targets/t/stage/verification");
         let built = fs::read_to_string(target.join(olean)).expect("the build of the target");
         assert_eq!(built, "target build\n");
@@ -2499,6 +2502,17 @@ pub(crate) mod tests {
         assert!(
             reason.is_some_and(|reason| reason.starts_with(changed)),
             "{reason:?}"
+        );
+    }
+
+    /// Makes the stand-in `tool` of `fixture` run `script` after it passes.
+    fn after_tool(fixture: &Fixture, tool: &str, script: &str) {
+        let bin = fixture.root().join("artifacts/formal/tools/bin");
+        let stand_in = format!("{tool}-stand-in");
+        fs::rename(bin.join(tool), bin.join(&stand_in)).expect("rename");
+        fixture.tool(
+            tool,
+            &format!("\"$(dirname \"$0\")/{stand_in}\" \"$@\" || exit\n{script}\n"),
         );
     }
 
@@ -2609,6 +2623,72 @@ pub(crate) mod tests {
         }
         for unit in [target, mutant] {
             assert_eq!(fixture::status(&done, unit).0, Status::Budget);
+        }
+    }
+
+    #[test]
+    fn a_mutant_is_extracted_while_the_one_before_it_builds() {
+        let fixture = with_targets("pipeline", &two_targets(1_800, 2));
+        let next = "m1";
+        let extracted = fixture.root().join("artifacts/extracted");
+        let mark = format!(
+            "case $PWD in */mutants/{next}/*) touch {} ;; esac",
+            extracted.display()
+        );
+        after_tool(&fixture, "aeneas", &mark);
+        let failed = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
+        let failing = fixture::failing("Krepi.Proofs.T", &[failed], 1);
+        let wait = waits_for(&extracted);
+        let script = format!("case $PWD in */mutants/m0/*) {wait};; esac\n{failing}");
+        fixture::lake_script(
+            &fixture,
+            "+Krepi",
+            &format!("case $PWD in */mutants/*) {script};; esac\n"),
+        );
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(
+            done.receipt.status,
+            Status::Verified,
+            "{:?}",
+            done.failures()
+        );
+        let site = |unit: &str, site| {
+            fixture::commands(&done, unit)
+                .into_iter()
+                .find(|c| c.site == site)
+        };
+        let built = site("target/t/mutant/m0", Site::TargetBuild).expect("the build of m0");
+        let aeneas = site(&format!("target/t/mutant/{next}"), Site::Aeneas).expect("Aeneas");
+        assert!(
+            aeneas.started < built.started + built.seconds,
+            "{aeneas:?} {built:?}"
+        );
+    }
+
+    #[test]
+    fn a_mutant_whose_extraction_fails_is_not_built_and_the_run_is_not_verified() {
+        let fixture = with_targets("pipeline-failed", &two_targets(1_800, 3));
+        after_tool(
+            &fixture,
+            "aeneas",
+            "case $PWD in */mutants/m1/*) exit 1 ;; esac",
+        );
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(
+            done.receipt.status,
+            Status::Rejected,
+            "{:?}",
+            done.failures()
+        );
+        let (status, reason) = fixture::status(&done, "target/t/mutant/m1");
+        let inconclusive = "inconclusive, its extraction failed";
+        assert!(status == Status::Rejected && reason.is_some_and(|r| r.starts_with(inconclusive)));
+        let sites = fixture::commands(&done, "target/t/mutant/m1")
+            .into_iter()
+            .map(|c| c.site);
+        assert_eq!(Vec::from_iter(sites), [Site::Charon, Site::Aeneas]);
+        for unit in ["target/t", "target/t/mutant/m0", "target/t/mutant/m2"] {
+            assert_eq!(fixture::status(&done, unit), (Status::Verified, None));
         }
     }
 
