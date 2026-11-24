@@ -35,7 +35,8 @@ are not free.
   only values of a dynamic reservation other than its `status` and flags
   (`reserved_unread`).
 - The discoveries: `ramOfChild_move`, `reservedOfChild_move`,
-  `reservedMemory_move`, `discoverMemory_move` and `discoverCpus_move`.
+  `reservedMemory_move`, `discoverMemory_move`, `discoverBootMemory_move`
+  and `discoverCpus_move`.
 -/
 
 @[expose] public section
@@ -746,6 +747,19 @@ theorem discoverMemory_move (hwf : t.WellFormed) : t'.discoverMemory = t.discove
     rw [this, hr0]
   unfold Fdt.discoverMemory
   simp only [← hs.2.1, hr, hr', except_ok_bind, hfold, reservedMemory_move hs hwf hroot hrp]
+
+/-- The two trees give the same boot memory, with every hand-over profile. -/
+theorem discoverBootMemory_move (hwf : t.WellFormed) (handOver : HandOverProfile) (a : UInt64)
+    (image : Span) :
+    t'.discoverBootMemory handOver a image = t.discoverBootMemory handOver a image := by
+  obtain ⟨root, hroot, hrp, hr, -⟩ := root_facts hwf
+  have hr' : t'.findNode "/" = .ok (some (moveTo t' root)) := by
+    rw [(findNode_move hs "/").1, hr]
+    rfl
+  have hP := property_move_clean hs hroot (clean_root hroot hrp)
+  unfold Fdt.discoverBootMemory
+  simp only [← hs.1, hr, hr', except_ok_bind, addressCells_congr (hP _), sizeCells_congr (hP _),
+    hP, discoverMemory_move hs hwf]
 
 /-- The two trees give the same CPU topology. -/
 theorem discoverCpus_move (hwf : t.WellFormed) (profile : CpuProfile) :

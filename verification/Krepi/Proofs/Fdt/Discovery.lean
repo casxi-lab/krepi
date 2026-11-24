@@ -11,12 +11,11 @@ import Krepi.Proofs.Fdt.UnreadLemmas
 One theorem for each registered statement of `Krepi.SpecProperties.Fdt`
 about memory discovery and the boot memory, whose type is exactly that
 statement: that the memory map of a well-formed tree is well-formed, that a
-boot memory is consistent, and that the values that the discoveries
-leave unread do not reach their results.
+boot memory is consistent and holds the size limit and the alignment of its
+hand-over profile, and that the values that the discoveries leave unread do
+not reach their results.
 
-`DiscoverMemoryWellFormed` is proved; the other three theorems are planned:
-each proof is `sorry` until a proof pull request proves it. The proofs come
-from the lemmas of
+Every theorem here is proved, from the lemmas of
 `Krepi.Proofs.Fdt.DiscoveryLemmas` (the steps of a successful discovery)
 and `Krepi.Proofs.Fdt.UnreadLemmas` (the nodes of a tree that differs only
 in unread values give the same results). Mathlib is imported so that the
@@ -38,13 +37,16 @@ public theorem discoverMemoryWellFormed : DiscoverMemoryWellFormed := by
   rw [hdyn, UInt64.toNat_ofNat_of_lt' (by omega)]
   omega
 
-public theorem discoverBootMemoryWellFormed : DiscoverBootMemoryWellFormed := by
-  sorry
+public theorem discoverBootMemoryWellFormed : DiscoverBootMemoryWellFormed :=
+  fun t _ _ _ m ht h => discoverMemoryWellFormed t m.memory ht (discoverBootMemory_ok h).1
 
-public theorem discoverBootMemoryConsistent : DiscoverBootMemoryConsistent := by
-  sorry
+public theorem discoverBootMemoryConsistent : DiscoverBootMemoryConsistent :=
+  fun _ _ _ _ _ h => (discoverBootMemory_ok h).2
 
 public theorem unreadValuesIgnored : UnreadValuesIgnored := by
-  sorry
+  intro t t' hwf hs
+  exact ⟨(discoverMemory_move hs hwf).symm,
+    fun handOver a image => (discoverBootMemory_move hs hwf handOver a image).symm,
+    fun profile => (discoverCpus_move hs hwf profile).symm⟩
 
 end Krepi.Proofs.Fdt.Discovery

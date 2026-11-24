@@ -27,7 +27,9 @@ unreached:
   runs out (`climbRanges_fuel`);
 - a translation through windows whose target sides have the sizes of their
   source sides and end within 64 bits never fails with `Overflow`
-  (`throughWindows_noov`).
+  (`throughWindows_noov`);
+- the search of one RAM range runs out of fuel only with fewer steps than
+  exclusions that end past its cursor (`searchRange_fuel`).
 -/
 
 @[expose] public section
@@ -192,6 +194,44 @@ theorem throughWindows_noov {req : Span} {src tgt : Window → Span} :
     have hst2 : (UInt64.ofNat st).toNat = st := UInt64.toNat_ofNat_of_lt' (by omega)
     refine errsIn_bind (errsIn_of_ok (span_new_ok.2 ⟨?_, rfl⟩)) fun s' _ => ih _
     rw [hst2]
+    omega
+
+/-! ## The selection of the boot memory -/
+
+/-- The search of one RAM range with more fuel than the exclusions that end
+past its cursor never runs out of fuel: each next candidate lies past every
+exclusion that the candidate before it touched. -/
+theorem searchRange_fuel {m : BootMemory} {size al bound : Nat} (hal : 0 < al) :
+    ∀ fuel c, m.exclusions.countP (fun x => decide (c < x.endNat)) < fuel →
+      ErrsIn (· ≠ .limitExceeded) (m.searchRange size al bound fuel c)
+  | 0, _, h => absurd h (Nat.not_lt_zero _)
+  | fuel + 1, c, h => by
+    rw [BootMemory.searchRange]
+    refine errsIn_ite (fun _ => errsIn_ok _) fun hfit => ?_
+    refine errsIn_ite (fun _ => errsIn_ok _) fun hne => ?_
+    refine errsIn_bind (errsIn_sub (alignUp_errs _ _) (by decide)) fun next hnext => ?_
+    refine searchRange_fuel hal fuel next ?_
+    simp only [Bool.or_eq_true, decide_eq_true_eq, not_or, Nat.not_le, Nat.not_lt] at hfit
+    generalize htd : m.exclusions.filter
+      (·.touches ⟨UInt64.ofNat c, UInt64.ofNat size⟩) = touched at hne hnext
+    obtain ⟨-, hall, -⟩ := foldl_max_spec Span.endNat touched 0
+    obtain ⟨hE, -, -, -⟩ := alignUp_ok hal hnext
+    obtain ⟨y, hy⟩ : ∃ y, y ∈ touched := by
+      cases h' : touched with
+      | nil => rw [h'] at hne; simp at hne
+      | cons y _ => exact ⟨y, List.mem_cons_self⟩
+    obtain ⟨hcs, -, hce⟩ := cand_toNat (t := c) (size := size) (by omega)
+    have hlt : ∀ x ∈ touched, c < x.endNat ∧ x.endNat ≤ next := by
+      intro x hx
+      have hxt := (List.mem_filter.1 (htd ▸ hx)).2
+      rw [touches_iff, hcs, hce] at hxt
+      exact ⟨hxt.2.2.2, Nat.le_trans (hall x hx) hE⟩
+    have hyc := hlt y hy
+    have hcnt := countP_lt (l := m.exclusions) (p := fun x => decide (next < x.endNat))
+      (q := fun x => decide (c < x.endNat))
+      (fun x _ hx => by simp only [decide_eq_true_eq] at hx ⊢; omega)
+      ⟨y, (List.mem_filter.1 (htd ▸ hy)).1, by simp only [decide_eq_true_eq]; omega,
+        by simp only [decide_eq_false_iff_not]; omega⟩
     omega
 
 end Krepi.Proofs.Fdt

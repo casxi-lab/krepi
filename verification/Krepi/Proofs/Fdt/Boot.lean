@@ -3,6 +3,7 @@ module
 public import Krepi.SpecProperties.Fdt.Invariants
 import Mathlib.Util.CountHeartbeats
 import Krepi.Proofs.Fdt.Plan
+import Krepi.Proofs.Fdt.BootMemory
 
 /-!
 # Device tree: proofs about the boot state
@@ -12,16 +13,16 @@ about the boot state, whose type is exactly that statement: that the cold
 entry establishes the invariants of the boot state and that each of its
 transactions preserves them.
 
-Every theorem here is planned: its proof is `sorry` until a proof pull
-request proves it, from the lemmas below. The cold entry publishes nothing, so each
+Every theorem here is proved. The cold entry publishes nothing, so each
 invariant holds of it trivially. An enabled transaction changes one field
-and keeps the hand-over bytes: the publication of the boot memory map
-publishes a map that its entry built, well-formed by the well-formedness
-theorems of the entries (`Krepi.Proofs.Fdt.Plan`); the publication of the
-topology publishes the topology that `Fdt::discover_cpus` gave for the tree
-of the hand-over bytes; and the start of the secondary CPUs is enabled only
-once both fields are published. Mathlib is imported so that the gate counts
-the heartbeats of each theorem.
+and keeps the hand-over bytes (`publishPlan_ok`, `publishTopology_ok`,
+`startSecondaries_ok`): the publication of the boot memory map publishes a
+map that its entry built, well-formed by the well-formedness theorems of the
+entries (`Krepi.Proofs.Fdt.Plan`, `Krepi.Proofs.Fdt.BootMemory`); the
+publication of the topology publishes the topology that `Fdt::discover_cpus`
+gave for the tree of the hand-over bytes; and the start of the secondary
+CPUs is enabled only once both fields are published. Mathlib is imported so
+that the gate counts the heartbeats of each theorem.
 -/
 
 namespace Krepi.Proofs.Fdt.Boot
@@ -80,39 +81,73 @@ theorem startSecondaries_ok {token : BootToken} {s s' : BootState}
     exact ⟨hc.1.2, hc.2, h.symm⟩
 
 public theorem coldEntryWellFormed : ColdEntryWellFormed := by
-  sorry
+  intro _ _ p hp
+  simp [BootState.coldEntry] at hp
 
 public theorem coldEntryFromHandOver : ColdEntryFromHandOver := by
-  sorry
+  intro _ _ t ht
+  simp [BootState.coldEntry] at ht
 
 public theorem coldEntryStartOrder : ColdEntryStartOrder := by
-  sorry
+  intro _ _ h
+  simp [BootState.coldEntry] at h
 
 public theorem publishPlanFromHandOver : PublishPlanFromHandOver := by
-  sorry
+  intro _ s _ s' hs h
+  obtain ⟨_, p, _, rfl⟩ := publishPlan_ok h
+  exact hs
 
 public theorem publishPlanStartOrder : PublishPlanStartOrder := by
-  sorry
+  intro _ s _ s' _ h
+  obtain ⟨hsec, p, _, rfl⟩ := publishPlan_ok h
+  intro h'
+  exact absurd (hsec ▸ h') (by simp)
 
 public theorem publishTopologyFromHandOver : PublishTopologyFromHandOver := by
-  sorry
+  intro _ s profile s' _ h
+  obtain ⟨_, t, ht, rfl⟩ := publishTopology_ok h
+  intro t' ht'
+  simp only [Option.some.injEq] at ht'
+  subst ht'
+  exact ⟨profile, ht⟩
 
 public theorem publishTopologyStartOrder : PublishTopologyStartOrder := by
-  sorry
+  intro _ s _ s' _ h
+  obtain ⟨hsec, t, _, rfl⟩ := publishTopology_ok h
+  intro h'
+  exact absurd (hsec ▸ h') (by simp)
 
 public theorem startSecondariesFromHandOver : StartSecondariesFromHandOver := by
-  sorry
+  intro _ s s' hs h
+  obtain ⟨_, _, rfl⟩ := startSecondaries_ok h
+  exact hs
 
 public theorem startSecondariesStartOrder : StartSecondariesStartOrder := by
-  sorry
+  intro _ s s' _ h
+  obtain ⟨hp, ht, rfl⟩ := startSecondaries_ok h
+  exact fun _ => ⟨hp, ht⟩
 
 public theorem publishPlanWellFormed : PublishPlanWellFormed := by
-  sorry
+  intro _ s build s' _ h
+  obtain ⟨_, p, hp, rfl⟩ := publishPlan_ok h
+  intro q hq
+  simp only [Option.some.injEq] at hq
+  subst hq
+  cases build with
+  | allRam ram boot firmware => exact Plan.allRamWellFormed ram boot firmware _ hp
+  | new window ram boot firmware =>
+    exact Plan.memoryPlanNewWellFormed window ram boot firmware _ hp
+  | fromBootMemory memory window more =>
+    exact BootMemory.fromBootMemoryWellFormed memory window more _ hp
 
 public theorem publishTopologyWellFormed : PublishTopologyWellFormed := by
-  sorry
+  intro _ s _ s' hs h
+  obtain ⟨_, t, _, rfl⟩ := publishTopology_ok h
+  exact hs
 
 public theorem startSecondariesWellFormed : StartSecondariesWellFormed := by
-  sorry
+  intro _ s s' hs h
+  obtain ⟨_, _, rfl⟩ := startSecondaries_ok h
+  exact hs
 
 end Krepi.Proofs.Fdt.Boot

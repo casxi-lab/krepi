@@ -15,8 +15,7 @@ about duplicates and ambiguities, whose type is exactly that statement: that
 where an entry looks for one item and finds two, it rejects the input and
 never picks one.
 
-The theorem is planned: its proof is `sorry` until a proof pull request
-proves it, from these lemmas. The paths: the components of the path of a
+Every theorem here is proved. The paths: the components of the path of a
 node lead from the root to it (`Krepi.Proofs.Fdt.PathLemmas`), so two nodes
 of one path make the walk of the lookup meet two children of one name, and a
 node that it finds is the node of its path (`paths_unique`). The CPU nodes,
@@ -77,6 +76,20 @@ theorem paths_unique (t : Fdt) (ht : t.WellFormed) :
       rw [descend_found hr h]
 
 public theorem noChoiceAmongDuplicates : NoChoiceAmongDuplicates := by
-  sorry
+  refine ⟨paths_unique, cpus_distinct_regs, ram_spans, ?_⟩
+  intro ram boot firmware p h
+  unfold MemoryPlan.allRam at h
+  obtain ⟨-, h⟩ := except_jp_ok h
+  obtain ⟨banks0, hb0, h⟩ := except_bind_ok.1 h
+  obtain ⟨⟨_, _⟩, -, h⟩ := except_bind_ok.1 h
+  obtain ⟨-, h⟩ := except_jp_ok h
+  obtain ⟨_, -, h⟩ := except_bind_ok.1 h
+  obtain ⟨_, -, h⟩ := except_bind_ok.1 h
+  rw [except_pure_ok] at h
+  subst h
+  obtain ⟨hb0eq, -, -⟩ := addBank_fold ram [] banks0 hb0 List.Pairwise.nil
+  simp only [List.nil_append] at hb0eq
+  subst hb0eq
+  exact sortByStart_perm _
 
 end Krepi.Proofs.Fdt.Duplicates
