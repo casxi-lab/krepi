@@ -16,9 +16,7 @@ module does not prove itself, whose type is exactly that proposition: for
 each error branch that no input of its entry reaches, that the entry never
 takes it.
 
-Every theorem here is proved but `cpuRegNoUnsupportedCells`, which is
-planned: its proof is `sorry` until a proof pull request proves it. The
-proofs evaluate no entry: the errors that
+Every theorem here is proved, without evaluating any entry: the errors that
 an entry can give are followed through its steps
 (`Krepi.Proofs.Fdt.ErrorSets`), and the bounds of fuel and of sums come from
 `Krepi.Proofs.Fdt.BoundLemmas`. Mathlib is imported so that the gate counts
@@ -89,7 +87,12 @@ public theorem windowTranslationNoOverflow : WindowTranslationNoOverflow := by
     exact ⟨hsz, hwx.1⟩
 
 public theorem cpuRegNoUnsupportedCells : CpuRegNoUnsupportedCells := by
-  sorry
+  intro profile cells ids n hc
+  have h2 : cells.toNat ≤ 2 := by rcases hc with rfl | rfl <;> decide
+  refine ne_of_errsIn (P := (· ≠ .unsupportedCells)) ?_ (fun h => h rfl)
+  unfold cpuOfChild
+  errs_auto
+  all_goals exact errsIn_sub (cellsU64_small _ h2) (by decide)
 
 public theorem findAvailableNoLimitExceeded : FindAvailableNoLimitExceeded := by
   intro m size alignment minimum limit

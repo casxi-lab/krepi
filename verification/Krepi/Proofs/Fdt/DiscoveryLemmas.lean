@@ -32,7 +32,9 @@ about the memory map, the boot memory and the CPU nodes.
   hand-over profile).
 - The CPU nodes: `IsCpu`, `cpuOfChild_ok` and `cpuOfChild_fold` (no two CPU
   nodes of an accepted `/cpus` have one `reg`), `pairwise_mem_ne` and
-  `cpus_distinct_regs`.
+  `cpus_distinct_regs`; `discoverCpus_ok` (a topology holds the profile that
+  the discovery was given and the number of IDs that `idsComplete`
+  accepts).
 -/
 
 @[expose] public section
@@ -490,6 +492,33 @@ theorem pairwise_mem_ne {α : Type} {R : α → α → Prop} : ∀ {l : List α}
     · exact Or.inl (ha1 ▸ h.1 _ hb1)
     · exact Or.inr (hb1 ▸ h.1 _ ha1)
     · exact pairwise_mem_ne h.2 ha1 hb1 hab
+
+/-- A topology of `Fdt::discover_cpus` holds the profile that it was given
+and the number of a set of IDs that `idsComplete` accepts. -/
+theorem discoverCpus_ok {t : Fdt} {profile : CpuProfile} {topology : CpuTopology}
+    (h : t.discoverCpus profile = .ok topology) :
+    ∃ ids, idsComplete profile ids = true ∧ topology = ⟨profile, UInt64.ofNat ids.length⟩ := by
+  unfold Fdt.discoverCpus at h
+  obtain ⟨_, _, h⟩ := except_bind_ok.1 h
+  split at h
+  · obtain ⟨_, _, h⟩ := except_bind_ok.1 h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    obtain ⟨_, _, h⟩ := except_bind_ok.1 h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    obtain ⟨_, _, h⟩ := except_bind_ok.1 h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    obtain ⟨ids, _, h⟩ := except_bind_ok.1 h
+    obtain ⟨hids, h⟩ := except_jp_ok h
+    obtain ⟨_, _, h⟩ := except_bind_ok.1 h
+    split at h
+    · obtain ⟨_, _, h⟩ := except_bind_ok.1 h
+      obtain ⟨-, h⟩ := except_jp_ok h
+      obtain ⟨_, _, h⟩ := except_bind_ok.1 h
+      obtain ⟨-, h⟩ := except_jp_ok h
+      obtain ⟨-, h⟩ := except_jp_ok h
+      exact ⟨ids, by simpa using hids, (except_pure_ok.1 h).symm⟩
+    · exact absurd h (except_throw_ne _ _)
+  · exact absurd h (except_throw_ne _ _)
 
 /-- No two CPU nodes of an accepted `/cpus` have one `reg`. -/
 theorem cpus_distinct_regs :

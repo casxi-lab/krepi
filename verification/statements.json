@@ -36,7 +36,7 @@
       "name": "Krepi.SpecProperties.Fdt.CheckCpuTopologySupported",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkCpuTopologySupported",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckMemoryPlanWellFormed",
@@ -48,19 +48,19 @@
       "name": "Krepi.SpecProperties.Fdt.CheckBootStateWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkBootStateWellFormed",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckBootStateFromHandOver",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkBootStateFromHandOver",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.CheckBootStateStartOrder",
       "theorem": "Krepi.Proofs.Fdt.Checks.checkBootStateStartOrder",
       "module": "Krepi.Proofs.Fdt.Checks",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.ParseWellFormed",
@@ -162,7 +162,7 @@
       "name": "Krepi.SpecProperties.Fdt.UnreadValuesIgnored",
       "theorem": "Krepi.Proofs.Fdt.Discovery.unreadValuesIgnored",
       "module": "Krepi.Proofs.Fdt.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.FindAvailableWellFormed",
@@ -180,13 +180,13 @@
       "name": "Krepi.SpecProperties.Fdt.DiscoverCpusSupported",
       "theorem": "Krepi.Proofs.Fdt.Cpus.discoverCpusSupported",
       "module": "Krepi.Proofs.Fdt.Cpus",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.AffinityRoundTrip",
       "theorem": "Krepi.Proofs.Fdt.Cpus.affinityRoundTrip",
       "module": "Krepi.Proofs.Fdt.Cpus",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.AllRamWellFormed",
@@ -222,79 +222,79 @@
       "name": "Krepi.SpecProperties.Fdt.ColdEntryWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Boot.coldEntryWellFormed",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.ColdEntryFromHandOver",
       "theorem": "Krepi.Proofs.Fdt.Boot.coldEntryFromHandOver",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.ColdEntryStartOrder",
       "theorem": "Krepi.Proofs.Fdt.Boot.coldEntryStartOrder",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PublishPlanFromHandOver",
       "theorem": "Krepi.Proofs.Fdt.Boot.publishPlanFromHandOver",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PublishPlanStartOrder",
       "theorem": "Krepi.Proofs.Fdt.Boot.publishPlanStartOrder",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PublishTopologyFromHandOver",
       "theorem": "Krepi.Proofs.Fdt.Boot.publishTopologyFromHandOver",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PublishTopologyStartOrder",
       "theorem": "Krepi.Proofs.Fdt.Boot.publishTopologyStartOrder",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.StartSecondariesFromHandOver",
       "theorem": "Krepi.Proofs.Fdt.Boot.startSecondariesFromHandOver",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.StartSecondariesStartOrder",
       "theorem": "Krepi.Proofs.Fdt.Boot.startSecondariesStartOrder",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PublishPlanWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Boot.publishPlanWellFormed",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.PublishTopologyWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Boot.publishTopologyWellFormed",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.StartSecondariesWellFormed",
       "theorem": "Krepi.Proofs.Fdt.Boot.startSecondariesWellFormed",
       "module": "Krepi.Proofs.Fdt.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.Fdt.NoChoiceAmongDuplicates",
       "theorem": "Krepi.Proofs.Fdt.Duplicates.noChoiceAmongDuplicates",
       "module": "Krepi.Proofs.Fdt.Duplicates",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.ParseAcceptsNameAtLimit",
@@ -384,13 +384,13 @@
       "name": "Krepi.SpecTests.Fdt.CpusAcceptsQemuPair",
       "theorem": "Krepi.Proofs.Fdt.Stp.cpusAcceptsQemuPair",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.CpusRejectsRepeatedId",
       "theorem": "Krepi.Proofs.Fdt.Stp.cpusRejectsRepeatedId",
       "module": "Krepi.Proofs.Fdt.Stp",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecTests.Fdt.TranslateRegThroughBus",
@@ -480,7 +480,7 @@
       "name": "Krepi.Spec.Fdt.Witnesses.CpuRegNoUnsupportedCells",
       "theorem": "Krepi.Proofs.Fdt.Witnesses.cpuRegNoUnsupportedCells",
       "module": "Krepi.Proofs.Fdt.Witnesses",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Spec.Fdt.Witnesses.FindAvailableNoLimitExceeded",

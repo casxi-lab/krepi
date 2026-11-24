@@ -16,16 +16,15 @@ FDT-R10, the input that the specification accepts with its result and the
 input that it rejects with its error.
 
 Every theorem here is proved, and `verification/statements.json` registers
-each as `proved`, but those of FDT-R08, which are planned: each proof is
-`sorry` until a proof pull request proves it. The tests are decided by the
-kernel on their concrete inputs. The tests that parse a tree that `Builder`
-finishes without overwrites rewrite the parse into the walk of its structure
-block first (`parse_fast` of `Krepi.Proofs.Fdt.StpLemmas`), so that no
-decision copies a whole tree; the small trees of FDT-R01 are decided on their
-bytes. These tests are proved in `Krepi.Proofs.Fdt.StpParse`,
-`Krepi.Proofs.Fdt.StpMemory` and `Krepi.Proofs.Fdt.StpPi5`, which keeps each
-module quick to build, and restated here. Mathlib is imported so that the gate
-counts the heartbeats of each theorem.
+each as `proved`. The tests are decided by the kernel on their concrete
+inputs. The tests that parse a tree that `Builder` finishes without
+overwrites rewrite the parse into the walk of its structure block first
+(`parse_fast` of `Krepi.Proofs.Fdt.StpLemmas`), so that no decision copies a
+whole tree; the small trees of FDT-R01 are decided on their bytes. These
+tests are proved in `Krepi.Proofs.Fdt.StpParse`, `Krepi.Proofs.Fdt.StpMemory`
+and `Krepi.Proofs.Fdt.StpPi5`, which keeps each module quick to build, and
+restated here. Mathlib is imported so that the gate counts the heartbeats of
+each theorem.
 -/
 
 namespace Krepi.Proofs.Fdt.Stp
@@ -93,10 +92,10 @@ public theorem allRamRejectsExcessBootStorage : AllRamRejectsExcessBootStorage :
 /-! ## FDT-R08 -/
 
 public theorem cpusAcceptsQemuPair : CpusAcceptsQemuPair := by
-  sorry
+  unfold CpusAcceptsQemuPair cpusTree; rw [parse_fast0]; decide +kernel
 
 public theorem cpusRejectsRepeatedId : CpusRejectsRepeatedId := by
-  sorry
+  unfold CpusRejectsRepeatedId cpusTree; rw [parse_fast0]; decide +kernel
 
 /-! ## FDT-R09 -/
 

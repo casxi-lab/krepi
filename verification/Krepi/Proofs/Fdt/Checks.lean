@@ -2,7 +2,9 @@ module
 
 public import Krepi.SpecProperties.Fdt.Invariants
 import Mathlib.Util.CountHeartbeats
+import Krepi.Proofs.Fdt.ExceptLemmas
 import Krepi.Proofs.Fdt.SpanLemmas
+import Krepi.Proofs.Fdt.DiscoveryLemmas
 
 /-!
 # Device tree: proofs about the checks of the invariants
@@ -11,14 +13,15 @@ One theorem for each registered statement of `Krepi.SpecProperties.Fdt`
 about the checks of the invariants, whose type is exactly that statement:
 that each computable check agrees with its invariant on every value.
 
-The theorems of `CheckCpuTopologySupported` and the three checks of the boot
-state are planned: each proof is `sorry` until a proof pull request proves
-it. The others are proved by rewriting
-each conjunct of a check into the conjunct of its invariant: the checks of
-spans and of pairs with the lemmas of `Krepi.Proofs.Fdt.SpanLemmas`
-(`nonempty_iff`, `onPages_iff`, `withinWidth_iff`, `allPairs_iff`), and the
-checks of the nodes of a tree one index at a time (`checkNode_iff`). Mathlib
-is imported so that the gate counts the heartbeats of each theorem.
+Every theorem here is proved, by rewriting each conjunct of a check into the
+conjunct of its invariant: the checks of spans and of pairs with the lemmas
+of `Krepi.Proofs.Fdt.SpanLemmas` (`nonempty_iff`, `onPages_iff`,
+`withinWidth_iff`, `allPairs_iff`), the checks of the nodes of a tree one
+index at a time (`checkNode_iff`), and the check of the topology of the
+hand-over with the profile that the topology holds, which is the profile of
+the discovery that built it (`discoverCpus_ok` of
+`Krepi.Proofs.Fdt.DiscoveryLemmas`). Mathlib is imported so that the gate
+counts the heartbeats of each theorem.
 -/
 
 namespace Krepi.Proofs.Fdt.Checks
@@ -79,7 +82,18 @@ public theorem checkBootMemoryConsistent : CheckBootMemoryConsistent := by
   simp [nonempty_iff, and_assoc]
 
 public theorem checkCpuTopologySupported : CheckCpuTopologySupported := by
-  sorry
+  intro t
+  unfold CpuTopology.checkSupported CpuTopology.Supported CpuProfile.allows
+  simp only [Bool.and_eq_true, bne_iff_ne, ne_eq, decide_eq_true_eq, UInt64.le_iff_toNat_le,
+    and_assoc]
+  have h1 : (1 : UInt64).toNat = 1 := rfl
+  have h4 : (4 : UInt64).toNat = 4 := rfl
+  rw [h1, h4]
+  constructor
+  · rintro ⟨h0, hle, hb⟩
+    exact ⟨by omega, hle, hb⟩
+  · rintro ⟨h0, hle, hb⟩
+    exact ⟨by omega, hle, hb⟩
 
 public theorem checkMemoryPlanWellFormed : CheckMemoryPlanWellFormed := by
   intro p
@@ -87,12 +101,34 @@ public theorem checkMemoryPlanWellFormed : CheckMemoryPlanWellFormed := by
   simp [nonempty_iff, onPages_iff, allPairs_iff, and_assoc]
 
 public theorem checkBootStateWellFormed : CheckBootStateWellFormed := by
-  sorry
+  intro s
+  unfold BootState.checkWellFormed BootState.WellFormed
+  cases s.plan with
+  | none => simp
+  | some p => simpa using checkMemoryPlanWellFormed p
 
 public theorem checkBootStateFromHandOver : CheckBootStateFromHandOver := by
-  sorry
+  intro s
+  unfold BootState.checkFromHandOver BootState.FromHandOver
+  cases s.topology with
+  | none => simp
+  | some t =>
+    simp only [Option.some.injEq, forall_eq']
+    constructor
+    · intro h
+      refine ⟨t.profile, ?_⟩
+      generalize s.tree.bind (fun f => f.discoverCpus t.profile) = x at h
+      cases x <;> simp_all
+    · rintro ⟨profile, h⟩
+      obtain ⟨_, -, hd⟩ := except_bind_ok.1 h
+      obtain ⟨_, -, rfl⟩ := discoverCpus_ok hd
+      dsimp only
+      rw [h]
+      simp
 
 public theorem checkBootStateStartOrder : CheckBootStateStartOrder := by
-  sorry
+  intro s
+  unfold BootState.checkStartOrder BootState.StartOrder
+  cases s.secondaries <;> simp
 
 end Krepi.Proofs.Fdt.Checks

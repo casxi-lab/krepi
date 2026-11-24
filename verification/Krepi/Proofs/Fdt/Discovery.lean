@@ -14,12 +14,11 @@ statement: that the memory map of a well-formed tree is well-formed, that a
 boot memory is consistent, and that the values that the discoveries
 leave unread do not reach their results.
 
-`UnreadValuesIgnored` is planned: its proof is `sorry` until a proof pull
-request proves it, with the lemmas of `Krepi.Proofs.Fdt.UnreadLemmas` (the
-nodes of a tree that differs only in unread values give the same results).
-The other three theorems are proved, from the lemmas of
-`Krepi.Proofs.Fdt.DiscoveryLemmas` (the steps of a successful discovery).
-Mathlib is imported so that the gate counts the heartbeats of each theorem.
+Every theorem here is proved, from the lemmas of
+`Krepi.Proofs.Fdt.DiscoveryLemmas` (the steps of a successful discovery)
+and `Krepi.Proofs.Fdt.UnreadLemmas` (the nodes of a tree that differs only
+in unread values give the same results). Mathlib is imported so that the
+gate counts the heartbeats of each theorem.
 -/
 
 namespace Krepi.Proofs.Fdt.Discovery
@@ -44,6 +43,9 @@ public theorem discoverBootMemoryConsistent : DiscoverBootMemoryConsistent :=
   fun _ _ _ _ _ h => (discoverBootMemory_ok h).2
 
 public theorem unreadValuesIgnored : UnreadValuesIgnored := by
-  sorry
+  intro t t' hwf hs
+  exact ⟨(discoverMemory_move hs hwf).symm,
+    fun handOver a image => (discoverBootMemory_move hs hwf handOver a image).symm,
+    fun profile => (discoverCpus_move hs hwf profile).symm⟩
 
 end Krepi.Proofs.Fdt.Discovery
