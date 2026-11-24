@@ -266,9 +266,9 @@ error order.
 
 - **The profile.** `HandOverProfile` holds the limit `maxBlobSize`, the
   exponent `alignmentLog2` of the alignment and the bytes `compatible`;
-  `requiredEntries` gives the nonempty pieces of those bytes between their
-  NUL bytes, the entries that the root `compatible` must hold. Every value
-  of the fields is a profile.
+  `requiredEntries` gives the nonempty pieces of those bytes split at each
+  NUL byte, the first and the last included: the entries that the root
+  `compatible` must hold. Every value of the fields is a profile.
 - **The value.** `BootMemory` holds the memory map of the tree, the span
   of the tree, the span of the image and the sum of the RAM ranges, which
   `BootMemory::dtb`, `image` and `ram_bytes` give, and the limit and the
