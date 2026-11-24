@@ -202,8 +202,8 @@
     },
     {
       "name": "Krepi.SpecProperties.Fdt.FromBootMemoryWellFormed",
-      "theorem": "Krepi.Proofs.Fdt.Plan.fromBootMemoryWellFormed",
-      "module": "Krepi.Proofs.Fdt.Plan",
+      "theorem": "Krepi.Proofs.Fdt.BootMemory.fromBootMemoryWellFormed",
+      "module": "Krepi.Proofs.Fdt.BootMemory",
       "state": "planned"
     },
     {
