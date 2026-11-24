@@ -1433,10 +1433,10 @@ def DiscoverBootMemoryNoBadTree : Prop :=
     t.discoverBootMemory handOver dtbAddress image ≠ .error .badTree
 
 /-- **Planned.** The sum of the RAM ranges of a memory discovery fits in 64
-bits, so the Pi 5 discovery never fails with `Overflow` at that sum: the
-ranges are disjoint spans that end within 64 bits. The discovery adds them
-one at a time with `checkedAdd`, and each partial sum is at most the sum of
-all of them, which this bounds, so no addition fails. -/
+bits, so the discovery of the boot memory never fails with `Overflow` at that
+sum: the ranges are disjoint spans that end within 64 bits. The discovery adds
+them one at a time with `checkedAdd`, and each partial sum is at most the sum
+of all of them, which this bounds, so no addition fails. -/
 def RamBytesFit : Prop :=
   ∀ (t : Fdt) (m : MemoryMap), t.discoverMemory = .ok m → spansBytes m.ram < 2 ^ 64
 

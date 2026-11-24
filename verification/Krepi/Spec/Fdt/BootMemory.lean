@@ -39,10 +39,12 @@ namespace Krepi.Spec.Fdt
 
 /-- `HandOverProfile`, what a board requires of its hand-over tree: the
 largest `totalsize` (`max_blob_size`); the alignment of the address of the
-tree, `2 ^ alignment_log2` bytes, so that every value is a power of two; and
-the entries that the root `compatible` must hold (`compatible`), the pieces
-of its bytes between NUL bytes, of which the empty ones require nothing.
-Every value is a profile, with the behaviour that these rules give it. -/
+tree, `2 ^ alignment_log2` bytes, so that every value is a power of two, which
+only the address 0 meets from an exponent of 64 up; and the entries that the
+root `compatible` must hold (`compatible`), the pieces of its bytes split at
+each NUL, the first and the last piece included, of which the empty ones
+require nothing and one that is not UTF-8 matches no entry. Every value is a
+profile, with the behaviour that these rules give it. -/
 structure HandOverProfile where
   maxBlobSize : UInt64
   alignmentLog2 : UInt8
@@ -77,7 +79,9 @@ def BootMemory.dynamic (m : BootMemory) : UInt64 := m.memory.dynamic
 
 /-! ## The root `compatible` -/
 
-/-- The pieces of a byte string between its NUL bytes. -/
+/-- The pieces of a byte string split at each NUL byte: the piece before the
+first NUL, those between two NULs and the piece after the last; a string
+without a NUL is one piece. -/
 def splitAtNul : List UInt8 → List (List UInt8)
   | [] => [[]]
   | b :: rest =>
@@ -98,7 +102,7 @@ def compatibleEntries : List (List UInt8) → Except Error (List String)
       pure (s :: more)
 
 /-- The entries that a profile requires of the root `compatible`: the
-nonempty pieces of `required` between its NUL bytes. -/
+nonempty pieces of `required` split at its NUL bytes. -/
 def requiredEntries (required : ByteArray) : List (List UInt8) :=
   (splitAtNul required.toList).filter (· != [])
 
