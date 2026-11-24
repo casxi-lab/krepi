@@ -1456,6 +1456,8 @@ In the tests of `cargo xtask formal run`, a fake tool that hangs gets a
 limit of 1 s, which only decides that it is stopped, and any other fake
 tool a limit of 3,600 s. A fake tool that hangs sleeps for 30 s, and so does
 a process that a test leaves behind in the group of a command that ends.
+A fake tool, or a test, that waits for another command waits at most 60 s,
+which only a failing test reaches.
 The test of a stop signal waits at most 120 s for the gate that it starts
 to reach its two commands, which only a failing test reaches, and 60 s for
 the group of each to be gone; those commands sleep for 240 s. The test of

@@ -929,8 +929,9 @@ command wrote is kept. Its limit is the smallest of:
   budgets of its targets for the shard of a target and for a run of
   `cargo xtask formal run --target` ([shards and merge](#shards-and-merge));
 - for a command of the unit of a target, the rest of the budget of the
-  target: the budget less the seconds of the earlier commands of the unit,
-  whichever phase ran them.
+  target: the budget less the time during which a command of the unit or
+  of a unit of its mutants has run so far, whichever phase ran it
+  ([proof targets](#proof-targets)).
 
 The steps after the phases, the second snapshot, the removal of the work
 directory and the receipt, have 300 s beyond the gate's budget. A command
@@ -1004,10 +1005,11 @@ target is no shard. The shard limit is 3,300 s: the wall-clock limit of the
 gate, 3,600 s, less the time of the merge, 300 s. `cargo xtask formal check`
 refuses a shard whose registered budget is more than the shard limit,
 whatever the workers of the shard, in either layout
-([proof targets](#proof-targets)): the run of a shard has a deadline of
-300 s and that budget from its start. A shard has one worker, which builds
-the mutants of its target one after another, each in a stage of its own
-that starts from the build of its target
+([proof targets](#proof-targets)): the budget counts the time during which
+a command of its target runs, whichever worker runs it, and the run of a
+shard has a deadline of 300 s and that budget from its start. A shard has
+one worker, which builds the mutants of its target one after another,
+each in a stage of its own that starts from the build of its target
 ([registered mutants](#registered-mutants)): on a standard
 `ubuntu-24.04-arm` runner the shard of the calibration target, with its 30
 mutants, took about 400 s, against the registered budget of its target of
@@ -1106,7 +1108,7 @@ receipt without a numeric attempt counts as the earliest, and two receipts
 of one part and one attempt are two receipts of the part. It gives the
 conclusion of the whole gate only when:
 
-1. every receipt can be read and parses, has schema 5 and a part, and its
+1. every receipt can be read and parses, has schema 6 and a part, and its
    commit and tree are those of the checkout, whose gate inputs are clean,
    whose registry, `statements.json` and qualification cases can be read
    and keep their rules and whose waiver record, where it can be read,
@@ -2315,13 +2317,13 @@ writes the receipt to standard error and exits with 120.
 
 ### Receipt
 
-`receipt.json` has schema 5. It is the pretty form of `serde_json`, with
+`receipt.json` has schema 6. It is the pretty form of `serde_json`, with
 the fields in the order of the tables below and every map sorted by its
 keys; times are seconds, rounded to milliseconds.
 
 | Field | Content |
 | --- | --- |
-| `schema` | `5` |
+| `schema` | `6` |
 | `command` | `cargo xtask formal run` |
 | `status` | `VERIFIED`, `REJECTED`, `STALE`, `TOOL_FAILURE`, `BUDGET`, `NOT_RUN` or `SCOPED` |
 | `complete` | Whether the run is complete, as defined above |
@@ -2342,7 +2344,7 @@ keys; times are seconds, rounded to milliseconds.
 | `base` | What the base round found, below, or `null` when the round stopped before it recorded it |
 | `proof_targets` | What the run found for each target that the phase `extraction` took, below, by its name: those that it selects and the formal ones, or in the shard of a target and in a run of `cargo xtask formal run --target` those that it selects alone, also one that it did not extract since it registers more than 30 mutants or its module is not a Lean module path |
 | `guard` | What the guard found on a pull request, below, or `null` without a pull request event or when its phase did not finish |
-| `commands` | Every command, in the order in which they ran |
+| `commands` | Every command, in the order of its `sequence` |
 | `failures` | Every failure that is not the conclusion of a unit, with its `status` and `message` |
 
 The `image` record has these fields:
@@ -2374,7 +2376,8 @@ Each command has these fields:
 
 | Field | Content |
 | --- | --- |
-| `sequence` | The number of the command in the run, from 1 |
+| `sequence` | The number of the command in the run, from 1, in the order in which the commands started |
+| `started` | When the command started, or was found not to start, in seconds from the start of the run |
 | `phase`, `unit` | The phase and the unit of the command, or `null` for the commands of the gate itself |
 | `site` | `charon`, `aeneas`, `qualification-build`, `ill-typed-build`, `case-audit`, `base-build`, `target-build`, `axiom-audit`, `leanchecker`, `comparator`, `git` or `cargo-metadata` |
 | `argv` | The program and its arguments |
@@ -2416,13 +2419,13 @@ Each record of `proof_targets` has these fields:
 | --- | --- |
 | `unit` | The unit of the target, `target/<name>`, or `null` for a target that the run did not select and extracted for the base round alone |
 | `state` | `formal` or `planned`, as the registry gives it |
-| `budget_seconds`, `seconds` | The budget of the target, and the seconds of the commands of its unit and of the units of its registered mutants, or 0 without a unit |
+| `budget_seconds`, `seconds` | The budget of the target, and the seconds during which a command of its unit or of the units of its registered mutants ran, the length of the union of their intervals, each from its `started` for its `seconds`, or 0 without a unit |
 | `observed` | What the extraction gave, as for a qualification case |
 | `generated` | The SHA-256 of each Lean file that Aeneas wrote, by its path below the output of Aeneas |
 | `declarations` | The declarations of its templates that stay axioms once its reviewed external declarations are installed |
 | `proof_modules` | Its proof modules, as the registry gives them |
 | `typed` | Whether its generated definitions type-check with warnings as errors |
-| `mutants` | The seconds of the commands of each registered mutant that the run ran, by its name; they count in `seconds` too |
+| `mutants` | The seconds of the commands of each registered mutant that the run ran, by its name, which run one after another; their intervals count in `seconds`, so these may add up to more than it |
 | `problems` | The problems that reject the target |
 
 The `guard` record has these fields:
@@ -3000,14 +3003,20 @@ model code that did not build. Once the target is verified, each of its
 registered [mutants](#mutants) runs in a unit of its own.
 
 The commands of the unit of a target and of the units of its registered
-mutants share its `budget`, 1,800 s unless the registry gives another: each
-runs for at most the budget less the seconds of the earlier commands of
-these units, in either phase, and the base round between them does not
-count. A command that meets that limit concludes its own unit `BUDGET`:
-the unit of the target while the target is extracted, built and checked,
-or that of a mutant, which leaves the target as it was concluded; the run
-is `BUDGET` either way. The calibration target registers a
-budget of 3,000 s, within the shard limit
+mutants share its `budget`, 1,800 s unless the registry gives another,
+which counts the time during which at least one of them runs, in either
+phase: the length of the union of their intervals. Commands that run one
+after another count their seconds, commands that run side by side count
+the time that they share once, and the base round between them, or any
+other time when none of them runs, does not count. A command that starts
+when these units have used `c` seconds runs for at most the budget less
+`c`, so commands that run side by side reach that limit together. A
+command that meets it concludes its own unit `BUDGET`: the unit of the
+target while the target is extracted, built and checked, or that of a
+mutant, which leaves the target as it was concluded. A command that would
+start once the budget is used up does not start, is `NOT_RUN` and
+concludes its unit `BUDGET` too; the run is `BUDGET` either way. The
+calibration target registers a budget of 3,000 s, within the shard limit
 ([calibration target](#calibration-target)); a target of the kernel keeps
 the default.
 

@@ -455,6 +455,7 @@ pub(crate) mod tests {
     pub(crate) fn tool(unit: &str, site: Site, argv: &str, class: Class) -> Command {
         Command {
             sequence: 1,
+            started: 0.0,
             phase: None,
             unit: Some(unit.to_string()),
             site,
@@ -1012,7 +1013,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_receipt_that_cannot_be_read_or_is_not_of_a_shard_of_schema_5_gives_no_conclusion() {
+    fn a_receipt_that_cannot_be_read_or_is_not_of_a_shard_of_schema_6_gives_no_conclusion() {
         let fixture = checkout("merge-receipts", r#"[{"name": "a"}]"#);
         let q = write(&fixture, "q", &qualification(&fixture));
         let shard = receipt(&fixture, "target/a", &units_of("a"));
@@ -1044,21 +1045,21 @@ pub(crate) mod tests {
             no_conclusion(&merged, &[first, unit, none("target/a")]);
             assert_eq!(merged.parts[1].sha256, sha256);
         }
-        // A receipt of schema 4, which has no shard, still concludes its
+        // A receipt of schema 5, which has no shard, still concludes its
         // units, but is no receipt of its part.
         let mut old = serde_json::to_value(qualification(&fixture)).expect("JSON");
-        old["schema"] = 4.into();
+        old["schema"] = 5.into();
         old.as_object_mut().expect("an object").remove("shard");
         fixture.write("artifacts/parts/old.json", &old.to_string());
         let old = fixture.root().join("artifacts/parts/old.json");
         let shown = old.display();
         let merged = merge_in(&fixture, &[old.clone(), write(&fixture, "t", &shard)]);
-        let schema = format!("{shown}: schema 4 where 5 is expected");
+        let schema = format!("{shown}: schema 5 where 6 is expected");
         no_conclusion(
             &merged,
             &[schema, none("comparator"), none("qualification")],
         );
-        // A receipt of schema 5 without a shard.
+        // A receipt of schema 6 without a shard.
         let mut unnamed = shard;
         unnamed.shard = None;
         let unnamed = write(&fixture, "unnamed", &unnamed);

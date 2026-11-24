@@ -98,7 +98,8 @@ pub fn list_path(layout: &Layout, target: &str) -> String {
 }
 
 /// Fills in the seconds of each target of `receipt` that has a unit, those
-/// of the commands of its unit and of its mutants, and those of each mutant.
+/// during which a command of its unit or of its mutants ran, the length of
+/// the union of their intervals, and those of the commands of each mutant.
 pub fn seconds(receipt: &mut Receipt) {
     let mut by_unit: BTreeMap<&str, f64> = BTreeMap::new();
     for command in &receipt.commands {
@@ -111,8 +112,10 @@ pub fn seconds(receipt: &mut Receipt) {
         let Some(own) = target.unit.as_deref() else {
             continue;
         };
-        let mine = by_unit.iter().filter(|(unit, _)| owner(unit) == own);
-        target.seconds = round(mine.map(|(_, seconds)| seconds).sum());
+        let mine = (receipt.commands.iter()).filter(|c| c.unit.as_deref().map(owner) == Some(own));
+        target.seconds = round(run::covered(
+            mine.map(|c| (c.started, c.started + c.seconds)),
+        ));
         let mutants = by_unit.iter().filter_map(|(unit, seconds)| {
             let name = unit.strip_prefix(own)?.strip_prefix(MUTANT)?;
             Some((name.to_string(), round(*seconds)))

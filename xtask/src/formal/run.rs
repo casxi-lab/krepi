@@ -150,12 +150,39 @@ pub struct Request<'a> {
 
 /// What the commands of a run write while they run, which threads that
 /// run commands side by side share: the commands that ended, in the order in
-/// which they ended, the conclusions and the number of commands started.
+/// which they ended, the conclusions, the number of commands started and,
+/// by its sequence, the unit and the start of each command that runs.
 #[derive(Default)]
 pub(super) struct Records {
     pub(super) commands: Vec<receipt::Command>,
     conclusions: Vec<(String, Conclusion)>,
     started: u32,
+    running: BTreeMap<u32, (Option<String>, f64)>,
+}
+
+impl Records {
+    /// The seconds, up to `now`, during which a command of a unit whose
+    /// budget is that of `owner` ran: the length of the union of their
+    /// intervals, from the run's start.
+    fn spent(&self, owner: &str, now: f64) -> f64 {
+        let mine = |unit: &Option<String>| unit.as_deref().map(mutants::owner) == Some(owner);
+        let ended = (self.commands.iter()).filter(|c| mine(&c.unit));
+        let running = (self.running.values()).filter(|(unit, _)| mine(unit));
+        let ended = ended.map(|c| (c.started, c.started + c.seconds));
+        covered(ended.chain(running.map(|(_, start)| (*start, now))))
+    }
+}
+
+/// The length of the union of `intervals`, each its start and its end.
+pub fn covered(intervals: impl IntoIterator<Item = (f64, f64)>) -> f64 {
+    let mut intervals = Vec::from_iter(intervals);
+    intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut length, mut reached) = (0.0, f64::NEG_INFINITY);
+    for (start, end) in intervals {
+        length += (end - start.max(reached)).max(0.0);
+        reached = reached.max(end);
+    }
+    length
 }
 
 /// The state of a run, through which the body of a phase runs its commands.
@@ -165,6 +192,8 @@ pub struct Gate {
     run: RunDir,
     /// The tool manifest that the run read from the checkout, and its text.
     manifest: Option<(Manifest, String)>,
+    /// The start of the run, from which the receipt gives the start of each command.
+    start: Instant,
     deadline: Instant,
     /// Whether it is a run of `formal mutants`, whose targets do not grow its budget.
     fixed: bool,
@@ -227,25 +256,30 @@ impl Gate {
         let mut records = self.records();
         records.started += 1;
         let (sequence, now) = (records.started, Instant::now());
+        let at = now.saturating_duration_since(self.start);
         let left = |end: Instant| end.saturating_duration_since(now);
         let phase_end = self.phase.as_ref().map_or(self.deadline, |(_, end)| *end);
         let mut limit = limit(request.site.cap(), left(phase_end), left(self.deadline));
-        // The commands of a target's unit, and of its mutants, share its budget.
+        // The commands of a target's unit, and of its mutants, share its
+        // budget, which counts the time during which any of them runs.
         let owner = unit.map(mutants::owner);
-        let mine = |c: &&receipt::Command| {
-            owner.is_some() && c.unit.as_deref().map(mutants::owner) == owner
-        };
-        let spent = (records.commands.iter().filter(mine)).map(|command| command.seconds);
-        let spent = Duration::from_secs_f64(spent.sum());
-        let rest = (owner.and_then(|unit| self.budgets.get(unit))).map(|b| b.saturating_sub(spent));
-        if let Some(rest) = rest.filter(|rest| *rest < limit.duration) {
-            (limit.duration, limit.by) = (rest, LimitBy::Target);
+        if let Some((owner, budget)) = owner.and_then(|o| Some((o, self.budgets.get(o)?))) {
+            let spent = Duration::from_secs_f64(records.spent(owner, at.as_secs_f64()));
+            let rest = budget.saturating_sub(spent);
+            if rest < limit.duration {
+                (limit.duration, limit.by) = (rest, LimitBy::Target);
+            }
         }
         #[cfg(test)]
         let limit = overridden.as_ref().map_or(limit, |(_, set, _)| *set);
         let name = word(&request.site);
-        drop(records);
         // The receipt writes a limit below half a millisecond as 0.
+        let starts = receipt::seconds(limit.duration) > 0.0 && skip.is_none();
+        if starts {
+            let running = (unit.map(str::to_string), at.as_secs_f64());
+            records.running.insert(sequence, running);
+        }
+        drop(records);
         let ran = if receipt::seconds(limit.duration) <= 0.0 {
             let used_up = format!("the {} budget was used up", word(&limit.by));
             Err((Class::NotRun, used_up))
@@ -275,6 +309,7 @@ impl Gate {
                     (Class::ToolFailure, reason)
                 })
         };
+        self.records().running.remove(&sequence);
         let own = |ran: &Ran| lean::proof_messages(&ran.output, &self.own).len();
         let verdict = match &ran {
             Ok(ran) => outcome::classify(request.site, ran, own(ran), read(ran).as_deref()),
@@ -302,6 +337,7 @@ impl Gate {
         };
         self.records().commands.push(receipt::Command {
             sequence,
+            started: receipt::seconds(at),
             phase: self.phase.as_ref().map(|(phase, _)| phase.clone()),
             unit: unit.map(str::to_string),
             site: request.site,
@@ -499,6 +535,7 @@ pub(crate) fn execute(
         layout: *context.layout,
         run: run.clone(),
         manifest: None,
+        start,
         deadline: start + context.budget.unwrap_or(GATE_BUDGET),
         fixed: context.budget == Some(mutants::RUN_BUDGET),
         phase: None,
@@ -2463,6 +2500,116 @@ pub(crate) mod tests {
             reason.is_some_and(|reason| reason.starts_with(changed)),
             "{reason:?}"
         );
+    }
+
+    /// A shell loop that waits at most 60 s for `path` to exist.
+    fn waits_for(path: &Path) -> String {
+        let path = path.display();
+        format!("i=0; while [ ! -e {path} ] && [ $i -lt 6000 ]; do sleep 0.01; i=$((i+1)); done\n")
+    }
+
+    #[test]
+    fn the_commands_of_a_target_and_its_mutants_share_its_budget_by_the_time_that_any_runs() {
+        assert_eq!(covered([]), 0.0);
+        assert_eq!(covered([(2.0, 3.0), (0.0, 1.0), (4.0, 4.0)]), 2.0);
+        assert_eq!(
+            covered([(0.0, 2.0), (1.5, 2.5), (1.0, 3.0), (3.0, 4.0)]),
+            4.0
+        );
+        // The command of the target waits for that of its mutant, which
+        // starts while it runs.
+        let fixture = Fixture::new("overlap");
+        let [first, second] =
+            ["first", "second"].map(|file| fixture.root().join("artifacts").join(file));
+        let (target, mutant) = ("target/t", "target/t/mutant/m0");
+        let phases = vec![phase("targets", LONG, &[target, mutant], |run| {
+            run.budgets
+                .insert(target.to_string(), Duration::from_secs(1_800));
+            let record = receipt::Target {
+                unit: Some(target.to_string()),
+                ..receipt::Target::default()
+            };
+            run.receipt.proof_targets.insert("t".to_string(), record);
+            let waits = format!("touch {}; {}", first.display(), waits_for(&second));
+            let started = format!("sleep 0.1; touch {}", second.display());
+            let gate = &*run;
+            std::thread::scope(|scope| {
+                scope.spawn(|| shell(gate, target, &waits));
+                fixture::wait_until(|| first.exists(), "the first command did not start");
+                scope.spawn(|| shell(gate, mutant, &started));
+            });
+            // A command of the mutant once the budget is used up.
+            let spent = run
+                .records()
+                .spent(target, run.start.elapsed().as_secs_f64());
+            run.budgets
+                .insert(target.to_string(), Duration::from_secs_f64(spent));
+            assert_eq!(shell(run, mutant, "exit 0").class, Class::NotRun);
+            for unit in [target, mutant] {
+                run.conclude(unit, (Status::Verified, None));
+            }
+            Ok(())
+        })];
+        let done = gate(&fixture, &[], phases);
+        let [a, b] = [target, mutant].map(|unit| fixture::commands(&done, unit)[0].clone());
+        let late = fixture::commands(&done, mutant)[1].clone();
+        // Both reach the limit of the target together.
+        assert_eq!((a.limit, b.limit), (LimitBy::Target, LimitBy::Target));
+        let end = |c: &receipt::Command| c.started + c.limit_seconds;
+        assert!((end(&a) - end(&b)).abs() < 0.0025, "{a:?} {b:?}");
+        assert!(b.started > a.started && b.limit_seconds < a.limit_seconds);
+        // The time during which both ran counts once.
+        let t = &done.receipt.proof_targets["t"];
+        let intervals = [&a, &b, &late].map(|c| (c.started, c.started + c.seconds));
+        assert_eq!(
+            t.seconds,
+            receipt::seconds(Duration::from_secs_f64(covered(intervals)))
+        );
+        assert!(t.seconds < a.seconds + b.seconds, "{t:?} {a:?} {b:?}");
+        assert_eq!(t.mutants, BTreeMap::from([("m0".to_string(), b.seconds)]));
+        let used_up = Some("the target budget was used up");
+        assert_eq!(
+            (late.class, late.reason.as_deref()),
+            (Class::NotRun, used_up)
+        );
+        assert_eq!(fixture::status(&done, mutant), (Status::Budget, used_up));
+        assert_eq!(done.receipt.status, Status::Budget);
+        // Two commands that hang side by side meet the limit together, and
+        // each concludes its unit BUDGET.
+        let fixture = Fixture::new("overlap-budget");
+        let started = fixture.root().join("artifacts/started");
+        let phases = vec![phase("targets", LONG, &[target, mutant], |run| {
+            run.budgets
+                .insert(target.to_string(), Duration::from_secs(1));
+            let hangs = format!("touch {}; exec sleep 30", started.display());
+            let gate = &*run;
+            std::thread::scope(|scope| {
+                scope.spawn(|| shell(gate, target, &hangs));
+                fixture::wait_until(|| started.exists(), "the first command did not start");
+                scope.spawn(|| shell(gate, mutant, "exec sleep 30"));
+            });
+            for unit in [target, mutant] {
+                run.conclude(unit, (Status::Verified, None));
+            }
+            Ok(())
+        })];
+        let done = gate(&fixture, &[], phases);
+        let [a, b] = [target, mutant].map(|unit| fixture::commands(&done, unit)[0].clone());
+        let stopped = |c: &receipt::Command| {
+            c.timed_out && (c.limit, c.class) == (LimitBy::Target, Class::Budget)
+        };
+        assert!(stopped(&a), "{a:?}");
+        // A thread that started its command after the limit finds it used
+        // up, which is the other outcome at the limit.
+        if b.class != Class::NotRun {
+            assert!(
+                stopped(&b) && (end(&a) - end(&b)).abs() < 0.0025,
+                "{a:?} {b:?}"
+            );
+        }
+        for unit in [target, mutant] {
+            assert_eq!(fixture::status(&done, unit).0, Status::Budget);
+        }
     }
 
     #[test]

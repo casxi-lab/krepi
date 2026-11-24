@@ -1,4 +1,4 @@
-//! The receipt of `cargo xtask formal run`, schema 5, the record of
+//! The receipt of `cargo xtask formal run`, schema 6, the record of
 //! `cargo xtask formal merge`, schema 3, as "Receipt" and "Shards and merge"
 //! in `docs/formal-verification.md` document them, and
 //! `cargo xtask formal receipt`, which judges a record against the checkout,
@@ -21,7 +21,7 @@ use super::registry::State;
 use super::waiver::{self, Waiver};
 use super::{Layout, guard, merge, toolchain};
 
-pub const SCHEMA: u32 = 5;
+pub const SCHEMA: u32 = 6;
 
 pub const COMMAND: &str = "cargo xtask formal run";
 
@@ -150,6 +150,7 @@ pub struct Unit {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Command {
     pub sequence: u32,
+    pub started: f64,
     pub phase: Option<String>,
     pub unit: Option<String>,
     pub site: Site,
@@ -497,6 +498,7 @@ mod tests {
     fn command(sequence: u32, site: Site, class: Class) -> Command {
         Command {
             sequence,
+            started: 0.5,
             phase: Some("base".to_string()),
             unit: Some("base".to_string()),
             site,
@@ -951,6 +953,7 @@ mod tests {
             guard: None,
             commands: vec![Command {
                 sequence: 1,
+                started: 0.25,
                 phase: None,
                 unit: None,
                 site: Site::Git,
@@ -980,7 +983,7 @@ mod tests {
         let e = "e".repeat(64);
         let expected = format!(
             r#"{{
-  "schema": 5,
+  "schema": 6,
   "command": "cargo xtask formal run",
   "status": "VERIFIED",
   "complete": true,
@@ -1043,6 +1046,7 @@ mod tests {
   "commands": [
     {{
       "sequence": 1,
+      "started": 0.25,
       "phase": null,
       "unit": null,
       "site": "git",
