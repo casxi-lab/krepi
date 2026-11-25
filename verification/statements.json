@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "hash": "c828a131dab6c147822c2a8f947a14a6d3af9b7c",
+  "hash": "b89fe12170892a221ccebc10d1a4f3136de6350b",
   "statements": [
     {
       "name": "Krepi.SpecProperties.Fdt.CheckFdtWellFormed",
@@ -493,6 +493,390 @@
       "theorem": "Krepi.Proofs.Fdt.Witnesses.bankBytesFit",
       "module": "Krepi.Proofs.Fdt.Witnesses",
       "state": "proved"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.FdtDiscoverCpus",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.fdtDiscoverCpus",
+      "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.CpuTopologyCount",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyCount",
+      "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.CpuTopologyProfile",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyProfile",
+      "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.CpuTopologyAffinity",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyAffinity",
+      "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.CpuTopologyValidateTimers",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyValidateTimers",
+      "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.CpuProfileLogicalId",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileLogicalId",
+      "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.CpuProfileAffinityShift",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileAffinityShift",
+      "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.CpuProfileConduit",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileConduit",
+      "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.FdtDiscoverMemory",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverMemory",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryMapRam",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.memoryMapRam",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryMapReserved",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.memoryMapReserved",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryMapDynamic",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.memoryMapDynamic",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.FdtDiscoverBootMemory",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverBootMemory",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.BootMemoryRam",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryRam",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.BootMemoryReserved",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryReserved",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.BootMemoryDynamic",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryDynamic",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.BootMemoryDtb",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryDtb",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.BootMemoryImage",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryImage",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.BootMemoryRamBytes",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryRamBytes",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.BootMemoryIsAvailable",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryIsAvailable",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.BootMemoryFindAvailable",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryFindAvailable",
+      "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanAllRam",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanAllRam",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanNew",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanNew",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanFromBootMemory",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanFromBootMemory",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanManagedBanks",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanManagedBanks",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanRam",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanRam",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanReservations",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanReservations",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanBootRanges",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanBootRanges",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanFirmwareRanges",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanFirmwareRanges",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanDescribedBytes",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanDescribedBytes",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanManagedBytes",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanManagedBytes",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanContainsRam",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanContainsRam",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanIsAvailable",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanIsAvailable",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanPermitsBacking",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanPermitsBacking",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.MemoryPlanAvailableRanges",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanAvailableRanges",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.AvailableRangesNext",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.availableRangesNext",
+      "module": "Krepi.Proofs.Fdt.Refinement.Plan",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.CellsU64",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.cellsU64",
+      "module": "Krepi.Proofs.Fdt.Refinement.Translate",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.RegNew",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.regNew",
+      "module": "Krepi.Proofs.Fdt.Refinement.Translate",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.RegNext",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.regNext",
+      "module": "Krepi.Proofs.Fdt.Refinement.Translate",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.AddressMapNew",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.addressMapNew",
+      "module": "Krepi.Proofs.Fdt.Refinement.Translate",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.AddressMapKind",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.addressMapKind",
+      "module": "Krepi.Proofs.Fdt.Refinement.Translate",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.AddressMapToParent",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.addressMapToParent",
+      "module": "Krepi.Proofs.Fdt.Refinement.Translate",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.AddressMapToChild",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.addressMapToChild",
+      "module": "Krepi.Proofs.Fdt.Refinement.Translate",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.SpanNew",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.spanNew",
+      "module": "Krepi.Proofs.Fdt.Refinement.Translate",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.SpanEnd",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.spanEnd",
+      "module": "Krepi.Proofs.Fdt.Refinement.Translate",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.SpanContains",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.spanContains",
+      "module": "Krepi.Proofs.Fdt.Refinement.Translate",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.FdtParse",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.fdtParse",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.FdtTotalSize",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.fdtTotalSize",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.FdtNodes",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.fdtNodes",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.NodesNext",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodesNext",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.FdtFindNode",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.fdtFindNode",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.FdtReservations",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.fdtReservations",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.ReservationsNext",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.reservationsNext",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.NodeName",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeName",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.NodeParent",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeParent",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.NodeProperty",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeProperty",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.NodeStringProperty",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeStringProperty",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.NodeEnabled",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeEnabled",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.NodeAddressCells",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeAddressCells",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.NodeSizeCells",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeSizeCells",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.NodeReg",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeReg",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.NodeRanges",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeRanges",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.NodeDmaRanges",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeDmaRanges",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.Fdt.NodeTranslateReg",
+      "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeTranslateReg",
+      "module": "Krepi.Proofs.Fdt.Refinement.Tree",
+      "state": "planned"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckTablesWellFormed",
