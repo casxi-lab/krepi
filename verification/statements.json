@@ -774,7 +774,7 @@
       "name": "Krepi.Statements.Fdt.FdtParse",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.fdtParse",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.FdtTotalSize",
