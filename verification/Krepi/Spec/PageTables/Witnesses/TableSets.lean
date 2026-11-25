@@ -23,9 +23,10 @@ witness as an equation `f x = .ok v` or `f x = .error e` and decides it with
 a local instance that compares the constructors and their payloads; the
 instance appears in no statement. Where an error has several rules, its
 witness is a conjunction with one input for each rule that the contract names,
-an input that fails with that error and succeeds once that rule is repaired, a
-pool that ends above $2^{\mathrm{bits}}$ being repaired by the width: such a
-pool is the pool of 4 tables at `BASE` at the width 32, whose walk is sound,
+an input that fails with that error and succeeds once that rule is repaired,
+a pool of no table being repaired by another pool, which changes the input,
+and a pool that ends above $2^{\mathrm{bits}}$ by the width: such a pool is
+the pool of 4 tables at `BASE` at the width 32, whose walk is sound,
 for the entries on one address and for the source of `clone_kernel_from`,
 whose target pool is then at `0x8000_0000`, so the input also tells the check
 of the pool from no check of the pool.
@@ -900,28 +901,31 @@ def BuiltPlan (p : Fdt.MemoryPlan) : Prop :=
   (∃ ram boot firmware, Fdt.MemoryPlan.allRam ram boot firmware = .ok p) ∨
     ∃ window ram boot firmware, Fdt.MemoryPlan.new window ram boot firmware = .ok p
 
-/-- **Planned.** `direct_map` never fails with `Alignment` at a usable range:
+/-- `direct_map` never fails with `Alignment` at a usable range:
 every usable range of a boot memory map that the fdt entries build starts and
 ends on a page boundary, since its managed banks and its reservations are
-whole pages. Its `Alignment` is that of `base` (`directMapAlignment`). -/
+whole pages. Its `Alignment` is that of `base` (`directMapAlignment`).
+Feature: `krepi.kernel.kernel-memory`. -/
 def DirectMapRangesOnPages : Prop :=
   ∀ p, BuiltPlan p → ∀ u ∈ p.availableRanges,
     u.start.toNat % PAGE_SIZE = 0 ∧ u.endNat % PAGE_SIZE = 0
 
-/-- **Planned.** `direct_map` never fails with `AlreadyMapped` for a leaf that
+/-- `direct_map` never fails with `AlreadyMapped` for a leaf that
 an earlier usable range shares an address with: the usable ranges of a boot
 memory map that the fdt entries build, in address order, each end at or
 before the start of the next, since they are disjoint parts of disjoint
 managed banks, and every leaf lies inside its range. Its `AlreadyMapped` is
-that of the walk (`directMapAlreadyMapped`). -/
+that of the walk (`directMapAlreadyMapped`).
+Feature: `krepi.kernel.kernel-memory`. -/
 def DirectMapRangesApart : Prop :=
   ∀ p, BuiltPlan p →
     (sortByKey (·.start.toNat) p.availableRanges).Pairwise fun a b => a.endNat ≤ b.start.toNat
 
-/-- **Planned.** The check of the target pool of `clone_kernel_from` never fails
+/-- The check of the target pool of `clone_kernel_from` never fails
 with `AddressWidth`: it takes the width that the check of the source pool has
 accepted. Its `AddressWidth` is that of the source
-(`cloneKernelFromAddressWidth`). -/
+(`cloneKernelFromAddressWidth`).
+Feature: `krepi.kernel.kernel-memory`. -/
 def CloneTargetWidthChecked : Prop :=
   ∀ (N : Nat) (sourceBase base : UInt64) (bits : UInt8),
     checkPool N sourceBase bits = .ok () → checkPool N base bits ≠ .error .addressWidth

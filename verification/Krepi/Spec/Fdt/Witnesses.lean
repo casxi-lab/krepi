@@ -35,7 +35,7 @@ to `priorityPlanStep7`).
 
 Error branches that no input of an entry reaches have no witness; for each,
 a proposition below states that the entry never takes it, with its reason,
-and a planned theorem proves it. The two variants of the specification that
+and a theorem proves it. The two variants of the specification that
 reject every input or accept every input are refuted by `notAlwaysRejecting`
 and `notAlwaysSucceeding`.
 -/
@@ -361,7 +361,7 @@ def priorityMemoryTree : Fdt :=
 /-- A `/cpus` of 1 size cell and 3 address cells. -/
 def priorityCpusTree : Fdt := cpusTree [("#address-cells", cells [3]), ("#size-cells", cells [1])]
 
-/-- Every tree of records of the witnesses, the planned ones included, passes
+/-- Every tree of records of the witnesses passes
 the check of the structural invariant of trees. -/
 theorem treesWellFormed :
     [accessTree, memoryTree, ram33Tree, rootTree, typeWithoutNulTree, untypedMemoryTree,
@@ -1387,103 +1387,116 @@ theorem priorityPlanStep7 :
 Branches of the entries that fail with an error, but that no input of the
 entry reaches under 64-bit arithmetic or on the trees that the parse
 accepts. Each proposition states that the entry, or the step of it where the
-branch lies, never takes the branch, and gives the reason; a planned theorem
+branch lies, never takes the branch, and gives the reason; a theorem
 below `Krepi.Proofs.Fdt.Witnesses` proves it. The error of each branch is
 still witnessed above where another branch of the same entry gives it. -/
 
-/-- **Planned.** Step 1 of the parse never fails with `Overflow`: the offset
+/-- Step 1 of the parse never fails with `Overflow`: the offset
 and the size of each block are 32-bit words, so the end of a block fits in
-64 bits. -/
+64 bits.
+Feature: `krepi.platform.device-tree`. -/
 def HeaderNoOverflow : Prop := ∀ input, header input ≠ .error .overflow
 
-/-- **Planned.** No entry of the reservation map runs past 64 bits, so its
+/-- No entry of the reservation map runs past 64 bits, so its
 `Overflow` of an entry past the tree is never reached: the map starts at a
 32-bit offset and the parse reads at most `MAX_RESERVATIONS + 1` entries of 16
 bytes. The entry `k`, from 0, starts at `reserveStart + 16 * k`, and the end
 `cursor + 16` that step 2 checks with `checkedAdd` is therefore at most
 `reserveStart + 16 * (MAX_RESERVATIONS + 1)`, which this states to be below
 `2 ^ 64`, so that check never fails. The other `Overflow` of the step, the
-end of the span of an entry, is reached (`parseOverflow`). -/
+end of the span of an entry, is reached (`parseOverflow`).
+Feature: `krepi.platform.device-tree`. -/
 def ReservationEntriesFit : Prop :=
   ∀ input h, header input = .ok h →
     h.layout.reserveStart + 16 * (MAX_RESERVATIONS.toNat + 1) < 2 ^ 64
 
-/-- **Planned.** The tokens never fail with `Overflow`: a value starts within
+/-- The tokens never fail with `Overflow`: a value starts within
 the structure block, of at most `MAX_BLOB_SIZE` bytes, and its length is a
-32-bit word, so its end fits in 64 bits. -/
+32-bit word, so its end fits in 64 bits.
+Feature: `krepi.platform.device-tree`. -/
 def TokensNoOverflow : Prop := ∀ input h, header input = .ok h → structureNodes h ≠ .error .overflow
 
-/-- **Planned.** The reservation map never runs out of its fuel: more fuel
+/-- The reservation map never runs out of its fuel: more fuel
 gives the same result, since `MAX_RESERVATIONS` entries and the terminator, or
 the entry after them, end it first. Its `LimitExceeded` is that of the limit.
+Feature: `krepi.platform.device-tree`.
 -/
 def ReservationFuelSuffices : Prop :=
   ∀ (h : Header) (n : Nat),
     reservationsFrom h (MAX_RESERVATIONS.toNat + 1 + n) h.layout.reserveStart [] = reservationMap h
 
-/-- **Planned.** The memory discovery never fails with `BadTree` on a
+/-- The memory discovery never fails with `BadTree` on a
 well-formed tree: such a tree has a root, and every node whose `reg` the
-discovery reads has a parent. -/
+discovery reads has a parent.
+Feature: `krepi.platform.device-tree`. -/
 def DiscoverMemoryNoBadTree : Prop := ∀ t : Fdt, t.WellFormed → t.discoverMemory ≠ .error .badTree
 
-/-- **Planned.** The discovery of the boot memory never fails with `BadTree`
-on a well-formed tree, for the reason of `DiscoverMemoryNoBadTree`. -/
+/-- The discovery of the boot memory never fails with `BadTree`
+on a well-formed tree, for the reason of `DiscoverMemoryNoBadTree`.
+Feature: `krepi.platform.device-tree`. -/
 def DiscoverBootMemoryNoBadTree : Prop :=
   ∀ (t : Fdt) (handOver : HandOverProfile) (dtbAddress : UInt64) (image : Span), t.WellFormed →
     t.discoverBootMemory handOver dtbAddress image ≠ .error .badTree
 
-/-- **Planned.** The sum of the RAM ranges of a memory discovery fits in 64
+/-- The sum of the RAM ranges of a memory discovery fits in 64
 bits, so the discovery of the boot memory never fails with `Overflow` at that
 sum: the ranges are disjoint spans that end within 64 bits. The discovery adds
 them one at a time with `checkedAdd`, and each partial sum is at most the sum
-of all of them, which this bounds, so no addition fails. -/
+of all of them, which this bounds, so no addition fails.
+Feature: `krepi.platform.device-tree`. -/
 def RamBytesFit : Prop :=
   ∀ (t : Fdt) (m : MemoryMap), t.discoverMemory = .ok m → spansBytes m.ram < 2 ^ 64
 
-/-- **Planned.** The climb of a translation never fails with `BadTree`: it
-reads the `ranges` of a bus only when the bus has a parent. -/
+/-- The climb of a translation never fails with `BadTree`: it
+reads the `ranges` of a bus only when the bus has a parent.
+Feature: `krepi.platform.device-tree`. -/
 def ClimbRangesNoBadTree : Prop :=
   ∀ (fuel : Nat) (bus : Node) (s : Span), climbRanges fuel bus s ≠ .error .badTree
 
-/-- **Planned.** `Node::translate_reg` never runs out of its fuel on a
-well-formed tree: no node lies deeper than `MAX_DEPTH - 1`. -/
+/-- `Node::translate_reg` never runs out of its fuel on a
+well-formed tree: no node lies deeper than `MAX_DEPTH - 1`.
+Feature: `krepi.platform.device-tree`. -/
 def TranslateRegFuelSuffices : Prop :=
   ∀ (n : Node) (s : Span), n.fdt.WellFormed → n.translateReg s ≠ .error .limitExceeded
 
-/-- **Planned.** A translation through the windows of a well-formed map never
+/-- A translation through the windows of a well-formed map never
 fails with `Overflow` once its request is within the width of its side: the
 translated span lies inside the target side of its window, which ends within
-64 bits, so neither its start nor its end leaves 64 bits. -/
+64 bits, so neither its start nor its end leaves 64 bits.
+Feature: `krepi.platform.device-tree`. -/
 def WindowTranslationNoOverflow : Prop :=
   ∀ (m : AddressMap) (s : Span) (reverse : Bool) (w : Window) (ws : List Window),
     m.WellFormed → m.windows = some (w :: ws) →
     s.WithinWidth (if reverse then m.parentCells else m.childCells) →
     m.translate s reverse ≠ .error .overflow
 
-/-- **Planned.** A CPU node never fails with `UnsupportedCells` at its `reg`:
+/-- A CPU node never fails with `UnsupportedCells` at its `reg`:
 step 6 reads that value in the address cells of `/cpus`, which it has checked
 to be 1 or 2 before it reads any child, and `cells_u64` fails with
 `UnsupportedCells` only for more than 2 cells. The `UnsupportedCells` of
 `discover_cpus` is that of the address cells of `/cpus`
-(`discoverCpusUnsupportedCells`). -/
+(`discoverCpusUnsupportedCells`).
+Feature: `krepi.platform.device-tree`. -/
 def CpuRegNoUnsupportedCells : Prop :=
   ∀ (profile : CpuProfile) (cells : UInt32) (ids : List UInt64) (n : Node),
     (cells = 1 ∨ cells = 2) → cpuOfChild profile cells ids n ≠ .error .unsupportedCells
 
-/-- **Planned.** `BootMemory::find_available` never runs out of its fuel:
+/-- `BootMemory::find_available` never runs out of its fuel:
 each candidate after the first lies past every exclusion that an earlier one
 touched, so `Q + 3` candidates for `Q` reserved regions end the search of a
-range first. -/
+range first.
+Feature: `krepi.platform.device-tree`. -/
 def FindAvailableNoLimitExceeded : Prop :=
   ∀ (m : BootMemory) (size alignment minimum limit : UInt64),
     m.findAvailable size alignment minimum limit ≠ .error .limitExceeded
 
-/-- **Planned.** The banks that pass step 3 of the boot memory map hold fewer
+/-- The banks that pass step 3 of the boot memory map hold fewer
 than `2 ^ 64` bytes, so the sum of step 4 never fails with `Overflow` in
 `all_ram`, `new` or `from_boot_memory`: they are disjoint spans that end
 within 64 bits. Step 4 adds the sorted banks one at a time, and each partial sum is at
 most the sum of all of them, which this bounds, so its check of the sum
-never fails. -/
+never fails.
+Feature: `krepi.platform.device-tree`. -/
 def BankBytesFit : Prop :=
   ∀ ram banks : List Span, ram.foldlM addBank [] = .ok banks →
     spansBytes (sortByStart banks) < 2 ^ 64

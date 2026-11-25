@@ -41,8 +41,8 @@ def MemoryPlanAllRam : Prop :=
         (MemoryPlan.allRam (spansOf ram) (spansOf boot) (regionsOf firmware)) ⦄
 
 /-- `MemoryPlan::new(window, ram, boot, firmware)`: a boot memory map that
-stands for that of `MemoryPlan.new`, or its error. Feature:
-`krepi.platform.device-tree`. -/
+stands for that of `MemoryPlan.new`, or its error.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanNew : Prop :=
   ∀ (window : fdt.Span) (ram boot : Slice fdt.Span)
     (firmware : Slice fdt.ReservedRegion),
@@ -52,8 +52,8 @@ def MemoryPlanNew : Prop :=
 
 /-- `MemoryPlan::from_boot_memory(memory, window, more)`: a boot memory map
 that stands for that of `MemoryPlan.fromBootMemory`, or its error, for a
-boot memory that keeps its invariants. Feature:
-`krepi.platform.device-tree`. -/
+boot memory that keeps its invariants.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanFromBootMemory : Prop :=
   ∀ (m : fdt.BootMemory) (M : BootMemory) (window : fdt.Span) (more : Slice fdt.Span),
     BootMemoryRepr m M → M.memory.WellFormed → M.Consistent →
@@ -63,32 +63,33 @@ def MemoryPlanFromBootMemory : Prop :=
 
 /-! ## The lists -/
 
-/-- `MemoryPlan::managed_banks()`: the managed banks. Feature:
-`krepi.platform.device-tree`. -/
+/-- `MemoryPlan::managed_banks()`: the managed banks.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanManagedBanks : Prop :=
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P →
     fdt.plan.MemoryPlan.managed_banks p ⦃ s => spansOf s = P.managedBanks ⦄
 
-/-- `MemoryPlan::ram()`: the banks. Feature: `krepi.platform.device-tree`. -/
+/-- `MemoryPlan::ram()`: the banks.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanRam : Prop :=
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P →
     fdt.plan.MemoryPlan.ram p ⦃ s => spansOf s = P.ram ⦄
 
 /-- `MemoryPlan::reservations()`: the boot storage and then the firmware
-reservations, `MemoryPlan.reservations`. Feature:
-`krepi.platform.device-tree`. -/
+reservations, `MemoryPlan.reservations`.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanReservations : Prop :=
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P →
     fdt.plan.MemoryPlan.reservations p ⦃ s => spansOf s = P.reservations ⦄
 
-/-- `MemoryPlan::boot_ranges()`: the boot storage. Feature:
-`krepi.platform.device-tree`. -/
+/-- `MemoryPlan::boot_ranges()`: the boot storage.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanBootRanges : Prop :=
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P →
     fdt.plan.MemoryPlan.boot_ranges p ⦃ s => spansOf s = P.bootRanges ⦄
 
-/-- `MemoryPlan::firmware_ranges()`: the firmware reservations. Feature:
-`krepi.platform.device-tree`. -/
+/-- `MemoryPlan::firmware_ranges()`: the firmware reservations.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanFirmwareRanges : Prop :=
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P →
     fdt.plan.MemoryPlan.firmware_ranges p ⦃ s => spansOf s = P.firmwareRanges ⦄
@@ -96,34 +97,38 @@ def MemoryPlanFirmwareRanges : Prop :=
 /-! ## The queries -/
 
 /-- `MemoryPlan::described_bytes()`: the sum of the banks, for a well-formed
-map. Feature: `krepi.platform.device-tree`. -/
+map.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanDescribedBytes : Prop :=
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P → P.WellFormed →
     fdt.plan.MemoryPlan.described_bytes p ⦃ n => word64 n = P.describedBytes ⦄
 
 /-- `MemoryPlan::managed_bytes()`: the sum of the managed banks, for a
-well-formed map. Feature: `krepi.platform.device-tree`. -/
+well-formed map.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanManagedBytes : Prop :=
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P → P.WellFormed →
     fdt.plan.MemoryPlan.managed_bytes p ⦃ n => word64 n = P.managedBytes ⦄
 
 /-- `MemoryPlan::contains_ram(range)`: whether one bank holds the range, for
-a well-formed map. Feature: `krepi.platform.device-tree`. -/
+a well-formed map.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanContainsRam : Prop :=
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan) (range : fdt.Span),
     MemoryPlanRepr p P → P.WellFormed →
     fdt.plan.MemoryPlan.contains_ram p range ⦃ b => b = P.containsRam (spanOf range) ⦄
 
 /-- `MemoryPlan::is_available(range)`: whether the range is available, for a
-well-formed map. Feature: `krepi.platform.device-tree`. -/
+well-formed map.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanIsAvailable : Prop :=
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan) (range : fdt.Span),
     MemoryPlanRepr p P → P.WellFormed →
     fdt.plan.MemoryPlan.is_available p range ⦃ b => b = P.isAvailable (spanOf range) ⦄
 
 /-- `MemoryPlan::permits_backing(range)`: whether a managed bank holds the
-range and it is available, for a well-formed map. Feature:
-`krepi.platform.device-tree`. -/
+range and it is available, for a well-formed map.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanPermitsBacking : Prop :=
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan) (range : fdt.Span),
     MemoryPlanRepr p P → P.WellFormed →
@@ -132,8 +137,8 @@ def MemoryPlanPermitsBacking : Prop :=
 /-! ## The usable ranges -/
 
 /-- `MemoryPlan::available_ranges()`: an iterator that stands for the usable
-ranges, `MemoryPlan.availableRanges`, for a well-formed map. Feature:
-`krepi.platform.device-tree`. -/
+ranges, `MemoryPlan.availableRanges`, for a well-formed map.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanAvailableRanges : Prop :=
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P → P.WellFormed →
     fdt.plan.MemoryPlan.available_ranges p ⦃ it =>
@@ -141,7 +146,8 @@ def MemoryPlanAvailableRanges : Prop :=
 
 /-- `AvailableRanges::next()`: one call gives the next range of the list that
 the iterator stands for and leaves it standing for the rest; at the end it
-gives none and stays at the end. Feature: `krepi.platform.device-tree`. -/
+gives none and stays at the end.
+Feature: `krepi.platform.device-tree`. -/
 def AvailableRangesNext : Prop :=
   ∀ (it : fdt.AvailableRanges) (l : List Span),
     Stands fdt.plan.available.AvailableRanges.next SpanRepr it l →

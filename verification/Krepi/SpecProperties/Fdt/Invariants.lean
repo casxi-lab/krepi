@@ -100,7 +100,7 @@ are more than the path holds, so the fuel does not cut it short. -/
 def Fdt.depth (t : Fdt) (i : Nat) : Nat := t.depthFrom (i + 1) i
 
 /-- The rules of the node of index `i` of a tree, whose record is `r`
-(format and bounds, lines 169 to 187 of the contract): the root, first,
+(format and bounds, lines 169 to 186 of the contract): the root, first,
 has no parent and the empty name; every other node has a parent before it
 and a name that is not empty; the characters of the name; the depth; at most
 `MAX_PROPERTIES` properties, no two of one name; and each property name of 1
@@ -121,7 +121,7 @@ def Fdt.NodeWellFormed (t : Fdt) (i : Nat) (r : NodeRecord) : Prop :=
 nonempty, within 64 bits and disjoint from the others; and at least one and
 at most `MAX_TOKENS` nodes, each of which keeps the rules of its node
 (`Fdt.NodeWellFormed`). These are the rules of format and bounds, lines 151
-to 187 of the contract, that the parse checks before it returns a tree. -/
+to 186 of the contract, that the parse checks before it returns a tree. -/
 def Fdt.WellFormed (t : Fdt) : Prop :=
   HEADER_SIZE ≤ t.totalSize.toNat ∧ t.totalSize ≤ MAX_BLOB_SIZE ∧
   t.reservations.length ≤ MAX_RESERVATIONS.toNat ∧
@@ -349,42 +349,52 @@ open Krepi.Spec.Fdt
 Each check agrees with its invariant on every value, also one that no entry
 builds. -/
 
-/-- `Fdt.checkWellFormed` decides `Fdt.WellFormed`. -/
+/-- `Fdt.checkWellFormed` decides `Fdt.WellFormed`.
+Feature: `krepi.platform.device-tree`. -/
 def CheckFdtWellFormed : Prop := ∀ t : Fdt, t.checkWellFormed = true ↔ t.WellFormed
 
-/-- `Reg.checkWellFormed` decides `Reg.WellFormed`. -/
+/-- `Reg.checkWellFormed` decides `Reg.WellFormed`.
+Feature: `krepi.platform.device-tree`. -/
 def CheckRegWellFormed : Prop :=
   ∀ (r : Reg) (cells : UInt32), r.checkWellFormed cells = true ↔ r.WellFormed cells
 
-/-- `AddressMap.checkWellFormed` decides `AddressMap.WellFormed`. -/
+/-- `AddressMap.checkWellFormed` decides `AddressMap.WellFormed`.
+Feature: `krepi.platform.device-tree`. -/
 def CheckAddressMapWellFormed : Prop :=
   ∀ m : AddressMap, m.checkWellFormed = true ↔ m.WellFormed
 
-/-- `MemoryMap.checkWellFormed` decides `MemoryMap.WellFormed`. -/
+/-- `MemoryMap.checkWellFormed` decides `MemoryMap.WellFormed`.
+Feature: `krepi.platform.device-tree`. -/
 def CheckMemoryMapWellFormed : Prop :=
   ∀ m : MemoryMap, m.checkWellFormed = true ↔ m.WellFormed
 
-/-- `BootMemory.checkConsistent` decides `BootMemory.Consistent`. -/
+/-- `BootMemory.checkConsistent` decides `BootMemory.Consistent`.
+Feature: `krepi.platform.device-tree`. -/
 def CheckBootMemoryConsistent : Prop :=
   ∀ m : BootMemory, m.checkConsistent = true ↔ m.Consistent
 
-/-- `CpuTopology.checkSupported` decides `CpuTopology.Supported`. -/
+/-- `CpuTopology.checkSupported` decides `CpuTopology.Supported`.
+Feature: `krepi.platform.device-tree`. -/
 def CheckCpuTopologySupported : Prop :=
   ∀ t : CpuTopology, t.checkSupported = true ↔ t.Supported
 
-/-- `MemoryPlan.checkWellFormed` decides `MemoryPlan.WellFormed`. -/
+/-- `MemoryPlan.checkWellFormed` decides `MemoryPlan.WellFormed`.
+Feature: `krepi.platform.device-tree`. -/
 def CheckMemoryPlanWellFormed : Prop :=
   ∀ p : MemoryPlan, p.checkWellFormed = true ↔ p.WellFormed
 
-/-- `BootState.checkWellFormed` decides `BootState.WellFormed`. -/
+/-- `BootState.checkWellFormed` decides `BootState.WellFormed`.
+Feature: `krepi.platform.device-tree`. -/
 def CheckBootStateWellFormed : Prop :=
   ∀ s : BootState, s.checkWellFormed = true ↔ s.WellFormed
 
-/-- `BootState.checkFromHandOver` decides `BootState.FromHandOver`. -/
+/-- `BootState.checkFromHandOver` decides `BootState.FromHandOver`.
+Feature: `krepi.platform.device-tree`. -/
 def CheckBootStateFromHandOver : Prop :=
   ∀ s : BootState, s.checkFromHandOver = true ↔ s.FromHandOver
 
-/-- `BootState.checkStartOrder` decides `BootState.StartOrder`. -/
+/-- `BootState.checkStartOrder` decides `BootState.StartOrder`.
+Feature: `krepi.platform.device-tree`. -/
 def CheckBootStateStartOrder : Prop :=
   ∀ s : BootState, s.checkStartOrder = true ↔ s.StartOrder
 
@@ -396,27 +406,32 @@ boot state. The structural invariants that the entries establish are the
 well-formedness lemmas of these entries, in the last group. -/
 
 /-- The boot memory of `Fdt::discover_boot_memory` is consistent, and holds
-the size limit and the alignment of the profile that it was given. -/
+the size limit and the alignment of the profile that it was given.
+Feature: `krepi.platform.device-tree`. -/
 def DiscoverBootMemoryConsistent : Prop :=
   ∀ (t : Fdt) (handOver : HandOverProfile) (dtbAddress : UInt64) (image : Span)
     (m : BootMemory), t.discoverBootMemory handOver dtbAddress image = .ok m →
     m.Consistent ∧ m.maxBlobSize = handOver.maxBlobSize ∧
       m.alignmentLog2 = handOver.alignmentLog2
 
-/-- The CPU topology of `Fdt::discover_cpus` has a supported count. -/
+/-- The CPU topology of `Fdt::discover_cpus` has a supported count.
+Feature: `krepi.platform.device-tree`. -/
 def DiscoverCpusSupported : Prop :=
   ∀ (t : Fdt) (profile : CpuProfile) (topology : CpuTopology),
     t.discoverCpus profile = .ok topology → topology.Supported
 
-/-- The boot state of the cold entry is well-formed. -/
+/-- The boot state of the cold entry is well-formed.
+Feature: `krepi.platform.device-tree`. -/
 def ColdEntryWellFormed : Prop :=
   ∀ (token : BootToken) (bytes : ByteArray), (BootState.coldEntry token bytes).WellFormed
 
-/-- The boot state of the cold entry has the topology of its hand-over. -/
+/-- The boot state of the cold entry has the topology of its hand-over.
+Feature: `krepi.platform.device-tree`. -/
 def ColdEntryFromHandOver : Prop :=
   ∀ (token : BootToken) (bytes : ByteArray), (BootState.coldEntry token bytes).FromHandOver
 
-/-- The boot state of the cold entry keeps the order of the start. -/
+/-- The boot state of the cold entry keeps the order of the start.
+Feature: `krepi.platform.device-tree`. -/
 def ColdEntryStartOrder : Prop :=
   ∀ (token : BootToken) (bytes : ByteArray), (BootState.coldEntry token bytes).StartOrder
 
@@ -426,33 +441,39 @@ Each transaction of the boot state preserves each of its functional
 invariants. -/
 
 /-- The publication of the boot memory map keeps the topology of the
-hand-over. -/
+hand-over.
+Feature: `krepi.platform.device-tree`. -/
 def PublishPlanFromHandOver : Prop :=
   ∀ (token : BootToken) (s : BootState) (build : PlanBuild) (s' : BootState),
     s.FromHandOver → BootState.publishPlan token s build = some (.ok s') → s'.FromHandOver
 
-/-- The publication of the boot memory map keeps the order of the start. -/
+/-- The publication of the boot memory map keeps the order of the start.
+Feature: `krepi.platform.device-tree`. -/
 def PublishPlanStartOrder : Prop :=
   ∀ (token : BootToken) (s : BootState) (build : PlanBuild) (s' : BootState),
     s.StartOrder → BootState.publishPlan token s build = some (.ok s') → s'.StartOrder
 
 /-- The publication of the CPU topology keeps the topology of the hand-over.
+Feature: `krepi.platform.device-tree`.
 -/
 def PublishTopologyFromHandOver : Prop :=
   ∀ (token : BootToken) (s : BootState) (profile : CpuProfile) (s' : BootState),
     s.FromHandOver → BootState.publishTopology token s profile = some (.ok s') → s'.FromHandOver
 
-/-- The publication of the CPU topology keeps the order of the start. -/
+/-- The publication of the CPU topology keeps the order of the start.
+Feature: `krepi.platform.device-tree`. -/
 def PublishTopologyStartOrder : Prop :=
   ∀ (token : BootToken) (s : BootState) (profile : CpuProfile) (s' : BootState),
     s.StartOrder → BootState.publishTopology token s profile = some (.ok s') → s'.StartOrder
 
-/-- The start of the secondary CPUs keeps the topology of the hand-over. -/
+/-- The start of the secondary CPUs keeps the topology of the hand-over.
+Feature: `krepi.platform.device-tree`. -/
 def StartSecondariesFromHandOver : Prop :=
   ∀ (token : BootToken) (s s' : BootState),
     s.FromHandOver → BootState.startSecondaries token s = some s' → s'.FromHandOver
 
-/-- The start of the secondary CPUs keeps the order of the start. -/
+/-- The start of the secondary CPUs keeps the order of the start.
+Feature: `krepi.platform.device-tree`. -/
 def StartSecondariesStartOrder : Prop :=
   ∀ (token : BootToken) (s s' : BootState),
     s.StartOrder → BootState.startSecondaries token s = some s' → s'.StartOrder
@@ -466,105 +487,125 @@ spans from such a value, and the transactions of the boot state. An entry
 that builds its value from unchecked input, such as the parse, has no
 hypothesis: its lemma is the establishment of the invariant of its value. -/
 
-/-- `Span::new` gives a span of the contract. -/
+/-- `Span::new` gives a span of the contract.
+Feature: `krepi.platform.device-tree`. -/
 def SpanNewWellFormed : Prop :=
   ∀ (start size : UInt64) (s : Span), Span.new start size = .ok s → s.Valid
 
-/-- The tree of `Fdt::parse` is well-formed. -/
+/-- The tree of `Fdt::parse` is well-formed.
+Feature: `krepi.platform.device-tree`. -/
 def ParseWellFormed : Prop :=
   ∀ (input : ByteArray) (t : Fdt), Fdt.parse input = .ok t → t.WellFormed
 
-/-- The `Reg` of `Reg::new` is well-formed in its address cells. -/
+/-- The `Reg` of `Reg::new` is well-formed in its address cells.
+Feature: `krepi.platform.device-tree`. -/
 def RegNewWellFormed : Prop :=
   ∀ (bytes : ByteArray) (addressCells sizeCells : UInt32) (r : Reg),
     Reg.new bytes addressCells sizeCells = .ok r → r.WellFormed addressCells
 
-/-- The map of `AddressMap::new` is well-formed. -/
+/-- The map of `AddressMap::new` is well-formed.
+Feature: `krepi.platform.device-tree`. -/
 def AddressMapNewWellFormed : Prop :=
   ∀ (bytes : Option ByteArray) (childCells parentCells sizeCells : UInt32) (m : AddressMap),
     AddressMap.new bytes childCells parentCells sizeCells = .ok m → m.WellFormed
 
 /-- The `Reg` of `Node::reg` is well-formed in the address cells of the
-parent. -/
+parent.
+Feature: `krepi.platform.device-tree`. -/
 def NodeRegWellFormed : Prop :=
   ∀ (n parent : Node) (cells : UInt32) (r : Reg),
     n.parent = some parent → parent.addressCells = .ok cells → n.reg = .ok r → r.WellFormed cells
 
-/-- The map of `Node::ranges` is well-formed. -/
+/-- The map of `Node::ranges` is well-formed.
+Feature: `krepi.platform.device-tree`. -/
 def NodeRangesWellFormed : Prop :=
   ∀ (n : Node) (m : AddressMap), n.ranges = .ok m → m.WellFormed
 
-/-- The map of `Node::dma_ranges` is well-formed. -/
+/-- The map of `Node::dma_ranges` is well-formed.
+Feature: `krepi.platform.device-tree`. -/
 def NodeDmaRangesWellFormed : Prop :=
   ∀ (n : Node) (m : AddressMap), n.dmaRanges = .ok m → m.WellFormed
 
 /-- `AddressMap::to_parent` of a well-formed map gives a nonempty span of the
-size of the request within the width of the parent's addresses. -/
+size of the request within the width of the parent's addresses.
+Feature: `krepi.platform.device-tree`. -/
 def ToParentWellFormed : Prop :=
   ∀ (m : AddressMap) (s r : Span), m.WellFormed → m.toParent s = .ok r →
     r.size = s.size ∧ r.size ≠ 0 ∧ r.WithinWidth m.parentCells
 
 /-- `AddressMap::to_child` of a well-formed map gives a nonempty span of the
-size of the request within the width of the child's addresses. -/
+size of the request within the width of the child's addresses.
+Feature: `krepi.platform.device-tree`. -/
 def ToChildWellFormed : Prop :=
   ∀ (m : AddressMap) (s r : Span), m.WellFormed → m.toChild s = .ok r →
     r.size = s.size ∧ r.size ≠ 0 ∧ r.WithinWidth m.childCells
 
 /-- `Node::translate_reg` gives a span within 64 bits of the size of the
-request. -/
+request.
+Feature: `krepi.platform.device-tree`. -/
 def TranslateRegWellFormed : Prop :=
   ∀ (n : Node) (s r : Span), n.translateReg s = .ok r → r.Valid ∧ r.size = s.size
 
 /-- The memory map of `Fdt::discover_memory` on a well-formed tree is
-well-formed. -/
+well-formed.
+Feature: `krepi.platform.device-tree`. -/
 def DiscoverMemoryWellFormed : Prop :=
   ∀ (t : Fdt) (m : MemoryMap), t.WellFormed → t.discoverMemory = .ok m → m.WellFormed
 
 /-- The memory map of a boot memory of `Fdt::discover_boot_memory` on a
-well-formed tree is well-formed. -/
+well-formed tree is well-formed.
+Feature: `krepi.platform.device-tree`. -/
 def DiscoverBootMemoryWellFormed : Prop :=
   ∀ (t : Fdt) (handOver : HandOverProfile) (dtbAddress : UInt64) (image : Span)
     (m : BootMemory), t.WellFormed → t.discoverBootMemory handOver dtbAddress image = .ok m →
     m.memory.WellFormed
 
 /-- `BootMemory::find_available` gives a nonempty span of the size asked
-within 64 bits. -/
+within 64 bits.
+Feature: `krepi.platform.device-tree`. -/
 def FindAvailableWellFormed : Prop :=
   ∀ (m : BootMemory) (size alignment minimum limit : UInt64) (s : Span),
     m.findAvailable size alignment minimum limit = .ok (some s) → s.size = size ∧ s.Nonempty
 
-/-- The boot memory map of `MemoryPlan::all_ram` is well-formed. -/
+/-- The boot memory map of `MemoryPlan::all_ram` is well-formed.
+Feature: `krepi.platform.device-tree`. -/
 def AllRamWellFormed : Prop :=
   ∀ (ram boot : List Span) (firmware : List ReservedRegion) (p : MemoryPlan),
     MemoryPlan.allRam ram boot firmware = .ok p → p.WellFormed
 
-/-- The boot memory map of `MemoryPlan::new` is well-formed. -/
+/-- The boot memory map of `MemoryPlan::new` is well-formed.
+Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanNewWellFormed : Prop :=
   ∀ (window : Span) (ram boot : List Span) (firmware : List ReservedRegion) (p : MemoryPlan),
     MemoryPlan.new window ram boot firmware = .ok p → p.WellFormed
 
-/-- The boot memory map of `MemoryPlan::from_boot_memory` is well-formed. -/
+/-- The boot memory map of `MemoryPlan::from_boot_memory` is well-formed.
+Feature: `krepi.platform.device-tree`. -/
 def FromBootMemoryWellFormed : Prop :=
   ∀ (memory : BootMemory) (window : Span) (more : List Span) (p : MemoryPlan),
     MemoryPlan.fromBootMemory memory window more = .ok p → p.WellFormed
 
 /-- The usable ranges of a well-formed boot memory map are well-formed as a
-table. -/
+table.
+Feature: `krepi.platform.device-tree`. -/
 def AvailableRangesWellFormed : Prop :=
   ∀ p : MemoryPlan, p.WellFormed → p.UsableWellFormed p.availableRanges
 
 /-- The publication of the boot memory map keeps the boot state well-formed.
+Feature: `krepi.platform.device-tree`.
 -/
 def PublishPlanWellFormed : Prop :=
   ∀ (token : BootToken) (s : BootState) (build : PlanBuild) (s' : BootState),
     s.WellFormed → BootState.publishPlan token s build = some (.ok s') → s'.WellFormed
 
-/-- The publication of the CPU topology keeps the boot state well-formed. -/
+/-- The publication of the CPU topology keeps the boot state well-formed.
+Feature: `krepi.platform.device-tree`. -/
 def PublishTopologyWellFormed : Prop :=
   ∀ (token : BootToken) (s : BootState) (profile : CpuProfile) (s' : BootState),
     s.WellFormed → BootState.publishTopology token s profile = some (.ok s') → s'.WellFormed
 
-/-- The start of the secondary CPUs keeps the boot state well-formed. -/
+/-- The start of the secondary CPUs keeps the boot state well-formed.
+Feature: `krepi.platform.device-tree`. -/
 def StartSecondariesWellFormed : Prop :=
   ∀ (token : BootToken) (s s' : BootState),
     s.WellFormed → BootState.startSecondaries token s = some s' → s'.WellFormed

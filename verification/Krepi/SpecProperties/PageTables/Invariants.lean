@@ -442,47 +442,56 @@ the free runs and of the offset of the direct map on every value, also one
 that no entry builds; the other functional checks on every table that keeps
 the invariants that they read. -/
 
-/-- `Tables.checkWellFormed` decides `Tables.WellFormed`. -/
+/-- `Tables.checkWellFormed` decides `Tables.WellFormed`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CheckTablesWellFormed : Prop :=
   ∀ (r : Region) (N : Nat) (s : Tables r N) (base : UInt64) (bits : UInt8),
     s.checkWellFormed base bits = true ↔ s.WellFormed base bits
 
-/-- `Ownership.checkWellFormed` decides `Ownership.WellFormed`. -/
+/-- `Ownership.checkWellFormed` decides `Ownership.WellFormed`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CheckOwnershipWellFormed : Prop :=
   ∀ (E X : Nat) (t : Ownership E X), t.checkWellFormed = true ↔ t.WellFormed
 
-/-- `Shared.checkWellFormed` decides `Shared.WellFormed`. -/
+/-- `Shared.checkWellFormed` decides `Shared.WellFormed`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CheckSharedWellFormed : Prop :=
   ∀ (E X : Nat) (s : Shared E X) (cfg : Config), s.checkWellFormed cfg = true ↔ s.WellFormed cfg
 
 /-- On a well-formed table, `Ownership.checkOneOwner` decides
-`Ownership.OneOwner`. -/
+`Ownership.OneOwner`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CheckOneOwner : Prop :=
   ∀ (E X : Nat) (t : Ownership E X), t.WellFormed → (t.checkOneOwner = true ↔ t.OneOwner)
 
 /-- On a well-formed table with one owner for every managed page,
-`Ownership.checkHolderRanges` decides `Ownership.HolderRanges`. -/
+`Ownership.checkHolderRanges` decides `Ownership.HolderRanges`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CheckHolderRanges : Prop :=
   ∀ (E X : Nat) (t : Ownership E X), t.WellFormed → t.OneOwner →
     (t.checkHolderRanges = true ↔ t.HolderRanges)
 
 /-- On a well-formed table, `Ownership.checkGenerationsBelowCounter` decides
-`Ownership.GenerationsBelowCounter`. -/
+`Ownership.GenerationsBelowCounter`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CheckGenerationsBelowCounter : Prop :=
   ∀ (E X : Nat) (t : Ownership E X), t.WellFormed →
     (t.checkGenerationsBelowCounter = true ↔ t.GenerationsBelowCounter)
 
-/-- `Ownership.checkFreeExtentsMaximal` decides `Ownership.FreeExtentsMaximal`. -/
+/-- `Ownership.checkFreeExtentsMaximal` decides `Ownership.FreeExtentsMaximal`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CheckFreeExtentsMaximal : Prop :=
   ∀ (E X : Nat) (t : Ownership E X), t.checkFreeExtentsMaximal = true ↔ t.FreeExtentsMaximal
 
 /-- On a well-formed table with one owner for every managed page,
-`Ownership.checkFreeOrHeldUsable` decides `Ownership.FreeOrHeldUsable`. -/
+`Ownership.checkFreeOrHeldUsable` decides `Ownership.FreeOrHeldUsable`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CheckFreeOrHeldUsable : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (B : Krepi.Spec.Fdt.MemoryPlan), t.WellFormed → t.OneOwner →
     (t.checkFreeOrHeldUsable B = true ↔ t.FreeOrHeldUsable B)
 
-/-- `Shared.checkDirectMapOffset` decides `Shared.DirectMapOffset`. -/
+/-- `Shared.checkDirectMapOffset` decides `Shared.DirectMapOffset`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CheckDirectMapOffset : Prop :=
   ∀ (E X : Nat) (s : Shared E X) (cfg : Config),
     s.checkDirectMapOffset cfg = true ↔ s.DirectMapOffset cfg
@@ -498,13 +507,15 @@ the invariant of their result from any record; their statements are in the
 last group. -/
 
 /-- `Tables::new` on storage that is zero in all its tables, in a pool that
-the contract admits, gives a well-formed set: the root alone in use. -/
+the contract admits, gives a well-formed set: the root alone in use.
+Feature: `krepi.kernel.kernel-memory`. -/
 def NewWellFormed : Prop :=
   ∀ (r : Region) (N : Nat) (base : UInt64) (bits : UInt8), PoolOk N base bits →
     (Tables.new (Pool.zero N) : Tables r N).WellFormed base bits
 
 /-- `kernel_map` on the lower set of `Tables::new` on zero storage gives a
-well-formed set once its plan has run. -/
+well-formed set once its plan has run.
+Feature: `krepi.kernel.kernel-memory`. -/
 def BootKernelMapWellFormed : Prop :=
   ∀ (N : Nat) (layout : Layout) (base : UInt64) (bits : UInt8) (s : Tables .lower N) (plan : Plan),
     PoolOk N base bits →
@@ -512,7 +523,8 @@ def BootKernelMapWellFormed : Prop :=
     (s.apply plan).WellFormed base bits
 
 /-- `direct_map` on the upper set of `Tables::new` on zero storage gives a
-well-formed set once its plan has run. -/
+well-formed set once its plan has run.
+Feature: `krepi.kernel.kernel-memory`. -/
 def BootDirectMapWellFormed : Prop :=
   ∀ (N : Nat) (memory : Krepi.Spec.Fdt.MemoryPlan) (base : UInt64) (bits : UInt8)
     (s : Tables .upper N) (plan : Plan), PoolOk N base bits →
@@ -520,41 +532,48 @@ def BootDirectMapWellFormed : Prop :=
     (s.apply plan).WellFormed base bits
 
 /-- The shared state of the boot, both kernel sets of `Tables::new` on zero
-pools that the contract admits, is well-formed. -/
+pools that the contract admits, is well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def BootWellFormed : Prop :=
   ∀ (E X : Nat) (cfg : Config), PoolOk KERNEL_TABLES cfg.lowerBase cfg.bits →
     PoolOk DIRECT_MAP_TABLES cfg.directBase cfg.bits →
     (Shared.boot BootCpu.boot (Pool.zero _) (Pool.zero _) : Shared E X).WellFormed cfg
 
 /-- The shared state of the boot keeps the offset of the direct map: its
-direct map's set maps nothing. -/
+direct map's set maps nothing.
+Feature: `krepi.kernel.kernel-memory`. -/
 def BootDirectMapOffset : Prop :=
   ∀ (E X : Nat) (cfg : Config),
     (Shared.boot BootCpu.boot (Pool.zero _) (Pool.zero _) : Shared E X).DirectMapOffset cfg
 
-/-- The table of `Ownership::new` is well-formed. -/
+/-- The table of `Ownership::new` is well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def NewOwnershipWellFormed : Prop :=
   ∀ (E X : Nat) (arena : UInt64) (banks : List PhysRange) (exclusions : List Exclusion)
     (t : Ownership E X), Ownership.new arena banks exclusions = .ok t → t.WellFormed
 
-/-- The table of `Ownership::new` records one owner for every managed page. -/
+/-- The table of `Ownership::new` records one owner for every managed page.
+Feature: `krepi.kernel.kernel-memory`. -/
 def NewOneOwner : Prop :=
   ∀ (E X : Nat) (arena : UInt64) (banks : List PhysRange) (exclusions : List Exclusion)
     (t : Ownership E X), Ownership.new arena banks exclusions = .ok t → t.OneOwner
 
 /-- The table of `Ownership::new` keeps the ranges of the holders: it has
-none. -/
+none.
+Feature: `krepi.kernel.kernel-memory`. -/
 def NewHolderRanges : Prop :=
   ∀ (E X : Nat) (arena : UInt64) (banks : List PhysRange) (exclusions : List Exclusion)
     (t : Ownership E X), Ownership.new arena banks exclusions = .ok t → t.HolderRanges
 
 /-- The table of `Ownership::new` keeps the generations below the counter:
-it has no holder. -/
+it has no holder.
+Feature: `krepi.kernel.kernel-memory`. -/
 def NewGenerationsBelowCounter : Prop :=
   ∀ (E X : Nat) (arena : UInt64) (banks : List PhysRange) (exclusions : List Exclusion)
     (t : Ownership E X), Ownership.new arena banks exclusions = .ok t → t.GenerationsBelowCounter
 
-/-- The table of `Ownership::new` has one free extent for each free run. -/
+/-- The table of `Ownership::new` has one free extent for each free run.
+Feature: `krepi.kernel.kernel-memory`. -/
 def NewFreeExtentsMaximal : Prop :=
   ∀ (E X : Nat) (arena : UInt64) (banks : List PhysRange) (exclusions : List Exclusion)
     (t : Ownership E X), Ownership.new arena banks exclusions = .ok t → t.FreeExtentsMaximal
@@ -562,6 +581,7 @@ def NewFreeExtentsMaximal : Prop :=
 /-- The table of the kernel root, which `Ownership::new` builds from the
 managed banks and the exclusions of a well-formed boot memory map, has as
 its free and held pages exactly the pages of the usable ranges of that map.
+Feature: `krepi.kernel.kernel-memory`.
 -/
 def NewFreeOrHeldUsable : Prop :=
   ∀ (E X : Nat) (B : Krepi.Spec.Fdt.MemoryPlan) (arena : UInt64) (banks : List PhysRange)
@@ -580,113 +600,134 @@ means is its abstract mapping, whose change by each entry is
 `Krepi.SpecProperties.PageTables.AfterEveryWrite`. Of the transactions of the
 shared state only `direct_map` writes the direct map's set. -/
 
-/-- `assign` keeps one owner for every managed page. -/
+/-- `assign` keeps one owner for every managed page.
+Feature: `krepi.kernel.kernel-memory`. -/
 def AssignOneOwner : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (c : Choice) (zeroed : Bool) (t' : Ownership E X)
     (a : Allocation), t.Invariant → t.Chose c → t.assign c zeroed = .ok (t', a) → t'.OneOwner
 
-/-- `reserve` keeps one owner for every managed page. -/
+/-- `reserve` keeps one owner for every managed page.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ReserveOneOwner : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner pages alignment : UInt64) (p : Placement)
     (t' : Ownership E X) (r : Reservation),
     t.Invariant → t.reserve owner pages alignment p = .ok (t', r) → t'.OneOwner
 
-/-- `publish` keeps one owner for every managed page. -/
+/-- `publish` keeps one owner for every managed page.
+Feature: `krepi.kernel.kernel-memory`. -/
 def PublishOneOwner : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (x : Initialized) (t' : Ownership E X)
     (a : Allocation), t.Invariant → t.publish owner x = .ok (t', a) → t'.OneOwner
 
-/-- `cancel` keeps one owner for every managed page. -/
+/-- `cancel` keeps one owner for every managed page.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CancelOneOwner : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (r : Reservation) (t' : Ownership E X),
     t.Invariant → t.cancel owner r = .ok t' → t'.OneOwner
 
-/-- `release` keeps one owner for every managed page. -/
+/-- `release` keeps one owner for every managed page.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ReleaseOneOwner : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (x : Allocation) (t' : Ownership E X),
     t.Invariant → t.release owner x = .ok t' → t'.OneOwner
 
-/-- `assign` keeps the ranges of the holders. -/
+/-- `assign` keeps the ranges of the holders.
+Feature: `krepi.kernel.kernel-memory`. -/
 def AssignHolderRanges : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (c : Choice) (zeroed : Bool) (t' : Ownership E X)
     (a : Allocation), t.Invariant → t.Chose c → t.assign c zeroed = .ok (t', a) → t'.HolderRanges
 
-/-- `reserve` keeps the ranges of the holders. -/
+/-- `reserve` keeps the ranges of the holders.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ReserveHolderRanges : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner pages alignment : UInt64) (p : Placement)
     (t' : Ownership E X) (r : Reservation),
     t.Invariant → t.reserve owner pages alignment p = .ok (t', r) → t'.HolderRanges
 
-/-- `publish` keeps the ranges of the holders. -/
+/-- `publish` keeps the ranges of the holders.
+Feature: `krepi.kernel.kernel-memory`. -/
 def PublishHolderRanges : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (x : Initialized) (t' : Ownership E X)
     (a : Allocation), t.Invariant → t.publish owner x = .ok (t', a) → t'.HolderRanges
 
-/-- `cancel` keeps the ranges of the holders. -/
+/-- `cancel` keeps the ranges of the holders.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CancelHolderRanges : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (r : Reservation) (t' : Ownership E X),
     t.Invariant → t.cancel owner r = .ok t' → t'.HolderRanges
 
-/-- `release` keeps the ranges of the holders. -/
+/-- `release` keeps the ranges of the holders.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ReleaseHolderRanges : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (x : Allocation) (t' : Ownership E X),
     t.Invariant → t.release owner x = .ok t' → t'.HolderRanges
 
-/-- `assign` keeps the generations below the counter. -/
+/-- `assign` keeps the generations below the counter.
+Feature: `krepi.kernel.kernel-memory`. -/
 def AssignGenerationsBelowCounter : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (c : Choice) (zeroed : Bool) (t' : Ownership E X)
     (a : Allocation), t.Invariant → t.Chose c → t.assign c zeroed = .ok (t', a) →
     t'.GenerationsBelowCounter
 
-/-- `reserve` keeps the generations below the counter. -/
+/-- `reserve` keeps the generations below the counter.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ReserveGenerationsBelowCounter : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner pages alignment : UInt64) (p : Placement)
     (t' : Ownership E X) (r : Reservation),
     t.Invariant → t.reserve owner pages alignment p = .ok (t', r) → t'.GenerationsBelowCounter
 
-/-- `publish` keeps the generations below the counter. -/
+/-- `publish` keeps the generations below the counter.
+Feature: `krepi.kernel.kernel-memory`. -/
 def PublishGenerationsBelowCounter : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (x : Initialized) (t' : Ownership E X)
     (a : Allocation), t.Invariant → t.publish owner x = .ok (t', a) → t'.GenerationsBelowCounter
 
-/-- `cancel` keeps the generations below the counter. -/
+/-- `cancel` keeps the generations below the counter.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CancelGenerationsBelowCounter : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (r : Reservation) (t' : Ownership E X),
     t.Invariant → t.cancel owner r = .ok t' → t'.GenerationsBelowCounter
 
-/-- `release` keeps the generations below the counter. -/
+/-- `release` keeps the generations below the counter.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ReleaseGenerationsBelowCounter : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (x : Allocation) (t' : Ownership E X),
     t.Invariant → t.release owner x = .ok t' → t'.GenerationsBelowCounter
 
-/-- `assign` keeps one free extent for each free run. -/
+/-- `assign` keeps one free extent for each free run.
+Feature: `krepi.kernel.kernel-memory`. -/
 def AssignFreeExtentsMaximal : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (c : Choice) (zeroed : Bool) (t' : Ownership E X)
     (a : Allocation), t.Invariant → t.Chose c → t.assign c zeroed = .ok (t', a) →
     t'.FreeExtentsMaximal
 
-/-- `reserve` keeps one free extent for each free run. -/
+/-- `reserve` keeps one free extent for each free run.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ReserveFreeExtentsMaximal : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner pages alignment : UInt64) (p : Placement)
     (t' : Ownership E X) (r : Reservation),
     t.Invariant → t.reserve owner pages alignment p = .ok (t', r) → t'.FreeExtentsMaximal
 
-/-- `publish` keeps one free extent for each free run. -/
+/-- `publish` keeps one free extent for each free run.
+Feature: `krepi.kernel.kernel-memory`. -/
 def PublishFreeExtentsMaximal : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (x : Initialized) (t' : Ownership E X)
     (a : Allocation), t.Invariant → t.publish owner x = .ok (t', a) → t'.FreeExtentsMaximal
 
-/-- `cancel` keeps one free extent for each free run. -/
+/-- `cancel` keeps one free extent for each free run.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CancelFreeExtentsMaximal : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (r : Reservation) (t' : Ownership E X),
     t.Invariant → t.cancel owner r = .ok t' → t'.FreeExtentsMaximal
 
-/-- `release` keeps one free extent for each free run. -/
+/-- `release` keeps one free extent for each free run.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ReleaseFreeExtentsMaximal : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (x : Allocation) (t' : Ownership E X),
     t.Invariant → t.release owner x = .ok t' → t'.FreeExtentsMaximal
 
 /-- `assign` keeps the free and held pages of the table of the kernel root.
+Feature: `krepi.kernel.kernel-memory`.
 -/
 def AssignFreeOrHeldUsable : Prop :=
   ∀ (E X : Nat) (B : Krepi.Spec.Fdt.MemoryPlan) (t : Ownership E X) (c : Choice) (zeroed : Bool)
@@ -694,6 +735,7 @@ def AssignFreeOrHeldUsable : Prop :=
     t.assign c zeroed = .ok (t', a) → t'.FreeOrHeldUsable B
 
 /-- `reserve` keeps the free and held pages of the table of the kernel root.
+Feature: `krepi.kernel.kernel-memory`.
 -/
 def ReserveFreeOrHeldUsable : Prop :=
   ∀ (E X : Nat) (B : Krepi.Spec.Fdt.MemoryPlan) (t : Ownership E X) (owner pages alignment : UInt64)
@@ -702,6 +744,7 @@ def ReserveFreeOrHeldUsable : Prop :=
     t'.FreeOrHeldUsable B
 
 /-- `publish` keeps the free and held pages of the table of the kernel root.
+Feature: `krepi.kernel.kernel-memory`.
 -/
 def PublishFreeOrHeldUsable : Prop :=
   ∀ (E X : Nat) (B : Krepi.Spec.Fdt.MemoryPlan) (t : Ownership E X) (owner : UInt64) (x : Initialized)
@@ -709,6 +752,7 @@ def PublishFreeOrHeldUsable : Prop :=
     t.publish owner x = .ok (t', a) → t'.FreeOrHeldUsable B
 
 /-- `cancel` keeps the free and held pages of the table of the kernel root.
+Feature: `krepi.kernel.kernel-memory`.
 -/
 def CancelFreeOrHeldUsable : Prop :=
   ∀ (E X : Nat) (B : Krepi.Spec.Fdt.MemoryPlan) (t : Ownership E X) (owner : UInt64) (r : Reservation)
@@ -716,13 +760,15 @@ def CancelFreeOrHeldUsable : Prop :=
     t'.FreeOrHeldUsable B
 
 /-- `release` keeps the free and held pages of the table of the kernel root.
+Feature: `krepi.kernel.kernel-memory`.
 -/
 def ReleaseFreeOrHeldUsable : Prop :=
   ∀ (E X : Nat) (B : Krepi.Spec.Fdt.MemoryPlan) (t : Ownership E X) (owner : UInt64) (x : Allocation)
     (t' : Ownership E X), t.Invariant → t.FreeOrHeldUsable B → t.release owner x = .ok t' →
     t'.FreeOrHeldUsable B
 
-/-- `direct_map` by the boot CPU keeps the offset of the direct map. -/
+/-- `direct_map` by the boot CPU keeps the offset of the direct map.
+Feature: `krepi.kernel.kernel-memory`. -/
 def BuildDirectMapOffset : Prop :=
   ∀ (E X : Nat) (cfg : Config) (cpu : BootCpu) (s : Shared E X) (memory : Krepi.Spec.Fdt.MemoryPlan)
     (s' : Shared E X) (plan : Plan), s.WellFormed cfg → s.DirectMapOffset cfg →
@@ -742,14 +788,16 @@ changes no table, and the read entries return values, so they have no lemma.
 -/
 
 /-- `reset` of a set whose tables not in use are zero, in a pool that the
-contract admits, gives a well-formed set, from any record. -/
+contract admits, gives a well-formed set, from any record.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ResetWellFormed : Prop :=
   ∀ (r : Region) (N : Nat) (s : Tables r N) (base : UInt64) (bits : UInt8),
     PoolOk N base bits → (∀ t, s.used ≤ t → t < N → s.table t = Table.zero) →
     (s.reset.1.apply s.reset.2).WellFormed base bits
 
 /-- `clone_kernel_from` into a target whose tables not in use are zero gives
-a well-formed target, from any source that it accepts. -/
+a well-formed target, from any source that it accepts.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CloneKernelFromWellFormed : Prop :=
   ∀ (r : Region) (N : Nat) (target source : Tables r N) (sourceBase base : UInt64) (bits : UInt8)
     (s : Tables r N) (plan : Plan),
@@ -757,94 +805,110 @@ def CloneKernelFromWellFormed : Prop :=
     target.cloneKernelFrom source sourceBase base bits = .ok (s, plan) →
     (s.apply plan).WellFormed base bits
 
-/-- `map_page` keeps a set well-formed. -/
+/-- `map_page` keeps a set well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def MapPageWellFormed : Prop :=
   ∀ (r : Region) (N : Nat) (s : Tables r N) (v p : UInt64) (k : Kind) (base : UInt64) (bits : UInt8)
     (s' : Tables r N) (plan : Plan), s.WellFormed base bits →
     s.mapPage v p k base bits = .ok (s', plan) → (s'.apply plan).WellFormed base bits
 
-/-- `map_block` keeps a set well-formed. -/
+/-- `map_block` keeps a set well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def MapBlockWellFormed : Prop :=
   ∀ (r : Region) (N : Nat) (s : Tables r N) (v p base : UInt64) (bits : UInt8) (s' : Tables r N)
     (plan : Plan), s.WellFormed base bits →
     s.mapBlock v p base bits = .ok (s', plan) → (s'.apply plan).WellFormed base bits
 
-/-- `unmap_page` keeps a set well-formed. -/
+/-- `unmap_page` keeps a set well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def UnmapPageWellFormed : Prop :=
   ∀ (r : Region) (N : Nat) (s : Tables r N) (v base : UInt64) (bits : UInt8) (plan : Plan)
     (p : UInt64), s.WellFormed base bits →
     s.unmapPage v base bits = .ok (plan, p) → (s.apply plan).WellFormed base bits
 
-/-- `kernel_map` keeps a set well-formed. -/
+/-- `kernel_map` keeps a set well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def KernelMapWellFormed : Prop :=
   ∀ (N : Nat) (s : Tables .lower N) (layout : Layout) (base : UInt64) (bits : UInt8)
     (s' : Tables .lower N) (plan : Plan), s.WellFormed base bits →
     s.kernelMap layout base bits = .ok (s', plan) → (s'.apply plan).WellFormed base bits
 
-/-- `direct_map` keeps a set well-formed. -/
+/-- `direct_map` keeps a set well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def DirectMapWellFormed : Prop :=
   ∀ (N : Nat) (s : Tables .upper N) (memory : Krepi.Spec.Fdt.MemoryPlan) (base : UInt64)
     (bits : UInt8) (s' : Tables .upper N) (plan : Plan), s.WellFormed base bits →
     s.directMap memory base bits = .ok (s', plan) → (s'.apply plan).WellFormed base bits
 
-/-- `assign` of a choice of `choose` keeps a table well-formed. -/
+/-- `assign` of a choice of `choose` keeps a table well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def AssignWellFormed : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (c : Choice) (zeroed : Bool) (t' : Ownership E X)
     (a : Allocation), t.WellFormed → t.Chose c → t.assign c zeroed = .ok (t', a) → t'.WellFormed
 
-/-- `reserve` keeps a table well-formed. -/
+/-- `reserve` keeps a table well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ReserveWellFormed : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner pages alignment : UInt64) (p : Placement)
     (t' : Ownership E X) (r : Reservation),
     t.WellFormed → t.reserve owner pages alignment p = .ok (t', r) → t'.WellFormed
 
-/-- `publish` keeps a table well-formed. -/
+/-- `publish` keeps a table well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def PublishWellFormed : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (x : Initialized) (t' : Ownership E X)
     (a : Allocation), t.WellFormed → t.publish owner x = .ok (t', a) → t'.WellFormed
 
-/-- `cancel` keeps a table well-formed. -/
+/-- `cancel` keeps a table well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CancelWellFormed : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (r : Reservation) (t' : Ownership E X),
     t.WellFormed → t.cancel owner r = .ok t' → t'.WellFormed
 
-/-- `release` keeps a table well-formed. -/
+/-- `release` keeps a table well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ReleaseWellFormed : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner : UInt64) (x : Allocation) (t' : Ownership E X),
     t.WellFormed → t.release owner x = .ok t' → t'.WellFormed
 
-/-- `kernel_map` by the boot CPU keeps the shared state well-formed. -/
+/-- `kernel_map` by the boot CPU keeps the shared state well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def BuildKernelMapWellFormed : Prop :=
   ∀ (E X : Nat) (cfg : Config) (cpu : BootCpu) (s : Shared E X) (layout : Layout)
     (s' : Shared E X) (plan : Plan), s.WellFormed cfg →
     s.buildKernelMap cpu layout cfg.lowerBase cfg.bits = some (.ok (s', plan)) → s'.WellFormed cfg
 
-/-- `direct_map` by the boot CPU keeps the shared state well-formed. -/
+/-- `direct_map` by the boot CPU keeps the shared state well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def BuildDirectMapWellFormed : Prop :=
   ∀ (E X : Nat) (cfg : Config) (cpu : BootCpu) (s : Shared E X) (memory : Krepi.Spec.Fdt.MemoryPlan)
     (s' : Shared E X) (plan : Plan), s.WellFormed cfg →
     s.buildDirectMap cpu memory cfg.directBase cfg.bits = some (.ok (s', plan)) → s'.WellFormed cfg
 
-/-- The end of the boot keeps the shared state well-formed. -/
+/-- The end of the boot keeps the shared state well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def EnableWellFormed : Prop :=
   ∀ (E X : Nat) (cfg : Config) (cpu : BootCpu) (s s' : Shared E X), s.WellFormed cfg →
     s.enable cpu = some s' → s'.WellFormed cfg
 
 /-- A fill of the lower kernel set under the token of the kernel tables
-keeps the shared state well-formed. -/
+keeps the shared state well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def FillKernelWellFormed : Prop :=
   ∀ (E X : Nat) (cfg : Config) (tok : KernelTablesToken) (s : Shared E X) (v p : UInt64) (k : Kind)
     (s' : Shared E X) (plan : Plan), s.WellFormed cfg →
     s.fillKernel tok v p k cfg.lowerBase cfg.bits = some (.ok (s', plan)) → s'.WellFormed cfg
 
-/-- `Ownership::new` under its token keeps the shared state well-formed. -/
+/-- `Ownership::new` under its token keeps the shared state well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def NewOwnershipSharedWellFormed : Prop :=
   ∀ (E X : Nat) (cfg : Config) (tok : OwnershipToken) (s : Shared E X) (arena : UInt64)
     (banks : List PhysRange) (exclusions : List Exclusion) (s' : Shared E X), s.WellFormed cfg →
     s.newOwnership tok arena banks exclusions = some (.ok s') → s'.WellFormed cfg
 
 /-- A write entry of the page ownership table under its token keeps the
-shared state well-formed when the entry keeps a table well-formed. -/
+shared state well-formed when the entry keeps a table well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def WithOwnershipWellFormed : Prop :=
   ∀ (E X : Nat) (cfg : Config) (ε α : Type) (tok : OwnershipToken) (s : Shared E X)
     (entry : Ownership E X → Except ε (Ownership E X × α)) (s' : Shared E X) (a : α),
@@ -852,7 +916,8 @@ def WithOwnershipWellFormed : Prop :=
     s.withOwnership tok entry = some (.ok (s', a)) → s'.WellFormed cfg
 
 /-- An allocation of one step under the token of the page ownership table
-keeps the shared state well-formed. -/
+keeps the shared state well-formed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def AllocateWellFormed : Prop :=
   ∀ (E X : Nat) (cfg : Config) (tok : OwnershipToken) (s : Shared E X)
     (owner pages alignment : UInt64) (p : Placement) (zeroed : PhysRange → Bool) (s' : Shared E X)

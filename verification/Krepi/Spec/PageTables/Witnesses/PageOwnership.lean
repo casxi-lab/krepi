@@ -556,24 +556,26 @@ inductive Built {E X : Nat} : Ownership E X → Prop
   | cancel {t o r t'} : Built t → t.cancel o r = .ok t' → Built t'
   | release {t o x t'} : Built t → t.release o x = .ok t' → Built t'
 
-/-- **Planned.** `assign` of a choice that `choose` gives on the same table, the
+/-- `assign` of a choice that `choose` gives on the same table, the
 requirement of the entry, never fails with `GenerationExhausted`,
 `OutOfMemory` or `MetadataExhausted`, and `reserve` never fails after its
 `choose`: on a table that the entries build, the free extents are disjoint,
 so the one extent that holds the chosen range is the one where `choose`
 found it, with the room that `choose` counted, and the counter that `choose`
 found not exhausted is unchanged. The only error of `assign` is `ZeroFailed`
-(`assignZeroFailed`), and the errors of `reserve` are those of `choose`. -/
+(`assignZeroFailed`), and the errors of `reserve` are those of `choose`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def TakeAcceptsChoice : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (o m al : UInt64) (p : Placement) (c : Choice) (s : HoldState),
     Built t → t.choose o m al p = .ok c → ∃ y, t.take c s = .ok y
 
-/-- **Planned.** A high placement never fails with `AddressOverflow` at the
+/-- A high placement never fails with `AddressOverflow` at the
 rounding of a start or the end of a range: its start is the end of the part
 of a free extent less the request, rounded down, so the range ends inside an
 extent below $2^{64}$. Its `AddressOverflow` is that of the size of the
 request or of its alignment; that of the rounding is the low placement's
-(`chooseAddressOverflow`). -/
+(`chooseAddressOverflow`).
+Feature: `krepi.kernel.kernel-memory`. -/
 def HighPlacementNoOverflow : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (o m al : UInt64) (w : Option PhysRange),
     t.choose o m al ⟨.high, w⟩ = .error .addressOverflow →
