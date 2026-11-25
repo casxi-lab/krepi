@@ -30,12 +30,16 @@ for every mutant of the code.
   stands for a list advances on it, which proves the statement of each
   `next`).
 - Options and lists: `optionRel_eq_iff`, `listRel_eq_iff`,
-  `listRel_iff_forall₂`, `listRel_length`.
+  `listRel_iff_forall₂`, `listRel_length`, and `any_drop_cons`, the step of
+  a loop that looks for an item.
 - Machine values: `byte_toNat`, `word32_toNat`, `word64_toNat`,
   `byte_eq_iff`, `word32_eq_iff`, `word64_eq_iff`, `word64_add`,
   `word64_ofNat_iff`, `word32_ofNat_iff`.
-- Sizes and conditions: `u32_size`, `u64_size`, and `of_decide_post` and
-  `of_decide_post_not`, the condition of a `decide` that a step returned.
+- Sizes, bounds and conditions: `u32_size`, `u64_size`, `u64_max_eq`,
+  `u64_MAX_val`, `u8_lt`, `u32_lt`, `u64_lt` (bounds that `omega` reads
+  without `scalar_tac`), `u64_eq_zero_iff`, `word64_bne_zero`, and
+  `of_decide_post` and `of_decide_post_not`, the condition of a `decide`
+  that a step returned.
 - The platform: `usize_numBits`, `usize_max`, `usize_size`, `usize_lt`,
   `slice_length_lt` and `u64_max_eq_usize_max`, what `Usize64` gives about
   the bounds of `usize`.
@@ -244,6 +248,11 @@ theorem listRel_length {α β : Type} {rel : α → β → Prop} {l : List α} {
     (h : ListRel rel l m) : l.length = m.length :=
   ((listRel_iff_forall₂ l m).mp h).length_eq
 
+/-- `List.any` of the suffix from an index within the list. -/
+theorem any_drop_cons {α : Type} {l : List α} {p : α → Bool} {i : Nat} (h : i < l.length) :
+    (l.drop i).any p = (p l[i] || (l.drop (i + 1)).any p) := by
+  rw [List.drop_eq_getElem_cons h, List.any_cons]
+
 /-- `ListRel` of a function: the list mapped by it. -/
 theorem listRel_eq_iff {α β : Type} (f : α → β) :
     ∀ (l : List α) (m : List β), ListRel (fun a b => f a = b) l m ↔ l.map f = m
@@ -382,6 +391,23 @@ theorem word32_ofNat_iff {x : U32} {n : Nat} :
 theorem u32_size : U32.size = 2 ^ 32 := by rw [U32.size, U32.numBits]; rfl
 
 theorem u64_size : U64.size = 2 ^ 64 := by rw [U64.size, U64.numBits]; rfl
+
+theorem u64_max_eq : U64.max = 2 ^ 64 - 1 := by rw [U64.max, U64.numBits]; rfl
+
+theorem u64_MAX_val : core.num.U64.MAX.val = 2 ^ 64 - 1 := rfl
+
+theorem u8_lt (x : U8) : x.val < 2 ^ 8 := x.hmax
+
+theorem u32_lt (x : U32) : x.val < 2 ^ 32 := x.hmax
+
+theorem u64_lt (x : U64) : x.val < 2 ^ 64 := x.hmax
+
+theorem u64_eq_zero_iff {x : U64} : x = 0#u64 ↔ x.val = 0 :=
+  ⟨fun h => by rw [h]; rfl, fun h => UScalar.eq_of_val_eq (by rw [h]; rfl)⟩
+
+theorem word64_bne_zero (x : U64) : (word64 x != 0) = (x != 0#u64) := by
+  rw [Bool.eq_iff_iff, bne_iff_ne, bne_iff_ne, ne_eq, ne_eq, word64_eq_iff, u64_eq_zero_iff]
+  rfl
 
 /-- The condition of a `decide` that a step returned as `true`. -/
 theorem of_decide_post {p : Prop} [Decidable p] {b : Bool} (h : b = decide p) (hb : b = true) :

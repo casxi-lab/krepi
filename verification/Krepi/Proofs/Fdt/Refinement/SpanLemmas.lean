@@ -2,6 +2,7 @@ module
 
 public import Krepi.Statements.Fdt.Representation
 public import Krepi.Proofs.Fdt.Refinement.BasicLemmas
+public import Krepi.Spec.Fdt.Discovery
 
 /-!
 # Device tree: refinement of the word reads, the spans and the cells
@@ -16,10 +17,14 @@ the callee and a mutant of a callee fails the proof of the callee alone:
   word of `u32At` and `u64At` of the bytes, or `Truncated`);
 - the spans: `span_new_spec`, `span_end_spec` and `span_contains_spec`, the
   statements `SpanNew`, `SpanEnd` and `SpanContains` without their premise;
-- the cells: `cells_u64_spec`, the statement `CellsU64` without its premise.
+- the cells: `cells_u64_spec`, the statement `CellsU64` without its premise;
+- the helpers of `fdt::span` that the entries share: `below_end_spec`,
+  `overlaps_spec`, `touches_spec`, `ends_within_spec`, `holds_spec`,
+  `valid_spec`, the loops `touches_any_spec` and `in_one_range_spec`, and
+  `prefix_spec` and `part_spec`, the prefixes and parts of a slice.
 
 With them, the spans of the specification of a span of the code:
-`spanOf_start`, `spanOf_size`, `spanOf_valid_iff`, `spanOf_endAddr`,
+`spanOf_start`, `spanOf_size`, `spanOf_endNat`, `spanOf_valid_iff`, `spanOf_endAddr`,
 `agrees_endAddr_ok` (a success of `Span::end` is the exact end, within 64
 bits), `endAddr_eq_error` (a failure is `Overflow` of a span whose end leaves
 64 bits) and `spanOf_contains`.
@@ -120,6 +125,9 @@ namespace Krepi.Proofs.Fdt.Refinement
 @[simp] theorem spanOf_start (s : fdt.Span) : (spanOf s).start = word64 s.start := rfl
 
 @[simp] theorem spanOf_size (s : fdt.Span) : (spanOf s).size = word64 s.size := rfl
+
+theorem spanOf_endNat (s : fdt.Span) : (spanOf s).endNat = s.start.val + s.size.val := by
+  simp only [Span.endNat, spanOf_start, spanOf_size, word64_toNat]
 
 theorem spanOf_valid_iff (s : fdt.Span) :
     (spanOf s).Valid ↔ s.start.val + s.size.val < 2 ^ 64 := by
@@ -260,5 +268,135 @@ theorem spanOf_contains (s o : fdt.Span) :
       scalar_tac
     refine agrees_of_eq ?_ r_post
     rw [cellsU64_ok_of (by scalar_tac) (by scalar_tac), u64At_bytesOf_ok (by omega), hl]
+
+/-! ## Helpers of the spans
+
+The functions of `fdt::span` that the entries share: comparisons at the
+exact ends, the checks of `touches` and `holds` against a slice of spans,
+and the prefixes and parts of a slice. -/
+
+/-- `below_end(address, span)`: whether the address lies before the exact end.
+-/
+@[step] theorem below_end_spec (a : U64) (s : fdt.Span) :
+    fdt.span.below_end a s ⦃ b => b = decide (a.val < s.start.val + s.size.val) ⦄ := by
+  unfold fdt.span.below_end
+  step*
+
+/-- `overlaps(a, b)`: `Span.overlaps`. -/
+@[step] theorem overlaps_spec (a b : fdt.Span) :
+    fdt.span.overlaps a b ⦃ r => r = (spanOf a).overlaps (spanOf b) ⦄ := by
+  unfold fdt.span.overlaps
+  step*
+  all_goals simp only [Span.overlaps, spanOf_endNat, spanOf_start, word64_toNat] at *
+  all_goals simp_all
+
+/-- `touches(a, b)`: `Span.touches`. -/
+@[step] theorem touches_spec (a b : fdt.Span) :
+    fdt.span.touches a b ⦃ r => r = (spanOf a).touches (spanOf b) ⦄ := by
+  unfold fdt.span.touches
+  step*
+  all_goals simp only [Span.touches, spanOf_size, word64_bne_zero] at *
+  all_goals simp_all
+
+/-- `ends_within(inner, outer)`: whether `inner` ends at or before `outer`, at
+the exact ends. -/
+@[step] theorem ends_within_spec (inner outer : fdt.Span) :
+    fdt.span.ends_within inner outer ⦃ b =>
+      b = decide ((spanOf inner).endNat ≤ (spanOf outer).endNat) ⦄ := by
+  unfold fdt.span.ends_within
+  simp only [spanOf_endNat]
+  step*
+  all_goals (subst_vars; simp only [u64_max_eq, u64_MAX_val, U64.rMax] at *)
+  all_goals
+    have := u64_lt inner.start
+    have := u64_lt inner.size
+    have := u64_lt outer.start
+    have := u64_lt outer.size
+    omega
+
+/-- `holds(outer, inner)`: `Span.holds`. -/
+@[step] theorem holds_spec (outer inner : fdt.Span) :
+    fdt.span.holds outer inner ⦃ r => r = (spanOf outer).holds (spanOf inner) ⦄ := by
+  unfold fdt.span.holds
+  step*
+  · simp only [Span.holds, spanOf_start, word64_toNat]
+    rw [decide_eq_true (by scalar_tac), Bool.true_and]; exact r_post
+  · simp only [Span.holds, spanOf_start, word64_toNat]
+    rw [decide_eq_false (by scalar_tac), Bool.false_and]
+
+/-- `valid(span)`: `Span.Valid`. -/
+@[step] theorem valid_spec (s : fdt.Span) :
+    fdt.span.valid s ⦃ r => r = decide (spanOf s).Valid ⦄ := by
+  unfold fdt.span.valid
+  step*
+  all_goals simp only [spanOf_valid_iff]
+  all_goals scalar_tac
+
+/-- `touches_any(spans, span)`: whether a span of the slice touches `span`. -/
+@[step] theorem touches_any_spec (spans : Slice fdt.Span) (span : fdt.Span) :
+    fdt.span.touches_any spans span ⦃ b =>
+      b = (spansOf spans).any (·.touches (spanOf span)) ⦄ := by
+  unfold fdt.span.touches_any fdt.span.touches_any_loop
+  apply loop.spec_decr_nat
+    (measure := fun (i : Usize) => spans.length - i.val)
+    (inv := fun (i : Usize) => ((spansOf spans).drop i.val).any (·.touches (spanOf span)) =
+      (spansOf spans).any (·.touches (spanOf span)))
+  · intro i hinv
+    unfold fdt.span.touches_any_loop.body
+    step*
+    · have hi : i.val < (spansOf spans).length := by simp [spansOf]; scalar_tac
+      have e : (spansOf spans)[i.val] = spanOf s := by
+        simp only [spansOf, List.getElem_map, s_post]
+      rw [← hinv, any_drop_cons hi, e, ← b_post, ‹b = true›, Bool.true_or]
+    · have hi : i.val < (spansOf spans).length := by simp [spansOf]; scalar_tac
+      refine ⟨?_, by scalar_tac⟩
+      have e : (spansOf spans)[i.val] = spanOf s := by
+        simp only [spansOf, List.getElem_map, s_post]
+      rw [← hinv, any_drop_cons hi, index1_post, e, ← b_post,
+        (Bool.not_eq_true _).mp ‹¬b = true›, Bool.false_or]
+    · rw [← hinv, List.drop_eq_nil_of_le (by simp [spansOf]; scalar_tac)]; rfl
+  · rfl
+
+/-- `in_one_range(ranges, span)`: `inOneRange`, whether a span of the slice
+holds `span`. -/
+@[step] theorem in_one_range_spec (ranges : Slice fdt.Span) (span : fdt.Span) :
+    fdt.span.in_one_range ranges span ⦃ b => b = inOneRange (spansOf ranges) (spanOf span) ⦄ := by
+  unfold fdt.span.in_one_range fdt.span.in_one_range_loop inOneRange
+  apply loop.spec_decr_nat
+    (measure := fun (i : Usize) => ranges.length - i.val)
+    (inv := fun (i : Usize) => ((spansOf ranges).drop i.val).any (·.holds (spanOf span)) =
+      (spansOf ranges).any (·.holds (spanOf span)))
+  · intro i hinv
+    unfold fdt.span.in_one_range_loop.body
+    step*
+    · have hi : i.val < (spansOf ranges).length := by simp [spansOf]; scalar_tac
+      have e : (spansOf ranges)[i.val] = spanOf s := by
+        simp only [spansOf, List.getElem_map, s_post]
+      rw [← hinv, any_drop_cons hi, e, ← b_post, ‹b = true›, Bool.true_or]
+    · have hi : i.val < (spansOf ranges).length := by simp [spansOf]; scalar_tac
+      refine ⟨?_, by scalar_tac⟩
+      have e : (spansOf ranges)[i.val] = spanOf s := by
+        simp only [spansOf, List.getElem_map, s_post]
+      rw [← hinv, any_drop_cons hi, index1_post, e, ← b_post,
+        (Bool.not_eq_true _).mp ‹¬b = true›, Bool.false_or]
+    · rw [← hinv, List.drop_eq_nil_of_le (by simp [spansOf]; scalar_tac)]; rfl
+  · rfl
+
+/-- `prefix(items, count)`: the first `count` items. -/
+@[step] theorem prefix_spec {T : Type} (items : Slice T) (count : Usize)
+    (h : count.val ≤ items.length) :
+    fdt.span.prefix items count ⦃ s => s.val = items.val.take count.val ⦄ := by
+  unfold fdt.span.prefix
+  step*
+  simp [s_post, List.slice]
+
+/-- `part(items, start, end)`: the items `[start, end)`. -/
+@[step] theorem part_spec {T : Type} (items : Slice T) (start stop : Usize)
+    (h0 : start.val ≤ stop.val) (h1 : stop.val ≤ items.length) :
+    fdt.span.part items start stop ⦃ s =>
+      s.val = (items.val.drop start.val).take (stop.val - start.val) ⦄ := by
+  unfold fdt.span.part
+  step*
+  simp [s_post, List.slice]
 
 end Krepi.Proofs.Fdt.Refinement
