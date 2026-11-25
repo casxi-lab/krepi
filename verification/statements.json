@@ -786,13 +786,13 @@
       "name": "Krepi.Statements.Fdt.FdtNodes",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.fdtNodes",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.NodesNext",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodesNext",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.FdtFindNode",
@@ -816,13 +816,13 @@
       "name": "Krepi.Statements.Fdt.NodeName",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeName",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.NodeParent",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeParent",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.NodeProperty",
