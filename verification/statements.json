@@ -642,73 +642,73 @@
       "name": "Krepi.Statements.Fdt.MemoryPlanManagedBanks",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanManagedBanks",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanRam",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanRam",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanReservations",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanReservations",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanBootRanges",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanBootRanges",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanFirmwareRanges",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanFirmwareRanges",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanDescribedBytes",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanDescribedBytes",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanManagedBytes",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanManagedBytes",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanContainsRam",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanContainsRam",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanIsAvailable",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanIsAvailable",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanPermitsBacking",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanPermitsBacking",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanAvailableRanges",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanAvailableRanges",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.AvailableRangesNext",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.availableRangesNext",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.CellsU64",
