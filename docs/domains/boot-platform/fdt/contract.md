@@ -954,14 +954,14 @@ in all. Of them, 55 test this component; 35 test the Pi 5 device bindings,
 which are not part of it, and are frozen here with the component that
 receives them. Their expected outputs are those that the test bodies
 assert. The vectors are in the vector file that the block below names,
-one line for each case; the replay is named once the host tests write
-their results.
+one line for each case, which the replay module that it names replays.
 
 ```vectors
 vectors = "verification/vectors/boot-platform/fdt.vectors"
+replay = "Krepi.SpecTests.Fdt.Replay"
 ```
 
-A vector of this page is one test function. The vector file is to hold one
+A vector of this page is one test function. The vector file holds one
 line for each case of it through an entry of this page, with the id
 `<vector>.<n>`, `n` counting those cases from 1, so that a vector of this
 page corresponds to the lines of the file whose ids start with its id; a

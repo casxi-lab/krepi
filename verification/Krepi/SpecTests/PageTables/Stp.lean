@@ -9,7 +9,7 @@ The specification tests of the `page-tables` component: for each requirement
 of `docs/domains/memory/page-tables/requirements.md`, PGT-R01 to PGT-R12, one
 input that the specification must accept, with the result that it must give,
 and one that it must reject, with the error that it must give. Each test is a
-proposition on concrete states and inputs, and a planned theorem below
+proposition on concrete states and inputs, and a theorem below
 `Krepi.Proofs.PageTables.Stp` proves it. Each instantiates the criterion of
 its requirement, the sentence of the requirement that begins "The criterion:",
 and its docstring quotes the words of that sentence that it instantiates.
@@ -123,7 +123,8 @@ clear. The leaves that the sets write are those descriptors: `pt-01` maps
 `0x2_0000_0000` to `0x10_0800_0000` as `ReadOnly` in a lower set of 6 tables,
 and `lookup_page` gives its descriptor; `pt-15` maps the block of
 `0xffff_ff81_0000_0000` to `0x1_0000_0000` in an upper set of 3 tables, and
-`lookup_block` gives its descriptor. -/
+`lookup_block` gives its descriptor.
+Feature: `krepi.kernel.kernel-memory`. -/
 def DescriptorsFollowKindRows : Prop :=
   kinds.map (descriptor · 0x10_0800_0000) =
     [0x40_0010_0800_0787, 0x60_0010_0800_0787, 0x60_0010_0800_0707, 0x60_0010_0800_0f07,
@@ -144,7 +145,8 @@ nG lie and whose bits 48 to 63 where PXN and UXN lie, the descriptor of each
 kind holds the bits of its row and bits 12 to 47 of the address, and no other
 bit, and the block descriptor bits 21 to 47: a descriptor that let a bit of the
 address through would be writable and executable, or of another kind, or
-hold a bit that the kind table does not name. -/
+hold a bit that the kind table does not name.
+Feature: `krepi.kernel.kernel-memory`. -/
 def DescriptorKeepsOnlyItsBits : Prop :=
   kinds.map (descriptor · 0xffff_ffff_ffff_ffff) =
     [0x40_ffff_ffff_f787, 0x60_ffff_ffff_f787, 0x60_ffff_ffff_f707, 0x60_ffff_ffff_ff07,
@@ -159,7 +161,8 @@ and `pt-14`: in a lower set of 3 tables, `0x4000_0000` to itself as
 `ReadWrite` uses 3 tables, the root, a level 2 and a level 3 table, and
 `lookup_page` gives its descriptor; in an upper set of 3 tables,
 `0xffff_ff80_0000_0000`, the first address of the upper region, to
-`0x1_0000_0000` as `ReadWrite` does the same. -/
+`0x1_0000_0000` as `ReadWrite` does the same.
+Feature: `krepi.kernel.kernel-memory`. -/
 def MapPageThenLookup : Prop :=
   (withPage (newSet .lower 3) 0x4000_0000 0x4000_0000 .readWrite).map
       (fun s => (s.usedTables, s.lookupPage 0x4000_0000 BASE BITS)) =
@@ -174,7 +177,8 @@ tables and the count of tables in use unchanged after every refusal", here
 as `Device`, an address that a page already maps, is refused with
 `AlreadyMapped`, where a remapping would replace the leaf; the refusal gives
 no set and no plan, so the set stays the one before the call, whose
-descriptor of `0x4000_0000` and count of 3 tables the test states. -/
+descriptor of `0x4000_0000` and count of 3 tables the test states.
+Feature: `krepi.kernel.kernel-memory`. -/
 def MapPageRefusesMappedPage : Prop :=
   (withPage (newSet .lower 3) 0x4000_0000 0x4000_0000 .readWrite).map
       (fun s => (s.mapPage 0x4000_0000 0x4000_1000 .device BASE BITS,
@@ -201,7 +205,8 @@ def pt17Lookups : List UInt64 := [0x0, 0x3fe0_0000, 0x4000_0000, 0x1_0000_0000, 
 boundaries of 1 GiB and of 4 GiB, with 9 tables in use, the root and 8 level 2
 tables; `lookup_block` at the blocks of `pt17Lookups` gives the block
 descriptor of each at its own physical address. The input is the criterion's
-own: 4,096 writes of a block. -/
+own: 4,096 writes of a block.
+Feature: `krepi.kernel.kernel-memory`. -/
 def EightGibOfBlocksInNineTables : Prop :=
   (blocksFromZero 4096).bind (fun s =>
       (pt17Lookups.mapM fun pa => s.lookupBlock (DIRECT_BASE ||| pa) BASE BITS).map
@@ -212,7 +217,8 @@ def EightGibOfBlocksInNineTables : Prop :=
 /-- **PGT-R03, rejected.** Criterion: "the refusal of one more with
 `OutOfTables`", `pt-17`: on the set of the 4,096 blocks, the block of
 `0x2_0000_0000`, in the ninth 1 GiB slot, would need a tenth table and is
-refused with `OutOfTables`. The input is the criterion's own. -/
+refused with `OutOfTables`. The input is the criterion's own.
+Feature: `krepi.kernel.kernel-memory`. -/
 def BlockBeyondNineTablesRefused : Prop :=
   (blocksFromZero 4096).map (fun s =>
       s.mapBlock (DIRECT_BASE ||| 0x2_0000_0000) 0x2_0000_0000 BASE BITS) =
@@ -229,7 +235,8 @@ after it 4 tables stay in use, `0x0` is `NotMapped` and `0x20_0000` keeps its
 descriptor. `reset` then gives the plan of a `Zero` of each of the 4 tables in
 use, in index order, and leaves 1 table in use and every entry 0; after it
 `0x4000_0000` to `0x8000` as `UserReadExecute` uses 3 tables and `lookup_page`
-gives its descriptor. -/
+gives its descriptor.
+Feature: `krepi.kernel.kernel-memory`. -/
 def UnmapAndResetFollowContract : Prop :=
   (do
     let s ← withPage (newSet .lower 4) 0x0 0x1000 .readWrite
@@ -250,7 +257,8 @@ and the requirement's refusal of "an address without a page leaf with
 `NotMapped`": in a lower set of 4 tables with `0x0` to `0x1000` as
 `ReadWrite` and `0x1000` to `0x2000` as `ReadOnly`, once the plan of
 `unmap_page` of `0x0` has run, a second `unmap_page` of `0x0` is refused with
-`NotMapped`. -/
+`NotMapped`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def UnmapRefusesUnmappedPage : Prop :=
   (do
     let s ← withPage (newSet .lower 4) 0x0 0x1000 .readWrite
@@ -292,7 +300,8 @@ counts of tables, blocks and pages of the contract", here with the 8 GB model
 as well: for each model, `direct_map` of its boot memory map into a new set of
 the 80 tables of the direct map's pool succeeds, with the tables in use, the
 blocks and the pages of its row. The inputs are the RAM of the models
-themselves, up to 16 GiB. -/
+themselves, up to 16 GiB.
+Feature: `krepi.kernel.kernel-memory`. -/
 def DirectMapCountsOfPi5Models : Prop :=
   ∀ m ∈ pi5Models,
     (pi5Memory m.ram).toOption.map (fun memory =>
@@ -333,7 +342,8 @@ and firmware. Once its plan has run, `lookup_page` refuses each page of
 give a descriptor. And of the requirement's "A map that needs more tables
 than the pool has, or a range beyond $2^{39}$, fails before any write", the
 range: on the boot memory map of one bank `[0x7f_ffe0_0000, +4 MiB)` across
-$2^{39}$, `direct_map` fails with `AddressWidth` and gives no plan. -/
+$2^{39}$, `direct_map` fails with `AddressWidth` and gives no plan.
+Feature: `krepi.kernel.kernel-memory`. -/
 def DirectMapOmitsExcludedPages : Prop :=
   excludedMemory.toOption.map (fun memory =>
       ((newSet .upper 4).directMap memory DM_BASE BITS).map fun (s, plan) =>
@@ -378,7 +388,8 @@ descriptor of its kind: the text `ReadExecute`, the read-only data and the
 device tree `ReadOnly`, with AP[2] set, so that a write faults; the data and
 the stack `ReadWrite`, with PXN and UXN set, so that an execution faults; the
 interrupt controller and the console `Device`, AP[2:1] `0b00`, written; and
-the guard `NotMapped`, so that an access faults. -/
+the guard `NotMapped`, so that an access faults.
+Feature: `krepi.kernel.kernel-memory`. -/
 def KernelMapGivesKindsAndGuard : Prop :=
   ((newSet .lower KERNEL_TABLES).kernelMap qemuLayout BASE BITS).map
       (fun (s, plan) => (s.usedTables, qemuLayoutPages.map fun v => (s.apply plan).lookupPage v BASE BITS)) =
@@ -396,7 +407,8 @@ def sharedPageLayout : Layout :=
 /-- **PGT-R06, rejected.** Criterion: "on the host, a layout whose text and
 data share a page is refused": `kernel_map` of `sharedPageLayout` into a new
 lower set of 32 tables is refused with `AlreadyMapped`, so no plan maps the
-page `0x4020_1000` writable and executable. -/
+page `0x4020_1000` writable and executable.
+Feature: `krepi.kernel.kernel-memory`. -/
 def KernelMapRefusesSharedPage : Prop :=
   ((newSet .lower KERNEL_TABLES).kernelMap sharedPageLayout BASE BITS).map Prod.snd = .error .alreadyMapped
 
@@ -440,7 +452,8 @@ them:
 - `kernel_map` of `planLayout` and `direct_map` of `planMemory`: each new
   level 3 table zeroed and filled, then the new level 2 table zeroed and
   filled with its entries in index order, one `Fence`, the one `Store` that
-  makes the tables reachable from the root, `Sync`. -/
+  makes the tables reachable from the root, `Sync`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def PlansFollowContractOrder : Prop :=
   ((newSet .lower 3).mapPage 0x4020_3000 0x4020_3000 .readWrite BASE BITS).map Prod.snd =
     .ok [.zero 2, .store 2 3 0x60_0000_4020_3707, .zero 1, .store 1 1 0x1_0000_2003, .fence,
@@ -486,7 +499,8 @@ invalid entries". The plans have no failure of their own; this test rejects
 a plan that would write a valid entry of the kernel tables. On
 `bootedShared`, the fill under the token of the kernel tables of the data
 page `0x4020_1000`, which `kernel_map` mapped, with the frame `0x4030_0000` as
-`Device`, is refused with `AlreadyMapped` and gives no plan. -/
+`Device`, is refused with `AlreadyMapped` and gives no plan.
+Feature: `krepi.kernel.kernel-memory`. -/
 def KernelFillRefusesValidEntry : Prop :=
   (bootedShared.bind fun s =>
       s.fillKernel KernelTablesToken.executing 0x4020_1000 0x4030_0000 .device BASE BITS).map
@@ -569,7 +583,8 @@ exclusions of the shape gives the table of the banks, one free extent for
 each usable range and no other extent, every exclusion in its record and the
 counter at 1. So a page of an extent has the owner free, a page of an
 exclusion the owner of its record, and no page both: `owner` gives for the
-pages of the shape their owners, `none` for a page of no managed bank. -/
+pages of the shape their owners, `none` for a page of no managed bank.
+Feature: `krepi.kernel.kernel-memory`. -/
 def OwnershipOfBoardShapes : Prop :=
   ∀ b ∈ boardShapes,
     (Fdt.MemoryPlan.allRam b.ram b.boot b.firmware).toOption.map
@@ -586,7 +601,8 @@ owner", with the requirement's refusal of "overlapping ... banks", `own-17`:
 `Ownership::new` of the banks `[0x0, 0x2000)` and `[0x1000, 0x2000)`, which
 share the page `0x1000`, in a table of 8 extents, is refused with
 `InvalidRange`, where a table of both banks would hold that page in two
-extents. -/
+extents.
+Feature: `krepi.kernel.kernel-memory`. -/
 def OwnershipRefusesOverlappingBanks : Prop :=
   (Ownership.new 1 [range 0x0 0x2000, range 0x1000 0x1000] [] : Except OwnershipError Table8) =
     .error .invalidRange
@@ -607,7 +623,8 @@ leaves the pages free and consumes no generation, so `choose` for owner 2
 gives the same range and `assign` with a completed zeroing holds it for
 owner 2 with generation 1 and gives that receipt, the bank split into three
 extents; the release of the receipt by owner 2 leaves one free extent of the
-whole bank and the counter at 2. -/
+whole bank and the counter at 2.
+Feature: `krepi.kernel.kernel-memory`. -/
 def AllocationTakesWindowAndGeneration : Prop :=
   (do
     let t ← (Ownership.new 1 [range 0x1_0000_0000 0x1_0000] [] : Except OwnershipError Table8)
@@ -628,7 +645,8 @@ of 2 extents of the arena 1 with the bank `[0x0, 0x1000)`, owner 3 allocates
 the page and releases it; the next allocation of owner 3 takes the same page
 with generation 2; the release of the first receipt, of generation 1, is then
 refused with `InvalidAllocation`, where a release that read the range and
-the owner alone would free the page of the second. -/
+the owner alone would free the page of the second.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ReleaseRefusesStaleReceipt : Prop :=
   (do
     let t ← (Ownership.new 1 [range 0x0 0x1000] [] : Except OwnershipError (Ownership 2 EXCLUSION_RECORDS))
@@ -653,7 +671,8 @@ allocation. Owner `0x16` then allocates 1 page outside it, `[0x2000, 0x3000)`
 with generation 2. After the zeroing, `Reservation::initialized` gives the
 packet with no failure, which validates, and its publication by owner `0xb`
 gives the receipt of the reservation; after the release of both receipts
-the free bytes are `0x4000`. -/
+the free bytes are `0x4000`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def ReservationPublishesAfterZeroing : Prop :=
   (do
     let t ← (Ownership.new 7 [range 0x0 0x4000] [] : Except OwnershipError Table8)
@@ -679,7 +698,8 @@ attempt": on a table of 4 extents of the arena 3 with the bank `[0x0, 0x2000)`,
 owner 4 reserves 2 pages; a failed zeroing gives back the reservation,
 attempted and with 1 failure; its cancel by owner 4 is refused with
 `ZeroFailed` and returns it, where a cancel would free pages whose bytes a
-zeroing may have changed. -/
+zeroing may have changed.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CancelRefusesAttemptedReservation : Prop :=
   (do
     let t ← (Ownership.new 3 [range 0x0 0x2000] [] : Except OwnershipError (Ownership 4 EXCLUSION_RECORDS))
@@ -733,7 +753,8 @@ an initialization with 132 exclusions succeeds":
 - at those 160 extents an allocation of 1 page with the low placement works:
   `choose` passes over the first extent, whose split would need a 161st, and
   gives `[0x3000, 0x4000)`, an extent of exactly one page, which `assign`
-  holds with generation 1, still with 160 extents. -/
+  holds with generation 1, still with 160 extents.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CapacitiesAtTheirLimits : Prop :=
   (firstPageOfEachBlock 78).toOption.map (fun memory =>
       ((newSet .upper DIRECT_MAP_TABLES).directMap memory DM_BASE BITS).map
@@ -755,7 +776,8 @@ def CapacitiesAtTheirLimits : Prop :=
   refused with `MetadataExhausted`;
 - `Ownership::new` with a 133rd exclusion, `[0x1c0_8000, 0x1c0_9000)`, which
   lies outside every bank and adds no extent, is refused with
-  `MetadataExhausted`, for the 132 exclusion records of the core. -/
+  `MetadataExhausted`, for the 132 exclusion records of the core.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CapacitiesRefuseOneMore : Prop :=
   (firstPageOfEachBlock 79).toOption.map (fun memory =>
       ((newSet .upper DIRECT_MAP_TABLES).directMap memory DM_BASE BITS).map Prod.snd) =
@@ -781,7 +803,8 @@ at the target's table of the source's index, and `Sync`. Once the plan has
 run, the target uses 6 tables and maps the three pages with the source's
 descriptors, and `0x8000_0000` is `NotMapped`; after `0x8000` to `0x6000` as
 `UserReadWrite` in the target, `0x8000` is `NotMapped` in the source, and
-after `unmap_page` of `0x4000` in the source the target still maps it. -/
+after `unmap_page` of `0x4000` in the source the target still maps it.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CopyIsPrivateAndOrdered : Prop :=
   (do
     let source ← withPage (newSet .lower 10) 0x4000 0x4000_0000 .readExecute
@@ -809,7 +832,8 @@ set of 3 tables with `0x2000_1000` to `0x4100_0000` as
 `KernelPrivateReadWrite`, a stack private to its address space, and a lower
 target set of 3 tables at `0x1_0000_4000` with `0x4000_0000` to itself as
 `ReadWrite`: the copy is refused with `InvalidDescriptor`, before any write,
-where a copy would give the target the private leaf. -/
+where a copy would give the target the private leaf.
+Feature: `krepi.kernel.kernel-memory`. -/
 def CopyRefusesPrivateLeaf : Prop :=
   (do
     let source ← withPage (newSet .lower 3) 0x2000_1000 0x4100_0000 .kernelPrivateReadWrite

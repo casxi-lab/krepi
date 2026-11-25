@@ -23,9 +23,10 @@ witness as an equation `f x = .ok v` or `f x = .error e` and decides it with
 a local instance that compares the constructors and their payloads; the
 instance appears in no statement. Where an error has several rules, its
 witness is a conjunction with one input for each rule that the contract names,
-an input that fails with that error and succeeds once that rule is repaired, a
-pool that ends above $2^{\mathrm{bits}}$ being repaired by the width: such a
-pool is the pool of 4 tables at `BASE` at the width 32, whose walk is sound,
+an input that fails with that error and succeeds once that rule is repaired,
+a pool of no table being repaired by another pool, which changes the input,
+and a pool that ends above $2^{\mathrm{bits}}$ by the width: such a pool is
+the pool of 4 tables at `BASE` at the width 32, whose walk is sound,
 for the entries on one address and for the source of `clone_kernel_from`,
 whose target pool is then at `0x8000_0000`, so the input also tells the check
 of the pool from no check of the pool.
@@ -48,7 +49,7 @@ both rules.
 
 Error branches that no input of an entry reaches have no witness; for each,
 a proposition below states that the entry never takes it, with its reason,
-and a planned theorem proves it. The two variants of the specification that
+and a theorem proves it. The two variants of the specification that
 reject every input or accept every input are refuted for the functions of
 these rows by `notAlwaysRejecting` and `notAlwaysSucceeding`.
 -/
@@ -890,7 +891,7 @@ theorem priorityCloneStep7 :
 Branches of the entries that fail with an error, but that no input of the
 entry reaches under its machine widths or on the boot memory maps that the
 fdt entries build. Each proposition states the fact that keeps the entry from
-the branch, with its reason; a planned theorem below
+the branch, with its reason; a theorem below
 `Krepi.Proofs.PageTables.Witnesses.TableSets` proves it. The error of each
 branch is witnessed above where another branch of the same entry gives it. -/
 
@@ -900,28 +901,31 @@ def BuiltPlan (p : Fdt.MemoryPlan) : Prop :=
   (∃ ram boot firmware, Fdt.MemoryPlan.allRam ram boot firmware = .ok p) ∨
     ∃ window ram boot firmware, Fdt.MemoryPlan.new window ram boot firmware = .ok p
 
-/-- **Planned.** `direct_map` never fails with `Alignment` at a usable range:
+/-- `direct_map` never fails with `Alignment` at a usable range:
 every usable range of a boot memory map that the fdt entries build starts and
 ends on a page boundary, since its managed banks and its reservations are
-whole pages. Its `Alignment` is that of `base` (`directMapAlignment`). -/
+whole pages. Its `Alignment` is that of `base` (`directMapAlignment`).
+Feature: `krepi.kernel.kernel-memory`. -/
 def DirectMapRangesOnPages : Prop :=
   ∀ p, BuiltPlan p → ∀ u ∈ p.availableRanges,
     u.start.toNat % PAGE_SIZE = 0 ∧ u.endNat % PAGE_SIZE = 0
 
-/-- **Planned.** `direct_map` never fails with `AlreadyMapped` for a leaf that
+/-- `direct_map` never fails with `AlreadyMapped` for a leaf that
 an earlier usable range shares an address with: the usable ranges of a boot
 memory map that the fdt entries build, in address order, each end at or
 before the start of the next, since they are disjoint parts of disjoint
 managed banks, and every leaf lies inside its range. Its `AlreadyMapped` is
-that of the walk (`directMapAlreadyMapped`). -/
+that of the walk (`directMapAlreadyMapped`).
+Feature: `krepi.kernel.kernel-memory`. -/
 def DirectMapRangesApart : Prop :=
   ∀ p, BuiltPlan p →
     (sortByKey (·.start.toNat) p.availableRanges).Pairwise fun a b => a.endNat ≤ b.start.toNat
 
-/-- **Planned.** The check of the target pool of `clone_kernel_from` never fails
+/-- The check of the target pool of `clone_kernel_from` never fails
 with `AddressWidth`: it takes the width that the check of the source pool has
 accepted. Its `AddressWidth` is that of the source
-(`cloneKernelFromAddressWidth`). -/
+(`cloneKernelFromAddressWidth`).
+Feature: `krepi.kernel.kernel-memory`. -/
 def CloneTargetWidthChecked : Prop :=
   ∀ (N : Nat) (sourceBase base : UInt64) (bits : UInt8),
     checkPool N sourceBase bits = .ok () → checkPool N base bits ≠ .error .addressWidth

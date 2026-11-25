@@ -11,7 +11,7 @@ The specification tests of the `fdt` component: for each requirement of
 input that the specification must accept, with the result that it must give,
 and one that it must reject, with the error that it must give. Each test is a
 proposition on concrete inputs, most of them trees that `Builder` writes,
-and a planned theorem below `Krepi.Proofs.Fdt.Stp` proves it. The docstring
+and a theorem below `Krepi.Proofs.Fdt.Stp` proves it. The docstring
 of each names its requirement and the part of the requirement's criterion
 that it instantiates.
 
@@ -74,7 +74,8 @@ the limit is accepted", for the bytes of a property name, on a tree with the
 bytes that QEMU leaves in the padding after a property value, which the
 requirement also accepts. The tree of 187 bytes with a property name of
 exactly 64 bytes is accepted; its value is the root with its two properties,
-the value of `model` exactly its 17 bytes, without the padding. -/
+the value of `model` exactly its 17 bytes, without the padding.
+Feature: `krepi.platform.device-tree`. -/
 def ParseAcceptsNameAtLimit : Prop :=
   Fdt.parse (namedTree nameAtLimit) =
     .ok { totalSize := 187
@@ -86,7 +87,8 @@ def ParseAcceptsNameAtLimit : Prop :=
 
 /-- **FDT-R01, rejected.** Criterion: "one 1 above it fails with the error of
 the contract", for the bytes of a property name: the same tree with a name
-of 65 bytes fails with `BadString` (Format and bounds, Names). -/
+of 65 bytes fails with `BadString` (Format and bounds, Names).
+Feature: `krepi.platform.device-tree`. -/
 def ParseRejectsNameAboveLimit : Prop :=
   Fdt.parse (namedTree (nameAtLimit ++ "k")) = .error .badString
 
@@ -96,7 +98,8 @@ def ParseRejectsNameAboveLimit : Prop :=
 returns from the parse and from the entries on it". `minimal` with its byte
 at offset 165 inverted, the byte `0x20` of the size cell `0x0020_0000` of the
 `reg` of `/memory@100000000`, which becomes `0x00df_0000`, is accepted, and
-the memory discovery on it returns the one RAM range of that size. -/
+the memory discovery on it returns the one RAM range of that size.
+Feature: `krepi.platform.device-tree`. -/
 def EntriesReturnOnChangedByte : Prop :=
   (Fdt.parse (flipByte minimal 165)).bind Fdt.discoverMemory =
     .ok { ram := [⟨0x1_0000_0000, 0xdf_0000⟩], reserved := [], dynamic := 0 }
@@ -105,7 +108,8 @@ def EntriesReturnOnChangedByte : Prop :=
 rejected", here as the rejecting test of the requirement, whose rule that no
 byte string makes an entry panic no total function can break. `minimal`
 without its last byte, the NUL of the last name of its strings block, fails
-with `Truncated` and no tree: its header declares 223 bytes. -/
+with `Truncated` and no tree: its header declares 223 bytes.
+Feature: `krepi.platform.device-tree`. -/
 def ParseRejectsPrefix : Prop :=
   Fdt.parse (minimal.extract 0 (minimal.size - 1)) = .error .truncated
 
@@ -125,14 +129,16 @@ def ramRangesTree (n : Nat) : ByteArray :=
 a reserved region outside every RAM range, which the discovery "accepts".
 The 32 RAM ranges come in tree order, and the entry of the reservation map is
 a reserved region with `no-map` set and `reusable` clear, kept although it
-lies in a hole. -/
+lies in a hole.
+Feature: `krepi.platform.device-tree`. -/
 def DiscoveryAcceptsMaxRamRanges : Prop :=
   (Fdt.parse (ramRangesTree 32)).bind Fdt.discoverMemory =
     .ok { ram := (List.range 32).map fun i => ⟨UInt64.ofNat (i * 0x2000), 0x1000⟩,
           reserved := [⟨⟨0x1000, 0x1000⟩, true, false⟩], dynamic := 0 }
 
 /-- **FDT-R03, rejected.** Criterion: "33 ... fail with `LimitExceeded`": the
-same tree with 33 RAM ranges. -/
+same tree with 33 RAM ranges.
+Feature: `krepi.platform.device-tree`. -/
 def DiscoveryRejectsExcessRamRanges : Prop :=
   (Fdt.parse (ramRangesTree 33)).bind Fdt.discoverMemory = .error .limitExceeded
 
@@ -153,7 +159,8 @@ the testing obligations pass": enabled children of `/reserved-memory` with a
 `size` and without a `reg`, one of one cell below `#size-cells` 2, with
 `reusable` and `alloc-ranges` of 3 bytes, as the shipped Pi 5 tree has its
 `linux,cma`, and one of two cells with `no-map`, are counted as 2 dynamic
-reservations and give no reserved region; a disabled one is ignored. -/
+reservations and give no reserved region; a disabled one is ignored.
+Feature: `krepi.platform.device-tree`. -/
 def DiscoveryRecordsDynamicReservations : Prop :=
   (Fdt.parse (reservedTree fun b => b
       |>.beginNode "linux,cma" |>.string "compatible" "shared-dma-pool" |>.flag "reusable"
@@ -166,7 +173,8 @@ def DiscoveryRecordsDynamicReservations : Prop :=
 /-- **FDT-R04, rejected.** Criterion: "a child with both `reg` and `size` is a
 static region", as the testing obligations state it: a child with `size` and
 a `reg` of size 0 is static, so its `reg` is read and its empty span fails
-with `EmptyRegion`, where a dynamic reservation would be counted. -/
+with `EmptyRegion`, where a dynamic reservation would be counted.
+Feature: `krepi.platform.device-tree`. -/
 def DiscoveryRejectsEmptyStaticReservation : Prop :=
   (Fdt.parse (reservedTree fun b => b
       |>.beginNode "pool@10000000" |>.cells "reg" [0, 0x1000_0000, 0, 0]
@@ -216,7 +224,8 @@ below 1 GiB, padded to a `totalsize` of `0x2_0000`, is accepted at
 `0x800_0000` with the image `[0x20_0000, 0x60_0000)`: the memory map keeps
 both reserved regions, the entry of the map first; the tree spans its 128 KiB;
 and `ram_bytes` is 8 GiB less 4 MiB; the value holds the limit and the
-alignment of the profile. The input is 128 KiB long. -/
+alignment of the profile. The input is 128 KiB long.
+Feature: `krepi.platform.device-tree`. -/
 def Pi5AcceptsTreeAtLimit : Prop :=
   pi5BootOfSize 0x2_0000 =
     .ok { memory := { ram := ram8GB.map spanOf,
@@ -227,7 +236,8 @@ def Pi5AcceptsTreeAtLimit : Prop :=
 
 /-- **FDT-R05, rejected.** Criterion: "one of 1 byte more fails with
 `LimitExceeded`": the same tree at a `totalsize` of `0x2_0001`, which the
-parse accepts. The input is 128 KiB and 1 byte long. -/
+parse accepts. The input is 128 KiB and 1 byte long.
+Feature: `krepi.platform.device-tree`. -/
 def Pi5RejectsTreeAboveLimit : Prop :=
   pi5BootOfSize 0x2_0001 = .error .limitExceeded
 
@@ -275,7 +285,8 @@ its boot memory map, with the installed size less 4 MiB as RAM and the hole
 left out of the usable ranges", here with the measured 8 GB model as well.
 For each model, the discovery gives its RAM ranges and `ram_bytes`, and the
 usable ranges of the boot memory map are those of `RamModel.usable`: none
-reaches into the hole `[0x3fc0_0000, 0x4000_0000)`. -/
+reaches into the hole `[0x3fc0_0000, 0x4000_0000)`.
+Feature: `krepi.platform.device-tree`. -/
 def Pi5ModelsBuildBootMemoryMaps : Prop :=
   ∀ model ∈ ramModels,
     (pi5Plan model.ranges).map (fun r => (r.1.ram, r.1.ramBytes, r.2.map (·.availableRanges))) =
@@ -285,7 +296,8 @@ def Pi5ModelsBuildBootMemoryMaps : Prop :=
 16 GiB of the boot memory map", with the scope's "RAM above 16 GiB in all is
 not supported". A hand-over tree of the shape of the models with 32 GB, the
 third range up to `0x8_0000_0000`, passes the discovery with `ram_bytes`
-32 GiB less 4 MiB, and its boot memory map fails with `ArenaTooLarge`. -/
+32 GiB less 4 MiB, and its boot memory map fails with `ArenaTooLarge`.
+Feature: `krepi.platform.device-tree`. -/
 def BootMemoryMapRejectsRamAboveCapacity : Prop :=
   (pi5Plan [(0, 0x3fc0_0000), (0x4000_0000, 0xc000_0000), (0x1_0000_0000, 0x7_0000_0000)]).map
       (fun r => (r.1.ramBytes, r.2)) =
@@ -309,7 +321,8 @@ def lastPageReusable : List ReservedRegion := [⟨⟨0x47ff_f000, 0x10⟩, false
 The map keeps the bank and manages it whole; it rounds each span of boot
 storage and the reservation outward to whole pages, in input order; and its
 usable ranges leave out every page of both, the `reusable` reservation
-included. -/
+included.
+Feature: `krepi.platform.device-tree`. -/
 def AllRamAcceptsMaxBootStorage : Prop :=
   (MemoryPlan.allRam [qemuBank] fourBootSpans lastPageReusable).map
       (fun p => (p, p.availableRanges)) =
@@ -321,7 +334,8 @@ def AllRamAcceptsMaxBootStorage : Prop :=
            ⟨0x4050_1000, 0x7af_e000⟩])
 
 /-- **FDT-R07, rejected.** Criterion: "of 5 fails with `Capacity`": the same
-map with a fifth span of boot storage. -/
+map with a fifth span of boot storage.
+Feature: `krepi.platform.device-tree`. -/
 def AllRamRejectsExcessBootStorage : Prop :=
   MemoryPlan.allRam [qemuBank] (fourBootSpans ++ [⟨0x4060_0000, 0x1000⟩]) lastPageReusable =
     .error .capacity
@@ -350,7 +364,8 @@ expected outputs", on a tree of the shape of those vectors: the QEMU virt
 profile with PSCI over HVC accepts the two CPUs, whose IDs are affinity level
 0, CPU 0 without an `enable-method`, with a count of 2; and the timer records
 of QEMU virt for two CPUs, type 1, the interrupts 13, 14, 11 and 10 and the
-flags `0x304`, are accepted for that topology. -/
+flags `0x304`, are accepted for that topology.
+Feature: `krepi.platform.device-tree`. -/
 def CpusAcceptsQemuPair : Prop :=
   ((Fdt.parse (cpusTree 1)).bind (·.discoverCpus qemuHvcCpus)).map
       (fun t => (t, t.validateTimers
@@ -360,7 +375,8 @@ def CpusAcceptsQemuPair : Prop :=
 /-- **FDT-R08, rejected.** Criterion: the logical IDs "run from 0 to
 `count - 1` without a gap or a repeat": the same tree with the `reg` 0 for
 `cpu@1` repeats the ID 0 and fails with `BadProperty`, where keeping one of
-the two would give a count of 1. -/
+the two would give a count of 1.
+Feature: `krepi.platform.device-tree`. -/
 def CpusRejectsRepeatedId : Prop :=
   (Fdt.parse (cpusTree 0)).bind (·.discoverCpus qemuHvcCpus) = .error .badProperty
 
@@ -383,7 +399,8 @@ def busTree : ByteArray :=
 their expected outputs", on a tree of their shape: the `reg` of the device is
 read in the cells of its bus, not of the root, and `translate_reg` takes its
 span through the one window of the bus's `ranges`, not its `dma-ranges`, to
-`[0xfd00_1000, 0xfd00_1200)`. -/
+`[0xfd00_1000, 0xfd00_1200)`.
+Feature: `krepi.platform.device-tree`. -/
 def TranslateRegThroughBus : Prop :=
   onNode busTree "/soc/serial@7d001000" (fun n => do (← n.reg).entries.mapM n.translateReg) =
     .ok (some [⟨0xfd00_1000, 0x200⟩])
@@ -392,7 +409,8 @@ def TranslateRegThroughBus : Prop :=
 fails": a map of 1 child cell, 1 parent cell and 1 size cell with the windows
 `[0x1000, 0x2000)` to `0x1_0000` and `[0x1800, 0x2800)` to `0x2_0000`, which
 both hold the request `[0x1800, 0x1900)`, fails with `AmbiguousMapping`
-(rule 3), where taking either window would give a span. -/
+(rule 3), where taking either window would give a span.
+Feature: `krepi.platform.device-tree`. -/
 def TranslationRejectsTwoWindows : Prop :=
   (AddressMap.new (some (bytesOf (cellBytes [0x1000, 0x1_0000, 0x1000, 0x1800, 0x2_0000, 0x1000])))
       1 1 1).bind (·.toParent ⟨0x1800, 0x100⟩) =
@@ -443,7 +461,8 @@ whose trees differ only in the seeds of `/chosen`: both give the same memory
 map, one RAM range and nothing reserved, and the same boot memory map, the
 page of the tree and the image as boot storage. The parse accepts both
 trees, and the trees that it gives differ at most in values that no rule
-reads (`unreadByDiscoveries`), here the seeds. -/
+reads (`unreadByDiscoveries`), here the seeds.
+Feature: `krepi.platform.device-tree`. -/
 def SeedsDoNotReachResults : Prop :=
   (∀ chosen ∈ [seedsA, seedsB],
     qemuBoot chosen =
@@ -460,7 +479,8 @@ value of `/chosen` other than its `device_type` and, when that is `memory`,
 its `status`: the memory discovery reads the `device_type` of every child of
 the root. The tree of `seedsA` with a `device_type` of `/chosen` that is not
 UTF-8, the bytes `0xff, 0`, fails with `BadString`: the results depend on
-that value of `/chosen`, and not on its seeds (`SeedsDoNotReachResults`). -/
+that value of `/chosen`, and not on its seeds (`SeedsDoNotReachResults`).
+Feature: `krepi.platform.device-tree`. -/
 def ChosenDeviceTypeIsRead : Prop :=
   (Fdt.parse (qemuTree (seedsA ++ [("device_type", [0xff, 0])]))).bind Fdt.discoverMemory =
     .error .badString

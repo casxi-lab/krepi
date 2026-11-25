@@ -245,7 +245,8 @@ properties of a node, the bytes of a property name and the reservation
 entries, a tree at the limit is accepted and one 1 above it fails with the
 error of the contract: `LimitExceeded`, and `BadString` for a property name
 (lines 175 to 184 of the contract). That every accepted tree lies within the
-limits is `ParseWellFormed`. -/
+limits is `ParseWellFormed`.
+Feature: `krepi.platform.device-tree`. -/
 def ParseLimitsExact : Prop :=
   (∃ t, Fdt.parse (treeOfSize MAX_BLOB_SIZE.toNat) = .ok t) ∧
     Fdt.parse (treeOfSize (MAX_BLOB_SIZE.toNat + 1)) = .error .limitExceeded ∧
@@ -262,7 +263,8 @@ def ParseLimitsExact : Prop :=
 
 /-- **Every prefix of an accepted tree is rejected** (FDT-R02). Each prefix
 of the bytes of an accepted tree that is shorter than its `totalsize` fails
-with `Truncated`. -/
+with `Truncated`.
+Feature: `krepi.platform.device-tree`. -/
 def PrefixesRejected : Prop :=
   ∀ (input : ByteArray) (t : Fdt), Fdt.parse input = .ok t →
     ∀ n, n < t.totalSize.toNat → Fdt.parse (input.extract 0 n) = .error .truncated
@@ -285,7 +287,8 @@ input and never picks one (rule 3, lines 251 to 258 of the contract).
 
 No accepted tree holds two properties of one name in a node
 (`ParseWellFormed`), and two windows that hold a request are rejected by
-`TranslationThroughOneWindow`. -/
+`TranslationThroughOneWindow`.
+Feature: `krepi.platform.device-tree`. -/
 def NoChoiceAmongDuplicates : Prop :=
   (∀ t : Fdt, t.WellFormed →
     (∀ n ∈ t.nodes, ∀ m ∈ t.nodes, n.index.val ≠ m.index.val → n.path = m.path →
@@ -310,7 +313,8 @@ reservation, so none bridges two banks or a hole; every address of a managed
 bank that no reservation holds lies in a usable range; and each usable range
 starts at the start of its bank or at the end of a reservation and ends at
 the end of its bank or at the start of a reservation, so it is maximal
-(lines 601 to 613 and 810 and 811 of the contract). -/
+(lines 601 to 613 and 810 and 811 of the contract).
+Feature: `krepi.platform.device-tree`. -/
 def UsableRangesExact : Prop :=
   ∀ p : MemoryPlan, p.WellFormed →
     (∀ r ∈ p.availableRanges,
@@ -328,7 +332,8 @@ def UsableRangesExact : Prop :=
 that `BootMemory::find_available` gives is available, fits the request in
 a RAM range, no RAM range before it in tree order has a span that fits, and
 no span that fits in its range starts lower; none means that no RAM range has
-a span that fits (lines 624 to 629 of the contract). -/
+a span that fits (lines 624 to 629 of the contract).
+Feature: `krepi.platform.device-tree`. -/
 def FindAvailableLowest : Prop :=
   ∀ (m : BootMemory) (size alignment minimum limit : UInt64),
     (∀ s, m.findAvailable size alignment minimum limit = .ok (some s) →
@@ -346,7 +351,8 @@ when that is `memory`, its `status`, such as the seeds that QEMU virt writes
 into `/chosen` at every boot; and every value of a dynamic reservation but
 its `status` and flags, such as its `size`, whatever its cells. They give
 the same memory map, boot memory and CPU topology, with every profile, and
-so the same boot memory map. -/
+so the same boot memory map.
+Feature: `krepi.platform.device-tree`. -/
 def UnreadValuesIgnored : Prop :=
   ∀ t t' : Fdt, t.WellFormed → t.SameExceptValues (unreadByDiscoveries t) t' →
     t.discoverMemory = t'.discoverMemory ∧
@@ -359,7 +365,8 @@ def UnreadValuesIgnored : Prop :=
 CPU of a supported topology, `CpuProfile::logical_id` of its affinity with
 any flag bits of `MPIDR_EL1` is its index; and flag bits outside the
 affinity fields never change a logical ID (lines 674 to 678 of the
-contract). -/
+contract).
+Feature: `krepi.platform.device-tree`. -/
 def AffinityRoundTrip : Prop :=
   (∀ (t : CpuTopology) (i flags : UInt64), t.Supported → i < t.count →
     flags &&& AFFINITY_MASK = 0 →
@@ -376,7 +383,8 @@ exactly when one window, and no other, shares an address with the request
 and that window holds all of it, and then gives the span of the request's
 size at the request's offset in that window (lines 707 to 714 of the
 contract). Two windows that hold the request, or one that holds part of it,
-make it fail. -/
+make it fail.
+Feature: `krepi.platform.device-tree`. -/
 def TranslationThroughOneWindow : Prop :=
   ∀ (m : AddressMap) (s : Span) (reverse : Bool), m.WellFormed → s.size ≠ 0 →
     s.WithinWidth (if reverse then m.parentCells else m.childCells) →

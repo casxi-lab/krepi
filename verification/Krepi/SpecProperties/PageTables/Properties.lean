@@ -274,9 +274,11 @@ stated here: the specification test `PlansFollowContractOrder` shows it only
 on sets that hold the root alone, within one 1 GiB slot. These orders leave
 the same set, since every new table is complete and fenced before the one
 store of its table descriptor and a leaf in a table that the set holds is
-one store into an invalid entry; the plans of the specification follow them
-by their definition, which the refinement of the target relates to the plans
-of the implementation. -/
+one store into an invalid entry, and the plans of `kernel_map` and
+`direct_map` run with the MMU off, into sets that no `TTBR` holds (lines 452
+to 454); the plans of the specification follow them by their definition,
+which the refinement of the target relates to the plans of the
+implementation. -/
 def Plan.inOrder (base : UInt64) : Plan → PlanState N → Bool
   | [], st => !st.valid
   | [.sync], _ => true
@@ -432,7 +434,8 @@ in every table set together" (lines 201 to 203):
 
 The mappings of the address spaces of processes beyond the copy, and
 `UserReadExecute` for the boot bundle, are those of the address-space
-component. -/
+component.
+Feature: `krepi.kernel.kernel-memory`. -/
 def NoWritableExecutable : Prop :=
   (∀ k : Kind, ¬ (k.attributes.writable = true ∧ k.attributes.executable = true)) ∧
   ∀ (E X : Nat) (cfg : Config) (txns : List Txn), WxPremises txns →
@@ -699,7 +702,8 @@ lines 347 to 350: the rows of `Tables::new`, `reset`, `map_page`,
 fourth invariant of the page ownership table, that "the firmware, image and
 boot storage pages never change owner" (line 541), is a statement of two
 states that these rows give: each row changes $O$ only on pages that are
-free or held. -/
+free or held.
+Feature: `krepi.kernel.kernel-memory`. -/
 def AfterEveryWrite : Prop :=
   AfterNew ∧ AfterReset ∧ AfterMapPage ∧ AfterMapBlock ∧ AfterUnmapPage ∧
   AfterCloneKernelFrom ∧ AfterKernelMap ∧ AfterDirectMap ∧ AfterOwnershipNew ∧ AfterAssign ∧
@@ -712,7 +716,8 @@ writes the direct map once, before the MMU is on, and no entry changes it
 afterwards" (lines 505 and 506), and its descriptors are "read-only after
 boot" and "the field never changes after it" (line 826): from any shared
 state with the MMU on, every list of transactions leaves the direct map's
-set as it was, and the MMU on. -/
+set as it was, and the MMU on.
+Feature: `krepi.kernel.kernel-memory`. -/
 def DirectMapUnchangedAfterBoot : Prop :=
   ∀ (E X : Nat) (cfg : Config) (s : Shared E X) (txns : List Txn), s.mmuOn = true →
     (runAll cfg txns s).directMap = s.directMap ∧ (runAll cfg txns s).mmuOn = true
@@ -725,7 +730,8 @@ and holds no `Invalidate`; no entry of this page removes or changes a valid
 entry of the kernel tables" (lines 426 to 429): on a well-formed shared
 state, every transaction keeps every valid entry of both kernel sets, and
 its plan for a kernel set writes only entries that are invalid when it
-writes them and holds no `Invalidate`. -/
+writes them and holds no `Invalidate`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def KernelTablesOnlyFilled : Prop :=
   ∀ (E X : Nat) (cfg : Config) (s : Shared E X) (txn : Txn), s.WellFormed cfg →
     (∀ t i, isValid (s.lowerKernel.entry t i) = true →
@@ -757,9 +763,10 @@ well-formed set:
   alone, within one 1 GiB slot. These orders leave the same set, since every
   new table is complete and fenced before the one store of its table
   descriptor and a leaf in a table that the set holds is one store into an
-  invalid entry; the plans of the specification follow them by their
-  definition, which the refinement of the target relates to the plans of the
-  implementation;
+  invalid entry, and the plans of `kernel_map` and `direct_map` run with the
+  MMU off, into sets that no `TTBR` holds (lines 452 to 454); the plans of
+  the specification follow them by their definition, which the refinement
+  of the target relates to the plans of the implementation;
 - the plan of `unmap_page` is `Store(t, i, 0)` of the leaf of $v$ and then
   `Invalidate(v)` (lines 430 to 432);
 - the plan of `clone_kernel_from` is a `Zero` of every table in use of the
@@ -768,7 +775,8 @@ well-formed set:
   order of the tables and of the entries of each, a leaf as it is and a
   table descriptor pointing at the target's table of the index that it
   points at in the source, and `Sync` last, with no `Fence` (lines 440 to
-  451). -/
+  451).
+Feature: `krepi.kernel.kernel-memory`. -/
 def PlansPublishInOrder : Prop :=
   (∀ (r : Region) (N : Nat) (s : Tables r N) (v p : UInt64) (k : Kind) (base : UInt64) (bits : UInt8)
     (s' : Tables r N) (plan : Plan), s.WellFormed base bits →
@@ -810,7 +818,8 @@ element of $G$ and of $P$: $\mathrm{used} = 1 + |G| + |P|$" (lines 302 and
 that it touches and one level 3 table for each 2 MiB slot that it maps in
 part, with pages" (lines 687 to 689): on a well-formed set, the record of
 the tables in use is 1 and the numbers of the elements of $G$ and of $P$,
-listed once each by `Tables.gSlots` and `Tables.pSlots`. -/
+listed once each by `Tables.gSlots` and `Tables.pSlots`.
+Feature: `krepi.kernel.kernel-memory`. -/
 def TablesInUseCounted : Prop :=
   ∀ (r : Region) (N : Nat) (s : Tables r N) (base : UInt64) (bits : UInt8), s.WellFormed base bits →
     s.usedTables = 1 + (s.gSlots base).length + (s.pSlots base).length ∧
@@ -838,6 +847,7 @@ to 590). On a well-formed table, whose extents are in address order:
 - `OutOfMemory` means that no extent holds a range of the request;
 - `MetadataExhausted` means that an extent gives a range and that every
   range that an extent gives needs more extents than the capacity has free.
+Feature: `krepi.kernel.kernel-memory`.
 -/
 def PlacementFirstFit : Prop :=
   ∀ (E X : Nat) (t : Ownership E X) (owner pages alignment : UInt64) (p : Placement),
@@ -864,7 +874,8 @@ owner is free or a holder" (lines 212 and 213). For every well-formed boot
 memory map, the table that `Ownership::new` builds from its managed banks and
 exclusions records one owner for every managed page, and once `direct_map`
 of the same map has run on a set of `Tables::new` on zero storage, a page is
-free exactly when the direct map maps it. -/
+free exactly when the direct map maps it.
+Feature: `krepi.kernel.kernel-memory`. -/
 def BootOwnersMatchDirectMap : Prop :=
   ∀ (E X N : Nat) (B : Krepi.Spec.Fdt.MemoryPlan) (arena : UInt64) (banks : List PhysRange)
     (exclusions : List Exclusion) (t : Ownership E X) (base : UInt64) (bits : UInt8)
