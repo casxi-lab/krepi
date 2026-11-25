@@ -28,7 +28,9 @@ are in that module.
   `treeNodes_of_repr`, `TreeNodes.unique`, `TreeNodes.offsets`
   (`offsetsOf`), `TreeNodes.length` and `TreeNodes.nodeRepr_iff` (a node of
   the code stands for the node of index `k` exactly when it stands for the
-  `k`-th token); `nodeRepr_begin`, what a node that stands for a node tells.
+  `k`-th token); `nodeRepr_begin`, what a node that stands for a node tells,
+  and `nodeRepr_tokens`, its begin-node token and the properties of its
+  record as `propsFrom` reads them after it.
 - The iterator: `NodesAt`, `nodes_next_sim` and `fdt_nodes_spec` (`Fdt.nodes`).
 - The name and the parent: `bytesOf_of_slice`, `node_name_spec`
   (`Node.name`), `node_at_offset_loop_spec`, `node_at_offset_spec`,
@@ -427,6 +429,27 @@ theorem nodeRepr_begin (hu : Usize64) {n : fdt.Node} {N : Node} (h : NodeRepr n 
   have hn : L[k].name = (⟨T, ⟨k, hk⟩⟩ : Node).name := (ht.begins.2 k hkL hk).1
   obtain ⟨next, hd⟩ := nodesFrom_mem ht.walk L[k] (List.getElem_mem hkL)
   exact ⟨L, ht, hkL, hat, hn, next, hn ▸ hd⟩
+
+/-- What a node of the code that stands for a node of the specification reads
+in its tree: at its offset the begin-node token with the name of the node,
+whose next token lies at its properties, and from there, within `MAX_TOKENS`
+tokens, the properties of its record as `propsFrom` reads them. -/
+theorem nodeRepr_tokens (hu : Usize64) {n : fdt.Node} {N : Node} (h : NodeRepr n N) :
+    decodeToken (bytesOf n.tree.structure) (bytesOf n.tree.strings) n.at.offset.val =
+        .ok (.beginNode N.name, n.at.properties.val) ∧
+      ∃ f ≤ MAX_TOKENS.toNat, propsFrom (bytesOf n.tree.structure) (bytesOf n.tree.strings) f
+        n.at.properties.val = some N.record.properties := by
+  obtain ⟨L, ht, hk, hat, hn, next, hd⟩ := nodeRepr_begin hu h
+  obtain ⟨hnext, -, -⟩ := decodeToken_begin hd
+  have hprop : n.at.properties.val = next := by rw [hat.2.2.2.2, hn, hnext]
+  refine ⟨by rw [hat.1, hprop]; exact hd, ?_⟩
+  obtain ⟨hp, hh, hh', hb, hs, hst, -⟩ := ht.repr
+  have hL := ht.walk
+  rw [hs, hst] at hL
+  obtain ⟨f, hf, hpf⟩ := parse_props hp hh' hL N.index.val hk N.index.isLt
+  refine ⟨f, hf, ?_⟩
+  rw [hs, hst, hat.2.2.2.2]
+  exact hpf
 
 /-- `Node::name()`: the bytes of the name of the node. -/
 theorem node_name_spec (hu : Usize64) (n : fdt.Node) (N : Node) (h : NodeRepr n N) :

@@ -44,6 +44,19 @@ is built once and not again for every mutant of the code.
   `nodesFrom` succeeds where `walkTokens` does and stands for its records; and
   `parse_nodesFrom`, the same for the structure block of a tree that
   `Fdt.parse` accepts.
+- The properties of the records: `propsFrom`, the properties from a cursor up
+  to the next begin node, end node or end token, as `property_range` walks
+  them (`propsFrom_zero`, `propsFrom_property`, `propsFrom_nop`,
+  `propsFrom_end`); `WalkProp` (the open nodes lie among the records, and only
+  the innermost may have no child yet) and `Unchildren` (a record that may
+  still take properties), with `walkProp_start`, `place_begin_full`,
+  `place_property_full`, `place_endNode_full`, `walkProp_begin`,
+  `walkProp_property`, `walkProp_endNode` and `not_unchildren_of_tail`;
+  `props_walkTokens` (a record that may take no more properties keeps its
+  own, the innermost one gets those that `propsFrom` reads from the cursor),
+  `props_walk` and `parse_props`: the properties of each record of a tree
+  that the parse accepts are those that `propsFrom` reads after the
+  begin-node token of the record, within `MAX_TOKENS` tokens.
 - The nodes of a tree: `nodes_length`, `nodes_getElem`, `nodes_drop_cons`
   and `nodes_drop_nil`.
 - The header: `block_size_le` and `header_sizes` (the bytes of a tree are at
@@ -590,6 +603,330 @@ theorem parse_nodesFrom {input : ByteArray} {T : Fdt} {h : Header}
   exact ⟨L, hL, by simpa using hb⟩
 
 end NodesFrom
+
+/-! ## The properties of the records -/
+
+section Props
+
+variable {str strs : ByteArray}
+
+/-- The properties from the token at `cursor` on, reading at most `fuel`
+tokens as `decodeToken` reads them, as `property_range` walks them: each
+property with its name and value, no-operations skipped, up to the first begin
+node, end node or end token; none when a token is refused or the fuel runs
+out. -/
+def propsFrom (str strs : ByteArray) : (fuel cursor : Nat) → Option (List (String × ByteArray))
+  | 0, _ => none
+  | fuel + 1, cursor =>
+    match decodeToken str strs cursor with
+    | .ok (.property nm v, next) => (propsFrom str strs fuel next).map ((nm, v) :: ·)
+    | .ok (.nop, next) => propsFrom str strs fuel next
+    | .ok (.beginNode _, _) => some []
+    | .ok (.endNode, _) => some []
+    | .ok (.endStructure, _) => some []
+    | .error _ => none
+
+/-- The open nodes of a walk lie among its records, and every open node but the
+innermost has a child. -/
+def WalkProp (w : Walk) : Prop :=
+  (∀ fr ∈ w.open_, fr.index < w.records.size) ∧ ∀ fr ∈ w.open_.tail, fr.children = true
+
+/-- The record `k` is that of the innermost open node, which has no child yet:
+properties may still follow for it. -/
+def Unchildren (w : Walk) (k : Nat) : Prop :=
+  ∃ fr rest, w.open_ = fr :: rest ∧ fr.children = false ∧ fr.index = k
+
+theorem walkProp_start : WalkProp Walk.start := ⟨fun _ h => absurd h List.not_mem_nil, fun _ h => absurd h List.not_mem_nil⟩
+
+/-- A begin node that the walk places: the records and open nodes after it. -/
+theorem place_begin_full {w w' : Walk} {nm : String} (h : w.place (.beginNode nm) = .ok w') :
+    w'.records = w.records.push ⟨nm, w.open_.head?.map (·.index), []⟩ ∧
+      w'.open_ = ⟨w.records.size, [], false⟩ :: (match w.open_ with
+        | [] => []
+        | f :: rest => { f with children := true } :: rest) := by
+  obtain ⟨op, sr, recs⟩ := w
+  cases op with
+  | nil =>
+    rw [Walk.place] at h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    replace h := except_pure_ok.1 h
+    subst h
+    exact ⟨rfl, rfl⟩
+  | cons f rest =>
+    rw [Walk.place] at h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    replace h := except_pure_ok.1 h
+    subst h
+    exact ⟨rfl, rfl⟩
+
+/-- A property that the walk places: it belongs to the innermost open node,
+which has no child. -/
+theorem place_property_full {w w' : Walk} {nm : String} {v : ByteArray}
+    (h : w.place (.property nm v) = .ok w') :
+    ∃ f rest, w.open_ = f :: rest ∧ f.children = false ∧
+      w'.records = w.records.modify f.index (fun r => { r with properties := r.properties ++ [(nm, v)] }) ∧
+      w'.open_ = { f with names := f.names ++ [nm] } :: rest := by
+  obtain ⟨op, sr, recs⟩ := w
+  cases op with
+  | nil => rw [Walk.place] at h; exact absurd h (except_throw_ne _ _)
+  | cons f rest =>
+    rw [Walk.place] at h
+    obtain ⟨h1, h⟩ := except_jp_ok h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    have h := except_pure_ok.1 h
+    subst h
+    exact ⟨f, rest, rfl, by simpa using h1, rfl, rfl⟩
+
+/-- An end node that the walk places closes the innermost open node. -/
+theorem place_endNode_full {w w' : Walk} (h : w.place .endNode = .ok w') :
+    w'.records = w.records ∧ ∃ f, w.open_ = f :: w'.open_ := by
+  obtain ⟨op, sr, recs⟩ := w
+  cases op with
+  | nil => cases h
+  | cons f rest => cases h; exact ⟨rfl, f, rfl⟩
+
+theorem propsFrom_zero (c : Nat) : propsFrom str strs 0 c = none := rfl
+
+theorem propsFrom_property {f c next : Nat} {nm : String} {v : ByteArray}
+    (hd : decodeToken str strs c = .ok (.property nm v, next)) :
+    propsFrom str strs (f + 1) c = (propsFrom str strs f next).map ((nm, v) :: ·) := by
+  rw [propsFrom, hd]
+
+theorem propsFrom_nop {f c next : Nat} (hd : decodeToken str strs c = .ok (.nop, next)) :
+    propsFrom str strs (f + 1) c = propsFrom str strs f next := by
+  rw [propsFrom, hd]
+
+theorem propsFrom_end {f c next : Nat} {tok : Token}
+    (hd : decodeToken str strs c = .ok (tok, next))
+    (ht : tok = .endStructure ∨ tok = .endNode ∨ ∃ nm, tok = .beginNode nm) :
+    propsFrom str strs (f + 1) c = some [] := by
+  rcases ht with rfl | rfl | ⟨nm, rfl⟩ <;> rw [propsFrom, hd]
+
+theorem not_unchildren_of_tail {w : Walk} (h : ∀ fr ∈ w.open_, fr.children = true) (k : Nat) :
+    ¬ Unchildren w k := by
+  rintro ⟨fr, rest, hs, hc, -⟩
+  have := h fr (by rw [hs]; exact List.mem_cons_self)
+  rw [hc] at this; cases this
+
+
+theorem walkProp_begin {w w' : Walk} {nm : String} (hw : WalkProp w)
+    (hp : w.place (.beginNode nm) = .ok w') : WalkProp w' := by
+  obtain ⟨hrec, hop⟩ := place_begin_full hp
+  obtain ⟨h1, h2⟩ := hw
+  refine ⟨fun fr hfr => ?_, fun fr hfr => ?_⟩
+  · rw [hrec, Array.size_push]
+    rw [hop] at hfr
+    rcases List.mem_cons.1 hfr with rfl | hfr
+    · exact Nat.lt_succ_self _
+    · cases hs : w.open_ with
+      | nil => rw [hs] at hfr; cases hfr
+      | cons f0 rest =>
+        rw [hs] at hfr
+        rcases List.mem_cons.1 hfr with rfl | hfr
+        · have := h1 f0 (by rw [hs]; exact List.mem_cons_self); exact Nat.lt_succ_of_lt this
+        · have := h1 fr (by rw [hs]; exact List.mem_cons_of_mem _ hfr)
+          exact Nat.lt_succ_of_lt this
+  · rw [hop, List.tail_cons] at hfr
+    cases hs : w.open_ with
+    | nil => rw [hs] at hfr; cases hfr
+    | cons f0 rest =>
+      rw [hs] at hfr
+      rcases List.mem_cons.1 hfr with rfl | hfr
+      · rfl
+      · exact h2 fr (by rw [hs]; exact hfr)
+
+theorem walkProp_property {w w' : Walk} {nm : String} {v : ByteArray} (hw : WalkProp w)
+    (hp : w.place (.property nm v) = .ok w') : WalkProp w' := by
+  obtain ⟨f0, rest0, hs0, hc0, hrec, hop⟩ := place_property_full hp
+  have hsz : w'.records.size = w.records.size := by rw [hrec]; simp
+  obtain ⟨h1, h2⟩ := hw
+  refine ⟨fun fr hfr => ?_, fun fr hfr => ?_⟩
+  · rw [hsz]
+    rw [hop] at hfr
+    rcases List.mem_cons.1 hfr with rfl | hfr
+    · exact h1 f0 (by rw [hs0]; exact List.mem_cons_self)
+    · exact h1 fr (by rw [hs0]; exact List.mem_cons_of_mem _ hfr)
+  · rw [hop, List.tail_cons] at hfr
+    exact h2 fr (by rw [hs0]; exact hfr)
+
+theorem walkProp_endNode {w w' : Walk} (hw : WalkProp w) (hp : w.place .endNode = .ok w') :
+    WalkProp w' := by
+  obtain ⟨hrec, f0, hs0⟩ := place_endNode_full hp
+  obtain ⟨h1, h2⟩ := hw
+  refine ⟨fun fr hfr => ?_, fun fr hfr => ?_⟩
+  · rw [hrec]; exact h1 fr (by rw [hs0]; exact List.mem_cons_of_mem _ hfr)
+  · exact h2 fr (by rw [hs0]; exact List.mem_of_mem_tail hfr)
+
+/-- The properties that a walk that succeeds gives its records: a record that
+can take no more properties keeps its own, and that of the innermost open
+node, without a child, gets those from the cursor on, as `propsFrom` reads
+them. -/
+theorem props_walkTokens : ∀ {f c : Nat} {w : Walk} {recs : Array NodeRecord},
+    WalkProp w → walkTokens str strs f c w = .ok recs →
+    (∀ k (hk : k < w.records.size), ¬ Unchildren w k →
+      recs[k]?.map (·.properties) = some w.records[k].properties) ∧
+    (∀ fr rest, w.open_ = fr :: rest → fr.children = false →
+      ∃ ps, propsFrom str strs f c = some ps ∧
+        recs[fr.index]?.map (·.properties) = w.records[fr.index]?.map (·.properties ++ ps))
+  | 0, _, _, _, _, h => by cases h
+  | f + 1, c, w, recs, hw, h => by
+    rw [walkTokens] at h
+    obtain ⟨⟨tok, next⟩, hd, h⟩ := except_bind_ok.1 h
+    cases tok with
+    | endStructure =>
+      obtain ⟨-, h⟩ := except_jp_ok h
+      cases except_pure_ok.1 h
+      refine ⟨fun k hk _ => by simp [hk], fun fr rest _ _ => ⟨[], propsFrom_end hd (Or.inl rfl), ?_⟩⟩
+      simp
+    | beginNode nm =>
+      obtain ⟨w', hp, h⟩ := except_bind_ok.1 h
+      obtain ⟨hrec, hop⟩ := place_begin_full hp
+      have hw' := walkProp_begin hw hp
+      obtain ⟨hA, -⟩ := props_walkTokens hw' h
+      have hnot : ∀ k, k < w.records.size → ¬ Unchildren w' k := by
+        rintro k hk ⟨fr, rest, hs, -, hi⟩
+        rw [hop] at hs
+        obtain ⟨rfl, -⟩ := List.cons.inj hs
+        simp at hi; omega
+      refine ⟨fun k hk _ => ?_, fun fr rest hs hc => ⟨[], propsFrom_end hd (Or.inr (Or.inr ⟨nm, rfl⟩)), ?_⟩⟩
+      · have := hA k (by rw [hrec]; simp; omega) (hnot k hk)
+        rw [this]; simp only [hrec, Array.getElem_push_lt hk]
+      · have hi : fr.index < w.records.size := hw.1 fr (by rw [hs]; exact List.mem_cons_self)
+        have := hA fr.index (by rw [hrec]; simp; omega) (hnot _ hi)
+        rw [this]; simp only [hrec, Array.getElem_push_lt hi, List.append_nil]
+        rw [Array.getElem?_eq_getElem hi]; rfl
+    | property nm v =>
+      obtain ⟨w', hp, h⟩ := except_bind_ok.1 h
+      obtain ⟨f0, rest0, hs0, hc0, hrec, hop⟩ := place_property_full hp
+      have hsz : w'.records.size = w.records.size := by rw [hrec]; simp
+      have hw' := walkProp_property hw hp
+      obtain ⟨hA, hB⟩ := props_walkTokens hw' h
+      refine ⟨fun k hk hk' => ?_, fun fr rest hs hc => ?_⟩
+      · have hne : k ≠ f0.index := fun e => hk' ⟨f0, rest0, hs0, hc0, e.symm⟩
+        have hnot : ¬ Unchildren w' k := by
+          rintro ⟨fr, rest, hs, -, hi⟩
+          rw [hop] at hs
+          obtain ⟨rfl, -⟩ := List.cons.inj hs
+          exact hne hi.symm
+        rw [hA k (by omega) hnot]
+        simp only [hrec, Array.getElem_modify, Ne.symm hne, ↓reduceIte]
+      · rw [hs0] at hs
+        obtain ⟨hfr, -⟩ := List.cons.inj hs
+        rw [← hfr]
+        obtain ⟨ps, hps, hrecs⟩ := hB _ rest0 hop hc0
+        refine ⟨(nm, v) :: ps, by rw [propsFrom, hd]; simp only [hps]; rfl, ?_⟩
+        rw [hrecs]
+        have hi : f0.index < w.records.size := hw.1 f0 (by rw [hs0]; exact List.mem_cons_self)
+        simp only [hrec, Array.getElem?_modify, Array.getElem?_eq_getElem hi]
+        simp
+    | endNode =>
+      obtain ⟨w', hp, h⟩ := except_bind_ok.1 h
+      obtain ⟨hrec, f0, hs0⟩ := place_endNode_full hp
+      have hw' := walkProp_endNode hw hp
+      obtain ⟨hA, -⟩ := props_walkTokens hw' h
+      have hnot : ∀ k, ¬ Unchildren w' k :=
+        not_unchildren_of_tail (fun fr hfr => hw.2 fr (by rw [hs0]; exact hfr))
+      refine ⟨fun k hk _ => ?_, fun fr rest hs hc => ⟨[], propsFrom_end hd (Or.inr (Or.inl rfl)), ?_⟩⟩
+      · rw [hA k (by rw [hrec]; exact hk) (hnot k)]; simp only [hrec]
+      · have hi : fr.index < w.records.size := hw.1 fr (by rw [hs]; exact List.mem_cons_self)
+        rw [hA fr.index (by rw [hrec]; exact hi) (hnot _)]
+        simp only [hrec, Array.getElem?_eq_getElem hi, List.append_nil]; rfl
+    | nop =>
+      obtain ⟨w', hp, h⟩ := except_bind_ok.1 h
+      cases hp
+      obtain ⟨hA, hB⟩ := props_walkTokens hw h
+      refine ⟨hA, fun fr rest hs hc => ?_⟩
+      obtain ⟨ps, hps, hrecs⟩ := hB fr rest hs hc
+      exact ⟨ps, by rw [propsFrom, hd]; exact hps, hrecs⟩
+
+/-- The properties of each record that a walk that succeeds begins: those
+that `propsFrom` reads after its begin-node token, within the fuel. -/
+theorem props_walk : ∀ {f c : Nat} {w : Walk} {pre : List Begin} {st : List Nat}
+    {recs : Array NodeRecord} {more : List Begin},
+    WalkRel w pre st → WalkProp w → walkTokens str strs f c w = .ok recs →
+    nodesFrom str strs f c st = some more →
+    ∀ k, pre.length ≤ k → ∀ (hk2 : k < (pre ++ more).length) (hk3 : k < recs.size),
+      ∃ f' ≤ f, propsFrom str strs f' (align4 ((pre ++ more)[k].offset + 4 +
+        (pre ++ more)[k].name.utf8ByteSize + 1)) = some recs[k].properties
+  | 0, _, _, _, _, _, _, _, _, h, _ => by cases h
+  | f + 1, c, w, pre, st, recs, more, hw, hwp, h, hn => by
+    rw [walkTokens] at h
+    obtain ⟨⟨tok, next⟩, hd, h⟩ := except_bind_ok.1 h
+    cases tok with
+    | endStructure =>
+      cases nodesFrom_end_some hd hn
+      intro k hk1 hk2; simp at hk2; omega
+    | beginNode nm =>
+      obtain ⟨w', hp, h⟩ := except_bind_ok.1 h
+      obtain ⟨-, more', rfl, hn'⟩ := nodesFrom_begin_some hd hn
+      obtain ⟨-, hw'⟩ := walkRel_begin (c := c) hw hp
+      obtain ⟨hrec, hop⟩ := place_begin_full hp
+      have hwp' := walkProp_begin hwp hp
+      intro k hk1 hk2 hk3
+      rcases Nat.lt_or_ge pre.length k with hlt | hge
+      · have := props_walk hw' hwp' h hn' k (by simp; omega) (by simpa using hk2) hk3
+        obtain ⟨f', hf', hpf⟩ := this
+        refine ⟨f', by omega, ?_⟩
+        simpa using hpf
+      · have hk : k = pre.length := Nat.le_antisymm hge hk1
+        subst hk
+        obtain ⟨-, hB⟩ := props_walkTokens hwp' h
+        obtain ⟨ps, hps, hrecs⟩ := hB _ _ hop rfl
+        obtain ⟨hnext, -, -⟩ := decodeToken_begin hd
+        refine ⟨f, by omega, ?_⟩
+        simp only [List.getElem_append_right (Nat.le_refl _), Nat.sub_self, List.getElem_cons_zero]
+        rw [← hnext, hps]
+        dsimp only at hrecs
+        rw [hrec, Array.getElem?_push_size, Option.map_some, List.nil_append] at hrecs
+        have hsz : w.records.size = pre.length := hw.begins.1.symm
+        rw [hsz, Array.getElem?_eq_getElem hk3, Option.map_some, Option.some.injEq] at hrecs
+        rw [hrecs]
+    | property nm v =>
+      obtain ⟨w', hp, h⟩ := except_bind_ok.1 h
+      rw [nodesFrom_property hd] at hn
+      intro k hk1 hk2 hk3
+      obtain ⟨f', hf', hpf⟩ := props_walk (walkRel_property hw hp) (walkProp_property hwp hp) h hn k
+        hk1 hk2 hk3
+      exact ⟨f', by omega, hpf⟩
+    | endNode =>
+      obtain ⟨w', hp, h⟩ := except_bind_ok.1 h
+      rw [nodesFrom_endNode hd] at hn
+      intro k hk1 hk2 hk3
+      obtain ⟨f', hf', hpf⟩ := props_walk (walkRel_endNode hw hp) (walkProp_endNode hwp hp) h hn k
+        hk1 hk2 hk3
+      exact ⟨f', by omega, hpf⟩
+    | nop =>
+      obtain ⟨w', hp, h⟩ := except_bind_ok.1 h
+      cases hp
+      rw [nodesFrom_nop hd] at hn
+      intro k hk1 hk2 hk3
+      obtain ⟨f', hf', hpf⟩ := props_walk hw hwp h hn k hk1 hk2 hk3
+      exact ⟨f', by omega, hpf⟩
+
+/-- The properties of each record of a tree that the parse accepts: those that
+`propsFrom` reads after the begin-node token of the record, within
+`MAX_TOKENS` tokens. -/
+theorem parse_props {input : ByteArray} {T : Fdt} {h : Header}
+    (hp : Fdt.parse input = .ok T) (hh : header input = .ok h) {L : List Begin}
+    (hL : nodesFrom h.structure_ h.strings MAX_TOKENS.toNat 0 [] = some L) :
+    ∀ k (hk : k < L.length) (hk' : k < T.records.size), ∃ f ≤ MAX_TOKENS.toNat,
+      propsFrom h.structure_ h.strings f (align4 (L[k].offset + 4 + L[k].name.utf8ByteSize + 1)) =
+        some T.records[k].properties := by
+  unfold Fdt.parse at hp
+  obtain ⟨h', hh', hp⟩ := except_bind_ok.1 hp
+  rw [hh] at hh'
+  cases hh'
+  obtain ⟨res, -, hp⟩ := except_bind_ok.1 hp
+  obtain ⟨recs, hr, hp⟩ := except_bind_ok.1 hp
+  cases except_pure_ok.1 hp
+  intro k hk hk'
+  have := props_walk walkRel_start walkProp_start hr hL k (Nat.zero_le _) (by simpa using hk) hk'
+  simpa using this
+
+end Props
 
 /-! ## The nodes of a tree -/
 
