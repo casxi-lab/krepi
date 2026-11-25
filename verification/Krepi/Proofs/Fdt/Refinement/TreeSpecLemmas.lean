@@ -3,6 +3,7 @@ module
 public import Krepi.Proofs.Fdt.Refinement.Utf8Lemmas
 public import Krepi.Spec.Fdt.Nodes
 import Krepi.Proofs.Fdt.ExceptLemmas
+import Krepi.Proofs.Fdt.PathLemmas
 
 /-!
 # Device tree: the nodes of a parsed tree
@@ -47,6 +48,25 @@ is built once and not again for every mutant of the code.
   and `nodes_drop_nil`.
 - The header: `block_size_le` and `header_sizes` (the bytes of a tree are at
   most `MAX_BLOB_SIZE`, its blocks within them).
+- Paths as bytes: `utf8Bytes`, the bytes of the UTF-8 encoding of characters
+  (`utf8Bytes_nil`, `utf8Bytes_cons`, `utf8Bytes_append`, `toUTF8_toList`,
+  `utf8Bytes_inj`, `utf8Bytes_eq_nil`), with `enc_slash`, `mem_enc_slash`
+  (the byte 47 lies in the encoding of `/` alone), `ne_or_high`,
+  `enc_ne_nil` and `head_enc_ne`; `doubleSlashB`, `pathValidB` and `splitB`,
+  the checks and the split of `Fdt.findNode` on bytes as the code reads them,
+  equal to those of the characters (`doubleSlashB_utf8`, `pathValidB_utf8`,
+  `splitB_utf8`), with their steps (`doubleSlashB_cons_of_ne`,
+  `doubleSlashB_append`, `doubleSlashB_slash`, `doubleSlashB_drop`,
+  `doubleSlashB_drop'`, `doubleSlashB_short`, `getLast_utf8`,
+  `length_utf8_gt`, `splitB_ne_nil`, `splitB_append_of` and `splitB_at`, the
+  split at the first `/` from an index).
+- The lookup of a path on bytes: `scanChild`, the search of `child_named`
+  among the nodes in their order (`scanChild_some`, `scanChild_none`, against
+  the filter of `Fdt.descend`), `childPred`, `descendB` (`Fdt.descend` on
+  components as bytes, `childPred_utf8`, `descendB_utf8`) and `findNode_eq`
+  (`Fdt.findNode` on the bytes of the path); `offset_inj` and
+  `parent_offset_iff` (the token of a record has the offset of the token of
+  `p` as its parent exactly when `p` is the parent of the record).
 -/
 
 @[expose] public section
@@ -643,5 +663,397 @@ theorem header_sizes {input : ByteArray} {hd : Header} (h : header input = .ok h
   refine ⟨?_, block_size_le hb1, block_size_le hb2⟩
   rw [ByteArray.size_extract]
   omega
+
+
+/-! ## Paths as bytes -/
+
+/-- The bytes of the UTF-8 encoding of characters. -/
+def utf8Bytes (cs : List Char) : List UInt8 := cs.flatMap String.utf8EncodeChar
+
+theorem utf8Bytes_nil : utf8Bytes [] = [] := rfl
+
+theorem utf8Bytes_cons (c : Char) (cs : List Char) :
+    utf8Bytes (c :: cs) = String.utf8EncodeChar c ++ utf8Bytes cs := List.flatMap_cons
+
+theorem utf8Bytes_append (a b : List Char) : utf8Bytes (a ++ b) = utf8Bytes a ++ utf8Bytes b :=
+  List.flatMap_append
+
+theorem toUTF8_toList (s : String) : s.toUTF8.toList = utf8Bytes s.toList := by
+  rw [String.toUTF8_eq_toByteArray, ← String.utf8Encode_toList, List.utf8Encode, toList_eq_data,
+    List.data_toByteArray]
+  rfl
+
+theorem utf8Bytes_inj {a b : List Char} (h : utf8Bytes a = utf8Bytes b) : a = b := by
+  have : (String.ofList a).toByteArray = (String.ofList b).toByteArray := by
+    rw [String.toByteArray_ofList, String.toByteArray_ofList, List.utf8Encode, List.utf8Encode]
+    exact congrArg List.toByteArray h
+  rw [String.toByteArray_inj] at this
+  rw [← String.toList_ofList (l := a), this, String.toList_ofList]
+
+theorem enc_slash : String.utf8EncodeChar '/' = [47] := by
+  rw [String.utf8EncodeChar_eq_utf8EncodeCharFast]; rfl
+
+theorem or_ge {a b : UInt8} : b.toNat ≤ (a ||| b).toNat := by
+  rw [UInt8.toNat_or]; exact Nat.right_le_or
+
+theorem ne_or_high {x k : UInt8} (hk : 128 ≤ k.toNat) : (47 : UInt8) ≠ x ||| k := by
+  intro h
+  have := congrArg UInt8.toNat h
+  have h2 : k.toNat ≤ (x ||| k).toNat := by rw [UInt8.toNat_or]; exact Nat.right_le_or
+  rw [← this] at h2
+  simp at h2
+  omega
+
+theorem mem_enc_slash {c : Char} (h : (47 : UInt8) ∈ String.utf8EncodeChar c) : c = '/' := by
+  rw [String.utf8EncodeChar_eq_utf8EncodeCharFast] at h
+  unfold String.utf8EncodeCharFast at h
+  dsimp only at h
+  split at h
+  · rename_i hv
+    simp only [List.mem_singleton] at h
+    apply Char.ext
+    have h1 := congrArg UInt8.toNat h
+    have h2 : c.val.toNat ≤ 127 := by
+      have := UInt32.le_iff_toNat_le.1 hv; simpa using this
+    simp only [UInt32.toNat_toUInt8, UInt8.reduceToNat] at h1
+    apply UInt32.toNat_inj.1
+    simp only [show ('/' : Char).val.toNat = 47 from rfl]
+    omega
+  · split at h
+    · simp only [List.mem_cons, List.not_mem_nil, or_false] at h
+      rcases h with h | h <;> exact absurd h (ne_or_high (by decide))
+    · split at h
+      · simp only [List.mem_cons, List.not_mem_nil, or_false] at h
+        rcases h with h | h | h <;> exact absurd h (ne_or_high (by decide))
+      · simp only [List.mem_cons, List.not_mem_nil, or_false] at h
+        rcases h with h | h | h | h <;> exact absurd h (ne_or_high (by decide))
+
+theorem enc_ne_nil (c : Char) : String.utf8EncodeChar c ≠ [] := String.utf8EncodeChar_ne_nil
+
+theorem utf8Bytes_eq_nil {cs : List Char} : utf8Bytes cs = [] ↔ cs = [] := by
+  cases cs with
+  | nil => simp [utf8Bytes]
+  | cons c cs => simp [utf8Bytes_cons]
+
+/-- Whether bytes hold two `/` in a row. -/
+def doubleSlashB : List UInt8 → Bool
+  | a :: b :: rest => (a == 47 && b == 47) || doubleSlashB (b :: rest)
+  | _ => false
+
+theorem doubleSlashB_cons_of_ne {x : UInt8} (hx : x ≠ 47) (Y : List UInt8) :
+    doubleSlashB (x :: Y) = doubleSlashB Y := by
+  cases Y with
+  | nil => rfl
+  | cons y Y => simp [doubleSlashB, hx]
+
+theorem doubleSlashB_append {X Y : List UInt8} (hX : (47 : UInt8) ∉ X) :
+    doubleSlashB (X ++ Y) = doubleSlashB Y := by
+  induction X with
+  | nil => rfl
+  | cons x X ih =>
+    simp only [List.mem_cons, not_or] at hX
+    rw [List.cons_append, doubleSlashB_cons_of_ne (Ne.symm hX.1), ih hX.2]
+
+theorem doubleSlashB_slash (Y : List UInt8) :
+    doubleSlashB (47 :: Y) = (Y.head? == some 47 || doubleSlashB Y) := by
+  cases Y with
+  | nil => rfl
+  | cons y Y => simp [doubleSlashB]
+
+theorem head_enc_ne {c : Char} (hc : c ≠ '/') :
+    ∃ e es, String.utf8EncodeChar c = e :: es ∧ e ≠ 47 := by
+  obtain ⟨e, es, he⟩ := List.exists_cons_of_ne_nil (enc_ne_nil c)
+  refine ⟨e, es, he, fun h => hc (mem_enc_slash ?_)⟩
+  rw [he, h]; exact List.mem_cons_self
+
+/-- One step of `doubleSlashB` over the bytes from `i` on. -/
+theorem doubleSlashB_drop {P : List UInt8} {i : Nat} (h : i + 1 < P.length) :
+    doubleSlashB (P.drop i) =
+      ((P[i] == 47 && P[i + 1] == 47) || doubleSlashB (P.drop (i + 1))) := by
+  rw [List.drop_eq_getElem_cons (by omega), List.drop_eq_getElem_cons h, doubleSlashB]
+
+/-- One step of `doubleSlashB` over the bytes from `j` on, with `i = j + 1`. -/
+theorem doubleSlashB_drop' {P : List UInt8} {j i : Nat} (hji : j + 1 = i) (h : i < P.length) :
+    doubleSlashB (P.drop j) =
+      ((P[j] == 47 && P[i] == 47) || doubleSlashB (P.drop i)) := by
+  subst hji; exact doubleSlashB_drop h
+
+/-- At most one byte holds no `//`. -/
+theorem doubleSlashB_short {P : List UInt8} (h : P.length ≤ 1) : doubleSlashB P = false := by
+  match P, h with
+  | [], _ => rfl
+  | [_], _ => rfl
+
+theorem doubleSlashB_utf8 : ∀ cs : List Char, doubleSlashB (utf8Bytes cs) = hasDoubleSlash cs
+  | [] => rfl
+  | c :: cs => by
+    by_cases hc : c = '/'
+    · subst hc
+      rw [utf8Bytes_cons, enc_slash, List.singleton_append, doubleSlashB_slash, doubleSlashB_utf8 cs]
+      cases cs with
+      | nil => rfl
+      | cons d ds =>
+        by_cases hd : d = '/'
+        · subst hd; rw [utf8Bytes_cons, enc_slash]; rfl
+        · obtain ⟨e, es, he, hne⟩ := head_enc_ne hd
+          rw [utf8Bytes_cons, he]
+          simp [hasDoubleSlash, hd, hne]
+    · rw [utf8Bytes_cons, doubleSlashB_append (fun h => hc (mem_enc_slash h)), doubleSlashB_utf8 cs,
+        hasDoubleSlash_cons hc]
+
+/-- The form of a path that `path_valid` checks, on its bytes: a `/` first, no
+`/` last but in the root, and no `//`. -/
+def pathValidB (P : List UInt8) : Bool :=
+  P.head? == some 47 && !(1 < P.length && P.getLast? == some 47) && !doubleSlashB P
+
+theorem getLast_utf8 {cs : List Char} (hcs : cs ≠ []) :
+    ((utf8Bytes cs).getLast? == some 47) = (cs.getLast? == some '/') := by
+  obtain ⟨cs', d, rfl⟩ := List.eq_nil_or_concat cs |>.resolve_left hcs
+  rw [List.concat_eq_append, utf8Bytes_append, utf8Bytes_cons, utf8Bytes_nil, List.append_nil,
+    List.getLast?_append, List.getLast?_concat]
+  obtain ⟨e, es, he⟩ := List.exists_cons_of_ne_nil (enc_ne_nil d)
+  have hl : (String.utf8EncodeChar d).getLast? = some ((String.utf8EncodeChar d).getLast (enc_ne_nil d)) :=
+    List.getLast?_eq_some_getLast _
+  rw [hl, Option.some_or]
+  by_cases hd : d = '/'
+  · subst hd; simp [enc_slash]
+  · have : (String.utf8EncodeChar d).getLast (enc_ne_nil d) ≠ 47 := fun h =>
+      hd (mem_enc_slash (h ▸ List.getLast_mem _))
+    simp [this, hd]
+
+theorem length_utf8_gt {rest : List Char} :
+    (1 < (utf8Bytes ('/' :: rest)).length) = (1 < ('/' :: rest).length) := by
+  rw [utf8Bytes_cons, enc_slash]
+  simp only [List.singleton_append, List.length_cons, Nat.lt_add_left_iff_pos, eq_iff_iff]
+  constructor
+  · intro h; cases rest with
+    | nil => simp [utf8Bytes] at h
+    | cons _ _ => simp
+  · intro h; cases rest with
+    | nil => simp at h
+    | cons c cs => rw [utf8Bytes_cons]; simp [List.length_append]; exact Or.inl c.utf8Size_pos
+
+theorem pathValidB_utf8 (cs : List Char) : pathValidB (utf8Bytes cs) = pathValid cs := by
+  unfold pathValidB pathValid
+  cases cs with
+  | nil => rfl
+  | cons c rest =>
+    by_cases hc : c = '/'
+    · subst hc
+      rw [doubleSlashB_utf8, getLast_utf8 (List.cons_ne_nil _ _)]
+      have := length_utf8_gt (rest := rest)
+      rw [utf8Bytes_cons, enc_slash] at this ⊢
+      simp only [List.singleton_append, List.head?_cons, beq_self_eq_true, Bool.true_and] at this ⊢
+      simp only [this]
+    · obtain ⟨e, es, he, hne⟩ := head_enc_ne hc
+      rw [utf8Bytes_cons, he]
+      simp only [List.cons_append, List.head?_cons, Option.some_beq_some, beq_false_of_ne hne,
+        beq_false_of_ne hc, Bool.false_and]
+
+/-- The components of bytes, split at each `/`, as `splitSlash` splits
+characters. -/
+def splitB : List UInt8 → List (List UInt8)
+  | [] => [[]]
+  | x :: rest =>
+    if x = 47 then [] :: splitB rest
+    else match splitB rest with
+      | [] => [[x]]
+      | w :: ws => (x :: w) :: ws
+
+theorem splitB_ne_nil (R : List UInt8) : splitB R ≠ [] := by
+  cases R with
+  | nil => simp [splitB]
+  | cons x rest =>
+    rw [splitB]
+    split
+    · simp
+    · split <;> simp
+
+theorem splitB_append_of {X : List UInt8} (hX : (47 : UInt8) ∉ X) (Y : List UInt8) :
+    splitB (X ++ Y) = match splitB Y with
+      | [] => [X]
+      | w :: ws => (X ++ w) :: ws := by
+  induction X with
+  | nil =>
+    rw [List.nil_append]
+    cases h : splitB Y with
+    | nil => exact absurd h (splitB_ne_nil Y)
+    | cons w ws => simp
+  | cons x X ih =>
+    simp only [List.mem_cons, not_or] at hX
+    rw [List.cons_append, splitB]
+    simp only [Ne.symm hX.1, ↓reduceIte, ih hX.2]
+    cases splitB Y <;> rfl
+
+theorem splitB_utf8 : ∀ cs : List Char, splitB (utf8Bytes cs) = (splitSlash cs).map utf8Bytes
+  | [] => rfl
+  | c :: cs => by
+    by_cases hc : c = '/'
+    · subst hc
+      rw [utf8Bytes_cons, enc_slash, List.singleton_append, splitB]
+      simp only [↓reduceIte, splitB_utf8 cs]
+      rfl
+    · rw [utf8Bytes_cons, splitB_append_of (fun h => hc (mem_enc_slash h)), splitB_utf8 cs,
+        splitSlash_cons hc]
+      cases splitSlash cs with
+      | nil => simp [utf8Bytes_cons, utf8Bytes_nil]
+      | cons w ws => simp [utf8Bytes_cons]
+
+/-- The components of bytes from the first `/` at `k` or their end on: the
+bytes before it, then the components after it. -/
+theorem splitB_at {R : List UInt8} {k : Nat} (hk : k ≤ R.length)
+    (hne : ∀ j < k, R[j]! ≠ 47) (hend : k = R.length ∨ R[k]! = 47) :
+    splitB R = R.take k :: (if k = R.length then [] else splitB (R.drop (k + 1))) := by
+  have hX : (47 : UInt8) ∉ R.take k := by
+    intro h
+    obtain ⟨j, hj, hjv⟩ := List.getElem_of_mem h
+    simp only [List.length_take] at hj
+    rw [List.getElem_take] at hjv
+    exact hne j (by omega) (by rw [getElem!_pos R j (by omega), hjv])
+  rcases hend with rfl | hend
+  · rw [List.take_length]
+    simp only [↓reduceIte]
+    have := splitB_append_of (List.take_length ▸ hX) []
+    rw [List.append_nil] at this
+    rw [this]; simp [splitB]
+  · have hlt : k < R.length := by
+      rcases Nat.lt_or_ge k R.length with h | h
+      · exact h
+      · rw [getElem!_neg R k (by omega)] at hend; cases hend
+    simp only [show k ≠ R.length by omega, ↓reduceIte]
+    have h47 : R[k] = 47 := by rw [← getElem!_pos R k hlt]; exact hend
+    conv => lhs; rw [← List.take_append_drop k R, List.drop_eq_getElem_cons hlt]
+    rw [splitB_append_of hX, splitB]
+    simp [h47]
+
+/-! ## The lookup of a path on bytes -/
+
+/-- The child of a node with a name, as `child_named` looks for it among the
+nodes `ns` in their order, `found` the match before them: the one node that
+matches, none, or `AmbiguousMapping` at a second match. -/
+def scanChild (pred : Node → Bool) : List Node → Option Node → Except Error (Option Node)
+  | [], found => .ok found
+  | n :: ns, found =>
+    if pred n then
+      match found with
+      | some _ => .error .ambiguousMapping
+      | none => scanChild pred ns (some n)
+    else scanChild pred ns found
+
+theorem scanChild_some (pred : Node → Bool) (m : Node) : ∀ ns : List Node,
+    scanChild pred ns (some m) = match ns.filter pred with
+      | [] => .ok (some m)
+      | _ :: _ => .error .ambiguousMapping
+  | [] => rfl
+  | n :: ns => by
+    rw [scanChild, List.filter_cons]
+    by_cases h : pred n
+    · simp [h]
+    · simp only [h, Bool.false_eq_true, ↓reduceIte]; exact scanChild_some pred m ns
+
+theorem scanChild_none (pred : Node → Bool) : ∀ ns : List Node,
+    scanChild pred ns none = match ns.filter pred with
+      | [] => .ok none
+      | [n] => .ok (some n)
+      | _ :: _ :: _ => .error .ambiguousMapping
+  | [] => rfl
+  | n :: ns => by
+    rw [scanChild, List.filter_cons]
+    by_cases h : pred n
+    · simp only [h, ↓reduceIte, scanChild_some]
+      cases ns.filter pred <;> rfl
+    · simp only [h, Bool.false_eq_true, ↓reduceIte]; exact scanChild_none pred ns
+
+/-- Whether a node is a child of `p` whose name has the bytes `c`. -/
+def childPred (p : Node) (c : List UInt8) (n : Node) : Bool :=
+  n.isChildOf p && n.name.toUTF8.toList == c
+
+/-- `Fdt.descend` on components as bytes, each child looked for as
+`child_named` does. -/
+def descendB (T : Fdt) : List (List UInt8) → Option Node → Except Error (Option Node)
+  | [], cur => .ok cur
+  | _ :: _, none => .ok none
+  | c :: rest, some p =>
+    match scanChild (childPred p c) T.nodes none with
+    | .ok r => descendB T rest r
+    | .error e => .error e
+
+theorem childPred_utf8 (p : Node) (c : List Char) :
+    childPred p (utf8Bytes c) = fun n => n.isChildOf p && n.name.toList == c := by
+  funext n
+  simp only [childPred, toUTF8_toList]
+  congr 1
+  by_cases h : n.name.toList = c
+  · simp [h]
+  · simp only [beq_false_of_ne h]
+    exact beq_false_of_ne fun e => h (utf8Bytes_inj e)
+
+theorem descendB_utf8 (T : Fdt) : ∀ (cs : List (List Char)) (cur : Option Node),
+    descendB T (cs.map utf8Bytes) cur = T.descend cs cur
+  | [], _ => by simp [descendB, Fdt.descend]
+  | _ :: _, none => by simp [descendB, Fdt.descend]
+  | c :: rest, some p => by
+    simp only [List.map_cons, descendB, childPred_utf8, scanChild_none, Fdt.descend]
+    cases List.filter (fun n => n.isChildOf p && n.name.toList == c) T.nodes with
+    | nil => exact descendB_utf8 T rest none
+    | cons n ns =>
+      cases ns with
+      | nil => exact descendB_utf8 T rest (some n)
+      | cons m ms => rfl
+
+/-- `Fdt.findNode` on the bytes of the path. -/
+theorem findNode_eq (T : Fdt) (p : String) : T.findNode p =
+    if !pathValidB (utf8Bytes p.toList) then .error .badPath
+    else if (utf8Bytes p.toList).length = 1 then .ok T.root
+    else descendB T (splitB ((utf8Bytes p.toList).drop 1)) T.root := by
+  unfold Fdt.findNode
+  rw [pathValidB_utf8]
+  dsimp only
+  split
+  · rfl
+  · rename_i hv
+    have hv' : pathValid p.toList = true := by simpa using hv
+    have hh : p.toList.head? = some '/' := by
+      simp only [pathValid, Bool.and_eq_true, beq_iff_eq] at hv'; exact hv'.1.1
+    obtain ⟨rest, hr⟩ : ∃ rest, p.toList = '/' :: rest := by
+      cases h : p.toList with
+      | nil => rw [h] at hh; cases hh
+      | cons c rest => rw [h] at hh; cases hh; exact ⟨rest, rfl⟩
+    rw [hr, utf8Bytes_cons, enc_slash, List.singleton_append, List.drop_one, List.tail_cons,
+      List.tail_cons, splitB_utf8, descendB_utf8]
+    by_cases h0 : rest = []
+    · subst h0; simp [utf8Bytes_nil]
+    · have h1 : ¬ (47 :: utf8Bytes rest).length = 1 := by
+        simp only [List.length_cons, Nat.add_eq_right, List.length_eq_zero_iff]
+        exact fun h => h0 (utf8Bytes_eq_nil.1 h)
+      have h2 : ¬ (('/' :: rest) == ['/']) = true := by simp [h0]
+      simp only [h1, h2, ↓reduceIte, Bool.false_eq_true]
+
+/-- Begin-node tokens with increasing offsets have distinct offsets. -/
+theorem offset_inj {L : List Begin} (hs : L.Pairwise (fun a b => a.offset < b.offset))
+    {i j : Nat} (hi : i < L.length) (hj : j < L.length) (h : L[i].offset = L[j].offset) : i = j := by
+  rcases Nat.lt_trichotomy i j with hij | rfl | hij
+  · have := List.pairwise_iff_getElem.1 hs i j hi hj hij; omega
+  · rfl
+  · have := List.pairwise_iff_getElem.1 hs j i hj hi hij; omega
+
+/-- The token of a record has the offset of the token of `p` as its parent
+exactly when `p` is the parent of the record. -/
+theorem parent_offset_iff {recs : Array NodeRecord} {L : List Begin} (hb : BeginsOf recs L)
+    (hs : L.Pairwise (fun a b => a.offset < b.offset)) {k p : Nat} (hk : k < L.length)
+    (hp : p < L.length) :
+    L[k].parent = some L[p].offset ↔ (recs[k]'(hb.1 ▸ hk)).parent = some p := by
+  rw [(hb.2 k hk (hb.1 ▸ hk)).2]
+  cases (recs[k]'(hb.1 ▸ hk)).parent with
+  | none => simp
+  | some q =>
+    simp only [Option.bind_some, Option.some.injEq]
+    constructor
+    · intro h
+      rcases Nat.lt_or_ge q L.length with hq | hq
+      · rw [List.getElem?_eq_getElem hq, Option.map_some, Option.some.injEq] at h
+        exact offset_inj hs hq hp h
+      · rw [List.getElem?_eq_none hq] at h; cases h
+    · rintro rfl; rw [List.getElem?_eq_getElem hp]; rfl
 
 end Krepi.Proofs.Fdt.Refinement

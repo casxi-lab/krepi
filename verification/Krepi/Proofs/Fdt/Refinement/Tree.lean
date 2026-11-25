@@ -23,6 +23,11 @@ those of `Krepi.Proofs.Fdt.Refinement.NodeWalkLemmas` (`fdt_nodes_spec`,
 `nodeAddressCells`, `nodeSizeCells`, `nodeReg`, `nodeRanges`, `nodeDmaRanges`
 and `nodeTranslateReg`. Each proof is `sorry` until a proof pull request
 proves it, and `verification/statements.json` registers it as `planned`.
+`fdtFindNode` among them does not hold as stated: for a path of `Usize.max`
+bytes, which a `Str` of the translation may have and a `&str` of Rust may
+not, the code leaves `usize`. `fdt_find_node_spec_of_lt` of
+`Krepi.Proofs.Fdt.Refinement.NodeWalkLemmas` proves it for a path of fewer
+bytes.
 Mathlib is imported so that the gate counts the heartbeats of each theorem.
 -/
 

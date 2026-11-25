@@ -33,6 +33,19 @@ are in that module.
 - The name and the parent: `bytesOf_of_slice`, `node_name_spec`
   (`Node.name`), `node_at_offset_loop_spec`, `node_at_offset_spec`,
   `parent_at_spec` and `node_parent_spec` (`Node.parent`).
+- Paths: `map_byte_getElem!`, `drop_map_byte_getElem!`, `slash_beq`,
+  `component_end_spec`, `double_slash_spec` (`doubleSlashB`) and
+  `path_valid_spec` (`pathValidB`).
+- The lookup: `is_child_spec`, `TreeNodes.child_iff` and `TreeNodes.name_eq`
+  (the tests of `child_named` as `childPred`), `first_node_spec` (`Fdt.root`),
+  `child_named_loop_spec` and `child_named_spec` (`scanChild`),
+  `fdtRepr_unique`, `TreeNodes.of_nodeRepr`, `descend_loop_spec`
+  (`descendB`), `find_path_spec`, and `fdt_find_node_spec_of_lt`, the triple
+  of `Fdt::find_node` against `Fdt.findNode` for a path of fewer than
+  `Usize.max` bytes. Without that premise the triple fails: for a path of
+  `Usize.max` bytes whose last component is reached at a node, `descend`
+  computes the index after the end of the path, which leaves `usize`; a
+  slice of bytes of Rust has at most `isize::MAX` bytes.
 -/
 
 @[expose] public section
@@ -554,5 +567,469 @@ theorem node_parent_spec (hu : Usize64) (n : fdt.Node) (N : Node) (h : NodeRepr 
       cases op with
       | none => simp [hps]
       | some x => exact hop.elim
+
+/-! ## Paths -/
+
+/-- The byte at an index of the bytes of a slice. -/
+theorem map_byte_getElem! (s : Slice U8) (j : Nat) (hj : j < s.length) :
+    (s.val.map byte)[j]! = byte s.val[j]! := by
+  rw [getElem!_pos _ j (by simpa using hj), List.getElem_map, getElem!_pos s.val j hj]
+
+/-- `component_end(path, start)`: the index of the first `/` from `start` on,
+or the end of the path. -/
+@[step] theorem component_end_spec (path : Slice U8) (start : Usize) (h : start.val ≤ path.length) :
+    fdt.nodes.component_end path start ⦃ e => start.val ≤ e.val ∧ e.val ≤ path.length ∧
+      (∀ j, start.val ≤ j → j < e.val → (path.val[j]!).val ≠ 47) ∧
+      (e.val = path.length ∨ (path.val[e.val]!).val = 47) ⦄ := by
+  unfold fdt.nodes.component_end fdt.nodes.component_end_loop
+  apply loop.spec_decr_nat
+    (measure := fun (i : Usize) => path.length - i.val)
+    (inv := fun (i : Usize) => start.val ≤ i.val ∧ i.val ≤ path.length ∧
+      ∀ j, start.val ≤ j → j < i.val → (path.val[j]!).val ≠ 47)
+  · rintro i ⟨h1, h2, h3⟩
+    unfold fdt.nodes.component_end_loop.body
+    step*
+    · refine ⟨h1, h2, h3, Or.inr ?_⟩
+      rw [← getElem_eq_getElem! rfl (by scalar_tac), ← i1_post, ‹i1 = 47#u8›]; rfl
+    · refine ⟨by omega, by scalar_tac, fun j hj1 hj2 => ?_, by scalar_tac⟩
+      rcases Nat.lt_or_ge j i.val with hj | hj
+      · exact h3 j hj1 hj
+      · have : j = i.val := by scalar_tac
+        subst this
+        rw [← getElem_eq_getElem! rfl (by scalar_tac), ← i1_post]
+        exact fun h => ‹¬i1 = 47#u8› (UScalar.eq_of_val_eq h)
+  · exact ⟨Nat.le_refl _, h, fun j h1 h2 => absurd h2 (by omega)⟩
+
+/-- A byte of the code is `/` exactly when it is 47. -/
+theorem slash_beq (x : U8) : (byte x == 47) = decide (x = 47#u8) := by
+  have : byte x = 47 ↔ x = 47#u8 := by
+    rw [byte_eq_iff]
+    exact ⟨fun h => UScalar.eq_of_val_eq h, fun h => by rw [h]; rfl⟩
+  by_cases h : x = 47#u8
+  · rw [decide_eq_true h]; exact beq_iff_eq.2 (this.2 h)
+  · rw [decide_eq_false h]; exact beq_false_of_ne fun e => h (this.1 e)
+
+/-- `double_slash(path)`: whether the path holds `//`. -/
+@[step] theorem double_slash_spec (path : Slice U8) :
+    fdt.nodes.double_slash path ⦃ b => b = doubleSlashB (path.val.map byte) ⦄ := by
+  unfold fdt.nodes.double_slash fdt.nodes.double_slash_loop
+  have hl : (path.val.map byte).length = path.length := List.length_map _
+  apply loop.spec_decr_nat
+    (measure := fun (i : Usize) => path.length - i.val)
+    (inv := fun (i : Usize) => 1 ≤ i.val ∧
+      doubleSlashB ((path.val.map byte).drop (i.val - 1)) = doubleSlashB (path.val.map byte))
+  · rintro i ⟨h1, h2⟩
+    unfold fdt.nodes.double_slash_loop.body
+    step*
+    · rw [← h2, ← i1_post, doubleSlashB_drop' (P := path.val.map byte)
+        (show i1.val + 1 = i.val by scalar_tac) (by scalar_tac)]
+      simp only [List.getElem_map, ← i2_post, ← i3_post, slash_beq, ‹i2 = 47#u8›, ‹i3 = 47#u8›]
+      rfl
+    · refine ⟨by scalar_tac, ?_, by scalar_tac⟩
+      rw [← h2, ← i1_post, doubleSlashB_drop' (P := path.val.map byte)
+        (show i1.val + 1 = i.val by scalar_tac) (by scalar_tac), index1_post, Nat.add_sub_cancel]
+      simp only [List.getElem_map, ← i2_post, ← i3_post, slash_beq, ‹¬i3 = 47#u8›]
+      simp
+    · refine ⟨by scalar_tac, ?_, by scalar_tac⟩
+      rw [← h2, ← i1_post, doubleSlashB_drop' (P := path.val.map byte)
+        (show i1.val + 1 = i.val by scalar_tac) (by scalar_tac), index1_post, Nat.add_sub_cancel]
+      simp only [List.getElem_map, ← i2_post, slash_beq, ‹¬i2 = 47#u8›]
+      simp
+    · rw [← h2, doubleSlashB_short (by simp; scalar_tac)]
+  · exact ⟨by simp, by simp⟩
+
+/-- `path_valid(path)`: whether the path has the form that `Fdt::find_node`
+takes, on its bytes. -/
+@[step] theorem path_valid_spec (path : Slice U8) :
+    fdt.nodes.path_valid path ⦃ b => b = pathValidB (path.val.map byte) ⦄ := by
+  unfold fdt.nodes.path_valid
+  have hl : (path.val.map byte).length = path.length := List.length_map _
+  step*
+  · rw [pathValidB]
+    have : path.val = [] := List.length_eq_zero_iff.1 (by scalar_tac)
+    simp [this]
+  · have hpos : 0 < path.length := by scalar_tac
+    rw [pathValidB, List.head?_eq_getElem?, List.getElem?_eq_getElem (by omega), List.getElem_map,
+      ← i_post]
+    simp only [Option.some_beq_some, slash_beq]
+    rw [decide_eq_false fun h => (bne_iff_ne.1 ‹(i != 47#u8) = true›) h]; rfl
+  all_goals
+    have hpos : 0 < path.length := by scalar_tac
+    have hi : i = 47#u8 := by
+      have := ‹¬(i != 47#u8) = true›
+      rwa [bne_iff_ne, ne_eq, Decidable.not_not] at this
+    have hh : (path.val.map byte).head? = some 47 := by
+      rw [List.head?_eq_getElem?, List.getElem?_eq_getElem (by omega), List.getElem_map, ← i_post,
+        hi]; rfl
+    simp only [pathValidB, hh, beq_self_eq_true, Bool.true_and]
+  · have e : (path.val.map byte).getLast? = some (byte i4) := by
+      rw [List.getLast?_eq_getElem?, List.getElem?_map, i4_post, List.length_map,
+        show path.val.length - 1 = i3.val by scalar_tac, List.getElem?_eq_getElem (by scalar_tac)]
+      rfl
+    have hlen : 1 < (path.val.map byte).length := by rw [hl]; scalar_tac
+    simp only [e, Option.some_beq_some, slash_beq, ‹i4 = 47#u8›, decide_true, hlen,
+      Bool.and_self, Bool.not_true, Bool.false_and]
+  · have e : (path.val.map byte).getLast? = some (byte i4) := by
+      rw [List.getLast?_eq_getElem?, List.getElem?_map, i4_post, List.length_map,
+        show path.val.length - 1 = i3.val by scalar_tac, List.getElem?_eq_getElem (by scalar_tac)]
+      rfl
+    simp only [e, Option.some_beq_some, slash_beq, ‹¬i4 = 47#u8›, decide_false, Bool.and_false,
+      Bool.not_false, Bool.true_and, b1_post]
+    simp
+  · have hlen : ¬ 1 < (path.val.map byte).length := by rw [hl]; scalar_tac
+    simp only [hlen, decide_false, Bool.false_and, Bool.not_false, Bool.true_and, b1_post]
+    simp
+
+/-! ## The lookup -/
+
+/-- `is_child(node, parent)`: whether the parent of `node` is at `parent`. -/
+@[step] theorem is_child_spec (node : fdt.NodeAt) (parent : Usize) :
+    fdt.nodes.is_child node parent ⦃ b => b = decide (node.parent = some parent) ⦄ := by
+  unfold fdt.nodes.is_child
+  cases node.parent <;> simp
+
+/-- The test of `is_child` on two nodes of a tree is `Node.isChildOf`. -/
+theorem TreeNodes.child_iff {t : fdt.Fdt} {T : Fdt} {L : List Begin} (ht : TreeNodes t T L)
+    {k p : Nat} (hk : k < T.records.size) (hp : p < T.records.size) {a pa : fdt.NodeAt}
+    (ha : AtRepr a (L[k]'(ht.length ▸ hk))) (hpa : AtRepr pa (L[p]'(ht.length ▸ hp))) :
+    decide (a.parent = some pa.offset) = (⟨T, ⟨k, hk⟩⟩ : Node).isChildOf ⟨T, ⟨p, hp⟩⟩ := by
+  have hkL : k < L.length := ht.length ▸ hk
+  have hpL : p < L.length := ht.length ▸ hp
+  have hiff := parent_offset_iff ht.begins (nodesFrom_sorted ht.walk).2.1 hkL hpL
+  have e : a.parent = some pa.offset ↔ L[k].parent = some L[p].offset := by
+    rw [← ha.2.1, ← hpa.1]
+    cases a.parent with
+    | none => simp
+    | some q => simp only [Option.map_some, Option.some.injEq]; exact ⟨fun h => h ▸ rfl, UScalar.eq_of_val_eq⟩
+  simp only [Node.isChildOf, Node.record, Fin.getElem_fin]
+  rw [Bool.eq_iff_iff, decide_eq_true_iff, e, hiff, beq_iff_eq]
+
+/-- The test of `same_bytes` of the name of a node of a tree with a slice is the
+comparison of the bytes of its name. -/
+theorem TreeNodes.name_eq {t : fdt.Fdt} {T : Fdt} {L : List Begin} (ht : TreeNodes t T L)
+    {k : Nat} (hk : k < T.records.size) {a : fdt.NodeAt} (ha : AtRepr a (L[k]'(ht.length ▸ hk)))
+    («name» : Slice U8) :
+    decide (a.name_start.val ≤ a.name_end.val ∧ a.name_end.val ≤ t.structure.length ∧
+      (bytesOf t.structure).extract a.name_start.val a.name_end.val = bytesOf «name») =
+      ((⟨T, ⟨k, hk⟩⟩ : Node).name.toUTF8.toList == «name».val.map byte) := by
+  have hkL : k < L.length := ht.length ▸ hk
+  obtain ⟨next, hd⟩ := nodesFrom_mem ht.walk L[k] (List.getElem_mem hkL)
+  obtain ⟨hnext, hex, hle⟩ := decodeToken_begin hd
+  have := le_align4 (L[k].offset + 4 + L[k].name.utf8ByteSize + 1)
+  rw [bytesOf_size] at hle
+  have hn : L[k].name = (⟨T, ⟨k, hk⟩⟩ : Node).name := (ht.begins.2 k hkL hk).1
+  rw [hn] at hex hnext this
+  rw [ha.2.2.1, ha.2.2.2.1, hn, hex]
+  by_cases h : (⟨T, ⟨k, hk⟩⟩ : Node).name.toByteArray = bytesOf «name»
+  · rw [decide_eq_true ⟨by omega, by omega, h⟩]
+    rw [String.toUTF8_eq_toByteArray, h, bytesOf_toList]; simp
+  · rw [decide_eq_false fun h' => h h'.2.2]
+    refine (beq_false_of_ne fun e => h ?_).symm
+    rw [byteArray_eq_iff, bytesOf_toList, ← e, String.toUTF8_eq_toByteArray]
+
+/-- `first_node(structure)`: the root of the tree. -/
+theorem first_node_spec {t : fdt.Fdt} {T : Fdt} {L : List Begin} (ht : TreeNodes t T L) :
+    fdt.nodes.first_node t.structure ⦃ o => OptionRel (fun a N => NodeRepr ⟨t, a⟩ N) o T.root ⦄ := by
+  unfold fdt.nodes.first_node
+  step with node_step_spec t.structure (bytesOf t.strings) _ MAX_TOKENS.toNat [] L ht.size
+    start_repr.1 (Nat.le_refl _) (by rw [start_repr.2]; exact ht.walk)
+  have hpost := ‹StepPost _ _ _ _›
+  have hlen := ht.length
+  cases L with
+  | nil =>
+    obtain ⟨-, hnone, -⟩ := hpost
+    dsimp only at hnone
+    subst hnone
+    have : ¬ 0 < T.records.size := by rw [← hlen]; exact Nat.lt_irrefl 0
+    simp [Fdt.root, this]
+  | cons b L =>
+    obtain ⟨-, a, ha, hat⟩ := hpost
+    dsimp only at ha
+    subst ha
+    have h0 : 0 < T.records.size := by rw [← hlen]; exact Nat.succ_pos _
+    simp only [Fdt.root, h0, ↓reduceDIte, optionRel_some_some]
+    exact (ht.nodeRepr_iff a 0 h0).2 hat
+
+/-- The loop of `child_named`: the child of the node at `parent` whose name
+has the bytes of `name`, among the nodes from the walker on, after `found`. -/
+theorem child_named_loop_spec {t : fdt.Fdt} {T : Fdt} {L : List Begin} (ht : TreeNodes t T L)
+    {p : Nat} (hp : p < T.records.size) {pa : fdt.NodeAt} (hpa : AtRepr pa (L[p]'(ht.length ▸ hp)))
+    («name» : Slice U8) (w : fdt.Walker) (found : Option fdt.NodeAt) (seen : Bool) (count : Usize)
+    (f : Nat) (st : List Nat) (fN : Option Node) (hw : WalkerRepr w st) (hf : f ≤ MAX_TOKENS.toNat)
+    (hc : count.val ≤ L.length)
+    (hL : nodesFrom (bytesOf t.structure) (bytesOf t.strings) f w.cursor.val st =
+      some (L.drop count.val))
+    (hfound : OptionRel (fun a N => NodeRepr ⟨t, a⟩ N) found fN) (hseen : seen = fN.isSome) :
+    fdt.nodes.child_named_loop t.structure pa.offset «name» w found seen count ⦃ r =>
+      Agrees (OptionRel (fun a N => NodeRepr ⟨t, a⟩ N)) errorOf r
+        (scanChild (childPred ⟨T, ⟨p, hp⟩⟩ («name».val.map byte)) (T.nodes.drop count.val) fN) ⦄ := by
+  have hlen := ht.length
+  have hmax : L.length < MAX_TOKENS.toNat := (nodesFrom_sorted ht.walk).2.2
+  rw [show MAX_TOKENS.toNat = 65536 from rfl] at hmax
+  unfold fdt.nodes.child_named_loop
+  apply loop.spec_decr_nat
+    (measure := fun (x : fdt.Walker × Option fdt.NodeAt × Bool × Usize) => L.length - x.2.2.2.val)
+    (inv := fun (x : fdt.Walker × Option fdt.NodeAt × Bool × Usize) => ∃ f st fN',
+      WalkerRepr x.1 st ∧ f ≤ MAX_TOKENS.toNat ∧ x.2.2.2.val ≤ L.length ∧
+      nodesFrom (bytesOf t.structure) (bytesOf t.strings) f x.1.cursor.val st =
+        some (L.drop x.2.2.2.val) ∧
+      OptionRel (fun a N => NodeRepr ⟨t, a⟩ N) x.2.1 fN' ∧ x.2.2.1 = fN'.isSome ∧
+      scanChild (childPred ⟨T, ⟨p, hp⟩⟩ («name».val.map byte)) (T.nodes.drop x.2.2.2.val) fN' =
+        scanChild (childPred ⟨T, ⟨p, hp⟩⟩ («name».val.map byte)) (T.nodes.drop count.val) fN)
+  · rintro ⟨w, found, seen, count⟩ ⟨f, st, fN', hw, hf, hc, hL, hfound, hseen, hans⟩
+    simp only at hw hc hL hfound hseen hans
+    unfold fdt.nodes.child_named_loop.body
+    step
+    rw [show MAX_TOKENS.toNat = 65536 from rfl] at r_post
+    refine ite_spec_pos (by scalar_tac) ?_
+    rcases Nat.lt_or_ge count.val L.length with hlt | hge
+    · have hk : count.val < T.records.size := by omega
+      rw [List.drop_eq_getElem_cons hlt] at hL
+      have hdrop : T.nodes.drop count.val = ⟨T, ⟨count.val, hk⟩⟩ :: T.nodes.drop (count.val + 1) := by
+        rw [List.drop_eq_getElem_cons (by rw [nodes_length]; exact hk), nodes_getElem]
+      rw [hdrop] at hans
+      simp only [scanChild] at hans
+      step with node_step_spec t.structure (bytesOf t.strings) w f st _ ht.size hw hf hL
+      obtain ⟨⟨f', st', hf', hw', hL'⟩, a, ha, hat⟩ := next_post
+      dsimp only at ha hL' hw'
+      subst ha
+      simp only
+      step
+      have hchild := ht.child_iff hk hp hat hpa
+      have hnm := ht.name_eq hk hat «name»
+      simp only [childPred] at hans
+      by_cases hb : b = true
+      · refine ite_spec_pos hb ?_
+        have hc1 : (⟨T, ⟨count.val, hk⟩⟩ : Node).isChildOf ⟨T, ⟨p, hp⟩⟩ = true := by
+          rw [← hchild, ← b_post]; exact hb
+        simp only [hc1, Bool.true_and] at hans
+        step
+        rw [hnm] at b1_post
+        by_cases hb1 : b1 = true
+        · refine ite_spec_pos hb1 ?_
+          simp only [← b1_post, hb1, ↓reduceIte] at hans
+          by_cases hs : seen = true
+          · refine ite_spec_pos hs ?_
+            cases fN' with
+            | none => simp [hs] at hseen
+            | some m =>
+              simp only [spec_ok]
+              rw [← hans]; rfl
+          · refine ite_spec_neg hs ?_
+            cases fN' with
+            | some m => simp [hs] at hseen
+            | none =>
+              simp only at hans
+              step
+              refine ⟨⟨f', st', some ⟨T, ⟨count.val, hk⟩⟩, hw', hf', by scalar_tac,
+                by simpa [count1_post] using hL', (ht.nodeRepr_iff a count.val hk).2 hat, rfl,
+                by rw [count1_post]; exact hans⟩, by scalar_tac⟩
+        · refine ite_spec_neg hb1 ?_
+          simp only [← b1_post, hb1, Bool.false_eq_true, ↓reduceIte] at hans
+          step
+          refine ⟨⟨f', st', fN', hw', hf', by scalar_tac, by simpa [count1_post] using hL', hfound,
+            hseen, by rw [count1_post]; exact hans⟩, by scalar_tac⟩
+      · refine ite_spec_neg hb ?_
+        have hc1 : (⟨T, ⟨count.val, hk⟩⟩ : Node).isChildOf ⟨T, ⟨p, hp⟩⟩ = false := by
+          rw [← hchild, ← b_post]; simpa using hb
+        simp only [hc1, Bool.false_and, Bool.false_eq_true, ↓reduceIte] at hans
+        step
+        refine ⟨⟨f', st', fN', hw', hf', by scalar_tac, by simpa [count1_post] using hL', hfound,
+          hseen, by rw [count1_post]; exact hans⟩, by scalar_tac⟩
+    · rw [List.drop_of_length_le hge] at hL
+      step with node_step_spec t.structure (bytesOf t.strings) w f st [] ht.size hw hf hL
+      obtain ⟨-, hnone, -⟩ := next_post
+      dsimp only at hnone
+      subst hnone
+      simp only [spec_ok]
+      rw [List.drop_of_length_le (by rw [nodes_length]; omega), scanChild] at hans
+      rw [← hans]
+      exact hfound
+  · exact ⟨f, st, fN, hw, hf, hc, hL, hfound, hseen, rfl⟩
+
+/-- `child_named(structure, parent, path, start, end)`: the child of the node at
+`parent` whose name has the bytes `[start, end)` of the path. -/
+theorem child_named_spec {t : fdt.Fdt} {T : Fdt} {L : List Begin} (ht : TreeNodes t T L)
+    {p : Nat} (hp : p < T.records.size) {pa : fdt.NodeAt} (hpa : AtRepr pa (L[p]'(ht.length ▸ hp)))
+    (path : Slice U8) (start «end» : Usize) (h0 : start.val ≤ «end».val)
+    (h1 : «end».val ≤ path.length) :
+    fdt.nodes.child_named t.structure pa.offset path start «end» ⦃ r =>
+      Agrees (OptionRel (fun a N => NodeRepr ⟨t, a⟩ N)) errorOf r
+        (scanChild (childPred ⟨T, ⟨p, hp⟩⟩ (((path.val.map byte).drop start.val).take
+          («end».val - start.val))) T.nodes none) ⦄ := by
+  unfold fdt.nodes.child_named
+  step*
+  have e : «name».val.map byte = ((path.val.map byte).drop start.val).take («end».val - start.val) := by
+    rw [name_post, List.slice, List.map_take, List.map_drop]
+  rw [← e]
+  exact child_named_loop_spec ht hp hpa «name» _ none false 0#usize MAX_TOKENS.toNat [] none
+    start_repr.1 (Nat.le_refl _) (Nat.zero_le _) (by rw [start_repr.2]; simpa using ht.walk) trivial rfl
+
+/-- Two trees of the specification that a tree of the code stands for are one. -/
+theorem fdtRepr_unique {t : fdt.Fdt} {T T' : Fdt} (h : FdtRepr t T) (h' : FdtRepr t T') : T = T' := by
+  have := h.1.symm.trans h'.1
+  cases this; rfl
+
+/-- A node of the code of a tree that stands for a node stands for one of the
+tree, of the token of its index. -/
+theorem TreeNodes.of_nodeRepr {t : fdt.Fdt} {T : Fdt} {L : List Begin} (ht : TreeNodes t T L)
+    {a : fdt.NodeAt} {N : Node} (h : NodeRepr ⟨t, a⟩ N) :
+    ∃ k, ∃ hk : k < T.records.size, N = ⟨T, ⟨k, hk⟩⟩ ∧ AtRepr a (L[k]'(ht.length ▸ hk)) := by
+  obtain ⟨T', ⟨k, hk⟩⟩ := N
+  obtain rfl := fdtRepr_unique ht.repr h.1
+  exact ⟨k, hk, rfl, (ht.nodeRepr_iff a k hk).1 h⟩
+
+/-- The byte at an index of the bytes from `i` on of a slice. -/
+theorem drop_map_byte_getElem! (s : Slice U8) (i j : Nat) :
+    ((s.val.map byte).drop i)[j]! = byte s.val[i + j]! := by
+  rcases Nat.lt_or_ge (i + j) s.val.length with h | h
+  · rw [getElem!_pos _ j (by simp; omega), List.getElem_drop, List.getElem_map,
+      getElem!_pos s.val (i + j) h]
+  · rw [getElem!_neg _ j (by simp; omega), getElem!_neg s.val (i + j) (by omega)]; rfl
+
+/-- The loop of `descend`: from the component at `start`, the node that the
+components of the path lead to from `current`. -/
+theorem descend_loop_spec {t : fdt.Fdt} {T : Fdt} {L : List Begin} (ht : TreeNodes t T L)
+    (path : Slice U8) (hpl : path.length < Usize.max) (start : Usize)
+    (current : Option fdt.NodeAt) (curN : Option Node)
+    (hcur : OptionRel (fun a N => NodeRepr ⟨t, a⟩ N) current curN)
+    (hs : start.val ≤ path.length + 1) :
+    fdt.nodes.descend_loop t.structure path start current ⦃ r =>
+      Agrees (OptionRel (fun a N => NodeRepr ⟨t, a⟩ N)) errorOf r
+        (if start.val ≤ path.length then descendB T (splitB ((path.val.map byte).drop start.val)) curN
+         else .ok curN) ⦄ := by
+  unfold fdt.nodes.descend_loop
+  apply loop.spec_decr_nat
+    (measure := fun (x : Usize × Option fdt.NodeAt) => path.length + 1 - x.1.val)
+    (inv := fun (x : Usize × Option fdt.NodeAt) => ∃ cN,
+      OptionRel (fun a N => NodeRepr ⟨t, a⟩ N) x.2 cN ∧ x.1.val ≤ path.length + 1 ∧
+      (if x.1.val ≤ path.length then descendB T (splitB ((path.val.map byte).drop x.1.val)) cN
+         else .ok cN) =
+      (if start.val ≤ path.length then descendB T (splitB ((path.val.map byte).drop start.val)) curN
+         else .ok curN))
+  · rintro ⟨start, current⟩ ⟨cN, hcur, hs, hans⟩
+    simp only at hcur hs hans
+    unfold fdt.nodes.descend_loop.body
+    step*
+    · -- no node so far
+      cases cN with
+      | some _ => rw [‹current = none›] at hcur; exact hcur.elim
+      | none =>
+        rw [← hans]
+        simp only [show start.val ≤ path.length by scalar_tac, ↓reduceIte]
+        obtain ⟨c, cs, hc⟩ := List.exists_cons_of_ne_nil (splitB_ne_nil ((path.val.map byte).drop start.val))
+        rw [hc, descendB]; trivial
+    · -- a node so far
+      rename_i node hnode
+      rw [hnode] at hcur
+      cases cN with
+      | none => exact hcur.elim
+      | some N =>
+        obtain ⟨p, hp, rfl, hat⟩ := ht.of_nodeRepr hcur
+        step with child_named_spec ht hp hat path start «end» end_post end_post1
+        have e1 : «end».val ≤ path.val.length := end_post1
+        have hk : «end».val - start.val ≤ ((path.val.map byte).drop start.val).length := by
+          simp only [List.length_drop, List.length_map]; omega
+        have hsplit := splitB_at hk (fun j hj => by
+            rw [drop_map_byte_getElem!, ne_eq, byte_eq_iff]
+            exact end_post2 (start.val + j) (by omega) (by omega))
+          (by
+            rcases end_post3 with h | h
+            · left; simp only [List.length_drop, List.length_map]; rw [h]
+            · right; rw [drop_map_byte_getElem!, byte_eq_iff, show start.val + («end».val - start.val) = «end».val by omega]
+              exact h)
+        simp only [show start.val ≤ path.length by scalar_tac, ↓reduceIte, hsplit, descendB] at hans
+        step*
+        · -- the child found
+          obtain ⟨vN, hvN, hrel⟩ := agrees_ok_iff.1 (agrees_of_branch_ok cf_post ‹_› r_post)
+          rw [hvN] at hans
+          simp only at hans
+          refine ⟨⟨vN, hrel, by scalar_tac, ?_⟩, by scalar_tac⟩
+          rw [← hans, start1_post]
+          rcases end_post3 with h | h
+          · have h' : «end».val - start.val = ((path.val.map byte).drop start.val).length := by
+              simp only [List.length_drop, List.length_map]; rw [h]
+            have h'' : ¬ «end».val + 1 ≤ path.length := by scalar_tac
+            simp only [h', h'', ↓reduceIte, descendB]
+          · have hlt : «end».val < path.val.length := by
+              rcases Nat.lt_or_ge «end».val path.val.length with h2 | h2
+              · exact h2
+              · rw [getElem!_neg path.val _ (by omega)] at h; cases h
+            have h' : ¬ «end».val - start.val = ((path.val.map byte).drop start.val).length := by
+              simp only [List.length_drop, List.length_map]; omega
+            have h'' : «end».val + 1 ≤ path.length := hlt
+            simp only [h', h'', ↓reduceIte, List.drop_drop]
+            rw [show start.val + («end».val - start.val + 1) = «end».val + 1 by omega]
+        · -- an error
+          have hE := agrees_err_of_branch cf_post ‹_› residual_post r_post
+          rw [hE] at hans
+          simp only at hans
+          rw [r1_post, ← hans, ← e_post]
+          rfl
+    · -- past the last component
+      simp only [show ¬ start.val ≤ path.length by scalar_tac, ↓reduceIte] at hans
+      rw [← hans]; exact hcur
+  · exact ⟨curN, hcur, hs, rfl⟩
+
+/-- `find_path(structure, path)`: the node of a path that is not empty, the root
+for `/`, under the premise that the path leaves room for the index after its
+last byte. -/
+theorem find_path_spec {t : fdt.Fdt} {T : Fdt} {L : List Begin} (ht : TreeNodes t T L)
+    (path : Slice U8) (hpl : path.length < Usize.max) (hne : 1 ≤ path.length) :
+    fdt.nodes.find_path t.structure path ⦃ r =>
+      Agrees (OptionRel (fun a N => NodeRepr ⟨t, a⟩ N)) errorOf r
+        (if path.length = 1 then .ok T.root
+         else descendB T (splitB ((path.val.map byte).drop 1)) T.root) ⦄ := by
+  unfold fdt.nodes.find_path
+  step with first_node_spec ht as ⟨root, hroot⟩
+  by_cases h1 : path.length = 1
+  · have : Slice.len path = 1#usize := by scalar_tac
+    simp only [this, ↓reduceIte, spec_ok, h1, agrees_ok_ok]
+    exact hroot
+  · have : ¬ Slice.len path = 1#usize := by scalar_tac
+    simp only [this, ↓reduceIte, h1]
+    have := descend_loop_spec ht path hpl 1#usize root T.root hroot (by scalar_tac)
+    simp only [show (1#usize : Usize).val = 1 from rfl, hne, ↓reduceIte] at this
+    exact this
+
+/-- `Fdt::find_node(path)` under the premise that the bytes of the path leave
+room for the index after the last of them, which holds for every slice of
+bytes of Rust (at most `isize::MAX` bytes): the node of `Fdt.findNode`. -/
+theorem fdt_find_node_spec_of_lt (hu : Usize64) (t : fdt.Fdt) (T : Fdt) (path : Str) (p : String)
+    (h : FdtRepr t T) (hs : StrRepr path p) (hp : p.utf8ByteSize < Usize.max) :
+    fdt.nodes.Fdt.find_node t path ⦃ r => Agrees (OptionRel NodeRepr) errorOf r (T.findNode p) ⦄ := by
+  obtain ⟨L, ht⟩ := treeNodes_of_repr hu h
+  unfold fdt.nodes.Fdt.find_node
+  have hs' : core.str.Str.as_bytes path ⦃ b => bytesOf b = p.toUTF8 ⦄ := hs
+  step with hs' as ⟨path1, hb⟩
+  have hP : path1.val.map byte = utf8Bytes p.toList := by
+    rw [← bytesOf_toList, hb, toUTF8_toList]
+  have hlen : path1.length = p.utf8ByteSize := by
+    rw [← bytesOf_size, hb, String.toUTF8_eq_toByteArray, String.size_toByteArray]
+  have hPl : (utf8Bytes p.toList).length = path1.length := by rw [← hP, List.length_map]
+  rw [findNode_eq, ← hP]
+  step*
+  · have hv : pathValidB (path1.val.map byte) = true := by rwa [← b_post]
+    have hne : 1 ≤ path1.length := by
+      have h0 := hv
+      simp only [pathValidB, Bool.and_eq_true, beq_iff_eq] at h0
+      show 1 ≤ path1.val.length
+      cases hq : path1.val with
+      | nil => rw [hq] at h0; simp at h0
+      | cons x xs => simp
+    have hl1 : ((path1.val.map byte).length = 1) = (path1.length = 1) := by
+      rw [List.length_map]
+    simp only [hv, Bool.not_true, Bool.false_eq_true, ↓reduceIte, hl1]
+    step with find_path_spec ht path1 (by rw [hlen]; exact hp) hne
+    step*
+    · obtain ⟨vN, hvN, hrel⟩ := agrees_ok_iff.1 (agrees_of_branch_ok cf_post ‹_› r_post)
+      rw [hvN, o_post, agrees_ok_ok]
+      cases val <;> cases vN <;> simp_all
+    · have hE := agrees_err_of_branch cf_post ‹_› residual_post ‹_›
+      rw [hE, r_post, agrees_err_error, e_post]
+  · have hv : pathValidB (path1.val.map byte) = false := by
+      rw [← b_post]; simpa using ‹¬b = true›
+    simp only [hv, Bool.not_false, ↓reduceIte, agrees_err_error]
+    rfl
 
 end Krepi.Proofs.Fdt.Refinement
