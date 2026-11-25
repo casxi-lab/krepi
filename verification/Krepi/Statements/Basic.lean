@@ -17,7 +17,10 @@ specification:
   same for a function that writes a state, whose state after a success
   stands for that of the specification and after a failure is unchanged;
 - `Stands`, which represents an iterator by the list of the specification
-  that its calls of `next` give, and `Advances`, the step of one call.
+  that its calls of `next` give, and `Advances`, the step of one call. The
+  statement of the `next` of an iterator, that an iterator which stands for
+  a list advances on it, follows from the definition of `Stands`; the list
+  is stated by the statement of the function that gives the iterator.
 
 A refinement statement states its function with the triple `⦃ ⦄` of the
 Aeneas Lean library, so that the function returns, for a function with a
@@ -93,19 +96,27 @@ def ListRel {α β : Type} (rel : α → β → Prop) : List α → List β → 
 /-- `Stands next rel it l`: the iterator `it` of the code stands for the
 list `l` of the specification. Its calls of `next` give the items of `l` in
 order, each related by `rel` to its item, and then none; each call returns
-the next state of the iterator with its item. This is the representation of
-an iterator by its list: the functions that give an iterator state that it
-stands for the list of their specification, and the functions that walk one
-rely on it. -/
+the next state of the iterator with its item. The call that gives none
+returns a state at which the iterator stays: a call there gives none and
+returns that state again. The state need not be the one of the call that
+gave none, since the code may move its cursor while it finds the end. This
+is the representation of an iterator by its list: the functions that give
+an iterator state that it stands for the list of their specification, and
+the functions that walk one rely on it. -/
 def Stands {σ α β : Type} (next : σ → Result (Option α × σ)) (rel : α → β → Prop) :
     σ → List β → Prop
-  | it, [] => next it ⦃ o _ => o = none ⦄
+  | it, [] => next it ⦃ o it' => o = none ∧ next it' = .ok (none, it') ⦄
   | it, b :: l => next it ⦃ o it' => ∃ a, o = some a ∧ rel a b ∧ Stands next rel it' l ⦄
 
 /-- `Advances next rel it l`: one call of `next` on an iterator that stands
 for `l` gives the head of `l`, none for the empty list, and returns an
 iterator that stands for the rest of `l`, the empty list again at the end,
-so that a call at the end leaves the iterator at its end. -/
+so that a call at the end leaves the iterator at its end. An iterator that
+stands for `l` advances on `l` by the definition of `Stands` alone, so the
+statement of the `next` of an iterator adds nothing to the statement of the
+function that gives it: that statement relates the calls of `next` from the
+states that the iterator reaches to the list of the specification, and so
+covers the code of `next`. -/
 def Advances {σ α β : Type} (next : σ → Result (Option α × σ)) (rel : α → β → Prop)
     (it : σ) (l : List β) : Prop :=
   next it ⦃ o it' => OptionRel rel o l.head? ∧ Stands next rel it' l.tail ⦄
