@@ -5,6 +5,7 @@ import Mathlib.Util.CountHeartbeats
 import Krepi.Proofs.Fdt.Refinement.ParseHeaderLemmas
 import Krepi.Proofs.Fdt.Refinement.NodeWalkLemmas
 import Krepi.Proofs.Fdt.Refinement.ParseWalkLemmas
+import Krepi.Proofs.Fdt.Refinement.NodePropertyLemmas
 
 /-!
 # Device tree: refinement of the parse and the node access
@@ -12,21 +13,24 @@ import Krepi.Proofs.Fdt.Refinement.ParseWalkLemmas
 One theorem for each statement of `Krepi.Statements.Fdt.Tree`,
 whose type is exactly that statement.
 
-Eight are proved, and `verification/statements.json` registers them as
+Seventeen are proved, and `verification/statements.json` registers them as
 `proved`: `fdtParse` restates the triple `fdt_parse_spec` of
 `Krepi.Proofs.Fdt.Refinement.ParseWalkLemmas`; `fdtTotalSize` and
 `fdtReservations` restate the triples of
 `Krepi.Proofs.Fdt.Refinement.ParseHeaderLemmas` (`fdt_total_size_spec` and
 `fdt_reservations_spec`); `fdtNodes`, `nodeName` and `nodeParent` restate
 those of `Krepi.Proofs.Fdt.Refinement.NodeWalkLemmas` (`fdt_nodes_spec`,
-`node_name_spec` and `node_parent_spec`); and `reservationsNext` and
-`nodesNext` follow from the representation of an iterator alone
-(`advances_of_stands`). The other ten are planned: `fdtFindNode`,
-`nodeProperty`, `nodeStringProperty`, `nodeEnabled`,
-`nodeAddressCells`, `nodeSizeCells`, `nodeReg`, `nodeRanges`, `nodeDmaRanges`
-and `nodeTranslateReg`. Each proof is `sorry` until a proof pull request
-proves it, and `verification/statements.json` registers it as `planned`.
-`fdtFindNode` among them does not hold as stated: for a path of `Usize.max`
+`node_name_spec` and `node_parent_spec`); `nodeProperty`,
+`nodeStringProperty`, `nodeEnabled`, `nodeAddressCells`, `nodeSizeCells`,
+`nodeReg`, `nodeRanges`, `nodeDmaRanges` and `nodeTranslateReg` restate those
+of `Krepi.Proofs.Fdt.Refinement.NodePropertyLemmas` (`node_property_spec`,
+`node_string_property_spec`, `node_enabled_spec`, `node_address_cells_spec`,
+`node_size_cells_spec`, `node_reg_spec`, `node_ranges_spec`,
+`node_dma_ranges_spec` and `node_translate_reg_spec`); and `reservationsNext`
+and `nodesNext` follow from the representation of an iterator alone
+(`advances_of_stands`). `fdtFindNode` is planned: its proof is `sorry` until
+a proof pull request proves it, and `verification/statements.json` registers
+it as `planned`. It does not hold as stated: for a path of `Usize.max`
 bytes, which a `Str` of the translation may have and a `&str` of Rust may
 not, the code leaves `usize`. `fdt_find_node_spec_of_lt` of
 `Krepi.Proofs.Fdt.Refinement.NodeWalkLemmas` proves it for a path of fewer
@@ -67,39 +71,30 @@ public theorem nodeName : NodeName := node_name_spec
 public theorem nodeParent : NodeParent := node_parent_spec
 
 /-- Proves `NodeProperty`. Feature: `krepi.platform.device-tree`. -/
-public theorem nodeProperty : NodeProperty := by
-  sorry
+public theorem nodeProperty : NodeProperty := node_property_spec
 
 /-- Proves `NodeStringProperty`. Feature: `krepi.platform.device-tree`. -/
-public theorem nodeStringProperty : NodeStringProperty := by
-  sorry
+public theorem nodeStringProperty : NodeStringProperty := node_string_property_spec
 
 /-- Proves `NodeEnabled`. Feature: `krepi.platform.device-tree`. -/
-public theorem nodeEnabled : NodeEnabled := by
-  sorry
+public theorem nodeEnabled : NodeEnabled := node_enabled_spec
 
 /-- Proves `NodeAddressCells`. Feature: `krepi.platform.device-tree`. -/
-public theorem nodeAddressCells : NodeAddressCells := by
-  sorry
+public theorem nodeAddressCells : NodeAddressCells := node_address_cells_spec
 
 /-- Proves `NodeSizeCells`. Feature: `krepi.platform.device-tree`. -/
-public theorem nodeSizeCells : NodeSizeCells := by
-  sorry
+public theorem nodeSizeCells : NodeSizeCells := node_size_cells_spec
 
 /-- Proves `NodeReg`. Feature: `krepi.platform.device-tree`. -/
-public theorem nodeReg : NodeReg := by
-  sorry
+public theorem nodeReg : NodeReg := node_reg_spec
 
 /-- Proves `NodeRanges`. Feature: `krepi.platform.device-tree`. -/
-public theorem nodeRanges : NodeRanges := by
-  sorry
+public theorem nodeRanges : NodeRanges := node_ranges_spec
 
 /-- Proves `NodeDmaRanges`. Feature: `krepi.platform.device-tree`. -/
-public theorem nodeDmaRanges : NodeDmaRanges := by
-  sorry
+public theorem nodeDmaRanges : NodeDmaRanges := node_dma_ranges_spec
 
 /-- Proves `NodeTranslateReg`. Feature: `krepi.platform.device-tree`. -/
-public theorem nodeTranslateReg : NodeTranslateReg := by
-  sorry
+public theorem nodeTranslateReg : NodeTranslateReg := node_translate_reg_spec
 
 end Krepi.Proofs.Fdt.Refinement.Tree

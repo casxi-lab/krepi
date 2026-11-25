@@ -828,55 +828,55 @@
       "name": "Krepi.Statements.Fdt.NodeProperty",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeProperty",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.NodeStringProperty",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeStringProperty",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.NodeEnabled",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeEnabled",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.NodeAddressCells",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeAddressCells",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.NodeSizeCells",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeSizeCells",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.NodeReg",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeReg",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.NodeRanges",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeRanges",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.NodeDmaRanges",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeDmaRanges",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.NodeTranslateReg",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.nodeTranslateReg",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.SpecProperties.PageTables.CheckTablesWellFormed",
