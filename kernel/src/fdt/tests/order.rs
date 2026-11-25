@@ -101,12 +101,16 @@ fn error_order_parse_step_5() {
     let bytes = b.finish();
     let tree = Fdt::parse(&bytes).unwrap();
     assert_eq!(
-        tree.discover_pi5_boot_memory(0x10_0000, Span::new(0x20_0000, 0x1000).unwrap())
-            .unwrap_err(),
+        tree.discover_boot_memory(
+            PI5_HAND_OVER,
+            0x10_0000,
+            Span::new(0x20_0000, 0x1000).unwrap()
+        )
+        .unwrap_err(),
         Error::NoMemory
     );
     assert_eq!(
-        tree.discover_pi5_boot_memory(0x10_0000, Span::new(0x20_0000, 0).unwrap())
+        tree.discover_boot_memory(PI5_HAND_OVER, 0x10_0000, Span::new(0x20_0000, 0).unwrap())
             .unwrap_err(),
         Error::EmptyRegion
     );
@@ -127,7 +131,7 @@ fn error_order_parse_step_6() {
     assert_eq!(
         Fdt::parse(&bytes)
             .unwrap()
-            .discover_cpus(CpuProfile::QemuHvc)
+            .discover_cpus(QEMU_HVC_CPUS)
             .unwrap_err(),
         Error::BadProperty
     );
@@ -161,7 +165,11 @@ fn error_order_parse_step_8() {
     let bytes = b.finish();
     let memory = Fdt::parse(&bytes)
         .unwrap()
-        .discover_pi5_boot_memory(0x10_0000, Span::new(0x20_0000, 0x1000).unwrap())
+        .discover_boot_memory(
+            PI5_HAND_OVER,
+            0x10_0000,
+            Span::new(0x20_0000, 0x1000).unwrap(),
+        )
         .unwrap();
     assert_eq!(
         memory.find_available(0, 3, 0, 0x1000),

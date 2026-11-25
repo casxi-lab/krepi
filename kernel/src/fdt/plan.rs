@@ -14,12 +14,12 @@ mod available;
 
 use super::span::{EMPTY, in_one_range, part, prefix, touches_any, valid};
 use super::{
-    AvailableRanges, BANKS, BOOT_SPANS, Cursor, FIRMWARE, MemoryPlan, Pi5BootMemory, PlanError,
+    AvailableRanges, BANKS, BOOT_SPANS, BootMemory, Cursor, FIRMWARE, MemoryPlan, PlanError,
     ReservedRegion, Span,
 };
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 
 /// The page of the boot memory map, 4 KiB.
 const PAGE_SIZE: u64 = 0x1000;
@@ -284,14 +284,13 @@ impl MemoryPlan {
         manage_window(plan, window)
     }
 
-    /// [`MemoryPlan::new`] with the RAM ranges of the Pi 5 boot memory
-    /// `memory`, the boot storage of its image, its tree and then the
-    /// further spans `more` of the board, such as the boot bundle, in this
-    /// order, and its reserved regions as firmware reservations; more than
-    /// two further spans make more than 4 spans of boot storage,
-    /// `Capacity`.
-    pub fn from_pi5(
-        memory: &Pi5BootMemory,
+    /// [`MemoryPlan::new`] with the RAM ranges of the boot memory `memory`,
+    /// the boot storage of its image, its tree and then the further spans
+    /// `more` of the board, such as the boot bundle, in this order, and its
+    /// reserved regions as firmware reservations; more than two further
+    /// spans make more than 4 spans of boot storage, `Capacity`.
+    pub fn from_boot_memory(
+        memory: &BootMemory,
         window: Span,
         more: &[Span],
     ) -> Result<MemoryPlan, PlanError> {

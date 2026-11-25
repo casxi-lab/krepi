@@ -1,32 +1,30 @@
-//! The CPU nodes of a tree for the supported CPU profiles: the CPUs below
-//! `/cpus`, their logical IDs and the PSCI conduit of `/psci`, and the
-//! timer records of QEMU virt.
+//! The CPU nodes of a tree against the CPU profile of a board: the CPUs
+//! below `/cpus`, their logical IDs and the PSCI conduit of `/psci`, and the
+//! timer records of the profile.
 //!
 //! Feature: krepi.platform.device-tree
 //!
-//! A profile fixes the affinity level of the CPU IDs, 1 on the Pi 5 and 0
-//! on QEMU virt, and the PSCI conduit. The discovery reads the children of
-//! `/cpus` once each, in tree order, before any CPU but the boot CPU is
-//! started.
+//! A profile fixes the PSCI conduit, the affinity level of the CPU IDs, 1 on
+//! the Pi 5 and 0 on QEMU virt, the numbers of CPUs that the board allows,
+//! whether CPU 0 needs an `enable-method` and the timer interrupts, if the
+//! core checks them. The discovery reads the children of `/cpus` once each,
+//! in tree order, before any CPU but the boot CPU is started.
 
 use super::format::{same_bytes, u32_at};
 use super::nodes::{
     START, address_cells_at, enabled_at, find_path, is_child, node_step, size_cells_at, string_is,
     value_at,
 };
-use super::{CpuProfile, CpuTopology, Error, Fdt, NodeAt, PsciConduit, TOKENS, cells_u64};
+use super::{
+    AffinityLevel, CpuProfile, CpuTopology, Error, Fdt, NodeAt, PsciConduit, TOKENS, cells_u64,
+};
+
+#[cfg(test)]
+pub(super) mod tests;
 
 /// The affinity fields of `MPIDR_EL1`: bits 0 to 23 and 32 to 39, without
 /// the U, MT and other flag bits.
 const AFFINITY_MASK: u64 = 0xff_00ff_ffff;
-
-/// Whether `profile` is that of the Pi 5.
-fn is_pi5(profile: CpuProfile) -> bool {
-    match profile {
-        CpuProfile::Pi5 => true,
-        _ => false,
-    }
-}
 
 /// Whether the `method` of `/psci` at `psci` names `conduit`, with the
 /// errors of [`string_is`]. Each arm gives its name as an argument: a
@@ -56,19 +54,21 @@ fn id_of(profile: CpuProfile, affinity: u64) -> Option<u64> {
 }
 
 impl CpuProfile {
-    /// The affinity level of the CPU IDs as a shift: 8 on the Pi 5, whose
-    /// CPU IDs are affinity level 1 of `MPIDR_EL1`, and 0 on QEMU virt.
+    /// The affinity level of the CPU IDs as a shift, the position of its
+    /// field in `MPIDR_EL1`: 0, 8, 16 or 32; 8 on the Pi 5, whose CPU IDs are
+    /// affinity level 1, and 0 on QEMU virt.
     pub fn affinity_shift(self) -> u64 {
-        if is_pi5(self) { 8 } else { 0 }
+        match self.affinity_level {
+            AffinityLevel::Aff0 => 0,
+            AffinityLevel::Aff1 => 8,
+            AffinityLevel::Aff2 => 16,
+            AffinityLevel::Aff3 => 32,
+        }
     }
 
-    /// The PSCI conduit: HVC for QEMU virt without EL2, SMC for QEMU virt
-    /// with EL2 and for the Pi 5.
+    /// The PSCI conduit of the profile.
     pub fn conduit(self) -> PsciConduit {
-        match self {
-            CpuProfile::QemuHvc => PsciConduit::Hvc,
-            _ => PsciConduit::Smc,
-        }
+        self.conduit
     }
 
     /// The logical ID of the affinity fields of `mpidr`,
@@ -81,7 +81,7 @@ impl CpuProfile {
 }
 
 impl CpuTopology {
-    /// The number of CPUs: 1, 2 or 4.
+    /// The number of CPUs, 1 to 4.
     pub fn count(self) -> u64 {
         self.count
     }
@@ -101,35 +101,37 @@ impl CpuTopology {
         }
     }
 
-    /// Checks the `interrupts` of the timer node of QEMU virt: records of
-    /// three cells, type 1 for a private interrupt, its number and the
-    /// flags `((1 << count) - 1) << 8 | 4`, the admitted CPUs and a
-    /// level-high trigger, for the private interrupts 13, 14, 11 and 10 in
-    /// this order and, with EL2, 12 after them, with nothing else; any other
-    /// value, `BadProperty`. For the Pi 5 profile, whose timer belongs to its
-    /// board support, `BadProperty`.
-    pub fn validate_qemu_timers(self, interrupts: &[u8]) -> Result<(), Error> {
-        let records = match self.profile {
-            CpuProfile::QemuHvc => 4,
-            CpuProfile::QemuSmc => 5,
-            CpuProfile::Pi5 => return Err(Error::BadProperty),
+    /// Checks the `interrupts` of the timer node against the timer
+    /// interrupts of the profile: records of three cells, type 1 for a
+    /// private interrupt, its number and the flags
+    /// `((1 << count) - 1) << 8 | 4`, the admitted CPUs and a level-high
+    /// trigger, for the private interrupts of the profile in their order,
+    /// with nothing else; any other value, `BadProperty`. For a profile
+    /// without timer interrupts, such as that of the Pi 5, whose timer
+    /// belongs to its board support, `BadProperty`.
+    pub fn validate_timers(self, interrupts: &[u8]) -> Result<(), Error> {
+        let timer = match self.profile.timer_interrupts {
+            Some(timer) => timer,
+            None => return Err(Error::BadProperty),
+        };
+        let records = if timer.count > 5 {
+            5
+        } else {
+            timer.count as usize
         };
         // The flags are a cell of 32 bits; the shift is taken modulo 32.
         let cpus = (1u32 << ((self.count as u32) & 31)) - 1;
         let flags = (cpus << 8) | 4;
-        if !timer_records(interrupts, records, flags) {
+        if !timer_records(interrupts, timer.numbers, records, flags) {
             return Err(Error::BadProperty);
         }
         Ok(())
     }
 }
 
-/// The private interrupts of the timer of QEMU virt, in their order.
-const TIMER_INTERRUPTS: [u32; 5] = [13, 14, 11, 10, 12];
-
-/// Whether `interrupts` holds exactly the first `records` timer records,
-/// each with `flags`.
-fn timer_records(interrupts: &[u8], records: usize, flags: u32) -> bool {
+/// Whether `interrupts` holds exactly the timer records of the first
+/// `records` of `numbers`, each with `flags`.
+fn timer_records(interrupts: &[u8], numbers: [u32; 5], records: usize, flags: u32) -> bool {
     if interrupts.len() != records * 12 {
         return false;
     }
@@ -142,7 +144,7 @@ fn timer_records(interrupts: &[u8], records: usize, flags: u32) -> bool {
             u32_at(interrupts, at + 8),
         ) {
             (Ok(kind), Ok(number), Ok(cell)) => {
-                kind == 1 && number == TIMER_INTERRUPTS[index] && cell == flags
+                kind == 1 && number == numbers[index] && cell == flags
             }
             _ => false,
         };
@@ -162,8 +164,9 @@ fn timer_records(interrupts: &[u8], records: usize, flags: u32) -> bool {
 /// `MissingProperty`; its value in `cells` cells, `UnsupportedCells` or
 /// `BadProperty`; its ID: a value that is not `id << affinity_shift` for an
 /// ID below 4, or the ID of an earlier CPU node, `BadProperty`; then, for
-/// every CPU but ID 0 and on the Pi 5 for every CPU, an `enable-method`
-/// other than `psci`, `BadProperty`.
+/// every CPU but ID 0, and for CPU 0 when the profile sets
+/// `cpu0_enable_method`, an `enable-method` other than `psci`,
+/// `BadProperty`.
 fn cpu_of_child(
     structure: &[u8],
     strings: &[u8],
@@ -193,7 +196,7 @@ fn cpu_of_child(
     if ids & (1 << id) != 0 {
         return Err(Error::BadProperty);
     }
-    if (id != 0 || is_pi5(profile))
+    if (id != 0 || profile.cpu0_enable_method)
         && !string_is(structure, strings, node, b"enable-method", b"psci")?
     {
         return Err(Error::BadProperty);
@@ -237,12 +240,13 @@ fn cpu_children(
 }
 
 /// Whether the IDs `ids` of `count` CPU nodes are complete: their number is
-/// 1, 2 or 4, and 4 on the Pi 5, and they are 0 to `count - 1`.
+/// one from 1 to 4 whose bit of the `cpu_counts` of the profile is set, and
+/// they are 0 to `count - 1`.
 fn ids_complete(profile: CpuProfile, ids: u64, count: u64) -> bool {
-    if count != 1 && count != 2 && count != 4 {
+    if count == 0 || count > 4 {
         return false;
     }
-    if is_pi5(profile) && count != 4 {
+    if (profile.cpu_counts as u64 >> count) & 1 == 0 {
         return false;
     }
     ids == (1 << count) - 1

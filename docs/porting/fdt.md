@@ -65,16 +65,16 @@ shapes of the [proof path](../domains/boot-platform/fdt/proof.md).
 | `src/fdt/translation.rs` | `kernel/src/fdt/translation.rs` |
 | `src/fdt/discovery.rs` | `kernel/src/fdt/discovery.rs` |
 | `src/fdt/cpus.rs` | `kernel/src/fdt/cpus.rs` |
-| `src/fdt/pi5.rs` | `kernel/src/fdt/pi5.rs` |
-| `src/fdt/pi5/selection.rs` | `kernel/src/fdt/pi5/selection.rs` |
+| `src/fdt/pi5.rs` | `kernel/src/fdt/hand_over.rs` |
+| `src/fdt/pi5/selection.rs` | `kernel/src/fdt/hand_over/selection.rs` |
 | `src/platform/memory.rs`, with `range` of `src/platform/mod.rs` | `kernel/src/fdt/plan.rs` |
 | `src/platform/memory/available.rs` | `kernel/src/fdt/plan/available.rs` |
 | `src/fdt/tests/mod.rs` | `kernel/src/fdt/tests.rs` |
-| `src/fdt/pi5/tests.rs` | `kernel/src/fdt/pi5/tests.rs` |
+| `src/fdt/pi5/tests.rs` | `kernel/src/fdt/hand_over/tests.rs` |
 | `src/platform/tests.rs`, the tests of the memory plan | `kernel/src/fdt/plan/tests.rs` |
 
 The other test files keep their names below `kernel/src/fdt/tests/` and
-`kernel/src/fdt/pi5/tests/`.
+`kernel/src/fdt/hand_over/tests/`.
 
 ## Changes
 
@@ -107,15 +107,16 @@ The other test files keep their names below `kernel/src/fdt/tests/` and
   place of the library sort, and sums are taken by loops.
 - **Boot storage.** It holds up to 4 spans, where the prototype allowed 2,
   so that a board can give the boot bundle as a span of its own;
-  `MemoryPlan::from_pi5` takes the further spans after the image and the
-  tree as a third argument.
+  `MemoryPlan::from_boot_memory` takes the further spans after the image
+  and the tree as a third argument.
 - **Widths.** The nine limits, `Fdt::total_size`, `CpuTopology::count` and
   the index of `affinity`, and `CpuProfile::logical_id` and
   `affinity_shift` are `u64`, the widths of the specification, where the
-  prototype used `usize` or `u32`. `PI5_MAX_BLOB_SIZE` is defined with the
-  other limits. The functions of `CpuProfile` and `CpuTopology` are no
-  longer `const fn`.
-- **New entries.** `MemoryMap::dynamic` and `Pi5BootMemory::dynamic` give
+  prototype used `usize` or `u32`. The size limit of the Pi 5 tree,
+  `PI5_MAX_BLOB_SIZE` in the prototype, is the `max_blob_size` of a
+  `HandOverProfile`, a `u64`. The functions of `CpuProfile` and
+  `CpuTopology` are no longer `const fn`.
+- **New entries.** `MemoryMap::dynamic` and `BootMemory::dynamic` give
   the number of dynamic reservations, of type `u64`, which the prototype
   rejected.
 - **Names and strings.** `Node::name` gives the checked bytes of the name
@@ -144,10 +145,22 @@ The other test files keep their names below `kernel/src/fdt/tests/` and
 - **CPU nodes.** `discover_cpus` compares the ID of a CPU node with
   `id << affinity_shift` without the mask of `logical_id`, which gives the
   same errors, since a flag bit makes the two values differ.
-  `validate_qemu_timers` takes the shift of its 32-bit CPU mask modulo 32,
+  `validate_timers` takes the shift of its 32-bit CPU mask modulo 32,
   as the specification does; for the supported counts the mask is the same.
+- **Board profiles.** The boards differ in the profiles that they give
+  the entries, not in the entries, and no entry is named after a board:
+  the prototype's `Fdt::discover_pi5_boot_memory`, `Pi5BootMemory`,
+  `MemoryPlan::from_pi5` and `CpuTopology::validate_qemu_timers` are
+  `Fdt::discover_boot_memory`, which takes a `HandOverProfile`,
+  `BootMemory`, `MemoryPlan::from_boot_memory` and
+  `CpuTopology::validate_timers`, which checks the `TimerInterrupts` of the
+  profile; `CpuProfile` is a value of five fields, with an
+  `AffinityLevel`, in place of the variants `QemuHvc`, `QemuSmc` and `Pi5`;
+  and the module `pi5` is `hand_over`. The profiles of the Pi 5 and of
+  QEMU virt that the tests give the entries are in
+  `kernel/src/fdt/tests/profiles.rs`.
 - **Derives.** `Span` no longer derives `Default`; `MemoryMap`,
-  `Pi5BootMemory` and `MemoryPlan` derive `Debug` only, as before, and the
+  `BootMemory` and `MemoryPlan` derive `Debug` only, as before, and the
   views and the small values are `Copy`. No production code calls a derived
   method.
 - **Documentation.** The module documentation and every comment are written
@@ -169,11 +182,11 @@ The other test files keep their names below `kernel/src/fdt/tests/` and
 | `src/fdt/tests/translation.rs`, 5 tests | The same names in `kernel/src/fdt/tests/translation.rs` |
 | `src/fdt/tests/discovery.rs`, 6 tests | The same names in `kernel/src/fdt/tests/discovery.rs` |
 | `src/fdt/tests/cpus.rs`, 6 tests | The same names in `kernel/src/fdt/tests/cpus.rs` |
-| `src/fdt/pi5/tests.rs`, 4 tests | The same names in `kernel/src/fdt/pi5/tests.rs` |
-| `src/fdt/pi5/tests/boundaries.rs`, 5 tests | The same names in `kernel/src/fdt/pi5/tests/boundaries.rs` |
-| `src/fdt/pi5/tests/selection.rs`, 3 tests | The same names in `kernel/src/fdt/pi5/tests/selection.rs` |
-| `src/fdt/pi5/tests/platform.rs`, 2 tests | The same names in `kernel/src/fdt/pi5/tests/platform.rs` |
-| `src/fdt/pi5/tests/firmware.rs`, 2 ignored tests | The same names in `kernel/src/fdt/pi5/tests/firmware.rs`, ignored |
+| `src/fdt/pi5/tests.rs`, 4 tests | The same names in `kernel/src/fdt/hand_over/tests.rs` |
+| `src/fdt/pi5/tests/boundaries.rs`, 5 tests | The same names in `kernel/src/fdt/hand_over/tests/boundaries.rs` |
+| `src/fdt/pi5/tests/selection.rs`, 3 tests | The same names in `kernel/src/fdt/hand_over/tests/selection.rs` |
+| `src/fdt/pi5/tests/platform.rs`, 2 tests | The same names in `kernel/src/fdt/hand_over/tests/platform.rs` |
+| `src/fdt/pi5/tests/firmware.rs`, 2 ignored tests | The same names in `kernel/src/fdt/hand_over/tests/firmware.rs`, ignored |
 | `src/platform/tests.rs`, the 13 tests of the memory plan | The same names in `kernel/src/fdt/plan/tests.rs` |
 
 These are the 55 vectors of the contract. Changed expected values:
@@ -203,7 +216,7 @@ These are the 55 vectors of the contract. Changed expected values:
 - A dynamic reservation, an enabled child of `/reserved-memory` with a
   `size` and no `reg`, is counted and accepted, whatever the cells of its
   `size`: `fdt::tests::discovery`, `fdt::tests::dynamic`,
-  `fdt::pi5::tests::rejects_active_dynamic_reservations_and_conflicting_flags`
+  `fdt::hand_over::tests::rejects_active_dynamic_reservations_and_conflicting_flags`
   and the ignored `source_firmware_rejects_dynamic_reservations`.
 - Boot storage of 4 spans is accepted and of 5 fails with `Capacity`:
   `boot_storage_of_four_spans_is_accepted` and

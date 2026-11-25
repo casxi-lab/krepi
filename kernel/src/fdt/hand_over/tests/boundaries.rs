@@ -37,7 +37,7 @@ fn rejects_wrong_root_cells_and_oversized_handoff() {
     b.property("compatible", b"raspberrypi,5-model-b\0brcm,bcm2712\0");
     assert_eq!(report(&finish(b)).unwrap_err(), Error::UnsupportedCells);
     let mut b = root();
-    b.property("padding", &vec![0; PI5_MAX_BLOB_SIZE as usize]);
+    b.property("padding", &vec![0; PI5_HAND_OVER.max_blob_size as usize]);
     ram(&mut b, &[0, 0, 2, 0]);
     assert_eq!(report(&finish(b)).unwrap_err(), Error::LimitExceeded);
 }
@@ -80,11 +80,14 @@ fn validates_storage_alignment_overflow_overlap_and_ram_containment() {
         ),
     ] {
         assert_eq!(
-            tree.discover_pi5_boot_memory(dtb, image).unwrap_err(),
+            tree.discover_boot_memory(PI5_HAND_OVER, dtb, image)
+                .unwrap_err(),
             expected
         );
     }
-    let map = tree.discover_pi5_boot_memory(DTB, IMAGE).unwrap();
+    let map = tree
+        .discover_boot_memory(PI5_HAND_OVER, DTB, IMAGE)
+        .unwrap();
     assert_eq!(
         map.is_available(Span { start: 0, size: 0 }),
         Err(Error::EmptyRegion)

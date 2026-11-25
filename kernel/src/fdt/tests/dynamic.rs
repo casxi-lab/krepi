@@ -96,7 +96,7 @@ fn shipped_placeholder_shape_is_accepted_with_its_dynamic_reservation() {
     let image = Span::new(0x8_0000, 0x8_0000).unwrap();
     let memory = Fdt::parse(&bytes)
         .unwrap()
-        .discover_pi5_boot_memory(0x20_0000, image)
+        .discover_boot_memory(PI5_HAND_OVER, 0x20_0000, image)
         .unwrap();
     assert_eq!(memory.ram(), &[Span::new(0, 0x2800_0000).unwrap()]);
     assert_eq!(

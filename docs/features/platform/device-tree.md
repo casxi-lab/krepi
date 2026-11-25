@@ -7,10 +7,10 @@ modules:
   - kernel/src/fdt/cpus.rs
   - kernel/src/fdt/discovery.rs
   - kernel/src/fdt/format.rs
+  - kernel/src/fdt/hand_over.rs
+  - kernel/src/fdt/hand_over/selection.rs
   - kernel/src/fdt/nodes.rs
   - kernel/src/fdt/parser.rs
-  - kernel/src/fdt/pi5.rs
-  - kernel/src/fdt/pi5/selection.rs
   - kernel/src/fdt/plan.rs
   - kernel/src/fdt/plan/available.rs
   - kernel/src/fdt/span.rs
@@ -19,6 +19,7 @@ modules:
   - kernel/boards/qemu-virt/src/main.rs
 tests:
   - kernel/src/fdt/tests.rs
+  - kernel/src/fdt/tests/any_profile.rs
   - kernel/src/fdt/tests/cpus.rs
   - kernel/src/fdt/tests/discovery.rs
   - kernel/src/fdt/tests/dynamic.rs
@@ -26,16 +27,21 @@ tests:
   - kernel/src/fdt/tests/limits.rs
   - kernel/src/fdt/tests/order.rs
   - kernel/src/fdt/tests/parser.rs
+  - kernel/src/fdt/tests/profiles.rs
   - kernel/src/fdt/tests/results.rs
+  - kernel/src/fdt/tests/results/differential.rs
   - kernel/src/fdt/tests/translation.rs
-  - kernel/src/fdt/pi5/tests.rs
-  - kernel/src/fdt/pi5/tests/boundaries.rs
-  - kernel/src/fdt/pi5/tests/builder.rs
-  - kernel/src/fdt/pi5/tests/firmware.rs
-  - kernel/src/fdt/pi5/tests/models.rs
-  - kernel/src/fdt/pi5/tests/platform.rs
-  - kernel/src/fdt/pi5/tests/selection.rs
+  - kernel/src/fdt/cpus/tests.rs
+  - kernel/src/fdt/cpus/tests/before.rs
+  - kernel/src/fdt/hand_over/tests.rs
+  - kernel/src/fdt/hand_over/tests/boundaries.rs
+  - kernel/src/fdt/hand_over/tests/builder.rs
+  - kernel/src/fdt/hand_over/tests/firmware.rs
+  - kernel/src/fdt/hand_over/tests/models.rs
+  - kernel/src/fdt/hand_over/tests/platform.rs
+  - kernel/src/fdt/hand_over/tests/selection.rs
   - kernel/src/fdt/plan/tests.rs
+  - kernel/src/fdt/plan/tests/before.rs
 suites:
   - qemu-boot
 theorems: none
@@ -52,8 +58,9 @@ device tree that the firmware, or the loader of QEMU, hands to the kernel,
 as untrusted input: it parses the tree within fixed bounds, gives access to
 its nodes and properties and translates their addresses through `reg`,
 `ranges` and `dma-ranges`, discovers the RAM ranges, the reserved regions,
-the dynamic reservations and the CPU nodes, checks the hand-over tree of
-the Raspberry Pi 5 against the storage of the image and of the tree, and
+the dynamic reservations and the CPU nodes, checks a hand-over tree against
+the hand-over profile of its board, such as the Raspberry Pi 5, and
+against the storage of the image and of the tree, and
 builds the boot memory map, the RAM banks with the boot storage and the
 firmware reservations left out by whole pages, which the page-tables
 component of the memory domain takes as its input. The code belongs to the
@@ -81,22 +88,27 @@ planned.
   - the translation `cells_u64`, `Reg::new` and `AddressMap::new`, `kind`,
     `to_parent` and `to_child`;
   - the memory discovery `Fdt::discover_memory`, whose `MemoryMap` gives
-    `ram`, `reserved` and `dynamic`, and the Pi 5 boot memory
-    `Fdt::discover_pi5_boot_memory(dtb_address, image)`, whose
-    `Pi5BootMemory` gives the same with `dtb`, `image`, `ram_bytes`,
+    `ram`, `reserved` and `dynamic`, and the boot memory of a hand-over
+    tree `Fdt::discover_boot_memory(hand_over, dtb_address, image)`, which
+    checks the tree against the `HandOverProfile` of its board and whose
+    `BootMemory` gives the same with `dtb`, `image`, `ram_bytes`,
     `is_available` and `find_available`;
-  - the CPU nodes `Fdt::discover_cpus(profile)`, whose `CpuTopology` gives
-    `count`, `profile`, `affinity` and `validate_qemu_timers`, and of a
-    `CpuProfile`, `logical_id`, `affinity_shift` and `conduit`;
-  - the boot memory map `MemoryPlan::all_ram`, `new` and `from_pi5`, which
-    return a `MemoryPlan` or a `PlanError`, with the queries
-    `managed_banks`, `ram`, `reservations`, `boot_ranges`,
+  - the CPU nodes `Fdt::discover_cpus(profile)`, against the `CpuProfile`
+    of the board with its `PsciConduit`, `AffinityLevel` and
+    `TimerInterrupts`, whose `CpuTopology` gives `count`, `profile`,
+    `affinity` and `validate_timers`, and of a `CpuProfile`, `logical_id`,
+    `affinity_shift` and `conduit`;
+  - the boot memory map `MemoryPlan::all_ram`, `new` and
+    `from_boot_memory`, which return a `MemoryPlan` or a `PlanError`, with
+    the queries `managed_banks`, `ram`, `reservations`, `boot_ranges`,
     `firmware_ranges`, `described_bytes`, `managed_bytes`, `contains_ram`,
     `is_available`, `permits_backing` and `available_ranges`;
   - `Span::new`, `end` and `contains`, and the limits `MAX_BLOB_SIZE`,
     `MAX_DEPTH`, `MAX_TOKENS`, `MAX_PROPERTIES`, `MAX_PROPERTY_NAME`,
-    `MAX_RESERVATIONS`, `MAX_MEMORY_REGIONS`, `MAX_RESERVED_REGIONS` and
-    `PI5_MAX_BLOB_SIZE`.
+    `MAX_RESERVATIONS`, `MAX_MEMORY_REGIONS` and `MAX_RESERVED_REGIONS`.
+
+  The boards differ in the profiles that they give these entries, not in
+  the entries.
 - **Iterators.** `Nodes`, `Reservations`, `Reg` and `AvailableRanges`,
   which `Fdt::nodes`, `Fdt::reservations`, `Node::reg` and `Reg::new`, and
   `MemoryPlan::available_ranges` return, give their items through an
@@ -111,8 +123,9 @@ planned.
   -p krepi-kernel` runs the tests of the module. With
   `KREPI_VECTOR_RESULTS` set to a directory, the results test writes the
   outputs of the frozen vectors to `boot-platform/fdt.results` below it
-  ([host results](../../formal-verification.md#host-results)). The two
-  ignored tests of the trees that the Raspberry Pi firmware ships read their
+  ([host results](../../formal-verification.md#host-results)). The three
+  ignored tests of the trees that the Raspberry Pi firmware ships, the two
+  firmware tests and the differential test of the shipped trees, read their
   files from the directories that `KREPI_PI5_SOURCE_DTB_DIR` and
   `KREPI_PI5_VALIDATED_DTB_DIR` name.
 
@@ -276,8 +289,8 @@ reservations, and, with the tree at the start of RAM and the image at
 - `kernel/src/fdt/discovery.rs`: `Fdt::discover_memory` and `MemoryMap`.
 - `kernel/src/fdt/cpus.rs`: `Fdt::discover_cpus`, `CpuTopology` and
   `CpuProfile`.
-- `kernel/src/fdt/pi5.rs` and `kernel/src/fdt/pi5/selection.rs`:
-  `Fdt::discover_pi5_boot_memory`, `Pi5BootMemory` and `find_available`.
+- `kernel/src/fdt/hand_over.rs` and `kernel/src/fdt/hand_over/selection.rs`:
+  `Fdt::discover_boot_memory`, `BootMemory` and `find_available`.
 - `kernel/src/fdt/plan.rs` and `kernel/src/fdt/plan/available.rs`:
   `MemoryPlan` with its entries and queries, and the `next` of
   `AvailableRanges`.
@@ -299,8 +312,11 @@ reservations, and, with the tree at the start of RAM and the image at
   reservations; the five RAM models of the Pi 5; the examples above; and
   the results test, which compares every output of the vector file with its
   expected output. They establish the rules on trees that the tests build,
-  not on the trees that a board hands over. The two ignored tests of the
-  firmware trees need files outside the repository and do not run in CI.
+  not on the trees that a board hands over. The differential tests compare
+  the board-neutral entries with a verbatim copy of the code before them on
+  the board profiles, and further tests check profile values that no board
+  gives against the contract. The three ignored tests of the firmware trees
+  need files outside the repository and do not run in CI.
 - **Compile-time guards.** The `subset` step of `cargo xtask check` builds
   the two compile-fail cases below `kernel/compile-fail/`: a tree built
   without the parse, which the private fields refuse, and a byte of the

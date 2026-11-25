@@ -51,26 +51,23 @@ fn discover(ids: &[u64], method: &str, profile: CpuProfile) -> Result<CpuTopolog
 
 #[test]
 fn separate_pi5_and_virtual_affinities_and_conduits() {
-    let pi = discover(&[0, 0x100, 0x200, 0x300], "smc\0", CpuProfile::Pi5).unwrap();
+    let pi = discover(&[0, 0x100, 0x200, 0x300], "smc\0", PI5_CPUS).unwrap();
     assert_eq!(pi.count(), 4);
-    assert_eq!(pi.profile(), CpuProfile::Pi5);
+    assert_eq!(pi.profile(), PI5_CPUS);
     for index in 0..4 {
         assert_eq!(pi.affinity(index), Some(index << 8));
     }
     assert_eq!(pi.affinity(4), None);
-    for (profile, method) in [
-        (CpuProfile::QemuHvc, "hvc\0"),
-        (CpuProfile::QemuSmc, "smc\0"),
-    ] {
+    for (profile, method) in [(QEMU_HVC_CPUS, "hvc\0"), (QEMU_SMC_CPUS, "smc\0")] {
         for count in [1, 2, 4] {
             let ids: Vec<_> = (0..count).collect();
             assert_eq!(discover(&ids, method, profile).unwrap().count(), count);
         }
     }
-    assert!(discover(&[0, 1, 2, 3], "smc\0", CpuProfile::Pi5).is_err());
-    assert!(discover(&[0, 0x100, 0x200, 0x300], "hvc\0", CpuProfile::Pi5).is_err());
-    assert!(discover(&[0, 1], "smc\0", CpuProfile::QemuHvc).is_err());
-    assert!(discover(&[0, 1], "hvc\0", CpuProfile::QemuSmc).is_err());
+    assert!(discover(&[0, 1, 2, 3], "smc\0", PI5_CPUS).is_err());
+    assert!(discover(&[0, 0x100, 0x200, 0x300], "hvc\0", PI5_CPUS).is_err());
+    assert!(discover(&[0, 1], "smc\0", QEMU_HVC_CPUS).is_err());
+    assert!(discover(&[0, 1], "hvc\0", QEMU_SMC_CPUS).is_err());
 }
 
 #[test]
@@ -85,17 +82,14 @@ fn reject_alias_holes_foreign_affinities_and_incomplete_board() {
         &[0, 1 << 32],
         &[0, 1 << 31],
     ] {
-        assert!(
-            discover(ids, "hvc\0", CpuProfile::QemuHvc).is_err(),
-            "{ids:?}"
-        );
+        assert!(discover(ids, "hvc\0", QEMU_HVC_CPUS).is_err(), "{ids:?}");
     }
     for ids in [
         &[0, 0x100][..],
         &[0, 0x100, 0x200, 0x301],
         &[0, 0x100, 0x200, 0x400],
     ] {
-        assert!(discover(ids, "smc\0", CpuProfile::Pi5).is_err());
+        assert!(discover(ids, "smc\0", PI5_CPUS).is_err());
     }
 }
 
@@ -114,12 +108,7 @@ fn cpu_status_model_and_enable_method_are_required() {
             model,
             2,
         );
-        assert!(
-            Fdt::parse(&bytes)
-                .unwrap()
-                .discover_cpus(CpuProfile::Pi5)
-                .is_err()
-        );
+        assert!(Fdt::parse(&bytes).unwrap().discover_cpus(PI5_CPUS).is_err());
     }
 }
 
@@ -137,35 +126,32 @@ fn cpu_reg_cell_width_is_checked_without_truncation() {
         assert_eq!(
             Fdt::parse(&bytes)
                 .unwrap()
-                .discover_cpus(CpuProfile::Pi5)
+                .discover_cpus(PI5_CPUS)
                 .unwrap()
                 .count(),
             4
         );
     }
-    assert!(discover(&[0, 0x100, 0x200, 0x100000300], "smc\0", CpuProfile::Pi5).is_err());
+    assert!(discover(&[0, 0x100, 0x200, 0x100000300], "smc\0", PI5_CPUS).is_err());
 }
 
 #[test]
 fn register_flags_do_not_change_logical_identity() {
     for id in 0..4 {
         for flags in [0, 1 << 24, 1 << 30, 1 << 31, 0xc1000000] {
-            assert_eq!(CpuProfile::Pi5.logical_id(flags | (id << 8)), Some(id));
-            assert_eq!(CpuProfile::QemuHvc.logical_id(flags | id), Some(id));
+            assert_eq!(PI5_CPUS.logical_id(flags | (id << 8)), Some(id));
+            assert_eq!(QEMU_HVC_CPUS.logical_id(flags | id), Some(id));
         }
     }
     for id in [1, 0x101, 0x400, 0x10000, 1 << 32] {
-        assert_eq!(CpuProfile::Pi5.logical_id(id), None);
+        assert_eq!(PI5_CPUS.logical_id(id), None);
     }
 }
 
 #[test]
 fn qemu_timer_records_follow_profile_and_admitted_cpus() {
-    for (profile, method) in [
-        (CpuProfile::QemuHvc, "hvc\0"),
-        (CpuProfile::QemuSmc, "smc\0"),
-    ] {
-        let ppis: &[u32] = if profile == CpuProfile::QemuHvc {
+    for (profile, method) in [(QEMU_HVC_CPUS, "hvc\0"), (QEMU_SMC_CPUS, "smc\0")] {
+        let ppis: &[u32] = if profile == QEMU_HVC_CPUS {
             &[13, 14, 11, 10]
         } else {
             &[13, 14, 11, 10, 12]
@@ -180,23 +166,23 @@ fn qemu_timer_records_follow_profile_and_admitted_cpus() {
                     valid.extend_from_slice(&cell.to_be_bytes());
                 }
             }
-            assert_eq!(topology.validate_qemu_timers(&valid), Ok(()));
+            assert_eq!(topology.validate_timers(&valid), Ok(()));
             for length in [0, 12, valid.len() - 1, valid.len() - 12] {
-                assert!(topology.validate_qemu_timers(&valid[..length]).is_err());
+                assert!(topology.validate_timers(&valid[..length]).is_err());
             }
             let mut extra = valid.clone();
             extra.extend_from_slice(&valid[..12]);
-            assert!(topology.validate_qemu_timers(&extra).is_err());
+            assert!(topology.validate_timers(&extra).is_err());
             for offset in (0..valid.len()).step_by(4) {
                 let mut wrong = valid.clone();
                 wrong[offset + 3] ^= 1;
-                assert!(topology.validate_qemu_timers(&wrong).is_err());
+                assert!(topology.validate_timers(&wrong).is_err());
             }
             let mut wrong_mask = valid.clone();
             wrong_mask[10] ^= 1;
-            assert!(topology.validate_qemu_timers(&wrong_mask).is_err());
-            let pi = discover(&[0, 0x100, 0x200, 0x300], "smc\0", CpuProfile::Pi5).unwrap();
-            assert!(pi.validate_qemu_timers(&valid).is_err());
+            assert!(topology.validate_timers(&wrong_mask).is_err());
+            let pi = discover(&[0, 0x100, 0x200, 0x300], "smc\0", PI5_CPUS).unwrap();
+            assert!(pi.validate_timers(&valid).is_err());
         }
     }
 }

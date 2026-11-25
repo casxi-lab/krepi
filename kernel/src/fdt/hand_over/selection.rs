@@ -1,5 +1,5 @@
-//! The selection of an available span of a Pi 5 boot memory, before the
-//! page ownership table exists.
+//! The selection of an available span of a boot memory, before the page
+//! ownership table exists.
 //!
 //! Feature: krepi.platform.device-tree
 //!
@@ -10,7 +10,7 @@
 //! exclusion too. A selected span describes memory and grants no ownership.
 
 use super::super::span::touches;
-use super::super::{Error, Pi5BootMemory, ReservedRegion, Span};
+use super::super::{BootMemory, Error, ReservedRegion, Span};
 
 /// The least multiple of `alignment`, a power of two, that is at least
 /// `address`, or `Overflow` when it leaves 64 bits.
@@ -56,7 +56,7 @@ fn furthest_touched(
 /// candidate whose end leaves 64 bits or passes `bound` ends the search in
 /// the range with none; one that touches no exclusion is the span.
 fn search_range(
-    memory: &Pi5BootMemory,
+    memory: &BootMemory,
     size: u64,
     alignment: u64,
     bound: u64,
@@ -89,7 +89,7 @@ fn search_range(
 /// aligned up, which fails with `Overflow`; the first range that has a span
 /// gives it.
 fn search_ranges(
-    memory: &Pi5BootMemory,
+    memory: &BootMemory,
     size: u64,
     alignment: u64,
     minimum: u64,
@@ -116,7 +116,7 @@ fn search_ranges(
     Ok(None)
 }
 
-impl Pi5BootMemory {
+impl BootMemory {
     /// A span of `size` bytes aligned to `alignment`, within
     /// `[minimum, limit)` and inside one RAM range, that touches neither the
     /// image, nor the tree, nor any reserved region: the span with the

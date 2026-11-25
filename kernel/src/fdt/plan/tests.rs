@@ -11,6 +11,12 @@ extern crate std;
 use super::*;
 use std::vec::Vec;
 
+// The copy of the boot memory before its profile became a value keeps the
+// lines of its source; the suffix of its names makes some of them longer
+// than the formatter allows.
+#[rustfmt::skip]
+pub(in crate::fdt) mod before;
+
 const RAM: Span = Span {
     start: 0,
     size: 0x0800_0000,
