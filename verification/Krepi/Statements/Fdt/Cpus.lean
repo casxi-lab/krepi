@@ -33,6 +33,7 @@ namespace Krepi.Statements.Fdt
 profile, or its error.
 Feature: `krepi.platform.device-tree`. -/
 def FdtDiscoverCpus : Prop :=
+  Usize64 →
   ∀ (t : fdt.Fdt) (T : Fdt) (profile : fdt.CpuProfile), FdtRepr t T →
     fdt.cpus.Fdt.discover_cpus t profile ⦃ r =>
       Agrees (fun c C => topologyOf c = C) errorOf r (T.discoverCpus (profileOf profile)) ⦄
@@ -40,11 +41,13 @@ def FdtDiscoverCpus : Prop :=
 /-- `CpuTopology::count()`: the number of CPUs of the topology.
 Feature: `krepi.platform.device-tree`. -/
 def CpuTopologyCount : Prop :=
+  Usize64 →
   ∀ t : fdt.CpuTopology, fdt.cpus.CpuTopology.count t ⦃ n => word64 n = (topologyOf t).count ⦄
 
 /-- `CpuTopology::profile()`: the profile of the topology.
 Feature: `krepi.platform.device-tree`. -/
 def CpuTopologyProfile : Prop :=
+  Usize64 →
   ∀ t : fdt.CpuTopology,
     fdt.cpus.CpuTopology.profile t ⦃ p => profileOf p = (topologyOf t).profile ⦄
 
@@ -52,6 +55,7 @@ def CpuTopologyProfile : Prop :=
 the index, none from the count on, for a supported topology.
 Feature: `krepi.platform.device-tree`. -/
 def CpuTopologyAffinity : Prop :=
+  Usize64 →
   ∀ (t : fdt.CpuTopology) (index : U64), (topologyOf t).Supported →
     fdt.cpus.CpuTopology.affinity t index ⦃ o =>
       o.map word64 = (topologyOf t).affinity (word64 index) ⦄
@@ -61,6 +65,7 @@ def CpuTopologyAffinity : Prop :=
 for a supported topology.
 Feature: `krepi.platform.device-tree`. -/
 def CpuTopologyValidateTimers : Prop :=
+  Usize64 →
   ∀ (t : fdt.CpuTopology) (interrupts : Slice U8), (topologyOf t).Supported →
     fdt.cpus.CpuTopology.validate_timers t interrupts ⦃ r =>
       Agrees (fun _ _ => True) errorOf r ((topologyOf t).validateTimers (bytesOf interrupts)) ⦄
@@ -69,6 +74,7 @@ def CpuTopologyValidateTimers : Prop :=
 of the value of `MPIDR_EL1`, or none.
 Feature: `krepi.platform.device-tree`. -/
 def CpuProfileLogicalId : Prop :=
+  Usize64 →
   ∀ (p : fdt.CpuProfile) (mpidr : U64),
     fdt.cpus.CpuProfile.logical_id p mpidr ⦃ o =>
       o.map word64 = (profileOf p).logicalId (word64 mpidr) ⦄
@@ -77,12 +83,14 @@ def CpuProfileLogicalId : Prop :=
 profile.
 Feature: `krepi.platform.device-tree`. -/
 def CpuProfileAffinityShift : Prop :=
+  Usize64 →
   ∀ p : fdt.CpuProfile,
     fdt.cpus.CpuProfile.affinity_shift p ⦃ n => word64 n = (profileOf p).affinityShift ⦄
 
 /-- `CpuProfile::conduit()`: the PSCI conduit of the profile.
 Feature: `krepi.platform.device-tree`. -/
 def CpuProfileConduit : Prop :=
+  Usize64 →
   ∀ p : fdt.CpuProfile,
     fdt.cpus.CpuProfile.conduit p ⦃ c => conduitOf c = (profileOf p).conduit ⦄
 

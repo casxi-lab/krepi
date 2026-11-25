@@ -35,6 +35,7 @@ of `Ownership.new` of the arena, the ranges and the exclusions, of the
 capacities `E` and `X`, or its error.
 Feature: `krepi.kernel.kernel-memory`. -/
 def OwnershipNew : Prop :=
+  Usize64 →
   ∀ (E X : Usize) (arena : U64) (banks : Slice page_tables.PhysRange)
     (exclusions : Slice page_tables.Exclusion) (Bs : List PhysRange) (Xs : List Exclusion),
     ListRel PhysRangeRepr banks.val Bs → ListRel ExclusionRepr exclusions.val Xs →
@@ -46,6 +47,7 @@ def OwnershipNew : Prop :=
 `Ownership.choose`, or its error.
 Feature: `krepi.kernel.kernel-memory`. -/
 def OwnershipChoose : Prop :=
+  Usize64 →
   ∀ (E X : Usize) (t : page_tables.Ownership E X) (T : Ownership E.val X.val)
     (owner pages alignment : U64) (placement : page_tables.Placement) (P : Placement),
     OwnershipRepr t T → T.Invariant → PlacementRepr placement P →
@@ -58,6 +60,7 @@ def OwnershipChoose : Prop :=
 with the table unchanged.
 Feature: `krepi.kernel.kernel-memory`. -/
 def OwnershipAssign : Prop :=
+  Usize64 →
   ∀ (E X : Usize) (t : page_tables.Ownership E X) (T : Ownership E.val X.val)
     (choice : page_tables.Choice) (C : Choice) (zeroed : Bool),
     OwnershipRepr t T → T.Invariant → ChoiceRepr choice C → T.Chose C →
@@ -69,6 +72,7 @@ the reservation of `Ownership.reserve`, or its error with the table
 unchanged.
 Feature: `krepi.kernel.kernel-memory`. -/
 def OwnershipReserve : Prop :=
+  Usize64 →
   ∀ (E X : Usize) (t : page_tables.Ownership E X) (T : Ownership E.val X.val)
     (owner pages alignment : U64) (placement : page_tables.Placement) (P : Placement),
     OwnershipRepr t T → T.Invariant → PlacementRepr placement P →
@@ -80,6 +84,7 @@ def OwnershipReserve : Prop :=
 `Reservation.initialized`, or the reservation that it retains.
 Feature: `krepi.kernel.kernel-memory`. -/
 def ReservationInitialized : Prop :=
+  Usize64 →
   ∀ (r : page_tables.Reservation) (R : Reservation) (zeroed : Bool), ReservationRepr r R →
     page_tables.ownership.receipts.Reservation.initialized r zeroed ⦃ x =>
       match x, R.initialized zeroed with
@@ -91,6 +96,7 @@ def ReservationInitialized : Prop :=
 `Ownership.publish`, or its error and the packet with the table unchanged.
 Feature: `krepi.kernel.kernel-memory`. -/
 def OwnershipPublish : Prop :=
+  Usize64 →
   ∀ (E X : Usize) (t : page_tables.Ownership E X) (T : Ownership E.val X.val) (owner : U64)
     (packet : page_tables.Initialized) (I : Initialized),
     OwnershipRepr t T → T.Invariant → InitializedRepr packet I →
@@ -103,6 +109,7 @@ def OwnershipPublish : Prop :=
 or its error and the reservation with the table unchanged.
 Feature: `krepi.kernel.kernel-memory`. -/
 def OwnershipCancel : Prop :=
+  Usize64 →
   ∀ (E X : Usize) (t : page_tables.Ownership E X) (T : Ownership E.val X.val) (owner : U64)
     (reservation : page_tables.Reservation) (R : Reservation),
     OwnershipRepr t T → T.Invariant → ReservationRepr reservation R →
@@ -115,6 +122,7 @@ def OwnershipCancel : Prop :=
 or its error with the table unchanged.
 Feature: `krepi.kernel.kernel-memory`. -/
 def OwnershipRelease : Prop :=
+  Usize64 →
   ∀ (E X : Usize) (t : page_tables.Ownership E X) (T : Ownership E.val X.val) (owner : U64)
     (receipt : page_tables.Allocation) (A : Allocation),
     OwnershipRepr t T → T.Invariant → AllocationRepr receipt A →
@@ -126,6 +134,7 @@ def OwnershipRelease : Prop :=
 `Ownership.owner`, none outside the managed pages.
 Feature: `krepi.kernel.kernel-memory`. -/
 def OwnershipOwner : Prop :=
+  Usize64 →
   ∀ (E X : Usize) (t : page_tables.Ownership E X) (T : Ownership E.val X.val) (address : U64),
     OwnershipRepr t T → T.Invariant →
     page_tables.ownership.Ownership.owner t address ⦃ o =>
@@ -135,6 +144,7 @@ def OwnershipOwner : Prop :=
 `Ownership.validate` succeeds, and its error otherwise.
 Feature: `krepi.kernel.kernel-memory`. -/
 def OwnershipValidate : Prop :=
+  Usize64 →
   ∀ (E X : Usize) (t : page_tables.Ownership E X) (T : Ownership E.val X.val) (owner : U64)
     (allocation : page_tables.Allocation) (A : Allocation) (state : page_tables.HoldState),
     OwnershipRepr t T → T.Invariant → AllocationRepr allocation A →
@@ -145,6 +155,7 @@ def OwnershipValidate : Prop :=
 /-- `Ownership::stats()`: the statistics of `Ownership.stats`.
 Feature: `krepi.kernel.kernel-memory`. -/
 def OwnershipStats : Prop :=
+  Usize64 →
   ∀ (E X : Usize) (t : page_tables.Ownership E X) (T : Ownership E.val X.val),
     OwnershipRepr t T → T.Invariant →
     page_tables.ownership.Ownership.stats t ⦃ s => StatsRepr s T.stats ⦄

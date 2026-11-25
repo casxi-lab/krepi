@@ -29,6 +29,13 @@ satisfies the postcondition. This module imports no generated definitions:
 each module of statements imports the generated definitions of one target
 alone, whose enumerations and external declarations would clash with those
 of another.
+
+Every refinement statement takes `Usize64` as its first premise: `usize` is
+64 bits wide. The premise restricts no input; it states the platform of the
+contracts and of the extraction, whose width Lean and Aeneas leave open. The
+registration of the two targets writes it into the premise tables of their
+proof pages, `docs/domains/boot-platform/fdt/proof.md` and
+`docs/domains/memory/page-tables/proof.md`.
 -/
 
 @[expose] public section
@@ -36,6 +43,19 @@ of another.
 open Aeneas Aeneas.Std
 
 namespace Krepi.Statements
+
+/-! ## The platform -/
+
+/-- The platform of the refinement statements: `usize` is 64 bits wide.
+The gate extracts the code for `aarch64-unknown-none`, the kernel images are
+built for `aarch64-unknown-none-softfloat`, and on both `usize` has 64 bits;
+the contracts and the specifications state their bounds for that width, as
+an offset or a size that leaves 64 bits. Lean and Aeneas leave the width
+open: the width of `Usize` is `System.Platform.numBits`, which is 32 or 64,
+and on 32 bits an addition that the code checks in `usize` can overflow
+where the specification, written for 64 bits, finds no overflow. It
+restricts no input. -/
+def Usize64 : Prop := System.Platform.numBits = 64
 
 /-! ## Machine values -/
 

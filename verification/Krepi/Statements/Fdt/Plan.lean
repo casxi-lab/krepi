@@ -35,6 +35,7 @@ namespace Krepi.Statements.Fdt
 for that of `MemoryPlan.allRam` of the spans and the regions, or its error.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanAllRam : Prop :=
+  Usize64 →
   ∀ (ram boot : Slice fdt.Span) (firmware : Slice fdt.ReservedRegion),
     fdt.plan.MemoryPlan.all_ram ram boot firmware ⦃ r =>
       Agrees MemoryPlanRepr planErrorOf r
@@ -44,6 +45,7 @@ def MemoryPlanAllRam : Prop :=
 stands for that of `MemoryPlan.new`, or its error.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanNew : Prop :=
+  Usize64 →
   ∀ (window : fdt.Span) (ram boot : Slice fdt.Span)
     (firmware : Slice fdt.ReservedRegion),
     fdt.plan.MemoryPlan.new window ram boot firmware ⦃ r =>
@@ -55,6 +57,7 @@ that stands for that of `MemoryPlan.fromBootMemory`, or its error, for a
 boot memory that keeps its invariants.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanFromBootMemory : Prop :=
+  Usize64 →
   ∀ (m : fdt.BootMemory) (M : BootMemory) (window : fdt.Span) (more : Slice fdt.Span),
     BootMemoryRepr m M → M.memory.WellFormed → M.Consistent →
     fdt.plan.MemoryPlan.from_boot_memory m window more ⦃ r =>
@@ -66,12 +69,14 @@ def MemoryPlanFromBootMemory : Prop :=
 /-- `MemoryPlan::managed_banks()`: the managed banks.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanManagedBanks : Prop :=
+  Usize64 →
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P →
     fdt.plan.MemoryPlan.managed_banks p ⦃ s => spansOf s = P.managedBanks ⦄
 
 /-- `MemoryPlan::ram()`: the banks.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanRam : Prop :=
+  Usize64 →
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P →
     fdt.plan.MemoryPlan.ram p ⦃ s => spansOf s = P.ram ⦄
 
@@ -79,18 +84,21 @@ def MemoryPlanRam : Prop :=
 reservations, `MemoryPlan.reservations`.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanReservations : Prop :=
+  Usize64 →
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P →
     fdt.plan.MemoryPlan.reservations p ⦃ s => spansOf s = P.reservations ⦄
 
 /-- `MemoryPlan::boot_ranges()`: the boot storage.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanBootRanges : Prop :=
+  Usize64 →
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P →
     fdt.plan.MemoryPlan.boot_ranges p ⦃ s => spansOf s = P.bootRanges ⦄
 
 /-- `MemoryPlan::firmware_ranges()`: the firmware reservations.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanFirmwareRanges : Prop :=
+  Usize64 →
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P →
     fdt.plan.MemoryPlan.firmware_ranges p ⦃ s => spansOf s = P.firmwareRanges ⦄
 
@@ -100,6 +108,7 @@ def MemoryPlanFirmwareRanges : Prop :=
 map.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanDescribedBytes : Prop :=
+  Usize64 →
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P → P.WellFormed →
     fdt.plan.MemoryPlan.described_bytes p ⦃ n => word64 n = P.describedBytes ⦄
 
@@ -107,6 +116,7 @@ def MemoryPlanDescribedBytes : Prop :=
 well-formed map.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanManagedBytes : Prop :=
+  Usize64 →
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P → P.WellFormed →
     fdt.plan.MemoryPlan.managed_bytes p ⦃ n => word64 n = P.managedBytes ⦄
 
@@ -114,6 +124,7 @@ def MemoryPlanManagedBytes : Prop :=
 a well-formed map.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanContainsRam : Prop :=
+  Usize64 →
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan) (range : fdt.Span),
     MemoryPlanRepr p P → P.WellFormed →
     fdt.plan.MemoryPlan.contains_ram p range ⦃ b => b = P.containsRam (spanOf range) ⦄
@@ -122,6 +133,7 @@ def MemoryPlanContainsRam : Prop :=
 well-formed map.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanIsAvailable : Prop :=
+  Usize64 →
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan) (range : fdt.Span),
     MemoryPlanRepr p P → P.WellFormed →
     fdt.plan.MemoryPlan.is_available p range ⦃ b => b = P.isAvailable (spanOf range) ⦄
@@ -130,6 +142,7 @@ def MemoryPlanIsAvailable : Prop :=
 range and it is available, for a well-formed map.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanPermitsBacking : Prop :=
+  Usize64 →
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan) (range : fdt.Span),
     MemoryPlanRepr p P → P.WellFormed →
     fdt.plan.MemoryPlan.permits_backing p range ⦃ b => b = P.permitsBacking (spanOf range) ⦄
@@ -140,6 +153,7 @@ def MemoryPlanPermitsBacking : Prop :=
 ranges, `MemoryPlan.availableRanges`, for a well-formed map.
 Feature: `krepi.platform.device-tree`. -/
 def MemoryPlanAvailableRanges : Prop :=
+  Usize64 →
   ∀ (p : fdt.MemoryPlan) (P : MemoryPlan), MemoryPlanRepr p P → P.WellFormed →
     fdt.plan.MemoryPlan.available_ranges p ⦃ it =>
       Stands fdt.plan.available.AvailableRanges.next SpanRepr it P.availableRanges ⦄
@@ -149,6 +163,7 @@ the iterator stands for and leaves it standing for the rest; at the end it
 gives none and stays at the end.
 Feature: `krepi.platform.device-tree`. -/
 def AvailableRangesNext : Prop :=
+  Usize64 →
   ∀ (it : fdt.AvailableRanges) (l : List Span),
     Stands fdt.plan.available.AvailableRanges.next SpanRepr it l →
     Advances fdt.plan.available.AvailableRanges.next SpanRepr it l

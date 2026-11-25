@@ -34,6 +34,7 @@ namespace Krepi.Statements.PageTables
 of the kind and the address.
 Feature: `krepi.kernel.kernel-memory`. -/
 def Descriptor : Prop :=
+  Usize64 →
   ∀ (kind : page_tables.Kind) (address : U64),
     page_tables.descriptor kind address ⦃ d => word64 d = descriptor (kindOf kind) (word64 address) ⦄
 
@@ -41,6 +42,7 @@ def Descriptor : Prop :=
 the range, or none.
 Feature: `krepi.kernel.kernel-memory`. -/
 def DirectAddress : Prop :=
+  Usize64 →
   ∀ (range : page_tables.PhysRange) (R : PhysRange), PhysRangeRepr range R →
     page_tables.direct_address range ⦃ o => o.map word64 = directAddress R ⦄
 
@@ -48,6 +50,7 @@ def DirectAddress : Prop :=
 error.
 Feature: `krepi.kernel.kernel-memory`. -/
 def PhysRangeNew : Prop :=
+  Usize64 →
   ∀ start len : U64,
     page_tables.range.PhysRange.new start len ⦃ r =>
       Agrees PhysRangeRepr ownershipErrorOf r (PhysRange.new (word64 start) (word64 len)) ⦄
@@ -55,6 +58,7 @@ def PhysRangeNew : Prop :=
 /-- `PhysRange::end()`: the end of the range, `PhysRange.endAddr`.
 Feature: `krepi.kernel.kernel-memory`. -/
 def PhysRangeEnd : Prop :=
+  Usize64 →
   ∀ (range : page_tables.PhysRange) (R : PhysRange), PhysRangeRepr range R →
     page_tables.range.PhysRange.end range ⦃ n => word64 n = R.endAddr ⦄
 
@@ -62,6 +66,7 @@ def PhysRangeEnd : Prop :=
 `PhysRange.contains`.
 Feature: `krepi.kernel.kernel-memory`. -/
 def PhysRangeContains : Prop :=
+  Usize64 →
   ∀ (range other : page_tables.PhysRange) (R O : PhysRange),
     PhysRangeRepr range R → PhysRangeRepr other O →
     page_tables.range.PhysRange.contains range other ⦃ b => b = R.contains O ⦄
@@ -70,6 +75,7 @@ def PhysRangeContains : Prop :=
 `PhysRange.overlaps`.
 Feature: `krepi.kernel.kernel-memory`. -/
 def PhysRangeOverlaps : Prop :=
+  Usize64 →
   ∀ (range other : page_tables.PhysRange) (R O : PhysRange),
     PhysRangeRepr range R → PhysRangeRepr other O →
     page_tables.range.PhysRange.overlaps range other ⦃ b => b = R.overlaps O ⦄
@@ -80,6 +86,7 @@ def PhysRangeOverlaps : Prop :=
 `Tables.lookupPage`, or its error.
 Feature: `krepi.kernel.kernel-memory`. -/
 def TablesLookupPage : Prop :=
+  Usize64 →
   ∀ (N : Usize) (upper : Bool) (s : page_tables.Tables N upper) (va base : U64) (bits : U8),
     page_tables.walk.Tables.lookup_page s va base bits ⦃ r =>
       Agrees (fun d D => word64 d = D) tableErrorOf r
@@ -89,6 +96,7 @@ def TablesLookupPage : Prop :=
 `Tables.lookupBlock`, or its error.
 Feature: `krepi.kernel.kernel-memory`. -/
 def TablesLookupBlock : Prop :=
+  Usize64 →
   ∀ (N : Usize) (upper : Bool) (s : page_tables.Tables N upper) (va base : U64) (bits : U8),
     page_tables.walk.Tables.lookup_block s va base bits ⦃ r =>
       Agrees (fun d D => word64 d = D) tableErrorOf r
@@ -97,6 +105,7 @@ def TablesLookupBlock : Prop :=
 /-- `Tables::used()`: the number of tables in use, `Tables.usedTables`.
 Feature: `krepi.kernel.kernel-memory`. -/
 def TablesUsed : Prop :=
+  Usize64 →
   ∀ (N : Usize) (upper : Bool) (s : page_tables.Tables N upper),
     page_tables.walk.Tables.used s ⦃ n => n.val = (tablesOf s).usedTables ⦄
 
@@ -106,6 +115,7 @@ def TablesUsed : Prop :=
 region of `UPPER`.
 Feature: `krepi.kernel.kernel-memory`. -/
 def TablesNew : Prop :=
+  Usize64 →
   ∀ (N : Usize) (upper : Bool) (pool : Aeneas.Std.Array (Aeneas.Std.Array U64 512#usize) N),
     page_tables.walk.Tables.new upper pool ⦃ s =>
       tablesOf s = (Tables.new (poolOf pool) : Tables (regionOf upper) N.val) ⦄
@@ -114,6 +124,7 @@ def TablesNew : Prop :=
 `Tables.reset`.
 Feature: `krepi.kernel.kernel-memory`. -/
 def TablesReset : Prop :=
+  Usize64 →
   ∀ (N : Usize) (upper : Bool) (s : page_tables.Tables N upper),
     page_tables.write.Tables.reset s ⦃ plan s' =>
       WritePlanRepr plan (tablesOf s).reset.2 ∧ tablesOf s' = (tablesOf s).reset.1 ⦄
@@ -123,6 +134,7 @@ after the write phase of `Tables.cloneKernelFrom` and a plan iterator that
 stands for its plan, or its error with the set unchanged.
 Feature: `krepi.kernel.kernel-memory`. -/
 def TablesCloneKernelFrom : Prop :=
+  Usize64 →
   ∀ (N : Usize) (upper : Bool) (s source : page_tables.Tables N upper) (sourceBase base : U64)
     (bits : U8),
     page_tables.copy.Tables.clone_kernel_from s source sourceBase base bits ⦃ r s' =>
@@ -136,6 +148,7 @@ iterator stands for and leaves it standing for the rest; at the end it gives
 none and stays at the end.
 Feature: `krepi.kernel.kernel-memory`. -/
 def ClonePlanNext : Prop :=
+  Usize64 →
   ∀ (N : Usize) (upper : Bool) (it : page_tables.ClonePlan N upper) (l : Plan),
     Stands page_tables.copy.ClonePlan.next StepRepr it l →
     Advances page_tables.copy.ClonePlan.next StepRepr it l
@@ -146,6 +159,7 @@ def ClonePlanNext : Prop :=
 phase and the plan of `Tables.mapPage`, or its error with the set unchanged.
 Feature: `krepi.kernel.kernel-memory`. -/
 def TablesMapPage : Prop :=
+  Usize64 →
   ∀ (N : Usize) (upper : Bool) (s : page_tables.Tables N upper) (va pa : U64)
     (kind : page_tables.Kind) (base : U64) (bits : U8),
     page_tables.write.Tables.map_page s va pa kind base bits ⦃ r s' =>
@@ -156,6 +170,7 @@ def TablesMapPage : Prop :=
 and the plan of `Tables.mapBlock`, or its error with the set unchanged.
 Feature: `krepi.kernel.kernel-memory`. -/
 def TablesMapBlock : Prop :=
+  Usize64 →
   ∀ (N : Usize) (upper : Bool) (s : page_tables.Tables N upper) (va pa base : U64) (bits : U8),
     page_tables.write.Tables.map_block s va pa base bits ⦃ r s' =>
       Writes (fun s' S => tablesOf s' = S) WritePlanRepr (tableErrorOf · = ·) s r s'
@@ -165,6 +180,7 @@ def TablesMapBlock : Prop :=
 `Tables.unmapPage`, with the set unchanged, or its error.
 Feature: `krepi.kernel.kernel-memory`. -/
 def TablesUnmapPage : Prop :=
+  Usize64 →
   ∀ (N : Usize) (upper : Bool) (s : page_tables.Tables N upper) (va base : U64) (bits : U8),
     page_tables.write.Tables.unmap_page s va base bits ⦃ r s' =>
       Writes (fun s' S => tablesOf s' = S)

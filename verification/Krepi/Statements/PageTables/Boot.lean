@@ -36,6 +36,7 @@ region: the set after the write phase of `Tables.kernelMap` and a plan
 iterator that stands for its plan, or its error with the set unchanged.
 Feature: `krepi.kernel.kernel-memory`. -/
 def KernelMap : Prop :=
+  Usize64 →
   ∀ (N : Usize) (s : page_tables.Tables N false) (layout : page_tables.Layout) (L : Layout)
     (base : U64) (bits : U8), LayoutRepr layout L →
     page_tables.kernel_map s layout base bits ⦃ r s' =>
@@ -47,6 +48,7 @@ the iterator stands for and leaves it standing for the rest; at the end it
 gives none and stays at the end.
 Feature: `krepi.kernel.kernel-memory`. -/
 def KernelMapPlanNext : Prop :=
+  Usize64 →
   ∀ (N : Usize) (it : page_tables.KernelMapPlan N) (l : Plan),
     Stands page_tables.boot.layout.KernelMapPlan.next StepRepr it l →
     Advances page_tables.boot.layout.KernelMapPlan.next StepRepr it l
@@ -57,6 +59,7 @@ iterator that stands for its plan, or its error with the set unchanged, for
 a boot memory map that the entries of the `fdt` component built.
 Feature: `krepi.kernel.kernel-memory`. -/
 def DirectMap : Prop :=
+  Usize64 →
   ∀ (N : Usize) (s : page_tables.Tables N true) (memory : fdt.MemoryPlan)
     (P : Krepi.Spec.Fdt.MemoryPlan) (base : U64) (bits : U8),
     MemoryPlanRepr memory P → Witnesses.TableSets.BuiltPlan P →
@@ -69,6 +72,7 @@ the iterator stands for and leaves it standing for the rest; at the end it
 gives none and stays at the end.
 Feature: `krepi.kernel.kernel-memory`. -/
 def DirectMapPlanNext : Prop :=
+  Usize64 →
   ∀ (N : Usize) (it : page_tables.DirectMapPlan N) (l : Plan),
     Stands page_tables.boot.direct.DirectMapPlan.next StepRepr it l →
     Advances page_tables.boot.direct.DirectMapPlan.next StepRepr it l

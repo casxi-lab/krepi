@@ -31,12 +31,14 @@ namespace Krepi.Statements.Fdt
 that of `Fdt.parse` of its bytes, or its error.
 Feature: `krepi.platform.device-tree`. -/
 def FdtParse : Prop :=
+  Usize64 →
   ∀ input : Slice U8,
     fdt.parser.Fdt.parse input ⦃ r => Agrees FdtRepr errorOf r (Fdt.parse (bytesOf input)) ⦄
 
 /-- `Fdt::total_size()`: the `totalsize` of the tree.
 Feature: `krepi.platform.device-tree`. -/
 def FdtTotalSize : Prop :=
+  Usize64 →
   ∀ (t : fdt.Fdt) (T : Fdt), FdtRepr t T →
     fdt.parser.Fdt.total_size t ⦃ n => word64 n = T.totalSize ⦄
 
@@ -44,6 +46,7 @@ def FdtTotalSize : Prop :=
 order of the structure block, `Fdt.nodes`.
 Feature: `krepi.platform.device-tree`. -/
 def FdtNodes : Prop :=
+  Usize64 →
   ∀ (t : fdt.Fdt) (T : Fdt), FdtRepr t T →
     fdt.nodes.Fdt.nodes t ⦃ it => Stands fdt.nodes.Nodes.next NodeRepr it T.nodes ⦄
 
@@ -52,6 +55,7 @@ iterator stands for and leaves it standing for the rest; at the end it
 gives none and stays at the end.
 Feature: `krepi.platform.device-tree`. -/
 def NodesNext : Prop :=
+  Usize64 →
   ∀ (it : fdt.Nodes) (l : List Node), Stands fdt.nodes.Nodes.next NodeRepr it l →
     Advances fdt.nodes.Nodes.next NodeRepr it l
 
@@ -60,6 +64,7 @@ no node has it, or its error, for a path whose `as_bytes` gives the bytes
 of the string of the specification.
 Feature: `krepi.platform.device-tree`. -/
 def FdtFindNode : Prop :=
+  Usize64 →
   ∀ (t : fdt.Fdt) (T : Fdt) (path : Str) (p : String), FdtRepr t T → StrRepr path p →
     fdt.nodes.Fdt.find_node t path ⦃ r => Agrees (OptionRel NodeRepr) errorOf r (T.findNode p) ⦄
 
@@ -67,6 +72,7 @@ def FdtFindNode : Prop :=
 reservation map before its terminator, `Fdt.reservations`.
 Feature: `krepi.platform.device-tree`. -/
 def FdtReservations : Prop :=
+  Usize64 →
   ∀ (t : fdt.Fdt) (T : Fdt), FdtRepr t T →
     fdt.parser.Fdt.reservations t ⦃ it =>
       Stands fdt.nodes.Reservations.next SpanRepr it T.reservations ⦄
@@ -76,6 +82,7 @@ the iterator stands for and leaves it standing for the rest; at the end it
 gives none and stays at the end.
 Feature: `krepi.platform.device-tree`. -/
 def ReservationsNext : Prop :=
+  Usize64 →
   ∀ (it : fdt.Reservations) (l : List Span), Stands fdt.nodes.Reservations.next SpanRepr it l →
     Advances fdt.nodes.Reservations.next SpanRepr it l
 
@@ -85,6 +92,7 @@ def ReservationsNext : Prop :=
 its NUL.
 Feature: `krepi.platform.device-tree`. -/
 def NodeName : Prop :=
+  Usize64 →
   ∀ (n : fdt.Node) (N : Node), NodeRepr n N →
     fdt.nodes.Node.name n ⦃ b => bytesOf b = N.name.toUTF8 ⦄
 
@@ -92,6 +100,7 @@ def NodeName : Prop :=
 `Node.parent`.
 Feature: `krepi.platform.device-tree`. -/
 def NodeParent : Prop :=
+  Usize64 →
   ∀ (n : fdt.Node) (N : Node), NodeRepr n N →
     fdt.nodes.Node.parent n ⦃ o => OptionRel NodeRepr o N.parent ⦄
 
@@ -100,6 +109,7 @@ name, none without it, `Node.property`, for a name whose `as_bytes` gives
 the bytes of the string of the specification.
 Feature: `krepi.platform.device-tree`. -/
 def NodeProperty : Prop :=
+  Usize64 →
   ∀ (n : fdt.Node) (N : Node) (key : Str) (s : String), NodeRepr n N → StrRepr key s →
     fdt.nodes.Node.property n key ⦃ o => o.map bytesOf = N.property s ⦄
 
@@ -108,6 +118,7 @@ none without it, or the error of `Node.stringProperty`, for a name whose
 `as_bytes` gives the bytes of the string of the specification.
 Feature: `krepi.platform.device-tree`. -/
 def NodeStringProperty : Prop :=
+  Usize64 →
   ∀ (n : fdt.Node) (N : Node) (key : Str) (s : String), NodeRepr n N → StrRepr key s →
     fdt.nodes.Node.string_property n key ⦃ r =>
       Agrees (fun o v => o.map bytesOf = v.map String.toUTF8) errorOf r (N.stringProperty s) ⦄
@@ -116,6 +127,7 @@ def NodeStringProperty : Prop :=
 `Node.enabled`.
 Feature: `krepi.platform.device-tree`. -/
 def NodeEnabled : Prop :=
+  Usize64 →
   ∀ (n : fdt.Node) (N : Node), NodeRepr n N →
     fdt.nodes.Node.enabled n ⦃ r => Agrees (· = ·) errorOf r N.enabled ⦄
 
@@ -123,6 +135,7 @@ def NodeEnabled : Prop :=
 of `Node.addressCells`.
 Feature: `krepi.platform.device-tree`. -/
 def NodeAddressCells : Prop :=
+  Usize64 →
   ∀ (n : fdt.Node) (N : Node), NodeRepr n N →
     fdt.nodes.Node.address_cells n ⦃ r =>
       Agrees (fun c C => word32 c = C) errorOf r N.addressCells ⦄
@@ -131,6 +144,7 @@ def NodeAddressCells : Prop :=
 `Node.sizeCells`.
 Feature: `krepi.platform.device-tree`. -/
 def NodeSizeCells : Prop :=
+  Usize64 →
   ∀ (n : fdt.Node) (N : Node), NodeRepr n N →
     fdt.nodes.Node.size_cells n ⦃ r => Agrees (fun c C => word32 c = C) errorOf r N.sizeCells ⦄
 
@@ -138,6 +152,7 @@ def NodeSizeCells : Prop :=
 error.
 Feature: `krepi.platform.device-tree`. -/
 def NodeReg : Prop :=
+  Usize64 →
   ∀ (n : fdt.Node) (N : Node), NodeRepr n N →
     fdt.nodes.Node.reg n ⦃ r => Agrees (fun g R => RegRepr g R.entries) errorOf r N.reg ⦄
 
@@ -145,6 +160,7 @@ def NodeReg : Prop :=
 or its error.
 Feature: `krepi.platform.device-tree`. -/
 def NodeRanges : Prop :=
+  Usize64 →
   ∀ (n : fdt.Node) (N : Node), NodeRepr n N →
     fdt.nodes.Node.ranges n ⦃ r => Agrees AddressMapRepr errorOf r N.ranges ⦄
 
@@ -152,6 +168,7 @@ def NodeRanges : Prop :=
 `Node.dmaRanges`, or its error.
 Feature: `krepi.platform.device-tree`. -/
 def NodeDmaRanges : Prop :=
+  Usize64 →
   ∀ (n : fdt.Node) (N : Node), NodeRepr n N →
     fdt.nodes.Node.dma_ranges n ⦃ r => Agrees AddressMapRepr errorOf r N.dmaRanges ⦄
 
@@ -159,6 +176,7 @@ def NodeDmaRanges : Prop :=
 or its error.
 Feature: `krepi.platform.device-tree`. -/
 def NodeTranslateReg : Prop :=
+  Usize64 →
   ∀ (n : fdt.Node) (N : Node) (span : fdt.Span), NodeRepr n N →
     fdt.nodes.Node.translate_reg n span ⦃ r =>
       Agrees SpanRepr errorOf r (N.translateReg (spanOf span)) ⦄

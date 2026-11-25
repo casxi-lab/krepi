@@ -29,6 +29,7 @@ namespace Krepi.Statements.Fdt
 /-- `cells_u64(bytes, cells)`: the number of `cellsU64`, or its error.
 Feature: `krepi.platform.device-tree`. -/
 def CellsU64 : Prop :=
+  Usize64 →
   ∀ (bytes : Slice U8) (cells : U32),
     fdt.cells_u64 bytes cells ⦃ r =>
       Agrees (fun n N => word64 n = N) errorOf r (cellsU64 (bytesOf bytes) (word32 cells)) ⦄
@@ -37,6 +38,7 @@ def CellsU64 : Prop :=
 entries of `Reg.new` of the bytes and the cells, or its error.
 Feature: `krepi.platform.device-tree`. -/
 def RegNew : Prop :=
+  Usize64 →
   ∀ (bytes : Slice U8) (addressCells sizeCells : U32),
     fdt.translation.Reg.new bytes addressCells sizeCells ⦃ r =>
       Agrees (fun g R => RegRepr g R.entries) errorOf r
@@ -47,6 +49,7 @@ stands for and leaves it standing for the rest; at the end it gives none and
 stays at the end.
 Feature: `krepi.platform.device-tree`. -/
 def RegNext : Prop :=
+  Usize64 →
   ∀ (g : fdt.Reg) (l : List Span), RegRepr g l → Advances fdt.translation.Reg.next SpanRepr g l
 
 /-! ## Address maps -/
@@ -56,6 +59,7 @@ address map that stands for that of `AddressMap.new` of the value, none when
 it is absent, and the cells, or its error.
 Feature: `krepi.platform.device-tree`. -/
 def AddressMapNew : Prop :=
+  Usize64 →
   ∀ (bytes : Option (Slice U8)) (childCells parentCells sizeCells : U32),
     fdt.translation.AddressMap.new bytes childCells parentCells sizeCells ⦃ r =>
       Agrees AddressMapRepr errorOf r
@@ -65,6 +69,7 @@ def AddressMapNew : Prop :=
 /-- `AddressMap::kind()`: the kind of `AddressMap.kind`.
 Feature: `krepi.platform.device-tree`. -/
 def AddressMapKind : Prop :=
+  Usize64 →
   ∀ (m : fdt.AddressMap) (M : AddressMap), AddressMapRepr m M →
     fdt.translation.AddressMap.kind m ⦃ k => kindOf k = M.kind ⦄
 
@@ -72,6 +77,7 @@ def AddressMapKind : Prop :=
 span, or its error.
 Feature: `krepi.platform.device-tree`. -/
 def AddressMapToParent : Prop :=
+  Usize64 →
   ∀ (m : fdt.AddressMap) (M : AddressMap) (span : fdt.Span), AddressMapRepr m M →
     fdt.translation.AddressMap.to_parent m span ⦃ r =>
       Agrees SpanRepr errorOf r (M.toParent (spanOf span)) ⦄
@@ -80,6 +86,7 @@ def AddressMapToParent : Prop :=
 span, or its error.
 Feature: `krepi.platform.device-tree`. -/
 def AddressMapToChild : Prop :=
+  Usize64 →
   ∀ (m : fdt.AddressMap) (M : AddressMap) (span : fdt.Span), AddressMapRepr m M →
     fdt.translation.AddressMap.to_child m span ⦃ r =>
       Agrees SpanRepr errorOf r (M.toChild (spanOf span)) ⦄
@@ -89,6 +96,7 @@ def AddressMapToChild : Prop :=
 /-- `Span::new(start, size)`: the span of `Span.new`, or its error.
 Feature: `krepi.platform.device-tree`. -/
 def SpanNew : Prop :=
+  Usize64 →
   ∀ start size : U64,
     fdt.span.Span.new start size ⦃ r =>
       Agrees SpanRepr errorOf r (Span.new (word64 start) (word64 size)) ⦄
@@ -96,6 +104,7 @@ def SpanNew : Prop :=
 /-- `Span::end()`: the end of `Span.endAddr`, or its error.
 Feature: `krepi.platform.device-tree`. -/
 def SpanEnd : Prop :=
+  Usize64 →
   ∀ s : fdt.Span,
     fdt.span.Span.end s ⦃ r => Agrees (fun n N => word64 n = N) errorOf r (spanOf s).endAddr ⦄
 
@@ -103,6 +112,7 @@ def SpanEnd : Prop :=
 of `Span.contains`.
 Feature: `krepi.platform.device-tree`. -/
 def SpanContains : Prop :=
+  Usize64 →
   ∀ s other : fdt.Span,
     fdt.span.Span.contains s other ⦃ r =>
       Agrees (· = ·) errorOf r ((spanOf s).contains (spanOf other)) ⦄
