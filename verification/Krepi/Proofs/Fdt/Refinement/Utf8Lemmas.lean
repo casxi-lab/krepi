@@ -1,6 +1,7 @@
 module
 
 public import Krepi.Proofs.Fdt.Refinement.BasicLemmas
+import Krepi.Proofs.Fdt.ExceptLemmas
 
 /-!
 # Device tree: the byte reads of the specification
@@ -11,8 +12,11 @@ generated functions of `fdt::format` are stated with, for the proofs below
 `Krepi.Proofs.Fdt.Refinement`. The module imports no generated definitions,
 so it is built once and not again for every mutant of the code.
 
-- Bytes of a slice: `toList_eq_data`, `byteArray_eq_iff`, `bytesOf_getElem!`,
-  `bytesOf_getElem?_of_lt`, `bytesOf_getElem?_of_lt'`, `byte_eq_zero_iff`, `bytesOf_extract_eq_iff`
+- Triples and machine values: `usize_numBits_ge`, `ite_spec_pos` and
+  `ite_spec_neg` (the triple of the branch that an `if` takes).
+- Bytes of a slice: `byte_at` (a byte that the code read), `toList_eq_data`,
+  `byteArray_eq_iff`, `bytesOf_getElem!`, `bytesOf_getElem?_of_lt`,
+  `bytesOf_getElem?_of_lt'`, `byte_eq_zero_iff`, `bytesOf_extract_eq_iff`
   (the bytes `[i, j)` of a slice are those of another slice),
   `drop_take_cons` (the step of a loop over the items `[i, e)` of a list),
   `bytesOf_extract_all` and `bytesOf_extract_any`.
@@ -34,12 +38,21 @@ so it is built once and not again for every mutant of the code.
   siblings, and the lemmas `scalarEnd_two` to `scalarEnd_bad` of each class of
   first byte.
 - Names: `nameChar`, the character sets of `isNodeNameChar` and
-  `isPropertyNameChar`; `isAlphanum_ofNat` and `nameChar_ofNat`, their
-  values on a byte as the code tests it; `nameChar_lt` (every character of
-  a name is ASCII) and `all_nameChar`, that the bytes of a UTF-8 string are
-  all name characters exactly when its characters are.
+  `isPropertyNameChar` (`nameChar_true`, `nameChar_false`);
+  `isAlphanum_ofNat` and `nameChar_ofNat`, their values on a byte as the code
+  tests it; `nameChar_lt` (every character of a name is ASCII) and
+  `all_nameChar`, that the bytes of a UTF-8 string are all name characters
+  exactly when its characters are.
 - Padding: `land_mask4` (the bits of `align4`), `le_align4`, `align4_lt` and
   `align4_mod`.
+- Tokens: `Piece` and `pieceAt`, the token at an offset of a structure block
+  as `fdt::nodes::piece_at` reads it without checking it again; `u32At_ok_le`,
+  `cString_ok`, `cString_nul`, `cString_extract`, `paddedEnd_ok` and
+  `checkedAdd_ok`, what a success of a read tells; and `TokenPiece` with
+  `pieceAt_of_decodeToken`, that `pieceAt` reads each token that
+  `decodeToken` gives: the same kind, the offset of the next, the NUL after
+  the name of a begin node, and the name offset and value offsets of a
+  property.
 -/
 
 @[expose] public section
@@ -49,6 +62,24 @@ open Krepi.Statements Krepi.Spec.Fdt
 open ByteArray.utf8DecodeChar?
 
 namespace Krepi.Proofs.Fdt.Refinement
+
+/-! ## Triples and machine values -/
+
+/-- The width of `usize` is at least 32 bits. -/
+theorem usize_numBits_ge : 32 ≤ UScalarTy.Usize.numBits := by
+  have := System.Platform.numBits_eq
+  rw [UScalarTy.Usize_numBits_eq]
+  omega
+
+/-- A triple of the branch that an `if` takes. -/
+theorem ite_spec_pos {α : Type} {c : Prop} [Decidable c] {a b : Result α} {p : α → Prop}
+    (h : c) (ha : a ⦃ p ⦄) : (if c then a else b) ⦃ p ⦄ := by
+  simp only [h, ↓reduceIte]; exact ha
+
+/-- A triple of the branch that an `if` takes. -/
+theorem ite_spec_neg {α : Type} {c : Prop} [Decidable c] {a b : Result α} {p : α → Prop}
+    (h : ¬ c) (hb : b ⦃ p ⦄) : (if c then a else b) ⦃ p ⦄ := by
+  simp only [h, ↓reduceIte]; exact hb
 
 /-! ## Bytes of a slice -/
 
@@ -69,6 +100,11 @@ theorem bytesOf_getElem! (s : Slice U8) (i : Nat) :
   cases s.val[i]? with
   | none => rfl
   | some x => simp
+
+/-- A byte that the code read from a slice, as a byte of the specification. -/
+theorem byte_at {bytes : Slice U8} {x : U8} {k n : Nat} {h : k < bytes.val.length}
+    (hx : x = bytes.val[k]'h) (hk : k = n) : ((bytesOf bytes)[n]!).toNat = x.val := by
+  subst hk; rw [bytesOf_getElem!, hx, getElem!_pos]
 
 /-- The byte at an index inside a slice. -/
 theorem bytesOf_getElem?_of_lt {s : Slice U8} {i : Nat} (h : i < s.val.length) :
@@ -657,7 +693,8 @@ theorem scalarEnd_some {b : ByteArray} {i e n : Nat} (hi : i < e) (he : e ≤ b.
   obtain ⟨c, hc, rfl⟩ := Option.map_eq_some_iff.mp h
   have hle := ByteArray.le_size_of_utf8DecodeChar?_eq_some hc
   have hpos := c.utf8Size_pos
-  have hx : (b.extract i e).extract c.utf8Size (b.extract i e).size = b.extract (i + c.utf8Size) e := by
+  have hx : (b.extract i e).extract c.utf8Size (b.extract i e).size =
+      b.extract (i + c.utf8Size) e := by
     rw [ByteArray.extract_extract, hs, show i + (e - i) = e by omega, Nat.min_self]
   refine ⟨by omega, by omega, ?_⟩
   rw [isValidUTF8_iff_decode (by omega), ← hx]
@@ -715,12 +752,17 @@ theorem toNat_ofNat_lt {n : Nat} (h : n < 0xd800) : (Char.ofNat n).toNat = n := 
   simp only [show n.isValidChar from Or.inl h, ↓reduceDIte]
   simp [Char.ofNatAux, Char.toNat]
 
+@[simp] theorem nameChar_true : nameChar true = isPropertyNameChar := rfl
+
+@[simp] theorem nameChar_false : nameChar false = isNodeNameChar := rfl
+
 /-- Every character of a name is ASCII. -/
 theorem nameChar_lt {p : Bool} {c : Char} (h : nameChar p c = true) : c.toNat < 128 := by
   cases p <;> simp only [nameChar, isNodeNameChar, isPropertyNameChar, Char.isAlphanum,
     Char.isAlpha, Char.isUpper, Char.isLower, Char.isDigit, Bool.false_eq_true, ↓reduceIte,
     Bool.or_eq_true, Bool.and_eq_true, decide_eq_true_eq, List.contains_cons, List.contains_nil,
-    Bool.or_false, beq_iff_eq, UInt32.le_iff_toNat_le, Char.toNat_val, ← Char.toNat_inj, Char.reduceToNat] at h
+    Bool.or_false, beq_iff_eq, UInt32.le_iff_toNat_le, Char.toNat_val, ← Char.toNat_inj,
+    Char.reduceToNat] at h
   all_goals omega
 
 /-- The bytes of a string, character by character. -/
@@ -839,5 +881,122 @@ def pieceAt (b : ByteArray) (cursor : Nat) : Option (Piece × Nat) :=
     else if tag.toNat = 2 then some (.endNode, cursor + 4)
     else if tag.toNat = 4 then some (.nop, cursor + 4)
     else some (.endToken, cursor + 4)
+
+/-- A string that `cString` reads: the NUL that `findNul` finds, the index after
+it, and the string of the bytes before it. -/
+theorem cString_ok {b : ByteArray} {start e : Nat} {s : String}
+    (h : cString b start = .ok (s, e)) :
+    ∃ nul, findNul b start = some nul ∧ e = nul + 1 ∧
+      String.fromUTF8? (b.extract start nul) = some s := by
+  unfold cString at h
+  split at h
+  · cases h
+  · rename_i nul hnul
+    split at h
+    · cases h
+    · rename_i s' hs
+      cases h
+      exact ⟨nul, hnul, rfl, hs⟩
+
+/-- The NUL of a string that `cString` reads lies `s.utf8ByteSize` bytes after
+its start. -/
+theorem cString_nul {b : ByteArray} {start e : Nat} {s : String}
+    (h : cString b start = .ok (s, e)) : findNul b start = some (start + s.utf8ByteSize) ∧
+      e = start + s.utf8ByteSize + 1 := by
+  obtain ⟨nul, hnul, rfl, hs⟩ := cString_ok h
+  obtain ⟨h1, h2, -, -⟩ := findNul_some hnul
+  have hsz := utf8ByteSize_of_fromUTF8? hs
+  rw [ByteArray.size_extract] at hsz
+  have : nul = start + s.utf8ByteSize := by omega
+  subst this
+  exact ⟨hnul, rfl⟩
+
+/-- The bytes of a string that `cString` reads are those of the string. -/
+theorem cString_extract {b : ByteArray} {start e : Nat} {s : String}
+    (h : cString b start = .ok (s, e)) :
+    b.extract start (start + s.utf8ByteSize) = s.toByteArray := by
+  obtain ⟨nul, hnul, -, hs⟩ := cString_ok h
+  have := (cString_nul h).1
+  rw [hnul] at this
+  cases this
+  exact (toByteArray_of_fromUTF8? hs).symm
+
+/-- The end of the padding that `paddedEnd` gives. -/
+theorem paddedEnd_ok {b : ByteArray} {e a : Nat} {z : Bool} (h : paddedEnd b e z = .ok a) :
+    a = align4 e ∧ align4 e ≤ b.size := by
+  unfold paddedEnd at h
+  dsimp only at h
+  split at h
+  · cases h
+  · split at h
+    · cases h
+    · cases h; exact ⟨rfl, by omega⟩
+
+/-- The sum that `checkedAdd` gives. -/
+theorem checkedAdd_ok {a b v : Nat} (h : checkedAdd a b = .ok v) : v = a + b := by
+  unfold checkedAdd at h
+  split at h
+  · cases h; rfl
+  · cases h
+
+/-- What `pieceAt` reads of a token that `decodeToken` gives: the same kind of
+token, the offset of the next, and for a begin node the NUL after its nm,
+for a property the offset of its name, whose string is the name, and the
+offsets of its value. -/
+def TokenPiece (str strs : ByteArray) (c next : Nat) : Token → Prop
+  | .beginNode nm => pieceAt str c = some (.beginNode (c + 4 + nm.utf8ByteSize), next)
+  | .endNode => pieceAt str c = some (.endNode, next)
+  | .property nm value => ∃ off e, cString strs off = .ok (nm, e) ∧
+      value = str.extract (c + 12) (c + 12 + value.size) ∧
+      pieceAt str c = some (.property off (c + 12) (c + 12 + value.size), next)
+  | .nop => pieceAt str c = some (.nop, next)
+  | .endStructure => pieceAt str c = some (.endToken, next)
+
+/-- `pieceAt` reads each token that `decodeToken` gives, without checking it
+again. -/
+theorem pieceAt_of_decodeToken {str strs : ByteArray} {c next : Nat} {tok : Token}
+    (h : decodeToken str strs c = .ok (tok, next)) : TokenPiece str strs c next tok := by
+  unfold decodeToken at h
+  obtain ⟨tag, htag, h⟩ := except_bind_ok.1 h
+  split at h
+  · rename_i ht
+    obtain ⟨⟨nm, e⟩, hcs, h⟩ := except_bind_ok.1 h
+    obtain ⟨a, hpe, h⟩ := except_bind_ok.1 h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    cases except_pure_ok.1 h
+    obtain ⟨hnul, rfl⟩ := cString_nul hcs
+    obtain ⟨rfl, -⟩ := paddedEnd_ok hpe
+    simp only [TokenPiece, pieceAt, htag, ht, ↓reduceIte, hnul, Option.map_some]
+  · rename_i ht
+    cases except_pure_ok.1 h
+    simp only [TokenPiece, pieceAt, htag, ht, Nat.reduceEqDiff, ↓reduceIte]
+  · rename_i ht
+    obtain ⟨len, hlen, h⟩ := except_bind_ok.1 h
+    obtain ⟨off, hoff, h⟩ := except_bind_ok.1 h
+    obtain ⟨ve, hve, h⟩ := except_bind_ok.1 h
+    obtain ⟨hsz, h⟩ := except_jp_ok h
+    obtain ⟨⟨nm, e'⟩, hcs, h⟩ := except_bind_ok.1 h
+    obtain ⟨-, h⟩ := except_jp_ok h
+    obtain ⟨a, hpe, h⟩ := except_bind_ok.1 h
+    cases except_pure_ok.1 h
+    obtain rfl := checkedAdd_ok hve
+    obtain ⟨rfl, -⟩ := paddedEnd_ok hpe
+    have hvs : (str.extract (c + 4 + 8) (c + 4 + 8 + len.toNat)).size = len.toNat := by
+      rw [ByteArray.size_extract]; omega
+    have hoff' : u32At str (c + 8) = .ok off := by
+      rw [show c + 8 = c + 4 + 4 by omega]; exact hoff
+    have hsz' : ¬ str.size < c + 12 + len.toNat := by omega
+    refine ⟨off.toNat, e', hcs, ?_, ?_⟩
+    · rw [hvs, show c + 4 + 8 = c + 12 by omega]
+    · rw [hvs]
+      simp only [pieceAt, htag, ht, hlen, hoff', hsz', Nat.reduceEqDiff, ↓reduceIte,
+        show c + 4 + 8 = c + 12 by omega]
+  · rename_i ht
+    cases except_pure_ok.1 h
+    simp only [TokenPiece, pieceAt, htag, ht, Nat.reduceEqDiff, ↓reduceIte]
+  · rename_i ht
+    cases except_pure_ok.1 h
+    simp only [TokenPiece, pieceAt, htag, ht, Nat.reduceEqDiff, ↓reduceIte]
+  · exact absurd h (except_throw_ne _ _)
 
 end Krepi.Proofs.Fdt.Refinement

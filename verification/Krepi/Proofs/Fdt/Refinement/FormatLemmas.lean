@@ -6,7 +6,35 @@ public import Krepi.Proofs.Fdt.Refinement.Utf8Lemmas
 /-!
 # Device tree: refinement of the byte reads of the format
 
-PLACEHOLDER
+The triples of the generated functions of `fdt::format` and of
+`fdt::nodes::piece_at`, each a `@[step]` lemma stated against the function of
+the specification that it implements, so that the proof of a caller steps
+over the call with the triple of the callee and a mutant of a callee fails the
+proof of the callee alone. The lemmas that need no generated code are in
+`Krepi.Proofs.Fdt.Refinement.Utf8Lemmas`.
+
+- Constants: `tokens_spec` and `depth_spec`, `MAX_TOKENS` and `MAX_DEPTH` as a
+  `usize`.
+- Padding and strings: `align4_spec` (`align4`), `find_nul_spec` (`findNul`),
+  `zeros_spec` and `padded_end_spec` (`paddedEnd`, or its error), and
+  `c_string_spec` (the NUL of the string of `cString`, or its error).
+- UTF-8: `continues_spec`, the rests `scalar_tail2_spec`, `scalar_tail3_spec`
+  and `scalar_tail4_spec` of `scalar_end` by the length of the sequence,
+  `scalar_end_eq_spec` (`scalarEnd`), `scalar_end_spec` (the index after the
+  character that `ByteArray.utf8DecodeChar?` decodes) and `is_utf8_spec`
+  (`ByteArray.IsValidUTF8` of the bytes of a range, the condition of
+  `String.fromUTF8?`). The table of `scalar_end` is 1,075 generated lines of
+  branches that repeat the tests of its first byte; `scalar_end_eq_spec`
+  follows the branches that the first byte takes and steps over each rest with
+  the triple of its length, so that no theorem walks the whole table.
+- Names: `alphanumeric_spec` and `alphanumeric_isAlphanum`
+  (`Char.isAlphanum`), `name_byte_spec` (`nameChar`, the characters of
+  `isNodeNameChar` and `isPropertyNameChar`) and `name_bytes_spec`.
+- Comparisons: `same_bytes_loop_spec`, `same_bytes_spec`, `starts_with_spec`,
+  `name_at_loop_spec` and `name_at_spec`, stated on the bytes of the slices.
+- Tokens: `pieceOf`, a token of the code as the `Piece` of the specification,
+  and `piece_at_spec` (`pieceAt`), with `agrees_word32_ok` and
+  `agrees_word32_err`, the word reads that agree with `u32At`.
 -/
 
 @[expose] public section
@@ -15,27 +43,6 @@ open Aeneas Aeneas.Std Aeneas.Std.WP Result
 open KrepiGen.Fdt Krepi.Spec.Fdt Krepi.Statements Krepi.Statements.Fdt
 
 namespace Krepi.Proofs.Fdt.Refinement
-
-/-! ## Helpers -/
-
-/-- The width of `usize` is at least 32 bits. -/
-theorem usize_numBits_ge : 32 ≤ UScalarTy.Usize.numBits := by
-  have := System.Platform.numBits_eq
-  rw [UScalarTy.Usize_numBits_eq]
-  omega
-
-/-- A byte that the code read from a slice, as a byte of the specification. -/
-theorem byte_at {bytes : Slice U8} {x : U8} {k n : Nat} {h : k < bytes.val.length}
-    (hx : x = bytes.val[k]'h) (hk : k = n) : ((bytesOf bytes)[n]!).toNat = x.val := by
-  subst hk; rw [bytesOf_getElem!, hx, getElem!_pos]
-
-theorem ite_spec_pos {α : Type} {c : Prop} [Decidable c] {a b : Result α} {p : α → Prop}
-    (h : c) (ha : a ⦃ p ⦄) : (if c then a else b) ⦃ p ⦄ := by
-  simp only [h, ↓reduceIte]; exact ha
-
-theorem ite_spec_neg {α : Type} {c : Prop} [Decidable c] {a b : Result α} {p : α → Prop}
-    (h : ¬ c) (hb : b ⦃ p ⦄) : (if c then a else b) ⦃ p ⦄ := by
-  simp only [h, ↓reduceIte]; exact hb
 
 /-! ## Constants -/
 
