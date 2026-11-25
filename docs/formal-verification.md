@@ -134,7 +134,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/Krepi/Spec/` | Specifications written from requirements, registered in `targets.json`; a component with a directory below [subject domains](domains/README.md) describes its own in the `specification.md` there, where it has one | Present |
 | `verification/Krepi/SpecProperties/` | The invariants and the cross-cutting properties of the specifications, stated on them as statements ([specifications](#specifications)) | Present |
 | `verification/Krepi/SpecTests/` | The specification tests, stated as statements, the builders of their inputs and the replay of the frozen test vectors of each component ([test vectors](#test-vectors)) | Present |
-| `verification/Krepi/Statements/` | Statements: the propositions that registered theorems prove ([statements and proofs](#statements-and-proofs)) | Planned |
+| `verification/Krepi/Statements/` | Statements: the propositions that registered theorems prove ([statements and proofs](#statements-and-proofs)) | Present |
 | `verification/Krepi/Proofs/` | Proofs of statements and refinement proofs of production targets; the only directory of the Lake project outside the statement side ([statements and proofs](#statements-and-proofs)) | Present |
 | `verification/Krepi/Models/` | Lean models of items that proofs reach without extracting them, and their differential check | Planned |
 | `verification/Krepi/Qualification/` | Proofs about the qualification shapes | Present |
@@ -3457,7 +3457,7 @@ code, the replay runs the specification, and both answer the vectors that
 the legacy tree froze
 ([independent evidence](conventions/testing.md#independent-evidence)). The
 contracts of the device-tree and page-tables components name their vector
-files, and no contract names a replay module yet.
+files and their replay modules.
 
 ### Contract block
 

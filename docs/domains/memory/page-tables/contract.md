@@ -920,11 +920,11 @@ one call of an entry that the test makes with the output that it asserts.
 The expected outputs below are the assertions of the test bodies. Where a
 row says only that a call fails, the vector file gives the error that the
 rules of this page give for its input; the expected output of the row stays
-as the test asserts it. The vector file is the one that the block below
-names; the replay is named once the host tests write their results.
+as the test asserts it. The block names the vector file and replay module.
 
 ```vectors
 vectors = "verification/vectors/memory/page-tables.vectors"
+replay = "Krepi.SpecTests.PageTables.Replay"
 ```
 
 | File | Vectors |
