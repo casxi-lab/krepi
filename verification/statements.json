@@ -780,7 +780,7 @@
       "name": "Krepi.Statements.Fdt.FdtTotalSize",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.fdtTotalSize",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.FdtNodes",
@@ -804,13 +804,13 @@
       "name": "Krepi.Statements.Fdt.FdtReservations",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.fdtReservations",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.ReservationsNext",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.reservationsNext",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.NodeName",

@@ -2,6 +2,7 @@ module
 
 public import Krepi.Statements.Fdt.Tree
 import Mathlib.Util.CountHeartbeats
+import Krepi.Proofs.Fdt.Refinement.ParseHeaderLemmas
 
 /-!
 # Device tree: refinement of the parse and the node access
@@ -9,23 +10,30 @@ import Mathlib.Util.CountHeartbeats
 One theorem for each statement of `Krepi.Statements.Fdt.Tree`,
 whose type is exactly that statement.
 
-Every theorem here is planned: its proof is `sorry` until a proof pull
-request proves it, and `verification/statements.json` registers it as
-`planned`. Mathlib is imported so that the gate counts the heartbeats of
-each theorem.
+Three are proved, and `verification/statements.json` registers them as
+`proved`: `fdtTotalSize` and `fdtReservations` restate the triples of
+`Krepi.Proofs.Fdt.Refinement.ParseHeaderLemmas` (`fdt_total_size_spec` and
+`fdt_reservations_spec`), and `reservationsNext` follows from the
+representation of the iterator alone (`advances_of_stands`). The other
+fifteen are planned: `fdtParse`, `fdtNodes`, `nodesNext`, `fdtFindNode`,
+`nodeName`, `nodeParent`, `nodeProperty`, `nodeStringProperty`,
+`nodeEnabled`, `nodeAddressCells`, `nodeSizeCells`, `nodeReg`, `nodeRanges`,
+`nodeDmaRanges` and `nodeTranslateReg`. Each proof is `sorry` until a proof
+pull request proves it, and `verification/statements.json` registers it as
+`planned`. Mathlib is imported so that the gate counts the heartbeats of each
+theorem.
 -/
 
 namespace Krepi.Proofs.Fdt.Refinement.Tree
 
-open Krepi.Statements.Fdt
+open Krepi.Statements.Fdt Krepi.Proofs.Fdt.Refinement
 
 /-- Proves `FdtParse`. Feature: `krepi.platform.device-tree`. -/
 public theorem fdtParse : FdtParse := by
   sorry
 
 /-- Proves `FdtTotalSize`. Feature: `krepi.platform.device-tree`. -/
-public theorem fdtTotalSize : FdtTotalSize := by
-  sorry
+public theorem fdtTotalSize : FdtTotalSize := fun hU t T hR => fdt_total_size_spec hU t T hR
 
 /-- Proves `FdtNodes`. Feature: `krepi.platform.device-tree`. -/
 public theorem fdtNodes : FdtNodes := by
@@ -40,12 +48,10 @@ public theorem fdtFindNode : FdtFindNode := by
   sorry
 
 /-- Proves `FdtReservations`. Feature: `krepi.platform.device-tree`. -/
-public theorem fdtReservations : FdtReservations := by
-  sorry
+public theorem fdtReservations : FdtReservations := fun _ t T hR => fdt_reservations_spec t T hR
 
 /-- Proves `ReservationsNext`. Feature: `krepi.platform.device-tree`. -/
-public theorem reservationsNext : ReservationsNext := by
-  sorry
+public theorem reservationsNext : ReservationsNext := fun _ _ _ h => advances_of_stands h
 
 /-- Proves `NodeName`. Feature: `krepi.platform.device-tree`. -/
 public theorem nodeName : NodeName := by
