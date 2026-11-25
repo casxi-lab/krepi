@@ -714,7 +714,7 @@
       "name": "Krepi.Statements.Fdt.CellsU64",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.cellsU64",
       "module": "Krepi.Proofs.Fdt.Refinement.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.RegNew",
@@ -756,19 +756,19 @@
       "name": "Krepi.Statements.Fdt.SpanNew",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.spanNew",
       "module": "Krepi.Proofs.Fdt.Refinement.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.SpanEnd",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.spanEnd",
       "module": "Krepi.Proofs.Fdt.Refinement.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.SpanContains",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.spanContains",
       "module": "Krepi.Proofs.Fdt.Refinement.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.FdtParse",
