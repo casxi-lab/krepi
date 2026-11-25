@@ -624,13 +624,13 @@
       "name": "Krepi.Statements.Fdt.MemoryPlanAllRam",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanAllRam",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanNew",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanNew",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanFromBootMemory",
