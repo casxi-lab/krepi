@@ -552,19 +552,19 @@
       "name": "Krepi.Statements.Fdt.MemoryMapRam",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.memoryMapRam",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryMapReserved",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.memoryMapReserved",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryMapDynamic",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.memoryMapDynamic",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.FdtDiscoverBootMemory",
@@ -576,37 +576,37 @@
       "name": "Krepi.Statements.Fdt.BootMemoryRam",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryRam",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.BootMemoryReserved",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryReserved",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.BootMemoryDynamic",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryDynamic",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.BootMemoryDtb",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryDtb",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.BootMemoryImage",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryImage",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.BootMemoryRamBytes",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryRamBytes",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.BootMemoryIsAvailable",
