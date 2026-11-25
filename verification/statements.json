@@ -720,37 +720,37 @@
       "name": "Krepi.Statements.Fdt.RegNew",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.regNew",
       "module": "Krepi.Proofs.Fdt.Refinement.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.RegNext",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.regNext",
       "module": "Krepi.Proofs.Fdt.Refinement.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.AddressMapNew",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.addressMapNew",
       "module": "Krepi.Proofs.Fdt.Refinement.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.AddressMapKind",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.addressMapKind",
       "module": "Krepi.Proofs.Fdt.Refinement.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.AddressMapToParent",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.addressMapToParent",
       "module": "Krepi.Proofs.Fdt.Refinement.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.AddressMapToChild",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Translate.addressMapToChild",
       "module": "Krepi.Proofs.Fdt.Refinement.Translate",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.SpanNew",
