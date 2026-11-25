@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "hash": "b89fe12170892a221ccebc10d1a4f3136de6350b",
+  "hash": "a7aaf92ac7fd8b3888b3c4b5e346c2e498dda5be",
   "statements": [
     {
       "name": "Krepi.SpecProperties.Fdt.CheckFdtWellFormed",
@@ -1489,6 +1489,192 @@
       "theorem": "Krepi.Proofs.PageTables.Witnesses.PageOwnership.highPlacementNoOverflow",
       "module": "Krepi.Proofs.PageTables.Witnesses.PageOwnership",
       "state": "proved"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.KernelMap",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Boot.kernelMap",
+      "module": "Krepi.Proofs.PageTables.Refinement.Boot",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.KernelMapPlanNext",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Boot.kernelMapPlanNext",
+      "module": "Krepi.Proofs.PageTables.Refinement.Boot",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.DirectMap",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Boot.directMap",
+      "module": "Krepi.Proofs.PageTables.Refinement.Boot",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.DirectMapPlanNext",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Boot.directMapPlanNext",
+      "module": "Krepi.Proofs.PageTables.Refinement.Boot",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.OwnershipNew",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipNew",
+      "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.OwnershipChoose",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipChoose",
+      "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.OwnershipAssign",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipAssign",
+      "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.OwnershipReserve",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipReserve",
+      "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.ReservationInitialized",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.reservationInitialized",
+      "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.OwnershipPublish",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipPublish",
+      "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.OwnershipCancel",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipCancel",
+      "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.OwnershipRelease",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipRelease",
+      "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.OwnershipOwner",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipOwner",
+      "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.OwnershipValidate",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipValidate",
+      "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.OwnershipStats",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipStats",
+      "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.Descriptor",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.descriptor",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.DirectAddress",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.directAddress",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.PhysRangeNew",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.physRangeNew",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.PhysRangeEnd",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.physRangeEnd",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.PhysRangeContains",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.physRangeContains",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.PhysRangeOverlaps",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.physRangeOverlaps",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.TablesLookupPage",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesLookupPage",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.TablesLookupBlock",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesLookupBlock",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.TablesUsed",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesUsed",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.TablesNew",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesNew",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.TablesReset",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesReset",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.TablesCloneKernelFrom",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesCloneKernelFrom",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.ClonePlanNext",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.clonePlanNext",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.TablesMapPage",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesMapPage",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.TablesMapBlock",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesMapBlock",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
+    },
+    {
+      "name": "Krepi.Statements.PageTables.TablesUnmapPage",
+      "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesUnmapPage",
+      "module": "Krepi.Proofs.PageTables.Refinement.Tables",
+      "state": "planned"
     }
   ]
 }
