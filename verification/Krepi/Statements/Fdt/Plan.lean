@@ -13,10 +13,12 @@ widths, under the premises that its arguments need, the function returns,
 and its result agrees with that of its function of `Krepi.Spec.Fdt` through
 the representation of `Krepi.Statements.Fdt.Representation`, the same error
 with the same priority included. None of these functions writes anything.
-The queries that read the spans of a boot memory map take
-`MemoryPlan.WellFormed`, which its three constructors establish, and the
-construction from a boot memory takes the invariants of the boot memory,
-premises of the proof path. The theorems below
+The six functions that compute from the spans of a boot memory map,
+`described_bytes`, `managed_bytes`, `contains_ram`, `is_available`,
+`permits_backing` and `available_ranges`, take `MemoryPlan.WellFormed`,
+which its three constructors establish, and the construction from a boot
+memory takes the invariants of the boot memory, premises of the proof
+path. The theorems below
 `Krepi.Proofs.Fdt.Refinement` prove them.
 -/
 

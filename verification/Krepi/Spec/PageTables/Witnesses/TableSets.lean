@@ -49,7 +49,7 @@ both rules.
 
 Error branches that no input of an entry reaches have no witness; for each,
 a proposition below states that the entry never takes it, with its reason,
-and a planned theorem proves it. The two variants of the specification that
+and a theorem proves it. The two variants of the specification that
 reject every input or accept every input are refuted for the functions of
 these rows by `notAlwaysRejecting` and `notAlwaysSucceeding`.
 -/
@@ -891,7 +891,7 @@ theorem priorityCloneStep7 :
 Branches of the entries that fail with an error, but that no input of the
 entry reaches under its machine widths or on the boot memory maps that the
 fdt entries build. Each proposition states the fact that keeps the entry from
-the branch, with its reason; a planned theorem below
+the branch, with its reason; a theorem below
 `Krepi.Proofs.PageTables.Witnesses.TableSets` proves it. The error of each
 branch is witnessed above where another branch of the same entry gives it. -/
 

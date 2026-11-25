@@ -72,8 +72,8 @@ against the targets and the open obligations
 ([legacy inventory and admission](#legacy-inventory-and-admission)), and
 `cargo xtask formal vectors` compares a component's frozen test vectors
 through its specification with the results of its host tests
-([test vectors](#test-vectors)), though no contract names a replay module
-yet; the formal step of `cargo xtask check` runs both, the second in the pinned
+([test vectors](#test-vectors)); the formal step of `cargo xtask check`
+runs both, the second in the pinned
 image ([vectors in CI](#vectors-in-ci)). `cargo xtask formal impact` lists
 the targets that a change affects ([commands](#commands)). A
 weekly toolchain canary runs the gate with the tools of Aeneas main through

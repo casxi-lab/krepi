@@ -24,11 +24,10 @@ hypotheses on their arguments.
   bytes places them. A node is a begin-node token of its structure block:
   it stands for the node of the same index in the order of the block, with
   the offsets of its name, its properties and its parent.
-- A `Reg` and an address map hold the value that the code checked: each
-  stands for the value that its constructor of the specification gives for
-  the same bytes and cells.
-- An iterator stands for the list that its calls of `next` give
-  (`Krepi.Statements.Stands`).
+- An address map holds the value that the code checked: it stands for the
+  map that `AddressMap.new` gives for the same bytes and cells.
+- An iterator, a `Reg` among them, stands for the list that its calls of
+  `next` give (`Krepi.Statements.Stands`).
 - A `&str` argument is read through `core::str::{str}::as_bytes`, which the
   translation keeps as a declaration without a body (`StrRepr`).
 -/

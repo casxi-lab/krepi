@@ -9,7 +9,7 @@ The specification tests of the `page-tables` component: for each requirement
 of `docs/domains/memory/page-tables/requirements.md`, PGT-R01 to PGT-R12, one
 input that the specification must accept, with the result that it must give,
 and one that it must reject, with the error that it must give. Each test is a
-proposition on concrete states and inputs, and a planned theorem below
+proposition on concrete states and inputs, and a theorem below
 `Krepi.Proofs.PageTables.Stp` proves it. Each instantiates the criterion of
 its requirement, the sentence of the requirement that begins "The criterion:",
 and its docstring quotes the words of that sentence that it instantiates.
