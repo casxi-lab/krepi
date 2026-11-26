@@ -570,7 +570,7 @@
       "name": "Krepi.Statements.Fdt.FdtDiscoverBootMemory",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverBootMemory",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.BootMemoryRam",
@@ -612,13 +612,13 @@
       "name": "Krepi.Statements.Fdt.BootMemoryIsAvailable",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryIsAvailable",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.BootMemoryFindAvailable",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryFindAvailable",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanAllRam",
