@@ -40,58 +40,56 @@ of the [proof targets](#proof-targets), of which only two planned ones are
 registered, which a whole run extracts only when a hand-written module
 imports their generated modules, as none does yet; the
 [base round](#base-round), which builds, audits and replays krepi's own
-Lean: today the qualification proofs and the definitions that they use,
-and the specifications of the device tree and of the page tables with
-their properties, their tests and the theorems that witness them, where the
-theorems of planned statements are built but not audited; and the targets, which build and audit the
-proofs of each target in a stage of its own and then build each of its
-registered [mutants](#mutants) in a stage of its own, which its proofs
-must reject.
-On a pull request, a first phase records the
-[guard](#guard), which `cargo xtask formal guard` runs on its own. With
-`--shard`, `cargo xtask formal run` runs one part of the gate, the
-qualification job, the [comparator](#comparator) part after it or the
-shard of one formal target, and
+Lean, divided between the qualification job and the [lanes](#lanes): today
+the qualification proofs and the definitions that they use, and the
+specifications of the device tree and of the page tables with their
+properties, their tests and the theorems that witness them, where the
+theorems of planned statements are built but not audited; and the targets,
+which build and audit the proofs of each target in a stage of its own and
+then build each of its registered [mutants](#mutants) in a stage of its
+own, which its proofs must reject. On a pull request, a first phase
+records the [guard](#guard), which `cargo xtask formal guard` runs on its
+own. With `--shard`, `cargo xtask formal run` runs one part of the gate,
+the qualification job, a lane, whose base run `--comparator` follows with
+its [comparator](#comparator), or the part of one formal target, and
 `cargo xtask formal merge` combines the receipts of the parts of a commit
-into the conclusion of the whole gate and of its three hard gates, the axiom
-audits, the replay of `leanchecker` and the comparator, with the
+into the conclusion of the whole gate and of its three hard gates, the
+axiom audits, the replay of `leanchecker` and the comparator, with the
 [waivers](#waivers) that hold ([shards and merge](#shards-and-merge)); CI
-runs the gate as these parts
-and merges them ([CI job](#ci-job)). `cargo xtask formal receipt` says
-whether the record of a merge is current for the checkout, and whether it
-is fresh ([current and fresh records](#current-and-fresh-records)). The
-[calibration target](#calibration-target), a crate with the shapes of the
-first kernel targets and its proofs, runs through the same phases with
-`cargo xtask formal run --calibration`, in the workflow
-`formal calibration` too. `cargo xtask formal mutants` generates the
-source mutants of a target and writes the list of those that survive
-([source mutants and survivors](#source-mutants-and-survivors)).
-`cargo xtask formal check`
+runs the gate as these parts and merges them ([CI job](#ci-job)). `cargo
+xtask formal receipt` says whether the record of a merge is current for
+the checkout, and whether it is fresh ([current and fresh
+records](#current-and-fresh-records)). The [calibration
+target](#calibration-target), a crate with the shapes of the first kernel
+targets and its proofs, runs through the same phases with `cargo xtask
+formal run --calibration`, in the workflow `formal calibration` too.
+`cargo xtask formal mutants` generates the source mutants of a target and
+writes the list of those that survive ([source mutants and
+survivors](#source-mutants-and-survivors)). `cargo xtask formal check`
 holds the inventory of the production functions of the kernel workspace
-against the targets and the open obligations
-([legacy inventory and admission](#legacy-inventory-and-admission)), and
-`cargo xtask formal vectors` compares a component's frozen test vectors
-through its specification with the results of its host tests
-([test vectors](#test-vectors)); the formal step of `cargo xtask check`
-runs both, the second in the pinned
-image ([vectors in CI](#vectors-in-ci)). `cargo xtask formal impact` lists
-the targets that a change affects ([commands](#commands)). A
-weekly toolchain canary runs the gate with the tools of Aeneas main through
-the steps of `cargo xtask formal canary` and records what they would break
-([toolchain canary](#toolchain-canary)). None of them verifies anything
-about the kernel. The cases taken from the CAS project expect what the
-pinned tools give; for 27 of them this differs from the expectation
-recorded with the earlier Charon and Aeneas, and each such change is
-explained ([qualification](#qualification)). CI runs the gate in the
-pinned image when the label `full-check` is added to a pull request to
-`main` whose change affects it, on a manual run of `main` and once a week,
-as the qualification job with the comparator part after it, a shard for
+against the targets and the open obligations ([legacy inventory and
+admission](#legacy-inventory-and-admission)), and `cargo xtask formal
+vectors` compares a component's frozen test vectors through its
+specification with the results of its host tests ([test
+vectors](#test-vectors)); the formal step of `cargo xtask check` runs
+both, the second in the pinned image ([vectors in CI](#vectors-in-ci)).
+`cargo xtask formal impact` lists the targets that a change affects
+([commands](#commands)). A weekly toolchain canary runs the gate with the
+tools of Aeneas main through the steps of `cargo xtask formal canary` and
+records what they would break ([toolchain canary](#toolchain-canary)).
+None of them verifies anything about the kernel. The cases taken from the
+CAS project expect what the pinned tools give; for 27 of them this differs
+from the expectation recorded with the earlier Charon and Aeneas, and each
+such change is explained ([qualification](#qualification)). CI runs the
+gate in the pinned image when the label `full-check` is added to a pull
+request to `main` whose change affects it, on a manual run of `main` and
+once a week, as the qualification job, a job for each lane, a part for
 each formal target and their merge; four jobs judge the conclusion and
 each hard gate in the record of the merge, and with `formal fast` and
 `formal guard` they are the six checks of the gate, which the rules of
-`main` require. On a push to `main`, a job reviews the record of the merged
-head ([CI job](#ci-job)). Everything else on this page is planned: the
-proofs of the registered statements, the formal targets of the kernel,
+`main` require. On a push to `main`, a job reviews the record of the
+merged head ([CI job](#ci-job)). Everything else on this page is planned:
+the proofs of the registered statements, the formal targets of the kernel,
 further specifications and the other commands of `cargo xtask formal`.
 They are set up by porting the tooling of the CAS project and the
 prototype tree, and this page changes with them. Nothing about the kernel
@@ -160,7 +158,9 @@ Generated Lean, extraction outputs, logs and receipts go to the ignored
 `artifacts/formal/` directory, and the Lake build directory
 `verification/.lake/` is ignored as well. Each run of the gate has a
 directory `artifacts/formal/runs/<id>/`, where `<id>` is the Unix time of
-its start, its process number and a count: `receipt.json`, `logs/` with
+its start, its process number and a count: `receipt.json`, or
+`base.json` for the base run of a lane
+([shards and merge](#shards-and-merge)), `logs/` with
 the two output files of each command, and `work/` with the export of the
 gate inputs, the home and temporary directories of the tools; in
 `cases/`, the extraction and the Lake stage of each qualification case; in
@@ -181,7 +181,7 @@ definitions are never edited.
 
 At its end, after the second snapshot, a run of `cargo xtask formal run` or
 `cargo xtask formal mutants` removes `work/`, so that its directory keeps
-`receipt.json` and `logs/`; with `--keep` it keeps `work/`, as
+its receipt and `logs/`; with `--keep` it keeps `work/`, as
 [editing proofs](#editing-proofs) needs. A work directory that cannot be
 removed, or whose removal ends after the deadline of the closing steps, is
 a tool failure of the run. A stop signal ends a run without a receipt and
@@ -578,14 +578,15 @@ push nothing:
 
 - `canary limits` resolves the head of Aeneas's `main` once, with
   `git ls-remote`, and `cargo xtask formal canary limits` gives the rows of
-  the run from `verification/targets.json`: the qualification row, and the
-  row of the shard of each formal target, by its unit, with the sum of the
-  budgets of the shard; planned targets have none. The shard step has the
-  limit that the job `formal limits` of the CI job gives a shard, and every
-  job the limits of the steps that it runs and 5 minutes, so a step's
-  limit, never the job's, ends a long step, and the steps that record a
-  part always run. A row whose job would need more than the 360 minutes of
-  a hosted runner fails the step.
+  the run from `verification/targets.json` and `verification/lanes.json`:
+  the qualification row, the row of each lane, with its registered budget,
+  and the row of the part of each formal target, by its part, with the
+  budget of the part; planned targets have none. The steps of a lane and
+  of a part have the limits that the job `formal limits` of the CI job
+  gives them, and every job the limits of the steps that it runs and 5
+  minutes, so a step's limit, never the job's, ends a long step, and the
+  steps that record a part always run. A row whose job would need more
+  than the 360 minutes of a hosted runner fails the step.
 - `toolchain canary <part>`, one job for each row, builds the image and
   runs its part in the steps below, and uploads what it leaves as the
   artifact `formal-canary-part-<part>-<run>-<attempt>`, with `-` for `/`.
@@ -598,7 +599,7 @@ The steps of a row end its job at the first that fails, each by its id:
    refuse a root user or a checkout of another owner, record the disk,
    remove preinstalled software and sample the disk every 15 seconds as the
    image workflows do, here until the end of the part, build xtask and copy
-   it for the comparator part as the job `formal run` does;
+   it for the comparator of a lane as the job `formal lane` does;
 2. `resolve`: fetch the head of Aeneas's `main` that `canary limits`
    resolved into `artifacts/canary/aeneas/`, and, when its `charon-pin` has
    one line that is not a comment, that Charon commit, without submodules,
@@ -636,11 +637,13 @@ The steps of a row end its job at the first that fails, each by its id:
    without `KREPI_FORMAL_IMAGE` and without a trigger, under `deadline.sh`,
    which writes its exit status for the verdict as well. The qualification
    row runs `gate`, the qualification job, `cargo xtask formal run --shard
-   qualification --keep`, as the job `formal run` does, and then
-   `comparator`, the [comparator](#comparator) part, on the stage that it
-   kept, in a container of its own as that job does, also when the gate
-   failed; the row of a formal target runs `shard`, its shard, as the job
-   `formal shard <name>` does. The comparator runs `lake comparator` only
+   qualification`, as the job `formal run` does; the row of a lane runs
+   `lane`, its base run, `cargo xtask formal run --shard lane/<name>
+   --keep`, and then `comparator`, its [comparator](#comparator), on the
+   stage that the base run kept, in a container of its own, as the job
+   `formal lane <name>` does, also when the base run failed; and the row of
+   a formal target runs `shard`, its part, as the job
+   `formal shard <name>/1` does. The comparator runs `lake comparator` only
    on the units whose statements the base round verified and audited, and
    records each other unit as `NOT_RUN` ([formal
    upgrade](formal-upgrade.md#canary-verdicts)).
@@ -679,19 +682,21 @@ exits with 0 only when its verdict is `PASSED`. A row writes the outcome
 of each of its steps into `artifacts/canary/part.json`. The step `verdict`
 reads what the rows of the attempt uploaded itself, not through
 `cargo xtask formal merge`, as the receipts of the canary name no image:
-the qualification job, the comparator part and the shard of each formal
-target of the registry are its parts, and each row must have left one
-record and each part one receipt. Receipts of more than one commit, tree,
-run or attempt are a defect of the canary. Otherwise the run gets the
-finding of the first part that did not pass, in that order with the
-shards by name, at the first step of its row that did not pass, or else
-that of the part, with the step, after the part for a shard, and the
-commit of `main` in its detail. The detail starts instead with `limits`
-when the job `canary limits` did not succeed, with `parts` when the
-registry cannot be read, the receipts disagree or the run passed, and
-with the part of the row, without a step, when a row left no record or
-more than one. The job passes only on `PASSED`. A run is repeated whole,
-never by its failed jobs alone, so that its parts are of one attempt:
+the qualification job, each lane and the part of each formal target of
+the registry are its parts, and each row must have left one record and
+each part one receipt, which for a lane its comparator writes; the step
+`lane` is judged by the base record that the base run of the lane left.
+Receipts of more than one commit, tree, run or attempt are a defect of the
+canary. Otherwise the run gets the finding of the first part that did not
+pass, in that order with the lanes and the parts each by name, at the
+first step of its row that did not pass, or else that of the part, with
+the step, after the part for a lane and the part of a target, and the
+commit of `main` in its detail. The detail starts instead with `limits` when the job `canary
+limits` did not succeed, with `parts` when the registry cannot be read,
+the receipts disagree or the run passed, and with the part of the row,
+without a step, when a row left no record or more than one. The job passes
+only on `PASSED`. A run is repeated whole, never by its failed jobs alone,
+so that its parts are of one attempt:
 
 | Finding | When |
 | --- | --- |
@@ -744,14 +749,14 @@ others are planned.
 | Command | Purpose |
 | --- | --- |
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
-| `cargo xtask formal run [--target NAME]... [--shard NAME] [--calibration] [--keep]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the part of the named targets, their extraction and the phase `targets`, `--shard` only the qualification job, the [comparator](#comparator) part or the shard of a formal target ([shards and merge](#shards-and-merge)), `--calibration` runs in the layout of the [calibration target](#calibration-target), and `--keep` keeps the work directory of the run ([layout](#layout)). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run of the whole gate has |
+| `cargo xtask formal run [--target NAME]... [--shard NAME [--comparator]] [--calibration] [--keep]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the part of the named targets, their extraction and the phase `targets`, `--shard` only the qualification job, the base run of a lane, whose [comparator](#comparator) `--comparator` runs after it, or the part of a formal target ([shards and merge](#shards-and-merge)), `--calibration` runs in the layout of the [calibration target](#calibration-target), and `--keep` keeps the work directory of the run ([layout](#layout)). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run of the whole gate has |
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs, sources and registries ([guard](#guard)) |
 | `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)) and of the waiver record ([waivers](#waivers)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)), the lanes ([lanes](#lanes)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its jobs fetched and built: give the rows of the run and their `limits` from the registry, `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from what its parts left and, with `--outcomes`, the result of the job `canary limits` ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
 | `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration, and `--keep` keeps the work directory of the run, as for `run` |
 | `cargo xtask formal impact --base REV` | Lists, one item per line, the merge base of `REV` and `HEAD`, each path changed since with its Git status, without rename detection, the decision, `unaffected` when no changed path lies within a [gate input](#gate-inputs-and-snapshot) and `affected` otherwise, and the registered targets that the change affects, with their states: every target when an input of extraction changed, and otherwise each whose entry in `verification/targets.json` changed and each with a changed file of its `proof_modules`. A registry that cannot be read at the merge base, as after a change of its schema, counts as one without targets, so that every target is listed, after a line `unreadable verification/targets.json at the merge base: <why>`. Paths, names and that reason are printed escaped, so that none splits a line. It decides nothing, and exits with 1 only on a base that is not a revision or when Git or the registry at the head cannot be read |
-| `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job, of the comparator part and of the shard of each formal target of the commit checked out into the conclusion of the whole gate, which passes when every unit and part outside the [waivers](#waivers) that hold is `VERIFIED`, and of its three hard gates, the axiom audits, the replay of `leanchecker` and the comparator, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
+| `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job, of each lane and of the part of each formal target of the commit checked out into the conclusion of the whole gate, which passes when every unit and part outside the [waivers](#waivers) that hold is `VERIFIED`, and of its three hard gates, the axiom audits, the replays of `leanchecker` and the comparator, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
 | `cargo xtask formal receipt [--require-fresh] [RECORD]` | Judges the record of a merge, by default `artifacts/formal/merge/record.json`, against the checkout ([current and fresh records](#current-and-fresh-records)): `CURRENT` when it has the gate inputs of the clean checkout, the pinned image and one conclusion for each registered unit and is complete, `VERIFIED` and passing, and `WAIVED` when it passes only within waivers that still hold; `--require-fresh` also requires the trigger of a run of CI, no planned statement and no waiver. It exits with 0 when the record is current, and fresh when asked, 3 when it is waived, 1 otherwise and 2 on a usage error. It runs no tool and proves nothing |
 
 `cargo xtask check` does not run the gate, which needs the pinned tools;
@@ -817,8 +822,9 @@ in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
    image that it runs in against the tool manifest and the export's image
    pin, and the user it runs as ([image pin](#image-pin)). The target
    registry of the export, `verification/targets.json`, must register every
-   name given with `--target`, and the target of the shard of a target as a
-   formal target ([shards and merge](#shards-and-merge));
+   name given with `--target`, and the target of the part of a target as a
+   formal target, and the lanes of the export the lane of a run of a lane
+   ([shards and merge](#shards-and-merge));
 4. rejects the run when a gate input is a Python source, a file whose name
    ends in `.py` in any case, a Lean file below `verification/KrepiGen/`,
    the directory of the generated definitions, which only stages of the run
@@ -844,15 +850,16 @@ in the repository; and `verification/`, `xtask/`, `.github/workflows/`,
    package that kernel targets are extracted from. The targets that a run
    selects are every formal target of the registry for a whole run, and
    those that `--target` names, planned ones included, for a run with
-   `--target`; a run with a base round extracts these and, for the base
+   `--target`; a whole run extracts these and, for the base
    round, the formal targets that it does not select and the planned
    targets whose generated modules a hand-written module imports
    ([proof targets](#proof-targets)), so a whole run extracts no other
    planned target, and a run of
    `cargo xtask formal run --target` extracts the named targets alone.
-   The qualification job selects no target and extracts every
-   formal target for the base round but those of the waivers that hold
-   ([waivers](#waivers)), and those planned targets; the shard of a
+   The qualification job selects and extracts no target; the base run of
+   a lane selects none and extracts the targets of the lane for its base
+   round but the formal ones of the waivers that hold
+   ([waivers](#waivers), [base round](#base-round)); the part of a
    target selects its target and extracts no other. A whole run whose
    registry has no formal target and no such planned target selects and
    extracts none, and the workspace may then have no root package.
@@ -927,10 +934,12 @@ command wrote is kept. Its limit is the smallest of:
   the comparator, Git and `cargo metadata` have none;
 - the rest of the budget of its phase;
 - the rest of the budget of the gate, 7,200 s from the start of the run
-  and the budget of each target that the run selects; 7,800 s for the
-  qualification job, 1,800 s for the comparator part, and 300 s and the
-  budgets of its targets for the shard of a target and for a run of
-  `cargo xtask formal run --target` ([shards and merge](#shards-and-merge));
+  and the budget of each target that the run selects; 7,200 s for the
+  qualification job; 300 s, the registered budget of the lane and 600 s
+  for the runs of a lane, whose comparator run ends by the deadline of its
+  base run; and 300 s and the budgets of its targets for the part of a
+  target and for a run of `cargo xtask formal run --target`
+  ([shards and merge](#shards-and-merge));
 - for a command of the unit of a target, the rest of the budget of the
   target: the budget less the time during which a command of the unit or
   of a unit of its mutants has run so far, whichever phase ran it
@@ -962,17 +971,18 @@ The shard plan is `verification/shards.json`, and
 `verification/qualification/calibration/shards.json` for the
 [calibration target](#calibration-target). It has schema 1 and `parts`, an
 array with one entry for each part of the gate that a run of CI has
-measured: `qualification`, or `target/<name>` for a registered target,
-each named by its unit. It is written by hand from the receipts of runs on
+measured: `qualification`, `lane/<name>` for a lane of the
+[lanes](#lanes), or `target/<name>/1` for a registered target, each named
+as its receipt names its part. It is written by hand from the receipts of runs on
 a standard `ubuntu-24.04-arm` runner, never by a run. The entries are
 those of the runs on `main` that measured the parts:
 `verification/shards.json` has `qualification`, and the plan of the
-calibration target has `qualification` and `target/calibration`. Each entry
+calibration target has `qualification` and `target/calibration/1`. Each entry
 has these fields:
 
 | Field | Content |
 | --- | --- |
-| `part` | `qualification` or `target/<name>` |
+| `part` | `qualification`, `lane/<name>` or `target/<name>/1` |
 | `disk_peak` | The disk peak of the part in bytes: `disk_available_at_start` less `disk_least_available` of the measuring receipt ([receipt](#receipt)) |
 | `seconds` | The `seconds` of the measuring receipt |
 | `cgroup_memory_peak` | The `cgroup_memory_peak` of the measuring receipt, in bytes |
@@ -999,33 +1009,35 @@ For example, with values that are only an illustration:
 
 `cargo xtask formal check` refuses a plan that does not parse, of another
 schema or with a field that it does not know, a part listed twice, and a
-part that is neither `qualification` nor the unit of a registered target;
-it lists the formal targets that the plan has no entry for, which is not a
-problem, as a target is measured once it is registered.
+part that is neither `qualification`, a lane of the lanes nor the part of
+a registered target; it lists the parts of the formal targets that the
+plan has no entry for, which is not a problem, as a target is measured
+once it is registered.
 
-Every formal target is a shard of its own, named by its unit; a planned
-target is no shard. The shard limit is 3,300 s: the wall-clock limit of the
-gate, 3,600 s, less the time of the merge, 300 s. `cargo xtask formal check`
-refuses a shard whose registered budget is more than the shard limit,
-whatever the workers of the shard, in either layout
+Every formal target has one part, `target/<name>/1`, and a planned target
+none. The shard limit is 3,300 s: the wall-clock limit of the gate,
+3,600 s, less the time of the merge, 300 s. `cargo xtask formal check`
+refuses the part of a target whose registered budget is more than the
+shard limit, whatever the workers of the part, in either layout
 ([proof targets](#proof-targets)): the budget counts the time during which
-a command of its target runs, whichever worker runs it, and the run of a
-shard has a deadline of 300 s and that budget from its start. Two workers
+a command of its target runs, whichever worker runs it, and the run of the
+part has a deadline of 300 s and that budget from its start. Two workers
 build the mutants of a target side by side, each in a stage of its own
 that starts from the build of its target
 ([registered mutants](#registered-mutants)). On a standard
-`ubuntu-24.04-arm` runner the shard of the calibration target, with its 30
+`ubuntu-24.04-arm` runner the part of the calibration target, with its 30
 mutants built one after another, took about 400 s, against the registered
 budget of its target of 3,000 s, and the parts of the gate stayed well
 within the wall-clock limit, the memory and the disk of the runner.
 
 The disk guard of a run, after the steps of the gate inputs and before the
-first phase, reads the plan of the export. The parts of a run are
-`qualification` and the unit of each target that it selects: a whole run
-sums the qualification and every formal target, and a run with `--target`
-or of `formal mutants` the qualification and the named targets; the
-qualification job counts `qualification` alone, and the shard of a target
-the unit of its target alone. A part
+first phase, reads the plan of the export. A run of a part counts that
+part alone: the qualification job `qualification`, both runs of a lane
+`lane/<name>` and the part of a target `target/<name>/1`. Any other run
+counts `qualification` and the part of each target that it selects: a
+whole run sums the qualification and every formal target, and a run with
+`--target` or of `formal mutants` the qualification and the named
+targets. A part
 without an entry counts 8 GiB, 8,589,934,592 bytes, and a part listed
 twice its largest peak. When the bytes available on the file system of the
 run directory at the start are less than 1.5 times the sum of the disk
@@ -1049,8 +1061,10 @@ The lanes are `verification/lanes.json`, and
 [calibration target](#calibration-target). They divide the hand-written
 modules of the Lake project, its Lean files below `Krepi/`, between the
 qualification job and the lanes of the base round, each with a registered
-budget. The runs of the gate do not read them yet; `cargo xtask formal check`
-and the job `formal limits` of the [CI job](#ci-job) check them. They have
+budget, and the gate runs each lane as a part of its own
+([shards and merge](#shards-and-merge), [base round](#base-round));
+`cargo xtask formal check` and the job `formal limits` of the
+[CI job](#ci-job) check them. They have
 schema 1 and `lanes`, an array with one entry for each lane, with these
 fields; a field that the table does not list is refused:
 
@@ -1093,27 +1107,35 @@ parse, of another schema or with a field that it does not know, and:
 
 The lanes are neither a registry nor on the statement side, so the
 [guard](#guard) requires no label for a change of them. The job
-`formal limits` fails on a lane name that is not of these characters and on
-a lane whose budget and the extraction margin are more than the shard
-limit, as the check does ([CI job](#ci-job)); the other rules are the
-check's alone.
+`formal limits` fails on a lane name that is not of these characters or
+that another lane has, on a component in two lanes, and on a lane whose
+budget and the extraction margin are more than the shard limit, as the
+check does ([CI job](#ci-job)); the other rules are the check's alone. The
+merge checks that the base rounds of the qualification job and of the
+lanes held the modules that the lanes give them
+([shards and merge](#shards-and-merge)).
 
 ### Shards and merge
 
 The gate runs as parts of one commit: the qualification job,
-`cargo xtask formal run --shard qualification`, the comparator part after
-it, `cargo xtask formal run --shard comparator`, and the shard of each
-formal target of the registry, `cargo xtask formal run --shard
-target/<name>`, which `cargo xtask formal merge` combines into the
+`cargo xtask formal run --shard qualification`; each lane of the
+[lanes](#lanes), in two runs, its base run,
+`cargo xtask formal run --shard lane/<name> --keep`, and then its
+comparator run, `cargo xtask formal run --shard lane/<name> --comparator`;
+and the part of each formal target of the registry,
+`cargo xtask formal run --shard target/<name>/1`, the one part of a
+target. `cargo xtask formal merge` combines their receipts into the
 conclusion of the whole gate. A run without `--shard` and `--target` has
-every phase in one process; local runs, the measurement jobs of the workflow
-`formal measure` such as `leanchecker fresh` ([CI job](#ci-job)) and
-`formal mutants` use it, and its receipt is no part of a merge. `--shard`
-cannot be given with `--target`.
-In CI the jobs `formal run`, which runs the comparator part after the
-qualification job, `formal shard <name>` and `formal parts` of the
-workflow `formal` run these parts and their merge, and the workflow
-`formal calibration` runs those of the calibration
+every phase in one process, with one base round over every hand-written
+module; local runs, the measurement jobs of the workflow `formal measure`
+such as `leanchecker fresh` ([CI job](#ci-job)) and `formal mutants` use
+it, and its receipt is no part of a merge. `--shard` cannot be given with
+`--target`, and `--comparator` only with `--shard lane/<name>`: otherwise
+the command exits with 2 before a run starts.
+In CI the jobs `formal run`, `formal lane <name>`, which runs the
+comparator run of its lane after its base run, `formal shard <name>/1` and
+`formal parts` of the workflow `formal` run these parts and their merge,
+and the workflow `formal calibration` runs those of the calibration
 ([CI job](#ci-job), [calibration target](#calibration-target)); the
 [toolchain canary](#toolchain-canary) runs the parts without a merge. These parts
 and their merge are the default way of running the gate in CI, and the
@@ -1122,27 +1144,41 @@ jobs `formal merge`, `formal axioms`, `formal leanchecker` and
 the merge, are among the required checks of `main`.
 
 - **The qualification job** has the [guard](#guard) on a pull request, the
-  [qualification](#qualification), the extraction of every formal target
-  but those of the [waivers](#waivers) that hold, whose commands are those
-  of the unit `base`, and the [base round](#base-round); it runs no target.
-  Its budget is 7,800 s: the gate's 7,200 s and 600 s for the extraction,
-  which the budgets of the targets do not grow. Its disk guard counts
-  `qualification` alone.
-- **The comparator part** has the phase `comparator` alone
-  ([comparator](#comparator)), which checks the theorems of the proved
-  statements in the stage of the base round of the qualification job of
-  the same commit and run, which that job keeps with `--keep`. Its budget
-  is 1,800 s, and its disk guard counts `qualification`.
-- **The shard of a target** has the extraction of that formal target, whose
+  [qualification](#qualification) and its [base round](#base-round): that
+  of the modules below `Krepi/Qualification/`, with the generated modules
+  of the proof cases of the qualification, and the checks of every
+  hand-written module, the statement hash, the file and source rules, the
+  list of the modules with the part that holds each, and what the
+  [waivers](#waivers) that hold leave out of them. It extracts no target
+  and runs none. Its budget is the gate's 7,200 s, and its disk guard
+  counts `qualification` alone.
+- **The base run of a lane** has the extraction of the targets of the
+  lane, whose commands are those of the unit `base/lane/<name>` of its
+  round, and the base round of the lane: its own hand-written modules,
+  with the generated modules of its targets, built, audited and replayed
+  from a root module of their own. Its deadline is 300 s for its start and
+  its closing steps, the registered budget of the lane and 600 s, the
+  extraction margin, which the phase `extraction` has: at most the shard
+  limit of 3,300 s ([lanes](#lanes)). It writes its receipt in its run
+  directory as the base record of the lane, `base.json` with schema 1, in
+  place of `receipt.json`, and keeps its stage with `--keep` for the
+  comparator run. Its disk guard counts the lane.
+- **The comparator run of a lane** has the phase `comparator` alone
+  ([comparator](#comparator)): it takes the one base record of the lane of
+  the same commit and run of CI below the runs directory, continues the
+  deadline of that base run, checks the proved statements of the lane in
+  the stage that the base run kept, and writes the receipt of the lane,
+  below. Its phase has at most 1,800 s, and its disk guard counts the lane.
+- **The part of a target** has the extraction of that formal target, whose
   commands are those of its unit, and the phase `targets` for it: its
   build, type check, audit, declaration ranges and registered
   [mutants](#mutants). It has no guard, qualification or base round, and
   lists the hand-written Lean modules of the snapshot as the base round
-  does, without building or auditing them, which the qualification job
-  does. Its budget is 300 s for its start and its closing steps and the
-  registered budget of its target, which its extraction shares. Its disk
-  guard counts the unit of its target alone. A shard of a planned or
-  unknown target is a tool failure before the phases.
+  does, without building or auditing them, which the lanes do. Its budget
+  is 300 s for its start and its closing steps and the registered budget
+  of its target, which its extraction shares. Its disk guard counts its
+  part alone. A part of a planned or unknown target is a tool failure
+  before the phases.
 - **A run of `cargo xtask formal run --target NAME...`** runs the part of
   the named targets in the same way: their extraction, planned targets
   included, and the phase `targets` for the formal ones, without the guard,
@@ -1155,11 +1191,27 @@ the merge, are among the required checks of `main`.
   without it, never `SCOPED`; it is complete by the rule of a run of the
   whole gate over its own units ([results](#results)).
 
+The receipt of a lane is that of its comparator run, which reads the base
+record again as it ends: a record whose SHA-256 is not the one that the
+run took at its start is a tool failure of the run. Otherwise the receipt
+holds the phases, units, failures, extracted targets, base round and lane
+record of the base run with its own; the commands of the base run, with
+the paths of their logs from the run directory of the comparator run,
+`../<run>/logs/...`, and then its own, numbered after them and timed from
+the start of the base run; the start and the budgets of the base run, the
+sum of the seconds of both runs, the larger memory peaks and the least
+free disk of both and the free disk at the start of the base run; and
+`base_record`, the SHA-256 of the base record, the run, start and seconds
+of the base run, and the start and seconds of the comparator run
+([receipt](#receipt)). When the comparator run finds no base record of the
+lane, or more than one, its receipt has its own units alone, `NOT_RUN`,
+and is a tool failure ([comparator](#comparator)).
+
 `cargo xtask formal merge [--calibration] RECEIPT...` runs on the host in a
 checkout of the commit of the receipts; it pulls no image and runs no proof
-tool. It reads the registry, `statements.json`, the qualification cases and
-the waiver record of the checkout, those of the calibration target, which
-has no waiver record, with `--calibration`, and judges the
+tool. It reads the registry, `statements.json`, the qualification cases,
+the lanes and the waiver record of the checkout, those of the calibration
+target, which has no waiver record, with `--calibration`, and judges the
 [waivers](#waivers) on the UTC date of the clock of its host.
 Where it is given the receipts of several attempts of one part, only that
 of the latest attempt counts and the others are listed as superseded; a
@@ -1167,10 +1219,10 @@ receipt without a numeric attempt counts as the earliest, and two receipts
 of one part and one attempt are two receipts of the part. It gives the
 conclusion of the whole gate only when:
 
-1. every receipt can be read and parses, has schema 6 and a part, and its
+1. every receipt can be read and parses, has schema 7 and a part, and its
    commit and tree are those of the checkout, whose gate inputs are clean,
-   whose registry, `statements.json` and qualification cases can be read
-   and keep their rules and whose waiver record, where it can be read,
+   whose registry, `statements.json`, qualification cases and lanes can be
+   read and keep their rules and whose waiver record, where it can be read,
    keeps its rules (a missing or unreadable record has no
    [waivers](#waivers)), and the clock of the host gives a date from
    1970-01-01 to 9999-12-31;
@@ -1180,16 +1232,38 @@ conclusion of the whole gate only when:
 3. every receipt names one and the same image;
 4. every receipt has one and the same trigger: the mode, `ref` and
    `run_id` of its `trigger`, whatever its event and attempt;
-5. one receipt is of the qualification job, one of the comparator part
-   and one of the shard of each formal target, and none is of another
-   part;
-6. the receipt of the qualification job, unless it has a failure, has
-   extracted every formal target but those of the waivers that hold on the
-   date of the merge, as its `proof_targets` list them;
-7. each unit that the checkout registers, of the qualification, of the base
-   round, of the comparator and of each formal target with its registered
-   mutants, has exactly one conclusion among the receipts, and no receipt
-   concludes another unit.
+5. one receipt is of the qualification job, one of each lane of the
+   checkout and one of the part of each formal target, and none is of
+   another part;
+6. each unit that the checkout registers, of the qualification and of the
+   base round of the qualification job, of the base round and of the
+   comparator of each lane, and of each formal target with its registered
+   mutants, has exactly one conclusion among the receipts, which the
+   receipt of the part that holds the unit gives, and no receipt concludes
+   another unit;
+7. the receipt of the qualification job lists the hand-written modules,
+   and the checks of the base rounds below find nothing.
+
+The checks judge what the base rounds of the qualification job and of the
+lanes held, from `handwritten`, `left_out` and `lane` of their receipts
+([receipt](#receipt)). Each is `true` in `checks` of the record when it
+finds nothing, and each finding is a problem:
+
+- **`coverage`**: each hand-written module that the qualification job
+  lists is held by exactly one of the job and the lanes, and each module
+  that they hold is in that list;
+- **`names`**: no public constant that the audit of a base round reports
+  for the modules of its root, below, is declared by two parts;
+- **`waivers`**: each lane leaves out of its round exactly those of its
+  modules that the qualification job lists in `left_out`, the closure of
+  what the waivers that held for it leave out;
+- **`extraction`**: the lane of each formal target outside the waivers
+  that hold on the date of the merge, the lane of its `module`, extracted
+  it;
+- **`seeds`**: `null` while every formal target has one part.
+
+Without the receipt of the qualification job, which is a problem already,
+the checks are all `false`.
 
 When a condition fails, the merge gives no conclusion: it is `TOOL_FAILURE`
 and not complete, with each problem. Otherwise its status is that of a run
@@ -1199,7 +1273,7 @@ when every receipt is: a target that the proofs reject, whose mutants did
 not run, makes it `REJECTED` and not complete, and a part that the disk
 guard refused makes it `TOOL_FAILURE` and not complete, where that run
 itself is `NOT_RUN`. With no formal target in the registry, the receipts of
-the qualification job and of the comparator part alone are merged. Each run
+the qualification job and of the lanes alone are merged. Each run
 whose job names its image compares that reference with the pin of its
 snapshot, so the merge records the image that the receipts name and does
 not compare it with the pin.
@@ -1207,7 +1281,7 @@ not compare it with the pin.
 The units of the targets of the waivers that hold on the date of the merge,
 with their registered mutants and the `base/<theorem>` of each statement
 in a proof module of these targets that the base round leaves out, and the
-parts of the shards of these targets are recorded and not required. A
+parts of these targets are recorded and not required. A
 statement in a module that the base round leaves out only because the
 module imports what a waiver leaves out stays required: its `SCOPED`
 `base/<theorem>` fails the merge ([waivers](#waivers)). The merge passes
@@ -1218,49 +1292,54 @@ used waiver is `REJECTED`: a waiver only lets the merge pass. A merge
 whose units are all `VERIFIED` and whose parts have no failure is
 `VERIFIED`, with its waivers unused. A merge without a waiver that holds
 passes only when every unit is `VERIFIED` and no part has a failure. A
-waiver that expires after the qualification job and before the merge
-leaves a target out of the job that no waiver covers at the merge, which
-gives no conclusion; running the merge again does not help, the gate must
-run again.
+waiver that expires after the base run of a lane and before the merge
+leaves a target out of the lane that no waiver covers at the merge: the
+check `extraction` fails and the merge gives no conclusion; running the
+merge again does not help, the gate must run again.
 
 The merge also judges three hard gates, each from its own entries among the
 kept receipts and over the same waivers: an entry holds when it passed or
 is `VERIFIED`, or when it is of a target of a waiver that holds, as above.
 Every gate fails when the merge has a problem.
 
-- **`axioms`** passes when the receipts have at least one audit, a command
-  of the base round or of the shard of a target that checks `Audit.lean`
-  (the runs that count heartbeats are no audit), and each audit and each
-  unit `base`, `base/<theorem>` and `target/<name>`, without the units of
-  mutants, holds.
-- **`leanchecker`** passes when the receipts have exactly one replay with
-  `leanchecker`, that of the base round with `--fresh`, and it passed; it
-  is a command of the unit `base`, which no waiver covers.
-- **`comparator`** passes when each unit `comparator` and
-  `comparator/<target>` holds, and so without such a unit.
+- **`axioms`** passes when each receipt with a base round, of the
+  qualification job and of each lane, has an audit, a command of its round
+  that checks `Audit.lean` (the runs that count heartbeats are no audit),
+  each audit of the receipts, those of the parts of the targets included,
+  holds, and each unit `base`, `base/lane/<name>`, `base/<theorem>` and
+  `target/<name>`, without the units of mutants, holds.
+- **`leanchecker`** passes when each receipt with a base round has exactly
+  one replay with `leanchecker`, that of its round with `--fresh` of its
+  root module `Krepi`, and it passed; no waiver covers it.
+- **`comparator`** passes when each unit `comparator/lane/<name>`,
+  `comparator/<target>` and `comparator` holds, and so without such a unit.
 
 A gate that passes says only that its own entries hold: a merge whose
 other units or parts fail does not pass, whatever its gates.
 
-The comparator part runs in the job of the qualification part, after it, so
-that job takes the `seconds` of both parts. The synthetic wall clock is the
-`seconds` of the slowest job and the seconds of the merge, from the start
-of its job, which the job gives in
-`KREPI_FORMAL_MERGE_STARTED` as Unix seconds (the merge jobs of CI take
-the start of the runner's worker process, else that of their first step),
-to the end of the command; it
-is the command's own seconds without that variable or with one that is not
-a Unix time before the command. The `seconds` of a part do not count the
-pull of the image and the build of xtask in its job. The gate's wall-clock
-limit is 3,600 s, 300 s of which are the merge's, so the registered budget
-of a shard is at most 3,300 s
-([shard plan and disk guard](#shard-plan-and-disk-guard)). A synthetic wall
-clock above 2,880 s, 80% of the limit, is flagged in the record and the
-summary, and so is each part whose job's `seconds` are above 2,880 s, its
-own for the shard of a target and the comparator part, and the sum of both
-parts for the qualification part, or whose cgroup memory peak is above
-13,372,738,764 B, 80% of the 16,715,923,456 B of memory of the runner of CI.
-The flags change no conclusion.
+Each part runs in a job of its own: the qualification job in `formal run`,
+the two runs of a lane in `formal lane <name>`, and the part of a target in
+`formal shard <name>/1`, so that the job of a lane takes the `seconds` of
+both its runs, which its receipt sums. The synthetic wall clock is the
+longest chain of these jobs that their `needs` in the workflow `formal`
+give, each job after those that it needs, by the sum of their `seconds`,
+and the seconds of the merge, from the start of its job, which the job
+gives in `KREPI_FORMAL_MERGE_STARTED` as Unix seconds (the merge jobs of CI
+take the start of the runner's worker process, else that of their first
+step), to the end of the command; it is the command's own seconds without
+that variable or with one that is not a Unix time before the command. The
+jobs of the parts need only `formal limits`, so the chain is the slowest
+job; the merge keeps their `needs` in a table that a test holds equal to
+the workflow. The `seconds` of a part do not count the pull of the image
+and the build of xtask in its job. The gate's wall-clock limit is 3,600 s,
+300 s of which are the merge's, so the registered budget of a part of a
+target, and that of a lane with the extraction margin, is at most 3,300 s
+([shard plan and disk guard](#shard-plan-and-disk-guard), [lanes](#lanes)).
+A synthetic wall clock above 2,880 s, 80% of the limit, is flagged in the
+record and the summary, and so is each job whose `seconds` are above
+2,880 s, and each part whose cgroup memory peak is above
+13,372,738,764 B, 80% of the 16,715,923,456 B of memory of the runner of
+CI. The flags change no conclusion.
 
 The merge writes `artifacts/formal/merge/record.json` and its summary
 `summary.md`, prints the summary, and exits with 0 when it passes and 1
@@ -1270,13 +1349,13 @@ synthetic wall clock, the trigger, a line
 `- checks: axioms pass, leanchecker pass, comparator pass` with `fail` for
 each hard gate that fails, that the merge passes when it is not
 `VERIFIED`, each waiver that holds, each flag and each problem; the
-trigger, the shards, the waivers and the problems are escaped, so that none
-splits a line. The record has schema 3 and the form of a receipt
+trigger, the jobs, the parts, the waivers and the problems are escaped, so
+that none splits a line. The record has schema 4 and the form of a receipt
 ([receipt](#receipt)):
 
 | Field | Content |
 | --- | --- |
-| `schema` | `3` |
+| `schema` | `4` |
 | `status`, `complete` | The conclusion, as above |
 | `passes` | Whether the merge passes, as above |
 | `gates` | Whether each hard gate passes: `axioms`, `leanchecker` and `comparator`, as above |
@@ -1287,17 +1366,19 @@ splits a line. The record has schema 3 and the form of a receipt
 | `planned_statements` | The number of planned statements of `statements.json`, or `null` when it cannot be read |
 | `waiver_date` | The UTC date on which the merge judged the waivers, or `null` when the clock gives none |
 | `waivers` | Each waiver that holds on that date: `waiver`, its entry of the waiver record, and `used`, whether the merge used it |
-| `parts` | Each receipt given, in order: `receipt`, its path; `sha256`, of its bytes, or `null`; and when it parses, `shard`, `run_id`, `attempt`, `superseded`, `status`, `complete`, `seconds` and the `cgroup_memory_peak` of its `resources`; `over_seconds`, whether the `seconds` of its job are above 2,880 s, as above; and `over_memory`, whether its peak is above 13,372,738,764 B, or `null` without a peak |
+| `parts` | Each receipt given, in order: `receipt`, its path; `sha256`, of its bytes, or `null`; and when it parses, `shard`, `job`, the job that runs its part, `run_id`, `attempt`, `superseded`, `status`, `complete`, `seconds` and the `cgroup_memory_peak` of its `resources`; `over_seconds`, whether the `seconds` of its job are above 2,880 s, as above; and `over_memory`, whether its peak is above 13,372,738,764 B, or `null` without a peak |
 | `units` | Each registered unit with its phase, status and reason |
-| `axioms` | Each theorem that the base round of the qualification job audited, with the axioms that the audit reported for it, the report of the gate `axioms` |
-| `slowest_part_seconds`, `merge_seconds`, `merge_from`, `wall_clock_seconds`, `over_80_percent` | The synthetic wall clock: the slowest job, the merge from its `job` or its `command`, their sum and whether it is above 2,880 s |
+| `axioms` | Each theorem that the base rounds of the qualification job and of the lanes audited, with the axioms that the audit reported for it, the report of the gate `axioms` |
+| `checks` | Whether each check of the base rounds found nothing: `coverage`, `names`, `waivers` and `extraction`, as above, and `seeds`, `null` |
+| `jobs` | Each job of the parts that the merge kept, by its name: `seconds`, the sum of the `seconds` of its receipts; `over_seconds`, whether these are above 2,880 s; and `cgroup_memory_peak`, the largest of its receipts, with `over_memory`, as for a part |
+| `chain`, `chain_seconds`, `merge_seconds`, `merge_from`, `wall_clock_seconds`, `over_80_percent` | The synthetic wall clock: the longest chain of jobs, the first first, and the sum of their seconds, the merge from its `job` or its `command`, the sum of both and whether it is above 2,880 s |
 | `problems` | Each condition that fails |
 
 For example, with values that are only an illustration:
 
 ```json
 {
-  "schema": 3,
+  "schema": 4,
   "status": "VERIFIED",
   "complete": true,
   "passes": true,
@@ -1340,6 +1421,7 @@ For example, with values that are only an illustration:
       "receipt": "artifacts/parts/qualification/receipt.json",
       "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "shard": "qualification",
+      "job": "formal run",
       "run_id": "123",
       "attempt": "1",
       "superseded": false,
@@ -1365,7 +1447,25 @@ For example, with values that are only an illustration:
       "Quot.sound"
     ]
   },
-  "slowest_part_seconds": 1095.7,
+  "checks": {
+    "coverage": true,
+    "names": true,
+    "waivers": true,
+    "extraction": true,
+    "seeds": null
+  },
+  "jobs": {
+    "formal run": {
+      "seconds": 1095.7,
+      "over_seconds": false,
+      "cgroup_memory_peak": 10429386752,
+      "over_memory": false
+    }
+  },
+  "chain": [
+    "formal run"
+  ],
+  "chain_seconds": 1095.7,
   "merge_seconds": 62.0,
   "merge_from": "job",
   "wall_clock_seconds": 1157.7,
@@ -1397,31 +1497,38 @@ may be named, and a name may repeat. A record that is missing or cannot
 be read has no waivers, and the layout of the
 [calibration target](#calibration-target) has no record.
 
-The qualification job reads the record of its export when its extraction
-starts, with the UTC date of the clock of the host, and leaves the formal
-targets of the waivers that hold then out of the extraction and of the
-[base round](#base-round). A record that breaks its rules, or a clock that
-reads before 1970-01-01 or after 9999-12-31, stops the extraction as a
-tool failure. The base round leaves out the proof modules of those targets
-that no other formal target lists, and every hand-written module that
-imports a module left out, or a generated module of such a target,
-`KrepiGen.<module>.<file>`, unless a target that the job extracted lists
-it: such a module of a target fails the build, as the import of any
-missing module does. The round neither builds nor checks a statement
-whose module is left out: its `base/<theorem>` is `SCOPED`, with the
-reason that the waiver of the target leaves the module out of the base
-round, and is a unit of that target when the module is one of its proof
-modules. A waiver of a target that proves a registered statement in one of
-its proof modules that the round leaves out is therefore always used: the
-round leaves the statement unchecked, so a merge that passes is `REJECTED`,
-never `VERIFIED`, and `cargo xtask formal receipt` calls its record `WAIVED`
-at best, not `CURRENT`, even when the shard of the target is `VERIFIED`;
-once the waiver has expired, the record is not current
-([current and fresh records](#current-and-fresh-records)). The
-[source rules](#source-rules) still apply to every tracked Lean file, those
-left out included. The shard of a waived target runs as any other. A run
-without `--shard`, the shard of a target and the calibration target do
-not read the record.
+The qualification job reads the record of its export when its
+[base round](#base-round) starts, and the base run of a lane when its
+extraction starts, each with the UTC date of the clock of its host; a
+lane leaves the formal targets of the waivers that hold then out of its
+extraction, and both leave what these waivers leave out out of their base
+round. A record that breaks its rules, or a clock that reads before
+1970-01-01 or after 9999-12-31, stops the phase as a tool failure. The
+base round leaves out the proof modules of those targets that no other
+formal target lists, and every hand-written module that imports a module
+left out, or a generated module of such a target,
+`KrepiGen.<module>.<file>`, unless a formal target outside the waivers
+lists it: such a module of a target fails the build, as the import of any
+missing module does. The qualification job records what is left out of
+all the hand-written modules, with the target of each, in `left_out` of
+its receipt, and each lane, in its lane record, what it left out of its
+own modules; the merge requires the two to agree
+([shards and merge](#shards-and-merge)). The round neither builds nor
+checks a statement whose module is left out: its `base/<theorem>` is
+`SCOPED`, with the reason that the waiver of the target leaves the module
+out of the base round, and is a unit of that target when the module is one
+of its proof modules. A waiver of a target that proves a registered
+statement in one of its proof modules that the round leaves out is
+therefore always used: the round leaves the statement unchecked, so a
+merge that passes is `REJECTED`, never `VERIFIED`, and `cargo xtask formal
+receipt` calls its record `WAIVED` at best, not `CURRENT`, even when the
+part of the target is `VERIFIED`; once the waiver has expired, the record
+is not current ([current and fresh records](#current-and-fresh-records)).
+The [source rules](#source-rules) still apply to every tracked Lean file,
+those left out included, in the qualification job. The part of a waived
+target runs as any other. A run without `--shard`, the part of a target
+and the comparator run of a lane do not read the record, and the layout of
+the calibration target has none.
 
 `cargo xtask formal merge` reads the record of the checkout and judges it
 on the UTC date of the clock of its host; a record that breaks its rules,
@@ -1436,13 +1543,14 @@ it used one. A waiver covers no unit of the qualification, not the unit
 `base`, and no `base/<theorem>` of a module that the base round leaves
 out only because the module imports what a waiver leaves out: that unit
 is `SCOPED` and fails the merge. Nor does a waiver cover the unit
-`comparator`, which holds the statements of a proof module that two formal
-targets list: a waiver of one of them leaves such a module in the base
-round, where it is checked, and waivers of all of them leave it out, which
-makes `comparator` `SCOPED` and fails the merge. The hard gates of the
-merge pass over the commands and units of the same targets in the same way,
-so the merge and its three gates can pass while the record is `REJECTED`;
-the replay of `leanchecker`, a command of the unit `base`, is never covered
+`comparator/lane/<name>` of a lane, which holds the statements of its
+modules that no formal target or two formal targets list: a waiver of one
+of two such targets leaves such a module in the base round, where it is
+checked, and waivers of all of them leave it out, which makes the unit
+`SCOPED` and fails the merge. The hard gates of the merge pass over the
+commands and units of the same targets in the same way, so the merge and
+its three gates can pass while the record is `REJECTED`; the replays of
+`leanchecker`, commands of the units of the base rounds, are never covered
 ([shards and merge](#shards-and-merge)).
 
 `cargo xtask formal receipt` calls a record that passes with a used waiver
@@ -1593,8 +1701,9 @@ triples.
 
 The qualification phase, in `qualify.rs`, checks the pinned tools against
 the code shapes of the qualification crate before anything relies on them.
-Every run but the shard of a target, the comparator part and a run of
-`cargo xtask formal run --target` has it, with a budget of 3,600 s.
+The qualification job and a run without `--shard` and `--target` have
+it, with a budget of 3,600 s; the runs of a lane, the part of a target and
+a run of `cargo xtask formal run --target` do not.
 
 The crate `verification/qualification/` holds one module per shape. It is a
 workspace of its own with its own `Cargo.lock` and depends on no crate, so
@@ -1714,18 +1823,35 @@ explains each with its evidence.
 
 ### Base round
 
-The base round, in `base.rs`, builds, audits and replays the hand-written
+The base round, in `base.rs`, builds, audits and replays hand-written
 Lean of the snapshot with the generated modules of the proof cases of the
-qualification and of the targets that the run extracted. Every run but the
-shard of a target, the comparator part and a run of
-`cargo xtask formal run --target` has it after the qualification, with a
-budget of 3,600 s. Its units are `base` and
-`base/<theorem>` for each statement that `statements.json` registers as
-proved; the phase reads that file from the checkout at the start of the
-run, to register its units, and stops when the export's file is not the
-same. A planned statement has no unit. Other theorems that the audit
-lists, such as the qualification theorems and unregistered ones, are
-judged within `base`.
+qualification and of the targets that the run extracted, with a budget of
+3,600 s. It runs over a part of the hand-written modules, as the
+[lanes](#lanes) divide them: in the qualification job, after the
+qualification, over the modules below `Krepi/Qualification/`, and those of
+no lane, with the proof cases; in the base run of a lane, after the
+extraction of its targets, over its own modules, those of its components
+and the shared modules that it lists, with the generated modules of its
+targets; and in a run without `--shard` and `--target`, after the
+qualification and the extraction, over all of them. The part of a target,
+the comparator run of a lane and a run of
+`cargo xtask formal run --target` have no base round. Its units are
+`base`, or `base/lane/<name>` in a lane, and `base/<theorem>` for each
+statement that `statements.json` registers as proved in a module of its
+part; the phase reads that file and the lanes from the checkout at the
+start of the run, to register its units, and stops when one cannot be
+read or the export's `statements.json` is not the same. A planned
+statement has no unit. Other theorems that the audit lists, such as the
+qualification theorems and unregistered ones, are judged within the unit
+of the round, which the rest of this section calls `base`.
+
+A lane extracts the formal targets of its components, as the `module` of a
+target names its component, the planned targets of its components whose
+generated modules its own modules import, and every other target whose
+generated modules the hand-written modules that its own modules reach
+import, which it extracts for the stage alone; the lane record of its
+receipt gives each with its role, `formal`, `planned` or `cone`
+([receipt](#receipt)). The qualification job extracts no target.
 
 The round reads `statements.json`, `axioms.json` and `tcb.json` of the
 export; a file that cannot be read, or does not follow its schema, stops
@@ -1740,7 +1866,10 @@ the phase. Then it
    below neither `verification/Krepi/` nor `verification/externals/`, such
    as `verification/Krepi.lean`, for a file whose path does not name a
    Lean module, and for a file that breaks a
-   [source rule](#source-rules);
+   [source rule](#source-rules). A lane leaves step 1 and these rules to the
+   qualification job: it lists the files in the same way and rejects its
+   round only for a file below neither directory, and its
+   `statement_hash` holds two empty strings;
 3. creates the stage `work/base/stage/` as the qualification creates the
    stage of a case: the project files of the export, its module files below
    `verification/Krepi/` whose paths name modules but those that the
@@ -1749,8 +1878,9 @@ the phase. Then it
    installation, and, for each
    qualification case with a proof whose generated code built, the
    generated modules as the case installed them, the reviewed external
-   declarations of a case with `models` among them, and, for each target
-   that the run extracted, its generated modules as its stage holds them.
+   declarations of a case with `models` among them, in the qualification
+   job and a run without a part, and, for each target that the run
+   extracted, its generated modules as its stage holds them.
    When the generated code of such a case did not build, or the generated
    definitions of a target do not type-check, nothing is built, audited or
    replayed: `base` and each of its theorems are concluded from the
@@ -1759,12 +1889,18 @@ the phase. Then it
    [calibration target](#calibration-target), the qualification proofs are
    in another Lake project, and the round has no proof case;
 4. writes the root module `Krepi`, a module file with a `public import` of
-   each module below `Krepi` and `KrepiGen` in the stage, sorted, so that a
-   module that nothing imports is built, audited and replayed as well. The
-   library `KrepiRoot` of `lakefile.toml` builds it as `+Krepi`; the
-   library `Krepi` takes only the modules below the root, so that a stage
-   without the root, such as that of a qualification case, still builds by
-   default. The round rejects a planned statement whose module has no file.
+   each module of its part in the stage, sorted: the hand-written modules
+   of the part and the generated modules of the proof cases and of the
+   targets that the run extracted, in a lane but those of the targets that
+   it extracted for the stage alone, so that a module of the part that
+   nothing imports is built, audited and replayed as well; in a run without
+   a part these are all the modules below `Krepi` and `KrepiGen` in the
+   stage. The other modules of the stage are built only as far as the root
+   imports them. The library `KrepiRoot` of `lakefile.toml` builds it as
+   `+Krepi`; the library `Krepi` takes only the modules below the root, so
+   that a stage without the root, such as that of a qualification case,
+   still builds by default. In the qualification job and a run without a
+   part, the round rejects a planned statement whose module has no file.
 
 No problem of these steps stops the commands, so that the audit and
 `leanchecker` judge what they find themselves. The commands run in the
@@ -1772,7 +1908,7 @@ stage's `verification/`, in this order:
 
 | Command | Call site | Cap |
 | --- | --- | --- |
-| `lake build --no-cache --wfail +Krepi`; with planned statements, `+M` for each module that is neither the root nor the module of a planned statement | Base build | 7,200 s |
+| `lake build --no-cache --wfail +Krepi`; with planned statements, `+M` for each module that the root imports that is not the module of a planned statement | Base build | 7,200 s |
 | With planned statements, `lake build --no-cache +Krepi` | Base build | 7,200 s |
 | `lake env lean Audit.lean` | Axiom audit | 1,800 s |
 | `lake env leanchecker --fresh Krepi` | `leanchecker` | None |
@@ -1791,8 +1927,8 @@ dependency: a proved file that imports a planned file fails. The second
 build, of the root without `--wfail`, adds the planned modules, and each
 line of its log that starts with `warning: ` or `error: ` must be the
 warning ``declaration uses `sorry` `` in the file of a planned module; any
-other rejects the round. krepi's own modules are every module below `Krepi` but
-the root, and the reviewed external declarations installed for
+other rejects the round. krepi's own modules are every module below `Krepi` in
+the stage but the root, and the reviewed external declarations installed for
 qualification cases, `KrepiGen.<module>.FunsExternal` and
 `TypesExternal`. A failed build is a proof failure when its log has an
 error or a warning whose line names the file of an own module, and a tool
@@ -1800,27 +1936,31 @@ failure otherwise ([results](#results)).
 
 **Audit.** `Audit.lean` is not a module. It imports the root, sets
 `pp.privateNames`, states `example : S := t` for the theorem `t` of each
-proved statement `S` of a module in the stage, and runs a program that,
-for each own module, prints a marker, runs `#print axioms` on each theorem
-constant of the module that is not private, not an internal detail and not
-the theorem of a planned statement, prints the module that declares each
-of its native-decision axioms, and prints the line at which each theorem's
-declaration range starts; it then prints, for each proved statement, the
-module that defines `S` and whether the type of `t` in the environment is
-the constant `S` itself. The `example` alone would not show that:
-elaborating `t` against `S` may insert a coercion, apply an instance or
-fill an argument that the proofs declare.
-The list of theorems is Lean's, so it holds the theorems that Lean
-generates, such as `injEq` and `congr_eq` lemmas, and theorems that a
-metaprogram adds. The round rejects
+proved statement `S` of a module of the part in the stage, and runs a
+program that, for each own module that the root imports, prints a marker,
+runs `#print axioms` on each theorem constant of the module that is not
+private, not an internal detail and not the theorem of a planned
+statement, prints the module that declares each of its native-decision
+axioms, and prints the line at which each theorem's declaration range
+starts; it then prints, for each proved statement, the module that defines
+`S` and whether the type of `t` in the environment is the constant `S`
+itself. The `example` alone would not show that: elaborating `t` against
+`S` may insert a coercion, apply an instance or fill an argument that the
+proofs declare. A second program prints `krepi-name <constant>` for each
+constant of each module that the root imports that is neither private nor
+an internal detail: the public constants of the round, which its lane
+record lists for the check `names` of the merge ([shards and
+merge](#shards-and-merge)). The list of theorems is Lean's, so it holds
+the theorems that Lean generates, such as `injEq` and `congr_eq` lemmas,
+and theorems that a metaprogram adds. The round rejects
 
 - an axiom of a theorem that the allowlist does not allow for its kind;
 - a registered proved theorem that the audit does not report in its
   registered module, or whose type is not the statement constant itself,
   without arguments, whether or not its `example` checks;
 - a statement that is not defined in an own module outside `Krepi.Proofs`;
-- an own module without its marker, and an error at another line of the
-  audit file.
+- an own module that the root imports without its marker, and an error
+  at another line of the audit file.
 
 The allowlist is one table of data in `lean.rs`, by the kind of the
 theorem's module. Besides `propext`, `Classical.choice` and `Quot.sound`,
@@ -1872,8 +2012,11 @@ files.
 **Replay.** `leanchecker --fresh Krepi` imports the root module and checks
 again in the kernel, starting from an empty environment, every declaration
 that the import brings in but unsafe and partial ones: those of every
-module of the stage, krepi's own and the generated ones, and those of Lean,
-the Aeneas Lean library and its packages that they import. The stage's
+module of the stage that the root imports, directly or through others,
+krepi's own and the generated ones, and those of Lean, the Aeneas Lean
+library and its packages that they import. A declaration of a module of
+another lane that no module of the part imports is replayed in that lane
+alone. The stage's
 build directory is new in every run, so that no earlier output is
 replayed. An exit with 0 passes. Another exit is a proof failure, which
 rejects the round with the output, whose lines name the declaration but
@@ -1887,7 +2030,11 @@ module, it is a tool failure.
 `leanchecker` of the installation, which `lake env` finds first on `PATH`.
 That program loads the kernel from the Lean shared library, so the
 checker is identified by the download digest of the Lean archive in the
-tool manifest and, in CI, by the digest of the image.
+tool manifest and, in CI, by the digest of the image. The receipt also
+records the module of the replay, its seconds, and the largest maximum
+resident set of a process that the run had collected when it ended, with
+whether that grew during the replay, so that it is then the replay's own
+and otherwise bounds it from above.
 
 **Heartbeats.** Only theorems with a declaration range are counted. For
 each own file with such theorems, the round writes a copy below
@@ -1935,19 +2082,19 @@ runs the gate there as the runner's user, on a read-only root file system
 ([CI job](#ci-job)), and the gate refuses to run as root or as the owner of
 the installation ([image pin](#image-pin)).
 
-**Conclusions.** `base` is `VERIFIED` when the round has no problem and no
-command forced it, and `REJECTED` with its problems otherwise: the
-statement hash, the file and source rules, the modules of planned
-statements, a build that failed with messages in own modules, messages of
-the planned build other than the `sorry` warning, the axioms of
-unregistered theorems, missing markers, errors in the audit file and the
-kernel reports of `leanchecker`. Each `base/<theorem>` is `REJECTED` with
-its own problems, and when the build failed or `leanchecker` reported a
-declaration that the kernel rejects, and `VERIFIED` otherwise; the other
-audited theorems get their status in the receipt the same way. A tool
-failure among the round's commands forces `base` and each of its
-theorems. A `base/<theorem>` whose module a waiver leaves out is
-`SCOPED` ([waivers](#waivers)).
+**Conclusions.** `base`, or `base/lane/<name>`, is `VERIFIED` when the
+round has no problem and no command forced it, and `REJECTED` with its
+problems otherwise: the statement hash, the file and source rules, the
+modules of planned statements, a build that failed with messages in own
+modules, messages of the planned build other than the `sorry` warning, the
+axioms of unregistered theorems, missing markers, errors in the audit file
+and the kernel reports of `leanchecker`. Each `base/<theorem>` is
+`REJECTED` with its own problems, and when the build failed or
+`leanchecker` reported a declaration that the kernel rejects, and
+`VERIFIED` otherwise; the other audited theorems get their status in the
+receipt the same way. A tool failure among the round's commands forces
+`base` and each of its theorems. A `base/<theorem>` whose module a waiver
+leaves out is `SCOPED` ([waivers](#waivers)).
 
 ### Source rules
 
@@ -1997,39 +2144,47 @@ checks that each item names what its kind is for.
 
 ### Comparator
 
-The comparator part, in `comparator.rs`, checks the theorem of each proved
-statement of `statements.json` once more, apart from the audit: Lake's
+The comparator of a lane, in `comparator.rs`, checks the theorem of each
+proved statement of the lane once more, apart from the audit: Lake's
 `lake comparator` builds a challenge, which declares the theorem with the
 type of its statement and `sorry` for its proof, and the root module
-`Krepi` of the stage of the [base round](#base-round), exports both and
-requires the theorem of the solution to have exactly the type that the
-challenge gives it and to depend on no axiom outside the permitted list,
-which it checks on the export of the solution. `cargo xtask formal run
---shard comparator` runs it after the qualification job of the same
-commit, on the stage of the base round that the job kept with `--keep`
+`Krepi` of the stage of the [base round](#base-round) of the lane, exports
+both and requires the theorem of the solution to have exactly the type
+that the challenge gives it and to depend on no axiom outside the
+permitted list, which it checks on the export of the solution.
+`cargo xtask formal run --shard lane/<name> --comparator`, the comparator
+run of the lane, runs it after the base run of the lane of the same
+commit, on the stage of the base round that the base run kept with
+`--keep`, and writes the receipt of the lane
 ([shards and merge](#shards-and-merge)).
 
-Its units are `comparator/<target>` for each formal target that alone
-lists the module of a proved statement in its `proof_modules`, with those
-statements, and `comparator` with the other proved statements, among them
-those of a module that two formal targets list; a planned statement has
-none. A unit of a target thus holds only statements whose modules a
-[waiver](#waivers) of the target leaves out of the base round, and the
-waiver covers no result of the comparator on a statement that the round
-checked. The phase reads them from `statements.json` and the registry of
-the checkout when the run starts, and stops when it cannot read them.
-Without a unit, as in production today, the part runs no command and is
-`VERIFIED`. Otherwise it
+A proved statement belongs to the lane that holds its module
+([lanes](#lanes)). The units of a lane are `comparator/<target>` for each
+formal target that alone lists the module of a proved statement of the
+lane in its `proof_modules`, with those statements, and
+`comparator/lane/<name>` with its other proved statements, among them
+those of a module that two formal targets list or none; a planned
+statement has none. A proved statement of a module that no lane holds is
+in the unit `comparator`, which no part concludes, so that the merge gives
+no conclusion. A unit of a target thus holds only statements whose
+modules a [waiver](#waivers) of the target leaves out of the base round,
+and the waiver covers no result of the comparator on a statement that the
+round checked. The phase reads them from `statements.json`, the registry
+and the lanes of the checkout when the run starts, and stops when it
+cannot read them. It
 
-1. reads the receipts below the runs directory, `artifacts/formal/runs/`
-   or the directory that `KREPI_FORMAL_RUNS` names, and takes the one
-   receipt of the qualification job of the same commit and the same
+1. reads the base records below the runs directory,
+   `artifacts/formal/runs/`, or the directory that `KREPI_FORMAL_RUNS`
+   names, and takes the one base record of the same lane, commit and
    `run_id` of the trigger; when there is none or more than one, as when
-   a build below that directory wrote another, or when that receipt has
-   no base round, the phase stops, so that the units are `NOT_RUN` and the
-   run is a tool failure;
+   a build below that directory wrote another, the phase stops, so that
+   the units are `NOT_RUN` and the run is a tool failure. The run then
+   takes the deadline of the base run, from its start and its budget.
+   Without a unit, it runs no command, and the
+   receipt of the lane has the units of the base run alone; with one, a
+   base record without a base round stops the phase as well;
 2. adds the Lean library `KrepiChallenge` to the `lakefile.toml` of the
-   stage of that round, once however often the part runs on it;
+   stage of that round, once however often the comparator runs on it;
 3. concludes each unit:
    - `SCOPED` when the base round left the statement of one of its
      theorems out under a [waiver](#waivers), which makes
@@ -2045,16 +2200,17 @@ Without a unit, as in production today, the part runs no command and is
    - otherwise by `lake comparator --config KrepiChallenge.C<i>.json`,
      run in the stage, where `i` counts the units in the order of their
      names from 0. The challenge `KrepiChallenge.C<i>` imports every
-     module of the stage but the proof modules, `Krepi.Proofs`, the
-     modules below it and the proof modules of the targets that the job
-     extracted, and declares each theorem of the unit as
-     `public theorem <theorem> : <statement> := sorry`. The configuration
-     names the challenge, the solution module `Krepi`, the theorems and
-     the permitted axioms. Exit 0 is `VERIFIED`, and exit 1 `REJECTED`,
-     with the lines of the comparator that hold `error:`, unless a line
-     starts with `error: Child exited with `: a build or an export in its
-     sandbox did not finish, as for a name that the challenge lacks, which
-     is a `TOOL_FAILURE`, as is any other status ([results](#results)).
+     module that the root of the round imports but the proof modules,
+     `Krepi.Proofs`, the modules below it and the proof modules of the
+     targets that the base run extracted, and declares each theorem of the
+     unit as `public theorem <theorem> : <statement> := sorry`. The
+     configuration names the challenge, the solution module `Krepi`, the
+     theorems and the permitted axioms. Exit 0 is `VERIFIED`, and exit 1
+     `REJECTED`, with the lines of the comparator that hold `error:`,
+     unless a line starts with `error: Child exited with `: a build or an
+     export in its sandbox did not finish, as for a name that the
+     challenge lacks, which is a `TOOL_FAILURE`, as is any other status
+     ([results](#results)).
 
 The permitted axioms of a unit are the axioms that the audit of the base
 round reported for its theorems, which the round verified, so that the
@@ -2092,20 +2248,21 @@ directories over `/home`, `/root`, `/run/user` and `/tmp`, into which it
 binds back only the Lake project, Lean and Lake's home, with the build
 directory `.lake` writable. The stage reaches the Aeneas Lean library and
 its packages through links outside its Lake project, so the runs
-directory must lie outside those directories: in CI, the part reads it
-through a second mount at `/krepi-runs`, which `KREPI_FORMAL_RUNS` names.
+directory must lie outside those directories: in CI, the comparator run
+reads it through a second mount at `/krepi-runs`, which
+`KREPI_FORMAL_RUNS` names.
 Git in the sandbox reads only the system's configuration, `/etc/gitconfig`,
 which CI provides to mark every directory as safe, since the packages of
 the installation belong to root
 ([environment of tool commands](#environment-of-tool-commands),
-[CI job](#ci-job)). In CI the part runs a copy of xtask that its job made
-outside the checkout before the gate, mounted read-only at `/krepi-xtask`,
-so that what the base build writes in the checkout does not change the
-program that concludes the part; the stage that it checks is still the
-output of that build ([limitations](#limitations)).
+[CI job](#ci-job)). In CI the comparator run runs a copy of xtask that its
+job made outside the checkout before the base run, mounted read-only at
+`/krepi-xtask`, so that what the base build writes in the checkout does
+not change the program that concludes the lane; the stage that it checks
+is still the output of that build ([limitations](#limitations)).
 
-In the layout of the [calibration target](#calibration-target), the part
-runs two more challenges after its first unit when that unit has two
+In the layout of the [calibration target](#calibration-target), the
+comparator runs two more challenges after its first unit when that unit has two
 statements A and B, which conclude no unit: `KrepiChallenge.Statement`,
 the command of `comparator-negative/statement`, declares the theorem of A
 with the statement of B, with the permitted axioms of the unit, and
@@ -2272,7 +2429,7 @@ failing rule does not change the status of the run, which is about the
 proofs, and the standalone command decides. An event that cannot be read,
 or a failed Git command, stops the run as an internal error; a registry
 that cannot be read does not, as `registry-unreadable` names it. Without a
-pull request event, in the shard of a target, in the comparator part and in
+pull request event, in the runs of a lane, in the part of a target and in
 a run of `cargo xtask formal run --target`, the run has no guard phase.
 
 ### Results
@@ -2386,32 +2543,39 @@ writes the receipt to standard error and exits with 120.
 
 ### Receipt
 
-`receipt.json` has schema 6. It is the pretty form of `serde_json`, with
+`receipt.json` has schema 7. It is the pretty form of `serde_json`, with
 the fields in the order of the tables below and every map sorted by its
-keys; times are seconds, rounded to milliseconds.
+keys; times are seconds, rounded to milliseconds. The base record of a
+lane, `base.json`, which its base run writes in place of `receipt.json`,
+has the same fields with schema 1, and `base_record` `null`
+([shards and merge](#shards-and-merge)).
 
 | Field | Content |
 | --- | --- |
-| `schema` | `6` |
+| `schema` | `7` |
 | `command` | `cargo xtask formal run` |
 | `status` | `VERIFIED`, `REJECTED`, `STALE`, `TOOL_FAILURE`, `BUDGET`, `NOT_RUN` or `SCOPED` |
 | `complete` | Whether the run is complete, as defined above |
 | `trigger` | `mode`: `SCOPED` for a run of named targets; for a run of the whole gate or of a part, the mode that `KREPI_FORMAL_TRIGGER`, the variable through which a job of CI gives the trigger of its run, names, `REQUIRED`, `FORCED_FULL` or `WEEKLY`, and `MANUAL` when it is unset or empty, or when it holds any other value, `SCOPED` and `MANUAL` included, which is a tool failure before the phases ([results](#results)); `event`, `ref`, `run_id` and `attempt`, from `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`, or `null` |
-| `targets` | The names given with `--target`, sorted, or the target of the shard of a target; empty for a run of the whole gate, for the qualification job and for the comparator part |
-| `shard` | The part of a run with `--shard`, `qualification`, `comparator` or `target/<name>`, or `null` |
+| `targets` | The names given with `--target`, sorted, or the target of the part of a target; empty for a run of the whole gate, for the qualification job and for the runs of a lane |
+| `shard` | The part of a run with `--shard`, `qualification`, `lane/<name>` or `target/<name>/1`, or `null` |
 | `host` | `linux-aarch64` or `darwin-arm64`, or `null` on another host |
 | `image` | The image of a run on `linux-aarch64`, below, or `null` on another host |
 | `run`, `directory` | The identifier of the run, and its directory relative to the repository root |
 | `started`, `seconds` | The Unix time in seconds at which the run started, and how long it took |
 | `commit`, `tree` | The snapshot commit and its root tree, or `null` |
 | `inputs` | `before` and `after`, the object of each gate input (`mode`, `type`, `oid`, or `null` when the commit does not have it) at the start and at the end, or `null` when they were not taken; `clean_after`, whether the gate inputs were clean at the end, or `null` |
-| `budgets` | `gate_seconds`, 7200 and the budget of each target that the run selects, 7,800 for the qualification job, 1,800 for the comparator part, 300 and the budgets of its targets for the shard of a target and for a run of `cargo xtask formal run --target`, or 14,400 for a run of `cargo xtask formal mutants`, whatever the budgets of its targets ([source mutants and survivors](#source-mutants-and-survivors)), and `receipt_margin_seconds`, 300 |
+| `budgets` | `gate_seconds`, 7200 and the budget of each target that the run selects, 7,200 for the qualification job, 300, the registered budget of the lane and 600 for a lane, the budget of its base run, 300 and the budgets of its targets for the part of a target and for a run of `cargo xtask formal run --target`, or 14,400 for a run of `cargo xtask formal mutants`, whatever the budgets of its targets ([source mutants and survivors](#source-mutants-and-survivors)), and `receipt_margin_seconds`, 300 |
 | `resources` | What the run used of the host, below |
 | `phases` | For each phase, `budget_seconds`, `seconds` and `ran` |
 | `units` | For each unit, its `phase`, its `status` and the `reason` for it, or `null` |
 | `qualification` | What the qualification found, below, or `null` when it did not start |
 | `base` | What the base round found, below, or `null` when the round stopped before it recorded it |
-| `proof_targets` | What the run found for each target that the phase `extraction` took, below, by its name: those that it selects and the formal ones, or in the shard of a target and in a run of `cargo xtask formal run --target` those that it selects alone, also one that it did not extract since it registers more than 30 mutants or its module is not a Lean module path |
+| `base_record` | For the receipt of a lane, the base record that its comparator run read: `sha256`, of its bytes; `run`, `started` and `seconds`, of the base run; and `comparator_started` and `comparator_seconds`, of the comparator run; or `null` |
+| `lane` | For the qualification job and a lane, what its base round held, below, or `null` |
+| `handwritten` | For the qualification job, each hand-written module of the Lake project by name, with where its file lies by the [lanes](#lanes): its component, `qualification` or `shared`; or `null` |
+| `left_out` | For the qualification job, each hand-written module that the [waivers](#waivers) that hold leave out of the base round, with the target of the waiver; or `null` |
+| `proof_targets` | What the run found for each target that the phase `extraction` took, below, by its name: those that it selects and the formal ones, or in the part of a target and in a run of `cargo xtask formal run --target` those that it selects alone, in a lane the targets of the lane, also one that it did not extract since it registers more than 30 mutants or its module is not a Lean module path |
 | `guard` | What the guard found on a pull request, below, or `null` without a pull request event or when its phase did not finish |
 | `commands` | Every command, in the order of its `sequence` |
 | `failures` | Every failure that is not the conclusion of a unit, with its `status` and `message` |
@@ -2473,14 +2637,25 @@ The `base` record has these fields:
 | Field | Content |
 | --- | --- |
 | `statements_sha256`, `axioms_sha256`, `tcb_sha256` | The SHA-256 of `verification/statements.json`, `verification/axioms.json` and `verification/tcb.json` of the export |
-| `statement_hash` | `recorded`, the hash that `statements.json` records, and `computed`, the statement hash of the snapshot commit |
+| `statement_hash` | `recorded`, the hash that `statements.json` records, and `computed`, the statement hash of the snapshot commit; two empty strings in a lane |
 | `modules` | The modules that the root module imports |
-| `own` | krepi's own modules, whose messages decide a failed build |
+| `own` | krepi's own modules in the stage, whose messages decide a failed build |
 | `planned` | The modules of planned statements, built without `--wfail` |
 | `theorems` | For each theorem that the audit reported or `statements.json` registers: its `module`; its `kind`, `specification`, `qualification` or `target`; its `state` in `statements.json`, `proved` or `planned`, or `null` for a theorem that is not registered; the `axioms` that the audit reported, or `null`; its `status`; and its `problems`. The status of a registered proved theorem is that of its unit, that of a planned one `NOT_RUN`, and that of any other `VERIFIED` without problems, `REJECTED` with them, or the status that forced `base` |
-| `leanchecker` | `version`, the version line of `lean --version`, or `null`; `sha256`, of the `leanchecker` program; `mode`, `fresh`; and `prefixes`, the module that it replays, `Krepi` |
+| `leanchecker` | `version`, the version line of `lean --version`, or `null`; `sha256`, of the `leanchecker` program; `mode`, `fresh`; `prefixes`, the module that it replays, `Krepi`; `module`, the root module that it imports, `Krepi`; `seconds`, of the replay; `max_rss`, the largest maximum resident set of a process that the run had collected when the replay ended, in bytes, or `null`; and `max_rss_own`, whether that grew during the replay, so that it is the replay's own |
 | `heartbeats` | `method`, `count_heartbeats`; `counts`, the heartbeats of each theorem with a declaration range; and `missing`, why such a theorem, by its name, or a file, by its path, has none |
 | `problems` | The problems that reject `base` |
+
+The `lane` record has these fields:
+
+| Field | Content |
+| --- | --- |
+| `name` | The name of the lane, or `qualification` |
+| `components` | The components of the lane, as the lanes give them |
+| `modules` | The hand-written modules of the part, those left out included |
+| `left_out` | Those of them that the waivers leave out, with the target of the waiver |
+| `constants` | The public constants of the modules that the root imports, as the audit printed them, sorted |
+| `targets` | Each target that a lane extracted, with its role: `formal`, a formal target of its components; `planned`, a planned one of them that its own modules import; or `cone`, one that the modules that they reach import, for the stage alone |
 
 Each record of `proof_targets` has these fields:
 
@@ -2552,16 +2727,17 @@ no stored credentials, and run actions pinned to full commit SHAs.
 The gate runs when the label `full-check` is added to a pull request whose
 change affects it, by the decision of the job `formal fast` below, and on
 a manual or scheduled run of `main`, whatever the decision; on no other
-event. Then the job `formal limits` computes the limits of the parts; the
-job `formal run` runs the qualification job and the comparator part after
-it; beside it, the job `formal shard <name>` runs the shard of each formal
-target of the head's registry, and the job `formal scoped <name>` each
-planned target that the pull request affects, alone; and the job
-`formal parts` merges the receipts of the parts. Every job of the workflow
-that needs another has a condition that starts with `!cancelled()`, so
-that it runs unless the run was cancelled, also when a job that it needs
-failed or was skipped, as `formal fast` is on a run of `main`, and its
-condition decides the rest.
+event. Then the job `formal limits` computes the lanes and the limits of
+the parts; the job `formal run` runs the qualification job; beside it, the
+job `formal lane <name>` runs each lane of `verification/lanes.json`, its
+base run and then its comparator run, the job `formal shard <name>/1` the
+part of each formal target of the head's registry, and the job
+`formal scoped <name>` each planned target that the pull request affects,
+alone; and the job `formal parts` merges the receipts of the parts. Every
+job of the workflow that needs another has a condition that starts with
+`!cancelled()`, so that it runs unless the run was cancelled, also when a
+job that it needs failed or was skipped, as `formal fast` is on a run of
+`main`, and its condition decides the rest.
 
 Six jobs are the checks of the gate: `formal fast` and `formal guard`, and
 the four verdicts, `formal merge`, `formal axioms`, `formal leanchecker`
@@ -2607,16 +2783,14 @@ The steps of the job `formal run`, the qualification job:
    and size; copy the event to `artifacts/formal/event.json`, inside the
    checkout;
 3. build xtask on the runner with the Rust toolchain of
-   `rust-toolchain.toml`, and then copy it to `$RUNNER_TEMP/xtask`,
-   outside the checkout, and record its SHA-256, in a step of its own;
+   `rust-toolchain.toml`;
 4. probe a container of the image with the flags of the gate: the step
    fails unless the user is not root, the root file system is read-only, no
    capability is left in the bounding set, new privileges are off, `lo` is
    the only network interface, every attempt to create a file in or change
    the mode of `lean/`, `backend/`, `bin/`, `rustup/` and `cargo/` of the
    installation fails, and xtask starts in the image;
-5. run `cargo xtask formal run --shard qualification --keep`, which keeps
-   the stage of its base round for the comparator part, as the binary of
+5. run `cargo xtask formal run --shard qualification`, as the binary of
    step 3, in a container of the image, as the runner's user and group, with
    `--pull never --init --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --network none`,
    the checkout mounted at its own path as the working directory, and the
@@ -2626,40 +2800,19 @@ The steps of the job `formal run`, the qualification job:
    naming the image of `IMAGE`, under
    `.github/scripts/deadline.sh --stop-commands`;
 6. always, remove the container of the gate if a cancelled step left it;
-7. unless the run was cancelled or the probe failed, also when the gate
-   failed, run the comparator part, `cargo xtask formal run --shard
-   comparator`, in a container of its own ([comparator](#comparator)). Its
-   sandbox needs unprivileged user namespaces, so the step allows them on
-   the runner, setting `kernel.apparmor_restrict_unprivileged_userns` to
-   0, and the container has, besides the flags and the user of the gate,
-   seccomp and AppArmor unconfined, an empty `/run/user` and Docker's
-   masked and read-only system paths unconfined. A probe of that container
-   first fails the step unless the user is not root, the root file system
-   is read-only, no capability is left in the bounding set, new privileges
-   are off and `lo` is the only network interface. The part then runs with
-   the checkout mounted as for the gate, the runs directory of the
-   checkout mounted a second time at `/krepi-runs`, which
-   `KREPI_FORMAL_RUNS` names, a file that sets `safe.directory` to `*`
-   mounted read-only at `/etc/gitconfig`, and the variables of the gate
-   but the event, under `deadline.sh --stop-commands`; it runs the copy
-   of xtask of step 3, mounted read-only at `/krepi-xtask`, which the
-   container of the gate does not mount;
-8. always, remove the container of the comparator if a cancelled step left
-   it, within a minute;
-9. always, with workflow commands turned off, write a summary of each
+7. always, with workflow commands turned off, write a summary of the
    receipt to the summary of the workflow run: the status, whether the run
    is complete, its time and that of each phase, the number of units of
    each status, the image, the resources, the rules of the guard, every
    unit that is not `VERIFIED` and every failure. The step fails when the
    gate's step ran and the job left no receipt;
-10. always, write `summary.md` (the status, phases, units, resources and
-    failures of each receipt, with its SHA-256), and pack the `logs/` of
-    the runs into `logs.tar.gz`;
-11. always, upload the summary, the archive, `job.txt`, the record of
-    steps 2 to 4 and 7 and of the start of each part, the event and the
-    receipts of both parts as the artifact
-    `formal-part-qualification-<commit>-<attempt>`. The logs of the runs
-    are uploaded only in the archive.
+8. always, write `summary.md` (the status, phases, units, resources and
+   failures of the receipt, with its SHA-256), and pack the `logs/` of
+   the run into `logs.tar.gz`;
+9. always, upload the summary, the archive, `job.txt`, the record of
+   steps 2 to 4 and of the start of the gate, the event and the receipt
+   as the artifact `formal-part-qualification-<commit>-<attempt>`. The
+   logs of the run are uploaded only in the archive.
 
 xtask finds the repository through the path at which it was compiled, so
 the checkout is mounted at that path; the runner and the image are the same
@@ -2672,63 +2825,118 @@ process collects processes that leave their group, which the gate as
 process 1 would not, and `--pull never` makes a missing image an error
 instead of a pull.
 
-The job `formal run` has 192 minutes, whatever the registry: 15 for the
-steps before the gate's step, whose own limits add up to 15 (2 to check
-out, 8 to record the runner and pull, 3 to build xtask, 1 to copy it and 1
-for the probe), 137 for the gate's step, 37 for the comparator's step and 3
-for the steps after them. `deadline.sh` stops the gate at the deadline of
-the qualification job, its 7,800 s, and the 300 s of its receipt, 135
-minutes, and kills it a minute later, a minute before the limit of its
-step; it does the same with the comparator part at its 1,800 s and the 300
-s of its receipt, 35 minutes. So the receipt of each part is written before
-its step ends. When the steps use all their time, the limit of the job may
+The job `formal run` has 145 minutes, whatever the registry and the
+lanes: 15 for the steps before the gate's step, whose own limits add up to
+14 (2 to check out, 8 to record the runner and pull, 3 to build xtask and 1
+for the probe), 127 for the gate's step and 3 for the steps after it.
+`deadline.sh` stops the gate at the deadline of the qualification job, its
+7,200 s, and the 300 s of its receipt, 125 minutes, and kills it a minute
+later, a minute before the limit of its step. So its receipt is written
+before its step ends. When the steps use all their time, the limit of the job may
 cut the upload; the receipts are still written in the checkout. When the
 step of a part is cancelled or reaches its limit, the step after it removes
 the container, and the part writes no receipt.
 
 The gate's step fails whenever the gate does not exit with 0, `REJECTED`
-included, the comparator's step whenever the comparator part does not,
-and nothing marks a failure as expected.
+included, and so does each step that runs a part in the jobs of the lanes
+and of the parts of the targets; nothing marks a failure as expected.
 
 The job `formal limits`, before the parts, checks out the head and
-computes from the head's `verification/targets.json` the shards, one for
-each formal target, and the jobs of `formal scoped`, one for each planned
-target that `formal fast` lists, each with the budget of its target, 1,800
-s unless the registry gives another. The deadline of each is 300 s and
-that budget, and each has the 300 s of its receipt; the step that runs one
-has the minutes of its deadline and receipt, rounded up, and two more, as
+computes from the head's `verification/lanes.json` the jobs of the lanes,
+one for each lane, and from its `verification/targets.json` the parts of
+the targets, one for each formal target, and the jobs of `formal scoped`,
+one for each planned target that `formal fast` lists, each with the budget
+of its target, 1,800 s unless the registry gives another. The deadline of
+the part of a target and of a job of `formal scoped` is 300 s and that
+budget, and each has the 300 s of its receipt; the step that runs one has
+the minutes of its deadline and receipt, rounded up, and two more, as
 `deadline.sh` kills its command a minute after its deadline, and its job
-15 minutes before that step, the step and 3 minutes after it. So the
-receipt of each part is written before its step ends, however many formal
-targets the registry has. A shard whose registered budget is more than
-the shard limit of 3,300 s fails the job, as
-`cargo xtask formal check` refuses it ([shards and merge](#shards-and-merge)),
-so a shard job has at most 85 minutes. A job of a hosted runner ends after
-360 minutes; when the budget of a planned target needs a longer job, or a
-target name is not of lowercase letters, digits and hyphens, the job
-`formal limits` fails, the jobs of the parts and of `formal scoped` do not
-run, and the verdicts fail. So it does when the name of a lane of
-`verification/lanes.json` is not of these characters, or when the
-registered budget of a lane, 2,400 s unless the lanes give another, and the
-extraction margin of 600 s are more than the shard limit, as
-`cargo xtask formal check` refuses them ([lanes](#lanes)); the job computes
-no limit from the lanes. The limits of the jobs of the shards and of
-`formal scoped` are expressions of their matrix, so each such job writes
+15 minutes before that step, the step and 3 minutes after it. The deadline
+of a lane is 300 s, its registered budget, 2,400 s unless the lanes give
+another, and the extraction margin of 600 s; its base step has the minutes
+of that deadline and the 300 s of its receipt, rounded up, and two more, 62
+for the default budget, and its job 15 minutes before that step, the step,
+the 37 minutes of its comparator's step and 3 minutes after them, 117 for
+the default budget. So the receipt of each part is written before its step
+ends, however many lanes and formal targets there are. The part of a
+target whose registered budget is more than the shard limit of 3,300 s
+fails the job, as `cargo xtask formal check` refuses it
+([shards and merge](#shards-and-merge)), so the job of a part has at most
+85 minutes. A job of a hosted runner ends after 360 minutes; when the
+budget of a planned target needs a longer job, or a target name is not of
+lowercase letters, digits and hyphens, the job `formal limits` fails, the
+jobs of the parts and of `formal scoped` do not run, and the verdicts
+fail. So it does when the name of a lane is not of these characters or
+another lane has it, when a component is in two lanes, or when the
+registered budget of a lane and the extraction margin are more than the
+shard limit, as `cargo xtask formal check` refuses them ([lanes](#lanes)),
+so the job of a lane has at most 122 minutes. The limits of the jobs of
+the lanes, of the parts and of `formal scoped` are expressions of their
+matrix, so each such job writes
 its limit as `::notice title=timeout-minutes::<minutes>`, from which the
 record of the run takes it ([testing](conventions/testing.md#entry-points));
 every other job of the workflow has a limit written in it.
 
-Each job `formal shard <name>`, beside `formal run`, runs the shard of one
+Each job `formal lane <name>`, beside `formal run`, runs one lane. It is
+prepared as `formal run` is, with the shorter probe of `formal scoped` and
+without the event, and in a step of its own after the build copies xtask
+to `$RUNNER_TEMP/xtask`, outside the checkout, and records its SHA-256.
+Its steps then
+
+1. run the base run of the lane, `cargo xtask formal run --shard
+   lane/<name> --keep`, which keeps the stage of its base round for the
+   comparator, in a container of the image with the flags of the gate and
+   the variables `GITHUB_REF`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`,
+   `KREPI_FORMAL_TRIGGER` and `KREPI_FORMAL_IMAGE`, under
+   `.github/scripts/deadline.sh --stop-commands` with the minutes of its
+   deadline and receipt and a minute for its kill;
+2. always, remove the container of the base run if a cancelled step left
+   it;
+3. unless the run was cancelled or the probe failed, also when the base
+   run failed, run the comparator run of the lane, `cargo xtask formal run
+   --shard lane/<name> --comparator`, in a container of its own
+   ([comparator](#comparator)). Its sandbox needs unprivileged user
+   namespaces, so the step allows them on the runner, setting
+   `kernel.apparmor_restrict_unprivileged_userns` to 0, and the container
+   has, besides the flags and the user of the gate, seccomp and AppArmor
+   unconfined, an empty `/run/user` and Docker's masked and read-only
+   system paths unconfined. A probe of that container first fails the step
+   unless the user is not root, the root file system is read-only, no
+   capability is left in the bounding set, new privileges are off and `lo`
+   is the only network interface. The run then has the checkout mounted as
+   for the base run, the runs directory of the checkout mounted a second
+   time at `/krepi-runs`, which `KREPI_FORMAL_RUNS` names, a file that sets
+   `safe.directory` to `*` mounted read-only at `/etc/gitconfig`, and the
+   variables of the base run, under `deadline.sh --stop-commands` with the
+   1,800 s of its phase and the 300 s of its receipt, 35 minutes, and a
+   minute for its kill, in a step of 37 minutes; it runs the copy of
+   xtask, mounted read-only at `/krepi-xtask`, which the container of the
+   base run does not mount, and ends by the deadline of the base run;
+4. always, remove the container of the comparator if a cancelled step left
+   it, within a minute;
+5. always, with workflow commands turned off, write a summary of the base
+   record and of the receipt of the lane, with the outcome of both steps,
+   the seconds and the largest process of the replay and the resources, to
+   the summary of the workflow run and `summary.md`, and pack the `logs/`
+   of both runs into `logs.tar.gz`. The step fails when the comparator's
+   step ran and the job left no receipt;
+6. always, upload the summary, the archive, `job.txt`, the base record and
+   the receipt as `formal-part-lane-<name>-<commit>-<attempt>`.
+
+The failure of one lane cancels no other, and without a lane the job does
+not run.
+
+Each job `formal shard <name>/1`, beside `formal run`, runs the part of one
 formal target. It is prepared as `formal run` is, with the shorter probe of
 `formal scoped`, and without the event. Its main command,
-`cargo xtask formal run --shard target/<name>` in a container of the image
+`cargo xtask formal run --shard target/<name>/1` in a container of the image
 with the flags of the gate and the variables `GITHUB_REF`, `GITHUB_RUN_ID`,
 `GITHUB_RUN_ATTEMPT`, `KREPI_FORMAL_TRIGGER` and `KREPI_FORMAL_IMAGE`, runs
 under `.github/scripts/deadline.sh --stop-commands` with the minutes of its
 deadline and receipt and a minute for its kill. The job summarizes the
 receipt with workflow commands turned off, writes `summary.md` and
 `logs.tar.gz`, and uploads them with `job.txt` and the receipt as
-`formal-part-target-<name>-<commit>-<attempt>`. The failure of one shard
+`formal-part-target-<name>-1-<commit>-<attempt>`. The failure of one part
 cancels no other, and without a formal target in the registry the job does
 not run.
 
@@ -2746,9 +2954,10 @@ no part of the merge, and the job is no check of the gate. On a run of
 planned target is registered in `verification/targets.json`, it never
 runs.
 
-The job `formal parts` runs after `formal run` and the shards unless the
-run was cancelled or `formal run` was skipped, also when a part failed or
-did not run. It runs on the runner without the image, and its steps:
+The job `formal parts` runs after `formal run`, the lanes and the parts of
+the targets unless the run was cancelled or `formal run` was skipped, also
+when a part failed or did not run. It runs on the runner without the
+image, and its steps:
 
 1. record the start of the job, that of the runner's worker process or
    else that of the step, in `KREPI_FORMAL_MERGE_STARTED`;
@@ -2815,7 +3024,7 @@ A later event of a pull request whose change affects the gate, such as a
 push or an edit of its description, therefore makes the verdicts fail
 until the label `full-check` is added again on that head. When the gate
 ran, each verdict downloads the record from the artifact that
-`formal parts` names and requires its `schema` to be 3, its `run_id` that
+`formal parts` names and requires its `schema` to be 4, its `run_id` that
 of the run, its `commit` the head and its `trigger` the mode of the run,
 and then `passes` for `formal merge`, and `gates.axioms`,
 `gates.leanchecker` or `gates.comparator` for the other three
@@ -2825,8 +3034,8 @@ of the merge into the summary of the workflow run, or the paths of a
 change that does not affect the gate; `formal axioms` whether its gate
 passes, the axioms of each audited theorem of the record, or that there is
 no audited theorem, and each target of a waiver of the record, whose proof
-modules that no other formal target lists the base audit leaves out and
-whose shard audits them when its proofs build, each name of the record as
+modules that no other formal target lists the base audits leave out and
+whose part audits them when its proofs build, each name of the record as
 a JSON string in code, with `\u0060` for each backtick; `formal
 leanchecker` whether its gate passes; and `formal comparator` whether its
 gate passes and the status of each unit of the comparator, or that there
@@ -2998,8 +3207,8 @@ a tool, and each broken rule is a problem:
   `derived` is a key `file#Type::method` of a method that a
   `#[derive(..)]` of a production type in the file defines, not a
   production function;
-- the registered budget of each shard, whatever its workers, is at most
-  the shard limit of 3,300 s
+- the registered budget of the part of each formal target, whatever its
+  workers, is at most the shard limit of 3,300 s
   ([shard plan and disk guard](#shard-plan-and-disk-guard)).
 
 `cargo xtask formal check` also checks the shard plan
@@ -3008,35 +3217,37 @@ which hold the module of every formal target as a component
 ([lanes](#lanes)).
 
 The job `formal limits` of the workflow `formal` ([CI job](#ci-job)) also
-fails on another target name before the names reach a gate, on a shard
-whose registered budget is more than the shard limit, and on a lane whose
-name is not of lowercase letters, digits and hyphens or whose budget and
+fails on another target name before the names reach a gate, on the part
+of a target whose registered budget is more than the shard limit, and on
+a lane whose name is not of lowercase letters, digits and hyphens or that
+another lane has, a component in two lanes, and a lane whose budget and
 the extraction margin are more than the shard limit.
 
 The targets of the registry run in two phases of the gate. The phase
 `extraction`, before the base round, extracts the targets that the run
-selects and every formal target, since the base round builds every proof
-and so needs the generated definitions of each formal target; in a run
-with a base round, it also extracts each planned target whose generated
+selects and, in a whole run, every formal target, since the base round
+builds every proof and so needs the generated definitions of each formal
+target; in a whole run, it also extracts each planned target whose generated
 modules, `KrepiGen.<module>.<file>`, the header of a Lean file below
 `verification/Krepi/` imports, read as the
 [import rule](#statements-and-proofs) reads it, so that the round builds,
 audits and replays the statements and the proofs that use them. The
 selected targets have a unit of their own, `target/<name>`, and the
-others are extracted as commands of `base`. Such a planned target is
-neither checked against its registration nor concluded, runs no mutant
-and has no unit and no shard of its own; its record in the receipt has
-no unit. A planned target that the run does not select and no
-hand-written module imports is not extracted. The phase reads the
-imports from the checkout when the run starts and stops when those of
-the export are other ones. The shard of a target extracts its target
-alone, and the qualification job every formal target but those of the
-[waivers](#waivers) that hold, which leave out no planned target, and
-those planned targets, as commands of `base`
-([shards and merge](#shards-and-merge)). The phase
-has the budgets of the targets that it extracts, or 600 s in the
-qualification job, and the gate's budget grows by those of the selected
-targets alone. For each target, in `work/targets/<name>/`, it
+others are extracted as commands of the unit of the base round. Such a
+planned target is neither checked against its registration nor
+concluded, runs no mutant and has no unit and no part of its own; its
+record in the receipt has no unit. A planned target that the run does not
+select and no hand-written module imports is not extracted. The phase
+reads the imports from the checkout when the run starts and stops when
+those of the export are other ones. The part of a target extracts its
+target alone, the qualification job none, and the base run of a lane the
+targets of the lane but the formal ones of the [waivers](#waivers) that
+hold, which leave out no planned target, as commands of
+`base/lane/<name>` ([base round](#base-round),
+[shards and merge](#shards-and-merge)). The phase has the budgets of the
+targets that it extracts, or the extraction margin of 600 s in a lane,
+and the gate's budget grows by those of the selected targets alone. For
+each target, in `work/targets/<name>/`, it
 
 1. extracts the target from the root package of the exported workspace,
    for the extraction triple, with its `start_from` roots and the patterns
@@ -3065,7 +3276,7 @@ whose definitions type-check; for one whose definitions do not, nothing is
 built and the round is rejected, as for a qualification case whose code
 does not build. The phase `targets`, after the base round, takes each
 selected formal target in its stage: it copies the hand-written module
-files that the base round found, or in the shard of a target those that
+files that the base round found, or in the part of a target those that
 the same listing of the snapshot finds without the base round, writes the
 root module `Krepi` that imports the target's proof modules, builds it with
 `lake build --no-cache --wfail +Krepi`, runs the audit of the base round
@@ -3361,7 +3572,8 @@ no image holds:
   and a change of the tools changes the files of `verification/` alone;
 - its registries: `targets.json`, `statements.json`, and `models.json`,
   `axioms.json` and `tcb.json`, which are empty; its shard plan
-  `shards.json`, with the entries `qualification` and `target/calibration`
+  `shards.json`, with the entries `qualification` and
+  `target/calibration/1`
   ([shard plan and disk guard](#shard-plan-and-disk-guard)); and its lanes
   `lanes.json`, with the lane `calibration` ([lanes](#lanes)).
 
@@ -3380,8 +3592,9 @@ every run, and the extraction, the base round and the targets take the
 workspace, the Lake project and the registries of the calibration. With
 `--target calibration-planned` it extracts and concludes the planned target
 alone, without the qualification and the base round. With
-`--shard qualification` and `--shard target/calibration` it runs the parts
-of the calibration, and `cargo xtask formal merge --calibration` merges
+`--shard qualification`, `--shard lane/calibration`, with `--keep` and then
+`--comparator`, and `--shard target/calibration/1` it runs the parts of the
+calibration, and `cargo xtask formal merge --calibration` merges
 their receipts ([shards and merge](#shards-and-merge)). Neither
 target is in `verification/targets.json` or among the declared targets: a
 run in the production layout cannot name them and records none, and
@@ -3404,24 +3617,28 @@ runners, may only read the repository's contents, use no stored
 credentials and run actions pinned to full commit SHAs:
 
 - `calibration run`, the qualification job of the calibration, checks out
-  the head, pulls the image, builds xtask and copies it for the comparator
-  part with the step of the job `formal run`, probes a container of the
+  the head, pulls the image, builds xtask, probes a container of the
   gate, runs `cargo xtask formal check --calibration` on the runner, and
   records the bytes available before it and, where the runner has
   `/usr/bin/time`, its record, else a line that it has none, in `job.txt`;
   then it runs
-  `cargo xtask formal run --calibration --shard qualification --keep` in
+  `cargo xtask formal run --calibration --shard qualification` in
   a container of the image, with the flags, the user and the mounted
   checkout of the job `formal run` ([CI job](#ci-job)), and the variables
   `GITHUB_REF`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`,
   `KREPI_FORMAL_TRIGGER` and `KREPI_FORMAL_IMAGE`, but no event, so that
-  the guard does not run. After it, with the step of the job `formal run`,
-  which a unit test keeps equal but for `--calibration`, it runs the
-  comparator part, `cargo xtask formal run --calibration --shard
-  comparator`, in a container of its own on the stage that the job kept,
-  with that copy of xtask.
-  A step after it, of one minute, fails unless that part left one receipt
-  in which the unit `comparator/calibration` is `VERIFIED` and the
+  the guard does not run;
+- `calibration lane <name>`, beside it, one for each lane of the
+  calibration, which the workflow writes out and a unit test keeps equal to
+  its lanes, runs the steps of the lane job of `formal`, which a unit test
+  keeps equal but for `--calibration` and the prefix of the artifact: the
+  base run, `cargo xtask formal run --calibration --shard lane/<name>
+  --keep`, and then its comparator run, `cargo xtask formal run
+  --calibration --shard lane/<name> --comparator`, in a container of its
+  own on the stage that the base run kept, with the copy of xtask.
+  A step after it, of one minute, fails unless the comparator left one
+  receipt of the lane in which the unit `comparator/calibration` is
+  `VERIFIED` and the
   commands of the two challenges that the comparator must reject
   ([comparator](#comparator)) are those of the units
   `comparator-negative/statement` and `comparator-negative/axiom` alone,
@@ -3432,11 +3649,11 @@ credentials and run actions pinned to full commit SHAs:
 - `planned example`, beside it, runs
   `cargo xtask formal run --calibration --target calibration-planned` in
   the same way;
-- `calibration shard <name>`, beside them, one for each formal target of
-  the calibration registry, which the workflow writes out and a unit test
-  keeps equal to that registry, runs the steps of the shard job of
+- `calibration shard <name>/1`, beside them, one for each formal target
+  of the calibration registry, which the workflow writes out and a unit
+  test keeps equal to that registry, runs the steps of the shard job of
   `formal` with `cargo xtask formal run --calibration --shard
-  target/<name>`;
+  target/<name>/1`;
 - `calibration merge` runs the steps of the merge job of `formal` with
   `cargo xtask formal merge --calibration` on the downloaded
   `calibration-formal-part-*` artifacts. It runs when the jobs above ran,
@@ -3454,42 +3671,45 @@ it prints. With `/usr/bin/time` in front, as for the check and the merge,
 a SIGTERM, at the deadline or from the runner on a cancellation, can end
 the step before the command has ended, and no SIGKILL follows. The
 deadline of the qualification job of the calibration is
-the gate's 7,200 s and 600 s for the extraction, that of its comparator
-part the 1,800 s of the part, that of the planned example, which runs the
-part of its target alone, 300 s and the 1,800 s of its planned target,
-that of the shard of `calibration` 300 s and its 3,000 s, and that of the
-mutants the 14,400 s of `formal mutants`; with the 300 s of the receipt,
-135, 35, 40, 60 and 245 minutes. Each step has two minutes more than its
-deadline. The job of the planned example has 23 minutes more than its
-step, 65, and that of the qualification 23 more and 40 for the comparator
-part and the steps after it, 200; that of the shard has 15 minutes before
-its step and 3 after it, 80, and that of the mutants 20 more than its
-step, 267; the merge has 15. The limits of the jobs `calibration run` and
-`planned example` and those of the shard jobs are an expression of their
-matrix, so each such job writes its limit in a notice, from which the
-record of the run takes it, as the jobs `formal shard` and `formal scoped`
-do. A newer
-event of the same pull request cancels a job of the parts, of the planned
+the gate's 7,200 s, that of the base run of its lane 300 s, the 2,400 s of
+the lane and 600 s for its extraction, that of its comparator the 1,800 s
+of its phase, that of the planned example, which runs the part of its
+target alone, 300 s and the 1,800 s of its planned target, that of the
+part of `calibration` 300 s and its 3,000 s, and that of the mutants the
+14,400 s of `formal mutants`; with the 300 s of the receipt, 125, 60, 35,
+40, 60 and 245 minutes. Each step has two minutes more than its deadline.
+The jobs of the qualification and of the planned example have 23 minutes
+more than their step, 150 and 65; that of the lane has 15 minutes before
+its base step, the 37 of its comparator's step and 3 after them, 117; that
+of the part has 15 minutes before its step and 3 after it, 80, and that of
+the mutants 20 more than its step, 267; the merge has 15. The limits of
+the jobs `calibration run` and `planned example` and those of the lane
+and shard jobs are an expression of their matrix, so each such job writes
+its limit in a notice, from which the record of the run takes it, as the
+jobs `formal lane`, `formal shard` and `formal scoped` do. A newer event
+of the same pull request cancels a job of the parts, of the planned
 example or of the mutants that has not ended; the merge of an older run
 whose parts it cancelled still runs and fails, and only the latest run of
-a pull request counts. Each job
-summarizes its receipt, and the merge its record, with workflow commands
-turned off, since the receipt holds text of Lean and Lake: the run and
-shard jobs list the budget and the seconds of each target, and every
-summary gives the SHA-256 of the receipts. The jobs `calibration run` and
-`planned example` upload the receipt, the summary, and the record of the
-runner and the logs of the gate compressed into `logs.tar.gz`, which for
-`calibration run` also holds the output of the check; a shard job uploads
-`job.txt` beside them, and the merge its record, its summary and
-`job.txt`. The artifacts are
+a pull request counts. Each job summarizes its receipt, and the merge its
+record, with workflow commands turned off, since the receipt holds text of
+Lean and Lake: the run and shard jobs list the budget and the seconds of
+each target, and every summary gives the SHA-256 of the receipts. The jobs
+`calibration run` and `planned example` upload the receipt, the summary,
+and the record of the runner and the logs of the gate compressed into
+`logs.tar.gz`, which for `calibration run` also holds the output of the
+check; a lane job uploads `job.txt` and the base record beside them, a
+shard job `job.txt`, and the merge its record, its summary and `job.txt`.
+The artifacts are
 `calibration-formal-part-qualification-<commit>-<attempt>` of the job
-`calibration run`, `calibration-formal-part-target-<name>-<commit>-<attempt>`,
+`calibration run`,
+`calibration-formal-part-lane-<name>-<commit>-<attempt>`,
+`calibration-formal-part-target-<name>-1-<commit>-<attempt>`,
 `formal-calibration-planned-<commit>-<attempt>`,
 `formal-calibration-merge-<commit>-<attempt>` and
-`formal-calibration-mutants-<commit>-<attempt>`.
-The job of the mutants uploads the list of survivors as well, from
-`artifacts/formal/mutants/` and only when its run passed: a run that fails
-writes no list, and the checkout may hold the list of an earlier run.
+`formal-calibration-mutants-<commit>-<attempt>`. The job of the mutants
+uploads the list of survivors as well, from `artifacts/formal/mutants/`
+and only when its run passed: a run that fails writes no list, and the
+checkout may hold the list of an earlier run.
 
 ## Specifications
 
@@ -4020,7 +4240,8 @@ when reached.
 ## Editing proofs
 
 A run removes its work directory at its end, so a proof is edited after a
-run with `--keep`: in the stage of the base round of the run,
+run with `--keep`, a whole run or the base run of a lane: in the stage of
+the base round of the run,
 `artifacts/formal/runs/<id>/work/base/stage/verification`, or in the
 stage of a qualification case, with the Lean 4 extension: a stage holds
 the generated modules and the links to the installation that a checkout
@@ -4048,12 +4269,13 @@ in a checkout are not evidence; only a run of the gate produces receipts.
   missed or that a proof module hid from it, within the limit below. The
   list itself comes from the audit's report, and a name added to it must
   pass the allowlist, or the unit is not run ([comparator](#comparator)).
-- The comparator part is not isolated from the base build of its run. In
-  CI it runs a copy of xtask that the gate cannot write and requires
-  exactly one receipt of the qualification job of its commit and run, but
-  the stage's build outputs and the copied sources that its challenges
-  import are written by the base build of the same run, which has no
-  sandbox, so a metaprogram of a proof module could tamper with them. The
+- The comparator of a lane is not isolated from the base build of its
+  lane. In CI it runs a copy of xtask that the base run cannot write and
+  requires exactly one base record of its lane, commit and run, which it
+  reads again before it writes the receipt of the lane, but the stage's
+  build outputs and the copied sources that its challenges import are
+  written by the base build of the lane, which has no sandbox, so a
+  metaprogram of a proof module could tamper with them. The
   [guard](#guard), the review of the specifications and the replay with
   `leanchecker` remain; isolating the comparator further is future work.
 - The gate runs the workflows and the xtask of the head that it judges,

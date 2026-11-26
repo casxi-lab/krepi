@@ -80,10 +80,10 @@ on the statement side, and needs no label `spec`.
    first run of the gate in the new image, and its receipt is the result
    of the requalification. The same pull request also carries the label
    `formal-calibration`, so that the workflow `formal calibration` runs
-   the comparator part in the new image and checks that the comparator
+   the comparator of its lane in the new image and checks that the comparator
    rejects its two fixed challenges ([calibration
    target](formal-verification.md#calibration-target)); the canary runs
-   `lake comparator` only on the units whose statements its base round
+   `lake comparator` only on the units whose statements their base rounds
    verified and audited, and never the two challenges, so the pin is not
    switched before that run passes.
 5. **Requalify.** Every unit of the qualification that is not `VERIFIED`
@@ -162,20 +162,21 @@ no record or more than one. Triage each run:
 | `BROKEN` at `resolve` or `derive` | Aeneas main has a form of its pins that the committed checks refuse too: the Lean toolchain, the nightly, the `charon-pin` or the Mathlib lock | A finding with the detail; the next upgrade adapts the checks or the pins |
 | `BROKEN` at `patch` | The reviewed patch does not apply to Aeneas main | A finding with the run, the Aeneas commit and Git's output from `patch.json`; the next upgrade ports the patch |
 | `BROKEN` at `build` | A tool stage of the recipe fails: a compile error of Aeneas or Charon, a failing `lake build Aeneas`, a missing notice | A finding with the stage and the failure block of `build.log`. Read the text of a `backend` failure first: a network error of `lake exe cache get` that no rule of the canary knows is no breakage, and the run is repeated |
-| `BROKEN` at `gate`, `comparator` or the `shard` of a target | The qualification job, the comparator part or a shard does not verify the commit in the new image | Compare the canary's receipts with the units of a merge record of `formal.yml` that `cargo xtask formal receipt` calls `CURRENT` for the same commit of `main`, such as that of a manual or weekly run on it, or that of the head whose merge the job `formal receipt review` judged: a unit is broken only when it is `VERIFIED` there and not in the canary. A finding names those units, the qualification cases among them and the tool failures of the gate, as the estimate of an upgrade |
+| `BROKEN` at `gate`, `lane`, `comparator` or the `shard` of a target | The qualification job, a lane or the part of a target does not verify the commit in the new image | Compare the canary's receipts with the units of a merge record of `formal.yml` that `cargo xtask formal receipt` calls `CURRENT` for the same commit of `main`, such as that of a manual or weekly run on it, or that of the head whose merge the job `formal receipt review` judged: a unit is broken only when it is `VERIFIED` there and not in the canary. A finding names those units, the qualification cases among them and the tool failures of the gate, as the estimate of an upgrade |
 | `DEFECT` | A field that the canary derived disagrees with a tool or a check, the canary cannot read a form of the trees or the downloads, or the receipts of its parts are not of one commit, tree, run and attempt, as when the images of two rows give different switch exports | No breakage: the canary is fixed, and the run is repeated |
 | `FAILED` | The run did not complete: a step limit, the disk, the network, the runner, a row that left no record, or a step of the canary's own | No breakage: find the cause in the logs of the jobs and run the whole run again, not its failed jobs alone. A build that reached its limit while it built Mathlib, because Mathlib had no build cache for the new Lake lock, or a disk that filled, is a limit of the job and of the hosted runner, not of the tools |
 
-The canary runs the [comparator part](formal-verification.md#comparator)
-as the CI job does, so each unit of the comparator in a merge record has
-its counterpart in a canary receipt. The part runs `lake comparator` only
-on the units whose statements its base round verified and audited, and
-records each other unit as `NOT_RUN`: after a `BROKEN` at `gate` that its
-base round shares, it exercises neither `lake comparator`, its messages
-nor its sandbox, and no canary runs the two challenges that must be
-rejected. A change of the toolchain pin therefore still runs
-`formal calibration`, which runs the comparator part and those challenges,
-before it switches (step 4 of the [procedure](#procedure)).
+The canary runs the [comparator](formal-verification.md#comparator) of
+each lane as the CI job does, so each unit of the comparator in a merge
+record has its counterpart in a canary receipt. The comparator runs
+`lake comparator` only on the units whose statements the base round of its
+lane verified and audited, and records each other unit as `NOT_RUN`: after
+a `BROKEN` at `lane` that the base round of the lane shares, it exercises
+neither `lake comparator`, its messages nor its sandbox, and no canary
+runs the two challenges that must be rejected. A change of the toolchain
+pin therefore still runs `formal calibration`, which runs the comparator
+of its lane and those challenges, before it switches (step 4 of the
+[procedure](#procedure)).
 
 A finding is registered in the project's coordination records, never in
 this repository, and nothing of a canary run is repaired: the breakage is
