@@ -387,8 +387,7 @@ theorem fdtRepr_of_header {input : ByteArray} {h : Header} {T : Fdt} (t : fdt.Fd
   rw [spec_ok, UScalar.cast_val_eq, Slice.len_val]
   exact Nat.mod_eq_of_lt (slice_length_lt hU t.blob)
 
-/-- The statement `FdtTotalSize` without its premise on the platform's
-`usize`, which `total_size_spec` takes. -/
+/-- The statement `FdtTotalSize`, from `total_size_spec`. -/
 theorem fdt_total_size_spec (hU : Usize64) (t : fdt.Fdt) (T : Fdt) (hR : FdtRepr t T) :
     fdt.parser.Fdt.total_size t ⦃ n => word64 n = T.totalSize ⦄ := by
   obtain ⟨hp, h, hh, hblob, -, -, -⟩ := hR

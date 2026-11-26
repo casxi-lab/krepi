@@ -743,8 +743,7 @@ theorem find_path_valid_spec {t : fdt.Fdt} {T : Fdt} {L : List Begin} (ht : Tree
   simp only [Bool.not_true, Bool.false_eq_true, ↓reduceIte, List.length_map]
   exact this
 
-/-- `Fdt::discover_cpus(profile)`: the statement `FdtDiscoverCpus` without its
-`Usize64` premise in the triple. -/
+/-- `Fdt::discover_cpus(profile)`: the statement `FdtDiscoverCpus`. -/
 theorem discover_cpus_spec (hu : Usize64) (t : fdt.Fdt) (T : Fdt) (profile : fdt.CpuProfile)
     (h : FdtRepr t T) :
     fdt.cpus.Fdt.discover_cpus t profile ⦃ r =>

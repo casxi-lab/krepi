@@ -399,15 +399,14 @@ theorem size_cells_at_spec (hu : Usize64) {t : fdt.Fdt} {a : fdt.NodeAt} {N : No
   simp only [lift, bind_ok]
   exact cells_at_spec hu h _ "#size-cells" bytes_size_cells 1#u32
 
-/-- `Node::address_cells()`: the statement `NodeAddressCells` without its
-premise. -/
+/-- `Node::address_cells()`: the statement `NodeAddressCells`. -/
 theorem node_address_cells_spec (hu : Usize64) (n : fdt.Node) (N : Node) (h : NodeRepr n N) :
     fdt.nodes.Node.address_cells n ⦃ r =>
       Agrees (fun c C => word32 c = C) errorOf r N.addressCells ⦄ := by
   unfold fdt.nodes.Node.address_cells
   exact address_cells_at_spec hu h
 
-/-- `Node::size_cells()`: the statement `NodeSizeCells` without its premise. -/
+/-- `Node::size_cells()`: the statement `NodeSizeCells`. -/
 theorem node_size_cells_spec (hu : Usize64) (n : fdt.Node) (N : Node) (h : NodeRepr n N) :
     fdt.nodes.Node.size_cells n ⦃ r =>
       Agrees (fun c C => word32 c = C) errorOf r N.sizeCells ⦄ := by
@@ -464,7 +463,7 @@ theorem reg_at_spec (hu : Usize64) {t : fdt.Fdt} {a : fdt.NodeAt} {N : Node}
       rw [h3, hac, hsc]
       exact hR
 
-/-- `Node::reg()`: the statement `NodeReg` without its premise. -/
+/-- `Node::reg()`: the statement `NodeReg`. -/
 theorem node_reg_spec (hu : Usize64) (n : fdt.Node) (N : Node) (h : NodeRepr n N) :
     fdt.nodes.Node.reg n ⦃ r => Agrees (fun g R => RegRepr g R.entries) errorOf r N.reg ⦄ := by
   unfold fdt.nodes.Node.reg
@@ -560,14 +559,14 @@ theorem node_address_map_spec (hu : Usize64) (n : fdt.Node) (N : Node) (h : Node
     rw [bytesOf_of_slice s1_post]
     exact hM
 
-/-- `Node::ranges()`: the statement `NodeRanges` without its premise. -/
+/-- `Node::ranges()`: the statement `NodeRanges`. -/
 theorem node_ranges_spec (hu : Usize64) (n : fdt.Node) (N : Node) (h : NodeRepr n N) :
     fdt.nodes.Node.ranges n ⦃ r => Agrees AddressMapRepr errorOf r N.ranges ⦄ := by
   unfold fdt.nodes.Node.ranges
   simp only [lift, bind_ok]
   exact node_address_map_spec hu n N h _ "ranges" bytes_ranges
 
-/-- `Node::dma_ranges()`: the statement `NodeDmaRanges` without its premise. -/
+/-- `Node::dma_ranges()`: the statement `NodeDmaRanges`. -/
 theorem node_dma_ranges_spec (hu : Usize64) (n : fdt.Node) (N : Node) (h : NodeRepr n N) :
     fdt.nodes.Node.dma_ranges n ⦃ r => Agrees AddressMapRepr errorOf r N.dmaRanges ⦄ := by
   unfold fdt.nodes.Node.dma_ranges
@@ -663,8 +662,7 @@ theorem climb_spec (hu : Usize64) {t : fdt.Fdt} {bus : fdt.NodeAt} {B : Node}
   unfold fdt.nodes.climb
   exact climb_loop_spec hu _ bus B h span 0#usize (by simp) (by simp)
 
-/-- `Node::translate_reg(span)`: the statement `NodeTranslateReg` without its
-premise. -/
+/-- `Node::translate_reg(span)`: the statement `NodeTranslateReg`. -/
 theorem node_translate_reg_spec (hu : Usize64) (n : fdt.Node) (N : Node) (span : fdt.Span)
     (h : NodeRepr n N) :
     fdt.nodes.Node.translate_reg n span ⦃ r =>
