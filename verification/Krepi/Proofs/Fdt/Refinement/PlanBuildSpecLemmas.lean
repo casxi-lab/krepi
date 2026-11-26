@@ -2,6 +2,7 @@ module
 
 public import Krepi.Proofs.Fdt.PlanLemmas
 public import Krepi.Proofs.Fdt.ExceptLemmas
+import Mathlib.Util.CountHeartbeats
 
 /-!
 # Device tree: lemmas about the construction of a boot memory map
