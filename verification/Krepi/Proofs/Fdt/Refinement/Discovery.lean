@@ -3,6 +3,7 @@ module
 public import Krepi.Statements.Fdt.Discovery
 import Mathlib.Util.CountHeartbeats
 import Krepi.Proofs.Fdt.Refinement.AccessorLemmas
+import Krepi.Proofs.Fdt.Refinement.MemoryLemmas
 
 /-!
 # Device tree: refinement of the memory discovery and the boot memory
@@ -10,14 +11,15 @@ import Krepi.Proofs.Fdt.Refinement.AccessorLemmas
 One theorem for each statement of `Krepi.Statements.Fdt.Discovery`,
 whose type is exactly that statement.
 
-The accessors of the memory map and of the boot memory are proved: each
-restates the triple of its function in
-`Krepi.Proofs.Fdt.Refinement.AccessorLemmas` (`memory_map_ram_spec`,
-`memory_map_reserved_spec`, `memory_map_dynamic_spec`, `boot_memory_ram_spec`,
-`boot_memory_reserved_spec`, `boot_memory_dynamic_spec`,
-`boot_memory_dtb_spec`, `boot_memory_image_spec` and
-`boot_memory_ram_bytes_spec`), which holds without the premise `Usize64`. The
-discoveries and the queries of a boot memory, `fdtDiscoverMemory`,
+The memory discovery and the accessors of the memory map and of the boot
+memory are proved. `fdtDiscoverMemory` restates `fdt_discover_memory_spec` of
+`Krepi.Proofs.Fdt.Refinement.MemoryLemmas`. Each accessor restates the triple
+of its function in `Krepi.Proofs.Fdt.Refinement.AccessorLemmas`
+(`memory_map_ram_spec`, `memory_map_reserved_spec`, `memory_map_dynamic_spec`,
+`boot_memory_ram_spec`, `boot_memory_reserved_spec`,
+`boot_memory_dynamic_spec`, `boot_memory_dtb_spec`, `boot_memory_image_spec`
+and `boot_memory_ram_bytes_spec`), which holds without the premise
+`Usize64`. The discovery of the boot memory and the queries of a boot memory,
 `fdtDiscoverBootMemory`, `bootMemoryIsAvailable` and
 `bootMemoryFindAvailable`, are planned: their proofs are `sorry`, and
 `verification/statements.json` registers them as `planned`, so that no
@@ -30,8 +32,7 @@ namespace Krepi.Proofs.Fdt.Refinement.Discovery
 open Krepi.Statements.Fdt Krepi.Proofs.Fdt.Refinement
 
 /-- Proves `FdtDiscoverMemory`. Feature: `krepi.platform.device-tree`. -/
-public theorem fdtDiscoverMemory : FdtDiscoverMemory := by
-  sorry
+public theorem fdtDiscoverMemory : FdtDiscoverMemory := fdt_discover_memory_spec
 
 /-- Proves `MemoryMapRam`. Feature: `krepi.platform.device-tree`. -/
 public theorem memoryMapRam : MemoryMapRam := fun _ _ _ h => memory_map_ram_spec h

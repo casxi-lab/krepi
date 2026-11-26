@@ -546,7 +546,7 @@
       "name": "Krepi.Statements.Fdt.FdtDiscoverMemory",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverMemory",
       "module": "Krepi.Proofs.Fdt.Refinement.Discovery",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryMapRam",
