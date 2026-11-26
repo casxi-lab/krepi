@@ -295,6 +295,11 @@ impl MemoryPlan {
         more: &[Span],
     ) -> Result<MemoryPlan, PlanError> {
         check_window(window)?;
+        // Before the count `2 + more.len()` is formed, so that it stays within
+        // `usize`; `build` would give the same error for such a count.
+        if more.len() > 2 {
+            return Err(PlanError::Capacity);
+        }
         let mut boot = [memory.image, memory.dtb, EMPTY, EMPTY];
         if more.len() <= 2 {
             let mut index = 0;

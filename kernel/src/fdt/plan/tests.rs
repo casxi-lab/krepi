@@ -17,6 +17,10 @@ use std::vec::Vec;
 #[rustfmt::skip]
 pub(in crate::fdt) mod before;
 
+// The copy of the entry on a boot memory before it checked the number of
+// further spans right after the window.
+mod old;
+
 const RAM: Span = Span {
     start: 0,
     size: 0x0800_0000,

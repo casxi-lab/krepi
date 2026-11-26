@@ -1,6 +1,8 @@
 //! The limits of the format at the limit and 1 above, where no vector holds
-//! that case; the errors that no vector gives; the boot storage of 4 and 5
-//! spans; and `Span::contains` on spans that end beyond 64 bits.
+//! that case, with a path one component below the deepest node; the lookup
+//! of a path at its last component; the errors that no vector gives; the
+//! boot storage of 4 and 5 spans, also as the further spans of a boot
+//! memory; and `Span::contains` on spans that end beyond 64 bits.
 //!
 //! Feature: krepi.platform.device-tree
 
@@ -89,6 +91,58 @@ fn a_node_at_depth_31_is_accepted() {
         node = parent;
     }
     assert_eq!(depth, MAX_DEPTH - 1);
+}
+
+/// A path of 32 components below the root, one more than a tree holds:
+/// none, after its first 31 components each matched a node.
+#[test]
+fn a_path_below_the_deepest_node_gives_none() {
+    let mut b = Builder::default();
+    b.root();
+    for _ in 1..MAX_DEPTH {
+        b.begin("child");
+    }
+    for _ in 0..MAX_DEPTH {
+        b.end();
+    }
+    let bytes = b.finish();
+    let tree = Fdt::parse(&bytes).unwrap();
+    let path = "/child".repeat(MAX_DEPTH as usize);
+    assert!(tree.find_node(&path).unwrap().is_none());
+}
+
+/// The last component of a path: the node of that name below the node of
+/// the components before it; none when no child of that node has the name
+/// as it is written, unit address included; `AmbiguousMapping` when two
+/// have it; and none when an earlier component matches nothing.
+#[test]
+fn a_path_is_looked_up_at_its_last_component() {
+    let mut b = Builder::default();
+    b.root();
+    b.begin("soc");
+    for name in ["serial@1000", "timer", "timer"] {
+        b.begin(name);
+        b.end();
+    }
+    b.end();
+    b.end();
+    let bytes = b.finish();
+    let tree = Fdt::parse(&bytes).unwrap();
+    let serial = tree.find_node("/soc/serial@1000").unwrap().unwrap();
+    assert_eq!(serial.name(), b"serial@1000");
+    assert_eq!(serial.parent().unwrap().name(), b"soc");
+    for path in [
+        "/soc/serial",
+        "/soc/serial@100",
+        "/soc/serial@1000/x",
+        "/bus/timer",
+    ] {
+        assert!(tree.find_node(path).unwrap().is_none(), "{path}");
+    }
+    assert_eq!(
+        tree.find_node("/soc/timer").unwrap_err(),
+        Error::AmbiguousMapping
+    );
 }
 
 /// A root, `nops` no-operation tokens, the end node of the root and the end
@@ -216,6 +270,42 @@ fn boot_storage_of_five_spans_fails_with_capacity() {
         MemoryPlan::all_ram(&[RAM], &BOOT, &[]).unwrap_err(),
         PlanError::Capacity
     );
+}
+
+/// Two further spans of a boot memory make 4 spans of boot storage, the
+/// image, the tree and the two in this order, each by whole pages; three
+/// and four fail with `Capacity`.
+#[test]
+fn a_boot_memory_takes_two_further_spans_and_fails_with_three() {
+    let bytes = pi5();
+    let memory = Fdt::parse(&bytes)
+        .unwrap()
+        .discover_boot_memory(PI5_HAND_OVER, DTB, IMAGE)
+        .unwrap();
+    let window = Span::new(0x40_0000, 0x10_0000).unwrap();
+    let more = [
+        Span::new(0x30_0000, 0x1000).unwrap(),
+        Span::new(0x31_0000, 1).unwrap(),
+        Span::new(0x32_0000, 0x1000).unwrap(),
+        Span::new(0x33_0000, 0x1000).unwrap(),
+    ];
+    let plan = MemoryPlan::from_boot_memory(&memory, window, &more[..2]).unwrap();
+    assert_eq!(
+        plan.boot_ranges(),
+        &[
+            IMAGE,
+            Span::new(DTB, 0x1000).unwrap(),
+            Span::new(0x30_0000, 0x1000).unwrap(),
+            Span::new(0x31_0000, 0x1000).unwrap(),
+        ]
+    );
+    assert_eq!(plan.managed_banks(), &[window]);
+    for count in [3, 4] {
+        assert_eq!(
+            MemoryPlan::from_boot_memory(&memory, window, &more[..count]).unwrap_err(),
+            PlanError::Capacity
+        );
+    }
 }
 
 #[test]

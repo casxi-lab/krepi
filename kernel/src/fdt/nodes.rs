@@ -289,6 +289,32 @@ pub(super) fn find_path(structure: &[u8], path: &[u8]) -> Result<Option<NodeAt>,
     descend(structure, path, 1, root)
 }
 
+/// The node of the components of `path` from `start` below `current`, as
+/// [`descend`] gives it, for [`Fdt::find_node`]: the walk returns at the
+/// component that ends the path instead of stepping past it, so that the
+/// offset of a next component never leaves `usize`.
+fn descend_to_last(
+    structure: &[u8],
+    path: &[u8],
+    start: usize,
+    current: Option<NodeAt>,
+) -> Result<Option<NodeAt>, Error> {
+    let mut start = start;
+    let mut current = current;
+    while start <= path.len() {
+        let end = component_end(path, start);
+        current = match current {
+            Some(node) => child_named(structure, node.offset, path, start, end)?,
+            None => return Ok(None),
+        };
+        if end == path.len() {
+            return Ok(current);
+        }
+        start = end + 1;
+    }
+    Ok(current)
+}
+
 /// The node of `found` in `tree`.
 fn node_of(tree: Fdt<'_>, found: Option<NodeAt>) -> Option<Node<'_>> {
     match found {
@@ -610,7 +636,11 @@ impl<'a> Fdt<'a> {
         if !path_valid(path) {
             return Err(Error::BadPath);
         }
-        let found = find_path(self.structure, path)?;
+        let root = first_node(self.structure);
+        if path.len() == 1 {
+            return Ok(node_of(self, root));
+        }
+        let found = descend_to_last(self.structure, path, 1, root)?;
         Ok(node_of(self, found))
     }
 }
@@ -760,3 +790,6 @@ impl<'a> Node<'a> {
         Ok(translated)
     }
 }
+
+#[cfg(test)]
+mod tests;
