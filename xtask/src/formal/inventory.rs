@@ -15,6 +15,7 @@ use syn::punctuated::Punctuated;
 use syn::visit::{self, Visit};
 use syn::{Attribute, Expr, Ident, Lit, Token, Type};
 
+use super::lanes::{self, Home, Homes};
 use super::{Layout, classify, mutants, registry, storage, waiver};
 use crate::manifests;
 use crate::repo::{self, Tree};
@@ -367,8 +368,34 @@ pub fn open_json(obligations: &[Json]) -> String {
     serde_json::to_string_pretty(&open).expect("JSON") + "\n"
 }
 
+/// The hand-written modules of the Lake project of `layout` that `tree`
+/// tracks, the Lean files below its namespace, by name, each with its home:
+/// the qualification job below `<namespace>/Qualification/`, the component
+/// `<component>` in a directory `<namespace>/<layer>/<component>/` of a
+/// layer of [`lanes::LAYERS`], and otherwise the lane of the shared modules.
+pub fn homes(tree: &Tree, layout: &Layout) -> Homes {
+    let below = format!("{}/{}/", layout.project, layout.namespace);
+    let lean = |path: &str| {
+        Some(
+            path.strip_prefix(&below)?
+                .strip_suffix(".lean")?
+                .to_string(),
+        )
+    };
+    let files = tree.entries().filter_map(|(path, _)| lean(path));
+    let home = |file: &str| match file.split('/').collect::<Vec<_>>()[..] {
+        ["Qualification", ..] => Home::Qualification,
+        [layer, component, _, ..] if lanes::LAYERS.split(' ').any(|l| l == layer) => {
+            Home::Component(component.to_string())
+        }
+        _ => Home::Shared,
+    };
+    let module = |file: &str| format!("{}.{}", layout.namespace, file.replace('/', "."));
+    files.map(|file| (module(&file), home(&file))).collect()
+}
+
 /// Checks the tracked files of `tree` with the `roots` of the kernel targets,
-/// with the shard plan and the budget of each shard.
+/// with the shard plan, the budget of each shard and the lanes.
 pub fn check(tree: &Tree, roots: &[(String, bool)], layout: &Layout) -> (String, Problems) {
     let (inventory, mut problems) = inventory(tree, roots, layout.kernel);
     let text = |path: &str| tree.text(path).ok_or(format!("{path} is not tracked"));
@@ -382,6 +409,9 @@ pub fn check(tree: &Tree, roots: &[(String, bool)], layout: &Layout) -> (String,
         Err(problem) => (vec![problem], Vec::new()),
     };
     problems.extend(plan_problems);
+    let homes = homes(tree, layout);
+    let lanes = text(layout.lanes).map(|t| lanes::check(layout.lanes, t, &homes, &targets));
+    problems.extend(lanes.unwrap_or_else(|problem| vec![problem]));
     let axioms = text(layout.axioms).and_then(registry::axiom_rules);
     let axioms = axioms.unwrap_or_else(|problem| vec![problem]);
     problems.extend(
@@ -510,6 +540,11 @@ mod tests {
 
     const NO_PARTS: &str = "{\"schema\": 1, \"parts\": []}\n";
 
+    /// The lanes of the fixture: the lane `a` of the component `A`, the
+    /// module of its formal targets.
+    const LANES: &str =
+        "{\"schema\": 1, \"lanes\": [{\"name\": \"a\", \"components\": [\"A\"]}]}\n";
+
     /// The input of the test `functions_are_found_with_owners` of the
     /// inventory of the CAS project, unchanged.
     const SOURCE: &str = r##"
@@ -585,14 +620,15 @@ let s = "#[derive(Clone)] struct InString;";
         (inventory, problems.into_iter().collect())
     }
 
-    /// A tree of `files` with empty registries and shard plan and, unless
-    /// `files` holds one, the `verification/open.json` that its contracts
-    /// give.
+    /// A tree of `files` with empty registries and shard plan, the lanes
+    /// [`LANES`] and, unless `files` holds one, the `verification/open.json`
+    /// that its contracts give.
     fn tree(files: &[(&str, &str)]) -> Tree {
         let mut tree = Tree::from_files(&[
             (LAYOUT.registry, NO_TARGETS),
             (LAYOUT.models, NO_MODELS),
             (LAYOUT.shards, NO_PARTS),
+            (LAYOUT.lanes, LANES),
         ]);
         tree.insert(
             LAYOUT.axioms,
@@ -1179,7 +1215,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
         );
         // A formal target with the obligation, theorem and mutant that it
         // needs.
-        let targets = r#"{"schema": 2, "targets": [{"name": "a",
+        let targets = r#"{"schema": 2, "targets": [{"name": "a", "module": "A", "start_from": ["f"],
             "proves": ["kernel/demo/src/lib.rs#f"], "unclosed": ["kernel/demo/src/lib.rs#g"],
             "obligations": [{"id": "o", "theorems": ["T.t"]}],
             "mutants": [{"name": "m", "file": "kernel/demo/src/lib.rs", "find": "f", "replace": "f", "fails": ["T.t"]}]}]}"#;
@@ -1217,11 +1253,11 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
         );
     }
 
-    /// A registry with the formal target `a`, of `budget`, which proves `f`
-    /// of [`LIB`], and the planned target `b`, of 7,200 s.
+    /// A registry with the formal target `a` of the module `A`, of `budget`,
+    /// which proves `f` of [`LIB`], and the planned target `b`, of 7,200 s.
     fn shard_of(budget: u64) -> String {
         format!(
-            r#"{{"schema": 2, "targets": [{{"name": "a", "budget": {budget},
+            r#"{{"schema": 2, "targets": [{{"name": "a", "module": "A", "start_from": ["f"], "budget": {budget},
             "proves": ["kernel/demo/src/lib.rs#f"],
             "obligations": [{{"id": "o", "theorems": ["T.t"]}}],
             "mutants": [{{"name": "m", "file": "kernel/demo/src/lib.rs", "find": "f", "replace": "f", "fails": ["T.t"]}}]}},
@@ -1291,6 +1327,117 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
         tree.insert(LAYOUT.shards, repo::Entry::Submodule);
         let problems = Vec::from_iter(check(&tree, &roots(&[]), &LAYOUT).1);
         assert_eq!(problems, ["verification/shards.json is not tracked"]);
+    }
+
+    #[test]
+    fn hand_written_modules_have_the_home_of_their_directory() {
+        let tree = Tree::from_files(&[
+            ("verification/Krepi/Proofs/Fdt/Refinement/Lemmas.lean", ""),
+            ("verification/Krepi/SpecTests/PageTables/Vectors.lean", ""),
+            ("verification/Krepi/Statements/Basic.lean", ""),
+            ("verification/Krepi/Proofs/Calibration.lean", ""),
+            ("verification/Krepi/Qualification/Models/Arc.lean", ""),
+            ("verification/Krepi/Spec/Fdt/notes.md", ""),
+            ("verification/externals/Qual/X/FunsExternal.lean", ""),
+            (
+                "verification/qualification/calibration/Krepi/Calibration/Statements.lean",
+                "",
+            ),
+        ]);
+        let component = |name: &str| Home::Component(name.to_string());
+        let production = Vec::from_iter(homes(&tree, &LAYOUT));
+        let expected = [
+            ("Krepi.Proofs.Calibration", Home::Shared),
+            ("Krepi.Proofs.Fdt.Refinement.Lemmas", component("Fdt")),
+            ("Krepi.Qualification.Models.Arc", Home::Qualification),
+            (
+                "Krepi.SpecTests.PageTables.Vectors",
+                component("PageTables"),
+            ),
+            ("Krepi.Statements.Basic", Home::Shared),
+        ];
+        assert_eq!(
+            production,
+            expected.map(|(module, home)| (module.to_string(), home))
+        );
+        // The calibration layout reads the files of its own project alone.
+        let calibration = Vec::from_iter(homes(&tree, &Layout::CALIBRATION));
+        let statements = "Krepi.Calibration.Statements".to_string();
+        assert_eq!(calibration, [(statements, Home::Shared)]);
+    }
+
+    /// The module `Krepi.Statements.Basic`, outside the directories of the
+    /// components and the qualification.
+    const BASIC: (&str, &str) = ("verification/Krepi/Statements/Basic.lean", "module\n");
+
+    #[test]
+    fn a_hand_written_module_in_no_component_and_no_lane_is_one_problem_of_the_check() {
+        let lib = (LIB, "");
+        let problem = "verification/lanes.json: shared module Krepi.Statements.Basic is in no lane";
+        assert_eq!(problems(&[lib, BASIC]), [problem]);
+        // Listed by a lane, it is in that lane.
+        let lanes = r#"{"schema": 1, "lanes": [{"name": "a", "components": ["A"],
+            "modules": ["Krepi.Statements.Basic"]}]}"#;
+        assert_eq!(
+            problems(&[lib, BASIC, (LAYOUT.lanes, lanes)]),
+            Vec::<String>::new()
+        );
+        // Lanes that are not a tracked file.
+        let mut tree = tree(&[lib]);
+        tree.insert(LAYOUT.lanes, repo::Entry::Submodule);
+        let problems = Vec::from_iter(check(&tree, &roots(&[]), &LAYOUT).1);
+        assert_eq!(problems, ["verification/lanes.json is not tracked"]);
+    }
+
+    #[test]
+    fn shared_modules_in_two_lanes_fail_the_check() {
+        let lib = (LIB, "");
+        let common = ("verification/Krepi/Proofs/Common.lean", "module\n");
+        let lanes = |a: &str, b: &str| {
+            format!(
+                r#"{{"schema": 1, "lanes": [{{"name": "a", "components": ["A"], "modules": [{a}]}},
+                {{"name": "b", "components": ["B"], "modules": [{b}]}}]}}"#
+            )
+        };
+        let (basic, common_name) = (r#""Krepi.Statements.Basic""#, r#""Krepi.Proofs.Common""#);
+        // The shared modules are one component, which is in one lane.
+        let split = lanes(basic, common_name);
+        let problem = "verification/lanes.json: the shared modules are in more than one lane: a, b";
+        let files = |lanes| [lib, BASIC, common, (LAYOUT.lanes, lanes)];
+        assert_eq!(problems(&files(&split)), [problem]);
+        let together = lanes(&format!("{basic}, {common_name}"), "");
+        assert_eq!(problems(&files(&together)), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_lane_whose_budget_and_the_extraction_margin_exceed_the_shard_limit_fails_the_check() {
+        let lib = (LIB, "");
+        let lanes = |budget: u64| {
+            format!(
+                r#"{{"schema": 1, "lanes": [{{"name": "a", "components": ["A"], "budget": {budget}}}]}}"#
+            )
+        };
+        assert_eq!(
+            problems(&[lib, (LAYOUT.lanes, &lanes(2_700))]),
+            Vec::<String>::new()
+        );
+        let over = "verification/lanes.json: lane a: its registered budget of 2701 s and the \
+                    extraction margin of 600 s are more than the shard limit of 3300 s";
+        assert_eq!(problems(&[lib, (LAYOUT.lanes, &lanes(2_701))]), [over]);
+        // The same in the layout of the calibration.
+        let layout = Layout::CALIBRATION;
+        let tree = Tree::from_files(&[
+            (layout.registry, NO_TARGETS),
+            (layout.models, NO_MODELS),
+            (layout.axioms, NO_AXIOMS),
+            (layout.shards, NO_PARTS),
+            (layout.lanes, &lanes(2_701)),
+        ]);
+        let found = check(&tree, &roots(&[]), &layout).1;
+        assert!(
+            found.contains(&over.replace(LAYOUT.lanes, layout.lanes)),
+            "{found:?}"
+        );
     }
 
     #[test]

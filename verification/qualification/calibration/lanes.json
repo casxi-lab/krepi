@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "lanes": [
+    {
+      "name": "calibration",
+      "components": [
+        "Calibration"
+      ],
+      "modules": [
+        "Krepi.Calibration.Statements",
+        "Krepi.Proofs.Calibration"
+      ],
+      "budget": 2400
+    }
+  ]
+}

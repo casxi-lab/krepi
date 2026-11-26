@@ -1005,6 +1005,7 @@ mod tests {
             "verification/statements.json",
             "verification/targets.json",
             "verification/shards.json",
+            "verification/lanes.json",
             "verification/tcb.json",
             "verification/qualification/cases.json",
             "kernel/abi/src/lib.rs",

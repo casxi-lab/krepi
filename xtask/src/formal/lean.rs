@@ -689,18 +689,37 @@ const COUNT: &str = "#count_heartbeats in";
 /// The copy of `text` with [`COUNT`] before each line `at` which a theorem's
 /// declaration range starts with a doc comment, an attribute, a modifier or
 /// `theorem`, and the theorem of each inserted line; others are left out.
+/// A range that starts on a later line of the header of such a command, up
+/// to its keyword, starts inside it, as that of a theorem that `@[step]` adds.
 pub fn heartbeat_copy(text: &str, at: &[(String, usize)]) -> (String, BTreeMap<usize, String>) {
     const DECLARATION: &str = "theorem lemma public private protected nonrec";
-    let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let mut starts = BTreeMap::new();
-    for (theorem, line) in at {
+    let (lines, all) = (Vec::from_iter(text.split_inclusive('\n')), tokens(text));
+    // The line of the keyword of the command that starts at `line`: its first
+    // name outside the brackets of its attributes that is no modifier, which
+    // the words of `DECLARATION` after `theorem` and `lemma` are.
+    let modifier = |w: &str| DECLARATION.split(' ').skip(2).any(|m| m == w);
+    let keyword = |line: usize| {
+        let mut depth = 0_usize;
+        let mut rest = all.iter().skip_while(|(at, _)| *at < line);
+        let found = rest.find(|(_, token)| {
+            depth += usize::from(*token == Token::Symbol('['));
+            depth -= usize::from(*token == Token::Symbol(']') && depth > 0);
+            matches!(token, Token::Name(word) if depth == 0 && !modifier(word))
+        });
+        found.map_or(line, |(at, _)| *at)
+    };
+    let mut ordered = Vec::from_iter(at);
+    ordered.sort_by_key(|(_, line)| *line);
+    let (mut starts, mut header) = (BTreeMap::new(), 0);
+    for (theorem, line) in ordered {
         let text = lines.get(line.wrapping_sub(1)).copied().unwrap_or_default();
         let begins = match tokens(text).into_iter().next().map(|(_, token)| token) {
             Some(Token::Name(word)) => DECLARATION.split(' ').any(|start| start == word),
             first => matches!(first, Some(Token::Doc | Token::Symbol('@'))),
         };
-        if begins {
-            starts.entry(*line).or_insert_with(|| theorem.clone());
+        if begins && *line > header {
+            starts.insert(*line, theorem.clone());
+            header = keyword(*line);
         }
     }
     let (mut copy, mut inserted) = (String::new(), BTreeMap::new());
@@ -2225,6 +2244,71 @@ mod tests {
             heartbeats(output, &inserted),
             BTreeMap::from([("b".to_string(), 7)])
         );
+    }
+
+    #[test]
+    fn the_theorem_that_step_adds_to_a_theorem_with_a_doc_comment_has_no_heartbeat_count() {
+        // A copy that Lean parsed, and what it printed for it. `@[step]` adds
+        // the theorem `idU32_spec.mvcgen_spec`, whose range starts at the
+        // attribute, inside the command of `idU32_spec`, which starts at its
+        // doc comment: a line inserted there too ended that command after the
+        // doc comment, and the copy did not parse (see the header).
+        let copy = include_str!("fixtures/base/heartbeats/Krepi/HB/Step.lean");
+        let output = include_str!("fixtures/base/heartbeats/Krepi/HB/Step.json");
+        let original = copy.replace(&format!("{COUNT}\n"), "");
+        let at = [
+            ("idU32_spec", 13),
+            ("idU32_spec.mvcgen_spec", 15),
+            ("after", 19),
+        ];
+        let at = at.map(|(name, line)| (format!("Krepi.HB.{name}"), line));
+        let (written, inserted) = heartbeat_copy(&original, &at);
+        assert_eq!(written, copy);
+        let [spec, _, after] = at.map(|(name, _)| name);
+        assert_eq!(
+            inserted,
+            BTreeMap::from([(13, spec.clone()), (20, after.clone())])
+        );
+        assert_eq!(
+            heartbeats(output, &inserted),
+            BTreeMap::from([(spec, 84), (after, 32)])
+        );
+        // The same with an attribute before `@[step]`, a modifier, and
+        // `@[step]` on the line of its keyword or on its own line before it,
+        // where the range of the added theorem starts on the line of that of
+        // its theorem.
+        let text = "module\n\
+            /-- The first, with a doc comment\n\
+            of two lines. -/\n\
+            @[step] theorem a_spec : True := trivial\n\
+            /-- The second. -/\n\
+            @[simp]\n\
+            @[step]\n\
+            protected theorem b_spec : True := trivial\n\
+            @[step]\n\
+            theorem c_spec : True := trivial\n\
+            theorem d : True := trivial\n";
+        let at = [
+            ("a_spec", 2),
+            ("a_spec.mvcgen_spec", 4),
+            ("b_spec", 5),
+            ("b_spec.mvcgen_spec", 7),
+            ("c_spec", 9),
+            ("c_spec.mvcgen_spec", 9),
+            ("d", 11),
+        ];
+        let at = at.map(|(name, line)| (name.to_string(), line));
+        let (copy, inserted) = heartbeat_copy(text, &at);
+        let counted = [(2, "a_spec"), (6, "b_spec"), (11, "c_spec"), (14, "d")];
+        let counted = counted.map(|(line, name)| (line, name.to_string()));
+        assert_eq!(inserted, BTreeMap::from(counted.clone()));
+        // The copy is the text with a count before the first line of each of
+        // these commands alone.
+        let mut expected = Vec::from_iter(text.lines());
+        for (line, _) in counted {
+            expected.insert(line - 1, COUNT);
+        }
+        assert_eq!(Vec::from_iter(copy.lines()), expected);
     }
 
     #[test]

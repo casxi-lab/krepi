@@ -97,7 +97,10 @@ jobs:
   # by its unit, whose registered budget may be at most the shard limit,
   # 3,300 s, whatever its workers, as `cargo xtask formal check` requires;
   # a job of the hosted runners ends after 360 minutes. Target names are
-  # checked before they are passed on. The limits of the qualification job
+  # checked before they are passed on, and so are the lanes: the names of
+  # `verification/lanes.json`, and the registered budget of each lane with
+  # the extraction margin, 600 s, at most the shard limit, as
+  # `cargo xtask formal check` requires. The limits of the qualification job
   # do not depend on the registry and are written in it.
   limits:
     name: formal limits
@@ -127,8 +130,17 @@ jobs:
           shard_margin=300
           receipt_margin=300
           shard_limit=3300
+          extraction_margin=600
           registry=verification/targets.json
+          lanes=verification/lanes.json
           jq -e 'all(.targets[]; .name | test("^[a-z0-9][a-z0-9-]*$"))' "$registry" > /dev/null
+          jq -e 'all(.lanes[]; .name | test("^[a-z0-9][a-z0-9-]*$"))' "$lanes" > /dev/null
+          heavy=$(jq -r --argjson margin "$extraction_margin" --argjson limit "$shard_limit" \
+            '[.lanes[] | select((.budget // 2400) + $margin > $limit) | .name] | join(" ")' "$lanes")
+          if [ -n "$heavy" ]; then
+            echo "the registered budget of the lane $heavy and the extraction margin of $extraction_margin s are more than $shard_limit s" >&2
+            exit 1
+          fi
           # The targets of the state $1 with a name of the list $2, or with
           # any name when it is null, grouped by their name with the sum of
           # their budgets, and the limits of the step and the job of each.
