@@ -205,6 +205,49 @@ fn error_order_plan_step_2() {
     );
 }
 
+/// `MemoryPlan::from_boot_memory` with three further spans, 5 spans of boot
+/// storage: after a managed window of size 0, `InvalidRange`; otherwise
+/// `Capacity` of step 2, before the first further span, of size 0, in step
+/// 6, `InvalidRange`, and before the managed window outside every bank of
+/// step 8, `OutsideRam`.
+#[test]
+fn error_order_plan_step_2_further_spans() {
+    let mut b = Builder::default();
+    b.root();
+    b.property("compatible", b"raspberrypi,5-model-b\0brcm,bcm2712\0");
+    b.begin("memory@0");
+    b.property("device_type", b"memory\0");
+    b.cells("reg", &[0, 0, 0, 0x4000_0000]);
+    b.end();
+    b.end();
+    let bytes = b.finish();
+    let memory = Fdt::parse(&bytes)
+        .unwrap()
+        .discover_boot_memory(
+            PI5_HAND_OVER,
+            0x20_0000,
+            Span::new(0x10_0000, 0x1000).unwrap(),
+        )
+        .unwrap();
+    let more = [
+        Span::new(0x30_0000, 0).unwrap(),
+        Span::new(0x40_0000, 0x1000).unwrap(),
+        Span::new(0x50_0000, 0x1000).unwrap(),
+    ];
+    let empty = Span::new(0x60_0000, 0).unwrap();
+    assert_eq!(
+        MemoryPlan::from_boot_memory(&memory, empty, &more).unwrap_err(),
+        PlanError::InvalidRange
+    );
+    for window in [0x60_0000, 0x8000_0000] {
+        let window = Span::new(window, 0x1000).unwrap();
+        assert_eq!(
+            MemoryPlan::from_boot_memory(&memory, window, &more).unwrap_err(),
+            PlanError::Capacity
+        );
+    }
+}
+
 /// A bank that shares `[0x1000, 0x2000)` with an earlier one, `Overlap`,
 /// before the 16 GiB and 4 KiB of the banks in step 4, `ArenaTooLarge`.
 #[test]
