@@ -362,7 +362,7 @@ Every job of these lines has a `timeout-minutes`. In the jobs that run
 command also ends at a deadline that `timeout` sets one or two minutes
 before the limit of its job, counting for the check the 3-minute limit of
 the pull of the image before it, so that the uploads still run when the
-command takes too long: the check has 12 minutes of the 17 of its job on the
+command takes too long: the check has 14 minutes of the 19 of its job on the
 pull request and main lines and 38 of 43 on the full and nightly lines.
 `cargo xtask qemu-boot` runs after the check in the same job without a
 deadline of its own. The step starts the command as the last command of its
