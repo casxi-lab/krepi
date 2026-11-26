@@ -19,6 +19,8 @@ use super::*;
 use crate::fdt::cpus::tests::before::CpuProfile_before;
 use crate::fdt::plan::tests::before::Pi5BootMemory_before;
 
+mod lengths;
+
 /// The CPU profiles of the boards and the variants of the copy that name
 /// them.
 const CPU_PROFILES: [(CpuProfile, CpuProfile_before); 3] = [

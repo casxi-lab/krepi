@@ -30,6 +30,7 @@ tests:
   - kernel/src/fdt/tests/profiles.rs
   - kernel/src/fdt/tests/results.rs
   - kernel/src/fdt/tests/results/differential.rs
+  - kernel/src/fdt/tests/results/differential/lengths.rs
   - kernel/src/fdt/tests/translation.rs
   - kernel/src/fdt/cpus/tests.rs
   - kernel/src/fdt/cpus/tests/before.rs
@@ -40,8 +41,11 @@ tests:
   - kernel/src/fdt/hand_over/tests/models.rs
   - kernel/src/fdt/hand_over/tests/platform.rs
   - kernel/src/fdt/hand_over/tests/selection.rs
+  - kernel/src/fdt/nodes/tests.rs
+  - kernel/src/fdt/nodes/tests/old.rs
   - kernel/src/fdt/plan/tests.rs
   - kernel/src/fdt/plan/tests/before.rs
+  - kernel/src/fdt/plan/tests/old.rs
 suites:
   - qemu-boot
 theorems: none
@@ -314,9 +318,12 @@ reservations, and, with the tree at the start of RAM and the image at
   expected output. They establish the rules on trees that the tests build,
   not on the trees that a board hands over. The differential tests compare
   the board-neutral entries with a verbatim copy of the code before them on
-  the board profiles, and further tests check profile values that no board
-  gives against the contract. The three ignored tests of the firmware trees
-  need files outside the repository and do not run in CI.
+  the board profiles, and `MemoryPlan::from_boot_memory` and
+  `Fdt::find_node` with a verbatim copy of their code before they stopped
+  adding a constant to the length of an argument; further tests check
+  profile values that no board gives against the contract. The three
+  ignored tests of the firmware trees need files outside the repository
+  and do not run in CI.
 - **Compile-time guards.** The `subset` step of `cargo xtask check` builds
   the two compile-fail cases below `kernel/compile-fail/`: a tree built
   without the parse, which the private fields refuse, and a byte of the

@@ -790,3 +790,6 @@ impl<'a> Node<'a> {
         Ok(translated)
     }
 }
+
+#[cfg(test)]
+mod tests;
