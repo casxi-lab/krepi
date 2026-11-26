@@ -142,6 +142,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/externals/<Module>/` | Reviewed external declarations of a target or a qualification case (`FunsExternal.lean`, `TypesExternal.lean`), named by its `models` field | Present for qualification cases |
 | `verification/targets.json` | The proof target registry | Present |
 | `verification/shards.json` | The shard plan: for the qualification and for each target, the disk peak, the seconds and the cgroup memory peak that a run of CI measured, with the run and its commit; the disk guard of a run reads it ([shard plan and disk guard](#shard-plan-and-disk-guard)) | Present |
+| `verification/lanes.json` | The lanes: the components and the shared hand-written modules of each lane of the base round, with its registered budget ([lanes](#lanes)) | Present |
 | `verification/models.json` | The model registry ([models](#models)); `cargo xtask formal check` refuses a registered model | Present, empty |
 | `verification/statements.json` | The statement hash, and each statement with its theorem and state ([statements and proofs](#statements-and-proofs)) | Present |
 | `verification/axioms.json` | The axioms of the Aeneas Lean library that target theorems may use, each with its source and reason ([base round](#base-round)) | Present, empty |
@@ -150,7 +151,7 @@ never moved into the trusted boundary to close a gap.
 | `verification/legacy.json` | Kept empty: production functions without a proof are listed in `open.json` ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present, empty by design |
 | `verification/open.json` | The open obligations of the production code, generated from the `Open obligations` tables of the contracts of the components ([legacy inventory and admission](#legacy-inventory-and-admission)) | Present |
 | `verification/qualification/` | A small crate of code shapes and their expected tool outcomes (`cases.json`) | Present |
-| `verification/qualification/calibration/` | The [calibration target](#calibration-target): a workspace with a root package and a member, its Lake project with its statements and proofs, its registries and shard plan, and the lists of survivors of its source mutants in `mutants/` | Present |
+| `verification/qualification/calibration/` | The [calibration target](#calibration-target): a workspace with a root package and a member, its Lake project with its statements and proofs, its registries, shard plan and lanes, and the lists of survivors of its source mutants in `mutants/` | Present |
 | `verification/mutants/` | The list of survivors of the source mutants of each target that has one, `<target>.json` ([source mutants and survivors](#source-mutants-and-survivors)) | Absent until a list is written |
 | `verification/vectors/` | The frozen test vectors of the components whose contracts name them, one file for each component ([test vectors](#test-vectors)) | Present |
 | `xtask/src/formal/` | The commands of `cargo xtask formal` | `toolchain-check`, `run`, `guard`, `check`, `mutants`, `vectors`, `canary`, `impact`, `merge` and `receipt` present, the others planned |
@@ -745,7 +746,7 @@ others are planned.
 | `cargo xtask formal toolchain-check --aeneas DIR --charon DIR` | Checks Aeneas and Charon checkouts and the Aeneas patch against the tool manifest ([tool checks](#tool-checks)) |
 | `cargo xtask formal run [--target NAME]... [--shard NAME] [--calibration] [--keep]` | The proof gate on a snapshot of the gate inputs, with its receipt ([gate run](#gate-run)); `--target` runs only the part of the named targets, their extraction and the phase `targets`, `--shard` only the qualification job, the [comparator](#comparator) part or the shard of a formal target ([shards and merge](#shards-and-merge)), `--calibration` runs in the layout of the [calibration target](#calibration-target), and `--keep` keeps the work directory of the run ([layout](#layout)). Its phases are, on a pull request, the [guard](#guard), which records its rules; then the [qualification](#qualification), the extraction of the selected and the formal targets, the [base round](#base-round) and the selected [targets](#proof-targets) with their [mutants](#mutants), which every run of the whole gate has |
 | `cargo xtask formal guard --event PATH` | Checks a pull request, given by the JSON of its `pull_request` event, against the rules for changes of statements, proofs, sources and registries ([guard](#guard)) |
-| `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)) and of the waiver record ([waivers](#waivers)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
+| `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)) and of the waiver record ([waivers](#waivers)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)), the lanes ([lanes](#lanes)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its jobs fetched and built: give the rows of the run and their `limits` from the registry, `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from what its parts left and, with `--outcomes`, the result of the job `canary limits` ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
 | `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration, and `--keep` keeps the work directory of the run, as for `run` |
@@ -784,7 +785,8 @@ in `registry.rs`, the check of a target's registration against its
 extraction in `classify.rs`, the [comparator](#comparator) in
 `comparator.rs`, the installation of its generated files and
 reviewed external declarations in `externals.rs`, the shard plan, the
-disk guard and the removals in `storage.rs`, the shard limit, the parts
+disk guard and the removals in `storage.rs`, the lanes and their rules in
+`lanes.rs`, the shard limit, the parts
 of the gate and their merge in `merge.rs`, and the run, with the phases of
 the targets, in `run.rs`.
 
@@ -1039,6 +1041,62 @@ directory every second and skips a reading that cannot be taken;
 `disk_least_available` of the receipt is the least of these readings and
 the one at the start. A thread that cannot be started, or whose reading
 panics, is a tool failure of the run.
+
+### Lanes
+
+The lanes are `verification/lanes.json`, and
+`verification/qualification/calibration/lanes.json` for the
+[calibration target](#calibration-target). They divide the hand-written
+modules of the Lake project, its Lean files below `Krepi/`, between the
+qualification job and the lanes of the base round, each with a registered
+budget. The runs of the gate do not read them yet; `cargo xtask formal check`
+and the job `formal limits` of the [CI job](#ci-job) check them. They have
+schema 1 and `lanes`, an array with one entry for each lane, with these
+fields; a field that the table does not list is refused:
+
+| Field | Content |
+| --- | --- |
+| `name` | The name of the lane, of lowercase letters, digits and hyphens, starting with a letter or a digit |
+| `components` | The components of the lane, each the name of its directories `Krepi/<layer>/<component>/` in the layers `Spec`, `SpecProperties`, `SpecTests`, `Statements` and `Proofs`, which is the `module` of its targets ([proof targets](#proof-targets)) |
+| `modules` | The shared modules of the lane, by name, none when the field is left out |
+| `budget` | The registered budget of the lane in seconds, 2,400 when the field is left out |
+
+Each hand-written module belongs by its file to the qualification job when
+it lies below `Krepi/Qualification/`, to the lane of its component when it
+lies in the directory of a component, and otherwise it is a shared module,
+which belongs to the lane that lists it. The shared modules count as one
+component, so one lane lists them all.
+`verification/lanes.json` has the lane `fdt`, with the component `Fdt` and
+the shared module `Krepi.Statements.Basic`, and the lane `page-tables`, with
+the component `PageTables`. The Lake project of the calibration target has
+no directory of a component: its lanes have the lane `calibration`, with
+the component `Calibration` of its formal target and the shared modules
+`Krepi.Calibration.Statements` and `Krepi.Proofs.Calibration`. Each lane has
+the budget 2,400 s.
+
+`cargo xtask formal check` refuses, in either layout, lanes that do not
+parse, of another schema or with a field that it does not know, and:
+
+- a lane name that is not of lowercase letters, digits and hyphens starting
+  with a letter or a digit, or that another lane has;
+- a component, or a listed module, in two lanes or twice in one, and a
+  listed module that is no shared module;
+- a lane whose registered budget and the 600 s for the extraction of its
+  targets, the extraction margin, are more than the shard limit of 3,300 s
+  ([shard plan and disk guard](#shard-plan-and-disk-guard)), so that a lane
+  has at most 2,700 s;
+- a component of a hand-written module that no lane holds, a shared module
+  that no lane lists, and shared modules in two lanes;
+- a formal target whose `module` is no component of a lane; a planned
+  target needs no lane, and a component of a lane needs no hand-written
+  module.
+
+The lanes are neither a registry nor on the statement side, so the
+[guard](#guard) requires no label for a change of them. The job
+`formal limits` fails on a lane name that is not of these characters and on
+a lane whose budget and the extraction margin are more than the shard
+limit, as the check does ([CI job](#ci-job)); the other rules are the
+check's alone.
 
 ### Shards and merge
 
@@ -1836,10 +1894,20 @@ each own file with such theorems, the round writes a copy below
 `.heartbeats/` with Mathlib's `#count_heartbeats in` inserted before each
 of them, at the line at which its declaration range starts when a
 declaration command starts there, and reads the counts that
-`lake env lean --json` prints for the copy. A theorem whose range starts
-inside another command, such as a `where` clause, has no count, nor have
+`lake env lean --json` prints for the copy. A declaration command starts
+at a line whose first token is a doc comment, an attribute, one of the
+modifiers `public`, `private`, `protected` and `nonrec`, `theorem` or
+`lemma`, unless the line lies in the header of a command before which a
+count is inserted on an earlier line, up to the line of its keyword, the
+first name outside the brackets of its attributes that is no modifier. A theorem whose range
+starts inside another command, such as a `where` clause, or the theorem
+`<name>.mvcgen_spec` that `@[step]` adds at its attribute after the doc
+comment of a theorem on an earlier line, has no count, nor have
 the theorems of a file whose command ends by itself with a status other
-than 0; the receipt records why. A theorem without a declaration range,
+than 0; the receipt records why. A theorem that an attribute adds in the
+header of a declaration of another kind, such as `@[ext]` after the doc
+comment of a structure, gets a line inserted there, so the copy does not
+parse and the theorems of its file have no counts. A theorem without a declaration range,
 such as one that Lean generates for a structure or a `match`, has no count
 and no such record. `#count_heartbeats` is Mathlib's, so a file that
 imports neither Mathlib nor the Aeneas Lean library, which imports it,
@@ -2639,7 +2707,12 @@ so a shard job has at most 85 minutes. A job of a hosted runner ends after
 360 minutes; when the budget of a planned target needs a longer job, or a
 target name is not of lowercase letters, digits and hyphens, the job
 `formal limits` fails, the jobs of the parts and of `formal scoped` do not
-run, and the verdicts fail. The limits of the jobs of the shards and of
+run, and the verdicts fail. So it does when the name of a lane of
+`verification/lanes.json` is not of these characters, or when the
+registered budget of a lane, 2,400 s unless the lanes give another, and the
+extraction margin of 600 s are more than the shard limit, as
+`cargo xtask formal check` refuses them ([lanes](#lanes)); the job computes
+no limit from the lanes. The limits of the jobs of the shards and of
 `formal scoped` are expressions of their matrix, so each such job writes
 its limit as `::notice title=timeout-minutes::<minutes>`, from which the
 record of the run takes it ([testing](conventions/testing.md#entry-points));
@@ -2930,11 +3003,15 @@ a tool, and each broken rule is a problem:
   ([shard plan and disk guard](#shard-plan-and-disk-guard)).
 
 `cargo xtask formal check` also checks the shard plan
-([shard plan and disk guard](#shard-plan-and-disk-guard)).
+([shard plan and disk guard](#shard-plan-and-disk-guard)) and the lanes,
+which hold the module of every formal target as a component
+([lanes](#lanes)).
 
 The job `formal limits` of the workflow `formal` ([CI job](#ci-job)) also
-fails on another target name before the names reach a gate, and on a shard
-whose registered budget is more than the shard limit.
+fails on another target name before the names reach a gate, on a shard
+whose registered budget is more than the shard limit, and on a lane whose
+name is not of lowercase letters, digits and hyphens or whose budget and
+the extraction margin are more than the shard limit.
 
 The targets of the registry run in two phases of the gate. The phase
 `extraction`, before the base round, extracts the targets that the run
@@ -3283,9 +3360,10 @@ no image holds:
   project, so the two projects pin the same Lean and the same packages,
   and a change of the tools changes the files of `verification/` alone;
 - its registries: `targets.json`, `statements.json`, and `models.json`,
-  `axioms.json` and `tcb.json`, which are empty; and its shard plan
+  `axioms.json` and `tcb.json`, which are empty; its shard plan
   `shards.json`, with the entries `qualification` and `target/calibration`
-  ([shard plan and disk guard](#shard-plan-and-disk-guard)).
+  ([shard plan and disk guard](#shard-plan-and-disk-guard)); and its lanes
+  `lanes.json`, with the lane `calibration` ([lanes](#lanes)).
 
 `targets.json` registers two targets. `calibration` is formal: twelve
 roots in `start_from`, one obligation with one theorem for each, thirty

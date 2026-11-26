@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "lanes": [
+    {
+      "name": "fdt",
+      "components": [
+        "Fdt"
+      ],
+      "modules": [
+        "Krepi.Statements.Basic"
+      ],
+      "budget": 2400
+    },
+    {
+      "name": "page-tables",
+      "components": [
+        "PageTables"
+      ],
+      "modules": [],
+      "budget": 2400
+    }
+  ]
+}

@@ -16,6 +16,7 @@ pub mod extract;
 mod fixture;
 pub mod guard;
 pub mod inventory;
+pub mod lanes;
 pub mod lean;
 pub mod merge;
 pub mod mutants;
@@ -92,6 +93,8 @@ pub struct Layout {
     pub mutants: &'static str,
     /// The shard plan, relative to the repository root.
     pub shards: &'static str,
+    /// The lanes of the base round, relative to the repository root.
+    pub lanes: &'static str,
     /// The tool manifest, relative to the repository root.
     pub toolchain: &'static str,
     /// The pin of the image that the CI jobs run, relative to the
@@ -128,6 +131,7 @@ impl Layout {
         open: "verification/open.json",
         mutants: "verification/mutants",
         shards: "verification/shards.json",
+        lanes: "verification/lanes.json",
         toolchain: "verification/toolchain.json",
         image_pin: "verification/image-pin.json",
         tooling: "verification/tooling",
@@ -148,6 +152,7 @@ impl Layout {
         open: "",
         mutants: "verification/qualification/calibration/mutants",
         shards: "verification/qualification/calibration/shards.json",
+        lanes: "verification/qualification/calibration/lanes.json",
         waivers: "",
         ..Layout::PRODUCTION
     };
@@ -172,7 +177,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "check",
-        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, that the target registry, verification/axioms.json and the waiver record verification/waivers.json keep their rules, with every key of a target in the inventory, that the registries hold nothing that the gate does not support, that every survivor of the lists of survivors has a class, and that the shard plan and the budget of each shard keep their rules; --write first writes the file, and --calibration checks the calibration target",
+        about: "Check that every production function of the kernel workspace is in a target's proves or unclosed list or in verification/open.json, that this file is what the contracts give, that the target registry, verification/axioms.json and the waiver record verification/waivers.json keep their rules, with every key of a target in the inventory, that the registries hold nothing that the gate does not support, that every survivor of the lists of survivors has a class, that the shard plan and the budget of each shard keep their rules, and that the lanes of the base round keep theirs; --write first writes the file, and --calibration checks the calibration target",
         subcommands: &[],
     },
     Command {
@@ -600,6 +605,7 @@ mod tests {
             layout.axioms.to_string(),
             layout.tcb.to_string(),
             layout.shards.to_string(),
+            layout.lanes.to_string(),
             layout.waivers.to_string(),
             format!("{}/LICENSE-Apache-2.0", layout.tooling),
         ]
@@ -619,6 +625,8 @@ mod tests {
             layout.statements,
             layout.axioms,
             layout.tcb,
+            layout.shards,
+            layout.lanes,
             layout.waivers,
         ] {
             assert!(
@@ -639,6 +647,7 @@ mod tests {
             layout.registry,
             layout.models,
             layout.shards,
+            layout.lanes,
         ];
         let manifest = format!("{}/Cargo.toml", layout.kernel);
         let lock = format!("{}/Cargo.lock", layout.kernel);
