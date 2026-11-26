@@ -2,8 +2,9 @@
 //! `.github/workflows/formal-canary.yml`, as "Toolchain canary" in
 //! `docs/formal-verification.md` describes them. The workflow runs the gate
 //! once a week with the tools of Aeneas main, in parts: a job for the
-//! qualification job and the comparator part, and one for the shard of each
-//! formal target. Its jobs fetch the trees and the downloads; this module
+//! qualification job, one for each lane, its base run and its comparator, and
+//! one for the part of each formal target. Its jobs fetch the trees and the
+//! downloads; this module
 //! gives the parts and their limits, derives the tool manifest from the
 //! committed one and those files, checks that the patch applies, fills the
 //! build fact of the image and the statement hash, and concludes the run.
@@ -11,7 +12,8 @@
 //!
 //! Each step writes `artifacts/canary/<step>.json`, a [`Record`] with its
 //! [`Finding`], and exits with 0 only when it passed. `limits` gives the
-//! parts of a run and the limits of their jobs from the registry. `verdict`
+//! parts of a run and the limits of their jobs from the registry and the
+//! lanes. `verdict`
 //! reads the records and receipts of the parts and gives the run the
 //! finding of the first step of the first part that did not pass: a
 //! breakage of the tools, a defect of the canary or a failure of the run.
@@ -28,9 +30,9 @@ use serde_json::{Value, json};
 
 use super::guard::{self, Standalone};
 use super::outcome::{self, Status};
-use super::receipt::Receipt;
+use super::receipt::{BASE_RECORD, Receipt};
 use super::toolchain::{self, HOSTS, Sources};
-use super::{Layout, comparator, merge, qualify, registry, run};
+use super::{Layout, comparator, lanes, merge, qualify, registry, run};
 use crate::Command;
 
 /// The directory of the canary's own files, below the repository root: the
@@ -69,14 +71,15 @@ pub const RESOLVED: &str = "/aeneas/commit /aeneas/lake_manifest_sha256 /aeneas/
 pub const BUILT: &str = "/hosts/linux-aarch64/switch_export_sha256";
 
 /// The ids of the steps of the job of the parts, in their order: those of
-/// every row, then the gate and the comparator part of the qualification
-/// row and the shard of the row of a formal target.
+/// every row, then the gate of the qualification row, the base run and the
+/// comparator of the row of a lane and the part of the row of a formal target.
 pub const STEPS: &str = "runner disk sampler xtask copy resolve derive fetch toolchain-check patch \
-    build record fill probe gate comparator shard";
+    build record fill probe gate lane comparator shard";
 
 /// The steps that run a part, each of which writes `<id>-status` in [`DIR`]
-/// and leaves one receipt of its part.
-const RUNS_PART: &str = "gate comparator shard";
+/// and leaves one receipt of its part, which for the row of a lane its
+/// comparator writes.
+const RUNS_PART: &str = "gate lane comparator shard";
 
 /// The steps whose record this module writes.
 pub const RECORDED: &str = "resolve derive patch fill";
@@ -121,14 +124,15 @@ pub const EVERY_ROW: u64 = 107;
 pub const REMOVAL: u64 = 1;
 
 /// A row of the job of the parts: the qualification row, which runs the
-/// qualification job and then the comparator part, or the row of the shard
-/// of a formal target; with the limits of its main step and of its job.
+/// qualification job, the row of a lane, which runs its base run and then its
+/// comparator, or the row of the part of a formal target; with the limits of
+/// its main step and of its job.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Row {
-    /// The target of the shard, or `qualification`.
+    /// The lane, the target of the part, or `qualification`.
     pub name: String,
-    /// The part: `qualification` or `target/<name>`.
+    /// The part: `qualification`, `lane/<name>` or `target/<name>/1`.
     pub part: String,
     /// The part in the names of its artifact, `/` written `-`.
     pub key: String,
@@ -148,15 +152,16 @@ pub fn step_minutes(part: &str, seconds: u64) -> u64 {
     deadline.div_ceil(60) + STEP_MARGIN
 }
 
-/// The rows of a run on the target registry `text`: the qualification row,
-/// with the steps of the gate and of the comparator part, and the row of
-/// the shard of each formal target, by name, with the sum of the budgets of
-/// the shard ([`merge::shards`]); each job has [`EVERY_ROW`], the limits of
-/// its own steps and [`JOB_MARGIN`]. Planned targets have no row. A
-/// registry that cannot be read, a target name outside the registry's rule
-/// and a job of more than [`HOSTED_JOB`] minutes are errors.
-pub fn rows(text: &str) -> Result<Vec<Row>, String> {
-    let targets = registry::parse(text)?.targets;
+/// The rows of a run on the target registry `text` and the lanes `lanes`:
+/// the qualification row, with the step of the gate; the row of each lane,
+/// with the steps of its base run, with its registered budget, and of its
+/// comparator; and the row of the part of each formal target, by name, with
+/// the budget of the part ([`merge::shards`]); each job has [`EVERY_ROW`],
+/// the limits of its own steps and [`JOB_MARGIN`]. Planned targets have no
+/// row. A registry or lanes that cannot be read, a name outside the rule of
+/// the registry and a job of more than [`HOSTED_JOB`] minutes are errors.
+pub fn rows(text: &str, lanes: &str) -> Result<Vec<Row>, String> {
+    let (targets, lanes) = (registry::parse(text)?.targets, lanes::parse(lanes)?.lanes);
     let row = |part: &str, name: &str, step: u64, own: u64| Row {
         name: name.to_string(),
         part: part.to_string(),
@@ -165,18 +170,27 @@ pub fn rows(text: &str) -> Result<Vec<Row>, String> {
         job: EVERY_ROW + own + JOB_MARGIN,
     };
     let gate = step_minutes(qualify::PHASE, 0);
-    let own = gate + REMOVAL + step_minutes(comparator::PHASE, 0) + REMOVAL;
-    let mut rows = vec![row(qualify::PHASE, qualify::PHASE, gate, own)];
-    for (part, budget) in merge::shards(&targets) {
-        let name = merge::target(&part).unwrap_or_default();
+    let mut rows = vec![row(qualify::PHASE, qualify::PHASE, gate, gate + REMOVAL)];
+    let compare = (comparator::BUDGET + run::RECEIPT_MARGIN)
+        .as_secs()
+        .div_ceil(60)
+        + STEP_MARGIN;
+    let lanes = lanes
+        .iter()
+        .map(|lane| (format!("lane/{}", lane.name), lane.budget, compare));
+    for (part, budget, after) in
+        lanes.chain(merge::shards(&targets).into_iter().map(|(p, b)| (p, b, 0)))
+    {
+        let name = merge::lane(&part)
+            .or(merge::target(&part))
+            .unwrap_or_default();
         let letter = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
         if !name.starts_with(letter) || !name.chars().all(|c| letter(c) || c == '-') {
-            return Err(format!(
-                "target name {name:?} does not match [a-z0-9][a-z0-9-]*"
-            ));
+            return Err(format!("name {name:?} does not match [a-z0-9][a-z0-9-]*"));
         }
         let step = step_minutes(&part, budget);
-        rows.push(row(&part, name, step, step + REMOVAL));
+        let own = step + REMOVAL + [0, after + REMOVAL][usize::from(after > 0)];
+        rows.push(row(&part, name, step, own));
     }
     let long = rows.iter().filter(|row| row.job > HOSTED_JOB);
     let long = Vec::from_iter(long.map(|row| format!("{} needs {} minutes", row.part, row.job)));
@@ -396,9 +410,12 @@ fn trees(root: &Path, layout: &Layout) -> Result<BTreeMap<&'static str, String>,
 /// `limits`: the rows of a run on the registry of the checkout, in its data;
 /// a registry that the canary cannot run fails the run.
 fn limits(root: &Path, layout: &Layout) -> Result<Record, Record> {
-    let path = root.join(layout.registry);
-    let text = fs::read_to_string(&path).map_err(|error| io(&path, error))?;
-    let rows = rows(&text).map_err(|why| found(Finding::Failed, why))?;
+    let read = |path: PathBuf| fs::read_to_string(&path).map_err(|error| io(&path, error));
+    let (text, lanes) = (
+        read(root.join(layout.registry))?,
+        read(root.join(layout.lanes))?,
+    );
+    let rows = rows(&text, &lanes).map_err(|why| found(Finding::Failed, why))?;
     let parts = Vec::from_iter(rows.iter().map(|row| row.part.as_str()));
     let detail = format!("{} parts: {}", parts.len(), parts.join(", "));
     Ok(Record {
@@ -685,10 +702,11 @@ fn record_of(dir: &Path, step: &str) -> Option<Record> {
     serde_json::from_value(value).ok()
 }
 
-/// The receipts that the part in `dir` left, by path, each read or why not.
-fn receipts(dir: &Path) -> Vec<(PathBuf, Result<Receipt, String>)> {
+/// The receipts that the part in `dir` left in the files `file` of its
+/// runs, by path, each read or why not.
+fn receipts(dir: &Path, file: &str) -> Vec<(PathBuf, Result<Receipt, String>)> {
     let runs = fs::read_dir(within(dir, run::RUNS)).into_iter().flatten();
-    let paths = runs.flatten().map(|run| run.path().join("receipt.json"));
+    let paths = runs.flatten().map(|run| run.path().join(file));
     let mut paths = Vec::from_iter(paths.filter(|path| path.is_file()));
     paths.sort();
     let read = |path: PathBuf| {
@@ -706,7 +724,7 @@ fn receipts(dir: &Path) -> Vec<(PathBuf, Result<Receipt, String>)> {
 fn disagreement(parts: &BTreeMap<String, Vec<Part>>) -> Option<String> {
     let mut named = BTreeMap::<String, Vec<String>>::new();
     let dirs = parts.values().flatten().map(|part| part.dir.as_path());
-    for (_, receipt) in dirs.flat_map(receipts) {
+    for (_, receipt) in dirs.flat_map(|dir| receipts(dir, "receipt.json")) {
         let Ok(receipt) = receipt else {
             continue;
         };
@@ -728,13 +746,12 @@ fn disagreement(parts: &BTreeMap<String, Vec<Part>>) -> Option<String> {
 }
 
 /// The steps of [`STEPS`] that judge the part `part`: those of its row
-/// without the steps that run its other parts, or for the comparator part,
-/// which the qualification row runs after the gate, its step alone.
+/// without the steps that run the other parts.
 fn steps_of(part: &str) -> Vec<&'static str> {
-    let others: &[&str] = match part {
-        qualify::PHASE => &["comparator", "shard"],
-        comparator::PHASE => return vec!["comparator"],
-        _ => &["gate", "comparator"],
+    let others: &[&str] = match (part, merge::lane(part)) {
+        (qualify::PHASE, _) => &["lane", "comparator", "shard"],
+        (_, Some(_)) => &["gate", "shard"],
+        _ => &["gate", "lane", "comparator"],
     };
     let steps = STEPS.split_whitespace();
     Vec::from_iter(steps.filter(|step| !others.contains(step)))
@@ -791,12 +808,12 @@ fn first<'a>(
 /// run failed; receipts of the parts below [`PARTS`] that are not of one
 /// commit, tree, run and attempt are a defect of the canary
 /// ([`disagreement`]). Then the parts are judged in their order: the
-/// qualification row up to its gate, the comparator part of that row, and
-/// the row of each formal target of the registry ([`merge::shards`]) by
-/// name, each by the first of its steps that did not pass ([`first`]); a
-/// row without one record, or with more, fails the run. The run passed when
-/// every part did. The data holds the records of `derive` and `fill` of the
-/// qualification row.
+/// qualification row, the row of each lane and that of the part of each
+/// formal target of the registry ([`merge::shards`]), by name, each by the
+/// first of its steps that did not pass ([`first`]); a row without one
+/// record, or with more, fails the run. The run passed when every part did.
+/// The data holds the records of `derive` and `fill` of the qualification
+/// row.
 pub fn verdict(
     root: &Path,
     layout: &Layout,
@@ -821,19 +838,18 @@ pub fn verdict(
         Some(result) => return at("limits", failed(format!("the job ended with {result}"))),
         None => return at("limits", failed("the job has no result".to_string())),
     }
-    let path = root.join(layout.registry);
-    let text = fs::read_to_string(&path).map_err(|error| error.to_string());
-    let targets = match text.and_then(|text| registry::parse(&text)) {
-        Ok(registry) => registry.targets,
-        Err(why) => return at("parts", failed(format!("{}: {why}", path.display()))),
+    let read = |path: &str| fs::read_to_string(root.join(path)).map_err(|e| format!("{path}: {e}"));
+    let text = read(layout.registry).map(|text| (text, read(layout.lanes)));
+    let rows = text.and_then(|(text, lanes)| rows(&text, &lanes?));
+    let names = match rows {
+        Ok(rows) => Vec::from_iter(rows.into_iter().map(|row| row.part)),
+        Err(why) => return at("parts", failed(why)),
     };
     if let Some(why) = disagreement(&parts) {
         return at("parts", found(Finding::Defect, why));
     }
-    let own = [qualify::PHASE, comparator::PHASE].map(str::to_string);
-    let names = Vec::from_iter(own.into_iter().chain(merge::shards(&targets).into_keys()));
     for name in &names {
-        let row = [name.as_str(), qualify::PHASE][usize::from(name == comparator::PHASE)];
+        let row = name.as_str();
         let rows = parts.get(row).map_or(&[][..], Vec::as_slice);
         let [part] = rows else {
             return at(
@@ -927,7 +943,8 @@ fn build(dir: &Path) -> Record {
 }
 
 /// The step `step` of [`RUNS_PART`] that ran the part `part` in `dir`, by
-/// its exit status in `<step>-status` and the one receipt of the part:
+/// its exit status in `<step>-status` and the one receipt of the part, the
+/// base record for the base run of a lane:
 /// passed for 0 and a complete `VERIFIED` receipt; for 1 and a receipt with
 /// a verdict, a breakage unless the texts of its failures and of the units
 /// that are not `VERIFIED` make it a defect or a failure of the run; and a
@@ -939,7 +956,10 @@ fn ran(dir: &Path, step: &str, part: &str) -> Record {
     let Ok(status) = fs::read_to_string(status) else {
         return failed(format!("the {step} step wrote no exit status"));
     };
-    let receipts = receipts(dir);
+    let receipts = receipts(
+        dir,
+        ["receipt.json", BASE_RECORD][usize::from(step == "lane")],
+    );
     if let Some((path, Err(error))) = receipts.iter().find(|(_, receipt)| receipt.is_err()) {
         return failed(format!("{}: {error}", path.display()));
     }
@@ -1473,8 +1493,11 @@ mod tests {
     /// succeeded up to `step`, which ended with `outcome`, and were skipped
     /// after it; the steps of the other row were skipped.
     fn row_at(part: &str, step: &str, outcome: &str) -> BTreeMap<String, String> {
-        let others = [&["gate", "comparator"][..], &["shard"]];
-        let others = others[usize::from(part == qualify::PHASE)];
+        let others: &[&str] = match (part, merge::lane(part)) {
+            (qualify::PHASE, _) => &["lane", "comparator", "shard"],
+            (_, Some(_)) => &["gate", "shard"],
+            _ => &["gate", "lane", "comparator"],
+        };
         let ids = Vec::from_iter(STEPS.split_whitespace());
         let at = ids.iter().position(|id| *id == step).unwrap_or(ids.len());
         let words = ids.iter().enumerate().map(|(index, id)| {
@@ -1524,6 +1547,7 @@ mod tests {
     fn limits_of(text: &str) -> (ExitCode, Value) {
         let scratch = Scratch::temporary("canary-limits");
         scratch.write(layout().registry, text);
+        scratch.write(layout().lanes, &lanes_text(&["l"]));
         let matches = cli("").try_get_matches_from(["canary", "limits"]);
         let code = command(&scratch.0, &layout(), &matches.expect("a command line"));
         (
@@ -1559,6 +1583,7 @@ mod tests {
         assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
         // The verdict of the run whose qualification row ended there.
         scratch.write(layout.registry, &registry_text(&[], true));
+        scratch.write(layout.lanes, &lanes_text(&[]));
         let dir = root.join(PARTS).join("qualification");
         for step in ["resolve", "derive"] {
             record(&dir, step, (Finding::Passed, "", Value::Null));
@@ -1943,7 +1968,7 @@ mod tests {
     fn the_gate_is_classed_by_its_status_and_receipt() {
         use Status::{Rejected, ToolFailure, Verified};
         // The receipt of another part is not that of the gate.
-        let other = receipt("comparator", Verified, true, &[], &[]);
+        let other = receipt("lane/l", Verified, true, &[], &[]);
         let receipt = |status, complete, units: &[_], failures: &[_]| {
             receipt("qualification", status, complete, units, failures)
         };
@@ -2002,31 +2027,52 @@ mod tests {
         assert_eq!(gated(Some("1"), &[&rejected, &rejected]).detail, two);
     }
 
-    /// A root with the formal targets `formal` and a planned target, below
-    /// whose [`PARTS`] each row left what a row that passed leaves: the
-    /// records of its steps, and of each of its parts the exit status 0 and
-    /// a complete `VERIFIED` receipt. Its directories, by part.
-    fn passed_parts(formal: &[&str]) -> (Scratch, BTreeMap<String, PathBuf>) {
+    /// The lanes `names`, each of no component.
+    fn lanes_text(names: &[&str]) -> String {
+        let lanes = Vec::from_iter(
+            names
+                .iter()
+                .map(|name| json!({"name": name, "components": []})),
+        );
+        json!({"schema": 1, "lanes": lanes}).to_string()
+    }
+
+    /// A root with the lanes `lanes`, the formal targets `formal` and a
+    /// planned target, below whose [`PARTS`] each row left what a row that
+    /// passed leaves: the records of its steps, and of each of its parts the
+    /// exit status 0 of each step that runs it and a complete `VERIFIED`
+    /// receipt, which the comparator of a lane writes, beside the base record
+    /// of its base run. Its directories, by part.
+    fn passed_parts(lanes: &[&str], formal: &[&str]) -> (Scratch, BTreeMap<String, PathBuf>) {
         let scratch = Scratch::temporary("canary-verdict");
         let registry = Vec::from_iter(formal.iter().map(|name| (*name, None)));
         scratch.write(layout().registry, &registry_text(&registry, true));
+        scratch.write(layout().lanes, &lanes_text(lanes));
         let mut dirs = BTreeMap::new();
-        let parts = formal.iter().map(|name| format!("target/{name}"));
-        for part in std::iter::once("qualification".to_string()).chain(parts) {
+        let parts = formal.iter().map(|name| format!("target/{name}/1"));
+        let lanes = lanes.iter().map(|name| format!("lane/{name}"));
+        for part in std::iter::once("qualification".to_string())
+            .chain(lanes)
+            .chain(parts)
+        {
             let dir = scratch.0.join(PARTS).join(part.replace('/', "-"));
             for step in RECORDED.split(' ') {
                 record(&dir, step, (Finding::Passed, "", json!({"step": step})));
             }
             let verified = |part: &str| receipt(part, Status::Verified, true, &[], &[]);
             let runs = within(&dir, run::RUNS);
-            let steps = match part.as_str() {
-                "qualification" => vec![("gate", "qualification"), ("comparator", "comparator")],
-                part => vec![("shard", part)],
+            let steps = match (part.as_str(), merge::lane(&part)) {
+                ("qualification", _) => vec!["gate"],
+                (_, Some(_)) => vec!["lane", "comparator"],
+                _ => vec!["shard"],
             };
-            for (at, (step, of)) in steps.iter().enumerate() {
-                fs::create_dir_all(runs.join(at.to_string())).expect("a run");
-                let path = runs.join(at.to_string()).join("receipt.json");
-                fs::write(path, verified(of)).expect("the receipt");
+            fs::create_dir_all(runs.join("0")).expect("a run");
+            fs::write(runs.join("0/receipt.json"), verified(&part)).expect("the receipt");
+            if steps.contains(&"lane") {
+                fs::create_dir_all(runs.join("1")).expect("a run");
+                fs::write(runs.join("1").join(BASE_RECORD), verified(&part)).expect("the record");
+            }
+            for step in steps {
                 let status = within(&dir, DIR).join(format!("{step}-status"));
                 fs::write(status, "0\n").expect("the status");
             }
@@ -2038,7 +2084,7 @@ mod tests {
 
     #[test]
     fn a_step_that_passes_without_its_record_or_is_skipped_fails_the_run() {
-        let (scratch, dirs) = passed_parts(&[]);
+        let (scratch, dirs) = passed_parts(&[], &[]);
         let (root, dir) = (scratch.0.as_path(), &dirs["qualification"]);
         let all = ended_at("none", "none");
         let judged = |outcomes: &BTreeMap<String, String>| {
@@ -2047,7 +2093,7 @@ mod tests {
         };
         let passed = judged(&all);
         assert_eq!(passed.verdict, Finding::Passed, "{passed:?}");
-        let why = "parts (main abc): the receipts of qualification, comparator are VERIFIED";
+        let why = "parts (main abc): the receipts of qualification are VERIFIED";
         assert!(passed.detail.starts_with(why), "{passed:?}");
         let data = json!({"derive": {"step": "derive"}, "fill": {"step": "fill"}});
         assert_eq!(passed.data, data);
@@ -2138,39 +2184,40 @@ mod tests {
 
     #[test]
     fn a_comparator_that_exits_with_1_makes_the_run_broken() {
-        let (scratch, dirs) = passed_parts(&[]);
-        let (root, dir) = (scratch.0.as_path(), &dirs["qualification"]);
-        // The gate passed; the comparator part rejected its unit.
+        let (scratch, dirs) = passed_parts(&["l"], &[]);
+        let (root, dir) = (scratch.0.as_path(), &dirs["lane/l"]);
+        // The base run passed; the comparator rejected its unit, and its
+        // receipt is that of the lane.
         let units = [(
-            "comparator",
+            "comparator/lane/l",
             Status::Rejected,
             "error: the statements differ",
         )];
-        let rejected = receipt("comparator", Status::Rejected, true, &units, &[]);
-        fs::write(within(dir, run::RUNS).join("1/receipt.json"), rejected).expect("the receipt");
+        let rejected = receipt("lane/l", Status::Rejected, true, &units, &[]);
+        fs::write(within(dir, run::RUNS).join("0/receipt.json"), rejected).expect("the receipt");
         fs::write(within(dir, DIR).join("comparator-status"), "1\n").expect("the status");
-        left(dir, "qualification", &ended_at("comparator", "failure"));
+        left(dir, "lane/l", &row_at("lane/l", "comparator", "failure"));
         let broken = verdict(root, &layout(), &limited(), "abc");
         assert_eq!(broken.verdict, Finding::Broken, "{broken:?}");
-        let why = "comparator (main abc): the comparator exited with 1, REJECTED; units that are not VERIFIED: comparator REJECTED";
+        let why = "lane/l comparator (main abc): the comparator exited with 1, REJECTED; units that are not VERIFIED: comparator/lane/l REJECTED";
         assert!(broken.detail.starts_with(why), "{broken:?}");
-        // A comparator step that did not run after a gate that passed fails
-        // the run.
-        left(dir, "qualification", &ended_at("comparator", "skipped"));
+        // A comparator step that did not run after a base run that passed
+        // fails the run.
+        left(dir, "lane/l", &row_at("lane/l", "comparator", "skipped"));
         let failed = verdict(root, &layout(), &limited(), "abc");
         assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
-        let why = "comparator (main abc): the step ended with the outcome skipped";
+        let why = "lane/l comparator (main abc): the step ended with the outcome skipped";
         assert_eq!(failed.detail, why);
     }
 
     #[test]
     fn the_verdict_reads_one_record_and_one_receipt_of_each_part() {
-        let (scratch, dirs) = passed_parts(&["a", "b"]);
+        let (scratch, dirs) = passed_parts(&["l"], &["a", "b"]);
         let root = scratch.0.as_path();
         let judged = || verdict(root, &layout(), &limited(), "abc");
         let passed = judged();
         assert_eq!(passed.verdict, Finding::Passed, "{passed:?}");
-        let why = "parts (main abc): the receipts of qualification, comparator, target/a, target/b are VERIFIED and complete";
+        let why = "parts (main abc): the receipts of qualification, lane/l, target/a/1, target/b/1 are VERIFIED and complete";
         assert_eq!(passed.detail, why);
         // The job `limits` did not succeed.
         for (results, why) in [
@@ -2183,44 +2230,49 @@ mod tests {
         }
         // A part of a formal target: its build, and its shard by its status
         // and receipt.
-        let dir = &dirs["target/b"];
+        let dir = &dirs["target/b/1"];
         broken_build(dir);
-        left(dir, "target/b", &row_at("target/b", "build", "failure"));
+        left(dir, "target/b/1", &row_at("target/b/1", "build", "failure"));
         let broken = judged();
         assert_eq!(broken.verdict, Finding::Broken, "{broken:?}");
-        let why = "target/b build (main abc): the stage charon-build failed:\n";
+        let why = "target/b/1 build (main abc): the stage charon-build failed:\n";
         assert!(broken.detail.starts_with(why), "{broken:?}");
         let units = [("target/b", Status::Rejected, "")];
-        let rejected = receipt("target/b", Status::Rejected, true, &units, &[]);
+        let rejected = receipt("target/b/1", Status::Rejected, true, &units, &[]);
         fs::write(within(dir, run::RUNS).join("0/receipt.json"), rejected).expect("the receipt");
         fs::write(within(dir, DIR).join("shard-status"), "1\n").expect("the status");
-        left(dir, "target/b", &row_at("target/b", "shard", "failure"));
+        left(dir, "target/b/1", &row_at("target/b/1", "shard", "failure"));
         let broken = judged();
         assert_eq!(broken.verdict, Finding::Broken, "{broken:?}");
-        let why = "target/b shard (main abc): the shard exited with 1, REJECTED; ";
+        let why = "target/b/1 shard (main abc): the shard exited with 1, REJECTED; ";
         assert!(broken.detail.starts_with(why), "{broken:?}");
-        // The comparator part comes before the shards; restored, b is first again.
-        let dir = &dirs["qualification"];
-        let units = [("comparator", Status::Rejected, "")];
-        let rejected = receipt("comparator", Status::Rejected, true, &units, &[]);
-        let verified = receipt("comparator", Status::Verified, true, &[], &[]);
-        let place = "comparator (main abc): ";
+        // The lane comes before the parts; restored, b is first again.
+        let dir = &dirs["lane/l"];
+        let units = [("comparator/lane/l", Status::Rejected, "")];
+        let rejected = receipt("lane/l", Status::Rejected, true, &units, &[]);
+        let verified = receipt("lane/l", Status::Verified, true, &[], &[]);
+        let place = "lane/l lane (main abc): ";
         for (status, text, at) in [("1", rejected, place), ("0", verified, why)] {
-            fs::write(within(dir, run::RUNS).join("1/receipt.json"), text).expect("the receipt");
-            fs::write(within(dir, DIR).join("comparator-status"), status).expect("the status");
+            let record = within(dir, run::RUNS).join("1").join(BASE_RECORD);
+            fs::write(record, text).expect("the record");
+            fs::write(within(dir, DIR).join("lane-status"), status).expect("the status");
             let finding = judged();
             assert_eq!(finding.verdict, Finding::Broken, "{finding:?}");
             assert!(finding.detail.starts_with(at), "{finding:?}");
         }
         // The parts come in their order: the shard of a before that of b.
-        fs::write(within(&dirs["target/a"], DIR).join("shard-status"), "125\n").expect("status");
+        fs::write(
+            within(&dirs["target/a/1"], DIR).join("shard-status"),
+            "125\n",
+        )
+        .expect("status");
         let failed = judged();
         assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
-        let why = "target/a shard (main abc): the shard exited with `125`";
+        let why = "target/a/1 shard (main abc): the shard exited with `125`";
         assert!(failed.detail.starts_with(why), "{failed:?}");
         // A receipt of another tree, run, attempt or commit, also with a part
         // that failed, is a defect of the canary.
-        let receipts = within(&dirs["target/a"], run::RUNS).join("0/receipt.json");
+        let receipts = within(&dirs["target/a/1"], run::RUNS).join("0/receipt.json");
         let text = fs::read_to_string(&receipts).expect("the receipt");
         let keys = ["tree", "run_id", "attempt", "commit"].into_iter();
         for (key, value) in keys.zip(["t", "1", "1", "c"]) {
@@ -2230,19 +2282,19 @@ mod tests {
             assert_eq!(defect.verdict, Finding::Defect, "{key}: {defect:?}");
         }
         let defect = judged();
-        let why = "parts (main abc): the receipts of the parts are not of one commit, tree, run and attempt: qualification, comparator, target/b at commit c, tree t, run 1, attempt 1; target/a at commit d, tree t, run 1, attempt 1";
+        let why = "parts (main abc): the receipts of the parts are not of one commit, tree, run and attempt: lane/l, qualification, target/b/1 at commit c, tree t, run 1, attempt 1; target/a/1 at commit d, tree t, run 1, attempt 1";
         assert_eq!(defect.detail, why);
         fs::write(&receipts, text).expect("the receipt");
         // A part without its record fails the run.
-        let file = within(&dirs["target/a"], DIR).join(PART);
+        let file = within(&dirs["target/a/1"], DIR).join(PART);
         fs::remove_file(&file).expect("remove the record");
         let failed = judged();
         assert_eq!(failed.verdict, Finding::Failed, "{failed:?}");
-        let why = "target/a (main abc): the part left 0 records, not one";
+        let why = "target/a/1 (main abc): the part left 0 records, not one";
         assert_eq!(failed.detail, why);
         // The only artifact of a run without formal targets may lie in the
         // directory of the parts itself.
-        let (scratch, dirs) = passed_parts(&[]);
+        let (scratch, dirs) = passed_parts(&[], &[]);
         let base = scratch.0.join(PARTS);
         let entries = fs::read_dir(&dirs["qualification"]).expect("the part");
         for entry in entries.flatten() {
@@ -2266,30 +2318,45 @@ mod tests {
         format!("{{\"schema\": 2, \"targets\": [{}]}}\n", targets.join(", "))
     }
 
-    /// The rows of the registry of the formal targets `names`, with the
-    /// default budget, and a planned target, which hold to the rule: the
-    /// qualification row with the steps of the gate and the comparator, the
-    /// row of each shard with the limits that the job `formal limits` gives
-    /// it, and each job at most the 360 minutes of a hosted runner. The
+    /// The rows of the lane `l` and the registry of the formal targets
+    /// `names`, with the default budget, and a planned target, which hold to
+    /// the rule: the qualification row with the step of the gate, the row of
+    /// the lane with the steps of its base run and its comparator, the row of
+    /// the part of each target with the limits that the job `formal limits`
+    /// gives it, and each job at most the 360 minutes of a hosted runner. The
     /// planned target has no row and changes no limit.
     fn checked_rows(names: &[&str]) -> Vec<Row> {
-        let formal = Vec::from_iter(names.iter().map(|name| (*name, None)));
-        let rows = rows(&registry_text(&formal, true)).expect("the rows");
+        let (formal, lanes) = (
+            Vec::from_iter(names.iter().map(|name| (*name, None))),
+            lanes_text(&["l"]),
+        );
+        let rows = rows(&registry_text(&formal, true), &lanes).expect("the rows");
         assert_eq!(
             rows,
-            super::rows(&registry_text(&formal, false)).expect("the rows")
+            super::rows(&registry_text(&formal, false), &lanes).expect("the rows")
         );
-        let (gate, comparator) = ((7_200 + 600 + 300) / 60 + 2, (1_800 + 300) / 60 + 2);
-        let job = EVERY_ROW + gate + REMOVAL + comparator + REMOVAL + JOB_MARGIN;
+        let gate = (7_200 + 300) / 60 + 2;
         let first = [&rows[0].name, &rows[0].part, &rows[0].key].map(String::as_str);
         assert_eq!(first, ["qualification"; 3]);
-        assert_eq!((rows[0].step, rows[0].job), (gate, job));
-        let shards = Vec::from_iter(rows[1..].iter().map(|row| row.name.as_str()));
+        assert_eq!(
+            (rows[0].step, rows[0].job),
+            (gate, EVERY_ROW + gate + REMOVAL + JOB_MARGIN)
+        );
+        // 300 s of the lane, its 2,400 s, 600 s for its extraction and 300 s
+        // of the receipt, and 2 minutes; the comparator as in `formal.yml`.
+        let (lane, base, comparator) = (&rows[1], (300 + 2_400 + 600 + 300) / 60 + 2, 37);
+        assert_eq!(
+            [&lane.name, &lane.part, &lane.key].map(String::as_str),
+            ["l", "lane/l", "lane-l"]
+        );
+        let job = EVERY_ROW + base + REMOVAL + comparator + REMOVAL + JOB_MARGIN;
+        assert_eq!((lane.step, lane.job), (base, job));
+        let shards = Vec::from_iter(rows[2..].iter().map(|row| row.name.as_str()));
         assert_eq!(shards, names);
-        for row in &rows[1..] {
-            assert_eq!(row.part, format!("target/{}", row.name));
-            assert_eq!(row.key, format!("target-{}", row.name));
-            // 300 s of the shard, 1,800 s of the target and 300 s of the
+        for row in &rows[2..] {
+            assert_eq!(row.part, format!("target/{}/1", row.name));
+            assert_eq!(row.key, format!("target-{}-1", row.name));
+            // 300 s of the part, 1,800 s of the target and 300 s of the
             // receipt, and 2 minutes.
             assert_eq!(row.step, 42, "{row:?}");
             assert_eq!(row.job, EVERY_ROW + 42 + REMOVAL + JOB_MARGIN, "{row:?}");
@@ -2303,14 +2370,14 @@ mod tests {
     }
 
     #[test]
-    fn the_limits_of_no_formal_target_give_the_qualification_row_alone() {
-        assert_eq!(checked_rows(&[]).len(), 1);
+    fn the_limits_of_no_formal_target_give_the_qualification_row_and_that_of_the_lane() {
+        assert_eq!(checked_rows(&[]).len(), 2);
     }
 
     #[test]
     fn the_limits_of_one_formal_target_give_one_shard_row_of_42_minutes() {
         let rows = checked_rows(&["a"]);
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 3);
         // The step writes the rows into its record, which the workflow
         // gives the job of the parts.
         let (code, record) = limits_of(&registry_text(&[("a", None)], true));
@@ -2318,25 +2385,28 @@ mod tests {
             (code, &record["verdict"]),
             (ExitCode::SUCCESS, &json!("PASSED"))
         );
-        assert_eq!(record["detail"], "2 parts: qualification, target/a");
+        assert_eq!(
+            record["detail"],
+            "3 parts: qualification, lane/l, target/a/1"
+        );
         assert_eq!(record["data"], json!({ "parts": rows }));
     }
 
     #[test]
     fn the_limits_of_four_formal_targets_give_four_shard_rows_of_42_minutes() {
-        assert_eq!(checked_rows(&["a", "b", "c", "d"]).len(), 5);
+        assert_eq!(checked_rows(&["a", "b", "c", "d"]).len(), 6);
     }
 
     #[test]
     fn a_shard_whose_job_needs_more_than_360_minutes_fails_the_limits() {
-        // 300 s of the shard, 20,000 s of the target and 300 s of the
+        // 300 s of the part, 20,000 s of the target and 300 s of the
         // receipt make a step of 346 minutes.
-        assert_eq!(step_minutes("target/big", 20_000), 346);
+        assert_eq!(step_minutes("target/big/1", 20_000), 346);
         let formal = registry_text(&[("a", None), ("big", Some(20_000))], true);
-        let error = rows(&formal).expect_err("a job too long");
+        let error = rows(&formal, &lanes_text(&[])).expect_err("a job too long");
         let job = EVERY_ROW + 346 + REMOVAL + JOB_MARGIN;
         let why = format!(
-            "the job of target/big needs {job} minutes, more than the 360 minutes of a job of a hosted runner"
+            "the job of target/big/1 needs {job} minutes, more than the 360 minutes of a job of a hosted runner"
         );
         assert_eq!(error, why);
         let (code, record) = limits_of(&formal);
@@ -2345,10 +2415,17 @@ mod tests {
             (ExitCode::FAILURE, &json!("FAILED"))
         );
         assert_eq!(record["detail"], why);
-        // A name that the registry's rule refuses has no row either.
-        let named = rows(&registry_text(&[("A b", None)], false));
-        let why = "target name \"A b\" does not match [a-z0-9][a-z0-9-]*";
+        // A name that the registry's rule refuses has no row either, nor a
+        // lane, and lanes that cannot be read give no rows.
+        let named = rows(&registry_text(&[("A b", None)], false), &lanes_text(&[]));
+        let why = "name \"A b\" does not match [a-z0-9][a-z0-9-]*";
         assert_eq!(named.expect_err("a name"), why);
+        let named = rows(&registry_text(&[], false), &lanes_text(&["L"]));
+        assert_eq!(
+            named.expect_err("a name"),
+            "name \"L\" does not match [a-z0-9][a-z0-9-]*"
+        );
+        assert!(rows(&registry_text(&[], false), "{").is_err());
     }
 
     /// The text of the job `key` of `workflow`, up to the comment or the key
@@ -2430,26 +2507,27 @@ mod tests {
         let parts = job(CANARY, "canary");
         let steps = steps(parts);
         let names = Vec::from_iter(steps.iter().map(|(name, _)| *name));
-        assert_eq!(names.len(), 25);
+        assert_eq!(names.len(), 27);
         let condition = |lines: &[&str]| key(lines, "if").unwrap_or_default().to_string();
         // The steps that remove the containers, after each part, and those
         // that record the part, at the end, run always.
         let always = (steps.iter()).filter(|(_, lines)| condition(lines).starts_with("always()"));
         let always = Vec::from_iter(always.map(|(name, _)| *name));
-        let removals =
-            ["gate", "comparator", "shard"].map(|of| format!("Remove the container of the {of}"));
-        assert_eq!(always[..3], removals);
-        assert_eq!(always[3..], names[21..], "the steps that record the part");
+        let removals = ["gate", "lane", "comparator", "shard"]
+            .map(|of| format!("Remove the container of the {of}"));
+        assert_eq!(always[..4], removals);
+        assert_eq!(always[4..], names[23..], "the steps that record the part");
         // Every other step runs only when each step before it passed, on the
-        // rows that its condition names; the comparator part also runs after
-        // a gate that failed, unless the run was cancelled or the probe
+        // rows that its condition names; the comparator also runs after a
+        // base run that failed, unless the run was cancelled or the probe
         // failed.
         let rows = [
             "",
             " && matrix.part == 'qualification'",
-            " && matrix.part != 'qualification'",
+            " && startsWith(matrix.part, 'lane/')",
+            " && startsWith(matrix.part, 'target/')",
         ];
-        let comparator = "${{ !cancelled() && matrix.part == 'qualification' && steps.probe.outcome == 'success' }}";
+        let comparator = "${{ !cancelled() && startsWith(matrix.part, 'lane/') && steps.probe.outcome == 'success' }}";
         for (name, lines) in &steps {
             let condition = condition(lines);
             if *name == "Run the comparator in its own container" {
@@ -2474,37 +2552,46 @@ mod tests {
         // verdict judges a part by the steps of its row. The job of a row has
         // the limits of the steps that every row runs, of those of its part
         // and 5 minutes.
-        let mut sums = [0; 3];
+        let mut sums = BTreeMap::<&str, u64>::new();
         for (name, lines) in &steps {
             let row = condition(lines);
-            let ours = !row.contains("!= 'qualification'");
-            let theirs = !row.contains("== '");
+            let of = ["qualification", "lane", "target"]
+                .into_iter()
+                .find(|of| row.contains(&format!("'{of}")));
+            let of = of.unwrap_or("every");
             if let Some(id) = key(lines, "id") {
                 let outcome = format!("{id}=${{{{ steps.{id}.outcome }}}}");
                 assert!(parts.contains(&outcome), "{outcome}");
-                let judged = |part| steps_of(part).contains(&id);
-                let qualification = judged("qualification") || judged("comparator");
-                assert_eq!(qualification, ours, "{name}");
-                assert_eq!(judged("target/a"), theirs, "{name}");
+                for (part, kind) in [
+                    ("qualification", "qualification"),
+                    ("lane/a", "lane"),
+                    ("target/a/1", "target"),
+                ] {
+                    let judged = steps_of(part).contains(&id);
+                    assert_eq!(judged, of == "every" || of == kind, "{name} of {part}");
+                }
             }
             let minutes = key(lines, "timeout-minutes").expect(name);
             let Ok(minutes) = minutes.parse::<u64>() else {
-                assert_eq!(*name, "Run the shard in the image");
+                let own = ["Run the shard in the image", "Run the lane in the image"];
+                assert!(own.contains(name), "{name}");
                 assert_eq!(minutes, "${{ matrix.step }}");
                 continue;
             };
-            sums[usize::from(ours) + usize::from(!theirs)] += minutes;
+            *sums.entry(of).or_default() += minutes;
         }
-        let [shard, every, qualification] = sums;
+        let [every, qualification, lane, shard] =
+            ["every", "qualification", "lane", "target"].map(|of| sums[of]);
         assert_eq!(every, EVERY_ROW);
-        let gate = step_minutes("qualification", 0);
-        let comparator = step_minutes("comparator", 0);
-        assert_eq!(qualification, gate + comparator + 2 * REMOVAL);
-        assert_eq!(shard, REMOVAL);
-        let rows = super::rows(&registry_text(&[("a", None)], false)).expect("the rows");
+        let (gate, comparator) = (step_minutes("qualification", 0), (1_800 + 300) / 60 + 2);
+        assert_eq!(qualification, gate + REMOVAL);
+        assert_eq!((lane, shard), (comparator + 2 * REMOVAL, REMOVAL));
+        let rows = super::rows(&registry_text(&[("a", None)], false), &lanes_text(&["l"]));
+        let rows = rows.expect("the rows");
         assert!(parts.contains("    timeout-minutes: ${{ matrix.job }}\n"));
         assert_eq!(rows[0].job, every + qualification + JOB_MARGIN);
-        assert_eq!(rows[1].job, every + shard + rows[1].step + JOB_MARGIN);
+        assert_eq!(rows[1].job, every + lane + rows[1].step + JOB_MARGIN);
+        assert_eq!(rows[2].job, every + shard + rows[2].step + JOB_MARGIN);
         // The job reads the fields of its row, which the job `limits` gives
         // it with the head of Aeneas main, resolved once.
         let read = parts
@@ -2585,7 +2672,11 @@ mod tests {
         let command = "xtask/target/debug/xtask formal canary verdict --outcomes \"$OUTCOMES\"";
         assert!(verdict.contains(command));
         // The steps copied from the image build and from the jobs of the gate.
-        let (gate, shard) = (job(FORMAL, "gate"), job(FORMAL, "shard"));
+        let (gate, lane, shard) = (
+            job(FORMAL, "gate"),
+            job(FORMAL, "lane"),
+            job(FORMAL, "shard"),
+        );
         let copied = [
             (BUILD, "Record the disk and remove preinstalled software"),
             (BUILD, "Sample the disk every 15 seconds"),
@@ -2593,35 +2684,44 @@ mod tests {
             (BUILD, "Record the image"),
             (BUILD, "Summarize the disk measurement"),
             (gate, "Build xtask"),
-            (gate, "Copy xtask for the comparator"),
+            (lane, "Copy xtask for the comparator"),
             (gate, "Probe the container of the gate"),
             (gate, "Remove the container of the gate"),
-            (gate, "Remove the container of the comparator"),
+            (lane, "Remove the container of the comparator"),
         ];
         for (source, name) in copied {
             assert_eq!(step(parts, name, &[]), step(source, name, &[]), "{name}");
         }
-        let removal = "Remove the container of the shard";
-        let theirs = step(shard, "Remove the container of the gate", &[]);
-        assert_eq!(step(parts, removal, &[]), theirs);
+        for (removal, source) in [("lane", lane), ("shard", shard)] {
+            let theirs = step(source, "Remove the container of the gate", &[]);
+            assert_eq!(
+                step(
+                    parts,
+                    &format!("Remove the container of the {removal}"),
+                    &[]
+                ),
+                theirs
+            );
+        }
         let summary = "Summarize the receipt";
-        let outcome = "GATE_OUTCOME: ${{ matrix.part == 'qualification' && steps.gate.outcome || steps.shard.outcome }}";
+        let outcome = "GATE_OUTCOME: ${{ matrix.part == 'qualification' && steps.gate.outcome || startsWith(matrix.part, 'lane/') && steps.comparator.outcome || steps.shard.outcome }}";
         let theirs = step(gate, summary, &["GATE_OUTCOME: ${{ steps.gate.outcome }}"]);
         assert_eq!(step(parts, summary, &[outcome]), theirs);
         let check = "Check the sources and the patch against the manifest";
         let tee = ["2>&1 | tee artifacts/canary/toolchain-check.txt"];
         assert_eq!(step(parts, check, &tee), step(BUILD, check, &[]));
-        // The gate, the comparator part and the shard are those of the jobs
-        // `formal run` and `formal shard`, with their limits, but for two
-        // lines: the canary gives no reference of the image, which its
-        // receipts do not record, and `deadline.sh` writes the exit status
-        // of the part for the verdict.
+        // The gate, the base run and the comparator of a lane and the part of
+        // a target are those of the jobs `formal run`, `formal lane` and
+        // `formal shard`, with their limits, but for two lines: the canary
+        // gives no reference of the image, which its receipts do not record,
+        // and `deadline.sh` writes the exit status of the part for the verdict.
         let image = "--env KREPI_FORMAL_IMAGE=\"$IMAGE\" \\";
         let deadline = "exec bash .github/scripts/deadline.sh --stop-commands ";
         for (source, name, id) in [
             (gate, "Run the gate in the image", "gate"),
+            (lane, "Run the lane in the image", "lane"),
             (
-                gate,
+                lane,
                 "Run the comparator in its own container",
                 "comparator",
             ),
@@ -2634,20 +2734,25 @@ mod tests {
             assert_eq!(limit(parts, name), limit(source, name), "{name}");
         }
         // Their limits follow the budgets of the parts and their receipts.
-        for (part, name) in [
-            ("qualification", "Run the gate in the image"),
-            ("comparator", "Run the comparator in its own container"),
+        let compared = (comparator::BUDGET + run::RECEIPT_MARGIN)
+            .as_secs()
+            .div_ceil(60)
+            + STEP_MARGIN;
+        for (minutes, name) in [
+            (
+                step_minutes("qualification", 0),
+                "Run the gate in the image",
+            ),
+            (compared, "Run the comparator in its own container"),
         ] {
-            let minutes = step_minutes(part, 0);
             assert_eq!(limit(parts, name), minutes.to_string());
             let deadline = format!(" {}m 1m \\", minutes - STEP_MARGIN);
             let lines = step(parts, name, &[]);
             assert!(lines.iter().any(|line| line.ends_with(&deadline)), "{name}");
         }
-        assert_eq!(
-            limit(parts, "Run the shard in the image"),
-            "${{ matrix.step }}"
-        );
+        for name in ["Run the lane in the image", "Run the shard in the image"] {
+            assert_eq!(limit(parts, name), "${{ matrix.step }}");
+        }
         let build = |workflow: &'static str| {
             let start = workflow
                 .find("docker build --progress=plain")

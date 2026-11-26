@@ -1,8 +1,9 @@
-//! The comparator part of the proof gate, as "Comparator" in
+//! The comparator of a lane of the proof gate, as "Comparator" in
 //! `docs/formal-verification.md` describes it: in the stage of the base
-//! round that the qualification job kept, `lake comparator` checks the
-//! theorem of each proved statement against a challenge that declares it,
-//! with the axioms that the base audit admitted for its unit.
+//! round that the base run of the lane kept, `lake comparator` checks the
+//! theorem of each proved statement of the lane against a challenge that
+//! declares it, with the axioms that the base audit admitted for its unit;
+//! the run then writes the receipt of the lane with the base record.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -14,15 +15,16 @@ use serde_json::json;
 use super::guard::{self, State, Statement};
 use super::lean::{self, STANDARD_AXIOMS};
 use super::outcome::{Site, Status, word};
-use super::qualify::{self, conclusion, lake};
-use super::receipt::Receipt;
+use super::qualify::{conclusion, lake};
+use super::receipt::{self, BASE_RECORD, BASE_SCHEMA, BaseRecord, Failure, Receipt};
 use super::run::{self, Gate, Phase};
-use super::{Layout, base, registry};
+use super::toolchain::sha256;
+use super::{Layout, base, merge, registry};
 
-/// The name of the part and its phase, and the first part of its units.
+/// The name of the phase, and the first part of its units.
 pub const PHASE: &str = "comparator";
 
-/// The budget of the part.
+/// The budget of the phase.
 pub const BUDGET: Duration = Duration::from_secs(1_800);
 
 /// The variable that names the runs directory where the sandbox sees it.
@@ -31,33 +33,48 @@ pub const RUNS: &str = "KREPI_FORMAL_RUNS";
 /// The Lean library of the challenges in the stage.
 const LIBRARY: &str = "KrepiChallenge";
 
-/// The proved statements of each unit.
-type Units = BTreeMap<String, Vec<Statement>>;
+/// The part that concludes each unit, and its proved statements.
+pub type Units = BTreeMap<String, (String, Vec<Statement>)>;
 
-/// The units of the checkout `root`: `comparator/<target>` with the proved
-/// statements whose modules that formal target alone lists, as a waiver of
-/// it leaves them out, and `comparator` with the others.
-fn units(root: &Path, layout: &Layout) -> Result<Units, String> {
+/// The units of the checkout `root`, each with its lane: `comparator/<target>`
+/// with the proved statements of a lane whose modules that formal target
+/// alone lists, as a waiver of it leaves them out, `comparator/lane/<name>`
+/// with the other proved statements of the lane, and `comparator`, of no part,
+/// with those of a module of no lane.
+pub fn units(root: &Path, layout: &Layout) -> Result<Units, String> {
     let read = |path: &str| base::read(&root.join(path)).map_err(|e| format!("cannot read {e}"));
     let statements = guard::load_statements(&read(layout.statements)?, layout);
     let statements = statements.map_err(|e| format!("{}: {e}", layout.statements))?;
     let targets = registry::parse(&read(layout.registry)?);
     let targets = (targets.map_err(|e| format!("{}: {e}", layout.registry))?).targets;
     let formal = Vec::from_iter((targets.iter()).filter(|t| t.state == registry::State::Formal));
+    let lanes = base::lanes(root, layout)?;
+    let modules = statements.statements.iter().map(|s| s.module.clone());
+    let homes = base::homes(layout, modules);
     let mut units = Units::new();
     for statement in (statements.statements.into_iter()).filter(|s| s.state == State::Proved) {
+        let part = base::part_of(&lanes, &statement.module, homes.get(&statement.module));
+        let part = part.filter(|part| merge::lane(part).is_some());
         let mut listing = (formal.iter()).filter(|t| t.proof_modules.contains(&statement.module));
         let alone = (listing.next()).filter(|_| listing.next().is_none());
-        let name = alone.map_or(PHASE.to_string(), |t| format!("{PHASE}/{}", t.name));
-        units.entry(name).or_default().push(statement);
+        let name = (alone.map(|t| t.name.clone()).or(part.clone())).filter(|_| part.is_some());
+        let name = name.map_or(PHASE.to_string(), |name| format!("{PHASE}/{name}"));
+        units
+            .entry(name)
+            .or_insert((part.unwrap_or_default(), Vec::new()))
+            .1
+            .push(statement);
     }
     Ok(units)
 }
 
-/// The comparator part of the checkout `root`, whose qualification job left
-/// its run below `runs`, if given, else below the runs directory of `root`.
-pub fn phase<'a>(root: &Path, layout: &'a Layout, runs: Option<String>) -> Phase<'a> {
-    let units = units(root, layout);
+/// The comparator of the lane `lane` of the checkout `root`, whose base run
+/// left its run below `runs`, if given, else below the runs directory of
+/// `root`.
+pub fn phase<'a>(root: &Path, layout: &'a Layout, lane: &str, runs: Option<String>) -> Phase<'a> {
+    let part = format!("lane/{lane}");
+    let units = units(root, layout).map(|units| units.into_iter().filter(|(_, (p, _))| *p == part));
+    let units = units.map(Units::from_iter);
     let runs = runs.map_or(root.join(run::RUNS), PathBuf::from);
     Phase {
         name: PHASE.to_string(),
@@ -67,22 +84,31 @@ pub fn phase<'a>(root: &Path, layout: &'a Layout, runs: Option<String>) -> Phase
     }
 }
 
-/// Runs the comparator on `units` in the stage of the one qualification job
-/// below `runs` of the commit and run of CI; an error stops the phase.
+/// Runs the comparator on `units` in the stage of the one base record of
+/// the lane below `runs` of the commit and run of CI, whose deadline it
+/// takes; an error stops the phase.
 fn compare(gate: &mut Gate, units: Units, runs: &Path) -> Result<(), String> {
+    let layout = *gate.layout();
+    let run = |r: &Receipt| (r.commit.clone(), r.trigger.run_id.clone(), r.shard.clone());
+    let this = run(&gate.receipt);
+    let entries = fs::read_dir(runs).into_iter().flatten().flatten();
+    let found = entries.filter_map(|entry| record(&entry.path().join(BASE_RECORD)));
+    let found = found.filter(|(_, record)| record.schema == BASE_SCHEMA && run(record) == this);
+    let found = Vec::from_iter(found);
+    let count = format!(
+        "{} has {} base records of the lane, not one",
+        runs.display(),
+        found.len()
+    );
+    let [(sha256, job)] = <[_; 1]>::try_from(found).map_err(|_| count)?;
+    gate.continue_from(job.started, job.budgets.gate_seconds);
+    let mut read = BaseRecord::default();
+    (read.sha256, read.run) = (sha256, job.run.clone());
+    (read.started, read.seconds) = (job.started, job.seconds);
+    gate.receipt.base_record = Some(read);
     if units.is_empty() {
         return Ok(());
     }
-    let layout = *gate.layout();
-    let run = |receipt: &Receipt| (receipt.commit.clone(), receipt.trigger.run_id.clone());
-    let this = run(&gate.receipt);
-    let ours = |job: &Receipt| run(job) == this && job.shard.as_deref() == Some(qualify::PHASE);
-    let read = |path: PathBuf| serde_json::from_slice::<Receipt>(&fs::read(path).ok()?).ok();
-    let entries = fs::read_dir(runs).into_iter().flatten().flatten();
-    let jobs = entries.filter_map(|entry| read(entry.path().join("receipt.json")));
-    let jobs = Vec::from_iter(jobs.filter(ours));
-    let found = format!("{} qualification receipts of the run, not one", jobs.len());
-    let [job] = <[_; 1]>::try_from(jobs).map_err(|_| format!("{} has {found}", runs.display()))?;
     let base = (job.base.as_ref()).ok_or(format!("the run {} has no base round", job.run))?;
     // The challenges are the modules of a library of their own in the stage.
     let stage = runs.join(format!("{}/work/{}/stage", job.run, base::PHASE));
@@ -99,7 +125,7 @@ fn compare(gate: &mut Gate, units: Units, runs: &Path) -> Result<(), String> {
     let imports = String::from_iter(kept.map(|module| format!("public import {module}\n")));
     let private = |a: &str| (a.strip_prefix("_private.")?.split_once(".0.")).map(|m| proof(m.0));
     let entry = |s: &Statement| base.theorems.get(&s.theorem);
-    for (index, (unit, proved)) in units.into_iter().enumerate() {
+    for (index, (unit, (_, proved))) in units.into_iter().enumerate() {
         // SCOPED for a statement left out, NOT_RUN for one not verified and audited.
         let state = |s: &&Statement| entry(s).map(|t| (t.status, t.axioms.is_some()));
         let scoped = (proved.iter()).find(|s| state(s).is_some_and(|(s, _)| s == Status::Scoped));
@@ -135,6 +161,63 @@ fn compare(gate: &mut Gate, units: Units, runs: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Makes `receipt`, of the comparator run of a lane, the receipt of the lane
+/// with the base record that it read below `runs`, read again: with the
+/// phases, units, round, lane, targets, commands and failures of the base run
+/// before its own, the larger memory peaks and the least free disk of both,
+/// the free disk at the start, the start and budget of the base run and the
+/// seconds of both. A record that differs when it is read again is a tool
+/// failure.
+pub fn combine(runs: &Path, receipt: &mut Receipt) {
+    let Some(mut read) = receipt.base_record.clone() else {
+        return;
+    };
+    let again = record(&runs.join(&read.run).join(BASE_RECORD));
+    let Some((_, base)) = again.filter(|(sha256, _)| *sha256 == read.sha256) else {
+        let status = Status::ToolFailure;
+        let message = format!("cannot read the base record of {} again", read.run);
+        receipt.failures.push(Failure { status, message });
+        return run::conclude(receipt, false);
+    };
+    let offset = receipt.started.saturating_sub(base.started) as f64;
+    let count = u32::try_from(base.commands.len()).unwrap_or(u32::MAX);
+    let mut commands = base.commands;
+    let logs = (commands.iter_mut()).flat_map(|c| [&mut c.stdout, &mut c.stderr]);
+    for log in logs.flatten() {
+        log.path = format!("../{}/{}", base.run, log.path);
+    }
+    for command in &mut receipt.commands {
+        command.sequence = command.sequence.saturating_add(count);
+        command.started = receipt::seconds(Duration::from_secs_f64(command.started + offset));
+    }
+    commands.append(&mut receipt.commands);
+    (receipt.commands, receipt.base, receipt.lane) = (commands, base.base, base.lane);
+    receipt.proof_targets = base.proof_targets;
+    receipt.phases.extend(base.phases);
+    receipt.units.extend(base.units);
+    receipt.failures.splice(0..0, base.failures);
+    let (own, theirs) = (&mut receipt.resources, base.resources);
+    own.cgroup_memory_peak = own.cgroup_memory_peak.max(theirs.cgroup_memory_peak);
+    let rss = own
+        .largest_process_max_rss
+        .max(theirs.largest_process_max_rss);
+    let least = (own.disk_least_available.into_iter()).chain(theirs.disk_least_available);
+    (own.largest_process_max_rss, own.disk_least_available) = (rss, least.min());
+    own.disk_available_at_start = theirs.disk_available_at_start;
+    (read.comparator_started, read.comparator_seconds) = (receipt.started, receipt.seconds);
+    receipt.base_record = Some(read);
+    (receipt.started, receipt.budgets) = (base.started, base.budgets);
+    receipt.seconds = receipt::seconds(Duration::from_secs_f64(base.seconds + receipt.seconds));
+    run::conclude(receipt, false);
+}
+
+/// The SHA-256 of the receipt or base record at `path`, and what it holds,
+/// if it can be read.
+fn record(path: &Path) -> Option<(String, Receipt)> {
+    let bytes = fs::read(path).ok()?;
+    Some((sha256(&bytes), serde_json::from_slice(&bytes).ok()?))
+}
+
 /// Runs `lake comparator` in `stage` as a command of `unit` on the challenge
 /// `module`, which declares each theorem of `pairs` with its statement after
 /// `imports`, with the `allowed` axioms. Its problems are none when it passed,
@@ -165,8 +248,8 @@ fn judge(
 
 #[cfg(test)]
 mod tests {
-    //! The comparator part runs after the qualification job of the base
-    //! fixture of `base.rs`, whose Lake stand-in passes `lake comparator`
+    //! The comparator of a lane runs after the base run of the lane in the
+    //! base fixture of `base.rs`, whose Lake stand-in passes `lake comparator`
     //! unless a test gives it a script: the statement `S`, proved by `T` in
     //! `Krepi.Proofs.Counter`, and the statement `R`, proved by `M` in
     //! `Krepi.Proofs.Main`, with the formal target `t`.
@@ -181,7 +264,7 @@ mod tests {
     use crate::formal::outcome::Class;
     use crate::formal::receipt;
     use crate::formal::run::tests::{
-        Done, comparator_part, gate_shard, plenty, root_package, shard_phases,
+        Done, comparator_run, gate_shard, plenty, root_package, shard_phases,
     };
     use crate::formal::{merge, waiver};
 
@@ -216,16 +299,21 @@ mod tests {
         fixture
     }
 
-    /// The qualification job of `fixture`, which passes.
+    /// The base run of the lane `a` of `fixture`, which passes.
     fn job(fixture: &Fixture) -> Done {
         let job = fixtures::job(fixture);
         assert_eq!(job.code, ExitCode::SUCCESS, "{:?}", job.failures());
         job
     }
 
-    /// The comparator part of `fixture` in production.
+    /// The comparator run of the lane `a` of `fixture` in production.
     fn compared(fixture: &Fixture) -> Done {
-        comparator_part(fixture, &LAYOUT, None)
+        comparator_run(fixture, &LAYOUT, "a", None)
+    }
+
+    /// The base record that the base run `job` wrote.
+    fn record_of(job: &Done) -> PathBuf {
+        job.run.path.join(BASE_RECORD)
     }
 
     /// The challenge `name` of the stage of `job`, and its configuration.
@@ -250,11 +338,11 @@ mod tests {
         Vec::from_iter(BTreeSet::from_iter(names.map(|name| name.to_string())))
     }
 
-    /// Rewrites the receipt of `job` with `edit`.
+    /// Rewrites the base record of `job` with `edit`.
     fn edit(job: &Done, edit: impl FnOnce(&mut Receipt)) {
         let mut written = job.written();
         edit(&mut written);
-        fs::write(job.run.receipt(), receipt::render(&written)).expect("write the receipt");
+        fs::write(record_of(job), receipt::render(&written)).expect("write the record");
     }
 
     /// An edit of a receipt.
@@ -312,35 +400,44 @@ mod tests {
             target("u", "formal", &[COUNTER, "Krepi.Proofs.Main"]),
         ]);
         fixtures::targets(&fixture, &registry);
+        let modules = [COUNTER, "Krepi.Proofs.Main", "Krepi.Proofs.Other"];
+        let lane = json!({"name": "a", "components": [], "modules": modules});
+        fixture.write(
+            LAYOUT.lanes,
+            &json!({"schema": 1, "lanes": [lane]}).to_string(),
+        );
         let found = units(fixture.root(), &LAYOUT).expect("the units");
-        let theorems = |unit: &str| Vec::from_iter(found[unit].iter().map(|s| s.theorem.as_str()));
+        let theorems =
+            |unit: &str| Vec::from_iter(found[unit].1.iter().map(|s| s.theorem.as_str()));
+        assert!(found.values().all(|(part, _)| part == "lane/a"));
         assert_eq!(
             Vec::from_iter(found.keys()),
-            ["comparator", "comparator/t", "comparator/u"]
+            ["comparator/lane/a", "comparator/t", "comparator/u"]
         );
-        assert_eq!(theorems("comparator"), [T]);
+        assert_eq!(theorems("comparator/lane/a"), [T]);
         assert_eq!(
             (theorems("comparator/t"), theorems("comparator/u")),
             (vec!["Krepi.Proofs.Other.q"], vec![M])
         );
-        // The part concludes each with one challenge in the stage of the
-        // job, and in production runs no other.
+        // The comparator concludes each with one challenge in the stage of
+        // the base run, and in production runs no other.
         let fixture = checkout("comparator-part", &[COUNTER], json!({}));
         let job = job(&fixture);
         let done = compared(&fixture);
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
         let receipt = done.written();
         assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
-        assert_eq!(
-            Vec::from_iter(receipt.units.keys()),
-            ["comparator", "comparator/t"]
-        );
-        for unit in ["comparator", "comparator/t"] {
+        let units = receipt.units.keys().filter(|unit| unit.starts_with(PHASE));
+        assert_eq!(Vec::from_iter(units), ["comparator/lane/a", "comparator/t"]);
+        for unit in ["comparator/lane/a", "comparator/t"] {
             assert_eq!(status(&done, unit), (Status::Verified, None));
         }
         assert_eq!(
             runs(&done),
-            [run_of("comparator", "C0"), run_of("comparator/t", "C1")]
+            [
+                run_of("comparator/lane/a", "C0"),
+                run_of("comparator/t", "C1")
+            ]
         );
         let at = stage(&job);
         let at = at.strip_prefix(fixture.root()).expect("below the root");
@@ -355,17 +452,17 @@ mod tests {
     }
 
     #[test]
-    fn without_a_proved_statement_the_part_runs_nothing_and_is_verified() {
-        // It reads no receipt of a qualification job, which has not run.
+    fn without_a_proved_statement_the_comparator_runs_nothing_and_the_lane_is_verified() {
         let mut fixture = fixtures::base("comparator-none");
         fixtures::register(&fixture, &[(S, T, "planned")]);
         hashed(&mut fixture);
+        job(&fixture);
         let done = compared(&fixture);
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
         let receipt = done.written();
         assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
-        assert!(receipt.units.is_empty() && runs(&done).is_empty());
-        assert!(receipt.phases[PHASE].ran);
+        assert_eq!(Vec::from_iter(receipt.units.keys()), [fixtures::A]);
+        assert!(runs(&done).is_empty() && receipt.phases[PHASE].ran);
     }
 
     #[test]
@@ -508,7 +605,7 @@ mod tests {
         );
         let classes = Vec::from_iter(commands(&done, "comparator/t").iter().map(|c| c.class));
         assert_eq!(classes, [Class::ProofFailure]);
-        assert_eq!(status(&done, "comparator"), (Status::Verified, None));
+        assert_eq!(status(&done, "comparator/lane/a"), (Status::Verified, None));
         assert_eq!(done.receipt.status, Status::Rejected);
     }
 
@@ -560,7 +657,7 @@ mod tests {
         assert_eq!(record.theorems[theorem].status, Status::Verified);
         let done = compared(&fixture);
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
-        assert_eq!(status(&done, PHASE), (Status::Verified, None));
+        assert_eq!(status(&done, "comparator/lane/a"), (Status::Verified, None));
         assert_eq!(permitted(&job, "C0"), with_standard(&[&axiom]));
         let (text, _) = challenge(&job, "C0");
         assert!(text.contains("public import KrepiGen.P.Funs\n"), "{text}");
@@ -584,18 +681,19 @@ mod tests {
             status(&done, "comparator/t"),
             (Status::NotRun, Some(reason.as_str()))
         );
-        assert_eq!(runs(&done), [run_of("comparator", "C0")]);
-        // NOT_RUN alone is a tool failure, which leaves the receipt not complete.
+        assert_eq!(runs(&done), [run_of("comparator/lane/a", "C0")]);
+        // The receipt of the lane has the rejection of its base round, and
+        // NOT_RUN leaves it not complete.
         let receipt = done.written();
         assert_eq!(
             (receipt.status, receipt.complete),
-            (Status::ToolFailure, false)
+            (Status::Rejected, false)
         );
         // Without an entry, with one of a tool failure, or one verified but
         // without its axioms.
         let fixture = checkout("comparator-unverified", &[COUNTER], json!({}));
         let job = job(&fixture);
-        let original = fs::read(job.run.receipt()).expect("the receipt");
+        let original = fs::read(record_of(&job)).expect("the record");
         let edits: [(&str, Edit); 3] = [
             ("no entry", |receipt| drop(theorems(receipt).remove(T))),
             ("TOOL_FAILURE", |receipt| {
@@ -604,7 +702,7 @@ mod tests {
             ("VERIFIED", |receipt| of_t(receipt).axioms = None),
         ];
         for (found, change) in edits {
-            fs::write(job.run.receipt(), &original).expect("restore the receipt");
+            fs::write(record_of(&job), &original).expect("restore the record");
             edit(&job, change);
             let done = compared(&fixture);
             let reason = unverified(T, found);
@@ -612,8 +710,8 @@ mod tests {
                 status(&done, "comparator/t"),
                 (Status::NotRun, Some(reason.as_str()))
             );
-            assert_eq!(status(&done, "comparator"), (Status::Verified, None));
-            assert_eq!(runs(&done), [run_of("comparator", "C0")], "{found}");
+            assert_eq!(status(&done, "comparator/lane/a"), (Status::Verified, None));
+            assert_eq!(runs(&done), [run_of("comparator/lane/a", "C0")], "{found}");
         }
     }
 
@@ -625,10 +723,10 @@ mod tests {
         let error = "error: Krepi/Proofs/Counter.lean:9:22: unsolved goals";
         lake_script(&fixture, "build", &fixture::failing(COUNTER, &[error], 1));
         let job = fixtures::job(&fixture);
-        let base = |done: &Done| status(done, "base").0;
+        let base = |done: &Done| status(done, fixtures::A).0;
         assert_eq!(base(&job), Status::Rejected);
         let done = compared(&fixture);
-        for (unit, theorem) in [("comparator", M), ("comparator/t", T)] {
+        for (unit, theorem) in [("comparator/lane/a", M), ("comparator/t", T)] {
             let reason = unverified(theorem, "REJECTED");
             assert_eq!(status(&done, unit), (Status::NotRun, Some(reason.as_str())));
         }
@@ -664,7 +762,7 @@ mod tests {
         ] {
             lake_script(&fixture, "comparator", script);
             let done = compared(&fixture);
-            for unit in ["comparator", "comparator/t"] {
+            for unit in ["comparator/lane/a", "comparator/t"] {
                 assert_eq!(status(&done, unit), conclusion, "{script}");
             }
         }
@@ -682,8 +780,8 @@ mod tests {
             status(&done, "comparator/t"),
             (Status::Scoped, Some(reason.as_str()))
         );
-        assert_eq!(status(&done, "comparator"), (Status::Verified, None));
-        assert_eq!(runs(&done), [run_of("comparator", "C0")]);
+        assert_eq!(status(&done, "comparator/lane/a"), (Status::Verified, None));
+        assert_eq!(runs(&done), [run_of("comparator/lane/a", "C0")]);
     }
 
     #[test]
@@ -713,19 +811,25 @@ mod tests {
             &format!("echo '{mismatch}' >&2; exit 1\n"),
         );
         let done = compared(&fixture);
-        assert_eq!(Vec::from_iter(done.receipt.units.keys()), ["comparator"]);
+        let units = done
+            .receipt
+            .units
+            .keys()
+            .filter(|unit| unit.starts_with(PHASE));
+        assert_eq!(Vec::from_iter(units), ["comparator/lane/a"]);
         assert_eq!(
-            status(&done, "comparator"),
+            status(&done, "comparator/lane/a"),
             (Status::Rejected, Some(mismatch))
         );
         let root = fixture.root();
         let shard = |name: &str| {
-            let shard = format!("target/{name}");
+            let shard = format!("target/{name}/1");
             gate_shard(&fixture, &shard, shard_phases(root, &shard), plenty)
         };
+        assert!(job.run.path.join(BASE_RECORD).is_file());
         let parts = [
-            ("q", job),
-            ("c", done),
+            ("q", fixtures::qualification(&fixture)),
+            ("a", done),
             ("t", shard("t")),
             ("u", shard("u")),
         ];
@@ -742,8 +846,16 @@ mod tests {
     }
 
     #[test]
-    fn without_exactly_one_qualification_receipt_of_the_run_the_part_is_a_tool_failure() {
-        let fixture = checkout("comparator-alone", &[COUNTER], json!({}));
+    fn the_comparator_of_a_lane_reads_its_one_base_record_of_the_run_or_is_a_tool_failure() {
+        let mut fixture = checkout("comparator-alone", &[COUNTER], json!({}));
+        // A second lane, `b`, without a module.
+        let path = fixture.root().join(LAYOUT.lanes);
+        let mut lanes: Value =
+            serde_json::from_str(&fs::read_to_string(&path).expect("lanes")).expect("JSON");
+        let b = json!({"name": "b", "components": [], "modules": []});
+        lanes["lanes"].as_array_mut().expect("lanes").push(b);
+        fixture.write(LAYOUT.lanes, &format!("{lanes:#}\n"));
+        hashed(&mut fixture);
         let runs_of = fixture.root().join(run::RUNS);
         let stopped = |done: &Done, problem: &str| {
             let message = format!("the phase comparator stopped: {problem}");
@@ -753,35 +865,65 @@ mod tests {
                 (receipt.status, receipt.complete),
                 (Status::ToolFailure, false)
             );
-            for unit in ["comparator", "comparator/t"] {
+            for unit in ["comparator/lane/a", "comparator/t"] {
                 assert_eq!(status(done, unit), (Status::NotRun, Some(message.as_str())));
             }
-            assert!(runs(done).is_empty());
+            assert!(runs(done).is_empty() && receipt.base_record.is_none());
         };
         let found = |count: usize| {
             let runs = runs_of.display();
-            format!("{runs} has {count} qualification receipts of the run, not one")
+            format!("{runs} has {count} base records of the lane, not one")
         };
         let none = found(0);
         stopped(&compared(&fixture), &none);
-        // A receipt of the job of another run of CI, or of another commit.
+        // The base record of another lane is not read: without one of its
+        // own, the lane has none; with one, its axioms are those of its own
+        // record, whatever the other gives the theorem.
+        let other = run::tests::gate_shard(
+            &fixture,
+            "lane/b",
+            shard_phases(fixture.root(), "lane/b"),
+            plenty,
+        );
+        assert!(record_of(&other).is_file());
+        stopped(&compared(&fixture), &none);
+        edit(&other, |receipt| {
+            let theorem = base::Theorem {
+                axioms: Some(vec!["Krepi.Other.ax".to_string()]),
+                status: Status::Verified,
+                ..base::Theorem::default()
+            };
+            theorems(receipt).insert(T.to_string(), theorem);
+        });
         let job = job(&fixture);
-        let original = fs::read(job.run.receipt()).expect("the receipt");
+        let done = compared(&fixture);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        assert_eq!(permitted(&job, "C1"), with_standard(&[]));
+        let read = done
+            .receipt
+            .base_record
+            .clone()
+            .expect("the record that it read");
+        assert_eq!(read.run, job.run.id);
+        // A record of another run of CI, or of another commit.
+        let original = fs::read(record_of(&job)).expect("the record");
         edit(&job, |receipt| {
             receipt.trigger.run_id = Some("7".to_string())
         });
         stopped(&compared(&fixture), &none);
-        fs::write(job.run.receipt(), &original).expect("restore the receipt");
+        fs::write(record_of(&job), &original).expect("restore the record");
         fixture.write("README.md", "moved\n");
         fixture.commit_all();
         stopped(&compared(&fixture), &none);
         // One of the commit without a base round.
         let job = self::job(&fixture);
         edit(&job, |receipt| receipt.base = None);
-        stopped(
-            &compared(&fixture),
-            &format!("the run {} has no base round", job.run.id),
+        let message = format!(
+            "the phase comparator stopped: the run {} has no base round",
+            job.run.id
         );
+        let done = compared(&fixture);
+        assert_eq!(done.failures(), [message.as_str()]);
         // Two of the commit and run, as one that a build below the runs
         // directory added would make, whichever has a base round.
         self::job(&fixture);
@@ -795,7 +937,7 @@ mod tests {
         let elsewhere = fixture.root().join("artifacts/elsewhere");
         fs::create_dir_all(&elsewhere).expect("create the directory");
         fs::rename(&job.run.path, elsewhere.join(&job.run.id)).expect("move the run");
-        let done = comparator_part(&fixture, &LAYOUT, Some(&elsewhere));
+        let done = comparator_run(&fixture, &LAYOUT, "a", Some(&elsewhere));
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
         let stage = elsewhere
             .join(&job.run.id)
@@ -811,7 +953,7 @@ mod tests {
             at.iter().all(|c| fixture.root().join(&c.cwd) == stage),
             "{at:?}"
         );
-        // Without it, the runs directory of the checkout has no such receipt.
+        // Without it, the runs directory of the checkout has no such record.
         assert_eq!(compared(&fixture).receipt.status, Status::ToolFailure);
     }
 
@@ -846,12 +988,13 @@ mod tests {
              KrepiChallenge.Axiom.json) echo \"{illegal}\" >&2; exit 1 ;;\nesac\n"
         );
         lake_script(&fixture, "comparator", &script);
-        let done = comparator_part(&fixture, &CALIBRATION, None);
+        let done = comparator_run(&fixture, &CALIBRATION, "a", None);
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
         // They conclude no unit.
         let receipt = done.written();
         assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
-        assert_eq!(Vec::from_iter(receipt.units.keys()), ["comparator/t"]);
+        let units = receipt.units.keys().filter(|unit| unit.starts_with(PHASE));
+        assert_eq!(Vec::from_iter(units), ["comparator/t"]);
         let negatives = ["comparator-negative/statement", "comparator-negative/axiom"];
         let expected = [
             run_of("comparator/t", "C0"),
@@ -882,10 +1025,13 @@ mod tests {
         // A first unit with one statement runs none.
         let fixture = checkout("comparator-calibration-one", &[COUNTER], json!({}));
         self::job(&fixture);
-        let done = comparator_part(&fixture, &CALIBRATION, None);
+        let done = comparator_run(&fixture, &CALIBRATION, "a", None);
         assert_eq!(
             runs(&done),
-            [run_of("comparator", "C0"), run_of("comparator/t", "C1")]
+            [
+                run_of("comparator/lane/a", "C0"),
+                run_of("comparator/t", "C1")
+            ]
         );
     }
 }

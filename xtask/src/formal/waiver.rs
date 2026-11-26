@@ -108,10 +108,10 @@ pub fn left_out(layout: &Layout, targets: &[Target], waived: &BTreeSet<String>) 
 /// recorded and not required. It passes when it has no problem, every other
 /// unit is `VERIFIED` and no other part has a failure, and is then
 /// `REJECTED` when it used a waiver. Each hard gate of a merge without a
-/// problem passes over the same waivers: the axioms when there are audits,
-/// each passed, and each unit of the base round and of a target is
-/// `VERIFIED`; `leanchecker` when its one replay passed; the comparator when
-/// each of its units is `VERIFIED`.
+/// problem passes over the same waivers: the axioms when each base round has
+/// an audit, each passed, and each unit of the base rounds and of a target is
+/// `VERIFIED`; `leanchecker` when each base round has its one replay, which
+/// passed; the comparator when each of its units is `VERIFIED`.
 pub fn conclude(
     merged: &mut Merge,
     layout: &Layout,
@@ -150,9 +150,9 @@ pub fn conclude(
     };
     let within = |unit: &str, phase: &str| unit.split('/').next() == Some(phase);
     let target = |u: &str| merge::target(u).is_some() && mutants::owner(u) == u;
-    let audits = ok && ran(Site::AxiomAudit, lean::AUDIT).into_iter().min() == Some(true);
+    let audits = ok && merge::audited(kept) && !ran(Site::AxiomAudit, lean::AUDIT).contains(&false);
     merged.gates.axioms = audits && verified(&|u| within(u, base::PHASE) || target(u));
-    merged.gates.leanchecker = ok && ran(Site::Leanchecker, "leanchecker") == [true];
+    merged.gates.leanchecker = ok && merge::replayed(kept, layout.namespace);
     merged.gates.comparator = ok && verified(&|unit| within(unit, comparator::PHASE));
     let used = |w: &Waiver| (w.scope.iter()).any(|name| failing.contains(&Some(name.clone())));
     let held = (waivers.iter().filter(holds)).map(|w| (w.clone(), used(w)));

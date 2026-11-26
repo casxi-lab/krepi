@@ -162,7 +162,7 @@ impl Layout {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "run",
-        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the part of the named targets, their extraction and the phase targets, --shard NAME only the qualification job, qualification, the comparator part, comparator, which runs after it, or the shard of a formal target, target/<name>, --calibration runs the calibration target, and --keep keeps the work directory of the run",
+        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the part of the named targets, their extraction and the phase targets, --shard NAME only the qualification job, qualification, the base run of a lane, lane/<name>, whose comparator --comparator runs after it, or the part of a formal target, target/<name>/1, --calibration runs the calibration target, and --keep keeps the work directory of the run",
         subcommands: &[],
     },
     Command {
@@ -192,7 +192,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "merge",
-        about: "Merge RECEIPT..., the receipts of the qualification job, of the comparator part and of the shard of each formal target of the commit checked out, into the conclusion of the whole gate with the waivers of verification/waivers.json that hold, which passes when every unit and part outside them is VERIFIED, and of its three hard gates, the axiom audits, the replay of leanchecker and the comparator, and write its record and summary; --calibration merges those of the calibration target",
+        about: "Merge RECEIPT..., the receipts of the qualification job, of each lane and of the part of each formal target of the commit checked out, into the conclusion of the whole gate with the waivers of verification/waivers.json that hold, which passes when every unit and part outside them is VERIFIED, and of its three hard gates, the axiom audits, the replays of leanchecker and the comparator, and write its record and summary; --calibration merges those of the calibration target",
         subcommands: &[],
     },
     Command {
@@ -237,10 +237,11 @@ fn cli() -> clap::Command {
                 Arg::new("shard")
                     .long("shard")
                     .value_name("NAME")
-                    .help("Run only the qualification job, qualification, the comparator part, comparator, or the shard of a formal target, target/<name>")
+                    .help("Run only the qualification job, qualification, a lane, lane/<name>, or the part of a formal target, target/<name>/1")
                     .conflicts_with("target")
                     .value_parser(merge::shard),
                 clap::arg!(--calibration "Run in the layout of the calibration target"),
+                clap::arg!(--comparator "Run the comparator of the lane on what its base run kept"),
                 keep(),
             ]),
         )
@@ -293,9 +294,9 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
         };
     match matches.subcommand() {
         Some(("run", matches)) => {
-            let (keep, shard) = (matches.get_flag("keep"), matches.get_one::<String>("shard"));
-            let shard = shard.map(String::as_str);
-            run::command(root, layout(matches), targets(matches), None, keep, shard)
+            let flags = (matches.get_flag("keep"), matches.get_flag("comparator"));
+            let shard = matches.get_one::<String>("shard").map(String::as_str);
+            run::command(root, layout(matches), targets(matches), None, flags, shard)
         }
         Some(("mutants", matches)) => {
             let target = matches.get_one::<String>("target").cloned().into_iter();
@@ -305,7 +306,7 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
                 layout(matches),
                 BTreeSet::from_iter(target),
                 operators,
-                matches.get_flag("keep"),
+                (matches.get_flag("keep"), false),
                 None,
             )
         }
@@ -458,12 +459,17 @@ mod tests {
             (qualification, BTreeSet::new(), false)
         );
         assert_eq!(
-            shard(&["run", "--shard", "comparator"]),
-            (Some("comparator".to_string()), BTreeSet::new(), false)
+            shard(&["run", "--shard", "lane/fdt", "--keep"]),
+            (Some("lane/fdt".to_string()), BTreeSet::new(), true)
         );
-        let args = ["run", "--shard", "target/t", "--calibration", "--keep"];
+        let args = ["run", "--shard", "target/t/1", "--calibration", "--keep"];
         let t = BTreeSet::from(["t".to_string()]);
-        assert_eq!(shard(&args), (Some("target/t".to_string()), t, true));
+        assert_eq!(shard(&args), (Some("target/t/1".to_string()), t, true));
+        // The comparator of a lane is a flag of its part.
+        let matches =
+            read(&["run", "--shard", "lane/fdt", "--comparator"]).expect("a command line");
+        let (_, matches) = matches.subcommand().expect("a subcommand");
+        assert!(matches.get_flag("comparator") && !matches.get_flag("keep"));
         let matches = read(&["impact", "--base", "origin/main"]).expect("a valid command line");
         let (name, matches) = matches.subcommand().expect("a subcommand");
         let base = matches.get_one::<String>("base").map(String::as_str);
@@ -497,11 +503,17 @@ mod tests {
             &["run", "--shard"][..],
             &["run", "--shard", "base"],
             &["run", "--shard", "target/"],
+            &["run", "--shard", "comparator"],
             &["run", "--shard", "comparator/t"],
             &["run", "--shard", "targets/t"],
+            &["run", "--shard", "target/t"],
+            &["run", "--shard", "target/t/2"],
+            &["run", "--shard", "target/t/x/1"],
+            &["run", "--shard", "lane/"],
+            &["run", "--shard", "lane/a/b"],
             &["run", "--shard", "qualification", "--target", "t"],
-            &["run", "--target", "t", "--shard", "target/t"],
-            &["run", "--shard", "qualification", "--shard", "target/t"],
+            &["run", "--target", "t", "--shard", "target/t/1"],
+            &["run", "--shard", "qualification", "--shard", "target/t/1"],
             &["merge"],
             &["merge", "--keep"],
             &["merge", "--frobnicate"],
@@ -928,7 +940,7 @@ mod tests {
         };
         let (native, sourceless) = (axiom("A._native.d.ax_1_1", "s"), axiom("A.ax", " "));
         let hashless = r#"{"schema": 1, "hash": "0", "statements": []}"#;
-        let shard = "shard target/table: its registered budget of 3301 s is more than the shard \
+        let shard = "part target/table/1: its registered budget of 3301 s is more than the shard \
                      limit of 3300 s";
         let unregistered = r#"waiver 0: "slots" is no registered target"#;
         let broken = [

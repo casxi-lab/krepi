@@ -517,7 +517,7 @@ fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
             FORMAL,
             [&measured(Some(30))[..], &gates(Some(195), None)].concat(),
         ),
-        (committed.as_str(), gates(Some(192), Some(5)).to_vec()),
+        (committed.as_str(), gates(Some(145), Some(5)).to_vec()),
         (measure.as_str(), measured(Some(45)).to_vec()),
     ] {
         let limits = limits(text).expect("the workflow reads");
@@ -525,19 +525,21 @@ fn a_job_named_by_an_expression_takes_the_limit_of_its_template() {
             assert_eq!(job_limit(&limits, name), limit, "{name}");
         }
     }
-    // The committed file runs the gate as parts: the shards and the planned
-    // targets that run alone take their limits from the matrix, which they
-    // write in a notice; the merge of the parts, the verdicts and the review
-    // have limits of their own.
+    // The committed file runs the gate as parts: the lanes, the shards and
+    // the planned targets that run alone take their limits from the matrix,
+    // which they write in a notice; the merge of the parts, the verdicts and
+    // the review have limits of their own.
     let committed = limits(&committed).expect("the workflow reads");
     for name in [
+        "formal lane ${{ matrix.name }}",
         "formal shard ${{ matrix.name }}",
         "formal scoped ${{ matrix.name }}",
     ] {
         assert!(committed.contains(&(name.to_string(), None)), "{name}");
     }
     for (name, limit) in [
-        ("formal shard t", None),
+        ("formal lane fdt", None),
+        ("formal shard t/1", None),
         ("formal scoped t", None),
         ("formal parts", Some(15)),
         ("formal merge", Some(15)),

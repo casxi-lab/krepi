@@ -405,7 +405,7 @@ pub fn check(tree: &Tree, roots: &[(String, bool)], layout: &Layout) -> (String,
         Err(problem) => (Vec::new(), vec![problem]),
     };
     let (plan_problems, missing) = match text(layout.shards) {
-        Ok(plan) => storage::check(layout.shards, plan, &targets),
+        Ok(plan) => storage::check(layout.shards, plan, &targets, text(layout.lanes).ok()),
         Err(problem) => (vec![problem], Vec::new()),
     };
     problems.extend(plan_problems);
@@ -1267,7 +1267,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
 
     /// The problem of a shard of 3,301 s.
     const OVER: &str =
-        "shard target/a: its registered budget of 3301 s is more than the shard limit of 3300 s";
+        "part target/a/1: its registered budget of 3301 s is more than the shard limit of 3300 s";
 
     #[test]
     fn a_shard_whose_registered_budget_exceeds_the_shard_limit_fails_the_check() {
@@ -1304,7 +1304,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
         let (read, problems) = checked(NO_PARTS);
         assert_eq!(problems, Problems::new());
         assert!(
-            read.ends_with("; the shard plan has no entry for target/a"),
+            read.ends_with("; the shard plan has no entry for target/a/1"),
             "{read}"
         );
         let entry = |part: &str| {
@@ -1312,14 +1312,14 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
                 "cgroup_memory_peak": 1, "run_id": "1", "commit": "c"});
             json!({"schema": 1, "parts": [entry]}).to_string()
         };
-        let (read, problems) = checked(&entry("target/a"));
+        let (read, problems) = checked(&entry("target/a/1"));
         assert_eq!(problems, Problems::new());
         assert!(!read.contains("shard plan"), "{read}");
-        let problems = Vec::from_iter(checked(&entry("target/x")).1);
+        let problems = Vec::from_iter(checked(&entry("target/x/1")).1);
         assert_eq!(
             problems,
             [
-                "verification/shards.json: part target/x is neither the qualification nor a registered target"
+                "verification/shards.json: part target/x/1 is neither the qualification, a registered lane nor the part of a registered target"
             ]
         );
         // A plan that is not a tracked file.

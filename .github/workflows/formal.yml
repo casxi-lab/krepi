@@ -6,14 +6,16 @@
 # gate runs when the label full-check is added to a pull request whose
 # change affects it, on a manual run of main, `full` or `weekly`, and on the
 # weekly schedule, on Tuesdays at 12:37 UTC. Then the job `formal limits`
-# computes the shards and their limits from the budgets of the registry;
-# the job `formal run`, the qualification job, runs `cargo xtask formal run
-# --shard qualification --keep` in the pinned proof-tool image and then the
-# comparator part on the stage that it kept; beside it, the job `formal
-# shard <name>` runs the shard of each formal target of the head's
-# registry, and the job `formal scoped <name>` each planned target that the
-# pull request affects, alone; after them, the job `formal parts` merges
-# the receipts of the parts on the runner. The jobs `formal merge`, `formal
+# computes the lanes, the parts of the targets and their limits from the
+# budgets of the lanes and of the registry; the job `formal run`, the
+# qualification job, runs `cargo xtask formal run --shard qualification`
+# in the pinned proof-tool image; beside it, the job `formal lane <name>`
+# runs the base run of each lane of verification/lanes.json and then its
+# comparator on the stage that it kept, the job `formal shard <name>/1` the
+# part of each formal target of the head's registry, and the job `formal
+# scoped <name>` each planned target that the pull request affects, alone;
+# after them, the job `formal parts` merges the receipts of the parts on
+# the runner. The jobs `formal merge`, `formal
 # axioms`, `formal leanchecker` and `formal comparator` judge its record,
 # the conclusion of the gate and each hard gate, on the events above and
 # fail on any other; with `formal fast` and `formal guard`, they are the
@@ -87,19 +89,24 @@ env:
 jobs:
   # Runs the gate: when the label full-check is added to a pull request
   # whose change affects the gate, by the decision of `formal fast`, and on
-  # a manual or scheduled run of main. The deadline of the shard of a
+  # a manual or scheduled run of main. The deadline of the part of a
   # target, and of a planned target that the pull request affects, which
   # runs alone, is 300 s and the budget of the target; then each has the
   # 300 s of its receipt. Its step has the minutes of its deadline and
   # receipt, rounded up, and two more, as `deadline.sh` kills its command a
   # minute after its deadline; its job 15 minutes before the step, the step
-  # and 3 minutes after it. Every formal target is a shard of its own, named
-  # by its unit, whose registered budget may be at most the shard limit,
-  # 3,300 s, whatever its workers, as `cargo xtask formal check` requires;
-  # a job of the hosted runners ends after 360 minutes. Target names are
-  # checked before they are passed on, and so are the lanes: the names of
-  # `verification/lanes.json`, and the registered budget of each lane with
-  # the extraction margin, 600 s, at most the shard limit, as
+  # and 3 minutes after it. Every formal target has one part,
+  # `target/<name>/1`, whose registered budget may be at most the shard
+  # limit, 3,300 s, whatever its workers, as `cargo xtask formal check`
+  # requires; a job of the hosted runners ends after 360 minutes. The
+  # deadline of a lane is 300 s, its registered budget, 2,400 s unless
+  # verification/lanes.json gives another, and 600 s for the extraction of
+  # its targets, which may be at most the shard limit; its base step has
+  # the minutes of that deadline and of the receipt, and two more, its
+  # comparator step 37 minutes, and its job 15 minutes before the base step,
+  # both steps and 3 minutes after them. Target names are checked before
+  # they are passed on, and so are the lanes: their names, which no two
+  # lanes share, a component in no two lanes, and the budget of each, as
   # `cargo xtask formal check` requires. The limits of the qualification job
   # do not depend on the registry and are written in it.
   limits:
@@ -111,6 +118,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      lanes: ${{ steps.limits.outputs.lanes }}
       shards: ${{ steps.limits.outputs.shards }}
       scoped: ${{ steps.limits.outputs.scoped }}
     steps:
@@ -135,12 +143,28 @@ jobs:
           lanes=verification/lanes.json
           jq -e 'all(.targets[]; .name | test("^[a-z0-9][a-z0-9-]*$"))' "$registry" > /dev/null
           jq -e 'all(.lanes[]; .name | test("^[a-z0-9][a-z0-9-]*$"))' "$lanes" > /dev/null
+          twice=$(jq -r '[.lanes[].name] | group_by(.) | map(select(length > 1) | .[0]) | join(" ")' "$lanes")
+          if [ -n "$twice" ]; then
+            echo "more than one lane is named $twice" >&2
+            exit 1
+          fi
+          shared=$(jq -r '[.lanes[].components[]] | group_by(.) | map(select(length > 1) | .[0]) | join(" ")' "$lanes")
+          if [ -n "$shared" ]; then
+            echo "the component $shared is in more than one lane" >&2
+            exit 1
+          fi
           heavy=$(jq -r --argjson margin "$extraction_margin" --argjson limit "$shard_limit" \
             '[.lanes[] | select((.budget // 2400) + $margin > $limit) | .name] | join(" ")' "$lanes")
           if [ -n "$heavy" ]; then
             echo "the registered budget of the lane $heavy and the extraction margin of $extraction_margin s are more than $shard_limit s" >&2
             exit 1
           fi
+          # One job for each lane, with the limits of its base step and its
+          # job, beside the 37 minutes of its comparator step.
+          lanes=$(jq -c --argjson margin "$((shard_margin + extraction_margin + receipt_margin))" '
+            [.lanes[] | {name, budget: (.budget // 2400), part: "lane/\(.name)", key: "lane-\(.name)"}]
+              | map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 37 + 3)' \
+            "$lanes")
           # The targets of the state $1 with a name of the list $2, or with
           # any name when it is null, grouped by their name with the sum of
           # their budgets, and the limits of the step and the job of each.
@@ -152,14 +176,14 @@ jobs:
               | map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 3)' \
               "$registry"
           }
-          # One shard for each formal target, and one job for each planned
+          # One part for each formal target, and one job for each planned
           # target that the pull request affects, which runs it alone.
-          shards=$(rows formal null)
+          shards=$(rows formal null | jq -c 'map(.part = "target/\(.name)/1" | .key = "target-\(.name)-1" | .name += "/1")')
           scoped=$(rows planned "$SCOPED")
           over=$(jq -r --argjson limit "$shard_limit" \
             '[.[] | select(.budget > $limit) | .name] | join(" ")' <<< "$shards")
           if [ -n "$over" ]; then
-            echo "the registered budget of the shard of $over is more than $shard_limit s" >&2
+            echo "the registered budget of the part $over is more than $shard_limit s" >&2
             exit 1
           fi
           long=$(jq -r '[.[] | select(.job > 360) | .name] | join(" ")' <<< "$scoped")
@@ -168,27 +192,25 @@ jobs:
             exit 1
           fi
           {
+            echo "lanes=$lanes"
             echo "shards=$shards"
             echo "scoped=$scoped"
           } | tee -a "$GITHUB_OUTPUT"
 
-  # The qualification job: `cargo xtask formal run --shard qualification
-  # --keep` (the guard phase, the qualification, the extraction of every
-  # formal target and the base round), which keeps the stage of its base
-  # round, and then the comparator part, `cargo xtask formal run --shard
-  # comparator`, on that stage in a container of its own; each receipt is
-  # one part of the merge. The deadline of the gate is its 7,200 s and 600 s
-  # for the extraction of every formal target, that of the comparator its
-  # 1,800 s; then each has the 300 s of its receipt. Each step has the
-  # minutes of its deadline and receipt and two more, as `deadline.sh` kills
-  # its command a minute after its deadline, and the job 15 minutes before
-  # the gate step, the two steps and 3 minutes after them.
+  # The qualification job: `cargo xtask formal run --shard qualification`
+  # (the guard phase, the qualification and the base round of the
+  # qualification cases with the checks of the whole Lake project), whose
+  # receipt is one part of the merge. The deadline of the gate is its
+  # 7,200 s; then it has the 300 s of its receipt. Its step has the minutes
+  # of its deadline and receipt and two more, as `deadline.sh` kills its
+  # command a minute after its deadline, and the job 15 minutes before the
+  # gate step, the step and 3 minutes after it.
   gate:
     name: formal run
     needs: limits
     if: ${{ !cancelled() && needs.limits.result == 'success' }}
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 192
+    timeout-minutes: 145
     permissions:
       contents: read
     steps:
@@ -242,14 +264,6 @@ jobs:
             cargo build --locked --manifest-path xtask/Cargo.toml
             ls -l xtask/target/debug/xtask
           } 2>&1 | tee -a artifacts/formal/job.txt
-
-      # The comparator part runs this copy of xtask, mounted read-only: the
-      # gate, whose container mounts only the checkout, cannot change it.
-      - name: Copy xtask for the comparator
-        timeout-minutes: 1
-        run: |
-          cp xtask/target/debug/xtask "$RUNNER_TEMP/xtask"
-          sha256sum "$RUNNER_TEMP/xtask" | tee -a artifacts/formal/job.txt
 
       # The probe fails unless the container runs as a user other than root,
       # on a read-only root file system, without capabilities, new privileges
@@ -308,11 +322,11 @@ jobs:
       - name: Run the gate in the image
         id: gate
         if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
-        timeout-minutes: 137
+        timeout-minutes: 127
         run: |
           read -r -a gate_flags <<< "$GATE_FLAGS"
           echo "== gate started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
-          exec bash .github/scripts/deadline.sh --stop-commands 135m 1m \
+          exec bash .github/scripts/deadline.sh --stop-commands 125m 1m \
             docker run --rm --name "formal-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
@@ -320,7 +334,7 @@ jobs:
             --env KREPI_FORMAL_TRIGGER \
             --env GITHUB_EVENT_PATH="$GITHUB_WORKSPACE/artifacts/formal/event.json" \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard qualification --keep
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard qualification
 
       - name: Remove the container of the gate
         if: always()
@@ -329,73 +343,6 @@ jobs:
             echo "removed the container of the gate"
           else
             echo "no container of the gate is left"
-          fi
-
-      # The comparator part on the stage that the gate kept, also when the
-      # gate failed: `lake comparator` runs in a sandbox of bubblewrap, which
-      # needs unprivileged user namespaces on the runner and, in the
-      # container, seccomp and AppArmor unconfined, an empty /run/user and
-      # the system paths unmasked. The container keeps the other flags of the
-      # gate, which a probe checks first. The sandbox sees the stage through
-      # a second mount of the runs directory outside /home, which
-      # KREPI_FORMAL_RUNS names; it clears the environment, so Git there
-      # reads only /etc/gitconfig, which marks the packages of the image,
-      # which belong to root, as safe. The part runs the copy of xtask that
-      # the job made before the gate, at /krepi-xtask. `deadline.sh` stops
-      # the part at the deadline of the part and its receipt and kills it a
-      # minute later.
-      - name: Run the comparator in its own container
-        id: comparator
-        if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
-        timeout-minutes: 37
-        run: |
-          read -r -a gate_flags <<< "$GATE_FLAGS"
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          relaxed=(--security-opt seccomp=unconfined --security-opt apparmor=unconfined
-            --tmpfs /run/user --security-opt systempaths=unconfined)
-          printf '[safe]\n\tdirectory = *\n' > "$RUNNER_TEMP/gitconfig"
-          mkdir -p artifacts/formal/runs
-          echo "== probe: docker run $GATE_FLAGS ${relaxed[*]} --user $(id -u):$(id -g)" \
-            | tee -a artifacts/formal/job.txt
-          docker run --rm -i "${gate_flags[@]}" "${relaxed[@]}" --user "$(id -u):$(id -g)" \
-            "$IMAGE" bash -s 2>&1 <<'PROBE' | tee -a artifacts/formal/job.txt
-          status=0
-          fail() { echo "FAILED: $*"; status=1; }
-          echo "user: $(id)"
-          [ "$(id -u)" != 0 ] || fail "the container runs as root"
-          root=$(awk '$2 == "/" { line = $0 } END { print line }' /proc/self/mounts)
-          echo "root file system: $root"
-          case ",$(echo "$root" | awk '{ print $4 }')," in
-            *,ro,*) ;;
-            *) fail "the root file system is not read-only" ;;
-          esac
-          grep -E '^(CapBnd|CapEff|NoNewPrivs):' /proc/self/status
-          grep -q '^CapBnd:[[:space:]]*0*$' /proc/self/status || fail "capabilities are left"
-          grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/self/status || fail "new privileges are allowed"
-          echo "network interfaces: $(ls /sys/class/net)"
-          [ "$(ls /sys/class/net)" = lo ] || fail "the container has a network"
-          exit "$status"
-          PROBE
-          echo "== comparator started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
-          exec bash .github/scripts/deadline.sh --stop-commands 35m 1m \
-            docker run --rm --name "formal-comparator-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" "${relaxed[@]}" \
-            --user "$(id -u):$(id -g)" \
-            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
-            --volume "$GITHUB_WORKSPACE/artifacts/formal/runs:/krepi-runs" --env KREPI_FORMAL_RUNS=/krepi-runs \
-            --volume "$RUNNER_TEMP/gitconfig:/etc/gitconfig:ro" \
-            --volume "$RUNNER_TEMP/xtask:/krepi-xtask:ro" \
-            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
-            --env KREPI_FORMAL_IMAGE="$IMAGE" \
-            "$IMAGE" /krepi-xtask formal run --shard comparator
-
-      - name: Remove the container of the comparator
-        if: always()
-        timeout-minutes: 1
-        run: |
-          if docker rm --force "formal-comparator-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1; then
-            echo "removed the container of the comparator"
-          else
-            echo "no container of the comparator is left"
           fi
 
       - name: Summarize the receipt
@@ -491,11 +438,257 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
-  # The shard of each formal target of the head's registry, beside the
-  # qualification job: `cargo xtask formal run --shard target/<name>` in a
+  # The job of each lane of verification/lanes.json, beside the
+  # qualification job: the base run of the lane, `cargo xtask formal run
+  # --shard lane/<name> --keep`, in a container of the image with the flags
+  # of the gate, which extracts the targets of the lane, builds its root,
+  # audits and replays it and counts its heartbeats, and writes its base
+  # record; and then its comparator, `cargo xtask formal run --shard
+  # lane/<name> --comparator`, on the stage that the base run kept, in a
+  # container of its own, which writes the receipt of the lane, one part of
+  # the merge. It is prepared as the qualification job is, with the shorter
+  # probe of the shard job and without the event, with the limits that the
+  # job `formal limits` gives the lane, which the job writes in a notice
+  # for the record of the run. Without a lane the job does not run.
+  lane:
+    name: formal lane ${{ matrix.name }}
+    needs: limits
+    if: ${{ !cancelled() && needs.limits.result == 'success' && needs.limits.outputs.lanes != '[]' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: ${{ matrix.job }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.limits.outputs.lanes) }}
+    env:
+      NAME: ${{ matrix.name }}
+      PART: ${{ matrix.part }}
+      LIMIT: ${{ matrix.job }}
+    steps:
+      - name: Check out the candidate commit
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record the runner and pull the image
+        timeout-minutes: 8
+        run: |
+          echo "::notice title=timeout-minutes::$LIMIT"
+          mkdir -p artifacts/formal
+          {
+            echo "== prepare started $(date -u +%FT%TZ)"
+            echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, part $PART"
+            echo "user: $(id)"
+            echo "processors: $(nproc)"
+            free -b
+            df -B1 /
+            docker info --format 'security options {{json .SecurityOptions}}'
+            if [ "$(id -u)" = 0 ] || [ "$(stat -c %u "$GITHUB_WORKSPACE")" != "$(id -u)" ]; then
+              echo "the runner's user is root or does not own the checkout" >&2
+              exit 1
+            fi
+            echo "== docker pull $IMAGE"
+            docker pull "$IMAGE"
+            docker image inspect --format 'pulled {{json .RepoDigests}}, {{.Size}} bytes' "$IMAGE"
+            df -B1 /
+          } 2>&1 | tee artifacts/formal/job.txt
+
+      - name: Build xtask
+        timeout-minutes: 3
+        run: |
+          {
+            echo "== build xtask, started $(date -u +%FT%TZ)"
+            rustup toolchain install
+            cargo build --locked --manifest-path xtask/Cargo.toml
+          } 2>&1 | tee -a artifacts/formal/job.txt
+
+      # The comparator runs this copy of xtask, mounted read-only: the base
+      # run, whose container mounts only the checkout, cannot change it.
+      - name: Copy xtask for the comparator
+        timeout-minutes: 1
+        run: |
+          cp xtask/target/debug/xtask "$RUNNER_TEMP/xtask"
+          sha256sum "$RUNNER_TEMP/xtask" | tee -a artifacts/formal/job.txt
+
+      # The probe of the job `formal scoped`.
+      - name: Probe the container of the gate
+        id: probe
+        timeout-minutes: 1
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          docker run --rm -i "${gate_flags[@]}" --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE:ro" --workdir "$GITHUB_WORKSPACE" \
+            "$IMAGE" bash -s 2>&1 <<'PROBE' | tee -a artifacts/formal/job.txt
+          [ "$(id -u)" != 0 ] || { echo "FAILED: the container runs as root"; exit 1; }
+          grep -q '^CapBnd:[[:space:]]*0*$' /proc/self/status || { echo "FAILED: capabilities"; exit 1; }
+          [ "$(ls /sys/class/net)" = lo ] || { echo "FAILED: the container has a network"; exit 1; }
+          "$PWD/xtask/target/debug/xtask" help > /dev/null
+          echo "the probe passed"
+          PROBE
+
+      # The step ends two minutes after the deadline of the lane and its
+      # receipt, from the matrix; `deadline.sh` stops the command at that
+      # deadline and kills it a minute later.
+      - name: Run the lane in the image
+        id: lane
+        if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
+        timeout-minutes: ${{ matrix.step }}
+        env:
+          STEP: ${{ matrix.step }}
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          limit=$(( (STEP - 2) * 60 ))s
+          echo "== base run started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
+          exec bash .github/scripts/deadline.sh --stop-commands "$limit" 1m \
+            docker run --rm --name "formal-lane-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
+            --env KREPI_FORMAL_IMAGE="$IMAGE" \
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard "$PART" --keep
+
+      - name: Remove the container of the gate
+        if: always()
+        run: |
+          docker rm --force "formal-lane-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
+
+      # The comparator of the lane on the stage that its base run kept, also
+      # when that run failed: `lake comparator` runs in a sandbox of
+      # bubblewrap, which needs unprivileged user namespaces on the runner
+      # and, in the container, seccomp and AppArmor unconfined, an empty
+      # /run/user and the system paths unmasked. The container keeps the
+      # other flags of the gate, which a probe checks first. The sandbox sees
+      # the stage through a second mount of the runs directory outside /home,
+      # which KREPI_FORMAL_RUNS names; it clears the environment, so Git
+      # there reads only /etc/gitconfig, which marks the packages of the
+      # image, which belong to root, as safe. The comparator runs the copy of xtask
+      # that the job made before the base run, at /krepi-xtask, and writes
+      # the receipt of the lane; it ends by the deadline of the base run, and
+      # `deadline.sh` stops it at the limit of its phase and the receipt and
+      # kills it a minute later.
+      - name: Run the comparator in its own container
+        id: comparator
+        if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
+        timeout-minutes: 37
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          relaxed=(--security-opt seccomp=unconfined --security-opt apparmor=unconfined
+            --tmpfs /run/user --security-opt systempaths=unconfined)
+          printf '[safe]\n\tdirectory = *\n' > "$RUNNER_TEMP/gitconfig"
+          mkdir -p artifacts/formal/runs
+          echo "== probe: docker run $GATE_FLAGS ${relaxed[*]} --user $(id -u):$(id -g)" \
+            | tee -a artifacts/formal/job.txt
+          docker run --rm -i "${gate_flags[@]}" "${relaxed[@]}" --user "$(id -u):$(id -g)" \
+            "$IMAGE" bash -s 2>&1 <<'PROBE' | tee -a artifacts/formal/job.txt
+          status=0
+          fail() { echo "FAILED: $*"; status=1; }
+          echo "user: $(id)"
+          [ "$(id -u)" != 0 ] || fail "the container runs as root"
+          root=$(awk '$2 == "/" { line = $0 } END { print line }' /proc/self/mounts)
+          echo "root file system: $root"
+          case ",$(echo "$root" | awk '{ print $4 }')," in
+            *,ro,*) ;;
+            *) fail "the root file system is not read-only" ;;
+          esac
+          grep -E '^(CapBnd|CapEff|NoNewPrivs):' /proc/self/status
+          grep -q '^CapBnd:[[:space:]]*0*$' /proc/self/status || fail "capabilities are left"
+          grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/self/status || fail "new privileges are allowed"
+          echo "network interfaces: $(ls /sys/class/net)"
+          [ "$(ls /sys/class/net)" = lo ] || fail "the container has a network"
+          exit "$status"
+          PROBE
+          echo "== comparator started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
+          exec bash .github/scripts/deadline.sh --stop-commands 35m 1m \
+            docker run --rm --name "formal-comparator-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" "${relaxed[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$GITHUB_WORKSPACE/artifacts/formal/runs:/krepi-runs" --env KREPI_FORMAL_RUNS=/krepi-runs \
+            --volume "$RUNNER_TEMP/gitconfig:/etc/gitconfig:ro" \
+            --volume "$RUNNER_TEMP/xtask:/krepi-xtask:ro" \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
+            --env KREPI_FORMAL_IMAGE="$IMAGE" \
+            "$IMAGE" /krepi-xtask formal run --shard "$PART" --comparator
+
+      - name: Remove the container of the comparator
+        if: always()
+        timeout-minutes: 1
+        run: |
+          if docker rm --force "formal-comparator-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1; then
+            echo "removed the container of the comparator"
+          else
+            echo "no container of the comparator is left"
+          fi
+
+      - name: Summarize the receipt and compress the logs
+        if: always()
+        env:
+          GATE_OUTCOME: ${{ steps.lane.outcome }}
+          COMPARATOR_OUTCOME: ${{ steps.comparator.outcome }}
+        run: |
+          shopt -s nullglob
+          # The receipts hold text of Lean and Lake: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          mkdir -p artifacts/formal
+          logs=(artifacts/formal/runs/*/logs)
+          if [ "${#logs[@]}" -gt 0 ]; then
+            tar -czf artifacts/formal/logs.tar.gz "${logs[@]}"
+          fi
+          receipts=(artifacts/formal/runs/*/receipt.json)
+          {
+            echo "## formal lane $NAME"
+            echo
+            echo "Image \`$IMAGE\`; the base step: $GATE_OUTCOME; the comparator step: $COMPARATOR_OUTCOME."
+            echo
+            for record in artifacts/formal/runs/*/base.json; do
+              echo "- Base record \`$record\`, SHA-256 \`$(sha256sum "$record" | cut -d ' ' -f 1)\`"
+            done
+            for receipt in "${receipts[@]}"; do
+              jq -r --arg path "$receipt" --arg sha "$(sha256sum "$receipt" | cut -d ' ' -f 1)" '
+                "- Receipt `\($path)`, SHA-256 `\($sha)`: `\(.status)`, complete \(.complete), \(.seconds) s",
+                "- Phases: " + ([.phases | to_entries[] | "\(.key) \(.value.seconds) s"] | join(", ")),
+                "- Units: " + ([.units[].status] | group_by(.) | map("\(length) \(.[0])") | join(", ")),
+                "- Replay: \(.base.leanchecker.seconds // "none") s, largest process \(.base.leanchecker.max_rss // "none") B",
+                "- Resources: disk available at the start \(.resources.disk_available_at_start) B, " +
+                  "least \(.resources.disk_least_available) B; largest process " +
+                  "\(.resources.largest_process_max_rss) B; cgroup memory peak " +
+                  "\(.resources.cgroup_memory_peak) B",
+                (.units | to_entries[] | select(.value.status != "VERIFIED") | "- `\(.key)`: \(.value.status)"),
+                (.failures[] | "- \(.status): \(.message | .[0:500])")
+              ' "$receipt"
+            done
+          } | tee artifacts/formal/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "${#receipts[@]}" = 0 ] && [[ "$COMPARATOR_OUTCOME" =~ ^(success|failure)$ ]]; then
+            echo "the comparator step ran and left no receipt" >&2
+            exit 1
+          fi
+
+      - name: Upload the receipt, the summary and the logs of the lane
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: formal-part-${{ matrix.key }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: |
+            artifacts/formal/summary.md
+            artifacts/formal/logs.tar.gz
+            artifacts/formal/job.txt
+            artifacts/formal/runs/*/base.json
+            artifacts/formal/runs/*/receipt.json
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+  # The part of each formal target of the head's registry, beside the
+  # qualification job: `cargo xtask formal run --shard target/<name>/1` in a
   # container of the image, prepared as the qualification job is, with a
   # shorter probe and without the event, with the limits that the job
-  # `formal limits` gives the shard, which the job writes in a notice for
+  # `formal limits` gives the part, which the job writes in a notice for
   # the record of the run. Its main command runs under `deadline.sh`, which
   # passes a cancellation on to it. Without a formal target in the registry
   # the job does not run. The calibration workflow runs the same steps on
@@ -514,6 +707,8 @@ jobs:
         include: ${{ fromJSON(needs.limits.outputs.shards) }}
     env:
       NAME: ${{ matrix.name }}
+      PART: ${{ matrix.part }}
+      KEY: ${{ matrix.key }}
       LIMIT: ${{ matrix.job }}
     steps:
       - name: Check out the candidate commit
@@ -531,7 +726,7 @@ jobs:
           {
             echo "== prepare started $(date -u +%FT%TZ)"
             echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
-              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, shard target/$NAME"
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, part $PART"
             echo "user: $(id)"
             echo "processors: $(nproc)"
             free -b
@@ -571,7 +766,7 @@ jobs:
           echo "the probe passed"
           PROBE
 
-      # The step ends two minutes after the deadline of the shard and its
+      # The step ends two minutes after the deadline of the part and its
       # receipt, from the matrix; `deadline.sh` stops the command at that
       # deadline and kills it a minute later.
       - name: Run the shard in the image
@@ -584,17 +779,17 @@ jobs:
           read -r -a gate_flags <<< "$GATE_FLAGS"
           limit=$(( (STEP - 2) * 60 ))s
           exec bash .github/scripts/deadline.sh --stop-commands "$limit" 1m \
-            docker run --rm --name "formal-shard-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            docker run --rm --name "formal-$KEY-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard "target/$NAME"
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard "$PART"
 
       - name: Remove the container of the gate
         if: always()
         run: |
-          docker rm --force "formal-shard-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
+          docker rm --force "formal-$KEY-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
 
       - name: Summarize the receipt and compress the logs
         if: always()
@@ -641,7 +836,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: formal-part-target-${{ matrix.name }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          name: formal-part-${{ matrix.key }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: |
             artifacts/formal/summary.md
             artifacts/formal/logs.tar.gz
@@ -651,9 +846,9 @@ jobs:
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
   # Merges the receipts of the parts of this run on the runner, without the
-  # image: it downloads the artifacts of the job `formal run` and of each
-  # shard, of any attempt of the run, and runs `cargo xtask formal merge`
-  # under `deadline.sh`. It runs when the gate ran, unless the run was
+  # image: it downloads the artifacts of the job `formal run`, of each lane
+  # and of each part of a target, of any attempt of the run, and runs
+  # `cargo xtask formal merge` under `deadline.sh`. It runs when the gate ran, unless the run was
   # cancelled, also when a part failed or did not run, so that a missing
   # part fails the merge; the jobs of the verdicts take the name of the
   # artifact of its record from its output. Its first step records the start
@@ -663,7 +858,7 @@ jobs:
   # calibration target.
   parts:
     name: formal parts
-    needs: [gate, shard]
+    needs: [gate, lane, shard]
     if: ${{ !cancelled() && needs.gate.result != 'skipped' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
@@ -1121,7 +1316,7 @@ jobs:
   # whatever the decision, which the job then makes on the commit itself
   # and writes to the summary. Any other event or ref fails it, and so does
   # a re-run of an older run of a pull request. The record
-  # must be of schema 3, of this run, commit and trigger, and pass; on main
+  # must be of schema 4, of this run, commit and trigger, and pass; on main
   # the job then reads it back as a fresh record with `cargo xtask formal
   # receipt --require-fresh`, which changes no verdict.
   merge:
@@ -1273,7 +1468,7 @@ jobs:
           fi
           echo "record=$record" >> "$GITHUB_OUTPUT"
           jq -e --arg run "$GITHUB_RUN_ID" --arg sha "$HEAD_SHA" --arg mode "$KREPI_FORMAL_TRIGGER" \
-            '.schema == 3 and .run_id == $run and .commit == $sha and .trigger == $mode and .passes' "$record"
+            '.schema == 4 and .run_id == $run and .commit == $sha and .trigger == $mode and .passes' "$record"
 
       - name: Summarize the record
         if: ${{ always() && steps.record.outputs.record != '' }}
@@ -1404,7 +1599,7 @@ jobs:
           fi
           echo "record=$record" >> "$GITHUB_OUTPUT"
           jq -e --arg run "$GITHUB_RUN_ID" --arg sha "$HEAD_SHA" --arg mode "$KREPI_FORMAL_TRIGGER" \
-            '.schema == 3 and .run_id == $run and .commit == $sha and .trigger == $mode and .gates.axioms == true' "$record"
+            '.schema == 4 and .run_id == $run and .commit == $sha and .trigger == $mode and .gates.axioms == true' "$record"
 
       - name: Report the axioms of the audited theorems
         if: ${{ always() && steps.record.outputs.record != '' }}
@@ -1528,7 +1723,7 @@ jobs:
           fi
           echo "record=$record" >> "$GITHUB_OUTPUT"
           jq -e --arg run "$GITHUB_RUN_ID" --arg sha "$HEAD_SHA" --arg mode "$KREPI_FORMAL_TRIGGER" \
-            '.schema == 3 and .run_id == $run and .commit == $sha and .trigger == $mode and .gates.leanchecker == true' "$record"
+            '.schema == 4 and .run_id == $run and .commit == $sha and .trigger == $mode and .gates.leanchecker == true' "$record"
 
       - name: Summarize the hard gate
         if: ${{ always() && steps.record.outputs.record != '' }}
@@ -1642,7 +1837,7 @@ jobs:
           fi
           echo "record=$record" >> "$GITHUB_OUTPUT"
           jq -e --arg run "$GITHUB_RUN_ID" --arg sha "$HEAD_SHA" --arg mode "$KREPI_FORMAL_TRIGGER" \
-            '.schema == 3 and .run_id == $run and .commit == $sha and .trigger == $mode and .gates.comparator == true' "$record"
+            '.schema == 4 and .run_id == $run and .commit == $sha and .trigger == $mode and .gates.comparator == true' "$record"
 
       - name: Summarize the units of the comparator
         if: ${{ always() && steps.record.outputs.record != '' }}
