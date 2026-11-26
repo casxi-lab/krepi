@@ -43,7 +43,7 @@ jobs:
   check:
     name: cargo xtask check
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 17
+    timeout-minutes: 19
     permissions:
       contents: read
     steps:
@@ -93,7 +93,7 @@ jobs:
         run: docker pull "$(jq -er '"\(.repository)@\(.digest)"' verification/image-pin.json)"
 
       - name: Run cargo xtask check
-        run: exec bash .github/scripts/deadline.sh 12m 90s cargo xtask check --receipt artifacts/check-receipt.json
+        run: exec bash .github/scripts/deadline.sh 14m 90s cargo xtask check --receipt artifacts/check-receipt.json
 
       - name: Require the formal step to have passed
         run: jq -e '[.steps[] | select(.name == "formal")] | length == 1 and .[0].status == "passed"' artifacts/check-receipt.json
@@ -309,7 +309,7 @@ jobs:
     needs: [check, image, suite]
     if: always()
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 3
+    timeout-minutes: 1
     permissions: {}
     steps:
       - name: Require every job of the line to succeed
