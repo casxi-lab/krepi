@@ -26,9 +26,8 @@ callee alone:
   of boot storage), `check_window_spec` (`windowCheck`),
   `manage_window_spec`, `all_ram_spec` and `new_spec`, the statements
   `MemoryPlanAllRam` and `MemoryPlanNew` without their premise `Usize64`,
-  and `from_boot_memory_loop_spec` and `from_boot_memory_spec`,
-  `MemoryPlan.fromBootMemory` for further spans whose number plus two is a
-  `usize`.
+  and `from_boot_memory_loop_spec` and `from_boot_memory_spec`, the
+  statement `MemoryPlanFromBootMemory` without its premises.
 
 Each loop is `loop.spec_decr_nat` with the invariant that the fold of the
 specification from the position of the loop, after what the code has filled
@@ -932,10 +931,13 @@ theorem from_boot_memory_loop_spec (more : Slice fdt.Span) (boot : Array fdt.Spa
   · exact ⟨hi, hb⟩
 
 /-- `MemoryPlan::from_boot_memory(memory, window, more)`: `MemoryPlan.fromBootMemory`,
-for further spans whose number plus two is a `usize`: the code computes
-`2 + more.len()` before `build` refuses more than four spans of boot storage. -/
+the statement `MemoryPlanFromBootMemory` without its premises `Usize64`,
+`M.memory.WellFormed` and `M.Consistent`. More than two further spans give
+`Capacity` before the count `2 + more.len()` is formed, as `MemoryPlan.allRam`
+refuses more than four spans of boot storage (`allRam_of_boot_gt`); the second
+test of the code on the number of further spans then always holds. -/
 theorem from_boot_memory_spec {m : fdt.BootMemory} {M : BootMemory} (h : BootMemoryRepr m M)
-    (window : fdt.Span) (more : Slice fdt.Span) (hm : more.length + 2 ≤ Usize.max) :
+    (window : fdt.Span) (more : Slice fdt.Span) :
     fdt.plan.MemoryPlan.from_boot_memory m window more ⦃ r =>
       Agrees MemoryPlanRepr planErrorOf r
         (MemoryPlan.fromBootMemory M (spanOf window) (spansOf more)) ⦄ := by
@@ -944,12 +946,20 @@ theorem from_boot_memory_spec {m : fdt.BootMemory} {M : BootMemory} (h : BootMem
   step as ⟨r, r_post⟩
   refine try_spec r_post (fun e => from_residual_spec e) fun _ _ _ _ => ?_
   have hl : (spansOf more).length = more.length := List.length_map _
-  have e2 : (2#usize).val = 2 := rfl
-  have hdtb : M.dtb = spanOf m.dtb := h.2.1
-  have himg : M.image = spanOf m.image := h.2.2.1
-  by_cases hle : Slice.len more ≤ 2#usize
-  · have hle' : more.length ≤ 2 := by rw [UScalar.le_equiv, Slice.len_val] at hle; exact hle
-    simp only [hle, ↓reduceIte]
+  by_cases hgt : Slice.len more > 2#usize
+  · have hgt' : 2 < more.length := by
+      rw [gt_iff_lt, UScalar.lt_equiv, Slice.len_val] at hgt; exact hgt
+    simp only [hgt, ↓reduceIte, spec_ok]
+    rw [allRam_of_boot_gt _ _ _ (by rw [List.length_cons, List.length_cons, hl]; omega),
+      except_error_bind, agrees_err_error]
+    rfl
+  · have hle' : more.length ≤ 2 := by
+      rw [gt_iff_lt, UScalar.lt_equiv, Slice.len_val] at hgt; exact Nat.le_of_not_lt hgt
+    have hle : Slice.len more ≤ 2#usize := by
+      rw [UScalar.le_equiv, Slice.len_val]; exact hle'
+    have hdtb : M.dtb = spanOf m.dtb := h.2.1
+    have himg : M.image = spanOf m.image := h.2.2.1
+    simp only [hgt, hle, ↓reduceIte]
     obtain ⟨boot, hbe, hbp⟩ := spec_iff.1 (from_boot_memory_loop_spec more
       (Array.make 4#usize [m.image, m.dtb, fdt.span.EMPTY, fdt.span.EMPTY]) 0#usize hle'
       (Nat.zero_le _) m.image m.dtb (by simp [Array.make]))
@@ -965,23 +975,6 @@ theorem from_boot_memory_spec {m : fdt.BootMemory} {M : BootMemory} (h : BootMem
         rw [spansOf, hs1, Array.val_to_slice, ← List.map_take, hi2, Slice.len_val, hbp, hdtb,
           himg]
         rfl⟩)
-      (by rw [hi2, Slice.len_val, List.length_cons, List.length_cons, hl]; omega)
-    rw [hs, hs2] at hb
-    obtain ⟨r1, hr1e, hr1⟩ := spec_iff.1 hb
-    rw [hr1e, bind_ok]
-    exact try_spec hr1 (fun e => from_residual_spec e) fun _ _ hP _ =>
-      manage_window_spec hP window
-  · have hgt : 2 < more.length := by
-      rw [UScalar.le_equiv, Slice.len_val] at hle; omega
-    simp only [hle, ↓reduceIte]
-    obtain ⟨s, hse, hs⟩ := spec_iff.1 (boot_memory_ram_spec h)
-    rw [hse, bind_ok]
-    step as ⟨s1, hs1⟩
-    step as ⟨i2, hi2⟩
-    obtain ⟨s2, hs2e, hs2⟩ := spec_iff.1 (boot_memory_reserved_spec h)
-    rw [hs2e, bind_ok]
-    have hb := build_spec s s1 i2 s2 (M.image :: M.dtb :: spansOf more)
-      (fun h4 => absurd h4 (by rw [hi2, Slice.len_val]; omega))
       (by rw [hi2, Slice.len_val, List.length_cons, List.length_cons, hl]; omega)
     rw [hs, hs2] at hb
     obtain ⟨r1, hr1e, hr1⟩ := spec_iff.1 hb

@@ -636,7 +636,7 @@
       "name": "Krepi.Statements.Fdt.MemoryPlanFromBootMemory",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanFromBootMemory",
       "module": "Krepi.Proofs.Fdt.Refinement.Plan",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.MemoryPlanManagedBanks",

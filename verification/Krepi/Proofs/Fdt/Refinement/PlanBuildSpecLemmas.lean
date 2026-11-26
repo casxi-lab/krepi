@@ -26,7 +26,8 @@ so it is built once and not again for every mutant of the code.
 - The steps of the entries: `addBank_of_check`, `addBank_of_error`,
   `admitBank_eq`, `addBoot_of_pages`, `addBoot_of_error`,
   `addFirmware_of_pages` and `addFirmware_of_error`; the entries as chains of
-  binds: `capacity_iff`, `allRam_eq`, `windowCheck` (the window of
+  binds: `capacity_iff`, `allRam_eq`, `allRam_of_boot_gt` (more than four
+  spans of boot storage, `Capacity`), `windowCheck` (the window of
   `MemoryPlan.new`) and `new_eq`.
 -/
 
@@ -250,6 +251,13 @@ theorem allRam_eq (ram boot : List Span) (firmware : List ReservedRegion) :
               .ok { ram := sortByStart b0, managed := acc.2, boot := bp, firmware := fp } := by
   unfold MemoryPlan.allRam
   rfl
+
+/-- `MemoryPlan.allRam` with more than four spans of boot storage: `Capacity`. -/
+theorem allRam_of_boot_gt (ram boot : List Span) (firmware : List ReservedRegion)
+    (h : 4 < boot.length) : MemoryPlan.allRam ram boot firmware = .error .capacity := by
+  have hc := (capacity_iff ram boot firmware).2 (Or.inr (Or.inr (Or.inr (Or.inl h))))
+  rw [allRam_eq]
+  simp only [hc, ↓reduceIte]
 
 /-- Step 1 of the error order of the boot memory map, the first three rules of
 `MemoryPlan.new`: the window (`checkPlanSpan`), its ends on pages and its size. -/

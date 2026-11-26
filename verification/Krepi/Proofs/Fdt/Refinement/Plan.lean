@@ -11,8 +11,9 @@ import Krepi.Proofs.Fdt.Refinement.PlanBuildLemmas
 One theorem for each statement of `Krepi.Statements.Fdt.Plan`,
 whose type is exactly that statement.
 
-Fourteen of the fifteen are proved. The constructions `memoryPlanAllRam` and
-`memoryPlanNew` restate `all_ram_spec` and `new_spec` of
+All fifteen are proved. The constructions `memoryPlanAllRam`,
+`memoryPlanNew` and `memoryPlanFromBootMemory` restate `all_ram_spec`,
+`new_spec` and `from_boot_memory_spec` of
 `Krepi.Proofs.Fdt.Refinement.PlanBuildLemmas`. The lists, the queries and the
 iterator of the usable ranges each restate the triple of its function in
 `Krepi.Proofs.Fdt.Refinement.AccessorLemmas` (`memory_plan_managed_banks_spec`,
@@ -21,13 +22,9 @@ iterator of the usable ranges each restate the triple of its function in
 `Krepi.Proofs.Fdt.Refinement.PlanQueryLemmas` (`described_bytes_spec`,
 `managed_bytes_spec`, `contains_ram_spec`, `is_available_spec`,
 `permits_backing_spec` and `available_ranges_spec`). All of these triples hold
-without the premise `Usize64`, and `availableRangesNext` follows from
-`Stands` alone (`advances_of_stands`). The construction from a boot memory,
-`memoryPlanFromBootMemory`, is planned: its proof is `sorry`, and
-`verification/statements.json` registers it as `planned`, so that no module
-imports this one. `from_boot_memory_spec` of
-`Krepi.Proofs.Fdt.Refinement.PlanBuildLemmas` proves its refinement for
-further spans whose number plus two is a `usize`. Mathlib is imported so that
+without the premise `Usize64`, `from_boot_memory_spec` also without the
+invariants of the boot memory, and `availableRangesNext` follows from
+`Stands` alone (`advances_of_stands`). Mathlib is imported so that
 the gate counts the heartbeats of each theorem.
 -/
 
@@ -44,8 +41,8 @@ public theorem memoryPlanNew : MemoryPlanNew :=
   fun _ window ram boot firmware => new_spec window ram boot firmware
 
 /-- Proves `MemoryPlanFromBootMemory`. Feature: `krepi.platform.device-tree`. -/
-public theorem memoryPlanFromBootMemory : MemoryPlanFromBootMemory := by
-  sorry
+public theorem memoryPlanFromBootMemory : MemoryPlanFromBootMemory :=
+  fun _ _ _ window more h _ _ => from_boot_memory_spec h window more
 
 /-- Proves `MemoryPlanManagedBanks`. Feature: `krepi.platform.device-tree`. -/
 public theorem memoryPlanManagedBanks : MemoryPlanManagedBanks :=
