@@ -42,12 +42,13 @@ are in that module.
   (the tests of `child_named` as `childPred`), `first_node_spec` (`Fdt.root`),
   `child_named_loop_spec` and `child_named_spec` (`scanChild`),
   `fdtRepr_unique`, `TreeNodes.of_nodeRepr`, `descend_loop_spec`
-  (`descendB`), `find_path_spec`, and `fdt_find_node_spec_of_lt`, the triple
-  of `Fdt::find_node` against `Fdt.findNode` for a path of fewer than
-  `Usize.max` bytes. Without that premise the triple fails: for a path of
-  `Usize.max` bytes whose last component is reached at a node, `descend`
-  computes the index after the end of the path, which leaves `usize`; a
-  slice of bytes of Rust has at most `isize::MAX` bytes.
+  (`descendB`) and `find_path_spec`, for a path of fewer than `Usize.max`
+  bytes, since `descend` computes the index after the last component;
+  `descend_to_last_loop_spec` (`descendB` for every path, since
+  `descend_to_last` returns at the component that ends the path),
+  `optionRel_node_of` (the nodes that `node_of` makes) and
+  `fdt_find_node_spec`, the triple of `Fdt::find_node` against
+  `Fdt.findNode`, the statement `FdtFindNode`.
 -/
 
 @[expose] public section
@@ -1015,11 +1016,110 @@ theorem find_path_spec {t : fdt.Fdt} {T : Fdt} {L : List Begin} (ht : TreeNodes 
     simp only [show (1#usize : Usize).val = 1 from rfl, hne, ↓reduceIte] at this
     exact this
 
-/-- `Fdt::find_node(path)` under the premise that the bytes of the path leave
-room for the index after the last of them, which holds for every slice of
-bytes of Rust (at most `isize::MAX` bytes): the node of `Fdt.findNode`. -/
-theorem fdt_find_node_spec_of_lt (hu : Usize64) (t : fdt.Fdt) (T : Fdt) (path : Str) (p : String)
-    (h : FdtRepr t T) (hs : StrRepr path p) (hp : p.utf8ByteSize < Usize.max) :
+/-- The loop of `descend_to_last`: from the component at `start`, the node that
+the components of the path lead to from `current`, as `descend_loop_spec`
+gives it, for every path: the loop returns at the component that ends the path,
+so that the index after the last byte is never formed. -/
+theorem descend_to_last_loop_spec {t : fdt.Fdt} {T : Fdt} {L : List Begin} (ht : TreeNodes t T L)
+    (path : Slice U8) (start : Usize) (current : Option fdt.NodeAt) (curN : Option Node)
+    (hcur : OptionRel (fun a N => NodeRepr ⟨t, a⟩ N) current curN)
+    (hs : start.val ≤ path.length + 1) :
+    fdt.nodes.descend_to_last_loop t.structure path start current ⦃ r =>
+      Agrees (OptionRel (fun a N => NodeRepr ⟨t, a⟩ N)) errorOf r
+        (if start.val ≤ path.length then
+           descendB T (splitB ((path.val.map byte).drop start.val)) curN
+         else .ok curN) ⦄ := by
+  unfold fdt.nodes.descend_to_last_loop
+  apply loop.spec_decr_nat
+    (measure := fun (x : Usize × Option fdt.NodeAt) => path.length + 1 - x.1.val)
+    (inv := fun (x : Usize × Option fdt.NodeAt) => ∃ cN,
+      OptionRel (fun a N => NodeRepr ⟨t, a⟩ N) x.2 cN ∧ x.1.val ≤ path.length + 1 ∧
+      (if x.1.val ≤ path.length then descendB T (splitB ((path.val.map byte).drop x.1.val)) cN
+         else .ok cN) =
+      (if start.val ≤ path.length then descendB T (splitB ((path.val.map byte).drop start.val)) curN
+         else .ok curN))
+  · rintro ⟨start, current⟩ ⟨cN, hcur, hs, hans⟩
+    simp only at hcur hs hans
+    unfold fdt.nodes.descend_to_last_loop.body
+    step*
+    · -- no node so far
+      cases cN with
+      | some _ => rw [‹current = none›] at hcur; exact hcur.elim
+      | none =>
+        rw [← hans]
+        simp only [show start.val ≤ path.length by scalar_tac, ↓reduceIte]
+        obtain ⟨c, cs, hc⟩ :=
+          List.exists_cons_of_ne_nil (splitB_ne_nil ((path.val.map byte).drop start.val))
+        rw [hc, descendB]; trivial
+    · -- a node so far
+      rename_i node hnode
+      rw [hnode] at hcur
+      cases cN with
+      | none => exact hcur.elim
+      | some N =>
+        obtain ⟨p, hp, rfl, hat⟩ := ht.of_nodeRepr hcur
+        step with child_named_spec ht hp hat path start «end» end_post end_post1
+        have e1 : «end».val ≤ path.val.length := end_post1
+        have hk : «end».val - start.val ≤ ((path.val.map byte).drop start.val).length := by
+          simp only [List.length_drop, List.length_map]; omega
+        have hsplit := splitB_at hk (fun j hj => by
+            rw [drop_map_byte_getElem!, ne_eq, byte_eq_iff]
+            exact end_post2 (start.val + j) (by omega) (by omega))
+          (by
+            rcases end_post3 with h | h
+            · left; simp only [List.length_drop, List.length_map]; rw [h]
+            · right
+              rw [drop_map_byte_getElem!, byte_eq_iff,
+                show start.val + («end».val - start.val) = «end».val by omega]
+              exact h)
+        simp only [show start.val ≤ path.length by scalar_tac, ↓reduceIte, hsplit, descendB] at hans
+        step*
+        · -- the child found, at the component that ends the path
+          obtain ⟨vN, hvN, hrel⟩ := agrees_ok_iff.1 (agrees_of_branch_ok cf_post ‹_› r_post)
+          rw [hvN] at hans
+          simp only at hans
+          have hE : «end».val = path.length := by rw [‹«end» = Slice.len path›, Slice.len_val]
+          have h' : «end».val - start.val = ((path.val.map byte).drop start.val).length := by
+            simp only [List.length_drop, List.length_map]; rw [hE]
+          simp only [h', ↓reduceIte, descendB] at hans
+          rw [← hans, agrees_ok_ok]
+          exact hrel
+        · -- the child found, before a further component
+          obtain ⟨vN, hvN, hrel⟩ := agrees_ok_iff.1 (agrees_of_branch_ok cf_post ‹_› r_post)
+          rw [hvN] at hans
+          simp only at hans
+          have hne : «end».val ≠ path.length := fun hE =>
+            ‹¬«end» = Slice.len path› (UScalar.eq_of_val_eq (by rw [hE, Slice.len_val]))
+          have hlt : «end».val < path.val.length := Nat.lt_of_le_of_ne e1 hne
+          refine ⟨⟨vN, hrel, by scalar_tac, ?_⟩, by scalar_tac⟩
+          rw [← hans, start1_post]
+          have h' : ¬ «end».val - start.val = ((path.val.map byte).drop start.val).length := by
+            simp only [List.length_drop, List.length_map]; omega
+          have h'' : «end».val + 1 ≤ path.length := hlt
+          simp only [h', h'', ↓reduceIte, List.drop_drop]
+          rw [show start.val + («end».val - start.val + 1) = «end».val + 1 by omega]
+        · -- an error
+          have hE := agrees_err_of_branch cf_post ‹_› residual_post r_post
+          rw [hE] at hans
+          simp only at hans
+          rw [r1_post, ← hans, ← e_post]
+          rfl
+    · -- past the last component
+      simp only [show ¬ start.val ≤ path.length by scalar_tac, ↓reduceIte] at hans
+      rw [← hans]; exact hcur
+  · exact ⟨curN, hcur, hs, rfl⟩
+
+/-- A node of the code found in a tree, as `node_of` makes it, stands for the
+node of the specification that the found node stands for. -/
+theorem optionRel_node_of {t : fdt.Fdt} {o : Option fdt.NodeAt} {O : Option Node}
+    (h : OptionRel (fun a N => NodeRepr ⟨t, a⟩ N) o O) :
+    OptionRel NodeRepr (o.map (⟨t, ·⟩)) O := by
+  cases o <;> cases O <;> simp_all
+
+/-- `Fdt::find_node(path)`: the node of `Fdt.findNode`, the statement
+`FdtFindNode` (`descend_to_last_loop_spec` for a path of more than one byte). -/
+theorem fdt_find_node_spec (hu : Usize64) (t : fdt.Fdt) (T : Fdt) (path : Str) (p : String)
+    (h : FdtRepr t T) (hs : StrRepr path p) :
     fdt.nodes.Fdt.find_node t path ⦃ r => Agrees (OptionRel NodeRepr) errorOf r (T.findNode p) ⦄ := by
   obtain ⟨L, ht⟩ := treeNodes_of_repr hu h
   unfold fdt.nodes.Fdt.find_node
@@ -1027,9 +1127,6 @@ theorem fdt_find_node_spec_of_lt (hu : Usize64) (t : fdt.Fdt) (T : Fdt) (path : 
   step with hs' as ⟨path1, hb⟩
   have hP : path1.val.map byte = utf8Bytes p.toList := by
     rw [← bytesOf_toList, hb, toUTF8_toList]
-  have hlen : path1.length = p.utf8ByteSize := by
-    rw [← bytesOf_size, hb, String.toUTF8_eq_toByteArray, String.size_toByteArray]
-  have hPl : (utf8Bytes p.toList).length = path1.length := by rw [← hP, List.length_map]
   rw [findNode_eq, ← hP]
   step*
   · have hv : pathValidB (path1.val.map byte) = true := by rwa [← b_post]
@@ -1043,13 +1140,24 @@ theorem fdt_find_node_spec_of_lt (hu : Usize64) (t : fdt.Fdt) (T : Fdt) (path : 
     have hl1 : ((path1.val.map byte).length = 1) = (path1.length = 1) := by
       rw [List.length_map]
     simp only [hv, Bool.not_true, Bool.false_eq_true, ↓reduceIte, hl1]
-    step with find_path_spec ht path1 (by rw [hlen]; exact hp) hne
-    step*
-    · obtain ⟨vN, hvN, hrel⟩ := agrees_ok_iff.1 (agrees_of_branch_ok cf_post ‹_› r_post)
-      rw [hvN, o_post, agrees_ok_ok]
-      cases val <;> cases vN <;> simp_all
-    · have hE := agrees_err_of_branch cf_post ‹_› residual_post ‹_›
-      rw [hE, r_post, agrees_err_error, e_post]
+    step with first_node_spec ht as ⟨root, hroot⟩
+    by_cases h1 : path1.length = 1
+    · have : Slice.len path1 = 1#usize := by scalar_tac
+      simp only [this, ↓reduceIte, h1]
+      step*
+      rw [o_post, agrees_ok_ok]
+      exact optionRel_node_of hroot
+    · have : ¬ Slice.len path1 = 1#usize := by scalar_tac
+      simp only [this, ↓reduceIte, h1]
+      have hd := descend_to_last_loop_spec ht path1 1#usize root T.root hroot (by scalar_tac)
+      simp only [show (1#usize : Usize).val = 1 from rfl, hne, ↓reduceIte] at hd
+      step with hd
+      step*
+      · obtain ⟨vN, hvN, hrel⟩ := agrees_ok_iff.1 (agrees_of_branch_ok cf_post ‹_› r_post)
+        rw [hvN, o_post, agrees_ok_ok]
+        exact optionRel_node_of hrel
+      · have hE := agrees_err_of_branch cf_post ‹_› residual_post ‹_›
+        rw [hE, r_post, agrees_err_error, e_post]
   · have hv : pathValidB (path1.val.map byte) = false := by
       rw [← b_post]; simpa using ‹¬b = true›
     simp only [hv, Bool.not_false, ↓reduceIte, agrees_err_error]

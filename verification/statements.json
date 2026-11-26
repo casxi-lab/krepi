@@ -798,7 +798,7 @@
       "name": "Krepi.Statements.Fdt.FdtFindNode",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Tree.fdtFindNode",
       "module": "Krepi.Proofs.Fdt.Refinement.Tree",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.FdtReservations",

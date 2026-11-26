@@ -13,28 +13,23 @@ import Krepi.Proofs.Fdt.Refinement.NodePropertyLemmas
 One theorem for each statement of `Krepi.Statements.Fdt.Tree`,
 whose type is exactly that statement.
 
-Seventeen are proved, and `verification/statements.json` registers them as
-`proved`: `fdtParse` restates the triple `fdt_parse_spec` of
+All eighteen are proved, and `verification/statements.json` registers them
+as `proved`: `fdtParse` restates the triple `fdt_parse_spec` of
 `Krepi.Proofs.Fdt.Refinement.ParseWalkLemmas`; `fdtTotalSize` and
 `fdtReservations` restate the triples of
 `Krepi.Proofs.Fdt.Refinement.ParseHeaderLemmas` (`fdt_total_size_spec` and
-`fdt_reservations_spec`); `fdtNodes`, `nodeName` and `nodeParent` restate
-those of `Krepi.Proofs.Fdt.Refinement.NodeWalkLemmas` (`fdt_nodes_spec`,
-`node_name_spec` and `node_parent_spec`); `nodeProperty`,
-`nodeStringProperty`, `nodeEnabled`, `nodeAddressCells`, `nodeSizeCells`,
-`nodeReg`, `nodeRanges`, `nodeDmaRanges` and `nodeTranslateReg` restate those
-of `Krepi.Proofs.Fdt.Refinement.NodePropertyLemmas` (`node_property_spec`,
+`fdt_reservations_spec`); `fdtNodes`, `fdtFindNode`, `nodeName` and
+`nodeParent` restate those of `Krepi.Proofs.Fdt.Refinement.NodeWalkLemmas`
+(`fdt_nodes_spec`, `fdt_find_node_spec`, `node_name_spec` and
+`node_parent_spec`); `nodeProperty`, `nodeStringProperty`, `nodeEnabled`,
+`nodeAddressCells`, `nodeSizeCells`, `nodeReg`, `nodeRanges`,
+`nodeDmaRanges` and `nodeTranslateReg` restate those of
+`Krepi.Proofs.Fdt.Refinement.NodePropertyLemmas` (`node_property_spec`,
 `node_string_property_spec`, `node_enabled_spec`, `node_address_cells_spec`,
 `node_size_cells_spec`, `node_reg_spec`, `node_ranges_spec`,
 `node_dma_ranges_spec` and `node_translate_reg_spec`); and `reservationsNext`
 and `nodesNext` follow from the representation of an iterator alone
-(`advances_of_stands`). `fdtFindNode` is planned: its proof is `sorry` until
-a proof pull request proves it, and `verification/statements.json` registers
-it as `planned`. It does not hold as stated: for a path of `Usize.max`
-bytes, which a `Str` of the translation may have and a `&str` of Rust may
-not, the code leaves `usize`. `fdt_find_node_spec_of_lt` of
-`Krepi.Proofs.Fdt.Refinement.NodeWalkLemmas` proves it for a path of fewer
-bytes.
+(`advances_of_stands`).
 Mathlib is imported so that the gate counts the heartbeats of each theorem.
 -/
 
@@ -55,8 +50,7 @@ public theorem fdtNodes : FdtNodes := fdt_nodes_spec
 public theorem nodesNext : NodesNext := fun _ _ _ h => advances_of_stands h
 
 /-- Proves `FdtFindNode`. Feature: `krepi.platform.device-tree`. -/
-public theorem fdtFindNode : FdtFindNode := by
-  sorry
+public theorem fdtFindNode : FdtFindNode := fdt_find_node_spec
 
 /-- Proves `FdtReservations`. Feature: `krepi.platform.device-tree`. -/
 public theorem fdtReservations : FdtReservations := fun _ t T hR => fdt_reservations_spec t T hR
