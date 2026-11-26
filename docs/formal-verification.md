@@ -1093,8 +1093,10 @@ parse, of another schema or with a field that it does not know, and:
 
 The lanes are neither a registry nor on the statement side, so the
 [guard](#guard) requires no label for a change of them. The job
-`formal limits` fails on a lane name or on a budget that the check refuses
-in the same way ([CI job](#ci-job)).
+`formal limits` fails on a lane name that is not of these characters and on
+a lane whose budget and the extraction margin are more than the shard
+limit, as the check does ([CI job](#ci-job)); the other rules are the
+check's alone.
 
 ### Shards and merge
 
@@ -1895,14 +1897,17 @@ declaration command starts there, and reads the counts that
 `lake env lean --json` prints for the copy. A declaration command starts
 at a line whose first token is a doc comment, an attribute, one of the
 modifiers `public`, `private`, `protected` and `nonrec`, `theorem` or
-`lemma`, unless the line lies in the header of a command that starts on an
-earlier such line, up to the line of its keyword, the first name outside
-the brackets of its attributes that is no modifier. A theorem whose range
+`lemma`, unless the line lies in the header of a command before which a
+count is inserted on an earlier line, up to the line of its keyword, the
+first name outside the brackets of its attributes that is no modifier. A theorem whose range
 starts inside another command, such as a `where` clause, or the theorem
 `<name>.mvcgen_spec` that `@[step]` adds at its attribute after the doc
 comment of a theorem on an earlier line, has no count, nor have
 the theorems of a file whose command ends by itself with a status other
-than 0; the receipt records why. A theorem without a declaration range,
+than 0; the receipt records why. A theorem that an attribute adds in the
+header of a declaration of another kind, such as `@[ext]` after the doc
+comment of a structure, gets a line inserted there, so the copy does not
+parse and the theorems of its file have no counts. A theorem without a declaration range,
 such as one that Lean generates for a structure or a `match`, has no count
 and no such record. `#count_heartbeats` is Mathlib's, so a file that
 imports neither Mathlib nor the Aeneas Lean library, which imports it,
@@ -3004,8 +3009,9 @@ which hold the module of every formal target as a component
 
 The job `formal limits` of the workflow `formal` ([CI job](#ci-job)) also
 fails on another target name before the names reach a gate, on a shard
-whose registered budget is more than the shard limit, and on a lane that
-the check refuses for its name or its budget.
+whose registered budget is more than the shard limit, and on a lane whose
+name is not of lowercase letters, digits and hyphens or whose budget and
+the extraction margin are more than the shard limit.
 
 The targets of the registry run in two phases of the gate. The phase
 `extraction`, before the base round, extracts the targets that the run

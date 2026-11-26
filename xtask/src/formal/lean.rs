@@ -2262,7 +2262,10 @@ mod tests {
             ("after", 19),
         ];
         let at = at.map(|(name, line)| (format!("Krepi.HB.{name}"), line));
-        let (written, inserted) = heartbeat_copy(&original, &at);
+        // The base round passes the ranges in the order of their names.
+        let mut by_name = at.clone();
+        by_name.sort();
+        let (written, inserted) = heartbeat_copy(&original, &by_name);
         assert_eq!(written, copy);
         let [spec, _, after] = at.map(|(name, _)| name);
         assert_eq!(

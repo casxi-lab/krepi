@@ -384,7 +384,7 @@ pub fn homes(tree: &Tree, layout: &Layout) -> Homes {
     };
     let files = tree.entries().filter_map(|(path, _)| lean(path));
     let home = |file: &str| match file.split('/').collect::<Vec<_>>()[..] {
-        ["Qualification", ..] => Home::Qualification,
+        ["Qualification", _, ..] => Home::Qualification,
         [layer, component, _, ..] if lanes::LAYERS.split(' ').any(|l| l == layer) => {
             Home::Component(component.to_string())
         }
@@ -1336,6 +1336,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
             ("verification/Krepi/SpecTests/PageTables/Vectors.lean", ""),
             ("verification/Krepi/Statements/Basic.lean", ""),
             ("verification/Krepi/Proofs/Calibration.lean", ""),
+            ("verification/Krepi/Qualification.lean", ""),
             ("verification/Krepi/Qualification/Models/Arc.lean", ""),
             ("verification/Krepi/Spec/Fdt/notes.md", ""),
             ("verification/externals/Qual/X/FunsExternal.lean", ""),
@@ -1349,6 +1350,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
         let expected = [
             ("Krepi.Proofs.Calibration", Home::Shared),
             ("Krepi.Proofs.Fdt.Refinement.Lemmas", component("Fdt")),
+            ("Krepi.Qualification", Home::Shared),
             ("Krepi.Qualification.Models.Arc", Home::Qualification),
             (
                 "Krepi.SpecTests.PageTables.Vectors",
