@@ -498,49 +498,49 @@
       "name": "Krepi.Statements.Fdt.FdtDiscoverCpus",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.fdtDiscoverCpus",
       "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.CpuTopologyCount",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyCount",
       "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.CpuTopologyProfile",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyProfile",
       "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.CpuTopologyAffinity",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyAffinity",
       "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.CpuTopologyValidateTimers",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyValidateTimers",
       "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.CpuProfileLogicalId",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileLogicalId",
       "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.CpuProfileAffinityShift",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileAffinityShift",
       "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.CpuProfileConduit",
       "theorem": "Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileConduit",
       "module": "Krepi.Proofs.Fdt.Refinement.Cpus",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.Fdt.FdtDiscoverMemory",
