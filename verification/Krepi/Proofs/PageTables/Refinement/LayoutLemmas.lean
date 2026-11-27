@@ -27,6 +27,9 @@ layout for `kernel_map`, each against the checks of `Tables.kernelMap`.
   insertion, `insertAfter`), `sort_ranges_loop_spec`, `sort_ranges_spec`
   (the first `count` ranges sorted by `sortByKey`) and
   `sort_ranges_repr_spec` (they stand for the sorted ranges of the layout).
+- The leaf search of the plan: `viewOf`, `layout_leaf_loop_spec`,
+  `layout_leaf_spec` (`layoutFind`), `foundLow_of_layoutFind`, and
+  `kernel_map_plan_next_spec` (`KernelMapPlan::next` is one `Cur.step`).
 - `max_layout_ranges_eq` and `kernel_map_set_spec`: `kernel_map` gives the
   error of `Tables.kernelMap` with the set unchanged, or its set after the
   write phase, for a record of the set at least `2 ^ 33` below the largest
@@ -676,5 +679,179 @@ theorem kernel_map_set_spec {N : Usize} (s : page_tables.Tables N false)
   · rw [kernelMap_pool_error (s := tablesOf s) (agrees_err_of_branch cf_post ‹_› residual_post r_post),
       r2_post, e_post]
     exact ⟨rfl, rfl⟩
+
+/-! ## The leaf search of the plan -/
+
+/-- A range of the code on numbers. -/
+def viewOf (r : page_tables.LayoutRange) : RangeView :=
+  ⟨r.range.start.val, r.range.start.val + r.range.len.val, layoutKindOf r.kind⟩
+
+/-- The loop of `layout_leaf` from `index`, for at most 16 ranges whose ends
+fit in 64 bits: `layoutFind` of the ranges left. -/
+theorem layout_leaf_loop_spec (ranges : Aeneas.Std.Array page_tables.LayoutRange 16#usize)
+    (count : Usize) («from» limit : U64) (index : Usize) (hc : count.val ≤ 16)
+    (hi : index.val ≤ count.val)
+    (hfit : ∀ r ∈ ranges.val.take count.val, r.range.start.val + r.range.len.val < 2 ^ 64) :
+    page_tables.boot.layout.layout_leaf_loop ranges count «from» limit index ⦃ o =>
+      foundOf o = layoutFind (((ranges.val.take count.val).drop index.val).map viewOf)
+        «from».val limit.val ⦄ := by
+  have hlen : ranges.val.length = 16 := by simp
+  unfold page_tables.boot.layout.layout_leaf_loop
+  apply loop.spec_decr_nat
+    (measure := fun (i : Usize) => count.val - i.val)
+    (inv := fun (i : Usize) => i.val ≤ count.val ∧
+      layoutFind (((ranges.val.take count.val).drop i.val).map viewOf) «from».val limit.val =
+        layoutFind (((ranges.val.take count.val).drop index.val).map viewOf) «from».val limit.val)
+  · rintro j ⟨h1, h2⟩
+    unfold page_tables.boot.layout.layout_leaf_loop.body
+    have hlt : ∀ (hic : j.val < count.val),
+        ((ranges.val.take count.val).drop j.val).map viewOf =
+          viewOf (ranges.val[j.val]'(by omega)) ::
+            ((ranges.val.take count.val).drop (j.val + 1)).map viewOf := by
+      intro hic
+      rw [List.drop_eq_getElem_cons (by simp only [List.length_take]; omega), List.map_cons,
+        List.getElem_take]
+    step*
+    · have hm : (ranges.val.take count.val)[j.val]'(by
+          have : j.val < count.val := ‹j < count›
+          simp only [List.length_take]; omega) ∈ ranges.val.take count.val := List.getElem_mem _
+      rw [List.getElem_take] at hm
+      rw [range_post]; exact hfit _ hm
+    · have hic : j.val < count.val := ‹j < count›
+      have hf : «from».val < (viewOf range).stop := by
+        rw [show (viewOf range).stop = i.val from i_post.symm]; exact ‹«from» < i›
+      have hv : viewOf (ranges.val[j.val]'(by omega)) = viewOf range := by rw [range_post]
+      have hspec : layoutFind (((ranges.val.take count.val).drop j.val).map viewOf) «from».val limit.val =
+          if max (viewOf range).start «from».val < limit.val then
+            some ⟨max (viewOf range).start «from».val,
+              descriptor (viewOf range).kind (UInt64.ofNat (max (viewOf range).start «from».val)),
+              false⟩
+          else none := by
+        rw [hlt hic, hv, layoutFind_cons_lt hf]
+      rw [← h2, hspec]
+      have hmax : ∀ pa : U64, (pa = if range.range.start > «from» then range.range.start else «from») →
+          pa.val = max (viewOf range).start «from».val := by
+        intro pa hpa
+        simp only [viewOf]
+        split at hpa
+        · rw [hpa]; have : «from».val < range.range.start.val := ‹_›; omega
+        · rw [hpa]; have : ¬ «from».val < range.range.start.val := ‹_›; omega
+      obtain ⟨pa, hpa, hpaeq⟩ : ∃ pa : U64,
+          (if range.range.start > «from» then ok range.range.start else ok «from» :
+            Result U64) = ok pa ∧ pa = if range.range.start > «from» then range.range.start else «from» := by
+        split <;> exact ⟨_, rfl, rfl⟩
+      rw [hpa, bind_ok]
+      have hpv := hmax pa hpaeq
+      step*
+      · simp only [foundOf, Option.map_some]
+        have hl : max (viewOf range).start «from».val < limit.val := by rw [← hpv]; exact ‹pa < limit›
+        simp only [hl, ↓reduceIte, Option.some.injEq, Found.mk.injEq, and_true]
+        refine ⟨hpv, ?_⟩
+        rw [desc_post, k_post, ← hpv]; rfl
+      · simp only [foundOf, Option.map_none]
+        have hl : ¬ max (viewOf range).start «from».val < limit.val := by
+          rw [← hpv]; exact ‹¬pa < limit›
+        simp only [hl, ↓reduceIte]
+    · have hic : j.val < count.val := ‹j < count›
+      have hf : ¬ «from».val < (viewOf range).stop := by
+        rw [show (viewOf range).stop = i.val from i_post.symm]; exact ‹¬«from» < i›
+      have hv : viewOf (ranges.val[j.val]'(by omega)) = viewOf range := by rw [range_post]
+      refine ⟨by omega, ?_, by omega⟩
+      rw [← h2, hlt hic, hv, layoutFind_cons_ge hf, index1_post]
+    · have hle : count.val ≤ j.val := by have := ‹¬j < count›; scalar_tac
+      rw [← h2, List.drop_eq_nil_of_le (by simp only [List.length_take]; omega), List.map_nil,
+        layoutFind_nil]
+      rfl
+  · exact ⟨hi, rfl⟩
+
+/-- `layout_leaf(ranges, count, from, limit)` for at most 16 ranges whose
+ends fit in 64 bits: `layoutFind` of the first `count` ranges. -/
+theorem layout_leaf_spec (ranges : Aeneas.Std.Array page_tables.LayoutRange 16#usize)
+    (count : Usize) («from» limit : U64) (hc : count.val ≤ 16)
+    (hfit : ∀ r ∈ ranges.val.take count.val, r.range.start.val + r.range.len.val < 2 ^ 64) :
+    page_tables.boot.layout.layout_leaf ranges count «from» limit ⦃ o =>
+      foundOf o = layoutFind ((ranges.val.take count.val).map viewOf) «from».val limit.val ⦄ := by
+  unfold page_tables.boot.layout.layout_leaf
+  exact layout_leaf_loop_spec ranges count «from» limit 0#usize hc (Nat.zero_le _) hfit
+
+/-- The leaves that `layout_leaf` finds among nonempty ranges that end at or
+below `2 ^ 39` lie below `2 ^ 39`. -/
+theorem foundLow_of_layoutFind {o : Option page_tables.boot.Leaf} {rs : List RangeView}
+    {frm limit : Nat} (hlow : ∀ r ∈ rs, r.start < r.stop ∧ r.stop ≤ 2 ^ 39)
+    (h : foundOf o = layoutFind rs frm limit) : FoundLow o := by
+  intro l hl
+  rw [hl] at h
+  exact layoutFind_low hlow h.symm
+
+/-- `KernelMapPlan::next()` on a pool of at least one table, for at most 16
+ranges whose ends fit in 64 bits and nonempty ranges that end at or below
+`2 ^ 39`, and a cursor that does not overflow in this call: one call of
+`Cur.step` with the leaf search `layoutFind` of the ranges and the place
+that the cursor reads; the set, the base and the ranges stay. -/
+theorem kernel_map_plan_next_spec {N : Usize} (it : page_tables.KernelMapPlan N)
+    (hN : 0 < N.val) (hc : it.count.val ≤ 16)
+    (hfit : ∀ r ∈ it.ranges.val.take it.count.val, r.range.start.val + r.range.len.val < 2 ^ 64)
+    (hlow : ∀ r ∈ (it.ranges.val.take it.count.val).map viewOf, r.start < r.stop ∧ r.stop ≤ 2 ^ 39)
+    (hcur : CurFits it.cursor it.base)
+    (hs : it.cursor.phase = .NewPages → it.cursor.slot.val + 2 ^ 21 < 2 ^ 64)
+    (hg : it.cursor.phase = .Children ∨ it.cursor.phase = .Entries →
+      it.cursor.gib.val + 2 ^ 30 < 2 ^ 64)
+    (hseek : ((curOf it.cursor).take (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)
+        (layoutFind ((it.ranges.val.take it.count.val).map viewOf) (curOf it.cursor).search.1
+          (curOf it.cursor).search.2.1)).1 = .seek →
+      let c' := ((curOf it.cursor).take (placeOr (tablesOf it.set) (word64 it.base))
+        (word64 it.base) (layoutFind ((it.ranges.val.take it.count.val).map viewOf)
+          (curOf it.cursor).search.1 (curOf it.cursor).search.2.1)).2
+      c'.next + 1 ≤ Usize.max ∧ c'.t2 + 1 ≤ Usize.max ∧ c'.gib + 2 ^ 30 < 2 ^ 64 ∧
+        c'.phase = .children) :
+    page_tables.boot.layout.KernelMapPlan.next it ⦃ o it' =>
+      o.map stepOf = ((curOf it.cursor).step
+          (fun f l _ => layoutFind ((it.ranges.val.take it.count.val).map viewOf) f l)
+          (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)).1 ∧
+        curOf it'.cursor = ((curOf it.cursor).step
+          (fun f l _ => layoutFind ((it.ranges.val.take it.count.val).map viewOf) f l)
+          (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)).2 ∧
+        it'.set = it.set ∧ it'.base = it.base ∧ it'.ranges = it.ranges ∧ it'.count = it.count ⦄ := by
+  unfold page_tables.boot.layout.KernelMapPlan.next
+  step*
+  have hfv : «from».val = (curOf it.cursor).search.1 := by rw [← from_post]
+  have hlv : limit.val = (curOf it.cursor).search.2.1 := by rw [← from_post]
+  refine WP.spec_bind (layout_leaf_spec it.ranges it.count «from» limit hc hfit) ?_
+  intro found hfound
+  have hfl : FoundLow found := foundLow_of_layoutFind hlow hfound
+  refine WP.spec_bind (take_spec it.cursor it.set it.base found hN hfl hcur) ?_
+  rintro ⟨mt, mc⟩ ⟨hmt, hmc⟩
+  rw [hfound, hfv, hlv] at hmt hmc
+  simp only [Cur.step]
+  cases mt with
+  | Give st =>
+    refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, rfl, rfl⟩
+    · rw [← hmt]; rfl
+    · rw [← hmt]; exact hmc
+  | End =>
+    refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, rfl, rfl⟩
+    · rw [← hmt]; rfl
+    · rw [← hmt]; exact hmc
+  | Seek =>
+    obtain ⟨hn1, ht21, hgib, hph⟩ := hseek hmt.symm
+    rw [← hmc] at hn1 ht21 hgib hph
+    have hmph : mc.phase = .Children := by
+      cases h : mc.phase <;> simp only [curOf, phaseOf, h, reduceCtorEq] at hph ⊢
+    have hs' : mc.phase = .NewPages → mc.slot.val + 2 ^ 21 < 2 ^ 64 := by
+      intro h; rw [hmph] at h; cases h
+    have hg' : mc.phase = .Children ∨ mc.phase = .Entries → mc.gib.val + 2 ^ 30 < 2 ^ 64 :=
+      fun _ => hgib
+    step*
+    have hfv1 : from1.val = (curOf mc).search.1 := by rw [← from1_post]
+    have hlv1 : limit1.val = (curOf mc).search.2.1 := by rw [← from1_post]
+    refine WP.spec_bind (layout_leaf_spec it.ranges it.count from1 limit1 hc hfit) ?_
+    intro found1 hfound1
+    have hfl1 : FoundLow found1 := foundLow_of_layoutFind hlow hfound1
+    refine WP.spec_bind (children_spec mc found1 hfl1 hn1 ht21) ?_
+    rintro ⟨st, mc1⟩ ⟨hst, hmc1⟩
+    rw [hfound1, hfv1, hlv1] at hst hmc1
+    refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, rfl, rfl⟩
+    · rw [← hmt, ← hmc]; simp only [turnOf, Option.map_some, hst]
+    · rw [← hmt, ← hmc]; exact hmc1
 
 end Krepi.Proofs.PageTables.Refinement

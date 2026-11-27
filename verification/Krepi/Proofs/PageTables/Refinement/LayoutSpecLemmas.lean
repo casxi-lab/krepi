@@ -29,6 +29,8 @@ the code.
   `checkLayoutRange` makes), `checkPages_zero`, `checkPages_succ`.
 - The checks of one range as nested conditions: `checkLayoutRange_eq`;
   `checkPages_length` and `checkLayoutRange_ok` (what a success adds).
+- The leaf search of the plan: `RangeView`, `layoutFind`,
+  `layoutFind_cons_lt`, `layoutFind_cons_ge`, `layoutFind_nil`, `layoutFind_low`.
 - `Tables.kernelMap` step by step: `checkPool_ok_facts`,
   `kernelMap_pool_error`, `kernelMap_fold_error`, `kernelMap_fold_ok`.
 - Lists: `listRel_getElem`.
@@ -295,6 +297,58 @@ theorem kernelMap_fold_ok {s : Tables .lower N} {L : Layout} {base : UInt64} {bi
       (List.foldl Alloc.add ⟨s.used, none, none, []⟩ leaves.reverse).next - s.used
   · simp only [hc, ↓reduceIte]; rfl
   · simp only [hc, ↓reduceIte]; rfl
+
+/-! ## The leaf search of the kernel map -/
+
+/-- A range of a layout on numbers: its start, its end and its kind. -/
+structure RangeView where
+  start : Nat
+  stop : Nat
+  kind : Kind
+
+/-- The leaf search of the plan of `kernel_map` over sorted ranges that
+passed their checks: the first page at or above `frm` of the first range that
+ends above `frm`, when it lies below `limit`. -/
+def layoutFind (rs : List RangeView) (frm limit : Nat) : Option Found :=
+  match rs.find? (fun r => decide (frm < r.stop)) with
+  | none => none
+  | some r =>
+    if max r.start frm < limit then
+      some ⟨max r.start frm, descriptor r.kind (UInt64.ofNat (max r.start frm)), false⟩
+    else none
+
+theorem layoutFind_cons_lt {r : RangeView} {rs : List RangeView} {frm limit : Nat}
+    (h : frm < r.stop) :
+    layoutFind (r :: rs) frm limit =
+      if max r.start frm < limit then
+        some ⟨max r.start frm, descriptor r.kind (UInt64.ofNat (max r.start frm)), false⟩
+      else none := by
+  simp only [layoutFind, List.find?_cons, h, decide_true]
+
+theorem layoutFind_cons_ge {r : RangeView} {rs : List RangeView} {frm limit : Nat}
+    (h : ¬ frm < r.stop) : layoutFind (r :: rs) frm limit = layoutFind rs frm limit := by
+  simp only [layoutFind, List.find?_cons, h, decide_false]
+
+theorem layoutFind_nil (frm limit : Nat) : layoutFind [] frm limit = none := rfl
+
+/-- A leaf found among nonempty ranges that end at or below `2 ^ 39` lies
+below `2 ^ 39`. -/
+theorem layoutFind_low {rs : List RangeView} {frm limit : Nat} {f : Found}
+    (hlow : ∀ r ∈ rs, r.start < r.stop ∧ r.stop ≤ 2 ^ 39) (h : layoutFind rs frm limit = some f) :
+    f.pa < 2 ^ 39 := by
+  unfold layoutFind at h
+  split at h
+  · cases h
+  · rename_i r hr
+    have hm := List.mem_of_find?_eq_some hr
+    have hp := List.find?_some hr
+    simp only [decide_eq_true_eq] at hp
+    split at h
+    · cases h
+      have := hlow r hm
+      simp only
+      omega
+    · cases h
 
 /-! ## Lists of ranges -/
 

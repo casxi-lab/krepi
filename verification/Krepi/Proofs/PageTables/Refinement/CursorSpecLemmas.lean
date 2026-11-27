@@ -35,7 +35,7 @@ for every mutant of the code.
   `slotOf` (with `slotOf_ne_noSlot`, `gibOf_ne_noSlot`), `CurPhase`, `Cur`, `Found`, `Turn`, `placeOr` (the place that
   the cursor reads), and the functions of `MapCursor` on it, `Cur.search`,
   `Cur.children`, `Cur.entry`, `Cur.newPage`, `Cur.leaf`, `Cur.heldPage`
-  and `Cur.take`.
+  and `Cur.take`, and one call of the `next` of a plan, `Cur.step`.
 -/
 
 @[expose] public section
@@ -514,5 +514,19 @@ def Cur.take (place : Found → Place) (base : UInt64) (c : Cur) (found : Option
     (.give (.store 0 (index1 (UInt64.ofNat c.gib)) (tableAt base c.t2)),
       { c with phase := .leaf, frm := c.gib + GIB_SIZE })
   | .done => (.stop, c)
+
+/-- One call of the `next` of a map plan on numbers, with the leaf search
+`find frm limit pages` of the map: the search of the phase, the step that
+`take` gives for the leaf found, and on a `seek` the search of the cursor
+after it and the step of `children`. -/
+def Cur.step (find : Nat → Nat → Bool → Option Found) (place : Found → Place) (base : UInt64)
+    (c : Cur) : Option Step × Cur :=
+  let t := c.take place base (find c.search.1 c.search.2.1 c.search.2.2)
+  match t.1 with
+  | .give s => (some s, t.2)
+  | .stop => (none, t.2)
+  | .seek =>
+    (some (t.2.children (find t.2.search.1 t.2.search.2.1 t.2.search.2.2)).1,
+      (t.2.children (find t.2.search.1 t.2.search.2.1 t.2.search.2.2)).2)
 
 end Krepi.Proofs.PageTables.Refinement
