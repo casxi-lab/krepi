@@ -584,4 +584,344 @@ theorem direct_map_set_spec {N : Usize} (s : page_tables.Tables N true) (memory 
       (agrees_err_of_branch cf_post ‹_› residual_post r_post), r1_post, e_post]
     exact ⟨rfl, rfl⟩
 
+/-! ## The leaf search of the plan -/
+
+/-- The usable ranges that a state of the leaf search of the plan stands
+for: its current range, then the usable ranges from the cursor of its
+iterator. -/
+def searchList (M Rs : List Krepi.Spec.Fdt.Span) (ranges : fdt.AvailableRanges)
+    (range : fdt.Span) : List Krepi.Spec.Fdt.Span :=
+  spanOf range :: availableFrom M Rs ranges.cursor.bank.val ranges.cursor.at.val
+
+/-- The loop of `usable_leaf` from the state `(ranges, range, from)`, for an
+iterator over managed banks `M` within 64 bits and nonempty reservations
+`Rs` and ranges within 64 bits: the slices of the iterator stay; the leaf
+found is `usableFind` of the ranges of the state from `from`; the ranges of
+the state where the search stopped are those of the state without some
+first ranges, which end at or below `from` when the search asks for leaves
+of either form. -/
+theorem usable_leaf_loop_spec (limit : U64) (pages : Bool) (M Rs : List Krepi.Spec.Fdt.Span)
+    (hM : ∀ b ∈ M, b.Valid) (hRs : ∀ r ∈ Rs, r.Nonempty)
+    (ranges : fdt.AvailableRanges) (range : fdt.Span) («from» : U64)
+    (hm : spansOf ranges.managed = M) (hr : spansOf ranges.reservations = Rs)
+    (hv : ∀ u ∈ searchList M Rs ranges range, u.Valid) :
+    page_tables.boot.direct.usable_leaf_loop limit pages ranges range «from» ⦃ y =>
+      spansOf y.1 = M ∧ spansOf y.2.1 = Rs ∧
+      foundOf y.2.2.2.2.2 =
+        usableFind ((searchList M Rs ranges range).map spanView) «from».val limit.val pages ∧
+      ∃ skipped, searchList M Rs ranges range =
+          skipped ++ searchList M Rs ⟨y.1, y.2.1, y.2.2.1⟩ ⟨y.2.2.2.1, y.2.2.2.2.1⟩ ∧
+        (pages = false → ∀ u ∈ skipped, u.endNat ≤ «from».val) ⦄ := by
+  unfold page_tables.boot.direct.usable_leaf_loop
+  apply loop.spec_decr_nat
+    (measure := fun (x : fdt.AvailableRanges × fdt.Span × U64) =>
+      2 * (availableFrom M Rs x.1.cursor.bank.val x.1.cursor.at.val).length +
+        (if x.2.2.val < x.2.1.start.val + x.2.1.size.val then 1 else 0))
+    (inv := fun (x : fdt.AvailableRanges × fdt.Span × U64) =>
+      spansOf x.1.managed = M ∧ spansOf x.1.reservations = Rs ∧
+      (∀ u ∈ searchList M Rs x.1 x.2.1, u.Valid) ∧ (pages = false → x.2.2 = «from») ∧
+      ∃ skipped, searchList M Rs ranges range = skipped ++ searchList M Rs x.1 x.2.1 ∧
+        (∀ u ∈ skipped, u.endNat ≤ x.2.2.val) ∧
+        usableFind ((searchList M Rs x.1 x.2.1).map spanView) x.2.2.val limit.val pages =
+          usableFind ((searchList M Rs ranges range).map spanView) «from».val limit.val pages)
+  · rintro ⟨rs, rg, fr⟩ ⟨h1, h2, h3, h4, skipped, hsk, hskb, hspec⟩
+    simp only at h1 h2 h3 h4 hsk hskb hspec
+    unfold page_tables.boot.direct.usable_leaf_loop.body
+    have hvr : rg.start.val + rg.size.val < 2 ^ 64 :=
+      (spanOf_valid_iff rg).1 (h3 _ List.mem_cons_self)
+    have hview : spanView (spanOf rg) = (rg.start.val, rg.start.val + rg.size.val) := by
+      simp only [spanView, spanOf_start, word64_toNat, spanOf_endNat]
+    have hM' : ∀ b ∈ spansOf rs.managed, b.Valid := by rw [h1]; exact hM
+    have hR' : ∀ r ∈ spansOf rs.reservations, r.Nonempty := by rw [h2]; exact hRs
+    step as ⟨«end», end_post⟩
+    split
+    · -- the range ends above the address
+      have hlt : fr.val < «end».val := ‹fr < «end»›
+      have hat : (if rg.start > fr then ok rg.start else ok fr : Result U64) =
+          ok (if rg.start > fr then rg.start else fr) := by split <;> rfl
+      rw [hat, bind_ok]
+      generalize hA : (if rg.start > fr then rg.start else fr) = pa
+      have hpa : pa.val = max rg.start.val fr.val := by
+        rw [← hA]
+        split
+        · rename_i h; rw [gt_iff_lt, UScalar.lt_equiv] at h; omega
+        · rename_i h; rw [gt_iff_lt, UScalar.lt_equiv] at h; omega
+      have hpe : pa.val ≤ «end».val := by rw [hpa, end_post]; omega
+      have hcons : usableFind ((searchList M Rs rs rg).map spanView) fr.val limit.val pages =
+          match rangeFind «end».val pa.val pages with
+          | some l => if l.pa < limit.val then some l else none
+          | none => usableFind ((availableFrom M Rs rs.cursor.bank.val rs.cursor.at.val).map
+              spanView) «end».val limit.val pages := by
+        simp only [searchList, List.map_cons, hview]
+        rw [usableFind_cons_lt (by rw [← end_post]; exact hlt), ← end_post, hpa]
+        rfl
+      refine WP.spec_bind (range_leaf_spec pa «end» pages hpe) ?_
+      intro o ho
+      cases o with
+      | none =>
+        have hpg : pages = true := by
+          cases pages
+          · rw [rangeFind_false] at ho; cases ho
+          · rfl
+        refine spec_of_eq rfl ⟨h1, h2, h3, by simp [hpg], ⟨skipped, hsk, ?_, ?_⟩, ?_⟩
+        · intro u hu; exact Nat.le_trans (hskb u hu) (Nat.le_of_lt hlt)
+        · rw [← hspec, hcons, ← ho]
+          simp only [foundOf, Option.map_none, searchList, List.map_cons, hview]
+          rw [usableFind_cons_ge (by rw [← end_post]; omega)]
+        · simp only [show ¬ «end».val < rg.start.val + rg.size.val by rw [end_post]; omega,
+            ↓reduceIte, show fr.val < rg.start.val + rg.size.val by rw [← end_post]; exact hlt]
+          omega
+      | some leaf =>
+        simp only
+        split
+        · refine spec_of_eq rfl ⟨h1, h2, ?_, skipped, hsk, fun hp u hu => ?_⟩
+          · rw [← hspec, hcons, ← ho]
+            have hl : leaf.pa.val < limit.val := ‹leaf.pa < limit›
+            simp only [foundOf, Option.map_some, hl, ↓reduceIte]
+          · rw [← h4 hp]; exact hskb u hu
+        · refine spec_of_eq rfl ⟨h1, h2, ?_, skipped, hsk, fun hp u hu => ?_⟩
+          · rw [← hspec, hcons, ← ho]
+            have hl : ¬ leaf.pa.val < limit.val := ‹¬leaf.pa < limit›
+            simp only [foundOf, Option.map_some, Option.map_none, hl, ↓reduceIte]
+          · rw [← h4 hp]; exact hskb u hu
+    · -- the range ends at or below the address: the next range
+      have hge : ¬ fr.val < «end».val := ‹¬fr < «end»›
+      refine WP.spec_bind (available_ranges_next_spec rs hM' hR') ?_
+      rintro ⟨o, rs1⟩ ⟨f1, f2, ho⟩
+      rw [h1, h2] at ho
+      cases o with
+      | none =>
+        have ho' : availableFrom M Rs rs.cursor.bank.val rs.cursor.at.val = [] ∧
+            rs.managed.length ≤ rs1.cursor.bank.val := ho
+        refine spec_of_eq rfl ⟨by rw [f1]; exact h1, by rw [f2]; exact h2, ?_, skipped, ?_, ?_⟩
+        · rw [← hspec]
+          simp only [foundOf, Option.map_none, searchList, List.map_cons, hview, ho'.1,
+            List.map_nil]
+          rw [usableFind_cons_ge (by rw [← end_post]; exact hge)]
+          rfl
+        · rw [hsk]
+          simp only [searchList]
+          rw [ho'.1, availableFrom_end (by
+            rw [← h1]; simp only [spansOf, List.length_map]; exact ho'.2)]
+        · intro hp u hu; rw [← h4 hp]; exact hskb u hu
+      | some nx =>
+        have hrest : availableFrom M Rs rs.cursor.bank.val rs.cursor.at.val =
+            spanOf nx :: availableFrom M Rs rs1.cursor.bank.val rs1.cursor.at.val := ho
+        refine spec_of_eq rfl ⟨by rw [f1]; exact h1, by rw [f2]; exact h2, ?_, h4,
+          ⟨skipped ++ [spanOf rg], ?_, ?_, ?_⟩, ?_⟩
+        · intro u hu
+          apply h3
+          simp only [searchList] at hu ⊢
+          rw [hrest]
+          exact List.mem_cons_of_mem _ hu
+        · rw [hsk]
+          simp only [searchList, List.append_assoc, List.singleton_append, hrest]
+        · intro u hu
+          rcases List.mem_append.1 hu with hu | hu
+          · exact hskb u hu
+          · rw [List.mem_singleton] at hu
+            subst hu
+            show _ ≤ fr.val
+            rw [spanOf_endNat, ← end_post]; omega
+        · rw [← hspec]
+          simp only [searchList, List.map_cons, hview, hrest]
+          rw [usableFind_cons_ge (start := rg.start.val) (stop := rg.start.val + rg.size.val)
+            (by rw [← end_post]; exact hge)]
+        · simp only [hrest, List.length_cons]
+          split <;> split <;> omega
+  · exact ⟨hm, hr, hv, fun _ => rfl, ⟨[], rfl, fun u hu => absurd hu List.not_mem_nil, rfl⟩⟩
+
+/-- `usable_leaf(ranges, range, from, limit, pages)`: the loop, with the
+iterator and the range at which the search stopped. -/
+theorem usable_leaf_spec (ranges : fdt.AvailableRanges) (range : fdt.Span) («from» limit : U64)
+    (pages : Bool) (M Rs : List Krepi.Spec.Fdt.Span) (hM : ∀ b ∈ M, b.Valid)
+    (hRs : ∀ r ∈ Rs, r.Nonempty) (hm : spansOf ranges.managed = M)
+    (hr : spansOf ranges.reservations = Rs) (hv : ∀ u ∈ searchList M Rs ranges range, u.Valid) :
+    page_tables.boot.direct.usable_leaf ranges range «from» limit pages ⦃ y =>
+      spansOf y.1.managed = M ∧ spansOf y.1.reservations = Rs ∧
+      foundOf y.2.2 =
+        usableFind ((searchList M Rs ranges range).map spanView) «from».val limit.val pages ∧
+      ∃ skipped, searchList M Rs ranges range = skipped ++ searchList M Rs y.1 y.2.1 ∧
+        (pages = false → ∀ u ∈ skipped, u.endNat ≤ «from».val) ⦄ := by
+  unfold page_tables.boot.direct.usable_leaf
+  refine WP.spec_bind (usable_leaf_loop_spec limit pages M Rs hM hRs ranges range «from» hm hr hv) ?_
+  rintro ⟨s, s1, c, i, i1, o⟩ ⟨h1, h2, h3, skipped, h4, h5⟩
+  exact spec_of_eq rfl ⟨h1, h2, h3, skipped, h4, h5⟩
+
+/-- The leaf search of the plan of `direct_map` from a state of its
+iterator: `usableFind` of the ranges of the state (`searchList`). -/
+def directFind (M Rs : List Krepi.Spec.Fdt.Span) (ranges : fdt.AvailableRanges)
+    (range : fdt.Span) : Nat → Nat → Bool → Option Found :=
+  fun f l p => usableFind ((searchList M Rs ranges range).map spanView) f l p
+
+/-- The ranges of a state of the leaf search whose leaves the cursor can
+take: each within 64 bits, nonempty or ending at 0 (the empty range at 0 of
+the start), and ending at or below `2 ^ 39`. -/
+def SearchOk (L : List Krepi.Spec.Fdt.Span) : Prop :=
+  ∀ u ∈ L, u.Valid ∧ (u.start.toNat < u.endNat ∨ u.endNat = 0) ∧ u.endNat ≤ 2 ^ 39
+
+/-- The leaves that the search finds over ranges of `SearchOk` lie below
+`2 ^ 39`, at or above the address of the search. -/
+theorem found_of_usableFind {o : Option page_tables.boot.Leaf} {L : List Krepi.Spec.Fdt.Span}
+    {frm limit : Nat} {pages : Bool} (hL : SearchOk L)
+    (h : foundOf o = usableFind (L.map spanView) frm limit pages) :
+    FoundLow o ∧ ∀ l, o = some l → frm ≤ l.pa.val := by
+  have hB : ∀ r ∈ L.map spanView, (r.1 < r.2 ∨ r.2 = 0) ∧ r.2 ≤ 2 ^ 39 := by
+    intro r hr
+    obtain ⟨u, hu, rfl⟩ := List.mem_map.1 hr
+    exact ⟨(hL u hu).2.1, (hL u hu).2.2⟩
+  refine ⟨fun l hl => ?_, fun l hl => ?_⟩
+  · rw [hl] at h
+    exact (usableFind_bounds _ _ _ h.symm hB).2.2
+  · rw [hl] at h
+    exact (usableFind_bounds _ _ _ h.symm hB).1
+
+/-- `DirectMapPlan::next()` on a pool of at least one table, for an iterator
+of the usable ranges over managed banks `M` within 64 bits and nonempty
+reservations `Rs`, ranges of the state of `SearchOk`, and a cursor that does
+not overflow in this call: one call of `Cur.step` with the leaf search
+`directFind` of the state and the place that the cursor reads; the set and
+the base stay, and the ranges of the new state are those of the state
+without some first ranges, which end at or below the address of the cursor
+(`Cur.step` then searches the same leaves from any address at or above it,
+`usableFind_skip`). -/
+theorem direct_map_plan_next_spec {N : Usize} (it : page_tables.DirectMapPlan N)
+    (M Rs : List Krepi.Spec.Fdt.Span) (hN : 0 < N.val) (hM : ∀ b ∈ M, b.Valid)
+    (hRs : ∀ r ∈ Rs, r.Nonempty) (hm : spansOf it.ranges.managed = M)
+    (hr : spansOf it.ranges.reservations = Rs) (hok : SearchOk (searchList M Rs it.ranges it.range))
+    (hcur : CurFits it.cursor it.base)
+    (hs : it.cursor.phase = .NewPages → it.cursor.slot.val + 2 ^ 21 < 2 ^ 64)
+    (hg : it.cursor.phase = .Children ∨ it.cursor.phase = .Entries →
+      it.cursor.gib.val + 2 ^ 30 < 2 ^ 64)
+    (hseek : ((curOf it.cursor).take (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)
+        (directFind M Rs it.ranges it.range (curOf it.cursor).search.1
+          (curOf it.cursor).search.2.1 (curOf it.cursor).search.2.2)).1 = .seek →
+      let c' := ((curOf it.cursor).take (placeOr (tablesOf it.set) (word64 it.base))
+        (word64 it.base) (directFind M Rs it.ranges it.range (curOf it.cursor).search.1
+          (curOf it.cursor).search.2.1 (curOf it.cursor).search.2.2)).2
+      c'.next + 1 ≤ Usize.max ∧ c'.t2 + 1 ≤ Usize.max ∧ c'.gib + 2 ^ 30 < 2 ^ 64) :
+    page_tables.boot.direct.DirectMapPlan.next it ⦃ o it' =>
+      o.map stepOf = ((curOf it.cursor).step (directFind M Rs it.ranges it.range)
+          (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)).1 ∧
+        curOf it'.cursor = ((curOf it.cursor).step (directFind M Rs it.ranges it.range)
+          (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)).2 ∧
+        it'.set = it.set ∧ it'.base = it.base ∧
+        spansOf it'.ranges.managed = M ∧ spansOf it'.ranges.reservations = Rs ∧
+        ∃ skipped, searchList M Rs it.ranges it.range =
+            skipped ++ searchList M Rs it'.ranges it'.range ∧
+          ∀ u ∈ skipped, u.endNat ≤ it.cursor.from.val ⦄ := by
+  have hv : ∀ u ∈ searchList M Rs it.ranges it.range, u.Valid := fun u hu => (hok u hu).1
+  unfold page_tables.boot.direct.DirectMapPlan.next
+  step*
+  have hfv : «from».val = (curOf it.cursor).search.1 := by rw [← from_post]
+  have hlv : limit.val = (curOf it.cursor).search.2.1 := by rw [← from_post]
+  have hpv : pages = (curOf it.cursor).search.2.2 := by rw [← from_post]
+  have hfrm : (curOf it.cursor).search.1 = it.cursor.from.val := cur_search_frm _
+  refine WP.spec_bind (usable_leaf_spec it.ranges it.range «from» limit pages M Rs hM hRs hm hr hv) ?_
+  rintro ⟨ar, rg, found⟩ ⟨ha1, ha2, hfound, skipped, hsk, hskb⟩
+  obtain ⟨hfl, hfge⟩ := found_of_usableFind hok hfound
+  have hfd : foundOf found = directFind M Rs it.ranges it.range (curOf it.cursor).search.1
+      (curOf it.cursor).search.2.1 (curOf it.cursor).search.2.2 := by
+    rw [hfound, hfv, hlv, hpv]; rfl
+  refine WP.spec_bind (take_spec it.cursor it.set it.base found hN hfl hcur) ?_
+  rintro ⟨mt, mc⟩ ⟨hmt, hmc⟩
+  rw [hfd] at hmt hmc
+  -- the state of the search after the call, and what it keeps
+  obtain ⟨st, hst, hsm, hsr, hsl, hskp⟩ : ∃ st : (Slice fdt.Span × Slice fdt.Span × fdt.Cursor ×
+      fdt.Span),
+      (if (mc.gib != it.cursor.gib) = true then
+          ok (ar.managed, ar.reservations, ar.cursor, rg)
+        else ok (it.ranges.managed, it.ranges.reservations, it.ranges.cursor, it.range) :
+          Result (Slice fdt.Span × Slice fdt.Span × fdt.Cursor × fdt.Span)) = ok st ∧
+      spansOf st.1 = M ∧ spansOf st.2.1 = Rs ∧
+      (∃ sk, searchList M Rs it.ranges it.range =
+          sk ++ searchList M Rs ⟨st.1, st.2.1, st.2.2.1⟩ st.2.2.2 ∧
+        ∀ u ∈ sk, u.endNat ≤ it.cursor.from.val) ∧
+      (∀ f l p, it.cursor.from.val ≤ f →
+        usableFind ((searchList M Rs ⟨st.1, st.2.1, st.2.2.1⟩ st.2.2.2).map spanView) f l p =
+          directFind M Rs it.ranges it.range f l p) := by
+    by_cases hgc : (mc.gib != it.cursor.gib) = true
+    · have hpf : pages = false := by
+        cases hpg : pages
+        · rfl
+        · exfalso
+          have := cur_take_gib (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)
+            (curOf it.cursor) (directFind M Rs it.ranges it.range (curOf it.cursor).search.1
+              (curOf it.cursor).search.2.1 (curOf it.cursor).search.2.2) (by rw [← hpv, hpg])
+          rw [← hmc] at this
+          exact (u64_bne_iff _ _).1 hgc this
+      have hb : ∀ u ∈ skipped, u.endNat ≤ it.cursor.from.val := by
+        intro u hu; rw [← hfrm, ← hfv]; exact hskb hpf u hu
+      refine ⟨(ar.managed, ar.reservations, ar.cursor, rg), by simp only [hgc, ↓reduceIte], ha1,
+        ha2, ⟨skipped, hsk, hb⟩, ?_⟩
+      intro f l p hf
+      simp only [directFind]
+      rw [hsk, List.map_append, usableFind_skip]
+      intro r hr
+      obtain ⟨u, hu, rfl⟩ := List.mem_map.1 hr
+      exact Nat.le_trans (hb u hu) hf
+    · refine ⟨(it.ranges.managed, it.ranges.reservations, it.ranges.cursor, it.range),
+        by simp only [hgc, Bool.false_eq_true, ↓reduceIte], hm, hr,
+        ⟨[], rfl, fun u hu => absurd hu List.not_mem_nil⟩, fun f l p _ => rfl⟩
+  rw [uncurry_apply_pair, hst, bind_ok]
+  obtain ⟨sm, sr, sc, sg⟩ := st
+  simp only at hsm hsr hsl hskp
+  simp only [Cur.step]
+  cases mt with
+  | Give stp =>
+    refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, hsm, hsr, hsl⟩
+    · rw [← hmt]; rfl
+    · rw [← hmt]; exact hmc
+  | End =>
+    refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, hsm, hsr, hsl⟩
+    · rw [← hmt]; rfl
+    · rw [← hmt]; exact hmc
+  | Seek =>
+    obtain ⟨hn1, ht21, hgib⟩ := hseek hmt.symm
+    obtain ⟨l0, hl0, hfr0, hph0⟩ := cur_take_seek _ _ _ _ hmt.symm
+    rw [← hmc] at hn1 ht21 hgib hph0 hfr0
+    have hmph : mc.phase = .Children := by
+      cases h : mc.phase <;> simp only [curOf, phaseOf, h, reduceCtorEq] at hph0 ⊢
+    have hs' : mc.phase = .NewPages → mc.slot.val + 2 ^ 21 < 2 ^ 64 := by
+      intro h; rw [hmph] at h; cases h
+    have hg' : mc.phase = .Children ∨ mc.phase = .Entries → mc.gib.val + 2 ^ 30 < 2 ^ 64 :=
+      fun _ => hgib
+    -- the search of the children starts at the leaf found, at or above the address
+    have hge0 : it.cursor.from.val ≤ (curOf mc).search.1 := by
+      rw [cur_search_frm, hfr0]
+      obtain ⟨lf, hlf, hlv'⟩ : ∃ lf, found = some lf ∧ l0 = ⟨lf.pa.val, word64 lf.desc, lf.block⟩ := by
+        rw [← hfd] at hl0
+        cases hfo : found with
+        | none => rw [hfo] at hl0; cases hl0
+        | some lf =>
+          rw [hfo] at hl0
+          simp only [foundOf, Option.map_some, Option.some.injEq] at hl0
+          exact ⟨lf, rfl, hl0.symm⟩
+      rw [hlv']
+      have := hfge lf hlf
+      rw [hfv, hfrm] at this
+      exact this
+    step*
+    have hfv1 : from1.val = (curOf mc).search.1 := by rw [← from1_post]
+    have hlv1 : limit1.val = (curOf mc).search.2.1 := by rw [← from1_post]
+    have hpv1 : pages1 = (curOf mc).search.2.2 := by rw [← from1_post]
+    have hok2 : SearchOk (searchList M Rs ⟨sm, sr, sc⟩ sg) := by
+      obtain ⟨sk, hsk2, -⟩ := hsl
+      intro u hu
+      exact hok u (by rw [hsk2]; exact List.mem_append_right _ hu)
+    refine WP.spec_bind (usable_leaf_spec ⟨sm, sr, sc⟩ sg from1 limit1 pages1 M Rs hM hRs hsm hsr
+      (fun u hu => (hok2 u hu).1)) ?_
+    rintro ⟨ar1, rg1, found1⟩ ⟨_, _, hfound1, _⟩
+    obtain ⟨hfl1, -⟩ := found_of_usableFind hok2 hfound1
+    refine WP.spec_bind (children_spec mc found1 hfl1 hn1 ht21) ?_
+    rintro ⟨st1, mc1⟩ ⟨hst1, hmc1⟩
+    have hfd1 : foundOf found1 = directFind M Rs it.ranges it.range (curOf mc).search.1
+        (curOf mc).search.2.1 (curOf mc).search.2.2 := by
+      rw [hfound1, hfv1, hlv1, hpv1]
+      exact hskp _ _ _ hge0
+    rw [hfd1] at hst1 hmc1
+    refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, hsm, hsr, hsl⟩
+    · rw [← hmt, ← hmc]; simp only [turnOf, Option.map_some, hst1]
+    · rw [← hmt, ← hmc]; exact hmc1
+
 end Krepi.Proofs.PageTables.Refinement

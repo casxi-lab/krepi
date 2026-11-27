@@ -47,7 +47,14 @@ built once and not again for every mutant of the code.
   `usableFind` (the first leaf at or above an address of the usable ranges,
   as `usable_leaf` finds it), `usableFind_cons_lt`, `usableFind_cons_ge`,
   `usableFind_nil`, `usableFind_skip` (ranges that end at or below the
-  address do not change the search).
+  address do not change the search), `spanView`, `rangeFind_false`,
+  `rangeFind_bounds` and `usableFind_bounds` (the leaf found lies at or above
+  the address, below the limit and below the ends of the ranges).
+- The cursor and the state of the search: `cur_take_gib` (a step whose
+  search asks for pages keeps the 1 GiB slot), `cur_leaf_seek` and
+  `cur_take_seek` (a step that asks for no step yet does so for the leaf
+  found, from which the search of the children starts), `cur_search_frm`
+  (every search starts at the address of the cursor).
 -/
 
 @[expose] public section
@@ -479,5 +486,127 @@ theorem usableFind_skip {frm limit : Nat} {pages : Bool} :
   | (a, b) :: skipped, rest, h => by
     rw [List.cons_append, usableFind_cons_ge (Nat.not_lt.2 (h (a, b) List.mem_cons_self))]
     exact usableFind_skip skipped rest (fun r hr => h r (List.mem_cons_of_mem _ hr))
+
+/-- A span of the specification as the start and the end of `usableFind`. -/
+def spanView (u : Krepi.Spec.Fdt.Span) : Nat × Nat := (u.start.toNat, u.endNat)
+
+/-- `rangeFind` without the page filter finds the leaf at the address. -/
+theorem rangeFind_false (stop pa : Nat) : rangeFind stop pa false = some (leafAtFound stop pa) := by
+  simp only [rangeFind, Bool.and_false, Bool.false_eq_true, ↓reduceIte]
+
+/-- The leaf that `rangeFind` finds lies at or above the address, below the
+end, for an address below the end. -/
+theorem rangeFind_bounds {stop pa : Nat} {pages : Bool} {f : Found} (h : pa < stop)
+    (hf : rangeFind stop pa pages = some f) : pa ≤ f.pa ∧ f.pa < stop := by
+  unfold rangeFind at hf
+  split at hf
+  · rename_i hb
+    split at hf
+    · rename_i hlt
+      simp only [Option.some.injEq] at hf
+      subst hf
+      simp only [leafAtFound, Bool.and_eq_true, decide_eq_true_eq] at hb ⊢
+      obtain ⟨⟨h1, h2⟩, -⟩ := hb
+      simp only [BLOCK_SIZE] at h1 h2 hlt ⊢
+      omega
+    · cases hf
+  · simp only [Option.some.injEq] at hf
+    subst hf
+    exact ⟨Nat.le_refl _, h⟩
+
+/-- The leaf that `usableFind` finds lies at or above the address, below the
+limit, and below every bound of the ends of ranges that are nonempty or end
+at 0. -/
+theorem usableFind_bounds {limit B : Nat} {pages : Bool} :
+    ∀ (L : List (Nat × Nat)) (frm : Nat) (f : Found), usableFind L frm limit pages = some f →
+      (∀ r ∈ L, (r.1 < r.2 ∨ r.2 = 0) ∧ r.2 ≤ B) → frm ≤ f.pa ∧ f.pa < limit ∧ f.pa < B
+  | [], _, _, h, _ => by cases h
+  | (a, b) :: rest, frm, f, h, hB => by
+    by_cases hlt : frm < b
+    · rw [usableFind_cons_lt hlt] at h
+      cases hr : rangeFind b (max a frm) pages with
+      | none =>
+        rw [hr] at h
+        have := usableFind_bounds rest b f h (fun r hr => hB r (List.mem_cons_of_mem _ hr))
+        exact ⟨by omega, this.2⟩
+      | some l =>
+        rw [hr] at h
+        simp only at h
+        split at h
+        · rename_i hl
+          simp only [Option.some.injEq] at h
+          subst h
+          have hb := hB (a, b) List.mem_cons_self
+          simp only at hb
+          have hm1 := Nat.le_max_right a frm
+          have hm2 : max a frm < b := by
+            rcases Nat.lt_or_ge a frm with h1 | h1
+            · rw [Nat.max_eq_right (Nat.le_of_lt h1)]; exact hlt
+            · rw [Nat.max_eq_left h1]; omega
+          have := rangeFind_bounds hm2 hr
+          exact ⟨by omega, hl, by omega⟩
+        · cases h
+    · rw [usableFind_cons_ge hlt] at h
+      exact usableFind_bounds rest frm f h (fun r hr => hB r (List.mem_cons_of_mem _ hr))
+
+/-! ## The cursor and the state of the search -/
+
+/-- A step of the cursor whose search asks for pages, under a new level 2
+table, keeps its 1 GiB slot. -/
+theorem cur_take_gib (place : Found → Place) (base : UInt64) (c : Cur) (f : Option Found)
+    (h : c.search.2.2 = true) : (c.take place base f).2.gib = c.gib := by
+  unfold Cur.search at h
+  unfold Cur.take
+  cases hp : c.phase <;> simp only [hp, Bool.false_eq_true] at h ⊢
+  cases f with
+  | none => rfl
+  | some p =>
+    simp only [Cur.children]
+    split <;> rfl
+
+/-- `Cur.leaf` asks for no step yet only for a leaf found, from which the
+search of the children starts. -/
+theorem cur_leaf_seek (place : Found → Place) (c : Cur) (f : Option Found)
+    (h : (c.leaf place f).1 = .seek) :
+    ∃ l, f = some l ∧ (c.leaf place f).2.frm = l.pa ∧ (c.leaf place f).2.phase = .children := by
+  cases f with
+  | none => simp [Cur.leaf] at h
+  | some l =>
+    refine ⟨l, rfl, ?_⟩
+    simp only [Cur.leaf] at h ⊢
+    cases hp : place l with
+    | root =>
+      simp only [hp] at h ⊢
+      cases hb : l.block
+      · simp [hb] at h
+      · simp only [↓reduceIte, and_self]
+    | level2 t2 =>
+      simp only [hp] at h
+      cases hb : l.block <;> simp [hb] at h
+    | level3 t2 t3 => simp [hp] at h
+
+/-- `Cur.take` asks for no step yet only for a leaf found, from which the
+search of the children starts. -/
+theorem cur_take_seek (place : Found → Place) (base : UInt64) (c : Cur) (f : Option Found)
+    (h : (c.take place base f).1 = .seek) :
+    ∃ l, f = some l ∧ (c.take place base f).2.frm = l.pa ∧
+      (c.take place base f).2.phase = .children := by
+  unfold Cur.take at h ⊢
+  cases hp : c.phase <;> simp only [hp] at h ⊢
+  · exact cur_leaf_seek place c f h
+  · cases f with
+    | none => exact cur_leaf_seek place _ none h
+    | some p =>
+      simp only [Cur.heldPage] at h ⊢
+      split at h
+      · cases h
+      · rename_i hs
+        simp only [hs, ↓reduceIte]
+        exact cur_leaf_seek place _ (some p) h
+  all_goals simp at h
+
+/-- Every search of the cursor starts at its address `frm`. -/
+theorem cur_search_frm (c : Cur) : c.search.1 = c.frm := by
+  unfold Cur.search; cases c.phase <;> rfl
 
 end Krepi.Proofs.PageTables.Refinement
