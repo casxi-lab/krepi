@@ -33,9 +33,14 @@ every mutant of the code.
 - The scan: `placeOrder` (the extents in the order of a direction),
   `placeOrder_length`, `getElem_placeOrder_low`, `getElem_placeOrder_high`,
   `getElem?_placeOrder_low`, `getElem?_placeOrder_high`, `drop_of_getElem?`
-  (a list from an index at which it has an element), and `scan_nil_eq`, `scan_held`, `scan_free_none`, `scan_free_overflow`,
-  `scan_free_more` and `scan_free_ok`, one step of `scan` for each case.
-- The entries: `choose_eq` (`Ownership.choose` as the nested checks of the
+  (a list from an index at which it has an element), and `scan_nil_eq`,
+  `scan_held`, `scan_free_none`, `scan_free_overflow`, `scan_free_more` and
+  `scan_free_ok`, one step of `scan` for each case.
+- The pieces of a taken extent: `before_none`, `before_some`, `after_none`,
+  `after_some` (the free parts before and after the range, by
+  `rangeOf?`).
+- The entries: `reserve_ok_eq`, `reserve_error_eq` (`Ownership.reserve`
+  after the choice), `choose_eq` (`Ownership.choose` as the nested checks of the
   code), `take_exhausted`, `take_none`, `take_more` and `take_some` (the
   outcomes of `Ownership.take`), `extra_eq` (`Extent.extra` on numbers).
 -/
@@ -379,6 +384,59 @@ theorem take_some {g : UInt64} {before after : List Extent} {e : Extent}
       counter := Counter.after g }, ⟨t.arena, c.owner, g, c.range⟩) := by
   unfold Ownership.take
   simp only [hg, h, hm]; rfl
+
+/-- `Ownership.reserve` after a choice: the take of the choice, reserved,
+with a reservation not attempted and with no failure. -/
+theorem reserve_ok_eq {owner pages alignment : UInt64} {p : Placement}
+    (h : t.choose owner pages alignment p = .ok c) :
+    t.reserve owner pages alignment p =
+      (t.take c .reserved).map (fun x => (x.1, (⟨x.2, false, 0⟩ : Reservation))) := by
+  unfold Ownership.reserve
+  rw [h]
+  cases h' : t.take c .reserved <;> simp [h', Bind.bind, Except.bind, Except.map, pure,
+    Except.pure]
+
+/-- `Ownership.reserve` after a refused request: its error. -/
+theorem reserve_error_eq {owner pages alignment : UInt64} {p : Placement} {e : OwnershipError}
+    (h : t.choose owner pages alignment p = .error e) :
+    t.reserve owner pages alignment p = .error e := by
+  unfold Ownership.reserve
+  rw [h]
+  rfl
+
+/-- No part of a free extent before a range that starts with it. -/
+theorem before_none {e : Extent} {r : PhysRange} (h : r.start.toNat ≤ e.range.start.toNat) :
+    rangeOf? e.range.start.toNat (r.start.toNat - e.range.start.toNat) = none := by
+  unfold rangeOf?
+  split
+  · rename_i h'; exact absurd h'.1 (by omega)
+  · rfl
+
+/-- No part of a free extent after a range that ends with it. -/
+theorem after_none {e : Extent} {r : PhysRange} (h : e.range.endNat ≤ r.endNat) :
+    rangeOf? r.endNat (e.range.endNat - r.endNat) = none := by
+  unfold rangeOf?
+  split
+  · rename_i h'; exact absurd h'.1 (by omega)
+  · rfl
+
+/-- The part of a free extent before a range inside it. -/
+theorem before_some {e : Extent} {r : PhysRange} (h : e.range.start.toNat < r.start.toNat) :
+    ∃ B, rangeOf? e.range.start.toNat (r.start.toNat - e.range.start.toNat) = some B ∧
+      B.start.toNat = e.range.start.toNat ∧ B.len.toNat = r.start.toNat - e.range.start.toNat := by
+  have := r.fits
+  obtain ⟨B, hB, h1, h2⟩ := rangeOf?_exists (s := e.range.start.toNat)
+    (l := r.start.toNat - e.range.start.toNat) (by omega) (by omega)
+  exact ⟨B, hB, h1, by unfold PhysRange.endNat at h2; omega⟩
+
+/-- The part of a free extent after a range inside it. -/
+theorem after_some {e : Extent} {r : PhysRange} (h : r.endNat < e.range.endNat) :
+    ∃ B, rangeOf? r.endNat (e.range.endNat - r.endNat) = some B ∧
+      B.start.toNat = r.endNat ∧ B.len.toNat = e.range.endNat - r.endNat := by
+  have := e.range.fits
+  obtain ⟨B, hB, h1, h2⟩ := rangeOf?_exists (s := r.endNat)
+    (l := e.range.endNat - r.endNat) (by omega) (by unfold PhysRange.endNat at *; omega)
+  exact ⟨B, hB, h1, by unfold PhysRange.endNat at h1 h2 ⊢; omega⟩
 
 end Take
 

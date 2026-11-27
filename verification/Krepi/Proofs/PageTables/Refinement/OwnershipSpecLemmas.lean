@@ -24,7 +24,9 @@ built once and not again for every mutant of the code.
   after it are those of the array shifted, stands for the list with the
   block of the specification replaced; the shape of the writes of `take`,
   `release` and `cancel`).
-- Lists element by element: `getElem?_take_eq_of` (two lists that agree
+- Lists element by element: `drop_take_set_one`, `drop_take_set_two`,
+  `drop_take_set_three` (entries set in place, one after the other, read
+  back from their position), `getElem?_take_eq_of` (two lists that agree
   below a bound have one prefix) and `getElem?_shift` (a list whose
   entries from a position are those of another list shifted).
 - The search of an extent: `splitFirst_of_index` (the first index whose
@@ -115,6 +117,36 @@ theorem getElem?_shift {α : Type} {l l' : List α} {a b c : Nat}
     congr 1
     omega
   · rfl
+
+/-- One entry set in place. -/
+theorem drop_take_set_one {α : Type} {l : List α} {i : Nat} (h : i < l.length) (x : α) :
+    ((l.set i x).drop i).take 1 = [x] := by
+  apply List.ext_getElem?
+  intro j
+  rcases j with _ | j
+  · simp [h]
+  · simp
+
+/-- Two entries set in place, one after the other. -/
+theorem drop_take_set_two {α : Type} {l : List α} {i : Nat} (h : i + 1 < l.length) (x y : α) :
+    (((l.set i x).set (i + 1) y).drop i).take 2 = [x, y] := by
+  apply List.ext_getElem?
+  intro j
+  rcases j with _ | _ | j
+  · simp [show i < l.length by omega]
+  · simp [h]
+  · simp
+
+/-- Three entries set in place, one after the other. -/
+theorem drop_take_set_three {α : Type} {l : List α} {i : Nat} (h : i + 2 < l.length) (x y z : α) :
+    ((((l.set i x).set (i + 1) y).set (i + 2) z).drop i).take 3 = [x, y, z] := by
+  apply List.ext_getElem?
+  intro j
+  rcases j with _ | _ | _ | j
+  · simp [show i < l.length by omega]
+  · simp [show i + 1 < l.length by omega]
+  · simp [h]
+  · simp
 
 section ListRel
 
