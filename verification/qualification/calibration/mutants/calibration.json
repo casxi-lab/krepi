@@ -45,7 +45,7 @@
       "find": "[0",
       "replace": "[1",
       "function": "verification/qualification/calibration/src/table.rs#Table::new",
-      "run": "1794366879-7-0",
+      "receipt_sha256": "381019ed23c98bb28ed74e8f963e43602025762d341a28236b4821ed5489058d",
       "class": "missing-lemma",
       "reason": "The theorem about Table::new states the capacity and that no slot is in use, but not that every generation starts at 0; a table made with generation 1 would count every slot as retired and refuse a handle of generation 0, so the mutant changes the meaning."
     }

@@ -1481,7 +1481,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
             find: "f()".into(),
             replace: "f( )".into(),
             function: format!("{LIB}#{function}"),
-            run: "r".into(),
+            receipt_sha256: "e".repeat(64),
             class,
             reason: Some("No theorem is about it.".into()),
         };
@@ -1490,11 +1490,13 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
             let run = mutants::Run {
                 run: "r".into(),
                 operators: vec!["literal".into()],
+                receipt_sha256: "e".repeat(64),
                 ..mutants::Run::default()
             };
             let list = mutants::List {
                 schema: mutants::SCHEMA,
                 target: "a".into(),
+                operators: vec!["literal".into()],
                 runs: vec![run],
                 survivors,
                 ..mutants::List::default()

@@ -683,9 +683,9 @@ fn pipeline<T: Sync, P: Send>(
 
 /// A source mutant: the point of its edit, `<file>:<line>:<column>` with
 /// the file of the repository, its operator, the edit, the inventory key of
-/// the function that it edits, and, in a list of survivors, the run
-/// directory of the run of the list that it survived, and the class and the
-/// reason that a reviewer gives it.
+/// the function that it edits, and, in a list of survivors, the SHA-256 of
+/// the receipt of the run of the list that it survived, and the class and
+/// the reason that a reviewer gives it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Survivor {
@@ -694,7 +694,7 @@ pub struct Survivor {
     pub find: String,
     pub replace: String,
     pub function: String,
-    pub run: String,
+    pub receipt_sha256: String,
     pub class: Option<Category>,
     pub reason: Option<String>,
 }
@@ -942,7 +942,8 @@ fn unique(text: &str, start: usize, end: usize) -> Option<(usize, usize)> {
 }
 
 /// The source mutants of `target` with `operators` in the files that `read`
-/// gives by their paths, of class `no-theorem` in a function of `unclosed`
+/// gives by their paths, by the path of their file and then by the line and
+/// column of their point, of class `no-theorem` in a function of `unclosed`
 /// and without a class otherwise, and the number of points without a text
 /// that occurs once in their file.
 pub fn generate(
@@ -975,6 +976,7 @@ pub fn generate(
         {
             let mut points = Points::default();
             points.visit_block(body);
+            points.0.sort_by_key(|(start, ..)| *start);
             for (start, end, operator, to) in points.0 {
                 let bytes = offset(text, &starts, start).zip(offset(text, &starts, end));
                 let Some((from, until)) =
@@ -999,7 +1001,7 @@ pub fn generate(
                         find: find.to_string(),
                         replace,
                         function,
-                        run: String::new(),
+                        receipt_sha256: String::new(),
                         class: class.then_some(Category::NoTheorem),
                         reason: None,
                     });
@@ -1141,7 +1143,7 @@ pub fn write_list(
         qualification_sha256: record.qualification.map(|read| read.sha256),
     };
     list.commit = receipt.commit.clone().unwrap_or_default();
-    (list.survivors.iter_mut()).for_each(|survivor| survivor.run.clone_from(&item.run));
+    (list.survivors.iter_mut()).for_each(|s| s.receipt_sha256.clone_from(&item.receipt_sha256));
     list.runs = vec![item];
     let path = root.join(list_path(layout, target));
     let text = serde_json::to_string_pretty(&list).expect("a list") + "\n";
@@ -1162,10 +1164,11 @@ pub fn write_list(
 /// The problems of the lists of survivors in `tree` of `layout`, whose
 /// registry has `targets`: a list that does not parse, of another schema,
 /// of a target that the registry does not have or not at its path, the
-/// problems of its runs, a survivor of no run of the list, without a class
-/// or a reason, and one in a function of `unclosed` of another class than
-/// `no-theorem`; and the inventory keys of the functions of the survivors
-/// that no theorem covers.
+/// problems of its runs, two runs of the same receipt, operators or a number
+/// of mutants that are not those of its runs, a survivor of no run of the
+/// list, without a class or a reason, and one in a function of `unclosed` of
+/// another class than `no-theorem`; and the inventory keys of the functions
+/// of the survivors that no theorem covers.
 pub fn list_problems(
     tree: &Tree,
     layout: &Layout,
@@ -1197,9 +1200,22 @@ pub fn list_problems(
         }
         let runs = inventory::runs_problems(&list).into_iter();
         problems.extend(runs.map(|problem| format!("{path}: {problem}")));
+        let receipts = BTreeSet::from_iter(list.runs.iter().map(|run| &run.receipt_sha256));
+        if receipts.len() != list.runs.len() {
+            problems.push(format!("{path}: two of its runs have the same receipt"));
+        }
+        let ran = BTreeSet::from_iter(list.runs.iter().flat_map(|run| &run.operators));
+        if ran != BTreeSet::from_iter(&list.operators) {
+            problems.push(format!("{path}: its operators are not those of its runs"));
+        }
+        let sum: usize = list.runs.iter().map(|run| run.generated).sum();
+        if list.generated != sum {
+            let generated = list.generated;
+            problems.push(format!("{path}: {generated} generated, its runs {sum}"));
+        }
         for survivor in &list.survivors {
             let point = &survivor.point;
-            if !list.runs.iter().any(|run| run.run == survivor.run) {
+            if !receipts.contains(&survivor.receipt_sha256) {
                 problems.push(format!(
                     "{path}: the survivor at {point} is of no run of the list"
                 ));
@@ -1624,13 +1640,13 @@ mod tests {
         };
         assert_eq!(list.runs, [run]);
         assert_eq!(Some(list.commit), done.receipt.commit);
-        // A survivor of the draft is written with the run in which it
-        // survived.
+        // A survivor of the draft is written with the SHA-256 of the receipt
+        // of the run in which it survived.
         let mut draft: List =
             serde_json::from_str(done.draft.as_deref().expect("a draft")).expect("a draft list");
         let survivor: List = serde_json::from_str(&self::list("t", None, None)).expect("a list");
         draft.survivors = Vec::from_iter(survivor.survivors.into_iter().map(|mut s| {
-            s.run = String::new();
+            s.receipt_sha256 = String::new();
             s
         }));
         let text = serde_json::to_string(&draft).expect("JSON");
@@ -1647,8 +1663,8 @@ mod tests {
         let path = fixture.root().join("verification/mutants/t.json");
         let list: List =
             serde_json::from_str(&fs::read_to_string(path).expect("the list")).expect("a list");
-        let runs = Vec::from_iter(list.survivors.iter().map(|s| s.run.as_str()));
-        assert_eq!(runs, [done.receipt.run.as_str()]);
+        let runs = Vec::from_iter(list.survivors.iter().map(|s| s.receipt_sha256.as_str()));
+        assert_eq!(runs, [sha256(&receipt)]);
         // Without a verified target, no list is written.
         fixture::lake_script(&fixture, "+Krepi", "exit 1\n");
         let done = gate(
@@ -1970,11 +1986,12 @@ mod tests { fn t() { let _ = 1 + 1; } }
                 .iter()
                 .map(|m| (m.find.as_str(), m.replace.as_str())),
         );
-        // `x == 4` occurs twice, and the two lines of `twice` are the same.
+        // `x == 4` occurs twice, and the two lines of `twice` are the same;
+        // in the order of their places, `>>` before the `!=` that holds it.
         let expected = [
             ("== 4 |", "!= 4 |"),
-            ("!=", "=="),
             (">>", "<<"),
+            ("!=", "=="),
             ("== 4 }", "!= 4 }"),
         ];
         assert_eq!(edits, expected);
@@ -1984,15 +2001,21 @@ mod tests { fn t() { let _ = 1 + 1; } }
     }
 
     /// A run `run` of a list of survivors, of the CI run `run_id`, with
-    /// `operators` and `part`.
+    /// `operators` and `part`, and a receipt of its own, [`receipt_of`].
     fn run(run: &str, operators: &[&str], part: Option<&str>, run_id: &str) -> Run {
         Run {
             run: run.into(),
             run_id: Some(run_id.into()),
             operators: Vec::from_iter(operators.iter().map(|op| op.to_string())),
             part: part.map(str::to_string),
+            receipt_sha256: receipt_of(run),
             ..Run::default()
         }
+    }
+
+    /// The SHA-256 of the receipt of the run `run` of [`run`].
+    fn receipt_of(run: &str) -> String {
+        run.repeat(64)
     }
 
     /// A list of `target` with one survivor of class `class` and `reason`.
@@ -2003,13 +2026,14 @@ mod tests { fn t() { let _ = 1 + 1; } }
             find: "used + cost".into(),
             replace: "used - cost".into(),
             function: "kernel/src/lib.rs#Table::charge".into(),
-            run: "r".into(),
+            receipt_sha256: receipt_of("r"),
             class,
             reason: reason.map(str::to_string),
         };
         let list = List {
             schema: SCHEMA,
             target: target.into(),
+            operators: vec!["arithmetic".into()],
             runs: vec![run("r", &["arithmetic"], None, "1")],
             survivors: vec![survivor],
             ..List::default()
@@ -2086,17 +2110,26 @@ mod tests { fn t() { let _ = 1 + 1; } }
         );
     }
 
-    /// The problems of the list of the target `t` with `runs` and a survivor
-    /// of the run `survived`.
+    /// The problems of the list of the target `t` with `runs`, their
+    /// operators and a survivor of the run `survived`.
     fn runs_checked(runs: Vec<Run>, survived: &str) -> Vec<String> {
+        let operators = BTreeSet::from_iter(runs.iter().flat_map(|run| run.operators.clone()));
+        checked(|list| {
+            list.survivors[0].receipt_sha256 = receipt_of(survived);
+            (list.operators, list.runs) = (Vec::from_iter(operators), runs);
+        })
+    }
+
+    /// The problems of the list of the target `t` of [`list`], with one
+    /// survivor of class `equivalent`, as `change` changes it.
+    fn checked(change: impl FnOnce(&mut List)) -> Vec<String> {
         let mut list: List = serde_json::from_str(&list(
             "t",
             Some(Category::Equivalent),
             Some("Same meaning."),
         ))
         .expect("a list");
-        list.survivors[0].run = survived.to_string();
-        list.runs = runs;
+        change(&mut list);
         let registry = r#"{"schema": 3, "specifications": [], "targets": [{"name": "t"}]}"#;
         let targets = registry::parse(registry).expect("a registry").targets;
         let text = serde_json::to_string(&list).expect("JSON");
@@ -2193,6 +2226,43 @@ mod tests { fn t() { let _ = 1 + 1; } }
         );
         let alone = vec![run("a", &["literal"], Some("2/2"), "1")];
         assert_eq!(runs_checked(alone, "a"), [uncovered("literal", 1, "2/2")]);
+        // An operator of the list that none of its runs took.
+        let none = checked(|list| list.operators.push("method".into()));
+        assert_eq!(none, ["its operators are not those of its runs"]);
+    }
+
+    #[test]
+    fn two_runs_of_a_list_with_the_same_receipt_fail_the_check() {
+        // Two jobs whose run directories have the same name, and their
+        // survivors, are told apart by their receipts.
+        let mut runs = vec![
+            run("a", &["literal"], Some("1/2"), "1"),
+            run("a", &["literal"], Some("2/2"), "1"),
+        ];
+        runs[1].receipt_sha256 = receipt_of("b");
+        assert_eq!(runs_checked(runs.clone(), "b"), Vec::<String>::new());
+        runs[1].receipt_sha256 = receipt_of("a");
+        assert_eq!(
+            runs_checked(runs, "a"),
+            ["two of its runs have the same receipt"]
+        );
+    }
+
+    #[test]
+    fn a_list_whose_number_of_mutants_is_not_that_of_its_runs_fails_the_check() {
+        let sum = checked(|list| {
+            list.generated = 3;
+            list.runs[0].generated = 2;
+        });
+        assert_eq!(sum, ["3 generated, its runs 2"]);
+        let more = checked(|list| {
+            list.generated = 3;
+            list.runs[0].generated = 1;
+            list.runs.push(run("s", &["literal"], None, "1"));
+            list.runs[1].generated = 2;
+            list.operators.push("literal".into());
+        });
+        assert_eq!(more, Vec::<String>::new());
     }
 
     #[test]
@@ -2234,6 +2304,21 @@ mod tests { fn t() { let _ = 1 + 1; } }
                 assert!(sizes.iter().max().unwrap_or(&0) - sizes.iter().min().unwrap_or(&0) <= 1);
             }
         }
+        // The mutants of an operator are numbered by their places in their
+        // file, not by the syntax tree, in which the `-` holds `a * b + a`:
+        // the first of three parts takes the `*`.
+        let registry = serde_json::json!({"schema": 3, "specifications": [],
+            "targets": [{"name": "t", "proves": [format!("{FILE}#f")]}]});
+        let target = registry::parse(&registry.to_string()).expect("a registry");
+        let source = "pub fn f(a: u32, b: u32) -> u32 {\n    a * b + a - b\n}\n";
+        let read = |_: &str| Some(source.to_string());
+        let generated = generate(&read, &target.targets[0], &names(&["arithmetic"]));
+        let (mutants, _) = generated.expect("mutants");
+        let points = Vec::from_iter(mutants.iter().map(|m| m.point.as_str()));
+        let places = ["2:7", "2:11", "2:15"].map(|at| format!("{FILE}:{at}"));
+        assert_eq!(points, places);
+        let first = &mutants[interval(mutants.len(), Some((1, 3)))];
+        assert_eq!(Vec::from_iter(first.iter().map(|m| &m.point)), [&places[0]]);
     }
 
     #[test]
