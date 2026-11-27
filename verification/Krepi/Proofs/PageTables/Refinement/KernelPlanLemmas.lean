@@ -294,9 +294,9 @@ theorem kernel_map_start_spec {N : Usize} (s : page_tables.Tables N false)
 
 /-- **`KernelMap` for a record with room.** The conclusion of the statement
 `KernelMap` for a layout that stands for a layout and a set whose record of
-tables in use is at least `2 ^ 33` below the largest `usize`: the premise of
-the checks of the code (`kernel_map_set_spec`), which is all that this
-theorem adds to the statement. -/
+tables in use is at least `2 ^ 33` below the largest `usize`. That premise,
+the one of the checks of the code (`kernel_map_set_spec`), is the only one
+added to those of the statement. -/
 theorem kernel_map_of_room (hU : Usize64) {N : Usize} (s : page_tables.Tables N false)
     (layout : page_tables.Layout) (L : Layout) (base : U64) (bits : U8)
     (hL : LayoutRepr layout L) (hov : s.used.val + 2 ^ 33 ≤ Usize.max) :
