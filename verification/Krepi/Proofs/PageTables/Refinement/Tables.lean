@@ -2,6 +2,7 @@ module
 
 public import Krepi.Statements.PageTables.Tables
 import Mathlib.Util.CountHeartbeats
+import Krepi.Proofs.PageTables.Refinement.WalkLemmas
 
 /-!
 # Page tables: refinement of the descriptors, the ranges and the table sets
@@ -17,31 +18,25 @@ each theorem.
 
 namespace Krepi.Proofs.PageTables.Refinement.Tables
 
-open Krepi.Statements.PageTables
+open Krepi.Statements.PageTables Krepi.Proofs.PageTables.Refinement Krepi.Proofs.Fdt.Refinement
 
 /-- Proves `Descriptor`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem descriptor : Descriptor := by
-  sorry
+public theorem descriptor : Descriptor := fun _ => descriptor_spec
 
 /-- Proves `DirectAddress`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem directAddress : DirectAddress := by
-  sorry
+public theorem directAddress : DirectAddress := fun _ => direct_address_repr_spec
 
 /-- Proves `PhysRangeNew`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem physRangeNew : PhysRangeNew := by
-  sorry
+public theorem physRangeNew : PhysRangeNew := fun _ => phys_range_new_spec
 
 /-- Proves `PhysRangeEnd`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem physRangeEnd : PhysRangeEnd := by
-  sorry
+public theorem physRangeEnd : PhysRangeEnd := fun _ => phys_range_end_repr_spec
 
 /-- Proves `PhysRangeContains`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem physRangeContains : PhysRangeContains := by
-  sorry
+public theorem physRangeContains : PhysRangeContains := fun _ => phys_range_contains_repr_spec
 
 /-- Proves `PhysRangeOverlaps`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem physRangeOverlaps : PhysRangeOverlaps := by
-  sorry
+public theorem physRangeOverlaps : PhysRangeOverlaps := fun _ => phys_range_overlaps_repr_spec
 
 /-- Proves `TablesLookupPage`. Feature: `krepi.kernel.kernel-memory`. -/
 public theorem tablesLookupPage : TablesLookupPage := by
@@ -52,12 +47,10 @@ public theorem tablesLookupBlock : TablesLookupBlock := by
   sorry
 
 /-- Proves `TablesUsed`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem tablesUsed : TablesUsed := by
-  sorry
+public theorem tablesUsed : TablesUsed := fun _ _ _ s => used_spec s
 
 /-- Proves `TablesNew`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem tablesNew : TablesNew := by
-  sorry
+public theorem tablesNew : TablesNew := fun _ _ upper pool => new_spec upper pool
 
 /-- Proves `TablesReset`. Feature: `krepi.kernel.kernel-memory`. -/
 public theorem tablesReset : TablesReset := by
@@ -68,8 +61,7 @@ public theorem tablesCloneKernelFrom : TablesCloneKernelFrom := by
   sorry
 
 /-- Proves `ClonePlanNext`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem clonePlanNext : ClonePlanNext := by
-  sorry
+public theorem clonePlanNext : ClonePlanNext := fun _ _ _ _ _ h => advances_of_stands h
 
 /-- Proves `TablesMapPage`. Feature: `krepi.kernel.kernel-memory`. -/
 public theorem tablesMapPage : TablesMapPage := by

@@ -1500,7 +1500,7 @@
       "name": "Krepi.Statements.PageTables.KernelMapPlanNext",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Boot.kernelMapPlanNext",
       "module": "Krepi.Proofs.PageTables.Refinement.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.DirectMap",
@@ -1512,7 +1512,7 @@
       "name": "Krepi.Statements.PageTables.DirectMapPlanNext",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Boot.directMapPlanNext",
       "module": "Krepi.Proofs.PageTables.Refinement.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.OwnershipNew",
@@ -1584,37 +1584,37 @@
       "name": "Krepi.Statements.PageTables.Descriptor",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.descriptor",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.DirectAddress",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.directAddress",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.PhysRangeNew",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.physRangeNew",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.PhysRangeEnd",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.physRangeEnd",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.PhysRangeContains",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.physRangeContains",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.PhysRangeOverlaps",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.physRangeOverlaps",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.TablesLookupPage",
@@ -1632,13 +1632,13 @@
       "name": "Krepi.Statements.PageTables.TablesUsed",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesUsed",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.TablesNew",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesNew",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.TablesReset",
@@ -1656,7 +1656,7 @@
       "name": "Krepi.Statements.PageTables.ClonePlanNext",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.clonePlanNext",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.TablesMapPage",
