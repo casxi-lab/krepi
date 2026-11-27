@@ -1165,10 +1165,11 @@ the merge, are among the required checks of `main`.
   comparator run. Its disk guard counts the lane.
 - **The comparator run of a lane** has the phase `comparator` alone
   ([comparator](#comparator)): it takes the one base record of the lane of
-  the same commit and run of CI below the runs directory, continues the
-  deadline of that base run, checks the proved statements of the lane in
-  the stage that the base run kept, and writes the receipt of the lane,
-  below. Its phase has at most 1,800 s, and its disk guard counts the lane.
+  the same commit, tree, image and run of CI below the runs directory,
+  continues the deadline of that base run, checks the proved statements of
+  the lane in the stage that the base run kept, and writes the receipt of
+  the lane, below. Its phase has at most 1,800 s, and its disk guard counts
+  the lane.
 - **The part of a target** has the extraction of that formal target, whose
   commands are those of its unit, and the phase `targets` for it: its
   build, type check, audit, declaration ranges and registered
@@ -1253,7 +1254,13 @@ finds nothing, and each finding is a problem:
   lists is held by exactly one of the job and the lanes, and each module
   that they hold is in that list;
 - **`names`**: no public constant that the audit of a base round reports
-  for the modules of its root, below, is declared by two parts;
+  for the modules of its root, below, is declared by two parts, but a
+  theorem that each part declares with the same fingerprint, the hash of
+  its type and its universe parameters: Lean imports such a theorem from
+  two modules, as it does the `congr_eq` equations that it generates for
+  a `match` in each module that uses them, and refuses any other pair of
+  constants of one name, a theorem and a definition, or two theorems of
+  different types or universe parameters among them;
 - **`waivers`**: each lane leaves out of its round exactly those of its
   modules that the qualification job lists in `left_out`, the closure of
   what the waivers that held for it leave out;
@@ -1828,12 +1835,17 @@ Lean of the snapshot with the generated modules of the proof cases of the
 qualification and of the targets that the run extracted, with a budget of
 3,600 s. It runs over a part of the hand-written modules, as the
 [lanes](#lanes) divide them: in the qualification job, after the
-qualification, over the modules below `Krepi/Qualification/`, and those of
-no lane, with the proof cases; in the base run of a lane, after the
+qualification, over the modules below `Krepi/Qualification/`, with the
+proof cases; in the base run of a lane, after the
 extraction of its targets, over its own modules, those of its components
 and the shared modules that it lists, with the generated modules of its
 targets; and in a run without `--shard` and `--target`, after the
-qualification and the extraction, over all of them. The part of a target,
+qualification and the extraction, over all of them. A module of no lane is
+in no part, so that the merge finds it held by none. The qualification job
+of the [calibration target](#calibration-target) has no module and no
+proof case, so its root imports no module; its round builds, audits and
+replays that root all the same, as the hard gates of the merge require of
+each base round. The part of a target,
 the comparator run of a lane and a run of
 `cargo xtask formal run --target` have no base round. Its units are
 `base`, or `base/lane/<name>` in a lane, and `base/<theorem>` for each
@@ -1934,25 +1946,36 @@ qualification cases, `KrepiGen.<module>.FunsExternal` and
 error or a warning whose line names the file of an own module, and a tool
 failure otherwise ([results](#results)).
 
-**Audit.** `Audit.lean` is not a module. It imports the root, sets
-`pp.privateNames`, states `example : S := t` for the theorem `t` of each
-proved statement `S` of a module of the part in the stage, and runs a
-program that, for each own module that the root imports, prints a marker,
-runs `#print axioms` on each theorem constant of the module that is not
-private, not an internal detail and not the theorem of a planned
+**Audit.** `Audit.lean` is not a module. It imports `Lean`, whose
+elaborator its programs use also when the root imports no module, and the
+root, sets `pp.privateNames`, states `example : S := t` for the theorem
+`t` of each proved statement `S` of a module of the part in the stage, and
+runs a program that, for each own module that the root imports, prints a
+marker, runs `#print axioms` on each theorem constant of the module that
+is not private, not an internal detail and not the theorem of a planned
 statement, prints the module that declares each of its native-decision
 axioms, and prints the line at which each theorem's declaration range
 starts; it then prints, for each proved statement, the module that defines
 `S` and whether the type of `t` in the environment is the constant `S`
 itself. The `example` alone would not show that: elaborating `t` against
 `S` may insert a coercion, apply an instance or fill an argument that the
-proofs declare. A second program prints `krepi-name <constant>` for each
-constant of each module that the root imports that is neither private nor
-an internal detail: the public constants of the round, which its lane
-record lists for the check `names` of the merge ([shards and
-merge](#shards-and-merge)). The list of theorems is Lean's, so it holds
-the theorems that Lean generates, such as `injEq` and `congr_eq` lemmas,
-and theorems that a metaprogram adds. The round rejects
+proofs declare. A second program prints
+`krepi-name <constant> <kind> <fingerprint>` for each constant of each
+module that the root imports that is neither private nor an internal
+detail, as that module declares it: its kind, `theorem` or `other`, and
+the fingerprint `<hash>[<parameters>]`: the hash of its type, which Lean
+computes from the structure of the type alone, so that it is the same in
+every environment for the same type, and its universe parameters,
+separated by commas. These are the public constants of the round, which
+its lane record lists for the check `names` of the merge ([shards
+and merge](#shards-and-merge)). The list of theorems is Lean's, so it
+holds the theorems that Lean generates, such as `injEq` and `congr_eq`
+lemmas, and theorems that a metaprogram adds; Lean generates the
+`congr_eq` equations of a `match` in each module that uses them, so two
+parts may declare the same theorem, which the check admits. A constant
+that is an internal detail is not in the list, so the check does not see
+two such constants of one name, which Lean would not import together. The
+round rejects
 
 - an axiom of a theorem that the allowlist does not allow for its kind;
 - a registered proved theorem that the audit does not report in its
@@ -2175,11 +2198,13 @@ cannot read them. It
 
 1. reads the base records below the runs directory,
    `artifacts/formal/runs/`, or the directory that `KREPI_FORMAL_RUNS`
-   names, and takes the one base record of the same lane, commit and
-   `run_id` of the trigger; when there is none or more than one, as when
-   a build below that directory wrote another, the phase stops, so that
-   the units are `NOT_RUN` and the run is a tool failure. The run then
-   takes the deadline of the base run, from its start and its budget.
+   names, and takes the one base record of the same lane, commit, tree,
+   image and `run_id` of the trigger; when there is none or more than one,
+   as when a build below that directory wrote another, the phase stops, so
+   that the units are `NOT_RUN` and the run is a tool failure. The run then
+   takes the deadline of the base run, from its start and its budget; the
+   commands of the run before its phase, such as those of its export, have
+   the deadline that its own start and the same budget give.
    Without a unit, it runs no command, and the
    receipt of the lane has the units of the base run alone; with one, a
    base record without a base round stops the phase as well;
@@ -2642,7 +2667,7 @@ The `base` record has these fields:
 | `own` | krepi's own modules in the stage, whose messages decide a failed build |
 | `planned` | The modules of planned statements, built without `--wfail` |
 | `theorems` | For each theorem that the audit reported or `statements.json` registers: its `module`; its `kind`, `specification`, `qualification` or `target`; its `state` in `statements.json`, `proved` or `planned`, or `null` for a theorem that is not registered; the `axioms` that the audit reported, or `null`; its `status`; and its `problems`. The status of a registered proved theorem is that of its unit, that of a planned one `NOT_RUN`, and that of any other `VERIFIED` without problems, `REJECTED` with them, or the status that forced `base` |
-| `leanchecker` | `version`, the version line of `lean --version`, or `null`; `sha256`, of the `leanchecker` program; `mode`, `fresh`; `prefixes`, the module that it replays, `Krepi`; `module`, the root module that it imports, `Krepi`; `seconds`, of the replay; `max_rss`, the largest maximum resident set of a process that the run had collected when the replay ended, in bytes, or `null`; and `max_rss_own`, whether that grew during the replay, so that it is the replay's own |
+| `leanchecker` | `version`, the version line of `lean --version`, or `null`; `sha256`, of the `leanchecker` program; `mode`, `fresh`; `prefixes`, the module that it replays, `Krepi`; `module`, the root module that it imports, `Krepi`; `seconds`, of the replay; `max_rss`, the largest maximum resident set of a process that the run had collected when the replay ended, in bytes, or `null`, an upper bound of the largest resident set of the replay; and `max_rss_own`, whether that grew during the replay, so that it is the replay's own, while otherwise it is that of an earlier process |
 | `heartbeats` | `method`, `count_heartbeats`; `counts`, the heartbeats of each theorem with a declaration range; and `missing`, why such a theorem, by its name, or a file, by its path, has none |
 | `problems` | The problems that reject `base` |
 
@@ -2654,7 +2679,7 @@ The `lane` record has these fields:
 | `components` | The components of the lane, as the lanes give them |
 | `modules` | The hand-written modules of the part, those left out included |
 | `left_out` | Those of them that the waivers leave out, with the target of the waiver |
-| `constants` | The public constants of the modules that the root imports, as the audit printed them, sorted |
+| `constants` | The public constants of the modules that the root imports, as the audit printed them, each `<name> <kind> <fingerprint>`, sorted ([base round](#base-round)); one theorem may be in two parts ([shards and merge](#shards-and-merge)) |
 | `targets` | Each target that a lane extracted, with its role: `formal`, a formal target of its components; `planned`, a planned one of them that its own modules import; or `cone`, one that the modules that they reach import, for the stage alone |
 
 Each record of `proof_targets` has these fields:
@@ -2916,7 +2941,9 @@ Its steps then
    it, within a minute;
 5. always, with workflow commands turned off, write a summary of the base
    record and of the receipt of the lane, with the outcome of both steps,
-   the seconds and the largest process of the replay and the resources, to
+   the seconds of the replay, the upper bound `max_rss` of its largest
+   resident set with `max_rss_own`, whether it is the replay's own
+   ([receipt](#receipt)), and the resources, to
    the summary of the workflow run and `summary.md`, and pack the `logs/`
    of both runs into `logs.tar.gz`. The step fails when the comparator's
    step ran and the job left no receipt;
@@ -4271,11 +4298,11 @@ in a checkout are not evidence; only a run of the gate produces receipts.
   pass the allowlist, or the unit is not run ([comparator](#comparator)).
 - The comparator of a lane is not isolated from the base build of its
   lane. In CI it runs a copy of xtask that the base run cannot write and
-  requires exactly one base record of its lane, commit and run, which it
-  reads again before it writes the receipt of the lane, but the stage's
-  build outputs and the copied sources that its challenges import are
-  written by the base build of the lane, which has no sandbox, so a
-  metaprogram of a proof module could tamper with them. The
+  requires exactly one base record of its lane, commit, tree, image and
+  run, which it reads again before it writes the receipt of the lane, but
+  the stage's build outputs and the copied sources that its challenges
+  import are written by the base build of the lane, which has no sandbox,
+  so a metaprogram of a proof module could tamper with them. The
   [guard](#guard), the review of the specifications and the replay with
   `leanchecker` remain; isolating the comparator further is future work.
 - The gate runs the workflows and the xtask of the head that it judges,
