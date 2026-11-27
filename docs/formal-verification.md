@@ -1911,7 +1911,8 @@ the phase. Then it
    imports them. The library `KrepiRoot` of `lakefile.toml` builds it as
    `+Krepi`; the library `Krepi` takes only the modules below the root, so
    that a stage without the root, such as that of a qualification case,
-   still builds by default. In the qualification job and a run without a
+   still builds by default; the [comparator](#comparator) of a lane gives
+   it the root alone. In the qualification job and a run without a
    part, the round rejects a planned statement whose module has no file.
 
 No problem of these steps stops the commands, so that the audit and
@@ -2209,7 +2210,16 @@ cannot read them. It
    receipt of the lane has the units of the base run alone; with one, a
    base record without a base round stops the phase as well;
 2. adds the Lean library `KrepiChallenge` to the `lakefile.toml` of the
-   stage of that round, once however often the comparator runs on it;
+   stage of that round, once however often the comparator runs on it, and
+   gives the library `Krepi` of that file the root alone,
+   `globs = ["Krepi"]` for `globs = ["Krepi.+"]`. Lake takes the name of
+   the solution, `Krepi`, for that library before the root module, and the
+   stage of a lane holds the hand-written modules of every part but only
+   the generated modules of the targets that the lane extracted, so that a
+   build of every module below `Krepi` fails on those of the other parts.
+   The build of the solution is thus that of the root and of what it
+   imports, which the base round built, and no module of another part is
+   built or exported;
 3. concludes each unit:
    - `SCOPED` when the base round left the statement of one of its
      theorems out under a [waiver](#waivers), which makes
