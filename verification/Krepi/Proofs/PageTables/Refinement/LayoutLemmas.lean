@@ -30,10 +30,11 @@ layout for `kernel_map`, each against the checks of `Tables.kernelMap`.
 - The leaf search of the plan: `viewOf`, `layout_leaf_loop_spec`,
   `layout_leaf_spec` (`layoutFind`), `foundLow_of_layoutFind`, and
   `kernel_map_plan_next_spec` (`KernelMapPlan::next` is one `Cur.step`).
-- `max_layout_ranges_eq` and `kernel_map_set_spec`: `kernel_map` gives the
-  error of `Tables.kernelMap` with the set unchanged, or its set after the
-  write phase, for a record of the set at least `2 ^ 33` below the largest
-  `usize`; it does not relate the plan iterator.
+- `max_layout_ranges_eq`, `KernelMapStart` and `kernel_map_set_spec`:
+  `kernel_map` gives the error of `Tables.kernelMap` with the set unchanged,
+  or its set after the write phase and a plan iterator at its start, for a
+  record of the set at least `2 ^ 33` below the largest `usize`; that the
+  iterator stands for `mapPlan` is not proved.
 -/
 
 @[expose] public section
@@ -603,17 +604,29 @@ theorem sort_ranges_repr_spec (ranges : Aeneas.Std.Array page_tables.LayoutRange
 theorem max_layout_ranges_eq : page_tables.MAX_LAYOUT_RANGES = 16#usize := by
   unfold page_tables.MAX_LAYOUT_RANGES; rfl
 
+/-- The plan iterator that `kernel_map` returns on success, before its first
+call: the set after the write phase, `base`, the cursor before the first
+leaf with the record of the set before the write phase, and the first
+`count` ranges of the layout sorted, standing for the sorted ranges of the
+layout. -/
+def KernelMapStart {N : Usize} (s : page_tables.Tables N false) (layout : page_tables.Layout)
+    (L : Layout) (base : U64) (it : page_tables.KernelMapPlan N) : Prop :=
+  it.set.pool = s.pool ∧ it.base = base ∧ it.cursor = startCursor s.used ∧
+    it.count = layout.count ∧
+    ListRel LayoutRangeRepr (it.ranges.val.take it.count.val)
+      (sortByKey (·.range.start.toNat) L.ranges)
+
 /-- `kernel_map(set, layout, base, bits)` for a layout that stands for a
 layout and a record of the set at least `2 ^ 33` below the largest `usize`:
 the error of `Tables.kernelMap` with the set unchanged, or its set after the
-write phase. The plan iterator that it returns is not related here: its
-simulation of `mapPlan` is not proved. -/
+write phase with a plan iterator at its start (`KernelMapStart`). That the
+iterator stands for `mapPlan` (the simulation) is not proved here. -/
 theorem kernel_map_set_spec {N : Usize} (s : page_tables.Tables N false)
     (layout : page_tables.Layout) (L : Layout) (base : U64) (bits : U8)
     (hL : LayoutRepr layout L) (hov : s.used.val + 2 ^ 33 ≤ Usize.max) :
     page_tables.kernel_map s layout base bits ⦃ r s' =>
-      Writes (fun s' S => tablesOf s' = S) (fun _ _ => True) (tableErrorOf · = ·) s r s'
-        ((tablesOf s).kernelMap L (word64 base) (byte bits)) ⦄ := by
+      Writes (fun s' S => tablesOf s' = S) (fun it _ => KernelMapStart s layout L base it)
+        (tableErrorOf · = ·) s r s' ((tablesOf s).kernelMap L (word64 base) (byte bits)) ⦄ := by
   obtain ⟨hc16, hR, hg⟩ := hL
   have hc : layout.count.val ≤ 16 := hc16
   unfold page_tables.kernel_map
@@ -655,8 +668,11 @@ theorem kernel_map_set_spec {N : Usize} (s : page_tables.Tables N false)
         rw [hr2] at r2_post
         cases r2_post.1
       · simp only [hcond, ↓reduceIte] at r2_post ⊢
-        refine ⟨trivial, ?_⟩
-        rw [r2_post.2]
+        rw [hr2] at r2_post
+        obtain ⟨hv1, hs1⟩ := r2_post
+        cases hv1
+        refine ⟨⟨by rw [hs1], rfl, rfl, rfl, hR'⟩, ?_⟩
+        rw [hs1]
         rfl
     · obtain ⟨⟨earlier, leaves⟩, hy, hrel⟩ :=
         agrees_ok_iff.1 (agrees_of_branch_ok cf1_post ‹_› hr1)
