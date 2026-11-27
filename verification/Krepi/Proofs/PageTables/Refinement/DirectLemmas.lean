@@ -967,4 +967,22 @@ theorem searchOk_start {N : Usize} {s : page_tables.Tables N true}
   · exact ⟨by decide, Or.inr rfl, by decide⟩
   · exact ⟨(hne u hu).1.2, Or.inl (Krepi.Proofs.Fdt.nonempty_lt (hne u hu).1), hlow u hu⟩
 
+/-- **The leaf search of the plan as the first leaf at or above an
+address.** For a state of the plan whose ranges are those of the start
+without first ranges that end at or below `b`, over usable ranges `Us`
+nonempty, on pages, within 64 bits and apart in address order, the search
+from an address at or above `b` where a leaf starts is `firstFound` of the
+leaves of the direct map of `Us`. -/
+theorem directFind_eq_firstFound {M Rs Us sk : List Krepi.Spec.Fdt.Span}
+    {ranges : fdt.AvailableRanges} {range : fdt.Span} {b : Nat}
+    (h : (⟨0, 0⟩ :: Us : List Krepi.Spec.Fdt.Span) = sk ++ searchList M Rs ranges range)
+    (hb : ∀ u ∈ sk, u.endNat ≤ b)
+    (hUs : ∀ u ∈ Us, u.start.toNat < u.endNat ∧ u.start.toNat % PAGE_SIZE = 0 ∧
+      u.endNat % PAGE_SIZE = 0 ∧ u.endNat < 2 ^ 64)
+    (hpw : Us.Pairwise (fun a b => a.endNat ≤ b.start.toNat)) (f l : Nat) (p : Bool) (hf : b ≤ f)
+    (hls : ∀ u ∈ Us, u.start.toNat < f → f < u.endNat → LeafStart u.start.toNat u.endNat f) :
+    directFind M Rs ranges range f l p =
+      firstFound ((Us.flatMap usableLeaves).map foundOfLeaf) f l p := by
+  rw [directFind_eq_of_skip h hb f l p hf, usableFind_eq_firstFound Us f hUs hpw hls]
+
 end Krepi.Proofs.PageTables.Refinement
