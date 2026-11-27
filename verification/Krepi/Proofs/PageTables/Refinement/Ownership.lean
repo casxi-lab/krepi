@@ -23,8 +23,9 @@ namespace Krepi.Proofs.PageTables.Refinement.Ownership
 open Krepi.Statements.PageTables Krepi.Proofs.PageTables.Refinement
 
 /-- Proves `OwnershipNew`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem ownershipNew : OwnershipNew := by
-  sorry
+public theorem ownershipNew : OwnershipNew :=
+  fun _ E X arena banks exclusions Bs Xs hB hX =>
+    ownership_new_spec E X arena banks exclusions Bs Xs hB hX
 
 /-- Proves `OwnershipChoose`. Feature: `krepi.kernel.kernel-memory`. -/
 public theorem ownershipChoose : OwnershipChoose :=
