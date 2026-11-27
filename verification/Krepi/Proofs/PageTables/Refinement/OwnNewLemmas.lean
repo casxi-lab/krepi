@@ -81,7 +81,8 @@ theorem own_touchesPage_repr {r : page_tables.PhysRange} {R : PhysRange} (h : Ph
 /-! ## The owner of a page -/
 
 /-- `in_banks(banks, count, page)`: whether one of the first `count` banks
-holds the page, for banks that stand for the banks `Bs`. -/
+holds the page, for a count within the array whose first `count` banks stand
+for the banks `Bs`. -/
 @[step] theorem in_banks_spec {E : Usize} (banks : Aeneas.Std.Array page_tables.PhysRange E)
     (count : Usize) (page : U64) (Bs : List PhysRange)
     (hB : ListRel PhysRangeRepr (banks.val.take count.val) Bs) (hc : count.val ≤ E.val) :
@@ -114,8 +115,8 @@ holds the page, for banks that stand for the banks `Bs`. -/
   · exact ⟨by simp, by simp⟩
 
 /-- `holding_extent(extents, count, page)`: the index of the first of the
-first `count` extents that holds the page, for extents that stand for the
-extents `L`. -/
+first `count` extents that holds the page, for a count within the array whose
+first `count` extents stand for the extents `L`. -/
 @[step] theorem holding_extent_spec {E : Usize} (extents : Aeneas.Std.Array page_tables.Extent E)
     (count : Usize) (page : U64) (L : List Extent)
     (hL : ListRel ExtentRepr (extents.val.take count.val) L) (hc : count.val ≤ E.val) :
@@ -172,9 +173,9 @@ one found, in the order of `rankOf`. -/
   | some o => step*
 
 /-- `first_excluder(records, count, page)`: the first owner, in the order of
-`rankOf`, of the first `count` exclusion records that touch the page, for
-records that stand for the exclusions `Xs` and a page that does not end past
-$2^{64}$. -/
+`rankOf`, of the first `count` exclusion records that touch the page, for a
+count within the array whose first `count` records stand for the exclusions
+`Xs`, and a page that does not end past $2^{64}$. -/
 @[step] theorem first_excluder_spec {X : Usize}
     (records : Aeneas.Std.Array page_tables.Exclusion X) (count : Usize) (page : U64)
     (Xs : List Exclusion) (hX : ListRel ExclusionRepr (records.val.take count.val) Xs)
@@ -284,9 +285,12 @@ $2^{64}$. -/
 
 /-! ## Statistics -/
 
-/-- The loop of `extent_stats`: from the counters of the extents before
-`index`, those of all extents, for extents that stand for the extents `L`
-whose lengths from `index` on sum with `m` to less than $2^{64}$. -/
+/-- The loop of `extent_stats` from `index`, for a count within the array
+whose first `count` extents stand for the extents `L`, and `index` at most
+`count`: counters `m`, `f`, `a`, `n`, `k`, `big` whose statistics, folded over
+the extents from `index` on, are `S`, with `f` and `a` at most `m`, `n + k`
+at most `index`, and `m` with the lengths of the extents from `index` on
+below $2^{64}$, give the counters of `S`. -/
 theorem extent_stats_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_tables.Extent E)
     (count : Usize) (L : List Extent) (hL : ListRel ExtentRepr (extents.val.take count.val) L)
     (hc : count.val ≤ E.val) (S : Stats) (c cap : Nat)
@@ -378,8 +382,8 @@ theorem extent_stats_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_tabl
   · exact ⟨hidx, hinv, hsum, hf, ha, hn⟩
 
 /-- `extent_stats(extents, count)`: the statistics of the first `count`
-extents, for extents that stand for the extents `L`, whose lengths sum to
-less than $2^{64}$. -/
+extents, for a count within the array whose first `count` extents stand for
+the extents `L`, whose lengths sum to less than $2^{64}$. -/
 @[step] theorem extent_stats_spec {E : Usize} (extents : Aeneas.Std.Array page_tables.Extent E)
     (count : Usize) (L : List Extent) (hL : ListRel ExtentRepr (extents.val.take count.val) L)
     (hc : count.val ≤ E.val) (hsum : (L.map (·.range.len.toNat)).sum < 2 ^ 64) :
@@ -569,9 +573,10 @@ theorem cut_eq_cutNat {r bank : page_tables.PhysRange} {X : Exclusion} {B : Phys
     physRange_start hb, physRange_endNat hb]
   simp only [pageDown, pageUp, PAGE_SIZE, decide_eq_true_eq]
 
-/-- `cut(exclusion, bank)`: the pages `[start, stop)` of a bank on pages that
-an exclusion touches, `cutNat` (`Exclusion.cut`, `cut_eq_cutNat`), for ranges
-whose ends fit in 64 bits. -/
+/-- `cut(exclusion, bank)`: the pages `[start, stop)` of the bank that the
+exclusion touches, `cutNat` (`Exclusion.cut`, `cut_eq_cutNat`), for an
+exclusion whose end fits in 64 bits and a bank whose end fits in 64 bits and
+is a multiple of 4 KiB. -/
 @[step] theorem cut_spec (r bank : page_tables.PhysRange)
     (hfx : r.start.val + r.len.val < 2 ^ 64) (hfb : bank.start.val + bank.len.val < 2 ^ 64)
     (hbe : (bank.start.val + bank.len.val) % 4096 = 0) :
@@ -682,7 +687,11 @@ for `B`. -/
     rw [nearest_post, ← physRange_endNat hb]
     rfl
 
-/-- The loop of `insert_bank`: the ranges above `bank` move up by one. -/
+/-- The loop of `insert_bank` from the gap at `pos`, for an array that holds
+the first `pos` ranges of `P`, a gap, the other ranges of `P` and `rest`,
+with `pos` at most the length of `P` and the ranges of `P` from `pos` on
+starting above `bank`: the ranges of `P` that start above `bank` move up by
+one, and the gap stops after the last range whose start is at or below. -/
 theorem insert_bank_loop_spec {E : Usize} (sorted : Aeneas.Std.Array page_tables.PhysRange E)
     (bank : page_tables.PhysRange) (pos : Usize) (P rest : List page_tables.PhysRange)
     (X0 : page_tables.PhysRange) (h : sorted.val = P.take pos.val ++ X0 :: (P.drop pos.val ++ rest))
@@ -735,8 +744,9 @@ theorem insert_bank_loop_spec {E : Usize} (sorted : Aeneas.Std.Array page_tables
   · exact ⟨hpos, ⟨X0, h⟩, hafter⟩
 
 /-- `insert_bank(sorted, count, bank)`: the bank inserted into the first
-`count` ranges, in ascending order of their starts, after those whose start
-is at or below its own and before the others. -/
+`count` ranges, after those whose start is at or below its own and before
+the others, for `count` below `E` and first `count` ranges in ascending
+order of their starts. -/
 @[step] theorem insert_bank_spec {E : Usize} (sorted : Aeneas.Std.Array page_tables.PhysRange E)
     (count : Usize) (bank : page_tables.PhysRange) (hc : count.val < E.val)
     (hs : (sorted.val.take count.val).Pairwise (fun a b => a.start.val ≤ b.start.val)) :
@@ -814,8 +824,12 @@ starts in the first entries of `sorted`, for at most `E` banks that stand for
       · rwa [h1, List.take_length] at hperm
   · exact ⟨by simp, [], by simp, by simp, by simp⟩
 
-/-- The loop of `bank_extents`: from the address `at1` of the bank `⟨s, l⟩`,
-the free extents of the runs from `at1` on, after the extents `D` before. -/
+/-- The loop of `bank_extents` from the address `at1`, for a bank `⟨s, l⟩` on
+pages that stands for `B`, exclusions that stand for `Xs`, a count `used` at
+most `E` whose first `used` extents stand for `D`, and `at1` at or above the
+start of the bank and strictly inside no free run: the extents `T`, which
+are `D` and the free extents of the runs from `at1` on, or
+`MetadataExhausted` when they are more than `E`. -/
 theorem bank_extents_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_tables.Extent E)
     (used index : Usize) (s l : U64) (exclusions : Slice page_tables.Exclusion) (at1 : U64)
     (Xs : List Exclusion) (B : PhysRange) (hX : ListRel ExclusionRepr exclusions.val Xs)
@@ -935,9 +949,10 @@ theorem bank_extents_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_tabl
   · exact ⟨hu, hlo, hin, D, hD, hT⟩
 
 /-- `bank_extents(extents, used, index, bank, exclusions)`: the free extents
-of the bank of index `index`, after the extents `D` before, for a bank on
-pages that stands for `B` and exclusions that stand for `Xs`; or
-`MetadataExhausted` when they are more than `E`. -/
+of the bank of index `index` after the extents `D`, for a bank on pages that
+stands for `B`, exclusions that stand for `Xs`, and a count `used` at most
+`E` whose first `used` extents stand for `D`; or `MetadataExhausted` when
+they are more than `E`. -/
 @[step] theorem bank_extents_spec {E : Usize} (extents : Aeneas.Std.Array page_tables.Extent E)
     (used index : Usize) (bank : page_tables.PhysRange) (exclusions : Slice page_tables.Exclusion)
     (Xs : List Exclusion) (B : PhysRange) (D : List Extent)
@@ -958,9 +973,9 @@ pages that stands for `B` and exclusions that stand for `Xs`; or
     (by rw [← physRange_start hb, h1, own_bankExtents_eq])
 
 /-- `initial_extents(extents, banks, count, exclusions)`: the free extents of
-the first `count` banks, `initialExtents`, for banks on pages that stand for
-`SB` and exclusions that stand for `Xs`; or `MetadataExhausted` when they are
-more than `E`. -/
+the first `count` banks, `initialExtents`, for `count` at most `E`, first
+`count` banks on pages that stand for `SB`, and exclusions that stand for
+`Xs`; or `MetadataExhausted` when they are more than `E`. -/
 @[step] theorem initial_extents_spec {E : Usize} (extents : Aeneas.Std.Array page_tables.Extent E)
     (banks : Aeneas.Std.Array page_tables.PhysRange E) (count : Usize)
     (exclusions : Slice page_tables.Exclusion) (SB : List PhysRange) (Xs : List Exclusion)

@@ -350,8 +350,9 @@ theorem own_sorted_eq {Bs Q : List PhysRange} (ho : anyOverlap Bs = false) (hp :
   · exact Nat.lt_of_le_of_ne h.1 h.2
   · exact Nat.lt_of_le_of_ne h.1 h.2
 
-/-- The items before index `k` of a list in ascending order of a key are at
-most a bound that the item before `k` is at most. -/
+/-- For a list in ascending order of a key and `k` at most its length, the
+items before index `k` are at most a bound that the item of index `k - 1`,
+when there is one, is at most. -/
 theorem own_take_le_of_sorted {α : Type} {key : α → Nat} {P : List α} {k b : Nat}
     (hs : P.Pairwise (fun x y => key x ≤ key y)) (hk : k ≤ P.length)
     (hlast : ∀ y, 0 < k → P[k - 1]? = some y → key y ≤ b) : ∀ y ∈ P.take k, key y ≤ b := by
@@ -510,7 +511,9 @@ section Runs
 
 variable {C : List (Nat × Nat)} {lo hi : Nat}
 
-/-- What `cutAll` of nonempty cuts gives from one nonempty run. -/
+/-- What `cutAll` of nonempty cuts gives from one nonempty run `[lo, hi)`:
+the free addresses, runs apart from each other in order, each nonempty and
+inside `[lo, hi)`. -/
 theorem own_runs_facts (hC : ∀ c ∈ C, c.1 < c.2) (hlh : lo < hi) :
     (∀ p, (∃ r ∈ cutAll C [(lo, hi)], r.1 ≤ p ∧ p < r.2) ↔
       (lo ≤ p ∧ p < hi) ∧ ∀ c ∈ C, ¬ (c.1 ≤ p ∧ p < c.2)) ∧
@@ -524,7 +527,9 @@ theorem own_runs_facts (hC : ∀ c ∈ C, c.1 < c.2) (hlh : lo < hi) :
     subst h1
     exact ⟨h2.1, h2.2⟩
 
-/-- A cut that covers `[p, q)`: the runs from `p` on are those from `q` on. -/
+/-- For nonempty cuts and a nonempty run `[lo, hi)`: a cut that starts at or
+below `p` and ends at `q` above `p`, with `p` strictly inside no run, leaves
+the runs from `p` on those from `q` on, and `q` strictly inside no run. -/
 theorem own_runs_skip (hC : ∀ c ∈ C, c.1 < c.2) (hlh : lo < hi) {p q : Nat} (hpq : p < q)
     (hc : ∃ c ∈ C, c.1 ≤ p ∧ c.2 = q) (hin : NotInside (cutAll C [(lo, hi)]) p) :
     (cutAll C [(lo, hi)]).filter (fun r => decide (p ≤ r.1)) =
@@ -544,9 +549,12 @@ theorem own_runs_skip (hC : ∀ c ∈ C, c.1 < c.2) (hlh : lo < hi) {p q : Nat} 
     · exact hin r hr ⟨h', by omega⟩
     · exact key r hr ⟨by omega, h.1⟩
 
-/-- A free address `p` whose free pages reach `q`, the nearest start of a cut
-above `p` or the end: the runs from `p` on are `[p, q)` and the runs from `q`
-on. -/
+/-- For nonempty cuts and a nonempty run `[lo, hi)`: an address `p` in it
+that no cut covers (every cut that starts at or below `p` ends there or
+before), strictly inside no run, and `q` above `p`, at most `hi`, at most
+the start of every cut above `p`, and `hi` or such a start: the runs from
+`p` on are `[p, q)` and the runs from `q` on, and `q` is strictly inside no
+run. -/
 theorem own_runs_take (hC : ∀ c ∈ C, c.1 < c.2) (hlh : lo < hi) {p q : Nat} (hp : lo ≤ p)
     (hph : p < hi) (hreach : ∀ c ∈ C, c.1 ≤ p → c.2 ≤ p) (hpq : p < q) (hqh : q ≤ hi)
     (hnear : ∀ c ∈ C, p < c.1 → q ≤ c.1) (hq : q = hi ∨ ∃ c ∈ C, p < c.1 ∧ c.1 = q)
@@ -608,14 +616,16 @@ theorem own_runs_take (hC : ∀ c ∈ C, c.1 < c.2) (hlh : lo < hi) {p q : Nat} 
     · subst hr'; omega
     · rcases hsep r hr hr' with h' | h' <;> omega
 
-/-- No run starts at or above the end. -/
+/-- For nonempty cuts and a nonempty run `[lo, hi)`, no run starts at or
+above `hi`. -/
 theorem own_runs_end (hC : ∀ c ∈ C, c.1 < c.2) (hlh : lo < hi) {p : Nat} (hp : hi ≤ p) :
     (cutAll C [(lo, hi)]).filter (fun r => decide (p ≤ r.1)) = [] := by
   obtain ⟨-, -, hrun⟩ := own_runs_facts hC hlh
   exact List.filter_eq_nil_iff.2 fun r hr => by
     have := hrun r hr; simp only [decide_eq_true_eq]; omega
 
-/-- From the start of the bank, every run is ahead and none is around. -/
+/-- For nonempty cuts and a nonempty run `[lo, hi)`, every run starts at or
+above `lo`, and `lo` is strictly inside none. -/
 theorem own_runs_start (hC : ∀ c ∈ C, c.1 < c.2) (hlh : lo < hi) :
     (cutAll C [(lo, hi)]).filter (fun r => decide (lo ≤ r.1)) = cutAll C [(lo, hi)] ∧
     NotInside (cutAll C [(lo, hi)]) lo := by
