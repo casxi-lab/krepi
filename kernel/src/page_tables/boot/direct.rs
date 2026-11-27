@@ -98,7 +98,7 @@ pub(in crate::page_tables) fn check_usable<const N: usize>(
     bits: u8,
 ) -> Result<MapCheck, TableError> {
     let mut ranges = ranges;
-    let mut check = MapCheck::new(set.used);
+    let mut check = MapCheck::new();
     while let Some(range) = ranges.next() {
         check_range(set, &mut check, range, base, bits)?;
     }

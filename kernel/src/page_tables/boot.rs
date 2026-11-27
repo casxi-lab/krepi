@@ -88,22 +88,23 @@ impl<const N: usize, const UPPER: bool> Tables<N, UPPER> {
 }
 
 /// The checks of a map so far: the end of the ranges before the current
-/// one, and the new tables of the leaves checked, as the next free index
-/// with the 1 GiB slot of the latest new level 2 table and the 2 MiB slot of
-/// the latest new level 3 table.
+/// one, and the new tables of the leaves checked, as their number with the
+/// 1 GiB slot of the latest new level 2 table and the 2 MiB slot of the
+/// latest new level 3 table. The number starts from 0 whatever the record
+/// of the set, so that it stays within `usize` on any record.
 pub(super) struct MapCheck {
     reach: u64,
-    next: usize,
+    new_tables: usize,
     gib: u64,
     slot: u64,
 }
 
 impl MapCheck {
-    /// The checks before the first range, on a set of `used` tables in use.
-    fn new(used: usize) -> MapCheck {
+    /// The checks before the first range, with no new table.
+    fn new() -> MapCheck {
         MapCheck {
             reach: 0,
-            next: used,
+            new_tables: 0,
             gib: NO_SLOT,
             slot: NO_SLOT,
         }
@@ -140,7 +141,7 @@ fn check_leaf<const N: usize, const UPPER: bool>(
             let gib = pa & !(GIB_SIZE - 1);
             if gib != check.gib {
                 check.gib = gib;
-                check.next += 1;
+                check.new_tables += 1;
             }
         }
         LeafPlace::Level2(_) => {}
@@ -152,7 +153,7 @@ fn check_leaf<const N: usize, const UPPER: bool>(
         let slot = pa & !(BLOCK_SIZE - 1);
         if slot != check.slot {
             check.slot = slot;
-            check.next += 1;
+            check.new_tables += 1;
         }
     }
     Ok(())
@@ -162,16 +163,17 @@ fn check_leaf<const N: usize, const UPPER: bool>(
 /// `OutOfTables` when the pool has fewer free tables than the new tables of
 /// the whole plan; otherwise the set records them, and the cursor of the
 /// plan starts before the first leaf, with the new tables from the old
-/// record on.
+/// record on. As the new tables fit in the free ones, the new record does
+/// not leave `usize`.
 pub(super) fn write_phase<const N: usize, const UPPER: bool>(
     set: &mut Tables<N, UPPER>,
     check: MapCheck,
 ) -> Result<MapCursor, TableError> {
-    if set.free_tables() < check.next - set.used {
+    if set.free_tables() < check.new_tables {
         return Err(TableError::OutOfTables);
     }
     let next = set.used;
-    set.used = check.next;
+    set.used = next + check.new_tables;
     Ok(MapCursor {
         phase: MapPhase::Leaf,
         from: 0,
