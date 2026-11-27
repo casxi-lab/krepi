@@ -397,7 +397,7 @@ const BY_RECORD: &str = "${{ steps.record.outputs.retention }}";
 
 /// Every upload step of the tracked workflows: the file, the key of the
 /// job, the name of the step and its `retention-days` as written.
-const RETENTION: [(&str, &str, &str, &str); 32] = [
+const RETENTION: [(&str, &str, &str, &str); 34] = [
     (
         ".github/workflows/check.yml",
         "check",
@@ -432,6 +432,12 @@ const RETENTION: [(&str, &str, &str, &str); 32] = [
         ".github/workflows/formal-calibration.yml",
         "calibration",
         "Upload the receipt, the summary and the logs",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal-calibration.yml",
+        "lane",
+        "Upload the receipt, the summary and the logs of the lane",
         BY_REF,
     ),
     (
@@ -492,6 +498,12 @@ const RETENTION: [(&str, &str, &str, &str); 32] = [
         ".github/workflows/formal.yml",
         "gate",
         "Upload the receipt and the logs",
+        BY_REF,
+    ),
+    (
+        ".github/workflows/formal.yml",
+        "lane",
+        "Upload the receipt, the summary and the logs of the lane",
         BY_REF,
     ),
     (
@@ -875,19 +887,23 @@ const MEASURE: &str = ".github/workflows/formal-measure.yml";
 /// The workflow of the calibration target.
 const CALIBRATION: &str = ".github/workflows/formal-calibration.yml";
 /// The jobs of the gate in the formal workflows: the file and the key.
-const GATE_JOBS: [(&str, &str); 7] = [
+const GATE_JOBS: [(&str, &str); 9] = [
     (FORMAL, "gate"),
+    (FORMAL, "lane"),
     (FORMAL, "shard"),
     (FORMAL, "parts"),
     (FORMAL, "scoped"),
     (CALIBRATION, "calibration"),
+    (CALIBRATION, "lane"),
     (CALIBRATION, "shard"),
     (CALIBRATION, "merge"),
 ];
-/// What their uploads may hold: receipts, summaries, the records of the
-/// run and the logs of the run packed into `logs.tar.gz`.
-const GATE_UPLOADS: [&str; 7] = [
+/// What their uploads may hold: receipts and the base records of the lanes,
+/// summaries, the records of the run and the logs of the run packed into
+/// `logs.tar.gz`.
+const GATE_UPLOADS: [&str; 8] = [
     "artifacts/formal/runs/*/receipt.json",
+    "artifacts/formal/runs/*/base.json",
     "artifacts/formal/summary.md",
     "artifacts/formal/merge/record.json",
     "artifacts/formal/merge/summary.md",
@@ -1011,18 +1027,28 @@ fn the_parts_of_a_run_are_named_for_the_merge_that_downloads_them() {
     let attempt = "${{ github.run_attempt }}";
     let formal = workflow(FORMAL);
     let calibration = workflow(CALIBRATION);
-    let (gate, shard, merge) = (
+    let (gate, lane, shard, merge) = (
         &formal["jobs"]["gate"],
+        &formal["jobs"]["lane"],
         &formal["jobs"]["shard"],
         &formal["jobs"]["parts"],
     );
     // Each part names its artifact by the part, with `-` for `/`, the commit
-    // and the attempt.
+    // and the attempt: a lane and the part of a target by the key that the
+    // job `formal limits` gives its row.
     let qualification = format!("formal-part-qualification-{head}-{attempt}");
     assert_eq!(upload_name(gate), qualification);
-    let target = format!("formal-part-target-${{{{ matrix.name }}}}-{head}-{attempt}");
-    assert_eq!(upload_name(shard), target);
-    for (job, id) in [(gate, "gate"), (shard, "shard")] {
+    let keyed = format!("formal-part-${{{{ matrix.key }}}}-{head}-{attempt}");
+    assert_eq!(
+        (upload_name(lane), upload_name(shard)),
+        (keyed.as_str(), keyed.as_str())
+    );
+    for (job, id) in [
+        (gate, "gate"),
+        (lane, "lane"),
+        (lane, "comparator"),
+        (shard, "shard"),
+    ] {
         assert!(
             script_with_id(job, id).contains("--env GITHUB_RUN_ATTEMPT"),
             "{id}"
@@ -1032,7 +1058,7 @@ fn the_parts_of_a_run_are_named_for_the_merge_that_downloads_them() {
     // cancelled, on the runner, with a limit that the record of the run
     // reads; its output names the artifact of its record for the verdicts.
     assert_eq!(merge["name"].as_str(), Some("formal parts"));
-    assert_eq!(needs(merge), ["gate", "shard"]);
+    assert_eq!(needs(merge), ["gate", "lane", "shard"]);
     assert_eq!(
         merge["if"].as_str(),
         Some("${{ !cancelled() && needs.gate.result != 'skipped' }}")
@@ -1094,7 +1120,7 @@ fn the_parts_of_a_run_are_named_for_the_merge_that_downloads_them() {
     let artifact = format!("${{{{ matrix.artifact }}}}-{head}-{attempt}");
     assert_eq!(upload_name(job), artifact);
     let merge = &calibration["jobs"]["merge"];
-    assert_eq!(needs(merge), ["calibration", "shard"]);
+    assert_eq!(needs(merge), ["calibration", "lane", "shard"]);
     assert_eq!(
         merge["if"].as_str(),
         Some("${{ !cancelled() && needs.calibration.result != 'skipped' }}")
@@ -1133,10 +1159,17 @@ fn the_calibration_shard_and_merge_run_the_steps_of_those_of_formal() {
         ("calibration-formal-part-", "formal-part-"),
         ("formal-calibration-merge-", "formal-merge-"),
     ];
-    let pairs = [("shard", "shard"), ("parts", "merge")];
-    for ((key, copy), counts) in pairs.into_iter().zip([[1, 1, 0], [1, 1, 1]]) {
+    let pairs = [("lane", "lane"), ("shard", "shard"), ("parts", "merge")];
+    let counts = [[2, 1, 0], [1, 1, 0], [1, 1, 1]];
+    for ((key, copy), counts) in pairs.into_iter().zip(counts) {
         let own = emit(&formal["jobs"][key]["steps"]);
-        let mut copied = emit(&calibration["jobs"][copy]["steps"]);
+        // The lane of the calibration also checks the challenges that its
+        // comparator is to reject.
+        let mut steps = calibration["jobs"][copy]["steps"].clone();
+        if let Yaml::Array(steps) = &mut steps {
+            steps.retain(|step| step["name"].as_str() != Some(CHALLENGES_STEP));
+        }
+        let mut copied = emit(&steps);
         let found = replaced.map(|(from, _)| copied.matches(from).count());
         assert_eq!(found, counts, "{key}");
         for (from, to) in replaced {
@@ -1162,10 +1195,12 @@ fn the_calibration_shard_and_merge_run_the_steps_of_those_of_formal() {
         let (own, copied) = (&formal["jobs"][key], &calibration["jobs"][copy]);
         assert_eq!(settings(copied), settings(own), "{key}");
     }
-    // The shards run on the events of the qualification job.
+    // The lanes and the shards run on the events of the qualification job.
     let jobs = &calibration["jobs"];
-    assert_eq!(jobs["shard"]["if"], jobs["calibration"]["if"]);
-    assert!(jobs["shard"]["if"].as_str().is_some());
+    for key in ["lane", "shard"] {
+        assert_eq!(jobs[key]["if"], jobs["calibration"]["if"]);
+        assert!(jobs[key]["if"].as_str().is_some());
+    }
 }
 
 /// The step of `job` named `name`.
@@ -1182,9 +1217,9 @@ fn step_names(job: &Yaml) -> Vec<&str> {
         .collect()
 }
 
-/// The step that runs the comparator part and those that remove its
+/// The step that runs the comparator of a lane and those that remove its
 /// container and check its challenges, and the step that copies xtask for
-/// it before the gate.
+/// it before the base run.
 const COMPARATOR_STEP: &str = "Run the comparator in its own container";
 const XTASK_COPY: &str = "Copy xtask for the comparator";
 const COMPARATOR_REMOVAL: &str = "Remove the container of the comparator";
@@ -1198,31 +1233,40 @@ const UNCONFINED: [&str; 3] = [
 ];
 
 #[test]
-fn the_comparator_runs_after_the_gate_in_a_container_of_its_own() {
+fn the_comparator_runs_after_the_base_run_of_a_lane_in_a_container_of_its_own() {
     use crate::formal::{comparator, run::RECEIPT_MARGIN};
     let formal = workflow(FORMAL);
     let calibration = workflow(CALIBRATION);
-    let gate = &formal["jobs"]["gate"];
-    let run = &calibration["jobs"]["calibration"];
-    // The gate keeps its stage, and the comparator runs on it after the
-    // container of the gate is removed; its own container is removed after
-    // it within a minute.
-    assert!(script_with_id(gate, "gate").contains("formal run --shard qualification --keep"));
-    let rows = run["strategy"]["matrix"]["include"]
+    let gate = &formal["jobs"]["lane"];
+    let run = &calibration["jobs"]["lane"];
+    // The qualification job keeps no stage and runs no comparator.
+    let job = &formal["jobs"]["gate"];
+    let qualification = script_with_id(job, "gate");
+    assert!(
+        qualification.ends_with("formal run --shard qualification\n"),
+        "{qualification}"
+    );
+    assert!(
+        step_names(job)
+            .iter()
+            .all(|name| *name != COMPARATOR_STEP && *name != XTASK_COPY)
+    );
+    let rows = calibration["jobs"]["calibration"]["strategy"]["matrix"]["include"]
         .as_vec()
         .expect("the matrix");
     assert_eq!(rows[0]["key"].as_str(), Some("run"));
-    assert_eq!(
-        rows[0]["args"].as_str(),
-        Some("--shard qualification --keep")
-    );
+    assert_eq!(rows[0]["args"].as_str(), Some("--shard qualification"));
+    // The base run of a lane keeps its stage, and the comparator runs on it
+    // after the container of the base run is removed; its own container is
+    // removed after it within a minute.
+    assert!(script_with_id(gate, "lane").contains("formal run --shard \"$PART\" --keep"));
     for job in [gate, run] {
         let names = step_names(job);
         let at = |name: &str| names.iter().position(|step| *step == name);
         let gate = names
             .iter()
-            .position(|step| step.starts_with("Run the gate"));
-        let gate = gate.expect("the step of the gate");
+            .position(|step| step.starts_with("Run the lane"));
+        let gate = gate.expect("the step of the base run");
         assert_eq!(at("Remove the container of the gate"), Some(gate + 1));
         assert_eq!(at(COMPARATOR_STEP), Some(gate + 2));
         assert_eq!(at(COMPARATOR_REMOVAL), Some(gate + 3));
@@ -1266,7 +1310,7 @@ fn the_comparator_runs_after_the_gate_in_a_container_of_its_own() {
     let start = format!("exec bash {DEADLINE} --stop-commands {deadline}m 1m docker run --rm ");
     assert!(last.starts_with(&start), "{last}");
     assert!(
-        last.ends_with("\"$IMAGE\" /krepi-xtask formal run --shard comparator"),
+        last.ends_with("\"$IMAGE\" /krepi-xtask formal run --shard \"$PART\" --comparator"),
         "{last}"
     );
     // Unprivileged user namespaces are allowed on the runner, and the
@@ -1326,18 +1370,17 @@ fn the_comparator_runs_after_the_gate_in_a_container_of_its_own() {
         body.last().map(|line| line.trim()),
         Some("exit \"$status\"")
     );
-    // The calibration runs the same steps on its run row, with the flag of
-    // its layout.
+    // The calibration runs the same steps in its lane, with the flag of its
+    // layout.
     let own = step_named(run, COMPARATOR_STEP);
-    assert_eq!(
-        own["if"].as_str(),
-        Some("${{ !cancelled() && matrix.key == 'run' && steps.probe.outcome == 'success' }}")
-    );
+    assert_eq!(own["if"], step["if"]);
     assert_eq!(own["timeout-minutes"], step["timeout-minutes"]);
     let copied = own["run"].as_str().expect("a script");
     assert_eq!(copied.matches(" --calibration").count(), 1);
     assert_eq!(copied.replace(" --calibration", ""), script);
-    assert!(copied.contains("/krepi-xtask formal run --calibration --shard comparator"));
+    assert!(
+        copied.contains("/krepi-xtask formal run --calibration --shard \"$PART\" --comparator")
+    );
     let removal = |job: &Yaml| step_named(job, COMPARATOR_REMOVAL)["run"].clone();
     assert_eq!(removal(run), removal(gate));
     // The unconfined options are in these steps and in the measurement of
@@ -1359,10 +1402,10 @@ fn the_comparator_runs_after_the_gate_in_a_container_of_its_own() {
     assert_eq!(
         unconfined,
         [
-            (CALIBRATION, "calibration", COMPARATOR_STEP),
+            (CALIBRATION, "lane", COMPARATOR_STEP),
             (CANARY, "canary", COMPARATOR_STEP),
             (MEASURE, "comparator", measured),
-            (FORMAL, "gate", COMPARATOR_STEP),
+            (FORMAL, "lane", COMPARATOR_STEP),
         ]
         .map(|(path, key, name)| (path.to_string(), key.to_string(), name.to_string()))
     );
@@ -1378,9 +1421,9 @@ const ILLEGAL_AXIOM: &str = "Illegal axiom detected: 'propext'";
 fn the_calibration_checks_that_the_comparator_rejects_its_fixed_challenges() {
     use crate::formal::comparator::PHASE;
     let calibration = workflow(CALIBRATION);
-    let run = &calibration["jobs"]["calibration"];
-    // On the run row, after the comparator, unless the run was cancelled,
-    // and before the summary and the upload.
+    let run = &calibration["jobs"]["lane"];
+    // In the lane, after the comparator, unless the run was cancelled, and
+    // before the summary and the upload.
     let names = step_names(run);
     let at = |name: &str| names.iter().position(|step| *step == name);
     let removal = at(COMPARATOR_REMOVAL).expect("the removal");
@@ -1388,10 +1431,7 @@ fn the_calibration_checks_that_the_comparator_rejects_its_fixed_challenges() {
     let summary = at("Summarize the receipt and compress the logs");
     assert_eq!(summary, Some(removal + 2));
     let step = step_named(run, CHALLENGES_STEP);
-    assert_eq!(
-        step["if"].as_str(),
-        Some("${{ !cancelled() && matrix.key == 'run' }}")
-    );
+    assert_eq!(step["if"].as_str(), Some("${{ !cancelled() }}"));
     assert_eq!(step["timeout-minutes"].as_i64(), Some(1));
     let script = step["run"].as_str().expect("a script");
     let units = [
@@ -1424,7 +1464,7 @@ fn the_calibration_checks_that_the_comparator_rejects_its_fixed_challenges() {
         format!(r#"{{"unit": "{unit}", "class": "{class}", "stderr": {{"path": "logs/{log}"}}}}"#)
     };
     let good = format!(
-        r#"{{"shard": "comparator", "units": {{"comparator/calibration": {{"status": "VERIFIED"}}}},
+        r#"{{"shard": "lane/calibration", "units": {{"comparator/calibration": {{"status": "VERIFIED"}}}},
         "commands": [{}, {}, {}]}}"#,
         command("comparator/calibration", "PASSED", "1.stderr"),
         command(&units[1], "PROOF_FAILURE", "2.stderr"),
@@ -1449,6 +1489,7 @@ fn the_calibration_checks_that_the_comparator_rejects_its_fixed_challenges() {
         let output = std::process::Command::new("bash")
             .args(["--noprofile", "--norc", "-eo", "pipefail", "script.sh"])
             .current_dir(&scratch.0)
+            .env("PART", "lane/calibration")
             .env("GITHUB_STEP_SUMMARY", scratch.0.join("summary.md"))
             .output()
             .expect("run the script");
@@ -1497,9 +1538,9 @@ fn the_calibration_checks_that_the_comparator_rejects_its_fixed_challenges() {
              [\"comparator-negative/other\",\"comparator-negative/statement\"]",
         ),
         (
-            good.replace("\"comparator\"", "\"target/calibration\""),
+            good.replace("\"lane/calibration\"", "\"target/calibration/1\""),
             &logs[..],
-            "- FAILED: the comparator left 0 receipts, not one",
+            "- FAILED: the comparator left 0 receipts of lane/calibration, not one",
         ),
     ];
     for (receipt, logs, line) in failed {
@@ -1985,6 +2026,12 @@ fn the_gate_runs_on_the_full_check_label_and_on_main_by_hand_or_weekly() {
             "${{ !cancelled() && needs.limits.result == 'success' }}",
         ),
         (
+            "lane",
+            vec!["limits"],
+            "${{ !cancelled() && needs.limits.result == 'success' && needs.limits.outputs.lanes \
+             != '[]' }}",
+        ),
+        (
             "shard",
             vec!["limits"],
             "${{ !cancelled() && needs.limits.result == 'success' && needs.limits.outputs.shards \
@@ -1998,7 +2045,7 @@ fn the_gate_runs_on_the_full_check_label_and_on_main_by_hand_or_weekly() {
         ),
         (
             "parts",
-            vec!["gate", "shard"],
+            vec!["gate", "lane", "shard"],
             "${{ !cancelled() && needs.gate.result != 'skipped' }}",
         ),
     ] {
@@ -2034,7 +2081,7 @@ fn every_job_of_formal_that_needs_another_runs_unless_cancelled() {
     let needing = jobs(&formal)
         .into_iter()
         .filter(|(_, job)| !needs(job).is_empty());
-    assert_eq!(needing.count(), 9);
+    assert_eq!(needing.count(), 10);
     let good = "jobs:\n  a:\n    if: x\n  b:\n    needs: a\n    if: ${{ !cancelled() && y }}\n";
     assert_eq!(
         unless_cancelled_problems(&parse(good)),
@@ -2081,10 +2128,12 @@ fn the_trigger_of_a_run_follows_its_event() {
     };
     for (document, key, id) in [
         (&formal, "gate", "gate"),
-        (&formal, "gate", "comparator"),
+        (&formal, "lane", "lane"),
+        (&formal, "lane", "comparator"),
         (&formal, "shard", "shard"),
         (&calibration, "calibration", "gate"),
-        (&calibration, "calibration", "comparator"),
+        (&calibration, "lane", "lane"),
+        (&calibration, "lane", "comparator"),
         (&calibration, "shard", "shard"),
     ] {
         let lines = logical_lines(&script(document, key, id));
@@ -2264,8 +2313,10 @@ fn every_job_with_a_computed_limit_writes_it_in_a_notice() {
     computed.sort();
     let expected = [
         (CALIBRATION, "calibration"),
+        (CALIBRATION, "lane"),
         (CALIBRATION, "shard"),
         (CANARY, "canary"),
+        (FORMAL, "lane"),
         (FORMAL, "scoped"),
         (FORMAL, "shard"),
     ];
@@ -2665,9 +2716,10 @@ fn the_deadline_script_writes_the_status_of_the_command_when_asked() {
 /// or build the image, under [`DEADLINE`]: the file, the job, the step, and
 /// the minutes of its deadline, or `None` where the matrix of the job gives
 /// them.
-const CONTAINER_STEPS: [(&str, &str, &str, Option<i64>); 17] = [
-    (FORMAL, "gate", "Run the gate in the image", Some(135)),
-    (FORMAL, "gate", COMPARATOR_STEP, Some(35)),
+const CONTAINER_STEPS: [(&str, &str, &str, Option<i64>); 20] = [
+    (FORMAL, "gate", "Run the gate in the image", Some(125)),
+    (FORMAL, "lane", "Run the lane in the image", None),
+    (FORMAL, "lane", COMPARATOR_STEP, Some(35)),
     (FORMAL, "shard", "Run the shard in the image", None),
     (
         FORMAL,
@@ -2687,7 +2739,8 @@ const CONTAINER_STEPS: [(&str, &str, &str, Option<i64>); 17] = [
         "Run the gate on the calibration in the image",
         None,
     ),
-    (CALIBRATION, "calibration", COMPARATOR_STEP, Some(35)),
+    (CALIBRATION, "lane", "Run the lane in the image", None),
+    (CALIBRATION, "lane", COMPARATOR_STEP, Some(35)),
     (CALIBRATION, "shard", "Run the shard in the image", None),
     (
         CALIBRATION,
@@ -2696,7 +2749,8 @@ const CONTAINER_STEPS: [(&str, &str, &str, Option<i64>); 17] = [
         Some(245),
     ),
     (CANARY, "canary", "Build the image", Some(52)),
-    (CANARY, "canary", "Run the gate in the image", Some(135)),
+    (CANARY, "canary", "Run the gate in the image", Some(125)),
+    (CANARY, "canary", "Run the lane in the image", None),
     (CANARY, "canary", COMPARATOR_STEP, Some(35)),
     (CANARY, "canary", "Run the shard in the image", None),
     (
@@ -2852,6 +2906,7 @@ fn the_main_commands_of_the_formal_workflows_run_under_their_deadlines() {
     for (name, file) in [
         ("Build the image", "artifacts/canary/build-status"),
         ("Run the gate in the image", "artifacts/canary/gate-status"),
+        ("Run the lane in the image", "artifacts/canary/lane-status"),
         (COMPARATOR_STEP, "artifacts/canary/comparator-status"),
         (
             "Run the shard in the image",

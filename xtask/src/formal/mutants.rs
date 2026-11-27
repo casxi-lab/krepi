@@ -2031,26 +2031,38 @@ mod tests { fn t() { let _ = 1 + 1; } }
             default.as_str(),
             "| group_by(.name) | map({name: .[0].name, budget: (map(.budget) | add)})",
             r"| map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 3)' \",
-            "shards=$(rows formal null)",
+            r#"shards=$(rows formal null | jq -c 'map(.part = "target/\(.name)/1" | .key = "target-\(.name)-1" | .name += "/1")')"#,
+            r#"lanes=$(jq -c --argjson margin "$((shard_margin + extraction_margin + receipt_margin))" '"#,
+            r#"[.lanes[] | {name, budget: (.budget // 2400), part: "lane/\(.name)", key: "lane-\(.name)"}]"#,
+            r"| map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 37 + 3)' \",
             r#"scoped=$(rows planned "$SCOPED")"#,
             r#"over=$(jq -r --argjson limit "$shard_limit" \"#,
             r#"'[.[] | select(.budget > $limit) | .name] | join(" ")' <<< "$shards")"#,
             r#"long=$(jq -r '[.[] | select(.job > 360) | .name] | join(" ")' <<< "$scoped")"#,
+            r#"echo "lanes=$lanes""#,
             r#"echo "shards=$shards""#,
             r#"echo "scoped=$scoped""#,
         ] {
             assert!(formal.lines().any(|l| l.trim_start() == line), "{line}");
         }
-        // The qualification job has the steps of the gate and of the
-        // comparator, each the minutes of its deadline and receipt and two
-        // more, 15 minutes before them and 3 after.
-        let qualification = minutes(gate + extraction + margin) + 2;
+        // The qualification job has the step of the gate, the minutes of its
+        // deadline and receipt and two more, 15 minutes before it and 3
+        // after; a lane the step of its base run, of the shard margin, its
+        // registered budget and the extraction margin, and that of its
+        // comparator.
+        let qualification = minutes(gate + margin) + 2;
         let comparator = minutes(crate::formal::comparator::BUDGET.as_secs() + margin) + 2;
-        let qualification_job = 15 + qualification + comparator + 3;
+        let qualification_job = 15 + qualification + 3;
         assert_eq!(
             (qualification, comparator, qualification_job),
-            (137, 37, 192)
+            (127, 37, 145)
         );
+        let lane = |budget: u64| {
+            let step = minutes(shard_margin + budget + extraction + margin) + 2;
+            (step, 15 + step + comparator + 3)
+        };
+        assert_eq!(lane(crate::formal::lanes::BUDGET), (62, 117));
+        assert_eq!(lane(SHARD_LIMIT.as_secs() - extraction), (67, 122));
         let shard = |budget: u64| {
             let step = minutes(shard_margin + budget + margin) + 2;
             (step, 15 + step + 3)
@@ -2077,8 +2089,15 @@ mod tests { fn t() { let _ = 1 + 1; } }
             limit(&find_step(gate_job, "id", "gate")),
             Some(qualification)
         );
+        assert!(
+            gate_job["steps"]
+                .as_vec()
+                .expect("steps")
+                .iter()
+                .all(|s| s["id"].as_str() != Some("comparator"))
+        );
         assert_eq!(
-            limit(&find_step(gate_job, "id", "comparator")),
+            limit(&find_step(&jobs["lane"], "id", "comparator")),
             Some(comparator)
         );
         let outputs = jobs["limits"]["outputs"].as_hash().expect("the outputs");
@@ -2090,11 +2109,12 @@ mod tests { fn t() { let _ = 1 + 1; } }
         assert_eq!(
             outputs,
             [
+                (Some("lanes"), Some("${{ steps.limits.outputs.lanes }}")),
                 (Some("shards"), Some("${{ steps.limits.outputs.shards }}")),
                 (Some("scoped"), Some("${{ steps.limits.outputs.scoped }}")),
             ]
         );
-        for (key, rows) in [("shard", "shards"), ("scoped", "scoped")] {
+        for (key, rows) in [("lane", "lanes"), ("shard", "shards"), ("scoped", "scoped")] {
             let job = &jobs[key];
             let include = format!("${{{{ fromJSON(needs.limits.outputs.{rows}) }}}}");
             let matrix = &job["strategy"]["matrix"]["include"];
@@ -2130,22 +2150,15 @@ mod tests { fn t() { let _ = 1 + 1; } }
             .clone();
         let keys = Vec::from_iter(rows.iter().map(|row| row["key"].as_str()));
         assert_eq!(keys, [Some("run"), Some("planned")]);
-        assert_eq!(
-            rows[0]["args"].as_str(),
-            Some("--shard qualification --keep")
-        );
+        assert_eq!(rows[0]["args"].as_str(), Some("--shard qualification"));
         assert_eq!(
             rows[1]["args"].as_str(),
             Some("--target calibration-planned")
         );
-        // Each job has 23 minutes more than its step, and the run row the
-        // step of the comparator and 3 minutes after it as well; the planned
-        // example runs the part of its target alone.
+        // Each job has 23 minutes more than its step; the planned example
+        // runs the part of its target alone.
         let planned = shard_margin + budget(registry::State::Planned);
-        for (row, seconds, after) in [
-            (&rows[0], gate + extraction, comparator + 3),
-            (&rows[1], planned, 0),
-        ] {
+        for (row, seconds, after) in [(&rows[0], gate, 0), (&rows[1], planned, 0)] {
             let deadline = minutes(seconds + margin);
             assert_eq!(
                 row["deadline"].as_str(),
@@ -2159,7 +2172,36 @@ mod tests { fn t() { let _ = 1 + 1; } }
             .iter()
             .map(|row| (number(&row["step"]), number(&row["job"])));
         let written = Vec::from_iter(written.map(|(step, job)| step.zip(job)));
-        assert_eq!(written, [Some((137, 200)), Some((42, 65))]);
+        assert_eq!(written, [Some((127, 150)), Some((42, 65))]);
+        // One lane for each lane of the calibration, with its budget and the
+        // limits that `formal limits` would give it.
+        let lanes = document["jobs"]["lane"]["strategy"]["matrix"]["include"]
+            .as_vec()
+            .expect("the lanes");
+        let read = include_str!("../../../verification/qualification/calibration/lanes.json");
+        let read = crate::formal::lanes::parse(read).expect("the lanes").lanes;
+        let named = |row: &Yaml, key: &str| row[key].as_str().map(String::from);
+        let written = Vec::from_iter(
+            lanes
+                .iter()
+                .map(|row| (named(row, "name"), number(&row["budget"]))),
+        );
+        let expected = Vec::from_iter(
+            read.iter()
+                .map(|lane| (Some(lane.name.clone()), Some(lane.budget))),
+        );
+        assert_eq!(written, expected);
+        for row in lanes {
+            let name = named(row, "name").expect("a name");
+            assert_eq!(named(row, "part"), Some(format!("lane/{name}")));
+            assert_eq!(named(row, "key"), Some(format!("lane-{name}")));
+            let (step, job) = lane(number(&row["budget"]).expect("a budget"));
+            assert_eq!(
+                (number(&row["step"]), number(&row["job"])),
+                (Some(step), Some(job)),
+                "{row:?}"
+            );
+        }
         // One shard for each formal target of the calibration, with its
         // budget and the limits that `formal limits` would give it.
         let shards = document["jobs"]["shard"]["strategy"]["matrix"]["include"]
@@ -2171,13 +2213,25 @@ mod tests { fn t() { let _ = 1 + 1; } }
             (target_unit(name), row_budget(row).expect("a budget"))
         }));
         assert_eq!(written, merge::shards(&registry.targets));
-        assert_eq!(Vec::from_iter(written.keys()), ["target/calibration"]);
+        assert_eq!(Vec::from_iter(written.keys()), ["target/calibration/1"]);
         for row in shards {
             let (step, job) = shard(row_budget(row).expect("a budget"));
             let limits = (row["step"].as_i64(), row["job"].as_i64());
             assert_eq!(limits, (Some(step as i64), Some(job as i64)), "{row:?}");
         }
-        assert_eq!(shard(written["target/calibration"]), (62, 80));
+        assert_eq!(shard(written["target/calibration/1"]), (62, 80));
+        for row in shards {
+            let name = row["name"].as_str().expect("a name");
+            let target = name.strip_suffix("/1").expect("the first part");
+            assert_eq!(
+                row["part"].as_str(),
+                Some(format!("target/{name}").as_str())
+            );
+            assert_eq!(
+                row["key"].as_str(),
+                Some(format!("target-{target}-1").as_str())
+            );
+        }
         assert_eq!(
             merge::budget_problems(&registry.targets),
             Vec::<String>::new()

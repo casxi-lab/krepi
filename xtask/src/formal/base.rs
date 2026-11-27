@@ -1,11 +1,12 @@
 //! The base round of `cargo xtask formal run`, as "Base round" in
-//! `docs/formal-verification.md` describes it: the hand-written Lean of the
-//! snapshot, with the generated modules of the proof cases of the
-//! qualification, built in a stage of its own from a generated root module,
+//! `docs/formal-verification.md` describes it: the hand-written Lean of a
+//! part of the snapshot, a lane or the qualification job with the generated
+//! modules of the proof cases of the qualification, or all of it in a run
+//! without a part, built in a stage of its own from a generated root module,
 //! audited, replayed by `leanchecker --fresh` and counted in heartbeats.
-//! Its units are `base` and one for each proved statement of
-//! `statements.json`. In the qualification job it leaves out what the
-//! waivers that hold leave out.
+//! Its units are `base`, or `base/lane/<name>` in a lane, and one for each
+//! proved statement of `statements.json` of the part. In the qualification
+//! job and in a lane it leaves out what the waivers that hold leave out.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -16,18 +17,38 @@ use serde::{Deserialize, Serialize};
 
 use super::Layout;
 use super::guard::{self, State, Statement, Statements};
+use super::lanes::{self, Home, Homes};
 use super::lean::{self, Item, Kind, Sources};
 use super::outcome::{Class, Site, Status};
 use super::paths::Files;
-use super::process::Ran;
+use super::process::{self, Ran};
 use super::qualify::{self, conclusion, lake};
+use super::receipt::{Command, Role};
 use super::registry::{self, Target, declared_axioms};
 use super::run::{self, Gate, Phase, Request};
 use super::toolchain::sha256;
-use super::waiver;
+use super::{inventory, merge, waiver};
+use crate::repo::{Entry, Tree};
 
 /// The name of the phase, and the first part of the name of its units.
 pub const PHASE: &str = "base";
+
+/// The program that the audit runs after its own, with names for `MODULES`:
+/// the public constants of these modules, which a merge compares, each with
+/// its kind and the hash of its type with its universe parameters.
+const NAMES: &str = "
+open Lean in
+run_cmd do
+  let env ← getEnv
+  let mine : Array Name := #[MODULES]
+  for (module, data) in env.header.moduleNames.zip env.header.moduleData do
+    unless mine.contains module do continue
+    for decl in data.constNames, info in data.constants do
+      unless isPrivateName decl || decl.isInternalDetail do
+        let kind := if info.isTheorem then \"theorem\" else \"other\"
+        let params := \",\".intercalate (info.levelParams.map toString)
+        logInfo m!\"krepi-name {decl} {kind} {info.type.hash}[{params}]\"
+";
 
 /// The record of the base round in the receipt: the registries, the
 /// statement hash, the modules that the root imports, those whose messages
@@ -65,12 +86,18 @@ pub struct Theorem {
     pub problems: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// The replay: its versions, mode, prefixes and module, seconds, and the largest
+/// resident set of a process collected by its end, its own when it grew then.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Leanchecker {
     pub version: Option<String>,
     pub sha256: String,
     pub mode: String,
     pub prefixes: Vec<String>,
+    pub module: String,
+    pub seconds: f64,
+    pub max_rss: Option<u64>,
+    pub max_rss_own: bool,
 }
 
 /// The heartbeats of each theorem, and why a file or a theorem has none.
@@ -86,24 +113,74 @@ pub fn unit(theorem: &str) -> String {
     format!("{PHASE}/{theorem}")
 }
 
-/// The base round, with the statements of `statements.json` of the checkout
-/// `root`, which is clean at the start of the run, for its units. The phase
-/// stops when that file cannot be read, or differs from the export's.
-pub fn phase<'a>(root: &Path, layout: &'a Layout) -> Phase<'a> {
+/// The unit of the base round of the part `shard`: `base/lane/<name>` in a
+/// lane, and `base` otherwise.
+pub fn unit_of(shard: Option<&str>) -> String {
+    let lane = shard.filter(|shard| merge::lane(shard).is_some());
+    lane.map_or(PHASE.to_string(), |lane| format!("{PHASE}/{lane}"))
+}
+
+/// The lanes of `layout` in `dir`, a checkout or an export.
+pub fn lanes(dir: &Path, layout: &Layout) -> Result<Vec<lanes::Lane>, String> {
+    let lanes = lanes::parse(&read(&dir.join(layout.lanes))?);
+    let at = |error| format!("{}: {error}", layout.lanes);
+    Ok(lanes.map_err(at)?.lanes)
+}
+
+/// The homes of the hand-written `modules` of `layout`, by name, as
+/// [`inventory::homes`] gives them for their files.
+pub fn homes(layout: &Layout, modules: impl IntoIterator<Item = String>) -> Homes {
+    let mut tree = Tree::default();
+    for module in modules {
+        let file = format!("{}/{}", layout.project, lean::module_file(&module));
+        tree.insert(&file, Entry::File(Vec::new()));
+    }
+    inventory::homes(&tree, layout)
+}
+
+/// The part whose base round holds the hand-written `module` of `home`
+/// among `lanes`: the qualification job, the lane of its component or the
+/// lane that lists it, or none.
+pub fn part_of(lanes: &[lanes::Lane], module: &str, home: Option<&Home>) -> Option<String> {
+    let lane = match home? {
+        Home::Qualification => return Some(qualify::PHASE.to_string()),
+        Home::Component(component) => lanes.iter().find(|l| l.components.contains(component)),
+        Home::Shared => lanes.iter().find(|l| l.modules.iter().any(|m| m == module)),
+    };
+    lane.map(|lane| format!("lane/{}", lane.name))
+}
+
+/// Whether the part `shard` holds what `part` names: every module in a run
+/// without a part, and otherwise those of the part alone, so that a module of
+/// no lane is in no part.
+fn holds(shard: Option<&str>, part: Option<String>) -> bool {
+    shard.is_none_or(|shard| part.as_deref() == Some(shard))
+}
+
+/// The base round of the part `shard`, with the statements of
+/// `statements.json` and the lanes of the checkout `root`, which is clean at
+/// the start of the run, for its units. The phase stops when a file cannot be
+/// read, or when `statements.json` differs from the export's.
+pub fn phase<'a>(root: &Path, layout: &'a Layout, shard: Option<&str>) -> Phase<'a> {
     let path = layout.statements;
     let read = read(&root.join(path))
         .and_then(|text| Ok((guard::load_statements(&text, layout)?, text)))
         .map_err(|error| format!("cannot read {path}: {error}"));
-    let proved = (read.iter().flat_map(|(file, _)| &file.statements))
-        .filter(|statement| statement.state == State::Proved);
-    let units = [PHASE.to_string()].into_iter();
+    let lanes = shard.map_or(Ok(Vec::new()), |_| lanes(root, layout));
+    let all = read.iter().flat_map(|(file, _)| &file.statements);
+    let homes = homes(layout, all.clone().map(|s| s.module.clone()));
+    let held = lanes.as_deref().unwrap_or_default();
+    let part = |s: &Statement| part_of(held, &s.module, homes.get(&s.module));
+    let mine = Vec::from_iter(all.filter(|s| holds(shard, part(s))).cloned());
+    let proved = mine.iter().filter(|s| s.state == State::Proved);
+    let (shard, units) = (shard.map(str::to_string), [unit_of(shard)].into_iter());
     Phase {
         name: PHASE.to_string(),
         budget: Duration::from_secs(3_600),
         units: units.chain(proved.map(|s| unit(&s.theorem))).collect(),
         body: Box::new(move |gate| {
-            let (statements, text) = read?;
-            round(gate, &statements, &text)
+            let ((statements, text), lanes) = (read?, lanes?);
+            round(gate, &statements, &mine, &text, (shard.as_deref(), &lanes))
         }),
     }
 }
@@ -152,13 +229,17 @@ pub fn handwritten(
 }
 
 /// The header imports of the Lean file `path`.
-fn header(path: &Path) -> Result<Vec<String>, String> {
+pub(super) fn header(path: &Path) -> Result<Vec<String>, String> {
     Ok(guard::header_imports(&lean::tokens(&read(path)?)).1)
 }
 
 /// The targets of `targets` whose generated modules, `<generated>.<module>.`
 /// and a file, `imports` names, by name.
-fn generating(layout: &Layout, imports: &[String], targets: &[Target]) -> BTreeSet<String> {
+pub(super) fn generating(
+    layout: &Layout,
+    imports: &[String],
+    targets: &[Target],
+) -> BTreeSet<String> {
     let of = |import: &String| {
         let (prefix, _) = import.rsplit_once('.')?;
         let module = prefix.strip_prefix(&format!("{}.", layout.generated))?;
@@ -229,20 +310,21 @@ fn owners(
     Ok(reach.into_iter().filter_map(alone).collect())
 }
 
-/// Runs `request` as a command of `base` whose files `read` reads, unless
-/// `stop` says why it does not start; a command that did not end by itself
-/// stops the later ones.
+/// Runs `request` as a command of the unit of the round whose files `read`
+/// reads, unless `stop` says why it does not start; a command that did not
+/// end by itself stops the later ones.
 fn step<T>(
     gate: &mut Gate,
     stop: &mut Option<String>,
     request: &Request,
     read: impl FnMut(&Ran) -> Result<T, String>,
 ) -> (Class, String, Option<T>) {
+    let unit = unit_of(gate.receipt.shard.as_deref());
     if let Some(reason) = stop {
-        gate.skip(PHASE, request, reason);
+        gate.skip(&unit, request, reason);
         return (Class::NotRun, String::new(), None);
     }
-    let (ran, verdict, value) = gate.run(PHASE, request, read);
+    let (ran, verdict, value) = gate.run(&unit, request, read);
     if [Class::ToolFailure, Class::Budget, Class::NotRun].contains(&verdict.class) {
         *stop = Some(format!("{} before it did not finish", request.program));
     }
@@ -250,10 +332,18 @@ fn step<T>(
     (verdict.class, output, value)
 }
 
-/// Runs the base round on `statements`, read from the checkout as `text`.
-/// An error is an internal error of the gate, which stops the phase.
-fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), String> {
+/// Runs the base round of the part `shard` among `lanes` on `mine`, the
+/// statements of the part among `statements`, read from the checkout as
+/// `text`. An error is an internal error of the gate, which stops the phase.
+fn round(
+    gate: &mut Gate,
+    statements: &Statements,
+    mine: &[Statement],
+    text: &str,
+    (shard, lanes): (Option<&str>, &[lanes::Lane]),
+) -> Result<(), String> {
     let (layout, source, work) = (*gate.layout(), gate.source(), gate.work().join(PHASE));
+    let (round, global) = (unit_of(shard), shard.and_then(merge::lane).is_none());
     let input = |path: &str| read(&source.join(path));
     if input(layout.statements)? != text {
         let path = layout.statements;
@@ -278,25 +368,47 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
         ..Record::default()
     };
     // The statement hash, and the file and source rules of the Lean files,
-    // of which only module files named as modules reach the stage.
+    // of which only module files named as modules reach the stage, which a
+    // lane leaves to the qualification job.
     let commit = gate.receipt.commit.clone().unwrap_or_default();
     fs::create_dir_all(&work).map_err(|error| format!("{}: {error}", work.display()))?;
-    let (computed, tracked) = guard::statement_hash(gate, &commit, &layout, &work)?;
-    let (recorded, mut problems) = (statements.hash.clone(), Vec::new());
-    if computed != recorded {
-        let side = format!("the statement side of the snapshot is {computed}");
-        problems.push(format!("{} records {recorded}, {side}", layout.statements));
-    }
-    record.statement_hash = Hash { recorded, computed };
+    let mut problems = Vec::new();
+    let mut files = if !global {
+        // A Lean file outside the namespaces rejects every round; read as an
+        // empty module, a file is judged by its path alone.
+        let (files, tracked) = merge::handwritten(gate)?;
+        let listed = tracked.keys().filter(|path| path.ends_with(".lean"));
+        let outside = |path: &String| lean::source_problems(path, "module", &[], &layout);
+        problems.extend(listed.flat_map(outside));
+        files
+    } else {
+        let (computed, tracked) = guard::statement_hash(gate, &commit, &layout, &work)?;
+        let recorded = statements.hash.clone();
+        if computed != recorded {
+            let side = format!("the statement side of the snapshot is {computed}");
+            problems.push(format!("{} records {recorded}, {side}", layout.statements));
+        }
+        record.statement_hash = Hash { recorded, computed };
+        let (files, found) = handwritten(&layout, &source, &tracked, &sources.tcb)?;
+        problems.extend(found);
+        files
+    };
     let (stage, export) = (work.join("stage"), source.join(layout.project));
     let pins = source.join(layout.root_project);
     let project = lean::create_stage(&export, &pins, &stage, &installation.backend())?;
-    let (mut files, found) = handwritten(&layout, &source, &tracked, &sources.tcb)?;
-    problems.extend(found);
-    // What the waivers leave out, and each module that imports what is left
-    // out unless a target that the run extracted lists it.
+    // What the waivers leave out, read here in the qualification job, and each
+    // module that imports what is left out unless a formal target lists it.
+    let text = input(layout.registry)?;
+    let at = |e| format!("{}: {e}", layout.registry);
+    let registered = registry::parse(&text).map_err(at)?.targets;
+    if shard == Some(qualify::PHASE) {
+        gate.waived = run::waive(gate, &registered)?.1;
+    }
     let mut left = gate.waived.clone();
-    let listed = (gate.receipt.proof_targets.values()).flat_map(|t| t.proof_modules.clone());
+    let waived = BTreeSet::from_iter(left.values().cloned());
+    let formal = (registered.iter()).filter(|t| t.state == registry::State::Formal);
+    let listed = formal.filter(|t| !waived.contains(&t.name));
+    let listed = listed.flat_map(|t| t.proof_modules.clone());
     let (listed, mut imports) = (BTreeSet::from_iter(listed), Vec::new());
     let module = |file: &String| file.trim_end_matches(".lean").replace('/', ".");
     for file in files.iter().filter(|file| !listed.contains(&module(file))) {
@@ -315,9 +427,29 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     while let Some((module, target)) = imports.iter().find_map(|entry| found(&left, entry)) {
         left.insert(module, target);
     }
+    // The hand-written modules of the part, those left out included, which
+    // the root imports but those left out.
+    let homes = homes(&layout, files.iter().map(module));
+    let ours = |m: &String| holds(shard, part_of(lanes, m, homes.get(m)));
+    let mut held = gate.receipt.lane.clone().unwrap_or_default();
+    held.modules = Vec::from_iter(files.iter().map(module).filter(ours));
+    let ours = |(m, _): &(&String, &String)| held.modules.contains(m);
+    let left_out = left.iter().filter(ours);
+    held.left_out = BTreeMap::from_iter(left_out.map(|(m, t)| (m.clone(), t.clone())));
+    if shard == Some(qualify::PHASE) {
+        let home = |home: &Home| match home {
+            Home::Component(component) => component.clone(),
+            other => format!("{other:?}").to_lowercase(),
+        };
+        let listed = homes.iter().map(|(module, h)| (module.clone(), home(h)));
+        (gate.receipt.handwritten, held.name) = (Some(listed.collect()), qualify::PHASE.into());
+        gate.receipt.left_out = Some(left.clone());
+    }
     files.retain(|file| !left.contains_key(&module(file)));
+    let rooted = files.iter().map(module);
+    let mut rooted = BTreeSet::from_iter(rooted.filter(|m| held.modules.contains(m)));
     let (waived, kept): (Vec<Statement>, Vec<Statement>) =
-        (statements.statements.iter().cloned()).partition(|s| left.contains_key(&s.module));
+        (mine.iter().cloned()).partition(|s| left.contains_key(&s.module));
     for file in &files {
         lean::copy_into(&export, &project, file)?;
     }
@@ -327,7 +459,7 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     // when its proofs are in this project.
     let (mut cases, mut missing) = (BTreeMap::new(), Vec::new());
     let qualification = gate.receipt.qualification.clone().unwrap_or_default();
-    let here = layout.project == layout.root_project;
+    let here = layout.project == layout.root_project && global;
     for case in qualify::load_cases(&input(layout.cases)?, &layout)?
         .into_iter()
         .filter(|_| here)
@@ -347,6 +479,7 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
         for file in (case_record.generated.keys()).map(|file| file.replace("_Template", "")) {
             lean::copy_into(&from, &project, &file)?;
             (sources.declared).extend(declared_axioms(&read(&project.join(&file))?));
+            rooted.insert(module(&file));
             files.push(file);
         }
         let external = |name| format!("{}.{}.{name}", layout.generated, case.module);
@@ -355,27 +488,24 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
         cases.extend(modules.map(|module| (module, case_record.declarations.clone())));
     }
     // The generated modules of each target that the run extracted, whose
-    // definitions type-check, as its stage holds them, and what the theorems
-    // of its proof modules may use beyond the registry of library axioms:
-    // the declarations of its templates and its trusted axioms.
+    // definitions type-check, as its stage holds them, which the root imports
+    // but those of other lanes, and what the theorems of its proof modules may
+    // use beyond the registry of library axioms: the declarations of its
+    // templates and its trusted axioms.
     let mut targets = BTreeMap::new();
-    let mut registered = Vec::new();
-    if !gate.receipt.proof_targets.is_empty() {
-        let text = input(layout.registry)?;
-        let read = registry::parse(&text).map_err(|e| format!("{}: {e}", layout.registry))?;
-        registered = read.targets;
-    }
+    let rooting = |name: &String| held.targets.get(name) != Some(&Role::Cone);
     let mut planned = BTreeMap::new();
     for (name, target) in gate.receipt.proof_targets.clone() {
         let lacks = format!("the target {name} has no generated definitions that type-check");
         if !target.typed {
-            missing.push((target.unit.unwrap_or(PHASE.to_string()), lacks));
+            missing.push((target.unit.unwrap_or(round.clone()), lacks));
             continue;
         }
         let from = run::target_project(gate, &name);
         for file in (target.generated.keys()).map(|file| file.replace("_Template", "")) {
             lean::copy_into(&from, &project, &file)?;
             (sources.declared).extend(declared_axioms(&read(&project.join(&file))?));
+            rooted.extend(rooting(&name).then(|| module(&file)));
             files.push(file);
         }
         let own = (registered.iter()).filter(|registered| registered.name == name);
@@ -406,19 +536,27 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
         .or(missing.first())
         .cloned();
     let missing = first.as_ref().map(|(unit, _)| unit.clone());
-    // The modules of the stage, krepi's own and those of planned statements.
+    // The modules of the stage, krepi's own, the part's, which the root
+    // imports, and those of planned statements, each of which needs a file.
     let modules = (files.iter()).map(|file| file.trim_end_matches(".lean").replace('/', "."));
     let modules = BTreeSet::from_iter(modules);
-    let mine = format!("{}.", layout.namespace);
-    let own = (modules.iter()).filter(|m| m.starts_with(&mine) || cases.contains_key(*m));
-    let own: Vec<String> = own.cloned().collect();
+    let krepi = format!("{}.", layout.namespace);
+    let is_own = |m: &&String| m.starts_with(&krepi) || cases.contains_key(*m);
+    let own = Vec::from_iter(modules.iter().filter(is_own).cloned());
+    let ours = Vec::from_iter(rooted.iter().filter(is_own).cloned());
     let (proved, planned): (Vec<&Statement>, Vec<&Statement>) =
         (kept.iter()).partition(|statement| statement.state == State::Proved);
     let planned: BTreeSet<&String> = planned.into_iter().map(|planned| &planned.module).collect();
-    let absent = planned.iter().filter(|module| !modules.contains(**module));
-    problems.extend(absent.map(|module| format!("the planned module {module} has no file")));
+    let others = (statements.statements.iter()).filter(|s| global && s.state == State::Planned);
+    let others = others.map(|s| &s.module).filter(|m| !left.contains_key(*m));
+    let absent = BTreeSet::from_iter(others.filter(|module| !modules.contains(*module)));
+    problems.extend(
+        absent
+            .iter()
+            .map(|m| format!("the planned module {m} has no file")),
+    );
     let root = project.join(lean::module_file(layout.namespace));
-    write(&root, &lean::root_source(&modules))?;
+    write(&root, &lean::root_source(&rooted))?;
     // The builds: all but the planned modules with `--wfail`, then the root.
     // A build that failed, or a kernel report of `leanchecker`, stops every
     // theorem from being checked.
@@ -426,7 +564,7 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     let mut inherited = Vec::from_iter(first.map(|(_, why)| why));
     let mut stop = inherited.first().cloned();
     let root = format!("+{}", layout.namespace);
-    let unplanned = (modules.iter()).filter(|module| !planned.contains(module));
+    let unplanned = (rooted.iter()).filter(|module| !planned.contains(module));
     let unplanned = unplanned.map(|module| format!("+{module}")).collect();
     let mut builds = vec![(unplanned, true), (vec![root.clone()], false)];
     if planned.is_empty() {
@@ -449,17 +587,37 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
             problems.extend(other.map(|line| format!("{message}: {line}")));
         }
     }
-    // The audit, `leanchecker --fresh` of the root, and the version of Lean.
-    let audit = lean::audit_source(layout.namespace, &kept, &own);
+    // The audit, with the public constants of the modules of the root,
+    // `leanchecker --fresh` of the root, and the version of Lean.
+    let names = Vec::from_iter(rooted.iter().map(|module| format!("`{module}")));
+    let audit = lean::audit_source(layout.namespace, &kept, &ours);
+    let audit = audit + &NAMES.replace("MODULES", &names.join(", "));
     write(&project.join(lean::AUDIT), &audit)?;
     let args = lean::check_args(lean::AUDIT);
     let request = lake(Site::AxiomAudit, &args, &project);
     let (class, output, _) = step(gate, &mut stop, &request, |_| Ok(()));
     let ended = matches!(class, Class::Passed | Class::ProofFailure);
     let audit = ended.then(|| lean::audit_output(&output));
+    let declared = output
+        .lines()
+        .filter_map(|line| line.split_once("krepi-name "));
+    let declared = BTreeSet::from_iter(declared.map(|(_, name)| name.trim().to_string()));
+    held.constants = Vec::from_iter(declared);
     let args = ["env", "leanchecker", "--fresh", layout.namespace].map(str::to_string);
     let request = lake(Site::Leanchecker, &args, &project);
+    let before = process::largest_child_rss();
     let (class, output, _) = step(gate, &mut stop, &request, lean::leanchecker_read);
+    let (checked, rss) = (&mut record.leanchecker, process::largest_child_rss());
+    (checked.max_rss, checked.max_rss_own) = (rss, rss > before);
+    let replay = |c: &&Command| c.site == Site::Leanchecker;
+    let replay = gate
+        .records()
+        .commands
+        .iter()
+        .rev()
+        .find(replay)
+        .map(|c| c.seconds);
+    (checked.seconds, checked.module) = (replay.unwrap_or_default(), layout.namespace.into());
     if class == Class::ProofFailure {
         let lines: Vec<&str> = output.lines().map(str::trim).collect();
         let replay = format!("leanchecker --fresh {}", layout.namespace);
@@ -478,7 +636,7 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     counted.method = "count_heartbeats".to_string();
     let mut ranges: BTreeMap<&String, Vec<(String, usize)>> = BTreeMap::new();
     let audited = audit.iter().flat_map(|audit| &audit.ranges);
-    for (name, (module, line)) in audited.filter(|(_, (module, _))| own.contains(module)) {
+    for (name, (module, line)) in audited.filter(|(_, (module, _))| ours.contains(module)) {
         (ranges.entry(module).or_default()).push((name.clone(), *line));
     }
     for (module, at) in ranges {
@@ -504,7 +662,7 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     let mut theorems = BTreeMap::<String, Theorem>::new();
     let proofs = format!("{}.", layout.proofs);
     if let Some(audit) = &audit {
-        let unmarked = own.iter().filter(|module| !audit.modules.contains(*module));
+        let unmarked = ours.iter().filter(|m| !audit.modules.contains(*m));
         problems.extend(unmarked.map(|module| format!("the audit has no marker of {module}")));
         let examples = lean::FIRST_EXAMPLE..lean::FIRST_EXAMPLE + proved.len();
         let other = (audit.errors.iter()).filter(|(line, _)| !examples.contains(*line));
@@ -556,8 +714,8 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
     // from the round, whose problems hold those of unregistered theorems.
     let unregistered = (theorems.values()).filter(|theorem| theorem.state.is_none());
     problems.extend(unregistered.flat_map(|theorem| theorem.problems.clone()));
-    let of = missing.unwrap_or(PHASE.to_string());
-    let base = gate.conclude_from(PHASE, &of, conclusion(&problems));
+    let of = missing.unwrap_or(round.clone());
+    let base = gate.conclude_from(&round, &of, conclusion(&problems));
     let checked = (theorems.iter_mut()).filter(|(_, t)| t.state != Some(State::Planned));
     let forced = matches!(base, Status::ToolFailure | Status::Budget);
     for (name, theorem) in checked {
@@ -581,10 +739,11 @@ fn round(gate: &mut Gate, statements: &Statements, text: &str) -> Result<(), Str
             State::Planned => Status::NotRun,
         };
     }
-    record.modules = modules.into_iter().collect();
+    record.modules = rooted.into_iter().collect();
     record.planned = planned.into_iter().cloned().collect();
     (record.own, record.theorems, record.problems) = (own, theorems, problems);
     gate.receipt.base = Some(record);
+    gate.receipt.lane = shard.is_some().then_some(held);
     lean::listing(&read_only, Some(&listing)).map(|_| ())
 }
 
@@ -704,9 +863,43 @@ pub(crate) mod tests {
         gate(fixture, &[], phases(fixture))
     }
 
-    /// Commits what changed, with the statement hash of the commit in
-    /// `statements.json`.
+    /// Writes the one lane `a` of `fixture`, with each component of its
+    /// hand-written modules and of its targets and every shared module, unless
+    /// it has a lane.
+    pub(crate) fn one_lane(fixture: &Fixture) {
+        let text = fs::read_to_string(fixture.root().join(LAYOUT.lanes)).unwrap_or_default();
+        if lanes::parse(&text).is_ok_and(|lanes| !lanes.lanes.is_empty()) {
+            return;
+        }
+        let below = fixture.root().join("verification");
+        let files = walkdir::WalkDir::new(below.join("Krepi"))
+            .into_iter()
+            .flatten();
+        let files = files.filter(|entry| entry.path().extension().is_some_and(|e| e == "lean"));
+        let module = |path: &Path| {
+            let file = path.strip_prefix(&below).expect("below the project");
+            file.with_extension("").to_string_lossy().replace('/', ".")
+        };
+        let homes = homes(&LAYOUT, files.map(|entry| module(entry.path())));
+        let shared = homes.iter().filter(|(_, home)| **home == Home::Shared);
+        let mut components = BTreeSet::from_iter(homes.values().filter_map(|home| match home {
+            Home::Component(component) => Some(component.clone()),
+            _ => None,
+        }));
+        let registry = fs::read_to_string(fixture.root().join(LAYOUT.registry));
+        let registry = registry.ok().and_then(|text| registry::parse(&text).ok());
+        let targets = registry.into_iter().flat_map(|registry| registry.targets);
+        components.extend(targets.filter_map(|target| target.module));
+        let lane = json!({"name": "a", "components": components,
+            "modules": Vec::from_iter(shared.map(|(module, _)| module))});
+        let lanes = json!({"schema": 1, "lanes": [lane]});
+        fixture.write(LAYOUT.lanes, &format!("{lanes:#}\n"));
+    }
+
+    /// Commits what changed, with [`one_lane`] and the statement hash of the
+    /// commit in `statements.json`.
     pub(crate) fn hashed(fixture: &mut Fixture) {
+        one_lane(fixture);
         if !Fixture::git(fixture, &["status", "--porcelain"]).is_empty() {
             fixture.commit_all();
         }
@@ -725,7 +918,7 @@ pub(crate) mod tests {
     /// The qualification and the base round of `fixture`.
     fn phases(fixture: &Fixture) -> Vec<Phase<'_>> {
         let root = fixture.root();
-        vec![qualify::phase(root, &LAYOUT), phase(root, &LAYOUT)]
+        vec![qualify::phase(root, &LAYOUT), phase(root, &LAYOUT, None)]
     }
 
     /// A script of the Lake stand-in that prints `log` and exits with `code`.
@@ -873,7 +1066,12 @@ pub(crate) mod tests {
             &LAYOUT,
         );
         let statements = statements.expect("the statements").statements;
-        assert_eq!(audit, lean::audit_source("Krepi", &statements, &record.own));
+        let audited = lean::audit_source("Krepi", &statements, &record.own);
+        let names = Vec::from_iter(record.modules.iter().map(|module| format!("`{module}")));
+        assert_eq!(
+            audit,
+            audited + &NAMES.replace("MODULES", &names.join(", "))
+        );
     }
 
     #[test]
@@ -2179,11 +2377,10 @@ pub(crate) mod tests {
         hashed(&mut fixture);
         let root = fixture.root();
         let whole = gate(&fixture, &[], run::tests::every_phase(root, &[]));
-        let job = run::tests::shard_phases(root, "qualification");
-        let job = run::tests::gate_shard(&fixture, "qualification", job, run::tests::plenty);
-        let shard = run::tests::shard_phases(root, "target/t");
-        let shard = run::tests::gate_shard(&fixture, "target/t", shard, run::tests::plenty);
-        let compared = run::tests::comparator_part(&fixture, &LAYOUT, None);
+        let job = qualification(&fixture);
+        let shard = run::tests::shard_phases(root, "target/t/1");
+        let shard = run::tests::gate_shard(&fixture, "target/t/1", shard, run::tests::plenty);
+        let compared = lane(&fixture, &self::job(&fixture));
         for done in [&whole, &job, &shard, &compared] {
             let receipt = done.written();
             let conclusion = (receipt.status, receipt.complete);
@@ -2207,21 +2404,43 @@ pub(crate) mod tests {
         assert!(stage(&shard).contains_key(Path::new("Proofs/Main.lean")));
         assert_eq!(stage(&shard), stage(&whole));
         // The receipts of the parts merge into the units of the whole run,
-        // and the unit of the comparator part, which a whole run does not have.
-        let parts = [("q", &job), ("t", &shard), ("c", &compared)];
+        // and the units of the lane and of its comparator, which a whole run
+        // does not have.
+        let parts = [("q", &job), ("t", &shard), ("a", &compared)];
         let parts = parts.map(|(name, done)| part(&fixture, name, done));
         let mut merged = merge::merge(root, &LAYOUT, &parts, Some(Duration::ZERO));
         assert_eq!(merged.problems, Vec::<String>::new());
         assert_eq!((merged.status, merged.complete), (Status::Verified, true));
-        let unit = merged.units.remove("comparator").map(|unit| unit.status);
-        assert_eq!(unit, Some(Status::Verified));
+        for unit in [A, "comparator/lane/a"] {
+            let unit = merged.units.remove(unit).map(|unit| unit.status);
+            assert_eq!(unit, Some(Status::Verified));
+        }
         assert_eq!(merged.units, whole.receipt.units);
     }
 
+    /// The unit of the base round of the lane `a`.
+    pub(crate) const A: &str = "base/lane/a";
+
     /// The receipt of the qualification job of `fixture`.
-    pub(crate) fn job(fixture: &Fixture) -> Done {
+    pub(crate) fn qualification(fixture: &Fixture) -> Done {
         let phases = run::tests::shard_phases(fixture.root(), "qualification");
         run::tests::gate_shard(fixture, "qualification", phases, run::tests::plenty)
+    }
+
+    /// The base record of the base run of the lane `a` of `fixture`.
+    pub(crate) fn job(fixture: &Fixture) -> Done {
+        let phases = run::tests::shard_phases(fixture.root(), "lane/a");
+        run::tests::gate_shard(fixture, "lane/a", phases, run::tests::plenty)
+    }
+
+    /// The receipt of the lane `a` of `fixture`, from its comparator run after
+    /// the base run that `done` gave.
+    pub(crate) fn lane(fixture: &Fixture, done: &Done) -> Done {
+        assert!(
+            done.run.path.join(receipt::BASE_RECORD).is_file(),
+            "a base record"
+        );
+        run::tests::comparator_run(fixture, &LAYOUT, "a", None)
     }
 
     #[test]
@@ -2255,7 +2474,7 @@ pub(crate) mod tests {
             done.failures()
         );
         assert!(receipt.proof_targets.is_empty());
-        assert_eq!(status(&done, PHASE), (Status::Verified, None));
+        assert_eq!(status(&done, A), (Status::Verified, None));
         let reason =
             "its module Krepi.Proofs.Counter is left out of the base round by the waiver of t";
         assert_eq!(status(&done, &unit(T)), (Status::Scoped, Some(reason)));
@@ -2271,12 +2490,14 @@ pub(crate) mod tests {
         assert!(stage(&done).join("Krepi/Proofs/Main.lean").is_file());
         let audit = fs::read_to_string(stage(&done).join(lean::AUDIT)).expect("the audit");
         assert!(!audit.contains("Krepi.Proofs.Counter"), "{audit}");
-        // The source rules still apply to the module.
+        // The source rules still apply to the module, in the qualification
+        // job, which checks every Lean file.
         let axiom = format!("{COUNTER}\naxiom bad : False\n");
         fixture.write(&format!("verification/{counter}"), &axiom);
         hashed(&mut fixture);
-        let done = job(&fixture);
         let problem = format!("verification/{counter}:16: axiom");
+        assert_eq!(status(&job(&fixture), A), (Status::Verified, None));
+        let done = qualification(&fixture);
         assert_eq!(
             status(&done, PHASE),
             (Status::Rejected, Some(problem.as_str()))
@@ -2331,7 +2552,7 @@ pub(crate) mod tests {
         let conclusion = (receipt.status, receipt.complete);
         assert_eq!(conclusion, (Status::Rejected, true));
         let reason = "the base build failed: Krepi/Proofs/Main.lean:3:0";
-        assert_eq!(status(&done, PHASE), (Status::Rejected, Some(reason)));
+        assert_eq!(status(&done, A), (Status::Rejected, Some(reason)));
         assert_eq!(Vec::from_iter(receipt.proof_targets.keys()), ["u"]);
         let staged = |file: &str| {
             stage(&done)
@@ -2373,15 +2594,15 @@ pub(crate) mod tests {
         lake_script(&fixture, "build", &build);
         hashed(&mut fixture);
         // Without a waiver, the base round fails.
-        assert_eq!(status(&job(&fixture), PHASE).0, Status::Rejected);
+        assert_eq!(status(&job(&fixture), A).0, Status::Rejected);
         // With one, the qualification job leaves the target out, and only
         // its shard fails.
         waiver::tests::waive(&fixture, "t", "9999-12-31");
         let (job, root) = (job(&fixture), fixture.root());
-        let shard = run::tests::shard_phases(root, "target/t");
-        let shard = run::tests::gate_shard(&fixture, "target/t", shard, run::tests::plenty);
-        let compared = run::tests::comparator_part(&fixture, &LAYOUT, None);
-        let written = [&job, &shard, &compared].map(|done| done.written());
+        let shard = run::tests::shard_phases(root, "target/t/1");
+        let shard = run::tests::gate_shard(&fixture, "target/t/1", shard, run::tests::plenty);
+        let (compared, q) = (lane(&fixture, &job), qualification(&fixture));
+        let written = [&q, &shard, &compared].map(|done| done.written());
         let conclusions = written
             .each_ref()
             .map(|receipt| (receipt.status, receipt.complete));
@@ -2390,10 +2611,10 @@ pub(crate) mod tests {
             (Status::Rejected, true),
             (Status::Verified, true),
         ];
-        assert_eq!(conclusions, expected, "{:?}", job.failures());
-        assert!(written[0].proof_targets.is_empty());
+        assert_eq!(conclusions, expected, "{:?}", compared.failures());
+        assert!(written[2].proof_targets.is_empty());
         assert!(!stage(&job).join("Krepi/Proofs/Counter.lean").exists());
-        // The comparator part does not check the statement either.
+        // The comparator of the lane does not check the statement either.
         let scoped = "the base round did not audit and verify Krepi.Proofs.Counter.t: SCOPED";
         let compared_t = fixture::status(&compared, "comparator/t");
         assert_eq!(compared_t, (Status::Scoped, Some(scoped)));
@@ -2402,7 +2623,7 @@ pub(crate) mod tests {
         // not require them and passes, and so does each hard gate over the
         // audit, the replay of the base round and the comparator; its
         // conclusion stays REJECTED.
-        let parts = [("q", &job), ("t", &shard), ("c", &compared)];
+        let parts = [("q", &q), ("t", &shard), ("a", &compared)];
         let parts = parts.map(|(name, done)| part(&fixture, name, done));
         let merged = merge::merge(root, &LAYOUT, &parts, Some(Duration::ZERO));
         assert_eq!(merged.problems, Vec::<String>::new());
@@ -2411,7 +2632,7 @@ pub(crate) mod tests {
         let gates = merged.gates;
         let gates = [gates.axioms, gates.leanchecker, gates.comparator];
         assert_eq!(gates, [true, true, true]);
-        let audits = commands(&job, PHASE)
+        let audits = commands(&job, A)
             .into_iter()
             .filter(|c| c.site == Site::AxiomAudit);
         let audit = Vec::from_iter(audits.map(|c| (c.argv.last().cloned(), c.class)));
@@ -2430,5 +2651,361 @@ pub(crate) mod tests {
         assert_eq!(merged.units["comparator/t"].status, Status::Scoped);
         let exit = merge::tests::exit(&fixture, &[&parts[0], &parts[1], &parts[2]]);
         assert_eq!(exit, ExitCode::SUCCESS);
+    }
+
+    /// Writes the lanes `lanes` of `fixture`, each its name and modules.
+    fn lanes_of(fixture: &Fixture, lanes: &[(&str, &[&str], &[&str])]) {
+        let lane = |(name, components, modules): &(&str, &[&str], &[&str])| json!({"name": name, "components": components, "modules": modules});
+        let lanes = json!({"schema": 1, "lanes": Vec::from_iter(lanes.iter().map(lane))});
+        fixture.write(LAYOUT.lanes, &format!("{lanes:#}\n"));
+    }
+
+    /// The base run of the lane `name` of `fixture`.
+    fn lane_run(fixture: &Fixture, name: &str) -> Done {
+        let shard = format!("lane/{name}");
+        let phases = run::tests::shard_phases(fixture.root(), &shard);
+        run::tests::gate_shard(fixture, &shard, phases, run::tests::plenty)
+    }
+
+    #[test]
+    fn a_lane_builds_audits_and_replays_its_own_modules_from_its_root() {
+        // A proof file that nothing imports is built and audited in its
+        // lane, whose root imports it with the other own modules.
+        let mut fixture = base("lane-own");
+        let lone = "module\n\nnamespace Krepi.Proofs.Lone\n\npublic theorem lone : True := trivial\n\n\
+            end Krepi.Proofs.Lone\n";
+        fixture.write("verification/Krepi/Proofs/Lone.lean", lone);
+        let shared = [
+            "Krepi.Spec.Counter",
+            "Krepi.Statements.Counter",
+            "Krepi.Proofs.Counter",
+        ];
+        lanes_of(
+            &fixture,
+            &[
+                ("a", &[], &shared),
+                ("b", &[], &["Krepi.Proofs.Lone", "Krepi.Proofs.Main"]),
+            ],
+        );
+        hashed(&mut fixture);
+        let done = lane_run(&fixture, "b");
+        assert_eq!(
+            status(&done, "base/lane/b"),
+            (Status::Verified, None),
+            "{:?}",
+            done.failures()
+        );
+        let root = fs::read_to_string(stage(&done).join("Krepi.lean")).expect("the root");
+        let imports = Vec::from_iter(
+            root.lines()
+                .filter_map(|line| line.strip_prefix("public import ")),
+        );
+        assert_eq!(imports, ["Krepi.Proofs.Lone", "Krepi.Proofs.Main"]);
+        let lines = Vec::from_iter(
+            commands(&done, "base/lane/b")
+                .into_iter()
+                .map(|c| c.argv.join(" ")),
+        );
+        assert!(
+            lines.contains(&BUILD.to_string()) && lines.contains(&AUDIT.to_string()),
+            "{lines:?}"
+        );
+        assert!(lines.contains(&LEANCHECKER.to_string()), "{lines:?}");
+        let audit = fs::read_to_string(stage(&done).join(lean::AUDIT)).expect("the audit file");
+        assert!(audit.contains("`Krepi.Proofs.Lone,"), "{audit}");
+        assert!(!audit.contains("`Krepi.Proofs.Counter"), "{audit}");
+        let record = record(&done);
+        assert_eq!(
+            record.theorems["Krepi.Proofs.Lone.lone"].status,
+            Status::Verified
+        );
+        // The other modules of the stage are those that its own ones may
+        // import; the statement of `S`, of the other lane, is no unit here.
+        assert!(stage(&done).join("Krepi/Proofs/Counter.lean").is_file());
+        assert!(!done.receipt.units.contains_key(&unit(T)));
+        let held = done.receipt.lane.clone().expect("the lane");
+        assert_eq!(held.modules, ["Krepi.Proofs.Lone", "Krepi.Proofs.Main"]);
+        // Each public constant with its kind and the fingerprint of its type
+        // and universe parameters, the same for the same type.
+        let split = |c: &String| Vec::from_iter(c.split(' ').map(String::from));
+        let constants = Vec::from_iter(held.constants.iter().map(split));
+        let named = Vec::from_iter(constants.iter().map(|c| (c[0].as_str(), c[1].as_str())));
+        let theorems = [
+            ("Krepi.Proofs.Lone.lone", "theorem"),
+            ("Krepi.Proofs.Main.m", "theorem"),
+        ];
+        assert_eq!(named, theorems);
+        let prints = Vec::from_iter(constants.iter().map(|c| c[2..].join(" ")));
+        assert!(
+            prints[0].ends_with("[]") && prints[0] == prints[1],
+            "{prints:?}"
+        );
+        // The replay records its module, seconds and an upper bound of its
+        // largest process.
+        let replay = &record.leanchecker;
+        assert_eq!(
+            (replay.module.as_str(), replay.mode.as_str()),
+            ("Krepi", "fresh")
+        );
+        let command = commands(&done, "base/lane/b")
+            .into_iter()
+            .find(|c| c.site == Site::Leanchecker && c.argv.join(" ") == LEANCHECKER);
+        assert_eq!(Some(replay.seconds), command.map(|c| c.seconds));
+        assert!(replay.max_rss.is_some_and(|rss| rss > 0));
+    }
+
+    #[test]
+    fn a_lean_file_outside_the_namespaces_rejects_the_round_of_a_lane() {
+        let mut fixture = base("lane-outside");
+        fixture.write("verification/Other/Foo.lean", "module\n");
+        hashed(&mut fixture);
+        let done = job(&fixture);
+        let outside = "is a Lean file outside verification/Krepi/ and verification/externals/";
+        let problem = format!("verification/Other/Foo.lean {outside}");
+        assert_eq!(record(&done).problems, std::slice::from_ref(&problem));
+        assert_eq!(status(&done, A), (Status::Rejected, Some(problem.as_str())));
+        assert!(!stage(&done).join("Other/Foo.lean").exists());
+    }
+
+    #[test]
+    fn a_declaration_added_without_the_kernel_fails_the_replay_of_the_lane_that_holds_it() {
+        // In a proof module of the second lane, and in the external
+        // declarations of a target of that lane.
+        let module = "Krepi.Proofs.Hack";
+        let proof = hack(module, "public import Krepi.Statements.Counter\n");
+        let external = hack("KrepiGen.P", "public import Aeneas\n");
+        for (label, file) in [
+            ("lane-hack-proof", "Krepi/Proofs/Hack.lean"),
+            ("lane-hack-external", "KrepiGen/P/FunsExternal.lean"),
+        ] {
+            let mut fixture = base(label);
+            run::tests::root_package(&fixture, "krepi-kernel", "");
+            targets(&fixture, &json!([planned("p")]));
+            shape_with_template(&fixture);
+            let template = fixture
+                .root()
+                .join("artifacts/shape-p/KrepiGen/P/FunsExternal_Template.lean");
+            if file.starts_with("KrepiGen") {
+                fs::write(&template, &external).expect("the template");
+            }
+            fixture.write(
+                "verification/Krepi/Statements/P.lean",
+                "module\n\npublic import KrepiGen.P.Funs\n",
+            );
+            fixture.write("verification/Krepi/Proofs/Hack.lean", &proof);
+            let lanes: [(&str, &[&str], &[&str]); 2] = [
+                (
+                    "a",
+                    &[],
+                    &[
+                        "Krepi.Spec.Counter",
+                        "Krepi.Statements.Counter",
+                        "Krepi.Proofs.Counter",
+                        "Krepi.Proofs.Main",
+                    ],
+                ),
+                ("b", &["P"], &["Krepi.Proofs.Hack", "Krepi.Statements.P"]),
+            ];
+            lanes_of(&fixture, &lanes);
+            let module = file.trim_end_matches(".lean").replace('/', ".");
+            let check = format!(
+                "if [ -f {file} ] && grep -qx 'public import {module}' Krepi.lean; then\n{}fi\n",
+                log(&kernel_report(&module), 1)
+            );
+            lake_script(&fixture, "leanchecker-Krepi", &check);
+            hashed(&mut fixture);
+            // The first lane replays its root, which does not import the
+            // file, and passes; the second fails, and so does the hard gate.
+            let first = lane_run(&fixture, "a");
+            assert_eq!(
+                status(&first, "base/lane/a"),
+                (Status::Verified, None),
+                "{label}"
+            );
+            let compared = run::tests::comparator_run(&fixture, &LAYOUT, "a", None);
+            let second = lane_run(&fixture, "b");
+            let replayed = commands(&second, "base/lane/b")
+                .into_iter()
+                .find(|c| c.argv.join(" ") == LEANCHECKER);
+            assert_eq!(
+                replayed.map(|c| c.class),
+                Some(Class::ProofFailure),
+                "{label}"
+            );
+            assert_eq!(
+                status(&second, "base/lane/b").0,
+                Status::Rejected,
+                "{label}"
+            );
+            let other = run::tests::comparator_run(&fixture, &LAYOUT, "b", None);
+            let job = qualification(&fixture);
+            let parts = [("q", &job), ("a", &compared), ("b", &other)];
+            let parts = parts.map(|(name, done)| part(&fixture, name, done));
+            let merged = merge::merge(fixture.root(), &LAYOUT, &parts, Some(Duration::ZERO));
+            assert_eq!(merged.problems, Vec::<String>::new(), "{label}");
+            assert_eq!(
+                (merged.gates.leanchecker, merged.status),
+                (false, Status::Rejected),
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_qualification_job_rejects_a_recorded_statement_hash_that_was_not_updated() {
+        let mut fixture = base("job-stale-hash");
+        hashed(&mut fixture);
+        assert_eq!(
+            status(&qualification(&fixture), PHASE),
+            (Status::Verified, None)
+        );
+        let recorded = hash(&mut fixture);
+        let spec = captured("Krepi/Spec/Counter.lean").replace("n + 1", "n + 2");
+        fixture.write("verification/Krepi/Spec/Counter.lean", &spec);
+        fixture.commit_all();
+        let computed = hash(&mut fixture);
+        let done = qualification(&fixture);
+        let problem = format!(
+            "{} records {recorded}, the statement side of the snapshot is {computed}",
+            LAYOUT.statements
+        );
+        assert_eq!(
+            status(&done, PHASE),
+            (Status::Rejected, Some(problem.as_str()))
+        );
+        // A lane does not compute it.
+        assert_eq!(
+            job(&fixture)
+                .written()
+                .base
+                .expect("a base record")
+                .statement_hash,
+            Hash::default()
+        );
+    }
+
+    #[test]
+    fn a_module_of_no_lane_is_held_by_no_part_and_the_merge_reports_it() {
+        // `Krepi.Proofs.Main` is in no lane: neither the qualification job
+        // nor the lane holds or builds it from its root, and the merge finds
+        // it in the list of the job, held by no part.
+        let mut fixture = base("no-lane");
+        let counter = [
+            "Krepi.Spec.Counter",
+            "Krepi.Statements.Counter",
+            "Krepi.Proofs.Counter",
+        ];
+        lanes_of(&fixture, &[("a", &[], &counter)]);
+        hashed(&mut fixture);
+        let main = "Krepi.Proofs.Main".to_string();
+        let job = qualification(&fixture);
+        assert_eq!(status(&job, PHASE), (Status::Verified, None));
+        let held = job
+            .receipt
+            .lane
+            .clone()
+            .expect("the lane record of the job");
+        assert_eq!(held.modules, ["Krepi.Qualification.Arithmetic"]);
+        let listed = job
+            .receipt
+            .handwritten
+            .clone()
+            .expect("the list of the job");
+        assert_eq!(listed.get(&main).map(String::as_str), Some("shared"));
+        let compared = lane(&fixture, &self::job(&fixture));
+        for done in [&job, &compared] {
+            assert!(!record(done).modules.contains(&main), "{:?}", record(done));
+        }
+        let parts = [("q", &job), ("a", &compared)].map(|(name, done)| part(&fixture, name, done));
+        let merged = merge::merge(fixture.root(), &LAYOUT, &parts, Some(Duration::ZERO));
+        let problem = format!("the hand-written module {main} is held by no part");
+        assert_eq!(merged.problems, [problem]);
+        assert!(!merged.checks.coverage && merged.checks.names);
+        assert_eq!(
+            (merged.status, merged.complete),
+            (Status::ToolFailure, false)
+        );
+    }
+
+    #[test]
+    fn the_qualification_job_of_the_calibration_builds_audits_and_replays_an_empty_root() {
+        // The calibration project has no module below `Krepi/Qualification/`,
+        // and the proofs of the qualification cases are in the production
+        // project, so the root of its qualification job imports nothing; the
+        // build, the audit, which imports `Lean` for its programs, and the
+        // replay run all the same.
+        let mut fixture = base("job-calibration");
+        let layout = Layout::CALIBRATION;
+        let at = |path: &str| format!("{}/{path}", layout.project);
+        let lakefile =
+            include_str!("../../../verification/qualification/calibration/lakefile.toml");
+        fixture.write(&at("lakefile.toml"), lakefile);
+        let lock = "{\"name\": \"krepiVerification\", \"packages\": []}\n";
+        fixture.write("verification/lake-manifest.json", lock);
+        let proof = MAIN.replace("Main", "Calibration");
+        fixture.write(&at("Krepi/Proofs/Calibration.lean"), &proof);
+        // The workspace of the calibration target, with its lock.
+        let manifest = "[package]\nname = \"formal-calibration\"\nversion = \"0.0.0\"\n\
+            edition = \"2024\"\n\n[workspace]\n\n[lints.rust]\nunsafe_code = \"forbid\"\n";
+        fixture.write(&at("Cargo.toml"), manifest);
+        fixture.write(&at("src/lib.rs"), "#![no_std]\n");
+        let manifest = fixture.root().join(at("Cargo.toml"));
+        let locked = Command::new(crate::check::cargo())
+            .args(["generate-lockfile", "--offline", "--manifest-path"])
+            .arg(&manifest)
+            .status();
+        assert!(locked.expect("cargo runs").success());
+        fixture.write(layout.axioms, "{\"schema\": 1, \"axioms\": []}\n");
+        fixture.write(layout.tcb, "{\"schema\": 1, \"items\": []}\n");
+        let registry = "{\"schema\": 2, \"specifications\": [], \"targets\": []}\n";
+        fixture.write(layout.registry, registry);
+        fixture.write(layout.models, "{\"schema\": 1, \"models\": []}\n");
+        fixture.write(layout.shards, "{\"schema\": 1, \"parts\": []}\n");
+        let lane = json!({"name": "calibration", "components": [],
+            "modules": ["Krepi.Proofs.Calibration"]});
+        let lanes = json!({"schema": 1, "lanes": [lane]});
+        fixture.write(layout.lanes, &format!("{lanes:#}\n"));
+        let statements = |hash: &str| {
+            let file = json!({"schema": 1, "hash": hash, "statements": []});
+            format!("{file:#}\n")
+        };
+        fixture.write(layout.statements, &statements(&"0".repeat(40)));
+        hashed(&mut fixture);
+        let work = fixture.root().join("artifacts/guard-calibration");
+        fs::create_dir_all(&work).expect("create the work directory");
+        let hash = guard::statement_hash(&mut fixture, "HEAD", &layout, &work);
+        fixture.write(layout.statements, &statements(&hash.expect("the hash").0));
+        fixture.commit_all();
+        let done = run::tests::layout_shard(&fixture, &layout, qualify::PHASE);
+        assert_eq!(
+            status(&done, PHASE),
+            (Status::Verified, None),
+            "{:?}",
+            done.failures()
+        );
+        let stage = done.run.path.join("work/base/stage/calibration");
+        let root = fs::read_to_string(stage.join("Krepi.lean")).expect("the root");
+        assert_eq!(root, lean::root_source(&BTreeSet::new()));
+        assert_eq!(argv(&done), [BUILD, AUDIT, LEANCHECKER, VERSION]);
+        let audit = fs::read_to_string(stage.join(lean::AUDIT)).expect("the audit file");
+        assert!(audit.starts_with("import Lean\nimport Krepi\n"), "{audit}");
+        let record = record(&done);
+        assert!(record.modules.is_empty() && record.theorems.is_empty());
+        let held = done
+            .receipt
+            .lane
+            .clone()
+            .expect("the lane record of the job");
+        assert!(
+            held.modules.is_empty() && held.constants.is_empty(),
+            "{held:?}"
+        );
+        let listed = done
+            .receipt
+            .handwritten
+            .clone()
+            .expect("the list of the job");
+        let home = listed.get("Krepi.Proofs.Calibration").map(String::as_str);
+        assert_eq!(home, Some("shared"));
     }
 }

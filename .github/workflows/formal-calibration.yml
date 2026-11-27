@@ -4,16 +4,18 @@
 # label formal-calibration, when it is opened, reopened or updated and when
 # that label is added. The job `calibration run`, the qualification job of
 # the calibration, runs `cargo xtask formal check --calibration`, then
-# `cargo xtask formal run --calibration --shard qualification --keep`, then
-# the comparator part on the stage that it kept, as the job `formal run` of
-# the workflow `formal` does, and checks that the comparator rejected the
-# two challenges that it is to reject; beside it,
-# the job `calibration shard <name>` runs the shard of each formal target
-# of the calibration with the steps of the shard job of the workflow
-# `formal`, and the job `planned example` the gate on the planned target
-# of the calibration alone; after them, the job `calibration merge`
-# combines the receipts of the qualification and the shards on the runner
-# with `cargo xtask formal merge --calibration`. On a
+# `cargo xtask formal run --calibration --shard qualification`, as the job
+# `formal run` of the workflow `formal` does; beside it, the job
+# `calibration lane <name>` runs the base run and the comparator of each
+# lane of the calibration with the steps of the lane job of the workflow
+# `formal` and checks that the comparator rejected the two challenges that
+# it is to reject, the job `calibration shard <name>/1` runs the part of
+# each formal target of the calibration with the steps of the shard job of
+# the workflow `formal`, and the job `planned example` the gate on the
+# planned target of the calibration alone; after them, the job
+# `calibration merge` combines the receipts of the qualification job, the
+# lanes and the parts on the runner with
+# `cargo xtask formal merge --calibration`. On a
 # manual run that asks for it, and on a pull request with the label, the
 # job `calibration mutants` runs `cargo xtask formal mutants calibration
 # --calibration` and uploads the list of survivors that it writes. None of
@@ -61,13 +63,11 @@ env:
 
 jobs:
   # The deadline of the qualification job of the calibration is the gate's
-  # 7,200 s and 600 s for the extraction, that of the planned example, which
-  # runs the part of its target alone, 300 s and the default 1,800 s of its
-  # planned target; with the 300 s of the receipt, 135 and 40 minutes. Each
-  # step has two minutes more, and each job 23 minutes more than its step,
-  # and the run row 40 more for the comparator and its checks: 37 minutes
-  # for its step, as in the job `formal run`, and 3 for the steps after it.
-  # The job writes its limit in a notice for the record of the run.
+  # 7,200 s, that of the planned example, which runs the part of its target
+  # alone, 300 s and the default 1,800 s of its planned target; with the
+  # 300 s of the receipt, 125 and 40 minutes. Each step has two minutes
+  # more, and each job 23 minutes more than its step. The job writes its
+  # limit in a notice for the record of the run.
   calibration:
     name: ${{ matrix.name }}
     if: >-
@@ -84,11 +84,11 @@ jobs:
         include:
           - name: calibration run
             key: run
-            args: --shard qualification --keep
+            args: --shard qualification
             artifact: calibration-formal-part-qualification
-            deadline: 135m
-            step: 137
-            job: 200
+            deadline: 125m
+            step: 127
+            job: 150
           - name: planned example
             key: planned
             args: --target calibration-planned
@@ -140,14 +140,6 @@ jobs:
             rustup toolchain install
             cargo build --locked --manifest-path xtask/Cargo.toml
           } 2>&1 | tee -a artifacts/formal/job.txt
-
-      # The comparator part runs this copy of xtask, mounted read-only: the
-      # gate, whose container mounts only the checkout, cannot change it.
-      - name: Copy xtask for the comparator
-        timeout-minutes: 1
-        run: |
-          cp xtask/target/debug/xtask "$RUNNER_TEMP/xtask"
-          sha256sum "$RUNNER_TEMP/xtask" | tee -a artifacts/formal/job.txt
 
       # A user other than root, a read-only root file system, no
       # capabilities and no network, as the probe of the job `formal run`.
@@ -210,123 +202,6 @@ jobs:
         run: |
           docker rm --force "formal-calibration-$KEY-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
 
-      # The comparator part of the calibration, with the step of the job
-      # `formal run` of the workflow `formal`, which a unit test keeps equal
-      # to this one but for the flag --calibration. Besides its units, it
-      # judges the two challenges that the comparator is to reject.
-      - name: Run the comparator in its own container
-        id: comparator
-        if: ${{ !cancelled() && matrix.key == 'run' && steps.probe.outcome == 'success' }}
-        timeout-minutes: 37
-        run: |
-          read -r -a gate_flags <<< "$GATE_FLAGS"
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          relaxed=(--security-opt seccomp=unconfined --security-opt apparmor=unconfined
-            --tmpfs /run/user --security-opt systempaths=unconfined)
-          printf '[safe]\n\tdirectory = *\n' > "$RUNNER_TEMP/gitconfig"
-          mkdir -p artifacts/formal/runs
-          echo "== probe: docker run $GATE_FLAGS ${relaxed[*]} --user $(id -u):$(id -g)" \
-            | tee -a artifacts/formal/job.txt
-          docker run --rm -i "${gate_flags[@]}" "${relaxed[@]}" --user "$(id -u):$(id -g)" \
-            "$IMAGE" bash -s 2>&1 <<'PROBE' | tee -a artifacts/formal/job.txt
-          status=0
-          fail() { echo "FAILED: $*"; status=1; }
-          echo "user: $(id)"
-          [ "$(id -u)" != 0 ] || fail "the container runs as root"
-          root=$(awk '$2 == "/" { line = $0 } END { print line }' /proc/self/mounts)
-          echo "root file system: $root"
-          case ",$(echo "$root" | awk '{ print $4 }')," in
-            *,ro,*) ;;
-            *) fail "the root file system is not read-only" ;;
-          esac
-          grep -E '^(CapBnd|CapEff|NoNewPrivs):' /proc/self/status
-          grep -q '^CapBnd:[[:space:]]*0*$' /proc/self/status || fail "capabilities are left"
-          grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/self/status || fail "new privileges are allowed"
-          echo "network interfaces: $(ls /sys/class/net)"
-          [ "$(ls /sys/class/net)" = lo ] || fail "the container has a network"
-          exit "$status"
-          PROBE
-          echo "== comparator started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
-          exec bash .github/scripts/deadline.sh --stop-commands 35m 1m \
-            docker run --rm --name "formal-comparator-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" "${relaxed[@]}" \
-            --user "$(id -u):$(id -g)" \
-            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
-            --volume "$GITHUB_WORKSPACE/artifacts/formal/runs:/krepi-runs" --env KREPI_FORMAL_RUNS=/krepi-runs \
-            --volume "$RUNNER_TEMP/gitconfig:/etc/gitconfig:ro" \
-            --volume "$RUNNER_TEMP/xtask:/krepi-xtask:ro" \
-            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
-            --env KREPI_FORMAL_IMAGE="$IMAGE" \
-            "$IMAGE" /krepi-xtask formal run --calibration --shard comparator
-
-      - name: Remove the container of the comparator
-        if: ${{ always() && matrix.key == 'run' }}
-        timeout-minutes: 1
-        run: |
-          if docker rm --force "formal-comparator-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1; then
-            echo "removed the container of the comparator"
-          else
-            echo "no container of the comparator is left"
-          fi
-
-      # The two challenges that the comparator part of the calibration
-      # judges beside its units and never concludes: the first statement's
-      # theorem with the second statement, and the first theorem with the
-      # permitted axioms of its unit but propext, which it uses. The step
-      # fails unless the comparator rejected each, with Lake's message for
-      # it in the error log of its command, and verified the unit of the
-      # calibration target, so that the second differs from a verified
-      # challenge only by the axiom left out.
-      - name: Check that the comparator rejects the fixed challenges
-        if: ${{ !cancelled() && matrix.key == 'run' }}
-        timeout-minutes: 1
-        run: |
-          # The receipt and the logs hold text of Lean and Lake: no workflow
-          # commands.
-          token=$(openssl rand -hex 16)
-          echo "::stop-commands::$token"
-          trap 'echo "::$token::"' EXIT
-          shopt -s nullglob
-          receipts=()
-          for receipt in artifacts/formal/runs/*/receipt.json; do
-            if jq -e '.shard == "comparator"' "$receipt" > /dev/null; then
-              receipts+=("$receipt")
-            fi
-          done
-          {
-            echo "## formal calibration: the challenges that the comparator rejects"
-            echo
-            if [ "${#receipts[@]}" != 1 ]; then
-              echo "- FAILED: the comparator left ${#receipts[@]} receipts, not one"
-              exit 1
-            fi
-            receipt=${receipts[0]}
-            status=0
-            fail() { echo "- FAILED: $*"; status=1; }
-            verified=$(jq -r '.units["comparator/calibration"].status // "none"' "$receipt")
-            echo "- \`comparator/calibration\`: $verified"
-            [ "$verified" = VERIFIED ] || fail "the unit comparator/calibration is not VERIFIED"
-            units=$(jq -c '[.commands[] | .unit // "" | select(startswith("comparator-negative/"))] | sort' "$receipt")
-            [ "$units" = '["comparator-negative/axiom","comparator-negative/statement"]' ] \
-              || fail "the challenges ran as the commands of $units"
-            for expected in "statement:Challenge and solution theorem statement do not match" \
-                "axiom:Illegal axiom detected: 'propext'"; do
-              unit=comparator-negative/${expected%%:*}
-              message=${expected#*:}
-              class=$(jq -r --arg unit "$unit" \
-                'first(.commands[] | select(.unit == $unit) | .class) // "none"' "$receipt")
-              log=$(jq -r --arg unit "$unit" \
-                'first(.commands[] | select(.unit == $unit) | .stderr.path) // empty' "$receipt")
-              echo "- \`$unit\`: $class"
-              [ "$class" = PROOF_FAILURE ] || fail "$unit is $class, not PROOF_FAILURE"
-              if [ -n "$log" ] && line=$(grep -F -m 1 -- "$message" "$(dirname "$receipt")/$log"); then
-                echo "    $line"
-              else
-                fail "the error log of $unit does not hold: $message"
-              fi
-            done
-            exit "$status"
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-
       - name: Summarize the receipt and compress the logs
         if: always()
         env:
@@ -378,17 +253,18 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
-  # The shard of each formal target of the calibration, beside the
-  # qualification job, with the steps of the shard job of the workflow
-  # `formal`, which a unit test keeps equal to these but for the flag
-  # --calibration and the prefix of the artifact: its deadline is 300 s
-  # and the budget of the target, then the 300 s of its receipt, 60 minutes
-  # for the 3,000 s of `calibration`; the step has two minutes more, and the
-  # job 15 minutes before the step and 3 after it, which it writes in a
-  # notice for the record of the run. A unit test keeps the matrix equal to
-  # the formal targets of the calibration registry.
-  shard:
-    name: calibration shard ${{ matrix.name }}
+  # The lane of the calibration, beside the qualification job, with the
+  # steps of the lane job of the workflow `formal`, which a unit test keeps
+  # equal to these but for the flag --calibration, the prefix of the
+  # artifact and the step that checks the challenges that the comparator is
+  # to reject: its base run has the deadline of the lane, 300 s, the 2,400 s
+  # of its registered budget and 600 s for its extraction, then the 300 s of
+  # its receipt, 62 minutes with the two of its step, its comparator 37
+  # minutes, and the job 15 minutes before the base step and 3 after the
+  # comparator, which it writes in a notice for the record of the run. A
+  # unit test keeps the matrix equal to the lanes of the calibration.
+  lane:
+    name: calibration lane ${{ matrix.name }}
     if: >-
       github.event_name != 'pull_request'
       || (contains(github.event.pull_request.labels.*.name, 'formal-calibration')
@@ -402,14 +278,17 @@ jobs:
       matrix:
         include:
           - name: calibration
-            budget: 3000
+            part: lane/calibration
+            key: lane-calibration
+            budget: 2400
             step: 62
-            job: 80
+            job: 117
     concurrency:
-      group: formal-calibration-shard-${{ matrix.name }}-${{ github.event.pull_request.number || github.ref }}
+      group: formal-calibration-lane-${{ matrix.name }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     env:
       NAME: ${{ matrix.name }}
+      PART: ${{ matrix.part }}
       LIMIT: ${{ matrix.job }}
     steps:
       - name: Check out the candidate commit
@@ -427,7 +306,321 @@ jobs:
           {
             echo "== prepare started $(date -u +%FT%TZ)"
             echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
-              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, shard target/$NAME"
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, part $PART"
+            echo "user: $(id)"
+            echo "processors: $(nproc)"
+            free -b
+            df -B1 /
+            docker info --format 'security options {{json .SecurityOptions}}'
+            if [ "$(id -u)" = 0 ] || [ "$(stat -c %u "$GITHUB_WORKSPACE")" != "$(id -u)" ]; then
+              echo "the runner's user is root or does not own the checkout" >&2
+              exit 1
+            fi
+            echo "== docker pull $IMAGE"
+            docker pull "$IMAGE"
+            docker image inspect --format 'pulled {{json .RepoDigests}}, {{.Size}} bytes' "$IMAGE"
+            df -B1 /
+          } 2>&1 | tee artifacts/formal/job.txt
+
+      - name: Build xtask
+        timeout-minutes: 3
+        run: |
+          {
+            echo "== build xtask, started $(date -u +%FT%TZ)"
+            rustup toolchain install
+            cargo build --locked --manifest-path xtask/Cargo.toml
+          } 2>&1 | tee -a artifacts/formal/job.txt
+
+      # The comparator runs this copy of xtask, mounted read-only: the base
+      # run, whose container mounts only the checkout, cannot change it.
+      - name: Copy xtask for the comparator
+        timeout-minutes: 1
+        run: |
+          cp xtask/target/debug/xtask "$RUNNER_TEMP/xtask"
+          sha256sum "$RUNNER_TEMP/xtask" | tee -a artifacts/formal/job.txt
+
+      # The probe of the job `formal scoped`.
+      - name: Probe the container of the gate
+        id: probe
+        timeout-minutes: 1
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          docker run --rm -i "${gate_flags[@]}" --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE:ro" --workdir "$GITHUB_WORKSPACE" \
+            "$IMAGE" bash -s 2>&1 <<'PROBE' | tee -a artifacts/formal/job.txt
+          [ "$(id -u)" != 0 ] || { echo "FAILED: the container runs as root"; exit 1; }
+          grep -q '^CapBnd:[[:space:]]*0*$' /proc/self/status || { echo "FAILED: capabilities"; exit 1; }
+          [ "$(ls /sys/class/net)" = lo ] || { echo "FAILED: the container has a network"; exit 1; }
+          "$PWD/xtask/target/debug/xtask" help > /dev/null
+          echo "the probe passed"
+          PROBE
+
+      # The step ends two minutes after the deadline of the lane and its
+      # receipt, from the matrix; `deadline.sh` stops the command at that
+      # deadline and kills it a minute later.
+      - name: Run the lane in the image
+        id: lane
+        if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
+        timeout-minutes: ${{ matrix.step }}
+        env:
+          STEP: ${{ matrix.step }}
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          limit=$(( (STEP - 2) * 60 ))s
+          echo "== base run started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
+          exec bash .github/scripts/deadline.sh --stop-commands "$limit" 1m \
+            docker run --rm --name "formal-lane-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
+            --env KREPI_FORMAL_IMAGE="$IMAGE" \
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --calibration --shard "$PART" --keep
+
+      - name: Remove the container of the gate
+        if: always()
+        run: |
+          docker rm --force "formal-lane-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
+
+      # The comparator of the lane on the stage that its base run kept, also
+      # when that run failed: `lake comparator` runs in a sandbox of
+      # bubblewrap, which needs unprivileged user namespaces on the runner
+      # and, in the container, seccomp and AppArmor unconfined, an empty
+      # /run/user and the system paths unmasked. The container keeps the
+      # other flags of the gate, which a probe checks first. The sandbox sees
+      # the stage through a second mount of the runs directory outside /home,
+      # which KREPI_FORMAL_RUNS names; it clears the environment, so Git
+      # there reads only /etc/gitconfig, which marks the packages of the
+      # image, which belong to root, as safe. The comparator runs the copy of xtask
+      # that the job made before the base run, at /krepi-xtask, and writes
+      # the receipt of the lane; it ends by the deadline of the base run, and
+      # `deadline.sh` stops it at the limit of its phase and the receipt and
+      # kills it a minute later.
+      - name: Run the comparator in its own container
+        id: comparator
+        if: ${{ !cancelled() && steps.probe.outcome == 'success' }}
+        timeout-minutes: 37
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          relaxed=(--security-opt seccomp=unconfined --security-opt apparmor=unconfined
+            --tmpfs /run/user --security-opt systempaths=unconfined)
+          printf '[safe]\n\tdirectory = *\n' > "$RUNNER_TEMP/gitconfig"
+          mkdir -p artifacts/formal/runs
+          echo "== probe: docker run $GATE_FLAGS ${relaxed[*]} --user $(id -u):$(id -g)" \
+            | tee -a artifacts/formal/job.txt
+          docker run --rm -i "${gate_flags[@]}" "${relaxed[@]}" --user "$(id -u):$(id -g)" \
+            "$IMAGE" bash -s 2>&1 <<'PROBE' | tee -a artifacts/formal/job.txt
+          status=0
+          fail() { echo "FAILED: $*"; status=1; }
+          echo "user: $(id)"
+          [ "$(id -u)" != 0 ] || fail "the container runs as root"
+          root=$(awk '$2 == "/" { line = $0 } END { print line }' /proc/self/mounts)
+          echo "root file system: $root"
+          case ",$(echo "$root" | awk '{ print $4 }')," in
+            *,ro,*) ;;
+            *) fail "the root file system is not read-only" ;;
+          esac
+          grep -E '^(CapBnd|CapEff|NoNewPrivs):' /proc/self/status
+          grep -q '^CapBnd:[[:space:]]*0*$' /proc/self/status || fail "capabilities are left"
+          grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/self/status || fail "new privileges are allowed"
+          echo "network interfaces: $(ls /sys/class/net)"
+          [ "$(ls /sys/class/net)" = lo ] || fail "the container has a network"
+          exit "$status"
+          PROBE
+          echo "== comparator started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
+          exec bash .github/scripts/deadline.sh --stop-commands 35m 1m \
+            docker run --rm --name "formal-comparator-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" "${relaxed[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --volume "$GITHUB_WORKSPACE/artifacts/formal/runs:/krepi-runs" --env KREPI_FORMAL_RUNS=/krepi-runs \
+            --volume "$RUNNER_TEMP/gitconfig:/etc/gitconfig:ro" \
+            --volume "$RUNNER_TEMP/xtask:/krepi-xtask:ro" \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
+            --env KREPI_FORMAL_IMAGE="$IMAGE" \
+            "$IMAGE" /krepi-xtask formal run --calibration --shard "$PART" --comparator
+
+      - name: Remove the container of the comparator
+        if: always()
+        timeout-minutes: 1
+        run: |
+          if docker rm --force "formal-comparator-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1; then
+            echo "removed the container of the comparator"
+          else
+            echo "no container of the comparator is left"
+          fi
+
+      # The two challenges that the comparator of the lane of the calibration
+      # judges beside its units and never concludes: the first statement's
+      # theorem with the second statement, and the first theorem with the
+      # permitted axioms of its unit but propext, which it uses. The step
+      # fails unless the comparator rejected each, with Lake's message for
+      # it in the error log of its command, and verified the unit of the
+      # calibration target, so that the second differs from a verified
+      # challenge only by the axiom left out.
+      - name: Check that the comparator rejects the fixed challenges
+        if: ${{ !cancelled() }}
+        timeout-minutes: 1
+        run: |
+          # The receipt and the logs hold text of Lean and Lake: no workflow
+          # commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          shopt -s nullglob
+          receipts=()
+          for receipt in artifacts/formal/runs/*/receipt.json; do
+            if jq -e --arg part "$PART" '.shard == $part' "$receipt" > /dev/null; then
+              receipts+=("$receipt")
+            fi
+          done
+          {
+            echo "## formal calibration: the challenges that the comparator rejects"
+            echo
+            if [ "${#receipts[@]}" != 1 ]; then
+              echo "- FAILED: the comparator left ${#receipts[@]} receipts of $PART, not one"
+              exit 1
+            fi
+            receipt=${receipts[0]}
+            status=0
+            fail() { echo "- FAILED: $*"; status=1; }
+            verified=$(jq -r '.units["comparator/calibration"].status // "none"' "$receipt")
+            echo "- \`comparator/calibration\`: $verified"
+            [ "$verified" = VERIFIED ] || fail "the unit comparator/calibration is not VERIFIED"
+            units=$(jq -c '[.commands[] | .unit // "" | select(startswith("comparator-negative/"))] | sort' "$receipt")
+            [ "$units" = '["comparator-negative/axiom","comparator-negative/statement"]' ] \
+              || fail "the challenges ran as the commands of $units"
+            for expected in "statement:Challenge and solution theorem statement do not match" \
+                "axiom:Illegal axiom detected: 'propext'"; do
+              unit=comparator-negative/${expected%%:*}
+              message=${expected#*:}
+              class=$(jq -r --arg unit "$unit" \
+                'first(.commands[] | select(.unit == $unit) | .class) // "none"' "$receipt")
+              log=$(jq -r --arg unit "$unit" \
+                'first(.commands[] | select(.unit == $unit) | .stderr.path) // empty' "$receipt")
+              echo "- \`$unit\`: $class"
+              [ "$class" = PROOF_FAILURE ] || fail "$unit is $class, not PROOF_FAILURE"
+              if [ -n "$log" ] && line=$(grep -F -m 1 -- "$message" "$(dirname "$receipt")/$log"); then
+                echo "    $line"
+              else
+                fail "the error log of $unit does not hold: $message"
+              fi
+            done
+            exit "$status"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize the receipt and compress the logs
+        if: always()
+        env:
+          GATE_OUTCOME: ${{ steps.lane.outcome }}
+          COMPARATOR_OUTCOME: ${{ steps.comparator.outcome }}
+        run: |
+          shopt -s nullglob
+          # The receipts hold text of Lean and Lake: no workflow commands.
+          token=$(openssl rand -hex 16)
+          echo "::stop-commands::$token"
+          trap 'echo "::$token::"' EXIT
+          mkdir -p artifacts/formal
+          logs=(artifacts/formal/runs/*/logs)
+          if [ "${#logs[@]}" -gt 0 ]; then
+            tar -czf artifacts/formal/logs.tar.gz "${logs[@]}"
+          fi
+          receipts=(artifacts/formal/runs/*/receipt.json)
+          {
+            echo "## formal lane $NAME"
+            echo
+            echo "Image \`$IMAGE\`; the base step: $GATE_OUTCOME; the comparator step: $COMPARATOR_OUTCOME."
+            echo
+            for record in artifacts/formal/runs/*/base.json; do
+              echo "- Base record \`$record\`, SHA-256 \`$(sha256sum "$record" | cut -d ' ' -f 1)\`"
+            done
+            for receipt in "${receipts[@]}"; do
+              jq -r --arg path "$receipt" --arg sha "$(sha256sum "$receipt" | cut -d ' ' -f 1)" '
+                "- Receipt `\($path)`, SHA-256 `\($sha)`: `\(.status)`, complete \(.complete), \(.seconds) s",
+                "- Phases: " + ([.phases | to_entries[] | "\(.key) \(.value.seconds) s"] | join(", ")),
+                "- Units: " + ([.units[].status] | group_by(.) | map("\(length) \(.[0])") | join(", ")),
+                "- Replay: \(.base.leanchecker.seconds // "none") s; resident set at most \(.base.leanchecker.max_rss // "none") B, its own \(.base.leanchecker.max_rss_own)",
+                "- Resources: disk available at the start \(.resources.disk_available_at_start) B, " +
+                  "least \(.resources.disk_least_available) B; largest process " +
+                  "\(.resources.largest_process_max_rss) B; cgroup memory peak " +
+                  "\(.resources.cgroup_memory_peak) B",
+                (.units | to_entries[] | select(.value.status != "VERIFIED") | "- `\(.key)`: \(.value.status)"),
+                (.failures[] | "- \(.status): \(.message | .[0:500])")
+              ' "$receipt"
+            done
+          } | tee artifacts/formal/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "${#receipts[@]}" = 0 ] && [[ "$COMPARATOR_OUTCOME" =~ ^(success|failure)$ ]]; then
+            echo "the comparator step ran and left no receipt" >&2
+            exit 1
+          fi
+
+      - name: Upload the receipt, the summary and the logs of the lane
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: calibration-formal-part-${{ matrix.key }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: |
+            artifacts/formal/summary.md
+            artifacts/formal/logs.tar.gz
+            artifacts/formal/job.txt
+            artifacts/formal/runs/*/base.json
+            artifacts/formal/runs/*/receipt.json
+          if-no-files-found: warn
+          retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+  # The part of each formal target of the calibration, beside the
+  # qualification job, with the steps of the shard job of the workflow
+  # `formal`, which a unit test keeps equal to these but for the flag
+  # --calibration and the prefix of the artifact: its deadline is 300 s
+  # and the budget of the target, then the 300 s of its receipt, 60 minutes
+  # for the 3,000 s of `calibration`; the step has two minutes more, and the
+  # job 15 minutes before the step and 3 after it, which it writes in a
+  # notice for the record of the run. A unit test keeps the matrix equal to
+  # the parts of the formal targets of the calibration registry.
+  shard:
+    name: calibration shard ${{ matrix.name }}
+    if: >-
+      github.event_name != 'pull_request'
+      || (contains(github.event.pull_request.labels.*.name, 'formal-calibration')
+      && (github.event.action != 'labeled' || github.event.label.name == 'formal-calibration'))
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: ${{ matrix.job }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: calibration/1
+            part: target/calibration/1
+            key: target-calibration-1
+            budget: 3000
+            step: 62
+            job: 80
+    concurrency:
+      group: formal-calibration-shard-${{ matrix.name }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    env:
+      NAME: ${{ matrix.name }}
+      PART: ${{ matrix.part }}
+      KEY: ${{ matrix.key }}
+      LIMIT: ${{ matrix.job }}
+    steps:
+      - name: Check out the candidate commit
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Record the runner and pull the image
+        timeout-minutes: 8
+        run: |
+          echo "::notice title=timeout-minutes::$LIMIT"
+          mkdir -p artifacts/formal
+          {
+            echo "== prepare started $(date -u +%FT%TZ)"
+            echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, part $PART"
             echo "user: $(id)"
             echo "processors: $(nproc)"
             free -b
@@ -451,7 +644,7 @@ jobs:
             cargo build --locked --manifest-path xtask/Cargo.toml
           } 2>&1 | tee -a artifacts/formal/job.txt
 
-      # The probe of the job `formal scoped` of the workflow `formal`.
+      # The probe of the job `formal scoped`.
       - name: Probe the container of the gate
         id: probe
         timeout-minutes: 1
@@ -467,7 +660,7 @@ jobs:
           echo "the probe passed"
           PROBE
 
-      # The step ends two minutes after the deadline of the shard and its
+      # The step ends two minutes after the deadline of the part and its
       # receipt, from the matrix; `deadline.sh` stops the command at that
       # deadline and kills it a minute later.
       - name: Run the shard in the image
@@ -480,17 +673,17 @@ jobs:
           read -r -a gate_flags <<< "$GATE_FLAGS"
           limit=$(( (STEP - 2) * 60 ))s
           exec bash .github/scripts/deadline.sh --stop-commands "$limit" 1m \
-            docker run --rm --name "formal-shard-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            docker run --rm --name "formal-$KEY-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --calibration --shard "target/$NAME"
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --calibration --shard "$PART"
 
       - name: Remove the container of the gate
         if: always()
         run: |
-          docker rm --force "formal-shard-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
+          docker rm --force "formal-$KEY-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
 
       - name: Summarize the receipt and compress the logs
         if: always()
@@ -537,7 +730,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: calibration-formal-part-target-${{ matrix.name }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          name: calibration-formal-part-${{ matrix.key }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: |
             artifacts/formal/summary.md
             artifacts/formal/logs.tar.gz
@@ -546,15 +739,15 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
-  # Merges the receipts of the qualification job and of the shards of the
-  # calibration on the runner with `cargo xtask formal merge --calibration`,
+  # Merges the receipts of the qualification job, the lanes and the parts of
+  # the calibration on the runner with `cargo xtask formal merge --calibration`,
   # with the steps of the merge job of the workflow `formal`, which a unit
   # test keeps equal to these but for the flag --calibration and the
   # prefixes of the artifacts. It runs when the jobs above ran, unless the
   # run was cancelled.
   merge:
     name: calibration merge
-    needs: [calibration, shard]
+    needs: [calibration, lane, shard]
     if: ${{ !cancelled() && needs.calibration.result != 'skipped' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15

@@ -1,5 +1,5 @@
-//! The receipt of `cargo xtask formal run`, schema 6, the record of
-//! `cargo xtask formal merge`, schema 3, as "Receipt" and "Shards and merge"
+//! The receipt of `cargo xtask formal run`, schema 7, the record of
+//! `cargo xtask formal merge`, schema 4, as "Receipt" and "Shards and merge"
 //! in `docs/formal-verification.md` document them, and
 //! `cargo xtask formal receipt`, which judges a record against the checkout,
 //! as "Current and fresh records" there describes.
@@ -21,7 +21,14 @@ use super::registry::State;
 use super::waiver::{self, Waiver};
 use super::{Layout, guard, merge, toolchain};
 
-pub const SCHEMA: u32 = 6;
+pub const SCHEMA: u32 = 7;
+
+/// The schema of the base record of a lane, the receipt that its base run
+/// writes in its run directory as [`BASE_RECORD`] for its comparator run.
+pub const BASE_SCHEMA: u32 = 1;
+
+/// The file of the base record of a lane in the directory of its base run.
+pub const BASE_RECORD: &str = "base.json";
 
 pub const COMMAND: &str = "cargo xtask formal run";
 
@@ -50,6 +57,10 @@ pub struct Receipt {
     pub units: BTreeMap<String, Unit>,
     pub qualification: Option<Qualification>,
     pub base: Option<super::base::Record>,
+    pub base_record: Option<BaseRecord>,
+    pub lane: Option<Lane>,
+    pub handwritten: Option<BTreeMap<String, String>>,
+    pub left_out: Option<BTreeMap<String, String>>,
     pub proof_targets: BTreeMap<String, Target>,
     pub guard: Option<super::guard::Record>,
     pub commands: Vec<Command>,
@@ -214,6 +225,46 @@ pub struct QualificationTheorem {
     pub axioms: Option<Vec<String>>,
 }
 
+/// The base record that the comparator run of a lane read: its SHA-256, the
+/// run, start and seconds of the base run that wrote it, and the start and
+/// seconds of the comparator run.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct BaseRecord {
+    pub sha256: String,
+    pub run: String,
+    pub started: u64,
+    pub seconds: f64,
+    pub comparator_started: u64,
+    pub comparator_seconds: f64,
+}
+
+/// What the base round of a lane, or of the qualification job, holds: its
+/// name and components, its own hand-written modules, those that waivers
+/// leave out among them with their targets, the public constants of the
+/// modules of its root, each `<name> <kind> <fingerprint>`, and each target
+/// that it extracted with its role.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Lane {
+    pub name: String,
+    pub components: Vec<String>,
+    pub modules: Vec<String>,
+    pub left_out: BTreeMap<String, String>,
+    pub constants: Vec<String>,
+    pub targets: BTreeMap<String, Role>,
+}
+
+/// Why a lane extracted a target: a formal target of its components, a
+/// planned one that its own modules import, or one that the modules that they
+/// import need.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    #[default]
+    Formal,
+    Planned,
+    Cone,
+}
+
 /// A target that the run extracted: its unit, or none for a target that
 /// only the base round needs, its state, budget and the seconds of its
 /// commands, what its extraction gave, the SHA-256 of each file that Aeneas
@@ -249,7 +300,7 @@ pub struct Failure {
 }
 
 /// The schema of the record of `cargo xtask formal merge`.
-pub const MERGE_SCHEMA: u32 = 3;
+pub const MERGE_SCHEMA: u32 = 4;
 
 /// Whether each hard gate of a merge passes: the axiom audits, the replay of
 /// `leanchecker --fresh` and the comparator.
@@ -282,7 +333,10 @@ pub struct Merge {
     pub parts: Vec<Part>,
     pub units: BTreeMap<String, Unit>,
     pub axioms: BTreeMap<String, Vec<String>>,
-    pub slowest_part_seconds: f64,
+    pub checks: Checks,
+    pub jobs: BTreeMap<String, Job>,
+    pub chain: Vec<String>,
+    pub chain_seconds: f64,
     pub merge_seconds: f64,
     pub merge_from: String,
     pub wall_clock_seconds: f64,
@@ -290,15 +344,39 @@ pub struct Merge {
     pub problems: Vec<String>,
 }
 
+/// Whether the hand-written modules of the receipts of a merge pass its
+/// checks of coverage, names, waivers and extraction, and of the seeds of the
+/// parts of a target, `null` while no target has more than one part.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Checks {
+    pub coverage: bool,
+    pub names: bool,
+    pub waivers: bool,
+    pub extraction: bool,
+    pub seeds: Option<bool>,
+}
+
+/// A job of the gate in a merge: the seconds of its receipts, its largest
+/// cgroup memory peak, and whether these are above the limits that it flags.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Job {
+    pub seconds: f64,
+    pub over_seconds: bool,
+    pub cgroup_memory_peak: Option<u64>,
+    pub over_memory: Option<bool>,
+}
+
 /// A receipt that a merge was given, by its path: the SHA-256 of the file
-/// and, when it parses, its shard, the run and attempt of its job, whether a
-/// later attempt supersedes it, its status, completeness, seconds and cgroup
-/// memory peak, and whether these are above the limits that the merge flags.
+/// and, when it parses, its shard and job, the run and attempt of its job,
+/// whether a later attempt supersedes it, its status, completeness, seconds
+/// and cgroup memory peak, and whether its job is above the seconds and it
+/// above the memory that the merge flags.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Part {
     pub receipt: String,
     pub sha256: Option<String>,
     pub shard: Option<String>,
+    pub job: Option<String>,
     pub run_id: Option<String>,
     pub attempt: Option<String>,
     pub superseded: bool,
@@ -575,7 +653,7 @@ mod tests {
                 attempt: Some("2".to_string()),
             },
             targets: vec!["alpha".to_string(), "demo".to_string()],
-            shard: Some("target/demo".to_string()),
+            shard: Some("target/demo/1".to_string()),
             host: Some("linux-aarch64".to_string()),
             image: Some(Image {
                 reference: Some(format!("ghcr.io/o/r@sha256:{}", "9".repeat(64))),
@@ -629,6 +707,41 @@ mod tests {
                 .collect(),
             qualification: Some(qualification()),
             base: Some(base()),
+            base_record: Some(BaseRecord {
+                sha256: "f".repeat(64),
+                run: "1699999000-41".to_string(),
+                started: 1_699_999_000,
+                seconds: 900.5,
+                comparator_started: 1_700_000_000,
+                comparator_seconds: 12.345,
+            }),
+            lane: Some(Lane {
+                name: "demo".to_string(),
+                components: vec!["Demo".to_string()],
+                modules: vec![
+                    "Krepi.Proofs.Demo.A".to_string(),
+                    "Krepi.Proofs.Demo.B".to_string(),
+                ],
+                left_out: BTreeMap::from([("Krepi.Proofs.Demo.B".to_string(), "t".to_string())]),
+                constants: vec!["Krepi.Proofs.Demo.A.a".to_string()],
+                targets: BTreeMap::from([
+                    ("c".to_string(), Role::Cone),
+                    ("demo".to_string(), Role::Formal),
+                    ("p".to_string(), Role::Planned),
+                ]),
+            }),
+            handwritten: Some(BTreeMap::from([
+                ("Krepi.Proofs.Demo.A".to_string(), "Demo".to_string()),
+                (
+                    "Krepi.Qualification.Q".to_string(),
+                    "qualification".to_string(),
+                ),
+                ("Krepi.Statements.Basic".to_string(), "shared".to_string()),
+            ])),
+            left_out: Some(BTreeMap::from([(
+                "Krepi.Proofs.Demo.B".to_string(),
+                "t".to_string(),
+            )])),
             proof_targets: BTreeMap::from([("t".to_string(), target())]),
             guard: Some(guard()),
             commands,
@@ -766,6 +879,10 @@ mod tests {
                 sha256: "8".repeat(64),
                 mode: "fresh".to_string(),
                 prefixes: names(&["Krepi"]),
+                module: "Krepi".to_string(),
+                seconds: 456.341,
+                max_rss: Some(5_935_132_672),
+                max_rss_own: true,
             },
             heartbeats: Heartbeats {
                 method: "count_heartbeats".to_string(),
@@ -855,7 +972,10 @@ mod tests {
             "\"writable\": true",
             "\"versions\": \"{\\n  \\\"schema\\\": 1\\n}\\n\"",
             "\"cgroup_memory_peak\": 9000000000",
-            "\"shard\": \"target/demo\"",
+            "\"shard\": \"target/demo/1\"",
+            "\"cone\"",
+            "\"formal\"",
+            "\"planned\"",
         ] {
             assert!(text.contains(word), "{word} is not in {text}");
         }
@@ -949,6 +1069,10 @@ mod tests {
             ]),
             qualification: None,
             base: None,
+            base_record: None,
+            lane: None,
+            handwritten: None,
+            left_out: None,
             proof_targets: BTreeMap::new(),
             guard: None,
             commands: vec![Command {
@@ -983,7 +1107,7 @@ mod tests {
         let e = "e".repeat(64);
         let expected = format!(
             r#"{{
-  "schema": 6,
+  "schema": 7,
   "command": "cargo xtask formal run",
   "status": "VERIFIED",
   "complete": true,
@@ -1041,6 +1165,10 @@ mod tests {
   }},
   "qualification": null,
   "base": null,
+  "base_record": null,
+  "lane": null,
+  "handwritten": null,
+  "left_out": null,
   "proof_targets": {{}},
   "guard": null,
   "commands": [
@@ -1117,6 +1245,7 @@ mod tests {
                 receipt: "artifacts/parts/qualification/receipt.json".to_string(),
                 sha256: Some("e".repeat(64)),
                 shard: Some("qualification".to_string()),
+                job: Some("formal run".to_string()),
                 run_id: Some("123".to_string()),
                 attempt: Some("1".to_string()),
                 superseded: false,
@@ -1141,7 +1270,24 @@ mod tests {
                     .map(String::from)
                     .to_vec(),
             )]),
-            slowest_part_seconds: 1_095.7,
+            checks: Checks {
+                coverage: true,
+                names: true,
+                waivers: true,
+                extraction: true,
+                seeds: None,
+            },
+            jobs: BTreeMap::from([(
+                "formal run".to_string(),
+                Job {
+                    seconds: 1_095.7,
+                    over_seconds: false,
+                    cgroup_memory_peak: Some(10_429_386_752),
+                    over_memory: Some(false),
+                },
+            )]),
+            chain: vec!["formal run".to_string()],
+            chain_seconds: 1_095.7,
             merge_seconds: 62.0,
             merge_from: "job".to_string(),
             wall_clock_seconds: 1_157.7,
@@ -1157,7 +1303,7 @@ mod tests {
         );
         let expected = format!(
             r#"{{
-  "schema": 3,
+  "schema": 4,
   "status": "VERIFIED",
   "complete": true,
   "passes": true,
@@ -1200,6 +1346,7 @@ mod tests {
       "receipt": "artifacts/parts/qualification/receipt.json",
       "sha256": "{e}",
       "shard": "qualification",
+      "job": "formal run",
       "run_id": "123",
       "attempt": "1",
       "superseded": false,
@@ -1225,7 +1372,25 @@ mod tests {
       "Quot.sound"
     ]
   }},
-  "slowest_part_seconds": 1095.7,
+  "checks": {{
+    "coverage": true,
+    "names": true,
+    "waivers": true,
+    "extraction": true,
+    "seeds": null
+  }},
+  "jobs": {{
+    "formal run": {{
+      "seconds": 1095.7,
+      "over_seconds": false,
+      "cgroup_memory_peak": 10429386752,
+      "over_memory": false
+    }}
+  }},
+  "chain": [
+    "formal run"
+  ],
+  "chain_seconds": 1095.7,
   "merge_seconds": 62.0,
   "merge_from": "job",
   "wall_clock_seconds": 1157.7,
@@ -1282,7 +1447,7 @@ mod tests {
     /// with the trigger `mode` of the run `run`.
     fn merged(fixture: &Fixture, mode: Mode, run: Option<&str>) -> Merge {
         let job = merging::qualification(fixture);
-        let shard = merging::receipt(fixture, "target/a", &merging::units_of("a"));
+        let shard = merging::receipt(fixture, "target/a/1", &merging::units_of("a"));
         let paths = [("q", job), ("t", shard)].map(|(name, mut part)| {
             (part.trigger.mode, part.trigger.run_id) = (mode, run.map(String::from));
             merging::write(fixture, name, &part)
@@ -1506,12 +1671,12 @@ mod tests {
         assert_eq!(read(&render(&record)), Ok(record.clone()));
         let mut value = serde_json::to_value(&record).expect("JSON");
         value["schema"] = 1.into();
-        let other = "the record has schema 1 where 3 is expected".to_string();
+        let other = "the record has schema 1 where 4 is expected".to_string();
         assert_eq!(read(&value.to_string()), Err(other));
         value.as_object_mut().expect("an object").remove("schema");
-        let none = "the record has schema null where 3 is expected".to_string();
+        let none = "the record has schema null where 4 is expected".to_string();
         assert_eq!(read(&value.to_string()), Err(none));
-        value["schema"] = 3.into();
+        value["schema"] = 4.into();
         value.as_object_mut().expect("an object").remove("passes");
         let error = read(&value.to_string()).expect_err("a missing field");
         assert!(
@@ -1523,8 +1688,8 @@ mod tests {
     }
 
     #[test]
-    fn a_record_of_schema_2_is_not_current() {
-        let fixture = pinned("receipt-schema-2", None);
+    fn a_record_of_schema_3_is_not_current() {
+        let fixture = pinned("receipt-schema-3", None);
         let record = merged(&fixture, Mode::Weekly, Some("7"));
         let path = fixture.root().join("artifacts/record.json");
         let judge = |text: &str| {
@@ -1534,14 +1699,17 @@ mod tests {
             super::command(fixture.root(), &Layout::PRODUCTION, &matches)
         };
         assert_eq!(judge(&render(&record)), ExitCode::SUCCESS);
-        // The same record as a merge of schema 2 wrote it, without its gates
-        // and the axioms of its theorems.
+        // The same record as a merge of schema 3 wrote it, without its jobs,
+        // chain and checks and with the slowest part in place of the chain.
         let mut value = serde_json::to_value(&record).expect("JSON");
-        value["schema"] = 2.into();
+        value["schema"] = 3.into();
         let fields = value.as_object_mut().expect("an object");
-        fields.retain(|field, _| !["gates", "axioms"].contains(&field.as_str()));
+        fields.retain(|field, _| {
+            !["checks", "jobs", "chain", "chain_seconds"].contains(&field.as_str())
+        });
+        fields.insert("slowest_part_seconds".to_string(), 1.0.into());
         assert_eq!(judge(&value.to_string()), ExitCode::FAILURE);
-        let other = "the record has schema 2 where 3 is expected".to_string();
+        let other = "the record has schema 3 where 4 is expected".to_string();
         assert_eq!(read(&value.to_string()), Err(other));
     }
 

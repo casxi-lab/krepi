@@ -423,9 +423,10 @@ condition that starts with `!cancelled()` for each of its jobs that needs
 another; to the trigger that each event gives the parts; to the jobs of
 the affected planned targets alone, whose decision step they run with jq;
 and to the review of the receipt on a push to `main`. They also hold the
-formal workflows to the comparator part after the gate in a container of
-its own, with its probe, its mounts and its settings, running a copy of
-xtask made before the gate and mounted read-only, in `formal` and in
+formal workflows to the comparator of each lane after its base run in a
+container of its own, with its probe, its mounts and its settings, running
+a copy of xtask made before the base run and mounted read-only, in
+`formal` and in
 the calibration, whose check of the two challenges that the comparator
 must reject they run with jq on receipts and logs of their own; to a
 notice of its limit in every job whose limit is an expression; to main
@@ -1035,38 +1036,38 @@ inputs and writes a receipt of the run below `artifacts/formal/runs/`
 tools, the extraction of the targets, the base round of krepi's own Lean
 and the targets that it selects, each with its registered mutants, with
 the guard on a pull request; with `--calibration`, the same phases on the
-calibration target; with `--shard`, only the qualification job, which
-leaves out the targets of the waivers that hold
-([waivers](../formal-verification.md#waivers)), the comparator part on
-the stage that that job kept
-([comparator](../formal-verification.md#comparator)), or the shard of one
+calibration target; with `--shard`, only the qualification job, the base
+run of a lane, which leaves out the targets of the waivers that hold
+([waivers](../formal-verification.md#waivers)), and with `--comparator`
+its comparator on the stage that the base run kept
+([comparator](../formal-verification.md#comparator)), or the part of one
 formal target; and with `--target`, only the part of the named targets
 ([shards and merge](../formal-verification.md#shards-and-merge)). It is not
 part of the check: CI runs it in the pinned proof-tool image with
-`--shard qualification --keep` and then `--shard comparator` as the job
-`formal run` of `.github/workflows/formal.yml`, and with
-`--shard target/<name>` as a job `formal shard <name>` for each formal
-target, on a GitHub-hosted `ubuntu-24.04-arm` runner, when the label
-`full-check` is added to a pull request to `main` whose change affects the
-gate, on a manual run of `main` and once a week. The jobs are not
-required checks; the verdicts that judge their merge are
-([CI job](../formal-verification.md#ci-job)). Each uploads its receipts,
-its summary and its logs packed into
-`logs.tar.gz` as the artifact
-`formal-part-qualification-<commit>-<attempt>` or
-`formal-part-target-<name>-<commit>-<attempt>`, and the job
-`formal parts` merges them. Beside them, a job `formal scoped <name>` runs
-the command with `--target` on each planned target that the pull request
-affects, and the job `formal limits` before them computes their limits and
-the shards from the registered budgets. The measurement jobs,
+`--shard qualification` as the job `formal run` of
+`.github/workflows/formal.yml`, with `--shard lane/<name> --keep` and then
+`--shard lane/<name> --comparator` as a job `formal lane <name>` for each
+lane, and with `--shard target/<name>/1` as a job `formal shard <name>/1`
+for each formal target, on a GitHub-hosted `ubuntu-24.04-arm` runner, when
+the label `full-check` is added to a pull request to `main` whose change
+affects the gate, on a manual run of `main` and once a week. The jobs are
+not required checks; the verdicts that judge their merge are ([CI
+job](../formal-verification.md#ci-job)). Each uploads its receipts, its
+summary and its logs packed into `logs.tar.gz` as the artifact
+`formal-part-qualification-<commit>-<attempt>`,
+`formal-part-lane-<name>-<commit>-<attempt>` or
+`formal-part-target-<name>-1-<commit>-<attempt>`, and the job `formal
+parts` merges them. Beside them, a job `formal scoped <name>` runs the
+command with `--target` on each planned target that the pull request
+affects, and the job `formal limits` before them computes their limits,
+the lanes and the parts from the registered budgets. The measurement jobs,
 `leanchecker` in two modes and `lake comparator`, are in
-`.github/workflows/formal-measure.yml` and run
-on a manual run of that workflow on `main` and when the label
-`formal-measure` is added to a pull request
-([CI job](../formal-verification.md#ci-job)). Its unit
-tests run in the `test` step above, on Git repositories that they create
-with the gate inputs in a minimal form, and with fake tools: shell scripts
-that hang, exit with a given status, end by a signal or print what a tool
+`.github/workflows/formal-measure.yml` and run on a manual run of that
+workflow on `main` and when the label `formal-measure` is added to a pull
+request ([CI job](../formal-verification.md#ci-job)). Its unit tests run
+in the `test` step above, on Git repositories that they create with the
+gate inputs in a minimal form, and with fake tools: shell scripts that
+hang, exit with a given status, end by a signal or print what a tool
 prints. On the Linux runner of CI the tests run as `linux-aarch64`, so the
 installation of each repository holds the `versions.json` of the pinned
 image, which the run compares with the tool manifest, and the tests give
@@ -1076,30 +1077,28 @@ its removal, and give the run readings of the free space of their own, so
 that the disk guard and the receipt do not depend on the disk of the host;
 each repository holds an empty shard plan and the directories of the
 Aeneas Lean library and of Lean, which a run lists before its first phase
-and after its last. The runs of the qualification job, of the comparator
-part and of the shard of a target are tested on the same repositories and
-fake tools, the comparator part after the qualification job and on
-receipts of that job that its tests edit; the waivers
-of their tests expire on 2000-01-01 or 9999-12-31, so that whether one
-holds does not depend on the date of the host. The
-texts that tests read in the forms of Lean, Lake and `leanchecker` are
-output of the pinned Lean 4.35.0, captured with absolute paths replaced;
-those stored below `xtask/src/formal/fixtures/base/` and
-`xtask/src/formal/fixtures/mutants/` name the command that printed them,
-and the default answers of the fake tools follow the same forms; the
-fixtures of a rule of the logs or of the declaration ranges are those
-outputs with the edits that the test names. The
-repositories lie in the system's temporary directory, outside the
+and after its last. The runs of the qualification job, of a lane and of
+the part of a target are tested on the same repositories and fake tools,
+with lanes that the tests write, the comparator run of a lane after its
+base run and on base records that its tests edit; the waivers of their
+tests expire on 2000-01-01 or 9999-12-31, so that whether one holds does
+not depend on the date of the host. The texts that tests read in the forms
+of Lean, Lake and `leanchecker` are output of the pinned Lean 4.35.0,
+captured with absolute paths replaced; those stored below
+`xtask/src/formal/fixtures/base/` and `xtask/src/formal/fixtures/mutants/`
+name the command that printed them, and the default answers of the fake
+tools follow the same forms; the fixtures of a rule of the logs or of the
+declaration ranges are those outputs with the edits that the test names.
+The repositories lie in the system's temporary directory, outside the
 checkout, whose Cargo configuration the gate would otherwise find above
-their exports. The tests therefore assume that no
-Cargo configuration lies in the temporary directory or above it, such as
-`~/.cargo/config.toml` when the temporary directory is below the home
-directory; with one there, every run that reaches Cargo fails and names
-the file. The test of a stop signal runs the gate in a child process, the
-test executable started again for that test alone, with SIGHUP at its
-default action even when the tests run under `nohup`; the test of an
-ignored SIGHUP starts the test executable again in the same way, once with
-SIGHUP ignored.
+their exports. The tests therefore assume that no Cargo configuration lies
+in the temporary directory or above it, such as `~/.cargo/config.toml`
+when the temporary directory is below the home directory; with one there,
+every run that reaches Cargo fails and names the file. The test of a stop
+signal runs the gate in a child process, the test executable started again
+for that test alone, with SIGHUP at its default action even when the tests
+run under `nohup`; the test of an ignored SIGHUP starts the test
+executable again in the same way, once with SIGHUP ignored.
 
 `cargo xtask formal guard --event PATH` checks a pull request against the
 rules for changes of statements, proofs, sources and registries
@@ -1173,8 +1172,8 @@ judgement of a build on the captured outputs of
 and fake tools of the tests of `cargo xtask formal run`.
 
 `cargo xtask formal merge [--calibration] RECEIPT...` merges the receipts
-of the qualification job, of the comparator part and of the shard of each
-formal target of the commit checked out into the conclusion of the whole
+of the qualification job, of each lane and of the part of each formal
+target of the commit checked out into the conclusion of the whole
 gate, with the waivers that hold, and writes its record and summary below
 `artifacts/formal/merge/`
 ([shards and merge](../formal-verification.md#shards-and-merge)). It runs
@@ -1185,16 +1184,16 @@ the job `calibration merge` of the workflow `formal calibration` run it on
 the runner with the receipts of the parts of their run. Its unit tests
 run in the `test` step above, on the Git repositories of the tests of
 `cargo xtask formal run` with
-receipts that the tests write, one of the comparator part of no seconds
-beside each of the qualification job unless a test gives its own, those of
-the qualification job with an audit and a replay of its base round that
-passed, and on the receipts of runs of the qualification job, of the
-comparator part and of the shard of a target in those repositories; their
-waivers, too, expire on 2000-01-01 or 9999-12-31. Tests judge the three
-hard gates on the entries of each, on a problem of the merge, on a rejected
-target with and without its waiver, on a statement left out only through
-an import and on the units of mutants; others judge the seconds of the job
-of the qualification and the comparator and the axioms that the record
+receipts that the tests write, one of the qualification job, which lists
+the hand-written modules, and one of a lane beside it unless a test gives
+its own, each with an audit and a replay of its base round that passed,
+and on the receipts of runs of the qualification job, of lanes and of the
+part of a target in those repositories; their waivers, too, expire on
+2000-01-01 or 9999-12-31. Tests judge the three hard gates on the entries
+of each, on a problem of the merge, on a rejected target with and without
+its waiver, on a statement left out only through an import and on the
+units of mutants; others judge the checks of the base rounds, the jobs,
+their chain and the synthetic wall clock, and the axioms that the record
 reports.
 
 `cargo xtask formal receipt [--require-fresh] [RECORD]` judges the record
@@ -1216,22 +1215,24 @@ it, which is not current.
 The workflow `formal calibration`, `.github/workflows/formal-calibration.yml`,
 runs the gate on the calibration target in the pinned proof-tool image
 once a week, on a manual run and on a pull request with the label
-`formal-calibration`: `cargo xtask formal check --calibration`,
-`cargo xtask formal run --calibration --shard qualification --keep`, the
-comparator part on the stage that it kept, with `--shard comparator`, and
-a check that the comparator rejected the two challenges that it must
-reject in the job `calibration run`, the shard of each formal target of
-the calibration with `--shard target/<name>` in a job
-`calibration shard <name>`, their merge
+`formal-calibration`: `cargo xtask formal check --calibration` and
+`cargo xtask formal run --calibration --shard qualification` in the job
+`calibration run`, the base run of each lane of the calibration with
+`--shard lane/<name> --keep`, its comparator on the stage that it kept,
+with `--shard lane/<name> --comparator`, and a check that the comparator
+rejected the two challenges that it must reject in a job
+`calibration lane <name>`, the part of each formal target of the
+calibration with `--shard target/<name>/1` in a job
+`calibration shard <name>/1`, their merge
 with `cargo xtask formal merge --calibration` in the job
 `calibration merge`, the planned target of the calibration alone, and, on
 a manual run that asks for it and on a pull request with the label,
 `cargo xtask formal mutants calibration --calibration`
 ([calibration target](../formal-verification.md#calibration-target)).
 It is not required. A unit test keeps its limits equal to the deadlines
-of its gates and receipts, its shards equal to the formal targets of the
-calibration registry, and the steps of its comparator part, its shard and
-its merge jobs equal to those of `formal`.
+of its gates and receipts, its lanes and its parts equal to the lanes and
+the formal targets of the calibration, and the steps of its lane, shard
+and merge jobs equal to those of `formal`.
 
 `cargo xtask formal vectors [DOMAIN/COMPONENT]` replays the frozen test
 vectors of a component through its specification with the pinned Lean and
@@ -1505,7 +1506,7 @@ to an exact version in the manifest of the crate that uses it:
 | `xtask/Cargo.toml` | `clap` without default features, with `std`, `help`, `usage` and `error-context` | MIT OR Apache-2.0 | The command lines of `cargo xtask check`, `cargo xtask image`, `cargo xtask suite`, `cargo xtask run-record`, `cargo xtask release-assets`, `cargo xtask usage`, `cargo xtask formal run`, `cargo xtask formal guard`, `cargo xtask formal toolchain-check`, `cargo xtask formal check`, `cargo xtask formal mutants`, `cargo xtask formal vectors`, `cargo xtask formal canary`, `cargo xtask formal impact`, `cargo xtask formal merge`, `cargo xtask formal receipt` and `cargo xtask known-failures`, defined with the builder, with their help, usage and error texts, which have no colour and are not wrapped to the terminal |
 | `xtask/Cargo.toml` | `libc` without default features | MIT OR Apache-2.0 | The process groups of the commands of `cargo xtask check`, `cargo xtask formal run`, `cargo xtask formal mutants` and `cargo xtask formal vectors`: killing a command's group, finding whether any of its processes remain, seeing that a command has ended without collecting it, and the default disposition of `SIGCHLD` that this needs; finding whether SIGHUP is ignored when the run starts; and the effective user of the run, the bytes available on the file system of its run directory, at its start and every second during it, and the largest resident set of a process that it collected, which its receipt records |
 | `xtask/Cargo.toml` | `serde` without default features, with `alloc` and `derive` | MIT OR Apache-2.0 | The types into which `cargo xtask formal toolchain-check` reads `verification/toolchain.json`, `cargo xtask formal check` reads `verification/targets.json`, `verification/axioms.json`, `verification/waivers.json`, the shard plan and the lanes, `cargo xtask formal run` reads `verification/targets.json`, `verification/qualification/cases.json`, `verification/extraction.toml`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/waivers.json`, the shard plan and the `translation.json` that Aeneas writes, `cargo xtask formal guard` reads `verification/targets.json` and `verification/tcb.json` at two commits, `cargo xtask formal impact` reads `verification/targets.json` at two commits, the lists of survivors that `cargo xtask formal mutants` writes and `cargo xtask formal check` reads, the type into which the `subset` step of `cargo xtask check` reads its compile-fail cases, the type into which `cargo xtask formal vectors` reads the `vectors` block of a contract, the record `images.json` that `cargo xtask image` writes and `cargo xtask suite` reads, the suites of `suites.toml`, the run and jobs that `cargo xtask run-record` reads, the run that `cargo xtask release-assets` reads, the data of a month that `cargo xtask usage` reads, the record of a step of `cargo xtask formal canary`, and the types of the receipt of `cargo xtask formal run`, which the canary and `cargo xtask formal merge` also read, and of the record of a merge, which `cargo xtask formal receipt` reads, and the entries of `known-failures.json`, which the test, release and formal steps of `cargo xtask check` read and `cargo xtask known-failures` writes |
-| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, of the record of `cargo xtask formal merge`, which `cargo xtask formal receipt` reads, of `verification/open.json`, of the lists of survivors of `cargo xtask formal mutants`, of the record `images.json` of `cargo xtask image`, of the report of `cargo xtask suite` and of the record of `cargo xtask run-record`, reading `images.json` and the run and jobs of a record, reading the run, `images.json` and the check receipt that `cargo xtask release-assets` checks, the summary of `cargo xtask usage`, reading the output of `cargo metadata` in the `manifests` and `subset` steps, in `cargo xtask formal run` and in `cargo xtask formal check`, the messages of Cargo's build of the test executable of xtask in the `formal` step of `cargo xtask check`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/models.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/waivers.json`, the shard plans `verification/shards.json` and that of the calibration target, the lanes `verification/lanes.json` and those of the calibration target, `verification/image-pin.json`, the `versions.json` of the proof-tool image, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the receipts that `cargo xtask formal merge` merges and those of the qualification job that the comparator part reads, the configurations of `lake comparator` that it writes, the messages that `lean --json` prints, the event of a pull request that `cargo xtask formal guard` reads, and the tool manifest, the Lake locks, the statement registry, the records of its steps and the receipts of its parts that `cargo xtask formal canary` reads and writes, the JSON text of `known-failures.json`, and the receipt of the check that `cargo xtask known-failures` reads |
+| `xtask/Cargo.toml` | `serde_json` without default features, with `preserve_order` | MIT OR Apache-2.0 | The JSON text of the receipts of `cargo xtask check` and `cargo xtask formal run`, of the record of `cargo xtask formal merge`, which `cargo xtask formal receipt` reads, of `verification/open.json`, of the lists of survivors of `cargo xtask formal mutants`, of the record `images.json` of `cargo xtask image`, of the report of `cargo xtask suite` and of the record of `cargo xtask run-record`, reading `images.json` and the run and jobs of a record, reading the run, `images.json` and the check receipt that `cargo xtask release-assets` checks, the summary of `cargo xtask usage`, reading the output of `cargo metadata` in the `manifests` and `subset` steps, in `cargo xtask formal run` and in `cargo xtask formal check`, the messages of Cargo's build of the test executable of xtask in the `formal` step of `cargo xtask check`, and reading `verification/toolchain.json`, `verification/targets.json`, `verification/models.json`, `verification/qualification/cases.json`, `verification/statements.json`, `verification/axioms.json`, `verification/tcb.json`, `verification/waivers.json`, the shard plans `verification/shards.json` and that of the calibration target, the lanes `verification/lanes.json` and those of the calibration target, `verification/image-pin.json`, the `versions.json` of the proof-tool image, the Lake locks of the Aeneas Lean library and of `verification/`, the `translation.json` that Aeneas writes, the receipts that `cargo xtask formal merge` merges and the base records of the lanes that their comparator reads, the configurations of `lake comparator` that it writes, the messages that `lean --json` prints, the event of a pull request that `cargo xtask formal guard` reads, and the tool manifest, the Lake locks, the statement registry, the records of its steps and the receipts of its parts that `cargo xtask formal canary` reads and writes, the JSON text of `known-failures.json`, and the receipt of the check that `cargo xtask known-failures` reads |
 | `xtask/Cargo.toml` | `syn` without default features, with `full`, `parsing` and `visit` | MIT OR Apache-2.0 | Parsing the source files of the kernel workspace for the inventory of `cargo xtask formal check` and for the `subset` step of `cargo xtask check`, walking their items and reading their attributes, paths and tokens, walking the bodies of the functions of a target for the source mutants of `cargo xtask formal mutants`, the crate attributes of the library of the root package of the kernel workspace for the `manifests` step and `cargo xtask formal run`, and in a unit test of the check the Rust files of every workspace for the names of the slow tests |
 | `xtask/Cargo.toml` | `proc-macro2` without default features, with `span-locations` | MIT OR Apache-2.0 | The token type under `syn`, whose span locations give the line of each problem that the `subset` step reports and the point of each source mutant of `cargo xtask formal mutants` |
 | `xtask/Cargo.toml` | `signal-hook` without default features | MIT OR Apache-2.0 | The handler that lets SIGINT and SIGTERM, and SIGHUP unless it is ignored, stop `cargo xtask check`, `cargo xtask formal run`, `cargo xtask formal mutants` and `cargo xtask formal vectors`; the emulation of their default action with which the formal commands then end, whereas the check exits with 128 plus the signal number; and the names of the signals in the output of the check |

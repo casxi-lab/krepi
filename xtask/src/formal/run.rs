@@ -135,8 +135,11 @@ pub(crate) struct Context<'a> {
     /// Reads the bytes available on the file system of a path:
     /// [`process::disk_available`], or a reading that a test gives.
     pub free: fn(&Path) -> Option<u64>,
-    /// The shard of the run, if any: `qualification`, `comparator` or `target/<name>`.
+    /// The part of the run, if any: `qualification`, `lane/<name>` or `target/<name>/1`.
     pub shard: Option<&'a str>,
+    /// Whether the run of a lane is that of its comparator, which reads the
+    /// base record of its base run.
+    pub comparator: bool,
 }
 
 /// A command, with the environment of `tool` and its input from `stdin`.
@@ -447,6 +450,14 @@ impl Gate {
         &self.layout
     }
 
+    /// Takes the deadline of the run from that of a run that started at the
+    /// Unix time `started` with the budget `seconds`.
+    pub(super) fn continue_from(&mut self, started: u64, seconds: u64) {
+        let end = Duration::from_secs(started.saturating_add(seconds));
+        let elapsed = Duration::from_secs(self.receipt.started);
+        self.deadline = self.start + end.saturating_sub(elapsed);
+    }
+
     /// The tool installation that the run uses.
     pub fn installation(&self) -> Result<Installation, String> {
         let (manifest, _) = (self.manifest.as_ref()).expect("phases run after the start");
@@ -671,7 +682,13 @@ pub(crate) fn execute(
     mutants::seconds(&mut receipt);
     receipt.resources.largest_process_max_rss = process::largest_child_rss();
     receipt.resources.cgroup_memory_peak = process::cgroup_memory_peak();
-    let scoped = !targets.is_empty() && context.shard.is_none();
+    conclude(&mut receipt, !targets.is_empty() && context.shard.is_none());
+    receipt.seconds = receipt::seconds(start.elapsed());
+    (receipt, draft)
+}
+
+/// Concludes `receipt`, which is `scoped` or not, from its failures and units.
+pub(super) fn conclude(receipt: &mut Receipt, scoped: bool) {
     let failures = receipt.failures.iter().map(|failure| failure.status);
     let units = receipt.units.values().map(|unit| unit.status);
     // Every failure but STALE stops the run or makes it a tool failure.
@@ -684,8 +701,6 @@ pub(crate) fn execute(
         false => outcome::run_status(&failures.chain(units).collect::<Vec<_>>(), scoped),
     };
     (receipt.complete, receipt.status) = (complete, status);
-    receipt.seconds = receipt::seconds(start.elapsed());
-    (receipt, draft)
 }
 
 /// Checks the host, reads the tool manifest and takes the snapshot of the
@@ -778,6 +793,17 @@ fn export_and_check(
     gate.deadline += all;
     gate.receipt.budgets.gate_seconds += all.as_secs();
     gate.budgets = BTreeMap::from_iter(chosen.iter().map(|name| (target_unit(name), budget(name))));
+    // The deadline of a lane grows by its registered budget.
+    if let Some(name) = part.and_then(merge::lane) {
+        let lanes = base::lanes(&source, &gate.layout)?;
+        let lane = lanes.iter().find(|lane| lane.name == name);
+        let lane = lane.ok_or(format!(
+            "{} registers no lane named {name}",
+            gate.layout.lanes
+        ))?;
+        gate.deadline += Duration::from_secs(lane.budget);
+        gate.receipt.budgets.gate_seconds += lane.budget;
+    }
     for problem in paths::rejected(&files, &gate.layout) {
         gate.fail(Status::Rejected, problem);
     }
@@ -786,8 +812,9 @@ fn export_and_check(
 
 /// Refuses the run, with a failure `NOT_RUN`, when the file system of its
 /// directory had less free at its start than 1.5 times the disk peak that
-/// the shard plan of the export gives its parts: the qualification but in
-/// the shard of a target, and the unit of each target that it selects.
+/// the shard plan of the export gives its parts: the part of a run of one,
+/// and otherwise the qualification and the part of each target that it
+/// selects.
 fn disk_guard(gate: &mut Gate) -> Result<(), String> {
     let path = gate.layout.shards;
     let plan = fs::read_to_string(gate.source().join(path))
@@ -796,9 +823,11 @@ fn disk_guard(gate: &mut Gate) -> Result<(), String> {
         .map_err(|error| format!("cannot read {path}: {error}"))?;
     let free = (gate.receipt.resources.disk_available_at_start)
         .ok_or("the bytes available on the file system of the run directory cannot be read")?;
-    let qualifies = gate.receipt.shard.is_none() || gate.receipt.targets.is_empty();
-    let parts = qualifies.then(|| qualify::PHASE.to_string()).into_iter();
-    let parts = Vec::from_iter(parts.chain(gate.budgets.keys().cloned()));
+    let selected = (gate.budgets.keys()).filter_map(|unit| merge::target(unit).map(merge::part));
+    let parts = match gate.receipt.shard.clone() {
+        Some(shard) => vec![shard],
+        None => Vec::from_iter([qualify::PHASE.to_string()].into_iter().chain(selected)),
+    };
     if let Some(refusal) = storage::refusal(&plan, &parts, free) {
         gate.fail(Status::NotRun, refusal);
     }
@@ -945,8 +974,8 @@ pub fn target_project(gate: &Gate, name: &str) -> PathBuf {
 /// selected formal ones and their mutants, the source mutants of `generate`
 /// in a run that generates them. The first stops on another registry, or
 /// other imports of planned targets, in the export; a run of targets
-/// [`alone`] extracts them alone, and the qualification job no formal
-/// target of a waiver that holds.
+/// [`alone`] extracts them alone, and a lane those of its modules
+/// ([`lane_targets`]) but those of a waiver that holds.
 pub(super) fn target_phases<'a>(
     root: &Path,
     layout: &Layout,
@@ -964,15 +993,27 @@ pub(super) fn target_phases<'a>(
     let chosen = selected(&states, &named, shard.is_some()).into_iter();
     let chosen = BTreeSet::from_iter(chosen.map(String::from));
     let alone = alone(shard, !named.is_empty(), generate.is_some());
-    // The base round builds the planned targets that hand-written modules import.
-    let imports = move |dir: &Path, layout: &Layout, targets: &[Target]| match alone {
-        true => Ok(BTreeSet::new()),
-        false => base::planned_imports(dir, layout, targets),
+    let lane = shard.and_then(merge::lane).map(str::to_string);
+    // The base round builds the planned targets that hand-written modules
+    // import, and that of a lane the targets of its modules.
+    let imports = move |dir: &Path, layout: &Layout, targets: &[Target]| match (alone, &lane) {
+        (true, _) => Ok(receipt::Lane::default()),
+        (false, Some(lane)) => lane_targets(dir, layout, lane, targets),
+        (false, None) => base::planned_imports(dir, layout, targets).map(|imported| {
+            let targets = imported
+                .into_iter()
+                .map(|name| (name, receipt::Role::Planned));
+            receipt::Lane {
+                targets: targets.collect(),
+                ..receipt::Lane::default()
+            }
+        }),
     };
     let start = (read.clone()).and_then(|(targets, _)| imports(root, layout, &targets));
-    let imported = start.clone().unwrap_or_default();
-    let extracted = |t: &Target| chosen.contains(&t.name) || imported.contains(&t.name);
-    all.retain(|t| (t.state == State::Formal && !alone) || extracted(t));
+    let imported = start.clone().unwrap_or_default().targets;
+    let margin = shard.and_then(merge::lane).is_some();
+    let extracted = |t: &Target| chosen.contains(&t.name) || imported.contains_key(&t.name);
+    all.retain(|t| (t.state == State::Formal && !alone && !margin) || extracted(t));
     let pick = |t: &&Target, state| t.state == state && chosen.contains(&t.name);
     let formal = Vec::from_iter(all.iter().filter(|t| pick(t, State::Formal)).cloned());
     let planned = Vec::from_iter(all.iter().filter(|t| pick(t, State::Planned)).cloned());
@@ -988,7 +1029,6 @@ pub(super) fn target_phases<'a>(
     let finished = generate
         .as_ref()
         .map_or(budget(&formal), |_| mutants::RUN_BUDGET);
-    let margin = shard == Some(qualify::PHASE);
     let extracting = [budget(&all), merge::EXTRACTION_MARGIN][usize::from(margin)];
     let phases = [
         ("extraction", extracting, units(&planned)),
@@ -1000,22 +1040,23 @@ pub(super) fn target_phases<'a>(
             if base::read(&gate.source().join(path))? != text {
                 return Err(format!("{path} differs from the one read at the start"));
             }
-            if imports(&gate.source(), &gate.layout, &registered)? != start? {
+            let start = start?;
+            if imports(&gate.source(), &gate.layout, &registered)? != start {
                 let other = "import other planned targets than at the start";
                 return Err(format!("the hand-written modules of the export {other}"));
             }
             if margin {
-                let waivers = waiver::read(&gate.source(), &gate.layout, &registered)?;
-                let waived = waiver::holding(&waivers, &waiver::today(SystemTime::now())?);
+                let waived;
+                (waived, gate.waived) = waive(gate, &registered)?;
                 all.retain(|t| t.state != State::Formal || !waived.contains(&t.name));
-                gate.waived = waiver::left_out(&gate.layout, &registered, &waived);
+                gate.receipt.lane = Some(start);
             }
             (all.iter()).try_for_each(|t| extract_target(gate, t, chosen.contains(&t.name)))
         }),
         Box::new(move |gate| {
             // Without a base round, the run lists the hand-written modules.
             if alone && !formal.is_empty() {
-                gate.handwritten = merge::handwritten(gate)?;
+                gate.handwritten = merge::handwritten(gate)?.0;
             }
             let generate = generate.as_deref();
             (formal.iter()).try_for_each(|t| finish_target(gate, t, generate))
@@ -1033,6 +1074,79 @@ pub(super) fn target_phases<'a>(
     [(); 2].map(|()| phases.next().expect("two phases"))
 }
 
+/// The lane `name` of `layout` in `dir`, a checkout or an export, with what it
+/// extracts of the registered `targets`: each formal one of its components, a
+/// planned one of them that its own modules import, and any other that these
+/// or the hand-written modules that they reach import. Links are not followed.
+fn lane_targets(
+    dir: &Path,
+    layout: &Layout,
+    name: &str,
+    targets: &[Target],
+) -> Result<receipt::Lane, String> {
+    let lanes = base::lanes(dir, layout)?;
+    let lane = lanes.iter().find(|lane| lane.name == name);
+    let lane = lane.ok_or(format!("{} registers no lane named {name}", layout.lanes))?;
+    let (project, mut imports) = (dir.join(layout.project), BTreeMap::new());
+    let below = project.join(layout.namespace);
+    let walk = walkdir::WalkDir::new(&below).into_iter();
+    for entry in walk.filter(|_| below.is_dir()) {
+        let entry = entry.map_err(|error| format!("cannot list {}: {error}", below.display()))?;
+        if entry.file_type().is_file() && entry.path().extension().is_some_and(|e| e == "lean") {
+            let file = entry.path().strip_prefix(&project).unwrap_or(entry.path());
+            let module = file.with_extension("").to_string_lossy().replace('/', ".");
+            imports.insert(module, base::header(entry.path())?);
+        }
+    }
+    let homes = base::homes(layout, imports.keys().cloned());
+    let part = format!("lane/{name}");
+    let held =
+        |m: &&String| base::part_of(&lanes, m, homes.get(*m)).as_deref() == Some(part.as_str());
+    let own = BTreeSet::from_iter(imports.keys().filter(held).cloned());
+    // The modules that the own ones import, directly or through others.
+    let mut cone = own.clone();
+    loop {
+        let more = (cone.iter()).flat_map(|module| &imports[module]);
+        let more = Vec::from_iter(more.filter(|m| imports.contains_key(*m) && !cone.contains(*m)));
+        if more.is_empty() {
+            break;
+        }
+        cone.extend(more.into_iter().cloned());
+    }
+    let of = |modules: &BTreeSet<String>| {
+        let named = Vec::from_iter(modules.iter().flat_map(|module| imports[module].clone()));
+        base::generating(layout, &named, targets)
+    };
+    let (direct, needed, mut found) = (of(&own), of(&cone), BTreeMap::new());
+    for target in targets {
+        let ours = target.module.iter().any(|m| lane.components.contains(m));
+        let role = match (target.state, ours) {
+            (registry::State::Formal, true) => receipt::Role::Formal,
+            (registry::State::Planned, true) if direct.contains(&target.name) => {
+                receipt::Role::Planned
+            }
+            _ if needed.contains(&target.name) => receipt::Role::Cone,
+            _ => continue,
+        };
+        found.insert(target.name.clone(), role);
+    }
+    let mut held = receipt::Lane::default();
+    (held.name, held.components, held.targets) = (name.to_string(), lane.components.clone(), found);
+    Ok(held)
+}
+
+/// The targets of the waivers of the export of `gate` that hold today, with
+/// the registered `targets`, and what they leave out of the base round.
+pub(super) fn waive(
+    gate: &Gate,
+    targets: &[Target],
+) -> Result<(BTreeSet<String>, waiver::LeftOut), String> {
+    let waivers = waiver::read(&gate.source(), &gate.layout, targets)?;
+    let waived = waiver::holding(&waivers, &waiver::today(SystemTime::now())?);
+    let left = waiver::left_out(&gate.layout, targets, &waived);
+    Ok((waived, left))
+}
+
 /// Extracts `target`, installs what the tools generated in its stage and
 /// type-checks the generated definitions with warnings as errors, as
 /// commands of its unit when the run selects it, `chosen`, and of `base`
@@ -1044,7 +1158,7 @@ fn extract_target(gate: &mut Gate, target: &Target, chosen: bool) -> Result<(), 
     let unit = if chosen {
         target_unit(name)
     } else {
-        base::PHASE.to_string()
+        base::unit_of(gate.receipt.shard.as_deref())
     };
     let mut record = receipt::Target {
         unit: chosen.then(|| unit.clone()),
@@ -1259,6 +1373,17 @@ fn take_end(gate: &mut Gate, inputs: &[&str], before: &Snapshot) -> Result<(), S
     Ok(())
 }
 
+/// Makes the receipt of the base run of a lane its base record, and that of
+/// its comparator run the receipt of the lane with that record.
+fn close(context: &Context, receipt: &mut Receipt) {
+    let runs = (context.var)(comparator::RUNS).map_or(context.root.join(RUNS), PathBuf::from);
+    match (context.shard.and_then(merge::lane), context.comparator) {
+        (Some(_), true) => comparator::combine(&runs, receipt),
+        (Some(_), false) => receipt.schema = receipt::BASE_SCHEMA,
+        _ => {}
+    }
+}
+
 /// Writes `receipt` into `run`, or to `stderr` without a run directory or
 /// when it cannot be written, with the exit codes under "Results" in
 /// `docs/formal-verification.md`.
@@ -1272,7 +1397,12 @@ pub(crate) fn finish(
         let _ = writeln!(stderr, "{}: {}", word(&failure.status), failure.message);
     }
     let text = receipt::render(receipt);
-    let written = run.map(|run| (run.receipt(), fs::write(run.receipt(), &text)));
+    let based = receipt.schema == receipt::BASE_SCHEMA;
+    let path = |run: &RunDir| match based {
+        true => run.path.join(receipt::BASE_RECORD),
+        false => run.receipt(),
+    };
+    let written = run.map(|run| (path(run), fs::write(path(run), &text)));
     if let Some((path, Ok(()))) = &written {
         let (status, path) = (word(&receipt.status), path.display());
         let complete = if receipt.complete { "" } else { "not " };
@@ -1299,41 +1429,53 @@ fn alone(shard: Option<&str>, named: bool, generate: bool) -> bool {
 }
 
 /// The phases of a run of `targets` with `context`, the guard on a pull
-/// request first: the comparator part has only its phase, a run of targets
-/// [`alone`] only their extraction and phase, and the qualification job
-/// every phase but that of the targets.
+/// request first: the comparator of a lane has only its phase, the base run
+/// of a lane its extraction and base round, a run of targets [`alone`] only
+/// their extraction and phase, and the qualification job the guard, the
+/// qualification and the base round.
 fn phases<'a>(
     context: &Context<'a>,
     targets: &BTreeSet<String>,
     generate: Option<Vec<String>>,
 ) -> Vec<Phase<'a>> {
     let (root, layout, shard) = (context.root, context.layout, context.shard);
-    if shard == Some(comparator::PHASE) {
+    let lane = shard.and_then(merge::lane);
+    if let Some(lane) = lane.filter(|_| context.comparator) {
         let runs = (context.var)(comparator::RUNS);
-        return vec![comparator::phase(root, layout, runs)];
+        return vec![comparator::phase(root, layout, lane, runs)];
     }
-    let alone = alone(shard, !targets.is_empty(), generate.is_some());
-    let mut phases = Vec::from_iter(guard::phase(context.var).filter(|_| !alone));
+    let (alone, job) = (
+        alone(shard, !targets.is_empty(), generate.is_some()),
+        shard == Some(qualify::PHASE),
+    );
+    let qualifies = !alone && lane.is_none();
+    let mut phases = Vec::from_iter(guard::phase(context.var).filter(|_| qualifies));
     let [extraction, finish] = target_phases(root, layout, targets, generate, shard);
-    phases.extend((!alone).then(|| qualify::phase(root, layout)));
-    phases.push(extraction);
-    phases.extend((!alone).then(|| base::phase(root, layout)));
+    phases.extend(qualifies.then(|| qualify::phase(root, layout)));
+    phases.extend((!job).then_some(extraction));
+    phases.extend((!alone).then(|| base::phase(root, layout, shard)));
     phases.extend((shard.is_none() || alone).then_some(finish));
     phases
 }
 
 /// Entry point of `cargo xtask formal run`, and of `cargo xtask formal
 /// mutants` for the source mutants of `generate`; `keep` keeps the work
-/// directory of the run, and `shard` names the shard that it runs.
+/// directory of the run, `shard` names the part that it runs, and in a lane
+/// `comparator` runs its comparator on what its base run kept.
 pub fn command(
     root: &Path,
     layout: &Layout,
     targets: BTreeSet<String>,
     generate: Option<Vec<String>>,
-    keep: bool,
+    (keep, comparator): (bool, bool),
     shard: Option<&str>,
 ) -> ExitCode {
     process::init();
+    let lane = shard.and_then(merge::lane);
+    if comparator && lane.is_none() {
+        eprintln!("--comparator runs the comparator of a lane, --shard lane/<name>");
+        return ExitCode::from(2);
+    }
     let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
     let context = Context {
         root,
@@ -1347,6 +1489,7 @@ pub fn command(
         keep,
         free: process::disk_available,
         shard,
+        comparator,
     };
     let lists = generate.as_ref().and_then(|_| targets.first().cloned());
     let run = RunDir::create(root);
@@ -1363,6 +1506,8 @@ pub fn command(
             (receipt, None)
         }
     };
+    let mut receipt = receipt;
+    close(&context, &mut receipt);
     // A stop signal after the last command ends the run without a receipt.
     process::stop_if_asked();
     let (stdout, stderr) = (&mut io::stdout(), &mut io::stderr());
@@ -1435,7 +1580,12 @@ pub(crate) mod tests {
     impl Done {
         /// The receipt as the run wrote it.
         pub(crate) fn written(&self) -> Receipt {
-            let text = fs::read_to_string(self.run.receipt()).expect("the receipt is written");
+            let paths = [self.run.receipt(), self.run.path.join(receipt::BASE_RECORD)];
+            let path = paths
+                .into_iter()
+                .find(|path| path.exists())
+                .unwrap_or_default();
+            let text = fs::read_to_string(path).expect("the receipt is written");
             serde_json::from_str(&text).expect("the receipt reads back")
         }
 
@@ -1497,6 +1647,7 @@ pub(crate) mod tests {
             keep,
             free,
             shard: None,
+            comparator: false,
         };
         gate_with(&context, run, &targets, phases, Box::new(io::sink()))
     }
@@ -1527,6 +1678,7 @@ pub(crate) mod tests {
             keep: true,
             free: plenty,
             shard: None,
+            comparator: false,
         };
         gate_with(&context, run, targets, phases, progress)
     }
@@ -1545,7 +1697,8 @@ pub(crate) mod tests {
         phases: Vec<Phase<'_>>,
         progress: Box<dyn Write + Send>,
     ) -> Done {
-        let (receipt, draft) = execute(context, &run, targets, phases, progress);
+        let (mut receipt, draft) = execute(context, &run, targets, phases, progress);
+        close(context, &mut receipt);
         let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
         let code = finish(&receipt, Some(&run), &mut stdout, &mut stderr);
         Done {
@@ -1909,7 +2062,10 @@ pub(crate) mod tests {
         let named = BTreeSet::from_iter(named.iter().map(|name| name.to_string()));
         let layout = &Layout::PRODUCTION;
         let [extraction, finish] = target_phases(root, layout, &named, None, None);
-        let (qualification, base) = (qualify::phase(root, layout), base::phase(root, layout));
+        let (qualification, base) = (
+            qualify::phase(root, layout),
+            base::phase(root, layout, None),
+        );
         vec![qualification, extraction, base, finish]
     }
 
@@ -1937,6 +2093,7 @@ pub(crate) mod tests {
             keep: true,
             free,
             shard,
+            comparator: false,
         }
     }
 
@@ -1975,17 +2132,23 @@ pub(crate) mod tests {
         gate_with(&context, run, &targets, phases, Box::new(io::sink()))
     }
 
-    /// Runs the comparator part of `fixture` in `layout` as `cargo xtask
-    /// formal run --shard comparator` does, with `runs` in the variable of
-    /// its runs directory, if given, into a new run directory, and writes its
-    /// receipt.
-    pub(crate) fn comparator_part(fixture: &Fixture, layout: &Layout, runs: Option<&Path>) -> Done {
+    /// Runs the comparator of the lane `lane` of `fixture` in `layout` as
+    /// `cargo xtask formal run --shard lane/<lane> --comparator` does, with
+    /// `runs` in the variable of its runs directory, if given, into a new run
+    /// directory, and writes the receipt of the lane.
+    pub(crate) fn comparator_run(
+        fixture: &Fixture,
+        layout: &Layout,
+        lane: &str,
+        runs: Option<&Path>,
+    ) -> Done {
         let runs = runs.map(|runs| runs.display().to_string());
         let var = |name: &str| runs.clone().filter(|_| name == comparator::RUNS);
-        let shard = Some(comparator::PHASE);
+        let shard = format!("lane/{lane}");
         let context = Context {
             layout,
-            ..shard_context(fixture.root(), shard, &var, plenty)
+            comparator: true,
+            ..shard_context(fixture.root(), Some(&shard), &var, plenty)
         };
         let run = RunDir::create(fixture.root()).expect("create the run directory");
         let phases = phases(&context, &BTreeSet::new(), None);
@@ -2005,14 +2168,37 @@ pub(crate) mod tests {
         phases(&context, &shard_targets(shard), None)
     }
 
+    /// Runs the shard `shard` of `fixture` in `layout` with the phases that
+    /// [`command`] gives it outside a pull request, into a new run directory,
+    /// and writes its receipt.
+    pub(crate) fn layout_shard(fixture: &Fixture, layout: &Layout, shard: &str) -> Done {
+        let context = Context {
+            layout,
+            ..shard_context(fixture.root(), Some(shard), &no_variable, plenty)
+        };
+        let run = RunDir::create(fixture.root()).expect("create the run directory");
+        let (targets, sink) = (shard_targets(shard), Box::new(io::sink()));
+        let phases = phases(&context, &targets, None);
+        gate_with(&context, run, &targets, phases, sink)
+    }
+
     /// The phases of the qualification job of `fixture` but its
     /// qualification, with a base round that is verified.
-    fn qualification_job<'a>(fixture: &Fixture) -> Vec<Phase<'a>> {
+    fn lane_job<'a>(fixture: &Fixture) -> Vec<Phase<'a>> {
         let (root, layout, none) = (fixture.root(), &Layout::PRODUCTION, &BTreeSet::new());
-        let [extraction, _] = target_phases(root, layout, none, None, Some(qualify::PHASE));
+        let [extraction, _] = target_phases(root, layout, none, None, Some("lane/a"));
         let mut phases = vec![extraction];
         phases.extend(verified());
         phases
+    }
+
+    /// Writes the lane `a` of `fixture` with `components` and the shared
+    /// modules `modules`, committed.
+    fn lane_a(fixture: &Fixture, components: &[&str], modules: &[&str]) {
+        let lane = serde_json::json!({"name": "a", "components": components, "modules": modules});
+        let lanes = serde_json::json!({"schema": 1, "lanes": [lane]});
+        fixture.write(Layout::PRODUCTION.lanes, &format!("{lanes}\n"));
+        fixture.commit_all();
     }
 
     #[test]
@@ -2040,52 +2226,88 @@ pub(crate) mod tests {
         let whole = ["guard", "qualification", "extraction", "base", "targets"];
         assert_eq!(names(root, None, true), whole);
         assert_eq!(names(root, None, false), whole[1..]);
-        // The qualification job has the guard of a pull request, and the
-        // shard of a target has none.
+        // The qualification job has the guard of a pull request and no
+        // extraction, and a lane and the part of a target have no guard.
         let job = Some("qualification");
-        assert_eq!(names(root, job, true), whole[..4]);
-        assert_eq!(names(root, job, false), whole[1..4]);
+        assert_eq!(names(root, job, true), ["guard", "qualification", "base"]);
+        assert_eq!(names(root, job, false), ["qualification", "base"]);
         for pull_request in [true, false] {
-            let shard = names(root, Some("target/t"), pull_request);
+            let shard = names(root, Some("target/t/1"), pull_request);
             assert_eq!(shard, ["extraction", "targets"]);
+            assert_eq!(
+                names(root, Some("lane/a"), pull_request),
+                ["extraction", "base"]
+            );
         }
     }
 
     #[test]
-    fn the_qualification_job_extracts_every_formal_target_for_the_base_round_and_runs_no_target() {
+    fn the_qualification_job_extracts_no_target_and_a_lane_the_formal_ones_of_its_components() {
         let fixture = with_targets("qualification-job", &two_targets(1_800, 1));
-        let done = gate_shard(
-            &fixture,
-            "qualification",
-            qualification_job(&fixture),
-            plenty,
+        let done = gate_shard(&fixture, "qualification", verified(), plenty);
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        let receipt = done.written();
+        assert_eq!(receipt.shard.as_deref(), Some("qualification"));
+        assert_eq!(
+            (receipt.trigger.mode, receipt.budgets.gate_seconds),
+            (Mode::Manual, 7_200)
         );
+        assert!(receipt.proof_targets.is_empty() && !done.sites().contains(&Site::Charon));
+        // A lane extracts the formal target of its components as commands of
+        // the unit of its base round, and not a planned one that no module
+        // of it imports. Its budget is the shard margin, its registered
+        // budget and the extraction margin, that of its extraction.
+        lane_a(&fixture, &["T", "P"], &["Krepi.Proofs.T"]);
+        let done = gate_shard(&fixture, "lane/a", lane_job(&fixture), plenty);
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
         let receipt = done.written();
         assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
-        assert_eq!(receipt.shard.as_deref(), Some("qualification"));
-        assert_eq!(receipt.trigger.mode, Mode::Manual);
-        assert_eq!(receipt.targets, Vec::<String>::new());
-        // Its budget is the gate's and the extraction margin, which is that of
-        // the extraction whatever the budgets of the formal targets.
-        assert_eq!(receipt.budgets.gate_seconds, 7_200 + 600);
+        assert_eq!(
+            (receipt.shard.as_deref(), receipt.targets.len()),
+            (Some("lane/a"), 0)
+        );
+        assert_eq!(receipt.budgets.gate_seconds, 300 + 2_400 + 600);
         assert_eq!(receipt.phases["extraction"].budget_seconds, 600);
         assert!(!receipt.phases.contains_key("targets"));
-        // It extracts the formal target as commands of `base`, and not the
-        // planned one.
         assert_eq!(Vec::from_iter(receipt.proof_targets.keys()), ["t"]);
         assert_eq!(receipt.proof_targets["t"].unit, None);
         assert!(receipt.proof_targets["t"].typed);
-        let base = Vec::from_iter(fixture::commands(&done, "base").iter().map(|c| c.site));
-        assert_eq!(base, [Site::Charon, Site::Aeneas, Site::TargetBuild]);
-        assert_eq!(Vec::from_iter(receipt.units.keys()), ["base"]);
+        let base = fixture::commands(&done, "base/lane/a")
+            .into_iter()
+            .map(|c| c.site);
+        assert_eq!(
+            Vec::from_iter(base),
+            [Site::Charon, Site::Aeneas, Site::TargetBuild]
+        );
+        let lane = receipt.lane.expect("the lane");
+        assert_eq!(
+            (lane.name.as_str(), lane.components),
+            ("a", vec!["T".to_string(), "P".to_string()])
+        );
+        assert_eq!(
+            lane.targets,
+            BTreeMap::from([("t".to_string(), receipt::Role::Formal)])
+        );
+        // A lane without its component extracts it neither.
+        lane_a(&fixture, &["P"], &["Krepi.Proofs.T"]);
+        let done = gate_shard(&fixture, "lane/a", lane_job(&fixture), plenty);
+        assert!(
+            done.written().proof_targets.is_empty(),
+            "{:?}",
+            done.failures()
+        );
     }
 
     #[test]
-    fn the_qualification_job_leaves_out_the_targets_of_a_waiver_that_holds_when_it_extracts() {
+    fn a_lane_leaves_out_the_targets_of_a_waiver_that_holds_when_it_extracts() {
         let fixture = with_targets("waived-job", &two_targets(1_800, 1));
+        lane_a(
+            &fixture,
+            &["T", "P"],
+            &["Krepi.Proofs.T", "Krepi.Statements.P"],
+        );
         let job = |fixture: &Fixture| {
-            let done = gate_shard(fixture, "qualification", qualification_job(fixture), plenty);
+            let done = gate_shard(fixture, "lane/a", lane_job(fixture), plenty);
             let charon = (done.receipt.commands.iter()).any(|c| c.site == Site::Charon);
             (done.written(), charon)
         };
@@ -2117,12 +2339,7 @@ pub(crate) mod tests {
             "{\"schema\": 2, \"waivers\": []}\n",
         );
         fixture.commit_all();
-        let done = gate_shard(
-            &fixture,
-            "qualification",
-            qualification_job(&fixture),
-            plenty,
-        );
+        let done = gate_shard(&fixture, "lane/a", lane_job(&fixture), plenty);
         let receipt = done.written();
         assert_eq!(
             (receipt.status, receipt.complete),
@@ -2142,8 +2359,8 @@ pub(crate) mod tests {
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
         assert_eq!(Vec::from_iter(done.receipt.proof_targets.keys()), ["t"]);
         assert_eq!(fixture::status(&done, "target/t"), (Status::Verified, None));
-        let phases = shard_phases(fixture.root(), "target/t");
-        let done = gate_shard(&fixture, "target/t", phases, plenty);
+        let phases = shard_phases(fixture.root(), "target/t/1");
+        let done = gate_shard(&fixture, "target/t/1", phases, plenty);
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
         assert_eq!(Vec::from_iter(done.receipt.proof_targets.keys()), ["t"]);
     }
@@ -2151,12 +2368,12 @@ pub(crate) mod tests {
     #[test]
     fn the_shard_of_a_target_runs_its_extraction_and_its_phase_alone() {
         let fixture = with_targets("target-shard", &two_targets(1_800, 1));
-        let phases = shard_phases(fixture.root(), "target/t");
-        let done = gate_shard(&fixture, "target/t", phases, plenty);
+        let phases = shard_phases(fixture.root(), "target/t/1");
+        let done = gate_shard(&fixture, "target/t/1", phases, plenty);
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
         let receipt = done.written();
         assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
-        assert_eq!(receipt.shard.as_deref(), Some("target/t"));
+        assert_eq!(receipt.shard.as_deref(), Some("target/t/1"));
         assert_eq!(receipt.trigger.mode, Mode::Manual);
         assert_eq!(receipt.targets, ["t"]);
         // Its budget is the shard margin and the budget of its target, which
@@ -2271,8 +2488,8 @@ pub(crate) mod tests {
         let done = named_run(&fixture, &["t"]);
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
         assert_eq!(extracted(&done), ["t"]);
-        let phases = shard_phases(fixture.root(), "target/t");
-        let done = gate_shard(&fixture, "target/t", phases, plenty);
+        let phases = shard_phases(fixture.root(), "target/t/1");
+        let done = gate_shard(&fixture, "target/t/1", phases, plenty);
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
         assert_eq!(extracted(&done), ["t"]);
         // A whole run extracts it for the base round, without a unit, and
@@ -2304,45 +2521,144 @@ pub(crate) mod tests {
         let budgets = [
             merge::SHARD_MARGIN,
             merge::budget(qualify::PHASE),
-            merge::budget("target/t"),
+            merge::budget("target/t/1"),
+            merge::budget("lane/l"),
             comparator::BUDGET,
         ];
         for budget in budgets {
             assert_ne!(budget, mutants::RUN_BUDGET);
         }
-        assert_eq!(merge::budget(comparator::PHASE), comparator::BUDGET);
+        assert_eq!(merge::budget(qualify::PHASE), GATE_BUDGET);
+        let lane = merge::SHARD_MARGIN + merge::EXTRACTION_MARGIN;
+        assert_eq!(merge::budget("lane/l"), lane);
     }
 
     #[test]
-    fn the_comparator_shard_runs_its_phase_alone() {
-        let fixture = merge::tests::checkout("comparator-shard", "[]");
-        // On a pull request as elsewhere, it has neither the guard nor any
-        // other phase.
+    fn a_lane_runs_its_base_round_and_then_its_comparator_by_the_deadline_of_its_base_run() {
+        let mut fixture = base::tests::base("lane-runs");
+        root_package(&fixture, "krepi-kernel", "");
+        base::tests::hashed(&mut fixture);
+        // On a pull request as elsewhere, the base run has the extraction and
+        // the base round, and the comparator run its phase alone.
         let event = |name: &str| match name {
             "GITHUB_EVENT_NAME" => Some("pull_request".to_string()),
             "GITHUB_EVENT_PATH" => Some("event.json".to_string()),
             _ => None,
         };
-        let shard = Some(comparator::PHASE);
-        let context = shard_context(fixture.root(), shard, &event, plenty);
-        let phases = phases(&context, &BTreeSet::new(), None).into_iter();
+        let root = fixture.root();
+        let context = shard_context(root, Some("lane/a"), &event, plenty);
+        let names = |context: &Context| {
+            let phases = phases(context, &BTreeSet::new(), None).into_iter();
+            Vec::from_iter(phases.map(|phase| phase.name))
+        };
+        assert_eq!(names(&context), ["extraction", "base"]);
         assert_eq!(
-            Vec::from_iter(phases.map(|phase| phase.name)),
+            names(&Context {
+                comparator: true,
+                ..context
+            }),
             ["comparator"]
         );
-        // Without a proved statement it has no unit and runs nothing.
-        let done = comparator_part(&fixture, &Layout::PRODUCTION, None);
+        // The base run writes its base record, of the deadline of the lane:
+        // the shard margin, the registered budget of the lane and the
+        // extraction margin from its start.
+        let job = base::tests::job(&fixture);
+        assert_eq!(job.code, ExitCode::SUCCESS, "{:?}", job.failures());
+        assert!(!job.run.receipt().exists());
+        let record = job.written();
+        assert_eq!(record.schema, receipt::BASE_SCHEMA);
+        assert_eq!(record.budgets.gate_seconds, 300 + 2_400 + 600);
+        assert_eq!(Vec::from_iter(record.phases.keys()), ["base", "extraction"]);
+        // Its commands run by that deadline: the build of the base round,
+        // whose phase has 3,600 s, has what was left of the 3,300 s when it
+        // started.
+        let build = (record.commands.iter()).find(|c| c.site == Site::BaseBuild);
+        let build = build.expect("the base build");
+        assert_eq!(build.limit, LimitBy::Gate, "{build:?}");
+        let left = (300 + 2_400 + 600) as f64 - build.started;
+        assert!(
+            (left - 1.0..=left + 1.0).contains(&build.limit_seconds),
+            "{build:?}"
+        );
+        // The comparator run writes the receipt of the lane with that record:
+        // its start, budget, phases, units and commands, and the seconds of
+        // both runs.
+        let done = comparator_run(&fixture, &Layout::PRODUCTION, "a", None);
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
         let receipt = done.written();
+        assert_eq!(
+            (receipt.schema, receipt.shard.as_deref()),
+            (receipt::SCHEMA, Some("lane/a"))
+        );
         assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
-        assert_eq!(receipt.shard.as_deref(), Some("comparator"));
-        assert_eq!(receipt.trigger.mode, Mode::Manual);
-        assert_eq!(receipt.targets, Vec::<String>::new());
-        assert_eq!(receipt.budgets.gate_seconds, 1_800);
-        assert_eq!(Vec::from_iter(receipt.phases.keys()), ["comparator"]);
-        assert_eq!(receipt.phases["comparator"].budget_seconds, 1_800);
-        assert!(receipt.phases["comparator"].ran && receipt.units.is_empty());
-        assert!(!done.sites().contains(&Site::Comparator));
+        assert_eq!(
+            (receipt.started, &receipt.budgets),
+            (record.started, &record.budgets)
+        );
+        let read = receipt.base_record.clone().expect("the base record");
+        let bytes = fs::read(job.run.path.join(receipt::BASE_RECORD)).expect("the record");
+        assert_eq!(
+            (read.sha256, read.run),
+            (toolchain::sha256(&bytes), job.run.id.clone())
+        );
+        assert_eq!(
+            (read.started, read.seconds),
+            (record.started, record.seconds)
+        );
+        let both = receipt::seconds(Duration::from_secs_f64(
+            record.seconds + read.comparator_seconds,
+        ));
+        assert_eq!(receipt.seconds, both);
+        let phases = Vec::from_iter(receipt.phases.keys());
+        assert_eq!(phases, ["base", "comparator", "extraction"]);
+        let units = Vec::from_iter(receipt.units.keys());
+        assert_eq!(
+            units,
+            [
+                "base/Krepi.Proofs.Counter.t",
+                "base/lane/a",
+                "comparator/lane/a"
+            ]
+        );
+        let sequences = Vec::from_iter(receipt.commands.iter().map(|c| c.sequence));
+        assert!(
+            sequences.windows(2).all(|pair| pair[0] < pair[1]),
+            "{sequences:?}"
+        );
+        let lane = receipt.lane.clone().expect("the lane");
+        assert_eq!(lane.name, "a");
+        assert!(
+            lane.modules.contains(&"Krepi.Proofs.Counter".to_string()),
+            "{lane:?}"
+        );
+        // Its deadline is that of the base run: with 100 s of it left, its
+        // command has at most these, whatever the budget of its phase.
+        let mut earlier = record.clone();
+        earlier.started = unix_seconds() + 100 - earlier.budgets.gate_seconds;
+        fs::write(
+            job.run.path.join(receipt::BASE_RECORD),
+            receipt::render(&earlier),
+        )
+        .expect("write");
+        let done = comparator_run(&fixture, &Layout::PRODUCTION, "a", None);
+        let compared = (done.receipt.commands.iter()).find(|c| c.site == Site::Comparator);
+        let compared = compared.expect("the comparator");
+        assert_eq!(compared.limit, LimitBy::Gate);
+        assert!(
+            (90.0..=100.0).contains(&compared.limit_seconds),
+            "{compared:?}"
+        );
+        assert_eq!(done.receipt.phases["comparator"].budget_seconds, 1_800);
+        // `--comparator` runs only in a lane.
+        let code = command(
+            root,
+            &Layout::PRODUCTION,
+            BTreeSet::new(),
+            None,
+            (false, true),
+            Some("qualification"),
+        );
+        assert_eq!(code, ExitCode::from(2));
     }
 
     #[test]
@@ -3934,8 +4250,8 @@ pub(crate) mod tests {
         let fixture = with_targets("disk-guard-targets", &two_targets(1_800, 1));
         let parts = [
             shard_entry("qualification", 1_000),
-            shard_entry("target/t", 2_000),
-            shard_entry("target/p", 1 << 40),
+            shard_entry("target/t/1", 2_000),
+            shard_entry("target/p/1", 1 << 40),
         ];
         let plan = serde_json::json!({"schema": 1, "parts": parts}).to_string();
         fixture.write("verification/shards.json", &plan);
@@ -3958,28 +4274,33 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_disk_guard_of_a_part_counts_the_qualification_or_its_target_alone() {
+    fn the_disk_guard_of_a_part_counts_that_part_alone() {
         let fixture = with_targets("disk-guard-parts", &two_targets(1_800, 1));
+        lane_a(&fixture, &["T"], &[]);
         let parts = [
             shard_entry("qualification", 1_000),
-            shard_entry("target/t", 2_000),
-            shard_entry("target/p", 1 << 40),
+            shard_entry("lane/a", 3_000),
+            shard_entry("target/t/1", 2_000),
+            shard_entry("target/p/1", 1 << 40),
         ];
         let plan = serde_json::json!({"schema": 1, "parts": parts}).to_string();
         fixture.write("verification/shards.json", &plan);
         fixture.commit_all();
         // The qualification job counts the qualification, and no target.
-        let job = qualification_job(&fixture);
-        let done = gate_shard(&fixture, "qualification", job, |_| Some(1_499));
+        let done = gate_shard(&fixture, "qualification", verified(), |_| Some(1_499));
         assert_eq!(done.written().status, Status::NotRun);
         assert_eq!(done.failures(), [refusal(1_499, 1_000)]);
         assert!(done.receipt.phases.values().all(|phase| !phase.ran));
-        let job = qualification_job(&fixture);
-        let done = gate_shard(&fixture, "qualification", job, |_| Some(1_500));
+        let done = gate_shard(&fixture, "qualification", verified(), |_| Some(1_500));
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        // A lane counts its lane, and neither the qualification nor a target.
+        let done = gate_shard(&fixture, "lane/a", lane_job(&fixture), |_| Some(4_499));
+        assert_eq!(done.failures(), [refusal(4_499, 3_000)]);
+        let done = gate_shard(&fixture, "lane/a", lane_job(&fixture), |_| Some(4_500));
         assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
         // The shard of a target counts its target, and not the qualification.
-        let phases = shard_phases(fixture.root(), "target/t");
-        let done = gate_shard(&fixture, "target/t", phases, |_| Some(2_999));
+        let phases = shard_phases(fixture.root(), "target/t/1");
+        let done = gate_shard(&fixture, "target/t/1", phases, |_| Some(2_999));
         assert_eq!(done.written().status, Status::NotRun);
         assert_eq!(done.failures(), [refusal(2_999, 2_000)]);
         assert!(done.receipt.phases.values().all(|phase| !phase.ran));
@@ -4233,6 +4554,7 @@ pub(crate) mod tests {
             keep: true,
             free: plenty,
             shard: None,
+            comparator: false,
         };
         let run = RunDir::create(fixture.root()).expect("create the run directory");
         let phases = vec![phase("checks", LONG, &["u1"], |run| {

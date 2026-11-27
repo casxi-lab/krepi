@@ -78,6 +78,10 @@ impl Fixture {
             "verification/shards.json",
             "{\"schema\": 1, \"parts\": []}\n",
         );
+        fixture.write(
+            "verification/lanes.json",
+            "{\"schema\": 1, \"lanes\": []}\n",
+        );
         let local = MANIFEST.replace(
             "\"prefix\": \"/opt/krepi-formal\"",
             "\"prefix\": \"artifacts/formal/tools\"",
@@ -247,7 +251,10 @@ fn aeneas(root: &str) -> String {
 /// says `none`), and for every one its line; then for each proved statement
 /// the module and whether its theorem has its type: those in
 /// `artifacts/lake/statements/<statement>`, else the name without its last
-/// component when that file exists, and `true`. A
+/// component when that file exists, and `true`; and for each module whose
+/// public constants it is to name, each `public theorem` and `public def` of
+/// its file, a `theorem` or `other`, with the checksum of the rest of its line
+/// and no universe parameter for its fingerprint. A
 /// heartbeat copy is counted ten heartbeats per line at each inserted line.
 /// `leanchecker` passes, and so does `lake comparator`, keyed `comparator`,
 /// whose configuration is its third argument. The range printer
@@ -301,6 +308,12 @@ case $key in
       if [ ! -f "$(path "$module").lean" ]; then module='[anonymous]'; fi
       if [ -f "$lake/statements/$statement" ]; then read -r module exact < "$lake/statements/$statement"; fi
       echo "krepi-audit statement $statement $module ${exact:-true}"
+    done
+    for module in $(names mine); do
+      grep -E '^public (theorem|def) ' "$(path "$module").lean" 2>/dev/null | while read -r _ kind name rest; do
+        [ "$kind" = theorem ] || kind=other
+        echo "krepi-name $module.$name $kind $(echo "$rest" | cksum | cut -d ' ' -f 1)[]"
+      done
     done ;;
   heartbeats)
     grep -n '^#count_heartbeats in$' "$file" | while IFS=: read -r line rest; do

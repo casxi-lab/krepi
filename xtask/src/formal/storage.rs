@@ -16,7 +16,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::registry::Target;
-use super::{merge, qualify, run};
+use super::{lanes, merge, qualify};
 
 /// The schema of the shard plan.
 pub const SCHEMA: u32 = 1;
@@ -37,9 +37,9 @@ pub struct Plan {
     pub parts: Vec<Part>,
 }
 
-/// What a run of CI measured for a part of the gate, named by its unit: its
-/// disk peak, the seconds and the cgroup memory peak of its receipt, and the
-/// run and its commit.
+/// What a run of CI measured for a part of the gate, named as its receipt
+/// names it: its disk peak, the seconds and the cgroup memory peak of its
+/// receipt, and the run and its commit.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[expect(
@@ -67,22 +67,36 @@ pub fn parse(text: &str) -> Result<Plan, String> {
 }
 
 /// The problems of the shard plan `text` at `path` with the registry's
-/// `targets`: a plan that cannot be read, a part listed twice, and a part
-/// that is neither the qualification nor a registered target; and the
-/// shards of the formal targets that it has no entry for, which are no
-/// problem.
-pub fn check(path: &str, text: &str, targets: &[Target]) -> (Vec<String>, Vec<String>) {
+/// `targets` and the `lanes`, if they can be read: a plan that cannot be
+/// read, a part listed twice, and a part that is neither the qualification,
+/// a registered lane nor the part of a registered target; and the parts of
+/// the formal targets that it has no entry for, which are no problem.
+pub fn check(
+    path: &str,
+    text: &str,
+    targets: &[Target],
+    lanes: Option<&str>,
+) -> (Vec<String>, Vec<String>) {
     let plan = match parse(text) {
         Ok(plan) => plan,
         Err(error) => return (vec![format!("{path}: {error}")], Vec::new()),
     };
-    let units = BTreeSet::from_iter(targets.iter().map(|t| run::target_unit(&t.name)));
+    let mut known = BTreeSet::from_iter(targets.iter().map(|t| merge::part(&t.name)));
+    let lanes = lanes
+        .and_then(|text| lanes::parse(text).ok())
+        .map(|lanes| lanes.lanes);
+    known.extend(
+        lanes
+            .iter()
+            .flatten()
+            .map(|lane| format!("lane/{}", lane.name)),
+    );
     let (mut problems, mut parts) = (Vec::new(), BTreeSet::new());
     for part in plan.parts.iter().map(|entry| &entry.part) {
         let problem = if !parts.insert(part) {
             "is listed twice"
-        } else if part != qualify::PHASE && !units.contains(part) {
-            "is neither the qualification nor a registered target"
+        } else if part != qualify::PHASE && !known.contains(part) {
+            "is neither the qualification, a registered lane nor the part of a registered target"
         } else {
             continue;
         };
@@ -174,26 +188,47 @@ mod tests {
     }
 
     #[test]
-    fn the_shard_plan_has_its_schema_and_parts_of_the_qualification_or_registered_targets() {
+    fn the_shard_plan_has_its_schema_and_parts_of_the_qualification_lanes_or_registered_targets() {
         let targets = registry::parse(
             r#"{"schema": 2, "targets": [{"name": "a"}, {"name": "p", "state": "planned"}]}"#,
         )
         .expect("a registry")
         .targets;
-        let checked = |text: &str| check(PATH, text, &targets);
+        let lanes = r#"{"schema": 1, "lanes": [{"name": "l", "components": ["A"]}]}"#;
+        let checked = |text: &str| check(PATH, text, &targets, Some(lanes));
         let none = Vec::<String>::new();
-        let entries = plan(&[("qualification", 1), ("target/a", 2)]);
+        let entries = plan(&[("qualification", 1), ("lane/l", 3), ("target/a/1", 2)]);
         assert_eq!(checked(&entries), (none.clone(), none.clone()));
-        let missing = vec!["target/a".to_string()];
+        let missing = vec!["target/a/1".to_string()];
         let entries = plan(&[("qualification", 1)]);
         assert_eq!(checked(&entries), (none.clone(), missing.clone()));
         // A planned target may have an entry, and is never missing.
-        assert_eq!(checked(&plan(&[("target/p", 1)])), (none.clone(), missing));
+        assert_eq!(
+            checked(&plan(&[("target/p/1", 1)])),
+            (none.clone(), missing)
+        );
+        let unknown =
+            "is neither the qualification, a registered lane nor the part of a registered target";
         for (entries, problem) in [
             (
-                plan(&[("target/x", 1)]),
-                "P: part target/x is neither the qualification nor a registered target",
+                plan(&[("target/x/1", 1)]),
+                format!("P: part target/x/1 {unknown}"),
             ),
+            (
+                plan(&[("target/a", 1)]),
+                format!("P: part target/a {unknown}"),
+            ),
+            (plan(&[("lane/m", 1)]), format!("P: part lane/m {unknown}")),
+        ] {
+            assert_eq!(checked(&entries).0, [problem], "{entries}");
+        }
+        // Without lanes that can be read, no lane is registered.
+        let lane = plan(&[("lane/l", 1)]);
+        assert_eq!(
+            check(PATH, &lane, &targets, None).0,
+            [format!("P: part lane/l {unknown}")]
+        );
+        for (entries, problem) in [
             (
                 plan(&[("qualification", 1), ("qualification", 2)]),
                 "P: part qualification is listed twice",

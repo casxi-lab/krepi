@@ -336,6 +336,13 @@ mod tests {
             r#"if [ -n "$heavy" ]; then"#.to_string(),
             r#"echo "the registered budget of the lane $heavy and the extraction margin of $extraction_margin s are more than $shard_limit s" >&2"#
                 .to_string(),
+            // A lane name that another lane has, and a component in two lanes.
+            r#"twice=$(jq -r '[.lanes[].name] | group_by(.) | map(select(length > 1) | .[0]) | join(" ")' "$lanes")"#
+                .to_string(),
+            r#"echo "more than one lane is named $twice" >&2"#.to_string(),
+            r#"shared=$(jq -r '[.lanes[].components[]] | group_by(.) | map(select(length > 1) | .[0]) | join(" ")' "$lanes")"#
+                .to_string(),
+            r#"echo "the component $shared is in more than one lane" >&2"#.to_string(),
         ];
         for line in &lines {
             assert!(formal.lines().any(|l| l.trim_start() == line), "{line}");
@@ -353,6 +360,34 @@ mod tests {
             [
                 "L: lane fdt: its registered budget of 2701 s and the extraction margin of 600 s are more than the shard limit of 3300 s"
             ]
+        );
+        // The job refuses two lanes of one name, and a component in two
+        // lanes, by the lines above, which the job runs after the name rule
+        // and before the budget; so does the check.
+        let at = |line: &str| {
+            formal
+                .lines()
+                .position(|l| l.trim_start().starts_with(line))
+        };
+        let order = [
+            "jq -e 'all(.lanes[]",
+            "twice=$(jq",
+            "shared=$(jq",
+            "heavy=$(jq",
+        ]
+        .map(at);
+        assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "{order:?}");
+        let mut named = two_lanes();
+        named[1]["name"] = json!("fdt");
+        assert_eq!(
+            problems(&named, &[]),
+            ["L: lane fdt: another lane has its name"]
+        );
+        let mut shared = two_lanes();
+        shared[1]["components"] = json!(["PageTables", "Fdt"]);
+        assert_eq!(
+            problems(&shared, &[]),
+            ["L: lane page-tables: component Fdt is in lane fdt already"]
         );
     }
 

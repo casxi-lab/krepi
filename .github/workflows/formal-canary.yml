@@ -34,12 +34,13 @@ defaults:
 
 jobs:
   # The head of Aeneas main, which `git ls-remote` gives, resolved once for
-  # every part, and the parts with their limits from the registry:
-  # `cargo xtask formal canary limits` gives the qualification row and one
-  # row for the shard of each formal target, whose shard step has the limit
-  # that the job `formal limits` of formal.yml computes, and fails when a
-  # job would need more than the 360 minutes of a hosted runner. A manual
-  # run of another branch skips every job: the canary tests main.
+  # every part, and the parts with their limits from the registry and the
+  # lanes: `cargo xtask formal canary limits` gives the qualification row,
+  # one row for each lane and one for the part of each formal target, whose
+  # steps have the limits that the job `formal limits` of formal.yml
+  # computes, and fails when a job would need more than the 360 minutes of
+  # a hosted runner. A manual run of another branch skips every job: the
+  # canary tests main.
   limits:
     name: canary limits
     if: github.ref == 'refs/heads/main'
@@ -88,13 +89,14 @@ jobs:
   # image as the earlier single job of the canary did and commits the
   # derived files with a fixed identity and time, so that the rows run on
   # the same commits; the qualification row then runs the qualification job
-  # and the comparator part as the job `formal run` of formal.yml does, and
-  # the row of a formal target its shard as the job `formal shard` does,
-  # each without the reference of the image and with `deadline.sh` keeping
-  # its exit status for the verdict. A row ends at the first step that
-  # fails, but for the comparator part, which also runs when the gate
-  # failed, and for the steps that remove the containers and record the
-  # part. The job writes its limit in a notice for the record of the run.
+  # as the job `formal run` of formal.yml does, the row of a lane its base
+  # run and its comparator as the job `formal lane` does, and the row of a
+  # formal target its part as the job `formal shard` does, each without the
+  # reference of the image and with `deadline.sh` keeping its exit status
+  # for the verdict. A row ends at the first step that fails, but for the
+  # comparator, which also runs when the base run of its lane failed, and
+  # for the steps that remove the containers and record the part. The job
+  # writes its limit in a notice for the record of the run.
   canary:
     name: toolchain canary ${{ matrix.part }}
     needs: limits
@@ -118,6 +120,7 @@ jobs:
       AENEAS_MAIN: ${{ needs.limits.outputs.aeneas }}
       PART: ${{ matrix.part }}
       NAME: ${{ matrix.name }}
+      KEY: ${{ matrix.key }}
       LIMIT: ${{ matrix.job }}
     steps:
       - name: Check out main with its history
@@ -208,8 +211,9 @@ jobs:
             ls -l xtask/target/debug/xtask
           } 2>&1 | tee -a artifacts/formal/job.txt
 
-      # The comparator part runs this copy of xtask, mounted read-only: the
-      # gate, whose container mounts only the checkout, cannot change it.
+      # The comparator of a lane runs this copy of xtask, mounted read-only:
+      # the base run, whose container mounts only the checkout, cannot
+      # change it.
       - name: Copy xtask for the comparator
         id: copy
         timeout-minutes: 1
@@ -413,18 +417,18 @@ jobs:
       - name: Run the gate in the image
         id: gate
         if: matrix.part == 'qualification'
-        timeout-minutes: 137
+        timeout-minutes: 127
         run: |
           read -r -a gate_flags <<< "$GATE_FLAGS"
           echo "== gate started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
-          exec bash .github/scripts/deadline.sh --stop-commands --status artifacts/canary/gate-status 135m 1m \
+          exec bash .github/scripts/deadline.sh --stop-commands --status artifacts/canary/gate-status 125m 1m \
             docker run --rm --name "formal-gate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --env GITHUB_EVENT_NAME --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
             --env KREPI_FORMAL_TRIGGER \
             --env GITHUB_EVENT_PATH="$GITHUB_WORKSPACE/artifacts/formal/event.json" \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard qualification --keep
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard qualification
 
       - name: Remove the container of the gate
         if: always() && matrix.part == 'qualification'
@@ -436,14 +440,43 @@ jobs:
             echo "no container of the gate is left"
           fi
 
-      # The comparator part on the stage that the gate kept, as the job
-      # `formal run` runs it, also when the gate failed; `deadline.sh` keeps
-      # its exit status for the verdict. It runs `lake comparator` only on
-      # the units whose statements the base round verified and audited, and
-      # records each other unit as NOT_RUN.
+      # The row of a lane: its base run, as the job `formal lane` of
+      # formal.yml runs it, with the limit of the step from the matrix and
+      # without the reference of the image; `deadline.sh` stops the command
+      # at the deadline of the lane and its receipt, kills it a minute later
+      # and keeps its exit status for the verdict.
+      - name: Run the lane in the image
+        id: lane
+        if: startsWith(matrix.part, 'lane/')
+        timeout-minutes: ${{ matrix.step }}
+        env:
+          STEP: ${{ matrix.step }}
+        run: |
+          read -r -a gate_flags <<< "$GATE_FLAGS"
+          limit=$(( (STEP - 2) * 60 ))s
+          echo "== base run started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
+          exec bash .github/scripts/deadline.sh --stop-commands --status artifacts/canary/lane-status "$limit" 1m \
+            docker run --rm --name "formal-lane-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            --user "$(id -u):$(id -g)" \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
+            --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard "$PART" --keep
+
+      - name: Remove the container of the lane
+        if: always() && startsWith(matrix.part, 'lane/')
+        timeout-minutes: 1
+        run: |
+          docker rm --force "formal-lane-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
+
+      # The comparator of the lane on the stage that its base run kept, as
+      # the job `formal lane` runs it, also when that run failed;
+      # `deadline.sh` keeps its exit status for the verdict. It runs
+      # `lake comparator` only on the units whose statements the base round
+      # verified and audited, records each other unit as NOT_RUN and writes
+      # the receipt of the lane.
       - name: Run the comparator in its own container
         id: comparator
-        if: ${{ !cancelled() && matrix.part == 'qualification' && steps.probe.outcome == 'success' }}
+        if: ${{ !cancelled() && startsWith(matrix.part, 'lane/') && steps.probe.outcome == 'success' }}
         timeout-minutes: 37
         run: |
           read -r -a gate_flags <<< "$GATE_FLAGS"
@@ -475,33 +508,33 @@ jobs:
           PROBE
           echo "== comparator started $(date -u +%FT%TZ)" | tee -a artifacts/formal/job.txt
           exec bash .github/scripts/deadline.sh --stop-commands --status artifacts/canary/comparator-status 35m 1m \
-            docker run --rm --name "formal-comparator-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" "${relaxed[@]}" \
+            docker run --rm --name "formal-comparator-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" "${relaxed[@]}" \
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --volume "$GITHUB_WORKSPACE/artifacts/formal/runs:/krepi-runs" --env KREPI_FORMAL_RUNS=/krepi-runs \
             --volume "$RUNNER_TEMP/gitconfig:/etc/gitconfig:ro" \
             --volume "$RUNNER_TEMP/xtask:/krepi-xtask:ro" \
             --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
-            "$IMAGE" /krepi-xtask formal run --shard comparator
+            "$IMAGE" /krepi-xtask formal run --shard "$PART" --comparator
 
       - name: Remove the container of the comparator
-        if: always() && matrix.part == 'qualification'
+        if: always() && startsWith(matrix.part, 'lane/')
         timeout-minutes: 1
         run: |
-          if docker rm --force "formal-comparator-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1; then
+          if docker rm --force "formal-comparator-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1; then
             echo "removed the container of the comparator"
           else
             echo "no container of the comparator is left"
           fi
 
-      # The row of a formal target: its shard, as the job `formal shard` of
+      # The row of a formal target: its part, as the job `formal shard` of
       # formal.yml runs it, with the limit of the step from the matrix and
       # without the reference of the image; `deadline.sh` stops the command
-      # at the deadline of the shard and its receipt, kills it a minute later
+      # at the deadline of the part and its receipt, kills it a minute later
       # and keeps its exit status for the verdict.
       - name: Run the shard in the image
         id: shard
-        if: matrix.part != 'qualification'
+        if: startsWith(matrix.part, 'target/')
         timeout-minutes: ${{ matrix.step }}
         env:
           STEP: ${{ matrix.step }}
@@ -509,23 +542,23 @@ jobs:
           read -r -a gate_flags <<< "$GATE_FLAGS"
           limit=$(( (STEP - 2) * 60 ))s
           exec bash .github/scripts/deadline.sh --stop-commands --status artifacts/canary/shard-status "$limit" 1m \
-            docker run --rm --name "formal-shard-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
+            docker run --rm --name "formal-$KEY-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT --env KREPI_FORMAL_TRIGGER \
-            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard "target/$NAME"
+            "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal run --shard "$PART"
 
       - name: Remove the container of the shard
-        if: always() && matrix.part != 'qualification'
+        if: always() && startsWith(matrix.part, 'target/')
         timeout-minutes: 1
         run: |
-          docker rm --force "formal-shard-$NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
+          docker rm --force "formal-$KEY-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
 
       - name: Summarize the receipt
         if: always()
         timeout-minutes: 2
         env:
-          GATE_OUTCOME: ${{ matrix.part == 'qualification' && steps.gate.outcome || steps.shard.outcome }}
+          GATE_OUTCOME: ${{ matrix.part == 'qualification' && steps.gate.outcome || startsWith(matrix.part, 'lane/') && steps.comparator.outcome || steps.shard.outcome }}
         run: |
           shopt -s nullglob
           # The receipt holds text of Lean, Lake and the registries of the
@@ -615,7 +648,8 @@ jobs:
             patch=${{ steps.patch.outcome }} build=${{ steps.build.outcome }}
             record=${{ steps.record.outcome }} fill=${{ steps.fill.outcome }}
             probe=${{ steps.probe.outcome }} gate=${{ steps.gate.outcome }}
-            comparator=${{ steps.comparator.outcome }} shard=${{ steps.shard.outcome }}
+            lane=${{ steps.lane.outcome }} comparator=${{ steps.comparator.outcome }}
+            shard=${{ steps.shard.outcome }}
         run: |
           mkdir -p artifacts/canary
           jq -n --arg part "$PART" --arg outcomes "$OUTCOMES" '{$part, $outcomes}' \
@@ -633,6 +667,7 @@ jobs:
             artifacts/canary/*.diff
             artifacts/canary/build-status
             artifacts/canary/gate-status
+            artifacts/canary/lane-status
             artifacts/canary/comparator-status
             artifacts/canary/shard-status
             artifacts/image/disk.txt
@@ -645,6 +680,7 @@ jobs:
             artifacts/image/docker-df.txt
             artifacts/formal/job.txt
             artifacts/formal/event.json
+            artifacts/formal/runs/*/base.json
             artifacts/formal/runs/*/receipt.json
             artifacts/formal/runs/*/logs/
           if-no-files-found: warn
@@ -656,8 +692,8 @@ jobs:
   # finding of the first part that did not pass, or a defect when the
   # receipts of the parts are not of one commit, tree, run and attempt. The
   # job runs after the parts, also when one of them failed or did not run,
-  # and passes only when the gate, the comparator part and every shard
-  # verified krepi with the tools of Aeneas main; the finding goes into
+  # and passes only when the qualification job, every lane and every part of
+  # a target verified krepi with the tools of Aeneas main; the finding goes into
   # verdict.json, the summary and one annotation. The results reach the
   # command through the environment, never through the script's text.
   verdict:
