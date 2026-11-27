@@ -924,4 +924,47 @@ theorem direct_map_plan_next_spec {N : Usize} (it : page_tables.DirectMapPlan N)
     · rw [← hmt, ← hmc]; simp only [turnOf, Option.map_some, hst1]
     · rw [← hmt, ← hmc]; exact hmc1
 
+/-! ## The search from the start of the plan -/
+
+/-- The ranges of the search of a plan iterator at its start: the empty range
+at 0, then the usable ranges. -/
+theorem searchList_start {N : Usize} {s : page_tables.Tables N true}
+    {P : Krepi.Spec.Fdt.MemoryPlan} {base : U64} {it : page_tables.DirectMapPlan N}
+    (h : DirectMapStart s P base it) :
+    searchList P.managed P.reservations it.ranges it.range = ⟨0, 0⟩ :: P.availableRanges := by
+  obtain ⟨-, -, -, -, -, hb, ha, hs, hz⟩ := h
+  have e1 : word64 it.range.start = 0 := by rw [word64, hs]; rfl
+  have e2 : word64 it.range.size = 0 := by rw [word64, hz]; rfl
+  simp only [searchList, spanOf, e1, e2, hb, ha, ← availableRanges_eq]
+
+/-- The search of a state whose ranges are those of the start without first
+ranges that end at or below `b`, from an address at or above `b`, is the
+search of the usable ranges `Us`. -/
+theorem directFind_eq_of_skip {M Rs Us sk : List Krepi.Spec.Fdt.Span}
+    {ranges : fdt.AvailableRanges} {range : fdt.Span} {b : Nat}
+    (h : (⟨0, 0⟩ :: Us : List Krepi.Spec.Fdt.Span) = sk ++ searchList M Rs ranges range)
+    (hb : ∀ u ∈ sk, u.endNat ≤ b) (f l : Nat) (p : Bool) (hf : b ≤ f) :
+    directFind M Rs ranges range f l p = usableFind (Us.map spanView) f l p := by
+  have e := congrArg (fun L => usableFind (L.map spanView) f l p) h
+  simp only [List.map_cons, List.map_append] at e
+  have h0 : spanView ⟨0, 0⟩ = (0, 0) := rfl
+  rw [h0, usableFind_zero_cons, usableFind_skip] at e
+  · exact e.symm
+  · intro r hr
+    obtain ⟨u, hu, rfl⟩ := List.mem_map.1 hr
+    exact Nat.le_trans (hb u hu) hf
+
+/-- The ranges of the search at the start of the plan of a success of
+`Tables.directMap` on a well-formed boot memory map are of `SearchOk`. -/
+theorem searchOk_start {N : Usize} {s : page_tables.Tables N true}
+    {P : Krepi.Spec.Fdt.MemoryPlan} {base : U64} {bits : U8} {x}
+    (hw : P.WellFormed) (hok : (tablesOf s).directMap P (word64 base) (byte bits) = .ok x) :
+    SearchOk (⟨0, 0⟩ :: P.availableRanges) := by
+  obtain ⟨hne, -, -⟩ := usable_wf hw
+  have hlow := directMap_ok_low hw hok
+  intro u hu
+  rcases List.mem_cons.1 hu with rfl | hu
+  · exact ⟨by decide, Or.inr rfl, by decide⟩
+  · exact ⟨(hne u hu).1.2, Or.inl (Krepi.Proofs.Fdt.nonempty_lt (hne u hu).1), hlow u hu⟩
+
 end Krepi.Proofs.PageTables.Refinement

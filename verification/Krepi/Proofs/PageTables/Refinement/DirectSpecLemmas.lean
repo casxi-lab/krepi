@@ -55,6 +55,10 @@ built once and not again for every mutant of the code.
   `cur_take_seek` (a step that asks for no step yet does so for the leaf
   found, from which the search of the children starts), `cur_search_frm`
   (every search starts at the address of the cursor).
+- The start of the search and the ranges of a success:
+  `usableFind_zero_cons` (the empty range at 0 of the start does not change
+  the search), `fold_checkUsableRange_low` and `directMap_ok_low` (the usable
+  ranges of a success of `Tables.directMap` end at or below `2 ^ 39`).
 -/
 
 @[expose] public section
@@ -608,5 +612,52 @@ theorem cur_take_seek (place : Found → Place) (base : UInt64) (c : Cur) (f : O
 /-- Every search of the cursor starts at its address `frm`. -/
 theorem cur_search_frm (c : Cur) : c.search.1 = c.frm := by
   unfold Cur.search; cases c.phase <;> rfl
+
+/-! ## The start of the search and the ranges of a success -/
+
+/-- The empty range at 0 does not change the search. -/
+theorem usableFind_zero_cons (Us : List (Nat × Nat)) (frm limit : Nat) (pages : Bool) :
+    usableFind ((0, 0) :: Us) frm limit pages = usableFind Us frm limit pages :=
+  usableFind_cons_ge (Nat.not_lt_zero _)
+
+/-- The checks of the usable ranges that pass pass each range at its end at
+or below `2 ^ 39`. -/
+theorem fold_checkUsableRange_low {s : Tables .upper N} {base : UInt64} {bits : UInt8} :
+    ∀ (us : List Krepi.Spec.Fdt.Span) (acc acc' : List Krepi.Spec.Fdt.Span × List (MapLeaf × Place)),
+      us.foldlM (s.checkUsableRange base bits) acc = .ok acc' → ∀ u ∈ us, u.endNat ≤ 2 ^ 39
+  | [], _, _, _, u, hu => absurd hu List.not_mem_nil
+  | v :: us, acc, acc', h, u, hu => by
+    rw [List.foldlM_cons] at h
+    obtain ⟨earlier, leaves⟩ := acc
+    cases hv : s.checkUsableRange base bits (earlier, leaves) v with
+    | error x => rw [hv] at h; cases h
+    | ok y =>
+      rw [hv] at h
+      rcases List.mem_cons.1 hu with rfl | hu
+      · rw [checkUsableRange_eq] at hv
+        split at hv
+        · cases hv
+        · split at hv
+          · cases hv
+          · rename_i h2
+            simp only [not_or, Nat.not_lt, VA_LIMIT] at h2
+            exact h2.1
+      · exact fold_checkUsableRange_low us y acc' h u hu
+
+/-- A success of `Tables.directMap` on a well-formed boot memory map passed
+every usable range, each ending at or below `2 ^ 39`. -/
+theorem directMap_ok_low {s : Tables .upper N} {P : Krepi.Spec.Fdt.MemoryPlan} {base : UInt64}
+    {bits : UInt8} {x : Tables .upper N × Plan} (hw : P.WellFormed)
+    (h : s.directMap P base bits = .ok x) : ∀ u ∈ P.availableRanges, u.endNat ≤ 2 ^ 39 := by
+  unfold Tables.directMap at h
+  cases hp : checkPool N base bits with
+  | error e => rw [hp] at h; cases h
+  | ok u =>
+    rw [hp] at h
+    simp only [bind, Except.bind] at h
+    rw [usable_sorted hw] at h
+    cases hf : P.availableRanges.foldlM (s.checkUsableRange base bits) ([], []) with
+    | error e => rw [hf] at h; cases h
+    | ok y => exact fold_checkUsableRange_low _ _ _ hf
 
 end Krepi.Proofs.PageTables.Refinement
