@@ -1548,19 +1548,19 @@
       "name": "Krepi.Statements.PageTables.OwnershipPublish",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipPublish",
       "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.OwnershipCancel",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipCancel",
       "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.OwnershipRelease",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipRelease",
       "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.OwnershipOwner",
@@ -1572,7 +1572,7 @@
       "name": "Krepi.Statements.PageTables.OwnershipValidate",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipValidate",
       "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.OwnershipStats",

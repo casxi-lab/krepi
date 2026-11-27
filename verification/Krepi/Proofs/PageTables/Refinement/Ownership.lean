@@ -1,6 +1,7 @@
 module
 
 public import Krepi.Statements.PageTables.Ownership
+public import Krepi.Proofs.PageTables.Refinement.ReceiptLemmas
 import Mathlib.Util.CountHeartbeats
 import Krepi.Proofs.PageTables.Refinement.PlaceLemmas
 
@@ -43,24 +44,24 @@ public theorem reservationInitialized : ReservationInitialized :=
   fun _ r R zeroed h => reservation_initialized_spec r R zeroed h
 
 /-- Proves `OwnershipPublish`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem ownershipPublish : OwnershipPublish := by
-  sorry
+public theorem ownershipPublish : OwnershipPublish :=
+  fun _ _ _ t T owner packet I hT _ hI => ownership_publish_spec t T owner packet I hT hI
 
 /-- Proves `OwnershipCancel`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem ownershipCancel : OwnershipCancel := by
-  sorry
+public theorem ownershipCancel : OwnershipCancel :=
+  fun _ _ _ t T owner r R hT _ hR => ownership_cancel_spec t T owner r R hT hR
 
 /-- Proves `OwnershipRelease`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem ownershipRelease : OwnershipRelease := by
-  sorry
+public theorem ownershipRelease : OwnershipRelease :=
+  fun _ _ _ t T owner a A hT _ hA => ownership_release_spec t T owner a A hT hA
 
 /-- Proves `OwnershipOwner`. Feature: `krepi.kernel.kernel-memory`. -/
 public theorem ownershipOwner : OwnershipOwner := by
   sorry
 
 /-- Proves `OwnershipValidate`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem ownershipValidate : OwnershipValidate := by
-  sorry
+public theorem ownershipValidate : OwnershipValidate :=
+  fun _ _ _ t T owner a A s hT _ hA => ownership_validate_spec t T owner a A s hT hA
 
 /-- Proves `OwnershipStats`. Feature: `krepi.kernel.kernel-memory`. -/
 public theorem ownershipStats : OwnershipStats := by
