@@ -135,7 +135,7 @@ pub(crate) struct Context<'a> {
     /// Reads the bytes available on the file system of a path:
     /// [`process::disk_available`], or a reading that a test gives.
     pub free: fn(&Path) -> Option<u64>,
-    /// The part of the run, if any: `qualification`, `lane/<name>` or `target/<name>/1`.
+    /// The part of the run, if any: `qualification`, `lane/<name>` or `target/<name>/<i>`.
     pub shard: Option<&'a str>,
     /// Whether the run of a lane is that of its comparator, which reads the
     /// base record of its base run.
@@ -782,12 +782,18 @@ fn export_and_check(
     // A run with a base round extracts every formal target for it, and the
     // planned ones that hand-written modules import.
     let part = gate.receipt.shard.as_deref();
+    let parts = merge::shards(&registered);
+    let of_part = part.and_then(|part| parts.get(part));
+    if let Some(part) = part.filter(|part| merge::target(part).is_some() && of_part.is_none()) {
+        return Err(format!("{registry} registers no part {part}"));
+    }
     let round = !alone(part, !targets.is_empty(), gate.fixed);
     let imported = round && !base::planned_imports(&source, &gate.layout, &registered)?.is_empty();
     let formal = states.values().any(|(state, _)| *state == State::Formal);
     let extracts = !chosen.is_empty() || formal || imported;
-    // The gate's budget grows by the budget of each target that it selects.
-    let budget = |name: &str| Duration::from_secs(states[name].1);
+    // The gate's budget grows by the budget of each target that it selects,
+    // or of its part.
+    let budget = |name: &str| Duration::from_secs(*of_part.unwrap_or(&states[name].1));
     let all: Duration =
         chosen.iter().map(|name| budget(name)).sum::<Duration>() * u32::from(!gate.fixed);
     gate.deadline += all;
@@ -804,6 +810,29 @@ fn export_and_check(
         gate.deadline += Duration::from_secs(lane.budget);
         gate.receipt.budgets.gate_seconds += lane.budget;
     }
+    // The part `i` of `k` of a target, with its seed.
+    if let Some((part, (i, &budget))) = part.zip(part.and_then(merge::index).zip(of_part)) {
+        let k = parts
+            .keys()
+            .filter(|p| merge::target(p) == merge::target(part));
+        let at = gate.receipt.inputs.before.as_ref();
+        let tree = at.and_then(|before| before.get(gate.layout.kernel).cloned().flatten());
+        let image = gate
+            .receipt
+            .image
+            .as_ref()
+            .and_then(|i| i.reference.clone());
+        gate.receipt.part = Some(receipt::TargetPart {
+            target: merge::target(part).unwrap_or_default().to_string(),
+            i: i as u64,
+            k: k.count() as u64,
+            budget_seconds: budget,
+            judges: i == 1,
+            source_tree: tree.map(|entry| entry.oid),
+            image,
+            ..receipt::TargetPart::default()
+        });
+    }
     for problem in paths::rejected(&files, &gate.layout) {
         gate.fail(Status::Rejected, problem);
     }
@@ -813,7 +842,7 @@ fn export_and_check(
 /// Refuses the run, with a failure `NOT_RUN`, when the file system of its
 /// directory had less free at its start than 1.5 times the disk peak that
 /// the shard plan of the export gives its parts: the part of a run of one,
-/// and otherwise the qualification and the part of each target that it
+/// and otherwise the qualification and the parts of each target that it
 /// selects.
 fn disk_guard(gate: &mut Gate) -> Result<(), String> {
     let path = gate.layout.shards;
@@ -823,7 +852,12 @@ fn disk_guard(gate: &mut Gate) -> Result<(), String> {
         .map_err(|error| format!("cannot read {path}: {error}"))?;
     let free = (gate.receipt.resources.disk_available_at_start)
         .ok_or("the bytes available on the file system of the run directory cannot be read")?;
-    let selected = (gate.budgets.keys()).filter_map(|unit| merge::target(unit).map(merge::part));
+    let registry = base::read(&gate.source().join(gate.layout.registry))?;
+    let targets = registry::parse(&registry)?.targets.into_iter();
+    let chosen = targets.filter(|target| gate.budgets.contains_key(&target_unit(&target.name)));
+    let selected = chosen
+        .flat_map(|target| merge::parts(&target))
+        .map(|(part, _)| part);
     let parts = match gate.receipt.shard.clone() {
         Some(shard) => vec![shard],
         None => Vec::from_iter([qualify::PHASE.to_string()].into_iter().chain(selected)),
@@ -975,7 +1009,9 @@ pub fn target_project(gate: &Gate, name: &str) -> PathBuf {
 /// in a run that generates them. The first stops on another registry, or
 /// other imports of planned targets, in the export; a run of targets
 /// [`alone`] extracts them alone, and a lane those of its modules
-/// ([`lane_targets`]) but those of a waiver that holds.
+/// ([`lane_targets`]) but those of a waiver that holds. The part of a target
+/// takes its target with the budget and the mutants of the part, and only
+/// its first part concludes the unit of the target.
 pub(super) fn target_phases<'a>(
     root: &Path,
     layout: &Layout,
@@ -987,8 +1023,17 @@ pub(super) fn target_phases<'a>(
     let read = fs::read_to_string(root.join(path)).map_err(|error| error.to_string());
     let read = read.and_then(|text| Ok((registry::parse(&text)?.targets, text)));
     let read = read.map_err(|error| format!("cannot read {path}: {error}"));
-    let mut all = Vec::from_iter(read.iter().flat_map(|(targets, _)| targets.clone()));
-    let states = BTreeMap::from_iter(all.iter().map(|t| (t.name.clone(), (t.state, t.budget))));
+    let index = shard.and_then(merge::index);
+    let in_part = |t: &Target| {
+        index
+            .and_then(|i| t.in_part(i))
+            .unwrap_or_else(|| t.clone())
+    };
+    let mut all = Vec::from_iter(
+        read.iter()
+            .flat_map(|(targets, _)| targets.iter().map(in_part)),
+    );
+    let states = BTreeMap::from_iter(all.iter().map(|t| (t.name.clone(), (t.state, t.budget()))));
     let named = Vec::from_iter(named.iter().cloned());
     let chosen = selected(&states, &named, shard.is_some()).into_iter();
     let chosen = BTreeSet::from_iter(chosen.map(String::from));
@@ -1018,9 +1063,11 @@ pub(super) fn target_phases<'a>(
     let formal = Vec::from_iter(all.iter().filter(|t| pick(t, State::Formal)).cloned());
     let planned = Vec::from_iter(all.iter().filter(|t| pick(t, State::Planned)).cloned());
     let units = |targets: &[Target]| Vec::from_iter(targets.iter().map(|t| target_unit(&t.name)));
-    let sum = |targets: &[Target]| (targets.iter().map(|t| t.budget)).fold(0, u64::saturating_add);
+    let sum =
+        |targets: &[Target]| (targets.iter().map(Target::budget)).fold(0, u64::saturating_add);
     let budget = |targets: &[Target]| Duration::from_secs(sum(targets));
-    let mut finish = units(&formal);
+    let judges = index.is_none_or(|i| i == 1);
+    let mut finish = Vec::from_iter(units(&formal).into_iter().filter(|_| judges));
     finish.extend(
         formal
             .iter()
@@ -1163,7 +1210,7 @@ fn extract_target(gate: &mut Gate, target: &Target, chosen: bool) -> Result<(), 
     let mut record = receipt::Target {
         unit: chosen.then(|| unit.clone()),
         state: target.state,
-        budget_seconds: target.budget,
+        budget_seconds: target.budget(),
         proof_modules: target.proof_modules.clone(),
         ..receipt::Target::default()
     };
@@ -1220,7 +1267,8 @@ fn extract_target(gate: &mut Gate, target: &Target, chosen: bool) -> Result<(), 
     } else {
         (record.problems).push("its module is not a Lean module path".to_string());
     }
-    if chosen && (many || target.state == State::Planned) {
+    let judges = gate.receipt.part.as_ref().is_none_or(|part| part.judges);
+    if chosen && judges && (many || target.state == State::Planned) {
         let (status, reason) = qualify::conclusion(&record.problems);
         let scoped = [status, Status::Scoped][usize::from(status == Status::Verified)];
         gate.conclude(&unit, ([scoped, Status::Budget][usize::from(many)], reason));
@@ -1269,6 +1317,15 @@ fn finish_target(
     } else {
         gate.skip(&unit, &build, "its generated definitions do not type-check");
     }
+    // The part of a target records its seed, the build of the proofs; one that
+    // does not judge the target runs its mutants on it.
+    let judges = gate.receipt.part.as_mut().map(|part| {
+        (part.generated, part.seed_built) = (record.generated.clone(), built);
+        part.judges
+    });
+    if judges == Some(false) {
+        return seeded(gate, target, built.then_some(project.as_path()));
+    }
     if built {
         let text = lean::audit_source(layout.namespace, &[], modules);
         let written = fs::write(project.join(lean::AUDIT), text);
@@ -1312,6 +1369,26 @@ fn finish_target(
     );
     record.problems = problems;
     (gate.receipt.proof_targets).insert(target.name.clone(), record);
+    Ok(())
+}
+
+/// Runs the registered mutants of the part of `target` that does not judge
+/// it on its seed in `project`, or, without one, concludes them `NOT_RUN`
+/// unless the commands of the target's unit force them.
+fn seeded(gate: &mut Gate, target: &Target, project: Option<&Path>) -> Result<(), String> {
+    let unit = target_unit(&target.name);
+    let Some(project) = project else {
+        let why = Some("the seed of the part did not build".to_string());
+        for mutant in mutants::units(target, false) {
+            gate.conclude_from(&mutant, &unit, (Status::NotRun, why.clone()));
+        }
+        return Ok(());
+    };
+    let failed = mutants::after(gate, target, Some(project), None)?;
+    let failed = failed.map(|why| format!("the part of the target {}: {why}", target.name));
+    failed
+        .into_iter()
+        .for_each(|why| gate.fail(Status::ToolFailure, why));
     Ok(())
 }
 
@@ -1900,7 +1977,7 @@ pub(crate) mod tests {
     pub(crate) fn register(fixture: &Fixture, targets: &str) {
         fixture.write(
             "verification/targets.json",
-            &format!("{{\"schema\": 2, \"specifications\": [], \"targets\": {targets}}}\n"),
+            &format!("{{\"schema\": 3, \"specifications\": [], \"targets\": {targets}}}\n"),
         );
         fixture.commit_all();
     }
@@ -2406,6 +2483,271 @@ pub(crate) mod tests {
         assert_eq!(phases, [Some("targets")]);
         let stage = done.run.path.join("work/targets/t/stage/verification");
         assert!(stage.join("Krepi/Proofs/T.lean").is_file());
+    }
+
+    /// The registry of [`two_targets`] in which `t` has three mutants in two
+    /// parts of `budgets`, the first with `m0` and the second with the others.
+    fn parted_targets(budgets: [u64; 2]) -> String {
+        let mut registry: serde_json::Value =
+            serde_json::from_str(&two_targets(1_800, 3)).expect("JSON");
+        let target = registry[0].as_object_mut().expect("the target t");
+        target.remove("budget");
+        let parts = serde_json::json!([{"budget": budgets[0], "mutants": ["m0"]},
+            {"budget": budgets[1], "mutants": ["m1", "m2"]}]);
+        target.insert("parts".to_string(), parts);
+        registry.to_string()
+    }
+
+    /// Runs the part `part` of `fixture` as `cargo xtask formal run --shard`
+    /// does outside a pull request.
+    fn part_run(fixture: &Fixture, part: &str) -> Done {
+        gate_shard(fixture, part, shard_phases(fixture.root(), part), plenty)
+    }
+
+    #[test]
+    fn each_part_of_a_target_runs_its_mutants_on_its_seed_and_only_the_first_judges_it() {
+        let fixture = with_targets("target-parts", &parted_targets([1_000, 900]));
+        let (first, second) = (
+            part_run(&fixture, "target/t/1"),
+            part_run(&fixture, "target/t/2"),
+        );
+        let units = [
+            &["target/t", "target/t/mutant/m0"][..],
+            &["target/t/mutant/m1", "target/t/mutant/m2"],
+        ];
+        for ((done, units), (judges, budget)) in [&first, &second]
+            .into_iter()
+            .zip(units)
+            .zip([(true, 1_000), (false, 900)])
+        {
+            assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+            let receipt = done.written();
+            assert_eq!((receipt.status, receipt.complete), (Status::Verified, true));
+            assert_eq!(Vec::from_iter(receipt.units.keys()), units);
+            // Its budget is that of the part, which its extraction shares.
+            assert_eq!(receipt.budgets.gate_seconds, 300 + budget);
+            assert_eq!(receipt.phases["extraction"].budget_seconds, budget);
+            assert_eq!(receipt.proof_targets["t"].budget_seconds, budget);
+            let part = receipt.part.clone().expect("the record of the part");
+            let read = (
+                part.target.as_str(),
+                part.k,
+                part.budget_seconds,
+                part.judges,
+                part.seed_built,
+            );
+            assert_eq!(read, ("t", 2, budget, judges, true));
+        }
+        let [one, two] = [&first, &second].map(|done| done.written().part.expect("the part"));
+        assert_eq!((one.i, two.i), (1, 2));
+        let seed = |part: &receipt::TargetPart| {
+            (
+                part.source_tree.clone(),
+                part.image.clone(),
+                part.generated.clone(),
+            )
+        };
+        assert_eq!(seed(&one), seed(&two));
+        assert!(one.source_tree.is_some() && !one.generated.is_empty());
+        // The second part builds the seed and runs its mutants on it, without
+        // the audit of the target.
+        let sites = |done: &Done| {
+            Vec::from_iter(fixture::commands(done, "target/t").iter().map(|c| c.site))
+        };
+        assert!(sites(&first).contains(&Site::AxiomAudit));
+        let seeded = [
+            Site::Charon,
+            Site::Aeneas,
+            Site::TargetBuild,
+            Site::TargetBuild,
+            Site::DeclarationRanges,
+        ];
+        assert_eq!(sites(&second), seeded);
+        // A part that the target does not have fails before the phases.
+        let third = part_run(&fixture, "target/t/3");
+        let none = "verification/targets.json registers no part target/t/3";
+        assert!(
+            third.has_failure(Status::ToolFailure, none),
+            "{:?}",
+            third.failures()
+        );
+        assert!(third.receipt.phases.values().all(|phase| !phase.ran));
+    }
+
+    #[test]
+    fn a_part_whose_seed_outruns_its_budget_is_budget_and_one_whose_seed_fails_runs_no_mutant() {
+        // The seed of the second part hangs after the extraction, whose
+        // seconds its budget of 3 s has already spent.
+        let fixture = with_targets("part-budget", &parted_targets([1_800, 3]));
+        fixture::lake_script(&fixture, "+Krepi", "exec sleep 30\n");
+        let done = part_run(&fixture, "target/t/2");
+        let receipt = done.written();
+        assert_eq!(receipt.status, Status::Budget, "{:?}", done.failures());
+        for unit in ["target/t/mutant/m1", "target/t/mutant/m2"] {
+            assert_eq!(receipt.units[unit].status, Status::Budget);
+        }
+        let hung = fixture::commands(&done, "target/t");
+        let hung = hung
+            .iter()
+            .find(|c| c.argv.ends_with(&["+Krepi".to_string()]));
+        let hung = hung.expect("the build of the seed");
+        assert_eq!((hung.limit, hung.class), (LimitBy::Target, Class::Budget));
+        assert!(!receipt.part.expect("the part").seed_built);
+        // A seed whose proofs fail leaves the mutants of the part not run.
+        let failed = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
+        let fixture = with_targets("part-seed", &parted_targets([1_800, 1_800]));
+        fixture::lake_script(
+            &fixture,
+            "+Krepi",
+            &fixture::failing("Krepi.Proofs.T", &[failed], 1),
+        );
+        let receipt = part_run(&fixture, "target/t/2").written();
+        assert_eq!(
+            (receipt.status, receipt.complete),
+            (Status::ToolFailure, false)
+        );
+        let why = Some("the seed of the part did not build");
+        for unit in ["target/t/mutant/m1", "target/t/mutant/m2"] {
+            let unit = &receipt.units[unit];
+            assert_eq!((unit.status, unit.reason.as_deref()), (Status::NotRun, why));
+        }
+        assert!(!receipt.part.expect("the part").seed_built);
+    }
+
+    /// [`with_targets`] in the layout of the calibration target: its
+    /// workspace with its root package and lock, its Lake project with its
+    /// lakefile and the proof module of `t`, its registries, the one lane `c`
+    /// with the component of `t` and that module, and the registry `targets`.
+    fn calibration_targets(label: &str, targets: &str) -> Fixture {
+        let layout = Layout::CALIBRATION;
+        let fixture = fixture::qualification(label, &serde_json::json!([]));
+        let at = |path: &str| format!("{}/{path}", layout.project);
+        let lakefile =
+            include_str!("../../../verification/qualification/calibration/lakefile.toml");
+        fixture.write(&at("lakefile.toml"), lakefile);
+        let lock = "{\"name\": \"krepiVerification\", \"packages\": []}\n";
+        fixture.write("verification/lake-manifest.json", lock);
+        let manifest = "[package]\nname = \"formal-calibration\"\nversion = \"0.0.0\"\n\
+            edition = \"2024\"\n\n[workspace]\n\n[lints.rust]\nunsafe_code = \"forbid\"\n";
+        fixture.write(&at("Cargo.toml"), manifest);
+        fixture.write(&at("src/lib.rs"), "#![no_std]\n");
+        let manifest = fixture.root().join(at("Cargo.toml"));
+        let locked = Command::new(crate::check::cargo())
+            .args(["generate-lockfile", "--offline", "--manifest-path"])
+            .arg(&manifest)
+            .status();
+        assert!(locked.expect("cargo runs").success());
+        for (file, list) in [
+            (layout.models, "models"),
+            (layout.axioms, "axioms"),
+            (layout.tcb, "items"),
+        ] {
+            fixture.write(file, &format!("{{\"schema\": 1, \"{list}\": []}}\n"));
+        }
+        let hash = "0".repeat(40);
+        let statements = format!("{{\"schema\": 1, \"hash\": \"{hash}\", \"statements\": []}}\n");
+        fixture.write(layout.statements, &statements);
+        fixture.write(layout.shards, "{\"schema\": 1, \"parts\": []}\n");
+        let lane =
+            serde_json::json!({"name": "c", "components": ["T"], "modules": ["Krepi.Proofs.T"]});
+        let lanes = serde_json::json!({"schema": 1, "lanes": [lane]});
+        fixture.write(layout.lanes, &format!("{lanes:#}\n"));
+        let proof = "module\n\npublic theorem f_spec : True := trivial\n";
+        fixture.write(&at("Krepi/Proofs/T.lean"), proof);
+        let failed = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
+        let failing = fixture::failing("Krepi.Proofs.T", &[failed], 1);
+        let mutant = format!("case $PWD in */mutants/*) {failing};; esac\n");
+        fixture::lake_script(&fixture, "+Krepi", &mutant);
+        let registry =
+            format!("{{\"schema\": 3, \"specifications\": [], \"targets\": {targets}}}\n");
+        fixture.write(layout.registry, &registry);
+        fixture.commit_all();
+        fixture
+    }
+
+    /// The receipt of the qualification job or of the lane `c` of the
+    /// calibration `fixture`, a `part`, as its runs would write it beside the
+    /// receipt `from` of a part of `t`: its units, of the checkout, `VERIFIED`,
+    /// an audit and a replay of its root, and what its base round holds.
+    fn calibration_round(fixture: &Fixture, from: &Receipt, part: &str) -> Receipt {
+        use crate::formal::merge::tests::{audit_of, replay_of};
+        let (layout, lane) = (&Layout::CALIBRATION, part != qualify::PHASE);
+        let owned = merge::owned(fixture.root(), layout).into_iter();
+        let units = owned.filter(|(.., of)| of == part).map(|(unit, ..)| unit);
+        let verified = |unit| {
+            (
+                unit,
+                receipt::Unit {
+                    phase: "p".to_string(),
+                    status: Status::Verified,
+                    reason: None,
+                },
+            )
+        };
+        let mut receipt = from.clone();
+        (receipt.shard, receipt.targets, receipt.part) = (Some(part.to_string()), Vec::new(), None);
+        receipt.units = units.map(verified).collect();
+        let round = base::unit_of(Some(part));
+        receipt.commands = vec![
+            audit_of(&round, Class::Passed),
+            replay_of(&round, Class::Passed),
+        ];
+        let module = "Krepi.Proofs.T".to_string();
+        receipt.lane = Some(receipt::Lane {
+            name: [qualify::PHASE, "c"][usize::from(lane)].to_string(),
+            components: Vec::from_iter(lane.then(|| "T".to_string())),
+            modules: Vec::from_iter(lane.then(|| module.clone())),
+            targets: BTreeMap::from_iter(lane.then(|| ("t".to_string(), receipt::Role::Formal))),
+            ..receipt::Lane::default()
+        });
+        receipt.proof_targets.retain(|_, _| lane);
+        receipt.handwritten = (!lane).then(|| BTreeMap::from([(module, "shared".to_string())]));
+        receipt.left_out = (!lane).then(BTreeMap::new);
+        receipt
+    }
+
+    #[test]
+    fn two_parts_of_a_calibration_target_merge_into_the_units_and_conclusion_of_one() {
+        // The target of three mutants as one part, and in two.
+        let layout = &Layout::CALIBRATION;
+        let merged = |label: &str, targets: &str, parts: &[&str]| {
+            let fixture = calibration_targets(label, targets);
+            let mut runs = Vec::from_iter(parts.iter().map(|part| {
+                let done = layout_shard(&fixture, layout, part);
+                assert_eq!(
+                    done.code,
+                    ExitCode::SUCCESS,
+                    "{part}: {:?}",
+                    done.failures()
+                );
+                done.written()
+            }));
+            let rounds =
+                [qualify::PHASE, "lane/c"].map(|part| calibration_round(&fixture, &runs[0], part));
+            runs.extend(rounds);
+            let image = format!("ghcr.io/casxi-lab/krepi-formal@sha256:{}", "a".repeat(64));
+            let paths = Vec::from_iter(runs.iter_mut().enumerate().map(|(index, receipt)| {
+                receipt.image.get_or_insert_default().reference = Some(image.clone());
+                let path = format!("artifacts/parts/{index}.json");
+                fixture.write(&path, &receipt::render(receipt));
+                fixture.root().join(path)
+            }));
+            merge::merge(fixture.root(), layout, &paths, Some(Duration::ZERO))
+        };
+        let one = merged("calibration-one", &two_targets(1_800, 3), &["target/t/1"]);
+        let parts = ["target/t/1", "target/t/2"];
+        let two = merged("calibration-two", &parted_targets([1_800, 1_800]), &parts);
+        for merged in [&one, &two] {
+            assert_eq!(merged.problems, Vec::<String>::new());
+            assert_eq!(
+                (merged.status, merged.complete, merged.passes),
+                (Status::Verified, true, true)
+            );
+        }
+        assert_eq!(two.units, one.units);
+        let mutants = (one.units.keys()).filter(|unit| unit.starts_with("target/t/mutant/"));
+        assert_eq!(mutants.count(), 3);
+        assert_eq!((one.checks, one.gates), (two.checks, two.gates));
     }
 
     #[test]

@@ -9,7 +9,7 @@
 # `calibration lane <name>` runs the base run and the comparator of each
 # lane of the calibration with the steps of the lane job of the workflow
 # `formal` and checks that the comparator rejected the two challenges that
-# it is to reject, the job `calibration shard <name>/1` runs the part of
+# it is to reject, the job `calibration shard <name>/<i>` runs each part of
 # each formal target of the calibration with the steps of the shard job of
 # the workflow `formal`, and the job `planned example` the gate on the
 # planned target of the calibration alone; after them, the job
@@ -567,15 +567,16 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
-  # The part of each formal target of the calibration, beside the
+  # Each part of each formal target of the calibration, beside the
   # qualification job, with the steps of the shard job of the workflow
   # `formal`, which a unit test keeps equal to these but for the flag
   # --calibration and the prefix of the artifact: its deadline is 300 s
-  # and the budget of the target, then the 300 s of its receipt, 60 minutes
-  # for the 3,000 s of `calibration`; the step has two minutes more, and the
-  # job 15 minutes before the step and 3 after it, which it writes in a
-  # notice for the record of the run. A unit test keeps the matrix equal to
-  # the parts of the formal targets of the calibration registry.
+  # and the budget of the part, then the 300 s of its receipt, 27 minutes
+  # for the 1,000 s of each of the three parts of `calibration`; the step
+  # has two minutes more, and the job 15 minutes before the step and 3 after
+  # it, which it writes in a notice for the record of the run. A unit test
+  # keeps the matrix equal to the parts of the formal targets of the
+  # calibration registry.
   shard:
     name: calibration shard ${{ matrix.name }}
     if: >-
@@ -593,9 +594,21 @@ jobs:
           - name: calibration/1
             part: target/calibration/1
             key: target-calibration-1
-            budget: 3000
-            step: 62
-            job: 80
+            budget: 1000
+            step: 29
+            job: 47
+          - name: calibration/2
+            part: target/calibration/2
+            key: target-calibration-2
+            budget: 1000
+            step: 29
+            job: 47
+          - name: calibration/3
+            part: target/calibration/3
+            key: target-calibration-3
+            budget: 1000
+            step: 29
+            job: 47
     concurrency:
       group: formal-calibration-shard-${{ matrix.name }}-${{ github.event.pull_request.number || github.ref }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}

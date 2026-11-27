@@ -1644,7 +1644,7 @@ mod tests { fn t() { let _ = 1 + 1; } }
     /// list `list` of the target, with `operators`.
     fn generated_in(list: &str, keys: &[&str], operators: &[&str]) -> (Vec<Survivor>, usize) {
         let tree = Tree::from_files(&[(FILE, SOURCE)]);
-        let registry = serde_json::json!({"schema": 2, "specifications": [], "targets": [{"name": "t", list: keys}]});
+        let registry = serde_json::json!({"schema": 3, "specifications": [], "targets": [{"name": "t", list: keys}]});
         let target = registry::parse(&registry.to_string())
             .expect("a registry")
             .targets
@@ -1773,7 +1773,7 @@ mod tests { fn t() { let _ = 1 + 1; } }
 
     #[test]
     fn a_survivor_without_a_class_fails_the_check() {
-        let registry = r#"{"schema": 2, "specifications": [], "targets": [{"name": "t"}]}"#;
+        let registry = r#"{"schema": 3, "specifications": [], "targets": [{"name": "t"}]}"#;
         let targets = registry::parse(registry).expect("a registry").targets;
         let path = "verification/mutants/t.json";
         let check = |text: &str| {
@@ -1814,7 +1814,7 @@ mod tests { fn t() { let _ = 1 + 1; } }
         );
         assert_eq!(check(&lemma), (Vec::new(), BTreeSet::new()));
         // A survivor in an unclosed function has no theorem.
-        let registry = r#"{"schema": 2, "specifications": [],
+        let registry = r#"{"schema": 3, "specifications": [],
             "targets": [{"name": "t", "unclosed": ["kernel/src/lib.rs#Table::charge"]}]}"#;
         let unclosed = registry::parse(registry).expect("a registry").targets;
         let tree = Tree::from_files(&[(path, &lemma)]);
@@ -2019,23 +2019,34 @@ mod tests { fn t() { let _ = 1 + 1; } }
             let line = format!("{name}={value}\n");
             assert!(formal.contains(&line), "{line}");
         }
-        // With these lines, which give a shard, and a planned target that a
-        // pull request affects run alone, the minutes of its budget and
-        // margins, as `merge::shards` and `merge::budget_problems` group and
-        // check them.
-        let default = format!("| {{name, budget: (.budget // {})}}]", registry::BUDGET);
+        // With these lines, which give each part of a target, and a planned
+        // target that a pull request affects run alone with the budgets of
+        // its parts, the minutes of its budget and margins, as
+        // `merge::shards` and `merge::budget_problems` group and check them,
+        // and the parts that the registry allows a target.
+        let budget = registry::BUDGET;
+        let default = format!(
+            "| {{name, budgets: (if (.parts // []) == [] then [.budget // {budget}] else [.parts[] | .budget // {budget}] end)}}]"
+        );
+        let (most, sum) = registry::PARTS;
+        let split = format!(
+            r#"split=$(jq -r '[.targets[] | select((.parts // [] | length) > {most} or ([.parts[]? | .budget // {budget}] | add // 0) > {sum}) | .name] | join(" ")' "$registry")"#
+        );
         for line in [
             r#"jq -e 'all(.targets[]; .name | test("^[a-z0-9][a-z0-9-]*$"))' "$registry" > /dev/null"#,
-            r#"jq -c --argjson margin "$((shard_margin + receipt_margin))" --arg state "$1" --argjson names "$2" '"#,
+            split.as_str(),
+            r#"jq -c --arg state "$1" --argjson names "$2" '"#,
             r#"[.targets[] | select((.state // "formal") == $state and ($names == null or (.name | IN($names[]))))"#,
             default.as_str(),
-            "| group_by(.name) | map({name: .[0].name, budget: (map(.budget) | add)})",
-            r"| map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 3)' \",
-            r#"shards=$(rows formal null | jq -c 'map(.part = "target/\(.name)/1" | .key = "target-\(.name)-1" | .name += "/1")')"#,
+            r#"| group_by(.name) | map({name: .[0].name, budgets: (map(.budgets) | transpose | map(add))})' \"#,
+            r#"jq -c --argjson margin "$((shard_margin + receipt_margin))" \"#,
+            r"'map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 3)'",
+            r#"shards=$(rows formal null | jq -c '[.[] | .name as $target | .budgets | to_entries[] | (.key + 1) as $i"#,
+            r#"| {name: "\($target)/\($i)", budget: .value, part: "target/\($target)/\($i)", key: "target-\($target)-\($i)"}]' | limits)"#,
             r#"lanes=$(jq -c --argjson margin "$((shard_margin + extraction_margin + receipt_margin))" '"#,
             r#"[.lanes[] | {name, budget: (.budget // 2400), part: "lane/\(.name)", key: "lane-\(.name)"}]"#,
             r"| map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 37 + 3)' \",
-            r#"scoped=$(rows planned "$SCOPED")"#,
+            r#"scoped=$(rows planned "$SCOPED" | jq -c 'map({name, budget: (.budgets | add)})' | limits)"#,
             r#"over=$(jq -r --argjson limit "$shard_limit" \"#,
             r#"'[.[] | select(.budget > $limit) | .name] | join(" ")' <<< "$shards")"#,
             r#"long=$(jq -r '[.[] | select(.job > 360) | .name] | join(" ")' <<< "$scoped")"#,
@@ -2141,7 +2152,7 @@ mod tests { fn t() { let _ = 1 + 1; } }
                 .targets
                 .iter()
                 .filter(|t| t.state == state)
-                .map(|t| t.budget)
+                .map(Target::budget)
                 .sum::<u64>()
         };
         let rows = document["jobs"]["calibration"]["strategy"]["matrix"]["include"]
@@ -2213,23 +2224,28 @@ mod tests { fn t() { let _ = 1 + 1; } }
             (target_unit(name), row_budget(row).expect("a budget"))
         }));
         assert_eq!(written, merge::shards(&registry.targets));
-        assert_eq!(Vec::from_iter(written.keys()), ["target/calibration/1"]);
+        let parts = [
+            "target/calibration/1",
+            "target/calibration/2",
+            "target/calibration/3",
+        ];
+        assert_eq!(Vec::from_iter(written.keys()), parts);
         for row in shards {
             let (step, job) = shard(row_budget(row).expect("a budget"));
             let limits = (row["step"].as_i64(), row["job"].as_i64());
             assert_eq!(limits, (Some(step as i64), Some(job as i64)), "{row:?}");
         }
-        assert_eq!(shard(written["target/calibration/1"]), (62, 80));
+        assert_eq!(shard(written["target/calibration/1"]), (29, 47));
         for row in shards {
             let name = row["name"].as_str().expect("a name");
-            let target = name.strip_suffix("/1").expect("the first part");
+            let (target, i) = name.rsplit_once('/').expect("a part");
             assert_eq!(
                 row["part"].as_str(),
                 Some(format!("target/{name}").as_str())
             );
             assert_eq!(
                 row["key"].as_str(),
-                Some(format!("target-{target}-1").as_str())
+                Some(format!("target-{target}-{i}").as_str())
             );
         }
         assert_eq!(

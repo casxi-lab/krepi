@@ -563,7 +563,7 @@ mod tests {
 
     /// The registry of the impact fixture: the formal target `a`, with the
     /// proof module `Krepi.Proofs.A`, and the planned target `b`.
-    const TARGETS: &str = r#"{"schema": 2, "targets": [
+    const TARGETS: &str = r#"{"schema": 3, "targets": [
         {"name": "a", "proof_modules": ["Krepi.Proofs.A"]},
         {"name": "b", "state": "planned"}
     ]}
@@ -695,12 +695,12 @@ mod tests {
         // A merge base of another schema, as a change of the schema leaves
         // it, has no targets; a registry at the head that cannot be read
         // stays an error.
-        let other = r#"{"schema": 3, "targets": []}"#;
+        let other = r#"{"schema": 4, "targets": []}"#;
         let (mut fixture, change) = changed_by("unreadable", &[(REGISTRY, other)], |fixture| {
             fixture.write(REGISTRY, TARGETS)
         });
         let (layout, base) = (Layout::PRODUCTION, change.merge_base);
-        let why = "schema 3 where 2 is expected";
+        let why = "schema 4 where 3 is expected";
         assert_eq!(
             impact_lines(&mut fixture, &layout, &base),
             Ok(vec![

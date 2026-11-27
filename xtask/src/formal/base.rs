@@ -2109,7 +2109,7 @@ pub(crate) mod tests {
     /// Writes the target registry `targets`, a JSON list, and an empty
     /// registry of models.
     pub(crate) fn targets(fixture: &Fixture, targets: &Value) {
-        let file = json!({"schema": 2, "specifications": [], "targets": targets});
+        let file = json!({"schema": 3, "specifications": [], "targets": targets});
         fixture.write(LAYOUT.registry, &format!("{file}\n"));
         fixture.write(LAYOUT.models, "{\"schema\": 1, \"models\": []}\n");
     }
@@ -2957,7 +2957,7 @@ pub(crate) mod tests {
         assert!(locked.expect("cargo runs").success());
         fixture.write(layout.axioms, "{\"schema\": 1, \"axioms\": []}\n");
         fixture.write(layout.tcb, "{\"schema\": 1, \"items\": []}\n");
-        let registry = "{\"schema\": 2, \"specifications\": [], \"targets\": []}\n";
+        let registry = "{\"schema\": 3, \"specifications\": [], \"targets\": []}\n";
         fixture.write(layout.registry, registry);
         fixture.write(layout.models, "{\"schema\": 1, \"models\": []}\n");
         fixture.write(layout.shards, "{\"schema\": 1, \"parts\": []}\n");

@@ -452,7 +452,7 @@ mod tests {
         let mut target = json!({"name": "reg", "state": "planned"});
         let object = target.as_object_mut().expect("a target");
         object.extend(fields.as_object().expect("the fields").clone());
-        let registry = json!({"schema": 2, "targets": [target]});
+        let registry = json!({"schema": 3, "targets": [target]});
         let registry = registry::parse(&registry.to_string()).expect("a registry");
         registry.targets.into_iter().next().expect("the target")
     }

@@ -69,8 +69,8 @@ pub fn parse(text: &str) -> Result<Plan, String> {
 /// The problems of the shard plan `text` at `path` with the registry's
 /// `targets` and the `lanes`, if they can be read: a plan that cannot be
 /// read, a part listed twice, and a part that is neither the qualification,
-/// a registered lane nor the part of a registered target; and the parts of
-/// the formal targets that it has no entry for, which are no problem.
+/// a registered lane nor a part of a registered target; and the parts of the
+/// formal targets that it has no entry for, which are no problem.
 pub fn check(
     path: &str,
     text: &str,
@@ -81,7 +81,8 @@ pub fn check(
         Ok(plan) => plan,
         Err(error) => return (vec![format!("{path}: {error}")], Vec::new()),
     };
-    let mut known = BTreeSet::from_iter(targets.iter().map(|t| merge::part(&t.name)));
+    let parts = targets.iter().flat_map(merge::parts);
+    let mut known = BTreeSet::from_iter(parts.map(|(part, _)| part));
     let lanes = lanes
         .and_then(|text| lanes::parse(text).ok())
         .map(|lanes| lanes.lanes);
@@ -190,7 +191,7 @@ mod tests {
     #[test]
     fn the_shard_plan_has_its_schema_and_parts_of_the_qualification_lanes_or_registered_targets() {
         let targets = registry::parse(
-            r#"{"schema": 2, "targets": [{"name": "a"}, {"name": "p", "state": "planned"}]}"#,
+            r#"{"schema": 3, "targets": [{"name": "a"}, {"name": "p", "state": "planned"}]}"#,
         )
         .expect("a registry")
         .targets;

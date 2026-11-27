@@ -61,6 +61,7 @@ pub struct Receipt {
     pub lane: Option<Lane>,
     pub handwritten: Option<BTreeMap<String, String>>,
     pub left_out: Option<BTreeMap<String, String>>,
+    pub part: Option<TargetPart>,
     pub proof_targets: BTreeMap<String, Target>,
     pub guard: Option<super::guard::Record>,
     pub commands: Vec<Command>,
@@ -265,6 +266,24 @@ pub enum Role {
     Cone,
 }
 
+/// What the part `i` of `k` of a target ran: its target, its budget, whether
+/// it judges the unit of the target, and its seed, the build of the proofs of
+/// the target that its mutants start from: the tree of the workspace that it
+/// extracted, the image, the SHA-256 of each file that Aeneas wrote, and
+/// whether the build passed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TargetPart {
+    pub target: String,
+    pub i: u64,
+    pub k: u64,
+    pub budget_seconds: u64,
+    pub judges: bool,
+    pub source_tree: Option<String>,
+    pub image: Option<String>,
+    pub generated: BTreeMap<String, String>,
+    pub seed_built: bool,
+}
+
 /// A target that the run extracted: its unit, or none for a target that
 /// only the base round needs, its state, budget and the seconds of its
 /// commands, what its extraction gave, the SHA-256 of each file that Aeneas
@@ -345,8 +364,8 @@ pub struct Merge {
 }
 
 /// Whether the hand-written modules of the receipts of a merge pass its
-/// checks of coverage, names, waivers and extraction, and of the seeds of the
-/// parts of a target, `null` while no target has more than one part.
+/// checks of coverage, names, waivers and extraction, and whether the parts
+/// of each target pass that of their seeds.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Checks {
     pub coverage: bool,
@@ -742,6 +761,17 @@ mod tests {
                 "Krepi.Proofs.Demo.B".to_string(),
                 "t".to_string(),
             )])),
+            part: Some(TargetPart {
+                target: "demo".to_string(),
+                i: 2,
+                k: 3,
+                budget_seconds: 1_000,
+                judges: false,
+                source_tree: Some("a".repeat(40)),
+                image: Some(format!("ghcr.io/o/r@sha256:{}", "9".repeat(64))),
+                generated: BTreeMap::from([("Funs.lean".to_string(), "b".repeat(64))]),
+                seed_built: true,
+            }),
             proof_targets: BTreeMap::from([("t".to_string(), target())]),
             guard: Some(guard()),
             commands,
@@ -1073,6 +1103,7 @@ mod tests {
             lane: None,
             handwritten: None,
             left_out: None,
+            part: None,
             proof_targets: BTreeMap::new(),
             guard: None,
             commands: vec![Command {
@@ -1169,6 +1200,7 @@ mod tests {
   "lane": null,
   "handwritten": null,
   "left_out": null,
+  "part": null,
   "proof_targets": {{}},
   "guard": null,
   "commands": [
@@ -1275,7 +1307,7 @@ mod tests {
                 names: true,
                 waivers: true,
                 extraction: true,
-                seeds: None,
+                seeds: Some(true),
             },
             jobs: BTreeMap::from([(
                 "formal run".to_string(),
@@ -1377,7 +1409,7 @@ mod tests {
     "names": true,
     "waivers": true,
     "extraction": true,
-    "seeds": null
+    "seeds": true
   }},
   "jobs": {{
     "formal run": {{
