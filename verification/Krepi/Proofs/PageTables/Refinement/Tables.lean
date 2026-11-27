@@ -3,6 +3,7 @@ module
 public import Krepi.Statements.PageTables.Tables
 import Mathlib.Util.CountHeartbeats
 import Krepi.Proofs.PageTables.Refinement.WalkLemmas
+import Krepi.Proofs.PageTables.Refinement.WriteLemmas
 
 /-!
 # Page tables: refinement of the descriptors, the ranges and the table sets
@@ -39,12 +40,12 @@ public theorem physRangeContains : PhysRangeContains := fun _ => phys_range_cont
 public theorem physRangeOverlaps : PhysRangeOverlaps := fun _ => phys_range_overlaps_repr_spec
 
 /-- Proves `TablesLookupPage`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem tablesLookupPage : TablesLookupPage := by
-  sorry
+public theorem tablesLookupPage : TablesLookupPage :=
+  fun _ _ _ s va base bits => lookup_page_spec s va base bits
 
 /-- Proves `TablesLookupBlock`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem tablesLookupBlock : TablesLookupBlock := by
-  sorry
+public theorem tablesLookupBlock : TablesLookupBlock :=
+  fun _ _ _ s va base bits => lookup_block_spec s va base bits
 
 /-- Proves `TablesUsed`. Feature: `krepi.kernel.kernel-memory`. -/
 public theorem tablesUsed : TablesUsed := fun _ _ _ s => used_spec s
@@ -53,8 +54,8 @@ public theorem tablesUsed : TablesUsed := fun _ _ _ s => used_spec s
 public theorem tablesNew : TablesNew := fun _ _ upper pool => new_spec upper pool
 
 /-- Proves `TablesReset`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem tablesReset : TablesReset := by
-  sorry
+public theorem tablesReset : TablesReset :=
+  fun _ _ _ s => reset_spec s
 
 /-- Proves `TablesCloneKernelFrom`. Feature: `krepi.kernel.kernel-memory`. -/
 public theorem tablesCloneKernelFrom : TablesCloneKernelFrom := by
@@ -64,15 +65,15 @@ public theorem tablesCloneKernelFrom : TablesCloneKernelFrom := by
 public theorem clonePlanNext : ClonePlanNext := fun _ _ _ _ _ h => advances_of_stands h
 
 /-- Proves `TablesMapPage`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem tablesMapPage : TablesMapPage := by
-  sorry
+public theorem tablesMapPage : TablesMapPage :=
+  fun _ _ _ s va pa kind base bits => map_page_spec s va pa kind base bits
 
 /-- Proves `TablesMapBlock`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem tablesMapBlock : TablesMapBlock := by
-  sorry
+public theorem tablesMapBlock : TablesMapBlock :=
+  fun _ _ _ s va pa base bits => map_block_spec s va pa base bits
 
 /-- Proves `TablesUnmapPage`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem tablesUnmapPage : TablesUnmapPage := by
-  sorry
+public theorem tablesUnmapPage : TablesUnmapPage :=
+  fun _ _ _ s va base bits => unmap_page_spec s va base bits
 
 end Krepi.Proofs.PageTables.Refinement.Tables

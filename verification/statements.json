@@ -1620,13 +1620,13 @@
       "name": "Krepi.Statements.PageTables.TablesLookupPage",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesLookupPage",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.TablesLookupBlock",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesLookupBlock",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.TablesUsed",
@@ -1644,7 +1644,7 @@
       "name": "Krepi.Statements.PageTables.TablesReset",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesReset",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.TablesCloneKernelFrom",
@@ -1662,19 +1662,19 @@
       "name": "Krepi.Statements.PageTables.TablesMapPage",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesMapPage",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.TablesMapBlock",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesMapBlock",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.TablesUnmapPage",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesUnmapPage",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     }
   ]
 }
