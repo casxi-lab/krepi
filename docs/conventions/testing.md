@@ -1040,15 +1040,16 @@ calibration target; with `--shard`, only the qualification job, the base
 run of a lane, which leaves out the targets of the waivers that hold
 ([waivers](../formal-verification.md#waivers)), and with `--comparator`
 its comparator on the stage that the base run kept
-([comparator](../formal-verification.md#comparator)), or the part of one
+([comparator](../formal-verification.md#comparator)), or a part of one
 formal target; and with `--target`, only the part of the named targets
 ([shards and merge](../formal-verification.md#shards-and-merge)). It is not
 part of the check: CI runs it in the pinned proof-tool image with
 `--shard qualification` as the job `formal run` of
 `.github/workflows/formal.yml`, with `--shard lane/<name> --keep` and then
 `--shard lane/<name> --comparator` as a job `formal lane <name>` for each
-lane, and with `--shard target/<name>/1` as a job `formal shard <name>/1`
-for each formal target, on a GitHub-hosted `ubuntu-24.04-arm` runner, when
+lane, and with `--shard target/<name>/<i>` as a job
+`formal shard <name>/<i>` for each part of each formal target, on a
+GitHub-hosted `ubuntu-24.04-arm` runner, when
 the label `full-check` is added to a pull request to `main` whose change
 affects the gate, on a manual run of `main` and once a week. The jobs are
 not required checks; the verdicts that judge their merge are ([CI
@@ -1221,9 +1222,9 @@ once a week, on a manual run and on a pull request with the label
 `--shard lane/<name> --keep`, its comparator on the stage that it kept,
 with `--shard lane/<name> --comparator`, and a check that the comparator
 rejected the two challenges that it must reject in a job
-`calibration lane <name>`, the part of each formal target of the
-calibration with `--shard target/<name>/1` in a job
-`calibration shard <name>/1`, their merge
+`calibration lane <name>`, each part of each formal target of the
+calibration with `--shard target/<name>/<i>` in a job
+`calibration shard <name>/<i>`, their merge
 with `cargo xtask formal merge --calibration` in the job
 `calibration merge`, the planned target of the calibration alone, and, on
 a manual run that asks for it and on a pull request with the label,

@@ -642,8 +642,8 @@ The steps of a row end its job at the first that fails, each by its id:
    --keep`, and then `comparator`, its [comparator](#comparator), on the
    stage that the base run kept, in a container of its own, as the job
    `formal lane <name>` does, also when the base run failed; and the row of
-   a formal target runs `shard`, its part, as the job
-   `formal shard <name>/1` does. The comparator runs `lake comparator` only
+   a part of a formal target runs `shard`, its part, as the job
+   `formal shard <name>/<i>` does. The comparator runs `lake comparator` only
    on the units whose statements the base round verified and audited, and
    records each other unit as `NOT_RUN` ([formal
    upgrade](formal-upgrade.md#canary-verdicts)).
@@ -972,17 +972,18 @@ The shard plan is `verification/shards.json`, and
 [calibration target](#calibration-target). It has schema 1 and `parts`, an
 array with one entry for each part of the gate that a run of CI has
 measured: `qualification`, `lane/<name>` for a lane of the
-[lanes](#lanes), or `target/<name>/1` for a registered target, each named
-as its receipt names its part. It is written by hand from the receipts of runs on
-a standard `ubuntu-24.04-arm` runner, never by a run. The entries are
-those of the runs on `main` that measured the parts:
-`verification/shards.json` has `qualification`, and the plan of the
-calibration target has `qualification` and `target/calibration/1`. Each entry
-has these fields:
+[lanes](#lanes), or `target/<name>/<i>` for a part of a registered target,
+each named as its receipt names its part. It is written by hand from the
+receipts of runs on a standard `ubuntu-24.04-arm` runner, never by a run.
+The entries are those of the runs that measured the parts:
+`verification/shards.json` has `qualification`, `lane/fdt` and
+`lane/page-tables`, and the plan of the calibration target has
+`qualification` and `target/calibration/1`, the part that once held every
+mutant of its target. Each entry has these fields:
 
 | Field | Content |
 | --- | --- |
-| `part` | `qualification`, `lane/<name>` or `target/<name>/1` |
+| `part` | `qualification`, `lane/<name>` or `target/<name>/<i>` |
 | `disk_peak` | The disk peak of the part in bytes: `disk_available_at_start` less `disk_least_available` of the measuring receipt ([receipt](#receipt)) |
 | `seconds` | The `seconds` of the measuring receipt |
 | `cgroup_memory_peak` | The `cgroup_memory_peak` of the measuring receipt, in bytes |
@@ -1009,35 +1010,36 @@ For example, with values that are only an illustration:
 
 `cargo xtask formal check` refuses a plan that does not parse, of another
 schema or with a field that it does not know, a part listed twice, and a
-part that is neither `qualification`, a lane of the lanes nor the part of
-a registered target; it lists the parts of the formal targets that the
-plan has no entry for, which is not a problem, as a target is measured
-once it is registered.
+part that is neither `qualification`, a lane of the lanes nor a part of a
+registered target; it lists the parts of the formal targets that the plan
+has no entry for, which is not a problem, as a part is measured once it
+runs.
 
-Every formal target has one part, `target/<name>/1`, and a planned target
-none. The shard limit is 3,300 s: the wall-clock limit of the gate,
-3,600 s, less the time of the merge, 300 s. `cargo xtask formal check`
-refuses the part of a target whose registered budget is more than the
-shard limit, whatever the workers of the part, in either layout
-([proof targets](#proof-targets)): the budget counts the time during which
-a command of its target runs, whichever worker runs it, and the run of the
-part has a deadline of 300 s and that budget from its start. Two workers
-build the mutants of a target side by side, each in a stage of its own
-that starts from the build of its target
-([registered mutants](#registered-mutants)). On a standard
-`ubuntu-24.04-arm` runner the part of the calibration target, with its 30
-mutants built one after another, took about 400 s, against the registered
-budget of its target of 3,000 s, and the parts of the gate stayed well
-within the wall-clock limit, the memory and the disk of the runner.
+Every formal target has its parts, `target/<name>/<i>` from 1: those that
+the registry gives it, at most 4, or else one
+([proof targets](#proof-targets)); a planned target has none. The shard
+limit is 3,300 s: the wall-clock limit of the gate, 3,600 s, less the time
+of the merge, 300 s. `cargo xtask formal check` refuses a part of a target
+whose registered budget is more than the shard limit, whatever the workers
+of the part, in either layout ([proof targets](#proof-targets)): the
+budget counts the time during which a command of its target runs,
+whichever worker runs it, and the run of the part has a deadline of 300 s
+and that budget from its start. Two workers build the mutants of a part
+side by side, each in a stage of its own that starts from the build of its
+target ([registered mutants](#registered-mutants)). On a standard
+`ubuntu-24.04-arm` runner the one part of the calibration target, with its
+30 mutants built one after another, took about 400 s, against its
+registered budget of 3,000 s, and the parts of the gate stayed well within
+the wall-clock limit, the memory and the disk of the runner.
 
 The disk guard of a run, after the steps of the gate inputs and before the
 first phase, reads the plan of the export. A run of a part counts that
 part alone: the qualification job `qualification`, both runs of a lane
-`lane/<name>` and the part of a target `target/<name>/1`. Any other run
-counts `qualification` and the part of each target that it selects: a
-whole run sums the qualification and every formal target, and a run with
-`--target` or of `formal mutants` the qualification and the named
-targets. A part
+`lane/<name>` and a part of a target `target/<name>/<i>`. Any other run
+counts `qualification` and the parts of each target that it selects: a
+whole run sums the qualification and every part of every formal target,
+and a run with `--target` or of `formal mutants` the qualification and the
+parts of the named targets. A part
 without an entry counts 8 GiB, 8,589,934,592 bytes, and a part listed
 twice its largest peak. When the bytes available on the file system of the
 run directory at the start are less than 1.5 times the sum of the disk
@@ -1122,9 +1124,10 @@ The gate runs as parts of one commit: the qualification job,
 [lanes](#lanes), in two runs, its base run,
 `cargo xtask formal run --shard lane/<name> --keep`, and then its
 comparator run, `cargo xtask formal run --shard lane/<name> --comparator`;
-and the part of each formal target of the registry,
-`cargo xtask formal run --shard target/<name>/1`, the one part of a
-target. `cargo xtask formal merge` combines their receipts into the
+and each part of each formal target of the registry,
+`cargo xtask formal run --shard target/<name>/<i>`
+([proof targets](#proof-targets)). `cargo xtask formal merge` combines
+their receipts into the
 conclusion of the whole gate. A run without `--shard` and `--target` has
 every phase in one process, with one base round over every hand-written
 module; local runs, the measurement jobs of the workflow `formal measure`
@@ -1133,7 +1136,7 @@ it, and its receipt is no part of a merge. `--shard` cannot be given with
 `--target`, and `--comparator` only with `--shard lane/<name>`: otherwise
 the command exits with 2 before a run starts.
 In CI the jobs `formal run`, `formal lane <name>`, which runs the
-comparator run of its lane after its base run, `formal shard <name>/1` and
+comparator run of its lane after its base run, `formal shard <name>/<i>` and
 `formal parts` of the workflow `formal` run these parts and their merge,
 and the workflow `formal calibration` runs those of the calibration
 ([CI job](#ci-job), [calibration target](#calibration-target)); the
@@ -1170,23 +1173,29 @@ the merge, are among the required checks of `main`.
   the lane in the stage that the base run kept, and writes the receipt of
   the lane, below. Its phase has at most 1,800 s, and its disk guard counts
   the lane.
-- **The part of a target** has the extraction of that formal target, whose
-  commands are those of its unit, and the phase `targets` for it: its
-  build, type check, audit, declaration ranges and registered
-  [mutants](#mutants). It has no guard, qualification or base round, and
-  lists the hand-written Lean modules of the snapshot as the base round
-  does, without building or auditing them, which the lanes do. Its budget
-  is 300 s for its start and its closing steps and the registered budget
-  of its target, which its extraction shares. Its disk guard counts its
-  part alone. A part of a planned or unknown target is a tool failure
-  before the phases.
-- **A run of `cargo xtask formal run --target NAME...`** runs the part of
-  the named targets in the same way: their extraction, planned targets
-  included, and the phase `targets` for the formal ones, without the guard,
-  the qualification and the base round, which a run of
-  `cargo xtask formal mutants` keeps. Its budget is 300 s and the
-  registered budgets of its targets. Its receipt is `SCOPED` and no part
-  of a merge.
+- **A part of a target**, `target/<name>/<i>` of the `k` parts of its
+  target, has the extraction of that formal target, whose commands are
+  those of its unit, and the phase `targets` for it: its build, the seed,
+  type check, audit, declaration ranges and the registered
+  [mutants](#mutants) of the part. Only the first part judges the target,
+  its build, type check, audit and declaration range, and concludes its
+  unit; each other part builds the seed alone, without judging it, and
+  runs its mutants on it ([proof targets](#proof-targets)). It has no
+  guard, qualification or base round, and lists the hand-written Lean
+  modules of the snapshot as the base round does, without building or
+  auditing them, which the lanes do. Its budget is 300 s for its start and
+  its closing steps and the registered budget of the part, which its
+  extraction shares. Its disk guard counts its part alone. A part of a
+  planned or unknown target, or one that its target does not have, is a
+  tool failure before the phases. Its receipt records the part and its
+  seed in `part` ([receipt](#receipt)).
+- **A run of `cargo xtask formal run --target NAME...`** runs the named
+  targets in the same way, each whole, its unit and every mutant of its
+  parts: their extraction, planned targets included, and the phase
+  `targets` for the formal ones, without the guard, the qualification and
+  the base round, which a run of `cargo xtask formal mutants` keeps. Its
+  budget is 300 s and the registered budgets of its targets, each the sum
+  of those of its parts. Its receipt is `SCOPED` and no part of a merge.
 - **The receipt of a part** names its part in `shard` and has the mode
   that `KREPI_FORMAL_TRIGGER` gives ([receipt](#receipt)), `MANUAL`
   without it, never `SCOPED`; it is complete by the rule of a run of the
@@ -1234,21 +1243,23 @@ conclusion of the whole gate only when:
 4. every receipt has one and the same trigger: the mode, `ref` and
    `run_id` of its `trigger`, whatever its event and attempt;
 5. one receipt is of the qualification job, one of each lane of the
-   checkout and one of the part of each formal target, and none is of
+   checkout and one of each part of each formal target, and none is of
    another part;
 6. each unit that the checkout registers, of the qualification and of the
    base round of the qualification job, of the base round and of the
    comparator of each lane, and of each formal target with its registered
    mutants, has exactly one conclusion among the receipts, which the
-   receipt of the part that holds the unit gives, and no receipt concludes
-   another unit;
+   receipt of the part that holds the unit gives: the unit of a target its
+   first part, and the unit of a registered mutant the part that the
+   registry gives it; and no receipt concludes another unit;
 7. the receipt of the qualification job lists the hand-written modules,
-   and the checks of the base rounds below find nothing.
+   and the checks below find nothing.
 
-The checks judge what the base rounds of the qualification job and of the
-lanes held, from `handwritten`, `left_out` and `lane` of their receipts
-([receipt](#receipt)). Each is `true` in `checks` of the record when it
-finds nothing, and each finding is a problem:
+The first four checks judge what the base rounds of the qualification job
+and of the lanes held, from `handwritten`, `left_out` and `lane` of their
+receipts, and the last the seeds of the parts of the targets, from their
+`part` ([receipt](#receipt)). Each is `true` in `checks` of the record
+when it finds nothing, and each finding is a problem:
 
 - **`coverage`**: each hand-written module that the qualification job
   lists is held by exactly one of the job and the lanes, and each module
@@ -1256,21 +1267,30 @@ finds nothing, and each finding is a problem:
 - **`names`**: no public constant that the audit of a base round reports
   for the modules of its root, below, is declared by two parts, but a
   theorem that each part declares with the same fingerprint, the hash of
-  its type and its universe parameters: Lean imports such a theorem from
-  two modules, as it does the `congr_eq` equations that it generates for
-  a `match` in each module that uses them, and refuses any other pair of
-  constants of one name, a theorem and a definition, or two theorems of
-  different types or universe parameters among them;
+  its type and its universe parameters, as Lean declares the `congr_eq`
+  equations that it generates for a `match` in each module that uses
+  them. The check lets through only such a theorem and reports every other
+  pair of constants of one name: a theorem and a definition, two theorems
+  of different types or universe parameters, and also a theorem and an
+  axiom of one type, which Lean 4.35.0 imports together. Lean also
+  requires two theorems of one name to have the same `all`, the names of
+  their mutual block, which the check does not compare;
 - **`waivers`**: each lane leaves out of its round exactly those of its
   modules that the qualification job lists in `left_out`, the closure of
   what the waivers that held for it leave out;
 - **`extraction`**: the lane of each formal target outside the waivers
   that hold on the date of the merge, the lane of its `module`, extracted
   it;
-- **`seeds`**: `null` while every formal target has one part.
+- **`seeds`**: the receipt of each part of a formal target records its
+  part, and the parts of one target took the same seed: the same tree of
+  the extracted workspace, image and SHA-256 of each file that Aeneas
+  wrote, and each built it, or none did, as where the proofs of the target
+  do not build and its first part rejects it. The build products are not
+  compared, since the build of a seed is not shown to be reproducible to
+  the byte.
 
 Without the receipt of the qualification job, which is a problem already,
-the checks are all `false`.
+the first four checks are `false`.
 
 When a condition fails, the merge gives no conclusion: it is `TOOL_FAILURE`
 and not complete, with each problem. Otherwise its status is that of a run
@@ -1325,8 +1345,8 @@ A gate that passes says only that its own entries hold: a merge whose
 other units or parts fail does not pass, whatever its gates.
 
 Each part runs in a job of its own: the qualification job in `formal run`,
-the two runs of a lane in `formal lane <name>`, and the part of a target in
-`formal shard <name>/1`, so that the job of a lane takes the `seconds` of
+the two runs of a lane in `formal lane <name>`, and each part of a target
+in `formal shard <name>/<i>`, so that the job of a lane takes the `seconds` of
 both its runs, which its receipt sums. The synthetic wall clock is the
 longest chain of these jobs that their `needs` in the workflow `formal`
 give, each job after those that it needs, by the sum of their `seconds`,
@@ -1376,7 +1396,7 @@ that none splits a line. The record has schema 4 and the form of a receipt
 | `parts` | Each receipt given, in order: `receipt`, its path; `sha256`, of its bytes, or `null`; and when it parses, `shard`, `job`, the job that runs its part, `run_id`, `attempt`, `superseded`, `status`, `complete`, `seconds` and the `cgroup_memory_peak` of its `resources`; `over_seconds`, whether the `seconds` of its job are above 2,880 s, as above; and `over_memory`, whether its peak is above 13,372,738,764 B, or `null` without a peak |
 | `units` | Each registered unit with its phase, status and reason |
 | `axioms` | Each theorem that the base rounds of the qualification job and of the lanes audited, with the axioms that the audit reported for it, the report of the gate `axioms` |
-| `checks` | Whether each check of the base rounds found nothing: `coverage`, `names`, `waivers` and `extraction`, as above, and `seeds`, `null` |
+| `checks` | Whether each check found nothing: `coverage`, `names`, `waivers`, `extraction` and `seeds`, as above |
 | `jobs` | Each job of the parts that the merge kept, by its name: `seconds`, the sum of the `seconds` of its receipts; `over_seconds`, whether these are above 2,880 s; and `cgroup_memory_peak`, the largest of its receipts, with `over_memory`, as for a part |
 | `chain`, `chain_seconds`, `merge_seconds`, `merge_from`, `wall_clock_seconds`, `over_80_percent` | The synthetic wall clock: the longest chain of jobs, the first first, and the sum of their seconds, the merge from its `job` or its `command`, the sum of both and whether it is above 2,880 s |
 | `problems` | Each condition that fails |
@@ -1459,7 +1479,7 @@ For example, with values that are only an illustration:
     "names": true,
     "waivers": true,
     "extraction": true,
-    "seeds": null
+    "seeds": true
   },
   "jobs": {
     "formal run": {
@@ -1969,7 +1989,14 @@ computes from the structure of the type alone, so that it is the same in
 every environment for the same type, and its universe parameters,
 separated by commas. These are the public constants of the round, which
 its lane record lists for the check `names` of the merge ([shards
-and merge](#shards-and-merge)). The list of theorems is Lean's, so it
+and merge](#shards-and-merge)). The hash is Lean's 32-bit structural hash
+of the type (`Expr.hash`), not a cryptographic one, and the fingerprint
+leaves out `all`, the names of the mutual block of a theorem: two theorems
+of one name whose types have the same hash, or that differ in `all` alone,
+pass the check `names`. That weakens only the check that stands in for
+importing every hand-written module together; no conclusion rests on it,
+since each part builds, audits, replays and compares its own theorems.
+The list of theorems is Lean's, so it
 holds the theorems that Lean generates, such as `injEq` and `congr_eq`
 lemmas, and theorems that a metaprogram adds; Lean generates the
 `congr_eq` equations of a `match` in each module that uses them, so two
@@ -2592,15 +2619,15 @@ has the same fields with schema 1, and `base_record` `null`
 | `status` | `VERIFIED`, `REJECTED`, `STALE`, `TOOL_FAILURE`, `BUDGET`, `NOT_RUN` or `SCOPED` |
 | `complete` | Whether the run is complete, as defined above |
 | `trigger` | `mode`: `SCOPED` for a run of named targets; for a run of the whole gate or of a part, the mode that `KREPI_FORMAL_TRIGGER`, the variable through which a job of CI gives the trigger of its run, names, `REQUIRED`, `FORCED_FULL` or `WEEKLY`, and `MANUAL` when it is unset or empty, or when it holds any other value, `SCOPED` and `MANUAL` included, which is a tool failure before the phases ([results](#results)); `event`, `ref`, `run_id` and `attempt`, from `GITHUB_EVENT_NAME`, `GITHUB_REF`, `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT`, or `null` |
-| `targets` | The names given with `--target`, sorted, or the target of the part of a target; empty for a run of the whole gate, for the qualification job and for the runs of a lane |
-| `shard` | The part of a run with `--shard`, `qualification`, `lane/<name>` or `target/<name>/1`, or `null` |
+| `targets` | The names given with `--target`, sorted, or the target of a part of a target; empty for a run of the whole gate, for the qualification job and for the runs of a lane |
+| `shard` | The part of a run with `--shard`, `qualification`, `lane/<name>` or `target/<name>/<i>`, or `null` |
 | `host` | `linux-aarch64` or `darwin-arm64`, or `null` on another host |
 | `image` | The image of a run on `linux-aarch64`, below, or `null` on another host |
 | `run`, `directory` | The identifier of the run, and its directory relative to the repository root |
 | `started`, `seconds` | The Unix time in seconds at which the run started, and how long it took |
 | `commit`, `tree` | The snapshot commit and its root tree, or `null` |
 | `inputs` | `before` and `after`, the object of each gate input (`mode`, `type`, `oid`, or `null` when the commit does not have it) at the start and at the end, or `null` when they were not taken; `clean_after`, whether the gate inputs were clean at the end, or `null` |
-| `budgets` | `gate_seconds`, 7200 and the budget of each target that the run selects, 7,200 for the qualification job, 300, the registered budget of the lane and 600 for a lane, the budget of its base run, 300 and the budgets of its targets for the part of a target and for a run of `cargo xtask formal run --target`, or 14,400 for a run of `cargo xtask formal mutants`, whatever the budgets of its targets ([source mutants and survivors](#source-mutants-and-survivors)), and `receipt_margin_seconds`, 300 |
+| `budgets` | `gate_seconds`, 7200 and the budget of each target that the run selects, 7,200 for the qualification job, 300, the registered budget of the lane and 600 for a lane, the budget of its base run, 300 and the budget of the part for a part of a target, 300 and the budgets of its targets for a run of `cargo xtask formal run --target`, or 14,400 for a run of `cargo xtask formal mutants`, whatever the budgets of its targets ([source mutants and survivors](#source-mutants-and-survivors)), and `receipt_margin_seconds`, 300 |
 | `resources` | What the run used of the host, below |
 | `phases` | For each phase, `budget_seconds`, `seconds` and `ran` |
 | `units` | For each unit, its `phase`, its `status` and the `reason` for it, or `null` |
@@ -2610,6 +2637,7 @@ has the same fields with schema 1, and `base_record` `null`
 | `lane` | For the qualification job and a lane, what its base round held, below, or `null` |
 | `handwritten` | For the qualification job, each hand-written module of the Lake project by name, with where its file lies by the [lanes](#lanes): its component, `qualification` or `shared`; or `null` |
 | `left_out` | For the qualification job, each hand-written module that the [waivers](#waivers) that hold leave out of the base round, with the target of the waiver; or `null` |
+| `part` | For a part of a target, the part and its seed, below, or `null` |
 | `proof_targets` | What the run found for each target that the phase `extraction` took, below, by its name: those that it selects and the formal ones, or in the part of a target and in a run of `cargo xtask formal run --target` those that it selects alone, in a lane the targets of the lane, also one that it did not extract since it registers more than 30 mutants or its module is not a Lean module path |
 | `guard` | What the guard found on a pull request, below, or `null` without a pull request event or when its phase did not finish |
 | `commands` | Every command, in the order of its `sequence` |
@@ -2692,13 +2720,25 @@ The `lane` record has these fields:
 | `constants` | The public constants of the modules that the root imports, as the audit printed them, each `<name> <kind> <fingerprint>`, sorted ([base round](#base-round)); one theorem may be in two parts ([shards and merge](#shards-and-merge)) |
 | `targets` | Each target that a lane extracted, with its role: `formal`, a formal target of its components; `planned`, a planned one of them that its own modules import; or `cone`, one that the modules that they reach import, for the stage alone |
 
+The `part` record has these fields:
+
+| Field | Content |
+| --- | --- |
+| `target`, `i`, `k` | The target, the number of the part, from 1, and the number of the parts of the target |
+| `budget_seconds` | The registered budget of the part |
+| `judges` | Whether the part judges the target and concludes its unit: the first part alone |
+| `source_tree` | The object ID of the tree of the workspace that the target is extracted from, as `inputs.before` gives it, or `null` |
+| `image` | The reference of the image, as `image`, or `null` |
+| `generated` | The SHA-256 of each Lean file that Aeneas wrote for the target, by its path below the output of Aeneas |
+| `seed_built` | Whether the build of the proofs of the target, which seeds its mutants, passed |
+
 Each record of `proof_targets` has these fields:
 
 | Field | Content |
 | --- | --- |
 | `unit` | The unit of the target, `target/<name>`, or `null` for a target that the run did not select and extracted for the base round alone |
 | `state` | `formal` or `planned`, as the registry gives it |
-| `budget_seconds`, `seconds` | The budget of the target, and the seconds during which a command of its unit or of the units of its registered mutants ran, the length of the union of their intervals, each from its `started` for its `seconds`, or 0 without a unit |
+| `budget_seconds`, `seconds` | The budget of the target, in a part of a target that of the part, and the seconds during which a command of its unit or of the units of its registered mutants ran, the length of the union of their intervals, each from its `started` for its `seconds`, or 0 without a unit |
 | `observed` | What the extraction gave, as for a qualification case |
 | `generated` | The SHA-256 of each Lean file that Aeneas wrote, by its path below the output of Aeneas |
 | `declarations` | The declarations of its templates that stay axioms once its reviewed external declarations are installed |
@@ -2765,8 +2805,8 @@ a manual or scheduled run of `main`, whatever the decision; on no other
 event. Then the job `formal limits` computes the lanes and the limits of
 the parts; the job `formal run` runs the qualification job; beside it, the
 job `formal lane <name>` runs each lane of `verification/lanes.json`, its
-base run and then its comparator run, the job `formal shard <name>/1` the
-part of each formal target of the head's registry, and the job
+base run and then its comparator run, the job `formal shard <name>/<i>`
+each part of each formal target of the head's registry, and the job
 `formal scoped <name>` each planned target that the pull request affects,
 alone; and the job `formal parts` merges the receipts of the parts. Every
 job of the workflow that needs another has a condition that starts with
@@ -2879,38 +2919,42 @@ and of the parts of the targets; nothing marks a failure as expected.
 The job `formal limits`, before the parts, checks out the head and
 computes from the head's `verification/lanes.json` the jobs of the lanes,
 one for each lane, and from its `verification/targets.json` the parts of
-the targets, one for each formal target, and the jobs of `formal scoped`,
-one for each planned target that `formal fast` lists, each with the budget
-of its target, 1,800 s unless the registry gives another. The deadline of
-the part of a target and of a job of `formal scoped` is 300 s and that
-budget, and each has the 300 s of its receipt; the step that runs one has
-the minutes of its deadline and receipt, rounded up, and two more, as
-`deadline.sh` kills its command a minute after its deadline, and its job
-15 minutes before that step, the step and 3 minutes after it. The deadline
-of a lane is 300 s, its registered budget, 2,400 s unless the lanes give
-another, and the extraction margin of 600 s; its base step has the minutes
-of that deadline and the 300 s of its receipt, rounded up, and two more, 62
-for the default budget, and its job 15 minutes before that step, the step,
-the 37 minutes of its comparator's step and 3 minutes after them, 117 for
-the default budget. So the receipt of each part is written before its step
-ends, however many lanes and formal targets there are. The part of a
-target whose registered budget is more than the shard limit of 3,300 s
-fails the job, as `cargo xtask formal check` refuses it
-([shards and merge](#shards-and-merge)), so the job of a part has at most
-85 minutes. A job of a hosted runner ends after 360 minutes; when the
-budget of a planned target needs a longer job, or a target name is not of
-lowercase letters, digits and hyphens, the job `formal limits` fails, the
-jobs of the parts and of `formal scoped` do not run, and the verdicts
-fail. So it does when the name of a lane is not of these characters or
-another lane has it, when a component is in two lanes, or when the
-registered budget of a lane and the extraction margin are more than the
-shard limit, as `cargo xtask formal check` refuses them ([lanes](#lanes)),
-so the job of a lane has at most 122 minutes. The limits of the jobs of
-the lanes, of the parts and of `formal scoped` are expressions of their
-matrix, so each such job writes
-its limit as `::notice title=timeout-minutes::<minutes>`, from which the
-record of the run takes it ([testing](conventions/testing.md#entry-points));
-every other job of the workflow has a limit written in it.
+the targets, one for each part of each formal target with the budget of
+the part, and the jobs of `formal scoped`, one for each planned target
+that `formal fast` lists, with the budgets of its parts added; the parts
+that the registry gives a target, or one with the budget of the target,
+1,800 s unless the registry gives another ([proof
+targets](#proof-targets)). The deadline of a part of a target and of a job
+of `formal scoped` is 300 s and that budget, and each has the 300 s of its
+receipt; the step that runs one has the minutes of its deadline and
+receipt, rounded up, and two more, as `deadline.sh` kills its command a
+minute after its deadline, and its job 15 minutes before that step, the
+step and 3 minutes after it. The deadline of a lane is 300 s, its
+registered budget, 2,400 s unless the lanes give another, and the
+extraction margin of 600 s; its base step has the minutes of that deadline
+and the 300 s of its receipt, rounded up, and two more, 62 for the default
+budget, and its job 15 minutes before that step, the step, the 37 minutes
+of its comparator's step and 3 minutes after them, 117 for the default
+budget. So the receipt of each part is written before its step ends,
+however many lanes and formal targets there are. A part of a target whose
+registered budget is more than the shard limit of 3,300 s fails the job,
+as does a target of more than 4 parts or whose parts have budgets of more
+than 7,200 s in all, as `cargo xtask formal check` refuses them ([shards
+and merge](#shards-and-merge)), so the job of a part has at most 85
+minutes and a job of `formal scoped` at most 150. A job of a hosted runner
+ends after 360 minutes; when the budget of a planned target needs a longer
+job, or a target name is not of lowercase letters, digits and hyphens, the
+job `formal limits` fails, the jobs of the parts and of `formal scoped` do
+not run, and the verdicts fail. So it does when the name of a lane is not
+of these characters or another lane has it, when a component is in two
+lanes, or when the registered budget of a lane and the extraction margin
+are more than the shard limit, as `cargo xtask formal check` refuses them
+([lanes](#lanes)), so the job of a lane has at most 122 minutes. The
+limits of the jobs of the lanes, of the parts and of `formal scoped` are
+expressions of their matrix, so each such job writes its limit as
+`::notice title=timeout-minutes::<minutes>`, from which the record of the
+run takes it ([testing](conventions/testing.md#entry-points)); every other
+job of the workflow has a limit written in it.
 
 Each job `formal lane <name>`, beside `formal run`, runs one lane. It is
 prepared as `formal run` is, with the shorter probe of `formal scoped` and
@@ -2963,10 +3007,10 @@ Its steps then
 The failure of one lane cancels no other, and without a lane the job does
 not run.
 
-Each job `formal shard <name>/1`, beside `formal run`, runs the part of one
+Each job `formal shard <name>/<i>`, beside `formal run`, runs a part of one
 formal target. It is prepared as `formal run` is, with the shorter probe of
 `formal scoped`, and without the event. Its main command,
-`cargo xtask formal run --shard target/<name>/1` in a container of the image
+`cargo xtask formal run --shard target/<name>/<i>` in a container of the image
 with the flags of the gate and the variables `GITHUB_REF`, `GITHUB_RUN_ID`,
 `GITHUB_RUN_ATTEMPT`, `KREPI_FORMAL_TRIGGER` and `KREPI_FORMAL_IMAGE`, runs
 under `.github/scripts/deadline.sh --stop-commands` with the minutes of its
@@ -3198,16 +3242,17 @@ runs there as a script with the flags of the runner's shell,
 
 ## Proof targets
 
-`targets.json` has schema 2. Each entry under `targets` describes one
+`targets.json` has schema 3. Each entry under `targets` describes one
 extraction and its obligations. The fields are those of the CAS project,
-with the state and the budget of a target added and a cut point written as
-an object; a field that the table does not list is refused:
+with the state, the budget and the parts of a target added and a cut point
+written as an object; a field that the table does not list is refused:
 
 | Field | Meaning |
 | --- | --- |
 | `name`, `module`, `feature` | Target name, generated Lean namespace, feature ID (`krepi.<area>.<feature>`) |
 | `state` | `formal`, the default, for a target that the gate verifies, or `planned` for one that it only extracts and type-checks; a run of the whole gate selects the formal targets, a planned one runs when `--target` names it, and a run with a base round extracts, for that round, each planned one whose generated modules a hand-written module imports |
-| `budget` | The seconds that the unit of the target may take, 1,800 when the field is left out |
+| `budget` | The seconds that the unit of the target and its mutants may take, 1,800 when the field is left out, of a target without `parts` |
+| `parts` | The parts of the target, from 1 to at most 4, each a job of the gate of its own ([shards and merge](#shards-and-merge)): each an object with its `budget`, 1,800 when the field is left out, and its `mutants`, the names of the registered mutants that it runs. Left out or empty, the target is one part with its `budget` and every mutant |
 | `description` | What the target proves, in one paragraph |
 | `start_from`, `exclude` | Charon roots and cut points by exclusion; `cargo xtask formal check` refuses `exclude`, which the gate does not support |
 | `opaque` | The cut points: items translated without their bodies, each an object with the Charon `pattern`, the `source` where the items are and the `reason`. A cut item is modelled as a deterministic function of its arguments, so the reason states that no statement depends on two calls with the same arguments agreeing, as a function that reads hardware or global state would not |
@@ -3235,7 +3280,10 @@ a tool, and each broken rule is a problem:
   an obligation nor a mutant;
 - every mutant names at least one theorem in `fails`, each a theorem of an
   obligation of its own target, and no target registers more than 30
-  mutants;
+  mutants, however many parts hold them;
+- a target with `parts` has no `budget` of its own and at most 4 parts,
+  whose budgets add up to at most 7,200 s; each of its registered mutants
+  is in exactly one part, and a part names only mutants of the target;
 - no key is in two of `proves`, `unclosed` and `derived`;
 - every cut point and every axiom of `verification/axioms.json` has a
   `source` and a `reason` that are not blank;
@@ -3244,7 +3292,7 @@ a tool, and each broken rule is a problem:
   `derived` is a key `file#Type::method` of a method that a
   `#[derive(..)]` of a production type in the file defines, not a
   production function;
-- the registered budget of the part of each formal target, whatever its
+- the registered budget of each part of each formal target, whatever its
   workers, is at most the shard limit of 3,300 s
   ([shard plan and disk guard](#shard-plan-and-disk-guard)).
 
@@ -3254,8 +3302,10 @@ which hold the module of every formal target as a component
 ([lanes](#lanes)).
 
 The job `formal limits` of the workflow `formal` ([CI job](#ci-job)) also
-fails on another target name before the names reach a gate, on the part
-of a target whose registered budget is more than the shard limit, and on
+fails on another target name before the names reach a gate, on a target of
+more than 4 parts or whose parts have budgets of more than 7,200 s in all,
+on a part of a target whose registered budget is more than the shard
+limit, and on
 a lane whose name is not of lowercase letters, digits and hyphens or that
 another lane has, a component in two lanes, and a lane whose budget and
 the extraction margin are more than the shard limit.
@@ -3276,14 +3326,15 @@ concluded, runs no mutant and has no unit and no part of its own; its
 record in the receipt has no unit. A planned target that the run does not
 select and no hand-written module imports is not extracted. The phase
 reads the imports from the checkout when the run starts and stops when
-those of the export are other ones. The part of a target extracts its
+those of the export are other ones. A part of a target extracts its
 target alone, the qualification job none, and the base run of a lane the
 targets of the lane but the formal ones of the [waivers](#waivers) that
 hold, which leave out no planned target, as commands of
 `base/lane/<name>` ([base round](#base-round),
 [shards and merge](#shards-and-merge)). The phase has the budgets of the
-targets that it extracts, or the extraction margin of 600 s in a lane,
-and the gate's budget grows by those of the selected targets alone. For
+targets that it extracts, a part of a target that of the part, or the
+extraction margin of 600 s in a lane, and the gate's budget grows by those
+of the selected targets alone. For
 each target, in `work/targets/<name>/`, it
 
 1. extracts the target from the root package of the exported workspace,
@@ -3316,7 +3367,8 @@ selected formal target in its stage: it copies the hand-written module
 files that the base round found, or in the part of a target those that
 the same listing of the snapshot finds without the base round, writes the
 root module `Krepi` that imports the target's proof modules, builds it with
-`lake build --no-cache --wfail +Krepi`, runs the audit of the base round
+`lake build --no-cache --wfail +Krepi`, the seed of its mutants, runs the
+audit of the base round
 on the proof modules with `lake env lean Audit.lean`, and rejects the
 target unless the audit reports each theorem of its obligations in one of
 its proof modules with only the axioms that the target row of the
@@ -3326,12 +3378,21 @@ type check had no problem. A formal target whose obligations name no
 theorem is rejected. A build of the proofs that fails without an error or a
 warning in a proof module is a tool failure of the target, generated or
 model code that did not build. Once the target is verified, each of its
-registered [mutants](#mutants) runs in a unit of its own.
+registered [mutants](#mutants) runs in a unit of its own. A target has
+its unit in its first part alone: each other part extracts the target,
+installs and type-checks it and builds its proofs, the seed, in the same
+way, but does not audit or conclude it, and runs its own mutants on that
+seed once it built, whether or not the first part verifies the target;
+without a seed, its mutants are `NOT_RUN`, unless a command of the target's
+unit forces them, as a budget used up forces `BUDGET`
+([registered mutants](#registered-mutants)). A run of the whole target,
+with `--target`, has its unit and every mutant in one run.
 
 The commands of the unit of a target and of the units of its registered
-mutants share its `budget`, 1,800 s unless the registry gives another,
-which counts the time during which at least one of them runs, in either
-phase: the length of the union of their intervals. Commands that run one
+mutants share its budget, the sum of the budgets of its parts, in a part
+the budget of the part, which counts the time during which at least one
+of them runs, in either phase: the length of the union of their
+intervals. Commands that run one
 after another count their seconds, commands that run side by side count
 the time that they share once, and the base round between them, or any
 other time when none of them runs, does not count. A command that starts
@@ -3341,8 +3402,10 @@ command that meets it concludes its own unit `BUDGET`: the unit of the
 target while the target is extracted, built and checked, or that of a
 mutant, which leaves the target as it was concluded. A command that would
 start once the budget is used up does not start, is `NOT_RUN` and
-concludes its unit `BUDGET` too; the run is `BUDGET` either way. The
-calibration target registers a budget of 3,000 s, within the shard limit
+concludes its unit `BUDGET` too; the run is `BUDGET` either way. In a part
+that does not conclude the unit of the target, a command of the seed that
+meets the budget makes the mutants of the part `BUDGET`. The calibration
+target registers three parts of 1,000 s, each within the shard limit
 ([calibration target](#calibration-target)); a target of the kernel keeps
 the default.
 
@@ -3379,7 +3442,7 @@ execution semantics or an edited generated file is rejected.
 
 A mutant is an edit of the source of a target that its proofs are to
 reject: the proof of a theorem of the target fails on the mutant. A formal
-target registers its mutants in `targets.json`
+target registers its mutants in `targets.json`, each in one of its parts
 ([proof targets](#proof-targets)), and
 `cargo xtask formal mutants` generates more
 ([source mutants and survivors](#source-mutants-and-survivors)); both are
@@ -3391,11 +3454,16 @@ Once the phase `targets` has verified a formal target, the run prints the
 declaration ranges of its proof modules in its stage, as a command of the
 target's unit, and takes each of its registered mutants in a unit of its
 own, `target/<name>/mutant/<mutant>`, whose commands share the budget of
-the target. Two workers take them in turn, the first the first, the
+the target. A part of a target takes the mutants of the part alone, with
+the budget of the part; a part other than the first does so once the
+build of its proofs, its seed, passed, without judging the target, and
+the merge requires the parts of a target to have taken one seed
+([shards and merge](#shards-and-merge)). Two workers take them in turn,
+the first the first, the
 third and so on, and the second the second, the fourth and so on, each in
 the order of the registry. Each worker prepares its next mutant, steps 1
 to 5, while it builds the one before, step 6, and a mutant that a step
-before the build concludes is not built. So up to four mutants of a target
+before the build concludes is not built. So up to four mutants of a part
 are prepared or built at once, each in its own work directory, with its
 own home and temporary directories, stage and Cargo target directory. A
 worker that stops at an error, or panics, stops the other before its next
@@ -3430,7 +3498,9 @@ accepted, with the reason `the mutant was not rejected by` and its `fails`,
 when it is inconclusive, with a reason that starts with `inconclusive`, and
 in the two cases before its build; a build that Lake or a Lean process it
 ran did not finish makes it `TOOL_FAILURE`. Each of them but `VERIFIED`
-fails the run. The mutants of a target that is not verified are `NOT_RUN`.
+fails the run. The mutants of a target that is not verified are `NOT_RUN`,
+and so are those of a part whose seed did not build, unless a command of
+the target's unit forces them.
 When the ranges make no table, the target is a tool failure and its mutants
 are inconclusive. The run lists the build directory of the stage of the
 target, as it lists the installation, before the first mutant and after
@@ -3617,8 +3687,12 @@ no image holds:
 `targets.json` registers two targets. `calibration` is formal: twelve
 roots in `start_from`, one obligation with one theorem for each, thirty
 mutants, each of which fails the proof of the theorem that it names alone,
-and a budget of 3,000 s, more than the default, since each mutant is built
-again in a stage of its own. `calibration-planned` is planned: it reaches
+and three parts of 1,000 s, each with ten of the mutants in the order of
+the registry, so that the first part concludes the target and its ten
+mutants, eleven units, and each other part builds the seed and runs its
+ten; the three add up to 3,000 s, more than the default for one target,
+since each mutant is built again in a stage of its own.
+`calibration-planned` is planned: it reaches
 `core::num::{u32}::count_ones`, which the pinned Aeneas does not model, and
 whose generated declaration stays a declaration.
 
@@ -3630,8 +3704,9 @@ workspace, the Lake project and the registries of the calibration. With
 `--target calibration-planned` it extracts and concludes the planned target
 alone, without the qualification and the base round. With
 `--shard qualification`, `--shard lane/calibration`, with `--keep` and then
-`--comparator`, and `--shard target/calibration/1` it runs the parts of the
-calibration, and `cargo xtask formal merge --calibration` merges
+`--comparator`, and `--shard target/calibration/<i>` for `i` from 1 to 3
+it runs the parts of the calibration, and
+`cargo xtask formal merge --calibration` merges
 their receipts ([shards and merge](#shards-and-merge)). Neither
 target is in `verification/targets.json` or among the declared targets: a
 run in the production layout cannot name them and records none, and
@@ -3686,11 +3761,11 @@ credentials and run actions pinned to full commit SHAs:
 - `planned example`, beside it, runs
   `cargo xtask formal run --calibration --target calibration-planned` in
   the same way;
-- `calibration shard <name>/1`, beside them, one for each formal target
-  of the calibration registry, which the workflow writes out and a unit
-  test keeps equal to that registry, runs the steps of the shard job of
-  `formal` with `cargo xtask formal run --calibration --shard
-  target/<name>/1`;
+- `calibration shard <name>/<i>`, beside them, one for each part of each
+  formal target of the calibration registry, which the workflow writes out
+  and a unit test keeps equal to that registry, runs the steps of the shard
+  job of `formal` with `cargo xtask formal run --calibration --shard
+  target/<name>/<i>`;
 - `calibration merge` runs the steps of the merge job of `formal` with
   `cargo xtask formal merge --calibration` on the downloaded
   `calibration-formal-part-*` artifacts. It runs when the jobs above ran,
@@ -3711,14 +3786,14 @@ deadline of the qualification job of the calibration is
 the gate's 7,200 s, that of the base run of its lane 300 s, the 2,400 s of
 the lane and 600 s for its extraction, that of its comparator the 1,800 s
 of its phase, that of the planned example, which runs the part of its
-target alone, 300 s and the 1,800 s of its planned target, that of the
-part of `calibration` 300 s and its 3,000 s, and that of the mutants the
+target alone, 300 s and the 1,800 s of its planned target, that of each
+part of `calibration` 300 s and its 1,000 s, and that of the mutants the
 14,400 s of `formal mutants`; with the 300 s of the receipt, 125, 60, 35,
-40, 60 and 245 minutes. Each step has two minutes more than its deadline.
+40, 27 and 245 minutes. Each step has two minutes more than its deadline.
 The jobs of the qualification and of the planned example have 23 minutes
 more than their step, 150 and 65; that of the lane has 15 minutes before
 its base step, the 37 of its comparator's step and 3 after them, 117; that
-of the part has 15 minutes before its step and 3 after it, 80, and that of
+of a part has 15 minutes before its step and 3 after it, 47, and that of
 the mutants 20 more than its step, 267; the merge has 15. The limits of
 the jobs `calibration run` and `planned example` and those of the lane
 and shard jobs are an expression of their matrix, so each such job writes
