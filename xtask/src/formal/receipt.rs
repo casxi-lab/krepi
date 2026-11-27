@@ -62,6 +62,7 @@ pub struct Receipt {
     pub handwritten: Option<BTreeMap<String, String>>,
     pub left_out: Option<BTreeMap<String, String>>,
     pub part: Option<TargetPart>,
+    pub source_mutants: Option<super::mutants::Record>,
     pub proof_targets: BTreeMap<String, Target>,
     pub guard: Option<super::guard::Record>,
     pub commands: Vec<Command>,
@@ -772,6 +773,18 @@ mod tests {
                 generated: BTreeMap::from([("Funs.lean".to_string(), "b".repeat(64))]),
                 seed_built: true,
             }),
+            source_mutants: Some(crate::formal::mutants::Record {
+                qualification: Some(crate::formal::mutants::Qualified {
+                    sha256: "e".repeat(64),
+                    run_id: Some("123".to_string()),
+                    commit: Some("c".repeat(40)),
+                    tree: Some("d".repeat(40)),
+                    image: Some(format!("ghcr.io/o/r@sha256:{}", "9".repeat(64))),
+                    status: Status::Verified,
+                    complete: true,
+                }),
+                part: Some("2/3".to_string()),
+            }),
             proof_targets: BTreeMap::from([("t".to_string(), target())]),
             guard: Some(guard()),
             commands,
@@ -1104,6 +1117,7 @@ mod tests {
             handwritten: None,
             left_out: None,
             part: None,
+            source_mutants: None,
             proof_targets: BTreeMap::new(),
             guard: None,
             commands: vec![Command {
@@ -1201,6 +1215,7 @@ mod tests {
   "handwritten": null,
   "left_out": null,
   "part": null,
+  "source_mutants": null,
   "proof_targets": {{}},
   "guard": null,
   "commands": [

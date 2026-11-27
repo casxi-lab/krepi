@@ -999,26 +999,185 @@ fn the_jobs_of_the_gate_upload_receipts_summaries_records_and_packed_logs() {
     assert_eq!(gate_upload_problems(&parse(&written)), Vec::<String>::new());
 }
 
-#[test]
-fn the_source_mutants_of_a_target_run_on_a_manual_run_of_main_alone() {
-    let job = &workflow(FORMAL)["jobs"]["mutants"];
-    let condition = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' \
-                     && inputs.mutants != ''";
-    assert_eq!(job["if"].as_str(), Some(condition));
-    // The inputs are checked before they reach a command: a formal target of
-    // the registry, and the operators of `formal mutants`.
-    let operators = format!("case \" {} \" in", crate::formal::mutants::OPERATORS);
-    let script = script_with_id(job, "inputs");
-    assert!(script.contains(&operators), "{script}");
-    assert!(
-        script.contains(r#"(.state // "formal") == "formal""#),
-        "{script}"
+/// Runs the step that computes the limits of `formal` in a new directory
+/// with the registry `registry`, on the event `event` with the input
+/// `mutants`: its exit status, its standard error and its outputs.
+fn limits_step(registry: &str, event: &str, mutants: &str) -> (Option<i32>, String, String) {
+    let formal = workflow(FORMAL);
+    let step = step_named(
+        &formal["jobs"]["limits"],
+        "Compute the limits from the registered budgets",
     );
+    let script = step["run"].as_str().expect("a script");
+    let scratch = crate::scratch::Scratch::temporary("limits");
+    scratch.write("verification/targets.json", registry);
+    scratch.write("verification/lanes.json", r#"{"schema": 1, "lanes": []}"#);
+    scratch.write("step.sh", script);
+    let output = std::process::Command::new("bash")
+        .args(["--noprofile", "--norc", "-eo", "pipefail", "step.sh"])
+        .current_dir(&scratch.0)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("GITHUB_OUTPUT", scratch.0.join("output"))
+        .envs([
+            ("GITHUB_EVENT_NAME", event),
+            ("MUTANTS", mutants),
+            ("SCOPED", "[]"),
+        ])
+        .output()
+        .expect("run the step");
+    let outputs = std::fs::read_to_string(scratch.0.join("output")).unwrap_or_default();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    (output.status.code(), stderr, outputs)
+}
+
+#[test]
+fn the_source_mutants_of_a_manual_run_follow_its_qualification_job() {
+    let formal = workflow(FORMAL);
+    let jobs = &formal["jobs"];
+    let job = &jobs["mutants"];
+    // Each item of the input is a job of the matrix that `formal limits`
+    // gives, after the qualification job of the run, also when that failed.
+    let condition = "${{ !cancelled() && needs.limits.result == 'success' && \
+                     needs.limits.outputs.mutants != '[]' }}";
+    assert_eq!(
+        (needs(job), job["if"].as_str()),
+        (vec!["limits", "gate"], Some(condition))
+    );
+    assert_eq!(
+        job["strategy"]["matrix"]["include"].as_str(),
+        Some("${{ fromJSON(needs.limits.outputs.mutants) }}")
+    );
+    assert_eq!(job["strategy"]["fail-fast"].as_bool(), Some(false));
+    assert_eq!(
+        jobs["limits"]["outputs"]["mutants"].as_str(),
+        Some("${{ steps.limits.outputs.mutants }}")
+    );
+    let step = step_named(
+        &jobs["limits"],
+        "Compute the limits from the registered budgets",
+    );
+    assert_eq!(
+        step["env"]["MUTANTS"].as_str(),
+        Some("${{ inputs.mutants }}")
+    );
+    let operators = format!("case \" {} \" in", crate::formal::mutants::OPERATORS);
+    assert!(
+        step["run"].as_str().is_some_and(|s| s.contains(&operators)),
+        "the operators of formal mutants"
+    );
+    // It downloads the qualification receipt of the run, of any attempt,
+    // into the directory that it gives the run.
+    let downloads = steps_using(job, "actions/download-artifact");
+    assert_eq!(downloads.len(), 1);
+    let with = &downloads[0]["with"];
+    let head = "${{ github.event.pull_request.head.sha || github.sha }}";
+    let pattern = format!("formal-part-qualification-{head}-*");
+    assert_eq!(with["pattern"].as_str(), Some(pattern.as_str()));
+    assert_eq!(
+        with["path"].as_str(),
+        Some("artifacts/formal/qualification")
+    );
+    assert_eq!(with["merge-multiple"].as_bool(), Some(true));
     let run = script_with_id(job, "mutants");
+    let variable = format!(
+        "--env {}=\"$GITHUB_WORKSPACE/artifacts/formal/qualification\"",
+        crate::formal::mutants::QUALIFICATION
+    );
+    assert!(run.contains(&variable), "{run}");
     assert!(
         run.ends_with("formal mutants \"$TARGET\" \"${arguments[@]}\"\n"),
         "{run}"
     );
+    let attempt = "${{ github.run_attempt }}";
+    let name = format!("formal-mutants-${{{{ matrix.key }}}}-{head}-{attempt}");
+    assert_eq!(upload_name(job), name);
+    assert_eq!(
+        job["name"].as_str(),
+        Some("formal mutants ${{ matrix.name }}")
+    );
+    let parts = steps_using(&jobs["parts"], "actions/download-artifact");
+    let pattern = parts[0]["with"]["pattern"].as_str().unwrap_or_default();
+    assert!(!name.starts_with(pattern.split('*').next().unwrap_or(pattern)));
+    // The items of a manual run, two of one target and one of another, each
+    // with its arguments and an artifact of its own; where jq is on the path,
+    // as on the runners.
+    let jq = std::process::Command::new("jq")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .status();
+    if !jq.is_ok_and(|status| status.success()) {
+        eprintln!("skipped: jq is not on the path");
+        return;
+    }
+    let registry = r#"{"schema": 3, "targets": [{"name": "a"}, {"name": "b-2", "state": "formal"},
+        {"name": "p", "state": "planned"}]}"#;
+    let (code, stderr, outputs) = limits_step(
+        registry,
+        "workflow_dispatch",
+        "b-2:literal@1/2  a b-2:literal@2/2",
+    );
+    assert_eq!(code, Some(0), "{stderr}");
+    let line = (outputs.lines()).find_map(|line| line.strip_prefix("mutants="));
+    let rows: serde_json::Value = serde_json::from_str(line.expect("the output")).expect("JSON");
+    let rows = rows.as_array().expect("the rows");
+    let field = |key: &str| Vec::from_iter(rows.iter().map(|row| row[key].clone()));
+    let strings = |values: &[&str]| Vec::from_iter(values.iter().map(|v| serde_json::json!(v)));
+    assert_eq!(field("target"), strings(&["b-2", "a", "b-2"]));
+    assert_eq!(field("key"), strings(&["b-2-1", "a-1", "b-2-2"]));
+    assert_eq!(
+        field("args"),
+        strings(&[
+            "--operator literal --part 1/2",
+            "",
+            "--operator literal --part 2/2"
+        ])
+    );
+    assert_eq!(
+        field("name"),
+        strings(&["b-2:literal@1/2", "a", "b-2:literal@2/2"])
+    );
+    let keys = std::collections::BTreeSet::from_iter(field("key").iter().map(ToString::to_string));
+    assert_eq!(keys.len(), rows.len());
+    let (code, _, outputs) = limits_step(registry, "workflow_dispatch", "a:ordering+equality");
+    assert_eq!(code, Some(0));
+    assert!(
+        outputs.contains(r#""args":"--operator ordering --operator equality""#),
+        "{outputs}"
+    );
+    // No job of source mutants on another event, or without an item.
+    for (event, input) in [
+        ("workflow_dispatch", ""),
+        ("schedule", "a"),
+        ("pull_request", "a"),
+    ] {
+        let (code, _, outputs) = limits_step(registry, event, input);
+        assert_eq!(code, Some(0), "{event}");
+        assert!(outputs.contains("mutants=[]\n"), "{event}: {outputs}");
+    }
+    // Items that the job refuses before any job runs.
+    for (input, refusal) in [
+        ("p", "p is not a formal target"),
+        ("c", "c is not a formal target"),
+        ("a:loops", "loops is not an operator of formal mutants"),
+        (
+            "a:literal@3/2",
+            "is not the interval i of k of one operator",
+        ),
+        (
+            "a:literal+method@1/2",
+            "is not the interval i of k of one operator",
+        ),
+        ("a:literal@1/5", "is not <target>"),
+        ("a@1/2", "is not <target>"),
+        ("A", "is not <target>"),
+        ("a:literal;id", "is not <target>"),
+        ("a a a a a", "more than 4 items name the target a"),
+    ] {
+        let (code, stderr, _) = limits_step(registry, "workflow_dispatch", input);
+        assert_eq!(code, Some(1), "{input}");
+        assert!(stderr.contains(refusal), "{input}: {stderr}");
+    }
 }
 
 #[test]
@@ -1158,9 +1317,24 @@ fn the_calibration_shard_and_merge_run_the_steps_of_those_of_formal() {
         (" --calibration", ""),
         ("calibration-formal-part-", "formal-part-"),
         ("formal-calibration-merge-", "formal-merge-"),
+        ("formal-calibration-mutants-", "formal-mutants-"),
+        (
+            "verification/qualification/calibration/mutants/",
+            "verification/mutants/",
+        ),
     ];
-    let pairs = [("lane", "lane"), ("shard", "shard"), ("parts", "merge")];
-    let counts = [[2, 1, 0], [1, 1, 0], [1, 1, 1]];
+    let pairs = [
+        ("lane", "lane"),
+        ("shard", "shard"),
+        ("parts", "merge"),
+        ("mutants", "mutants"),
+    ];
+    let counts = [
+        [2, 1, 0, 0, 0],
+        [1, 1, 0, 0, 0],
+        [1, 1, 1, 0, 0],
+        [1, 1, 0, 1, 1],
+    ];
     for ((key, copy), counts) in pairs.into_iter().zip(counts) {
         let own = emit(&formal["jobs"][key]["steps"]);
         // The lane of the calibration also checks the challenges that its
@@ -2081,7 +2255,7 @@ fn every_job_of_formal_that_needs_another_runs_unless_cancelled() {
     let needing = jobs(&formal)
         .into_iter()
         .filter(|(_, job)| !needs(job).is_empty());
-    assert_eq!(needing.count(), 10);
+    assert_eq!(needing.count(), 11);
     let good = "jobs:\n  a:\n    if: x\n  b:\n    needs: a\n    if: ${{ !cancelled() && y }}\n";
     assert_eq!(
         unless_cancelled_problems(&parse(good)),
@@ -2745,7 +2919,7 @@ const CONTAINER_STEPS: [(&str, &str, &str, Option<i64>); 20] = [
     (
         CALIBRATION,
         "mutants",
-        "Run the source mutants of the calibration in the image",
+        "Run the source mutants in the image",
         Some(245),
     ),
     (CANARY, "canary", "Build the image", Some(52)),

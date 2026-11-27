@@ -24,10 +24,11 @@
 # skipped only on main and fail on an event or a ref that they do not
 # judge. On a push to main, which is the merge of a pull request, the job
 # `formal receipt review` reviews the merge record of the merged head. On a
-# manual run of main that names a formal target in the input `mutants`, the
-# job `formal mutants` runs its source mutants with the operators of the
-# input `operators`. The measurement jobs are in the workflow `formal
-# measure`, `formal-measure.yml`.
+# manual run of main whose input `mutants` names formal targets, the job
+# `formal limits` expands its items into the jobs `formal mutants <item>`,
+# each of which runs the source mutants of its item after the qualification
+# job, with the qualification receipt of the run. The measurement jobs are
+# in the workflow `formal measure`, `formal-measure.yml`.
 # Actions are pinned to full commit SHAs; the comment names the release.
 name: formal
 
@@ -45,12 +46,7 @@ on:
         options: [full, weekly]
         required: true
       mutants:
-        description: A formal target whose source mutants the run generates, or none
-        type: string
-        required: false
-        default: ""
-      operators:
-        description: The operators of the source mutants, separated by spaces, or empty for every operator
+        description: "The source mutants that the run generates, or none: items separated by spaces, each <target> for every operator, <target>:<operator>+<operator> for those, or <target>:<operator>@<i>/<k> for the i-th of k intervals of one, at most four of a target"
         type: string
         required: false
         default: ""
@@ -111,7 +107,8 @@ jobs:
   # they are passed on, and so are the lanes: their names, which no two
   # lanes share, a component in no two lanes, and the budget of each, as
   # `cargo xtask formal check` requires. The limits of the qualification job
-  # do not depend on the registry and are written in it.
+  # do not depend on the registry and are written in it, and so are those of
+  # the source mutants, whose items the step checks before it passes them on.
   limits:
     name: formal limits
     needs: fast
@@ -124,6 +121,7 @@ jobs:
       lanes: ${{ steps.limits.outputs.lanes }}
       shards: ${{ steps.limits.outputs.shards }}
       scoped: ${{ steps.limits.outputs.scoped }}
+      mutants: ${{ steps.limits.outputs.mutants }}
     steps:
       - name: Check out the candidate commit
         timeout-minutes: 2
@@ -137,6 +135,7 @@ jobs:
         timeout-minutes: 1
         env:
           SCOPED: ${{ needs.fast.outputs.scoped || '[]' }}
+          MUTANTS: ${{ inputs.mutants }}
         run: |
           shard_margin=300
           receipt_margin=300
@@ -208,10 +207,61 @@ jobs:
             echo "the registered budget of $long needs a job longer than 360 minutes" >&2
             exit 1
           fi
+          # On a manual run, one job of source mutants for each item of the
+          # input `mutants`, numbered from 1 for each target: <target>, every
+          # operator, <target>:<operator>+<operator>, those operators, or
+          # <target>:<operator>@<i>/<k>, the i-th of k intervals of the
+          # mutants of one operator, 1 <= i <= k <= 4; each of a formal
+          # target, which at most four items name.
+          mutants='[]'
+          items=()
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            read -r -a items <<< "$MUTANTS"
+          fi
+          for item in "${items[@]}"; do
+            if ! [[ "$item" =~ ^([a-z0-9][a-z0-9-]*)(:([a-z]+(\+[a-z]+)*)(@([1-4])/([1-4]))?)?$ ]]; then
+              echo "$item is not <target>, <target>:<operator>+<operator> or <target>:<operator>@<i>/<k>" >&2
+              exit 1
+            fi
+            target=${BASH_REMATCH[1]}
+            given=${BASH_REMATCH[3]}
+            i=${BASH_REMATCH[6]}
+            k=${BASH_REMATCH[7]}
+            if ! jq -e --arg name "$target" \
+                'any(.targets[]; .name == $name and (.state // "formal") == "formal")' \
+                "$registry" > /dev/null; then
+              echo "$target is not a formal target of $registry" >&2
+              exit 1
+            fi
+            arguments=()
+            for operator in ${given//+/ }; do
+              case " ordering equality arithmetic bitwise logical negation literal condition method " in
+                *" $operator "*) arguments+=(--operator "$operator") ;;
+                *) echo "$operator is not an operator of formal mutants" >&2; exit 1 ;;
+              esac
+            done
+            if [ -n "$k" ]; then
+              if [ "${#arguments[@]}" != 2 ] || [ "$i" -gt "$k" ]; then
+                echo "$item is not the interval i of k of one operator, 1 <= i <= k <= 4" >&2
+                exit 1
+              fi
+              arguments+=(--part "$i/$k")
+            fi
+            n=$(jq -r --arg target "$target" '[.[] | select(.target == $target)] | length + 1' <<< "$mutants")
+            if [ "$n" -gt 4 ]; then
+              echo "more than 4 items name the target $target" >&2
+              exit 1
+            fi
+            mutants=$(jq -c --arg name "$item" --arg target "$target" --argjson n "$n" \
+              --arg args "${arguments[*]}" \
+              '. + [{name: $name, target: $target, n: $n, key: "\($target)-\($n)", args: $args}]' \
+              <<< "$mutants")
+          done
           {
             echo "lanes=$lanes"
             echo "shards=$shards"
             echo "scoped=$scoped"
+            echo "mutants=$mutants"
           } | tee -a "$GITHUB_OUTPUT"
 
   # The qualification job: `cargo xtask formal run --shard qualification`
@@ -1978,45 +2028,39 @@ jobs:
             'xtask/target/debug/xtask formal receipt "$1" | tee -a "$GITHUB_STEP_SUMMARY"; s=${PIPESTATUS[0]}; [ "$s" = 0 ] || [ "$s" = 3 ]' \
             review "$record"
 
-  # Runs the source mutants of the formal target that the input `mutants`
-  # names, with the operators of the input `operators`, every operator when
-  # it is empty, on a manual run of main beside the gate. The run of `formal
-  # mutants` has a budget of 14,400 s; with the 300 s of its receipt, 245
-  # minutes, its step two more and its job 20 more.
+  # Runs the source mutants of each item of the input `mutants` of a manual
+  # run of main, which the job `formal limits` checks and expands into a
+  # matrix, after the qualification job of the run, also when that failed:
+  # `cargo xtask formal mutants <target>` with the operators and the part of
+  # the item, in the pinned image with the flags of the gate, reads the
+  # qualification receipt of the run from the artifact of that job, of any
+  # attempt, and runs no mutant unless it is of this run, commit, tree and
+  # image, VERIFIED and complete. The run of `formal mutants` has a budget of
+  # 14,400 s; with the 300 s of its receipt, 245 minutes, its step two more
+  # and its job 20 more. The calibration workflow runs the same steps on the
+  # calibration target.
   mutants:
-    name: formal mutants
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mutants != ''
+    name: formal mutants ${{ matrix.name }}
+    needs: [limits, gate]
+    if: ${{ !cancelled() && needs.limits.result == 'success' && needs.limits.outputs.mutants != '[]' }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 267
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.limits.outputs.mutants) }}
     env:
-      TARGET: ${{ inputs.mutants }}
-      OPERATORS: ${{ inputs.operators }}
+      TARGET: ${{ matrix.target }}
+      ARGS: ${{ matrix.args }}
     steps:
       - name: Check out the candidate commit
         timeout-minutes: 2
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-
-      - name: Check the target and the operators
-        id: inputs
-        timeout-minutes: 1
-        run: |
-          # A formal target of the registry, and operators of `formal mutants`.
-          jq -e --arg name "$TARGET" \
-            'any(.targets[]; .name == $name and (.state // "formal") == "formal")' \
-            verification/targets.json > /dev/null
-          arguments=()
-          for operator in $OPERATORS; do
-            case " ordering equality arithmetic bitwise logical negation literal condition method " in
-              *" $operator "*) arguments+=(--operator "$operator") ;;
-              *) echo "$operator is not an operator of formal mutants" >&2; exit 1 ;;
-            esac
-          done
-          echo "arguments=${arguments[*]}" >> "$GITHUB_OUTPUT"
 
       - name: Record the runner and pull the image
         timeout-minutes: 8
@@ -2025,7 +2069,7 @@ jobs:
           {
             echo "== prepare started $(date -u +%FT%TZ)"
             echo "commit $HEAD_SHA, event $GITHUB_EVENT_NAME, ref $GITHUB_REF," \
-              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, job mutants, target $TARGET"
+              "run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT, job mutants, target $TARGET $ARGS"
             echo "processors: $(nproc)"
             free -b
             df -B1 /
@@ -2047,20 +2091,31 @@ jobs:
             cargo build --locked --manifest-path xtask/Cargo.toml
           } 2>&1 | tee -a artifacts/formal/job.txt
 
+      # Every attempt of the qualification job of the run into one path,
+      # below which the run takes the receipt of the latest; without one, the
+      # run is a tool failure.
+      - name: Download the qualification receipt of the run
+        timeout-minutes: 5
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: formal-part-qualification-${{ github.event.pull_request.head.sha || github.sha }}-*
+          path: artifacts/formal/qualification
+          merge-multiple: true
+
       - name: Run the source mutants in the image
         id: mutants
+        if: ${{ !cancelled() }}
         timeout-minutes: 247
-        env:
-          ARGUMENTS: ${{ steps.inputs.outputs.arguments }}
         run: |
           read -r -a gate_flags <<< "$GATE_FLAGS"
-          read -r -a arguments <<< "$ARGUMENTS"
+          read -r -a arguments <<< "$ARGS"
           exec bash .github/scripts/deadline.sh --stop-commands 245m 1m \
             docker run --rm --name "formal-mutants-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" "${gate_flags[@]}" \
             --user "$(id -u):$(id -g)" \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" --workdir "$GITHUB_WORKSPACE" \
             --env GITHUB_REF --env GITHUB_RUN_ID --env GITHUB_RUN_ATTEMPT \
             --env KREPI_FORMAL_IMAGE="$IMAGE" \
+            --env KREPI_FORMAL_QUALIFICATION="$GITHUB_WORKSPACE/artifacts/formal/qualification" \
             "$IMAGE" "$GITHUB_WORKSPACE/xtask/target/debug/xtask" formal mutants "$TARGET" "${arguments[@]}"
 
       - name: Remove the container of the run
@@ -2069,7 +2124,7 @@ jobs:
           docker rm --force "formal-mutants-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /dev/null 2>&1 || true
 
       - name: Summarize the list of survivors and compress the logs
-        if: always() && steps.inputs.outcome == 'success'
+        if: always()
         env:
           OUTCOME: ${{ steps.mutants.outcome }}
         run: |
@@ -2095,13 +2150,14 @@ jobs:
             cp "$written" "$list"
           fi
           {
-            echo "## formal mutants: $TARGET"
+            echo "## formal mutants: $TARGET $ARGS"
             echo
             echo "The run step: $OUTCOME."
             echo
             for receipt in artifacts/formal/runs/*/receipt.json; do
               jq -r --arg path "$receipt" --arg sha "$(sha256sum "$receipt" | cut -d ' ' -f 1)" '
                 "- Receipt `\($path)`, SHA-256 `\($sha)`: `\(.status)`, \(.seconds) s",
+                (.source_mutants.qualification // empty | "- Qualification receipt SHA-256 `\(.sha256)`, run \(.run_id): `\(.status)`, complete \(.complete)"),
                 (.units | to_entries[] | select(.value.status != "VERIFIED") | "- `\(.key)`: \(.value.status)"),
                 (.failures[] | "- \(.status): \(.message | .[0:500])")
               ' "$receipt"
@@ -2114,10 +2170,10 @@ jobs:
           } | tee artifacts/formal/summary.md | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the list of survivors, the receipt and the logs
-        if: always() && steps.inputs.outcome == 'success'
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: formal-mutants-${{ github.sha }}-${{ github.run_attempt }}
+          name: formal-mutants-${{ matrix.key }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: |
             artifacts/formal/mutants/
             artifacts/formal/summary.md

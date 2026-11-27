@@ -518,6 +518,34 @@ pub fn command(root: &Path, layout: &Layout, write: bool) -> ExitCode {
     ExitCode::from(u8::from(!problems.is_empty()))
 }
 
+/// The problems of the runs of the list of survivors `list`, which `cargo
+/// xtask formal check` reports with it: runs of other than one CI run, and
+/// an operator that is neither in one run without a part nor alone in the
+/// `k` runs of its parts `1/k` to `k/k`.
+pub fn runs_problems(list: &mutants::List) -> Vec<String> {
+    let ids = BTreeSet::from_iter(list.runs.iter().map(|run| &run.run_id));
+    let count = ids.len();
+    let mut problems =
+        Vec::from_iter((count != 1).then(|| format!("its runs are of {count} CI runs, not one")));
+    for operator in BTreeSet::from_iter(list.runs.iter().flat_map(|run| &run.operators)) {
+        let runs =
+            Vec::from_iter((list.runs.iter()).filter(|run| run.operators.contains(operator)));
+        let mut parts = Vec::from_iter(runs.iter().map(|run| run.part.clone()));
+        parts.sort();
+        let k = runs.len();
+        let split = Vec::from_iter((1..=k).map(|i| Some(format!("{i}/{k}"))));
+        let alone = runs.iter().all(|run| run.operators.len() == 1);
+        if parts != [None] && (parts != split || !alone) {
+            let parts = Vec::from_iter(parts.iter().map(|part| part.as_deref().unwrap_or("none")));
+            let (parts, whole) = (parts.join(", "), format!("1/{k} to {k}/{k}"));
+            problems.push(format!(
+                "the runs of the operator {operator} are neither one without a part nor its parts {whole} alone: {parts}"
+            ));
+        }
+    }
+    problems
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -1453,14 +1481,21 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
             find: "f()".into(),
             replace: "f( )".into(),
             function: format!("{LIB}#{function}"),
+            run: "r".into(),
             class,
             reason: Some("No theorem is about it.".into()),
         };
         let path = mutants::list_path(&LAYOUT, "a");
         let checked = |survivors: Vec<mutants::Survivor>| {
+            let run = mutants::Run {
+                run: "r".into(),
+                operators: vec!["literal".into()],
+                ..mutants::Run::default()
+            };
             let list = mutants::List {
                 schema: mutants::SCHEMA,
                 target: "a".into(),
+                runs: vec![run],
                 survivors,
                 ..mutants::List::default()
             };
