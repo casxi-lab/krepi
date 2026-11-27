@@ -3063,6 +3063,45 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_part_of_the_source_mutants_writes_its_part_and_what_it_read_in_its_list() {
+        // The list of the run holds it as its one run, with its part, its CI
+        // run and the SHA-256 of the qualification receipt that it read.
+        let fixture = with_targets("mutants-list", &two_targets(1_800, 1));
+        let source = mutants::Source {
+            operators: vec!["literal".to_string()],
+            part: Some((2, 3)),
+        };
+        let like = mutants_run(&fixture, &source).receipt;
+        let sha256 = qualified(&fixture, "1-1-0", &like, |_| {});
+        let done = mutants_run(&fixture, &source);
+        assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.failures());
+        let code = mutants::write_list(
+            fixture.root(),
+            &Layout::PRODUCTION,
+            "t",
+            done.draft.as_deref(),
+            &done.run,
+            &done.receipt,
+            done.code,
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        let path = fixture
+            .root()
+            .join(mutants::list_path(&Layout::PRODUCTION, "t"));
+        let text = fs::read_to_string(path).expect("the list");
+        let list: mutants::List = serde_json::from_str(&text).expect("a list");
+        let runs = Vec::from_iter(list.runs.iter().map(|run| {
+            let (part, read) = (run.part.as_deref(), run.qualification_sha256.as_deref());
+            (part, read, run.run_id.as_deref(), run.operators.clone())
+        }));
+        let literal = vec!["literal".to_string()];
+        assert_eq!(
+            runs,
+            [(Some("2/3"), Some(sha256.as_str()), Some("41"), literal)]
+        );
+    }
+
+    #[test]
     fn a_run_of_source_mutants_without_a_qualification_receipt_runs_no_mutant() {
         let fixture = with_targets("mutants-without", &two_targets(1_800, 1));
         let source = mutants::Source {
