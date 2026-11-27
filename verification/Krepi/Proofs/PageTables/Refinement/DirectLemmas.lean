@@ -18,22 +18,39 @@ search of its plan.
 - The checks of the leaves of a range: `UsableRel` (what the record of the
   checks holds against the leaves that passed), `checkPlace_leaf` (the check
   of `check_leaf` on a leaf is the free-slot check of the leaf of the
-  specification), `check_leaves_loop_spec` and `check_leaves_spec`.
+  specification) and `check_leaves_loop_spec`.
 - The checks of a range and of the usable ranges:
-  `direct_check_range_spec` (`Tables.checkUsableRange`),
-  `check_usable_loop_spec` and `check_usable_spec` (the fold of
-  `Tables.checkUsableRange` over the usable ranges that the iterator of the
-  boot memory map gives).
+  `checkUsableRange_tablesOf`, `direct_check_range_spec`
+  (`Tables.checkUsableRange`), `check_usable_loop_spec` and
+  `check_usable_spec` (the fold of `Tables.checkUsableRange` over the usable
+  ranges that the iterator of the boot memory map gives).
 - `DirectRoom` (the one premise on the record of the set that the count of
-  new tables of the code needs) and `DirectMapStart`, and
-  `direct_map_set_spec`: `direct_map` gives the error of `Tables.directMap`
-  with the set unchanged, or its set after the write phase and a plan
-  iterator at its start, for a boot memory map that the fdt entries built.
+  new tables of the code needs), `DirectMapStart`, `memoryPlanRepr_lengths`
+  and `direct_map_set_spec`: `direct_map` gives the error of
+  `Tables.directMap` with the set unchanged, or its set after the write phase
+  and a plan iterator at its start, for a boot memory map that the fdt
+  entries built.
+- The leaf search of the plan: `searchList` (the ranges of a state of the
+  search), `usable_leaf_loop_spec` and `usable_leaf_spec` (`usableFind` of
+  those ranges; the ranges of the state where the search stopped are a
+  suffix of them), `directFind`, `SearchOk`, `found_of_usableFind`, and
+  `direct_map_plan_next_spec` (`DirectMapPlan::next` is one `Cur.step` with
+  the search `directFind` of its state).
+- The search from the start of the plan: `searchList_start`,
+  `directFind_eq_of_skip`, `searchOk_start` and `directFind_eq_firstFound`
+  (the search of a state is the first leaf at or above an address of
+  `usableLeaves` of the usable ranges).
+- `direct_map_of_stands`: the conclusion of the statement `DirectMap` for an
+  input with the room of `DirectRoom`, from the simulation of `mapPlan` by
+  the plan iterator.
 
 The checks of the leaves rely on `check_leaf_spec`, whose count of new tables
 starts from the record `used` of the set and cannot overflow only while that
 record is far enough below the largest `usize`: `DirectRoom` states that
-premise once.
+premise once, and the triples that need it (`check_leaves_loop_spec`,
+`direct_check_range_spec`, `check_usable_loop_spec`, `check_usable_spec`,
+`direct_map_set_spec`, `direct_map_of_stands`) take it or the bound that it
+gives. The leaf search, the plan step and the fdt queries do not need it.
 -/
 
 @[expose] public section
@@ -247,6 +264,15 @@ theorem check_leaves_loop_spec {N : Usize} (set : page_tables.Tables N true)
       exact hr
   · exact ⟨hpa, hpa4, hpae, acc, fuel, hfuel, hrel, hov, rfl⟩
 
+/-- The premise on the record `used` of the tables in use of the set that
+the checks of `direct_map` need: at least `2 ^ 28` below the largest
+`usize`, room for two new tables for each of the at most `164 · 2 ^ 19`
+leaves of the usable ranges of a boot memory map. The checks of the code
+count the new tables from the record (`MapCheck::new(set.used)`), so a larger
+record can overflow their count; every triple of the direct map that needs
+the premise takes it through this definition. -/
+def DirectRoom (used : Nat) : Prop := used + 2 ^ 28 ≤ Usize.max
+
 /-- `checkUsableRange_eq` on the set of the code, whose region is that of
 `regionOf true`. -/
 theorem checkUsableRange_tablesOf {N : Usize} (set : page_tables.Tables N true) (base : UInt64)
@@ -355,8 +381,8 @@ theorem direct_check_range_spec {N : Usize} (set : page_tables.Tables N true)
 ranges, on a pool of at least one table, for managed banks within 64 bits,
 nonempty reservations, usable ranges `Us` within 64 bits, apart in address
 order and at most 164, of which the ranges `y.1` are checked and the rest are
-those of the iterator, a width below 64 and a record of the set at least
-`2 ^ 28` below the largest `usize`: the fold of `Tables.checkUsableRange`
+those of the iterator, a width below 64 and a record of the set with the
+room of `DirectRoom`: the fold of `Tables.checkUsableRange`
 over the ranges left, from the ranges checked and the leaves that passed
 (`UsableRel`). -/
 theorem check_usable_loop_spec {N : Usize}
@@ -364,7 +390,7 @@ theorem check_usable_loop_spec {N : Usize}
     (M Rs Us : List Krepi.Spec.Fdt.Span) (hN : 0 < N.val) (hb : bits.val < 64)
     (hM : ∀ b ∈ M, b.Valid) (hRs : ∀ r ∈ Rs, r.Nonempty) (hUs : ∀ u ∈ Us, u.Valid)
     (hsort : Us.Pairwise (fun x y => x.endNat ≤ y.start.toNat)) (hlen : Us.length ≤ 164)
-    (hov : i.val + 2 ^ 28 ≤ Usize.max)
+    (hov : DirectRoom i.val)
     (ranges : fdt.AvailableRanges) (hm : spansOf ranges.managed = M)
     (hr : spansOf ranges.reservations = Rs) (check : page_tables.boot.MapCheck)
     (y : List Krepi.Spec.Fdt.Span × List (MapLeaf × Place))
@@ -445,14 +471,14 @@ theorem check_usable_loop_spec {N : Usize}
 for an iterator at the start of the usable ranges `Us` of managed banks `M`
 within 64 bits and nonempty reservations `Rs`, with `Us` within 64 bits,
 apart in address order and at most 164, a width below 64 and a record of the
-set at least `2 ^ 28` below the largest `usize`: the fold of
+set with the room of `DirectRoom`: the fold of
 `Tables.checkUsableRange` over `Us`, with the record of the checks standing
 for its result (`UsableRel`). -/
 theorem check_usable_spec {N : Usize} (set : page_tables.Tables N true)
     (ranges : fdt.AvailableRanges) (base : U64) (bits : U8) (M Rs Us : List Krepi.Spec.Fdt.Span)
     (hN : 0 < N.val) (hb : bits.val < 64) (hM : ∀ b ∈ M, b.Valid) (hRs : ∀ r ∈ Rs, r.Nonempty)
     (hUs : ∀ u ∈ Us, u.Valid) (hsort : Us.Pairwise (fun x y => x.endNat ≤ y.start.toNat))
-    (hlen : Us.length ≤ 164) (hov : set.used.val + 2 ^ 28 ≤ Usize.max)
+    (hlen : Us.length ≤ 164) (hov : DirectRoom set.used.val)
     (hm : spansOf ranges.managed = M) (hr : spansOf ranges.reservations = Rs)
     (hstart : availableFrom M Rs ranges.cursor.bank.val ranges.cursor.at.val = Us) :
     page_tables.boot.direct.check_usable set ranges base bits ⦃ r =>
@@ -474,14 +500,6 @@ theorem check_usable_spec {N : Usize} (set : page_tables.Tables N true)
 
 /-! ## `direct_map` -/
 
-/-- The premise on the record `used` of the tables in use of the set that
-the checks of `direct_map` need: at least `2 ^ 28` below the largest
-`usize`, room for two new tables for each of the at most `164 · 2 ^ 19`
-leaves of the usable ranges of a boot memory map. The checks of the code
-count the new tables from the record (`MapCheck::new(set.used)`), so a larger
-record can overflow their count; every triple of the direct map that needs
-the premise takes it through this definition. -/
-def DirectRoom (used : Nat) : Prop := used + 2 ^ 28 ≤ Usize.max
 
 /-- The plan iterator that `direct_map` returns on success, before its first
 call: the set after the write phase, `base`, the cursor before the first
@@ -984,5 +1002,40 @@ theorem directFind_eq_firstFound {M Rs Us sk : List Krepi.Spec.Fdt.Span}
     directFind M Rs ranges range f l p =
       firstFound ((Us.flatMap usableLeaves).map foundOfLeaf) f l p := by
   rw [directFind_eq_of_skip h hb f l p hf, usableFind_eq_firstFound Us f hUs hpw hls]
+
+/-! ## What `DirectMap` needs besides these triples -/
+
+/-- **The statement `DirectMap` for one input, from the simulation.** For a
+map that stands for a boot memory map that the fdt entries built and a record
+of the set with the room of `DirectRoom`, `direct_map` satisfies the
+conclusion of `DirectMap` as soon as every plan iterator at its start
+(`DirectMapStart`) stands for the plan of a success of `Tables.directMap`:
+the simulation of `mapPlan` by `DirectMapPlan::next`, whose one step is
+`direct_map_plan_next_spec`. -/
+theorem direct_map_of_stands {N : Usize} (s : page_tables.Tables N true)
+    (memory : fdt.MemoryPlan) (P : Krepi.Spec.Fdt.MemoryPlan) (base : U64) (bits : U8)
+    (hP : MemoryPlanRepr memory P) (hB : Witnesses.TableSets.BuiltPlan P)
+    (hov : DirectRoom s.used.val)
+    (hsim : ∀ (it : page_tables.DirectMapPlan N) (S : Tables .upper N.val) (plan : Plan),
+      DirectMapStart s P base it →
+      (tablesOf s).directMap P (word64 base) (byte bits) = .ok (S, plan) →
+      Stands page_tables.boot.direct.DirectMapPlan.next StepRepr it plan) :
+    page_tables.direct_map s memory base bits ⦃ r s' =>
+      Writes (fun s' S => tablesOf s' = S) (Stands page_tables.boot.direct.DirectMapPlan.next StepRepr)
+        (tableErrorOf · = ·) s r s' ((tablesOf s).directMap P (word64 base) (byte bits)) ⦄ := by
+  refine spec_mono (direct_map_set_spec s memory P base bits hP hB hov) ?_
+  rintro ⟨r, s'⟩ h
+  cases hd : (tablesOf s).directMap P (word64 base) (byte bits) with
+  | error y =>
+    rw [hd] at h
+    cases r with
+    | Ok a => exact h.elim
+    | Err x => exact h
+  | ok v =>
+    obtain ⟨S, plan⟩ := v
+    rw [hd] at h
+    cases r with
+    | Ok a => exact ⟨hsim a S plan h.1 hd, h.2⟩
+    | Err x => exact h.elim
 
 end Krepi.Proofs.PageTables.Refinement

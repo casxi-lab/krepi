@@ -26,14 +26,12 @@ built once and not again for every mutant of the code.
   leaf at an address: a block at a multiple of 2 MiB with 2 MiB left, a page
   elsewhere), `directLeaf_form`, `directLeaf_of_block`, `directLeaf_of_page`,
   `directLeaf_size`, `directLeaf_pa`, `directLeaf_va`, `directLeaf_va_toNat`,
-  `directLeaves_succ`,
-  `directLeaves_stop`,
-  and the fuel: `leafFuel` (an upper bound on the leaves left from an
-  address), `leafFuel_step` and `leafFuel_leaf` (one leaf uses one),
-  `leafFuel_start` (the fuel `directFuel` of the specification covers a
-  range), `directFuel_le` (at most `2 ^ 19` leaves in a range below
-  `2 ^ 39`) and `usable_room` (the room of the record of new tables before a
-  range).
+  `directLeaves_succ`, `directLeaves_stop`; and the fuel: `leafFuel` (an
+  upper bound on the leaves left from an address), `leafFuel_step` and
+  `leafFuel_leaf` (one leaf uses one), `leafFuel_start` (the fuel
+  `directFuel` of the specification covers a range), `directFuel_le` (at
+  most `2 ^ 19` leaves in a range below `2 ^ 39`) and `usable_room` (the room
+  of the record of new tables before a range).
 - The ranges before: `reachSpans`, `reachSpans_append`, and
   `any_meets_spans` (for ranges that start at or below a leaf, an earlier
   range shares an address with it exactly when the leaf starts below
