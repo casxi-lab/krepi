@@ -140,12 +140,12 @@ a power of two as the alignment. -/
   · simp only [‹o1 = none›] at o1_post
     rw [fit_low_overflow hlh (by omega)]; rfl
   · simp only [‹o1 = some «end»›] at o1_post
-    have hh : «end».val ≤ high.val := by scalar_tac
+    have hh : «end».val ≤ high.val := (UScalar.le_equiv _ _).1 ‹_›
     obtain ⟨r, hr, hrs, hrl⟩ := fit_low_range (align := align.val) hlh hb (by omega) (by omega)
     rw [hr]
     exact ⟨(word64_eq_iff.2 (by rw [hrs, hs])).symm, (word64_eq_iff.2 hrl.symm).symm⟩
   · simp only [‹o1 = some «end»›] at o1_post
-    have hh : high.val < «end».val := by scalar_tac
+    have hh : high.val < «end».val := Nat.not_le.mp (mt (UScalar.le_equiv _ _).2 ‹_›)
     rw [fit_low_none (align := align.val) hlh (by omega) (by omega)]; trivial
 
 /-- `high_fit(low, high, bytes, align)`: the highest range of the request in
@@ -163,17 +163,17 @@ a power of two as the alignment. -/
   have h1 : 1 ≤ align.val := by rw [ha]; exact Nat.one_le_two_pow
   unfold page_tables.ownership.placement.high_fit
   step*
-  · rw [fit_high_small hlh (by scalar_tac)]; trivial
+  · rw [fit_high_small hlh ((UScalar.lt_equiv _ _).1 ‹_›)]; trivial
   all_goals
     have hs : start.val = alignDown (high.val - bytes.val) align.val := by
       rw [start_post, UScalar.val_and, i2_post, u64_complement_val, i1_post, i_post,
         alignDown_and (by have := u64_lt high; omega) ha hk.le]
-  · have hl : low.val ≤ start.val := by scalar_tac
+  · have hl : low.val ≤ start.val := (UScalar.le_equiv _ _).1 ‹_›
     obtain ⟨r, hr, hrs, hrl⟩ := fit_high_range (align := align.val) hlh i_post1 hb (u64_lt high)
       (by omega)
     rw [hr]
     exact ⟨(word64_eq_iff.2 (by rw [hrs, hs])).symm, (word64_eq_iff.2 hrl.symm).symm⟩
-  · have hl : start.val < low.val := by scalar_tac
+  · have hl : start.val < low.val := Nat.not_le.mp (mt (UScalar.le_equiv _ _).2 ‹_›)
     rw [fit_high_below hlh i_post1 (by omega)]; trivial
 
 /-- `fit(placement, extent, bytes, align)`: the range that the part of a free
@@ -264,8 +264,8 @@ theorem placement_scan_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_ta
     simp only at hP' hst hinv
     unfold page_tables.ownership.placement.scan_loop.body
     by_cases h1 : st < count
-    · have h1' : st.val < count.val := by scalar_tac
-      have h2 : st < E := by scalar_tac
+    · have h1' : st.val < count.val := (UScalar.lt_equiv _ _).1 h1
+      have h2 : st < E := (UScalar.lt_equiv _ _).2 (by omega)
       simp only [h1, h2, ↓reduceIte]
       apply spec_bind (Pₘ := fun (x : page_tables.Direction × page_tables.Extent) =>
         x.1 = pl.direction ∧ ∃ X, (placeOrder P.direction Ts)[st.val]? = some X ∧
@@ -279,7 +279,7 @@ theorem placement_scan_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_ta
           exact ⟨X, by rw [getElem?_placeOrder_low]; exact hX, by rw [extent1_post]; exact hXr⟩
         · simp only [directionOf]
           step*
-          have hi : i1.val = count.val - 1 - st.val := by scalar_tac
+          have hi : i1.val = count.val - 1 - st.val := by omega
           have hi1 : i1.val < extents.val.length := by rw [extents.property]; omega
           obtain ⟨X, hX, hXr⟩ := listRel_take_getElem? hT (i := i1.val) (by omega)
             (List.getElem?_eq_getElem hi1)
@@ -300,7 +300,7 @@ theorem placement_scan_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_ta
           step*
           · have hrv : r = .Ok none := by rw [branch_ok cf_post (by assumption), ‹val = none›]
             rw [hrv] at r_post
-            refine ⟨hP'', by scalar_tac, ?_, by scalar_tac⟩
+            refine ⟨hP'', by omega, ?_, by omega⟩
             rw [step1_post, ← hinv, scan_free_none hfree' (fitRel_none r_post)]
           · have hrv : r = .Ok (some range) := by
               rw [branch_ok cf_post (by assumption), ‹val = some range›]
@@ -314,8 +314,9 @@ theorem placement_scan_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_ta
             have hextra : i.val = X.extra R' := by
               rw [i_post, extra_eq, physRange_start hXr.1, physRange_start hR',
                 physRange_endNat hXr.1, physRange_endNat hR']
-            refine ⟨hP'', by scalar_tac, ?_, by scalar_tac⟩
-            rw [step1_post, ← hinv, scan_free_more hfree' hF (by scalar_tac)]
+            refine ⟨hP'', by omega, ?_, by omega⟩
+            have hlt := (UScalar.lt_equiv room i).1 ‹_›
+            rw [step1_post, ← hinv, scan_free_more hfree' hF (by omega)]
           · have hrv : r = .Ok (some range) := by
               rw [branch_ok cf_post (by assumption), ‹val = some range›]
             rw [hrv] at r_post
@@ -323,7 +324,8 @@ theorem placement_scan_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_ta
             have hextra : i.val = X.extra R' := by
               rw [i_post, extra_eq, physRange_start hXr.1, physRange_start hR',
                 physRange_endNat hXr.1, physRange_endNat hR']
-            rw [← hinv, scan_free_ok hfree' hF (by scalar_tac)]
+            have hlt := mt (UScalar.lt_equiv room i).2 ‹_›
+            rw [← hinv, scan_free_ok hfree' hF (by omega)]
             exact hR'
           · have hre : r = .Err e := branch_err cf_post (by assumption) residual_post
             rw [hre] at r_post
@@ -337,9 +339,9 @@ theorem placement_scan_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_ta
           all_goals first
             | exact hP''.1
             | exact hP''.2
-            | scalar_tac
+            | omega
             | rw [step1_post, ← hinv, scan_held hheld]
-    · have h1' : count.val ≤ st.val := by scalar_tac
+    · have h1' : count.val ≤ st.val := Nat.not_lt.mp (mt (UScalar.lt_equiv _ _).2 h1)
       simp only [h1, ↓reduceIte]
       have hnil : (placeOrder P.direction Ts).drop st.val = [] :=
         List.drop_eq_nil_of_le (by rw [placeOrder_length]; omega)
@@ -385,54 +387,50 @@ power of two as the alignment. -/
   simp only [page_limit_eq, page_size_eq, bind_ok]
   rw [choose_eq, word64_toNat, word64_toNat]
   have h0 : (0#u64 : U64).val = 0 := rfl
+  have hge : ∀ x : U64, x ≥ 4503599627370496#u64 ↔ 2 ^ 52 ≤ x.val := fun x => by
+    rw [ge_iff_le, UScalar.le_equiv, show (4503599627370496#u64 : U64).val = 2 ^ 52 from rfl]
   step*
-  · simp only [show 2 ^ 52 ≤ pages.val by scalar_tac, ↓reduceIte, agrees_err_error,
+  · simp only [(hge pages).1 ‹_›, ↓reduceIte, agrees_err_error, ownershipErrorOf]
+  · simp only [mt (hge pages).2 ‹_›, (hge alignment).1 ‹_›, ↓reduceIte, agrees_err_error,
       ownershipErrorOf]
-  · simp only [show ¬ 2 ^ 52 ≤ pages.val by scalar_tac, show 2 ^ 52 ≤ alignment.val by scalar_tac,
-      ↓reduceIte, agrees_err_error, ownershipErrorOf]
-  · simp only [h0, show ¬ 2 ^ 52 ≤ alignment.val by scalar_tac, Nat.not_le.mpr (Nat.two_pow_pos 52),
-      ↓reduceIte, agrees_err_error, ownershipErrorOf]
-  · simp only [h0, show ¬ 2 ^ 52 ≤ pages.val by scalar_tac, show ¬ pages.val = 0 by scalar_tac,
+  · simp only [h0, mt (hge alignment).2 ‹_›, Nat.not_le.mpr (Nat.two_pow_pos 52), ↓reduceIte,
+      agrees_err_error, ownershipErrorOf]
+  · simp only [h0, mt (hge pages).2 ‹_›, mt u64_eq_zero_iff.2 ‹_›,
       Nat.not_le.mpr (Nat.two_pow_pos 52), ↓reduceIte, agrees_err_error, ownershipErrorOf]
+  all_goals
+    have n1 : ¬ 2 ^ 52 ≤ pages.val := mt (hge pages).2 ‹_›
+    have n2 : ¬ 2 ^ 52 ≤ alignment.val := mt (hge alignment).2 ‹_›
+    have n3 : ¬ pages.val = 0 := mt u64_eq_zero_iff.2 ‹_›
+    have n4 : ¬ alignment.val = 0 := mt u64_eq_zero_iff.2 ‹_›
   · have h6 : alignment.val &&& (alignment.val - 1) ≠ 0 := by
       rw [← i1_post, ← UScalar.val_and, ← i2_post]; exact bne_zero_iff.1 ‹_›
-    simp only [show ¬ 2 ^ 52 ≤ pages.val by scalar_tac, show ¬ 2 ^ 52 ≤ alignment.val by scalar_tac,
-      show ¬ pages.val = 0 by scalar_tac, show ¬ alignment.val = 0 by scalar_tac, h6, ne_eq,
-      not_false_eq_true, ↓reduceIte, agrees_err_error, ownershipErrorOf]
-  · have h6 : alignment.val &&& (alignment.val - 1) = 0 := by
+    simp only [n1, n2, n3, n4, h6, ne_eq, not_false_eq_true, ↓reduceIte, agrees_err_error,
+      ownershipErrorOf]
+  all_goals
+    have h6 : alignment.val &&& (alignment.val - 1) = 0 := by
       rw [← i1_post, ← UScalar.val_and, ← i2_post]; exact not_bne_zero_iff.1 ‹_›
-    obtain ⟨k, hk⟩ := pow_two_of_and_pred (show alignment.val ≠ 0 by scalar_tac) h6
+  · obtain ⟨k, hk⟩ := pow_two_of_and_pred n4 h6
     exact ⟨k + 12, by rw [i5_post, hk, Nat.pow_add]⟩
-  · have h6 : alignment.val &&& (alignment.val - 1) = 0 := by
-      rw [← i1_post, ← UScalar.val_and, ← i2_post]; exact not_bne_zero_iff.1 ‹_›
-    have hcn : T.counter ≠ .exhausted := by rw [hcnt, ‹t.counter = _›]; simp [counterOf]
+  · have hcn : T.counter ≠ .exhausted := by rw [hcnt, ‹t.counter = _›]; simp [counterOf]
     have hr := branch_ok cf_post ‹_›
     rw [hr] at r_post
     obtain ⟨R, hR, hRr⟩ := agrees_ok_iff.1 r_post
     have e3 : E.val - T.extents.length = i3.val := by rw [i3_post, hlen]
     have e4 : pages.val * PAGE_SIZE = i4.val := by rw [i4_post]; rfl
     have e5 : alignment.val * PAGE_SIZE = i5.val := by rw [i5_post]; rfl
-    simp only [show ¬ 2 ^ 52 ≤ pages.val by scalar_tac, show ¬ 2 ^ 52 ≤ alignment.val by scalar_tac,
-      show ¬ pages.val = 0 by scalar_tac, show ¬ alignment.val = 0 by scalar_tac, h6, ne_eq,
-      not_true_eq_false, hcn, ↓reduceIte, e3, e4, e5, hR]
+    simp only [n1, n2, n3, n4, h6, ne_eq, not_true_eq_false, hcn, ↓reduceIte, e3, e4, e5, hR]
     exact ⟨rfl, hRr⟩
-  · have h6 : alignment.val &&& (alignment.val - 1) = 0 := by
-      rw [← i1_post, ← UScalar.val_and, ← i2_post]; exact not_bne_zero_iff.1 ‹_›
-    have hcn : T.counter ≠ .exhausted := by rw [hcnt, ‹t.counter = _›]; simp [counterOf]
+  · have hcn : T.counter ≠ .exhausted := by rw [hcnt, ‹t.counter = _›]; simp [counterOf]
     have hs := agrees_err_of_branch cf_post ‹_› residual_post ‹_›
     have e3 : E.val - T.extents.length = i3.val := by rw [i3_post, hlen]
     have e4 : pages.val * PAGE_SIZE = i4.val := by rw [i4_post]; rfl
     have e5 : alignment.val * PAGE_SIZE = i5.val := by rw [i5_post]; rfl
-    simp only [show ¬ 2 ^ 52 ≤ pages.val by scalar_tac, show ¬ 2 ^ 52 ≤ alignment.val by scalar_tac,
-      show ¬ pages.val = 0 by scalar_tac, show ¬ alignment.val = 0 by scalar_tac, h6, ne_eq,
-      not_true_eq_false, hcn, ↓reduceIte, e3, e4, e5, hs, r_post, ← e_post]
+    simp only [n1, n2, n3, n4, h6, ne_eq, not_true_eq_false, hcn, ↓reduceIte, e3, e4, e5, hs,
+      r_post, ← e_post]
     rfl
-  · have h6 : alignment.val &&& (alignment.val - 1) = 0 := by
-      rw [← i1_post, ← UScalar.val_and, ← i2_post]; exact not_bne_zero_iff.1 ‹_›
-    have hce : T.counter = .exhausted := by rw [hcnt, ‹t.counter = _›]; rfl
-    simp only [show ¬ 2 ^ 52 ≤ pages.val by scalar_tac, show ¬ 2 ^ 52 ≤ alignment.val by scalar_tac,
-      show ¬ pages.val = 0 by scalar_tac, show ¬ alignment.val = 0 by scalar_tac, h6, ne_eq,
-      not_true_eq_false, hce, ↓reduceIte, agrees_err_error, ownershipErrorOf]
+  · have hce : T.counter = .exhausted := by rw [hcnt, ‹t.counter = _›]; rfl
+    simp only [n1, n2, n3, n4, h6, ne_eq, not_true_eq_false, hce, ↓reduceIte, agrees_err_error,
+      ownershipErrorOf]
 
 /-! ## The search of a free extent -/
 
@@ -462,8 +460,8 @@ theorem free_containing_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_t
   · rintro idx ⟨hidx, hinv⟩
     unfold page_tables.ownership.placement.free_containing_loop.body
     by_cases h1 : idx < count
-    · have h1' : idx.val < count.val := by scalar_tac
-      have h2 : idx < E := by scalar_tac
+    · have h1' : idx.val < count.val := (UScalar.lt_equiv _ _).1 h1
+      have h2 : idx < E := (UScalar.lt_equiv _ _).2 (by omega)
       simp only [h1, h2, ↓reduceIte]
       have hi1 : idx.val < extents.val.length := by rw [extents.property]; omega
       obtain ⟨X, hX, hXr⟩ := listRel_take_getElem? hT h1' (List.getElem?_eq_getElem hi1)
@@ -483,23 +481,23 @@ theorem free_containing_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_t
           rw [PhysRange.contains, physRange_start hXr.1, physRange_start hR,
             physRange_endNat hXr.1, physRange_endNat hR, ← Bool.decide_and, ← b1_post]
           simpa using ‹¬b1 = true›
-        refine ⟨by scalar_tac, fun j hj Y hY => ?_, by scalar_tac⟩
+        refine ⟨by omega, fun j hj Y hY => ?_, by omega⟩
         rcases Nat.lt_or_ge j idx.val with hj' | hj'
         · exact hinv j hj' Y hY
-        · have : j = idx.val := by scalar_tac
+        · have : j = idx.val := by omega
           subst this
           rw [hX] at hY; cases hY
           rw [hcont, Bool.and_false]
       · have hfree : (X.holding == .free) = false := by
           rw [hXr.2.2, ← b_post]; simpa using ‹¬b = true›
-        refine ⟨by scalar_tac, fun j hj Y hY => ?_, by scalar_tac⟩
+        refine ⟨by omega, fun j hj Y hY => ?_, by omega⟩
         rcases Nat.lt_or_ge j idx.val with hj' | hj'
         · exact hinv j hj' Y hY
-        · have : j = idx.val := by scalar_tac
+        · have : j = idx.val := by omega
           subst this
           rw [hX] at hY; cases hY
           rw [hfree, Bool.false_and]
-    · have h1' : count.val ≤ idx.val := by scalar_tac
+    · have h1' : count.val ≤ idx.val := Nat.not_lt.mp (mt (UScalar.lt_equiv _ _).2 h1)
       simp only [h1, ↓reduceIte]
       apply spec_of_eq rfl
       exact splitFirst_of_none fun j hj => hinv j (by omega) _ (List.getElem?_eq_getElem hj)
@@ -546,23 +544,25 @@ theorem open_gap_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_tables.E
     simp only at ha1 ha2 hinv
     unfold page_tables.ownership.placement.open_gap_loop.body
     step*
-    · refine ⟨by scalar_tac, by scalar_tac, fun j => ?_, by scalar_tac⟩
+    · have hp := (UScalar.lt_equiv _ _).1 ‹i < p›
       have hl : A.val.length = E.val := A.property
+      refine ⟨by omega, by omega, fun j => ?_, by omega⟩
       have he : A.val[at1.val]? = some e := by
         rw [e_post]; exact List.getElem?_eq_getElem _
       rw [hinv at1.val] at he
-      simp only [show ¬ (p.val + gap.val ≤ at1.val ∧ at1.val < count + gap.val) by scalar_tac,
+      simp only [show ¬ (p.val + gap.val ≤ at1.val ∧ at1.val < count + gap.val) by omega,
         ↓reduceIte] at he
       rw [a_post, Array.set_val_eq, List.getElem?_set]
       by_cases hj : i1.val = j
       · subst hj
-        simp only [↓reduceIte, show i1.val < A.val.length by scalar_tac]
+        simp only [↓reduceIte, show i1.val < A.val.length by omega]
         split_ifs with hc
-        · rw [show i1.val - gap.val = at1.val by scalar_tac, he]
-        · exfalso; scalar_tac
+        · rw [show i1.val - gap.val = at1.val by omega, he]
+        · exfalso; omega
       · simp only [hj, ↓reduceIte, hinv j]
         split_ifs <;> first | rfl | (exfalso; omega)
-    · have : p.val = index.val + 1 := by scalar_tac
+    · have hp := mt (UScalar.lt_equiv _ _).2 ‹¬i < p›
+      have : p.val = index.val + 1 := by omega
       rw [this] at hinv
       exact hinv
   · exact ⟨h1, h2, hA⟩
@@ -616,7 +616,7 @@ theorem placement_split_spec {E : Usize} (A : Aeneas.Std.Array page_tables.Exten
   have hl : A.val.length = E.val := A.property
   unfold page_tables.ownership.placement.split
   by_cases hb : extent.range.start < range.start
-  · have hlt : X.range.start.toNat < R.start.toNat := by have := hb; scalar_tac
+  · have hlt : X.range.start.toNat < R.start.toNat := by have := (UScalar.lt_equiv _ _).1 hb; omega
     simp only [hb, ↓reduceIte]
     obtain ⟨B1, hB1, hB1s, hB1l⟩ := before_some hlt
     by_cases ha : range.start.val + range.len.val < extent.range.start.val + extent.range.len.val
@@ -651,7 +651,7 @@ theorem placement_split_spec {E : Usize} (A : Aeneas.Std.Array page_tables.Exten
           listRel_cons_cons, listRel_nil_nil, and_true]
         exact ⟨⟨physRangeRepr_of (by dsimp only; omega) (by dsimp only; omega), hX.2.1, rfl⟩,
           ⟨hR, hX.2.1, rfl⟩⟩
-  · have hlt : R.start.toNat ≤ X.range.start.toNat := by have := hb; scalar_tac
+  · have hlt : R.start.toNat ≤ X.range.start.toNat := by have := mt (UScalar.lt_equiv _ _).2 hb; omega
     simp only [hb, ↓reduceIte, bind_ok]
     by_cases ha : range.start.val + range.len.val < extent.range.start.val + extent.range.len.val
     · have hgt : R.endNat < X.range.endNat := by omega
@@ -732,18 +732,20 @@ theorem placement_split_spec {E : Usize} (A : Aeneas.Std.Array page_tables.Exten
           physRange_endNat hYe.1, physRange_endNat hcr]
       by_cases hm : extra > room
       · simp only [hm, ↓reduceIte]
-        rw [take_more hT' hsplit (by scalar_tac)]
+        have hm' := (UScalar.lt_equiv room extra).1 hm
+        rw [take_more hT' hsplit (by omega)]
         exact spec_of_eq rfl ⟨rfl, rfl⟩
       · simp only [hm, ↓reduceIte]
+        have hm' := mt (UScalar.lt_equiv room extra).2 hm
         step as ⟨a, a_post⟩
         have hH : holdingOf (.Held choice.owner g state) =
             .held C.owner (word64 g) (holdStateOf state) := by rw [hco]; rfl
-        have hE : idx.val + Y.extra C.range < E.val := by scalar_tac
+        have hE : idx.val + Y.extra C.range < E.val := by omega
         have hsp := placement_split_spec a idx extent choice.range (.Held choice.owner g state) Y
           C.range hYe hcr hcont hE
         step with hsp as ⟨F, hFo, hFp⟩
         rw [hH] at hFp
-        rw [take_some hT' hsplit (by scalar_tac)]
+        rw [take_some hT' hsplit (by omega)]
         have hrel : ListRel ExtentRepr (F.val.take (t.extent_count.val + extra.val))
             (((T.extents.take idx.val).reverse ++ []).reverseAux
               (Y.take C.range (.held C.owner (word64 g) (holdStateOf state)) ++
@@ -764,14 +766,14 @@ theorem placement_split_spec {E : Usize} (A : Aeneas.Std.Array page_tables.Exten
         step*
         · simp only [‹o1 = none›] at o1_post
           simp only [Writes]
-          refine ⟨⟨har, hco, rfl, hcr⟩, hbc, by scalar_tac, hxc, har, hbanks,
+          refine ⟨⟨har, hco, rfl, hcr⟩, hbc, by show i1.val ≤ E.val; omega, hxc, har, hbanks,
             by rw [i1_post]; exact hrel, hexcl, ?_⟩
           rw [Counter.after, word64_toNat]
           simp only [show ¬ g.val + 1 < 2 ^ 64 by omega, ↓reduceIte]
           rfl
         · simp only [‹o1 = some next›] at o1_post
           simp only [Writes]
-          refine ⟨⟨har, hco, rfl, hcr⟩, hbc, by scalar_tac, hxc, har, hbanks,
+          refine ⟨⟨har, hco, rfl, hcr⟩, hbc, by show i1.val ≤ E.val; omega, hxc, har, hbanks,
             by rw [i1_post]; exact hrel, hexcl, ?_⟩
           rw [Counter.after, word64_toNat]
           simp only [show g.val + 1 < 2 ^ 64 by omega, ↓reduceIte, counterOf]
