@@ -2,6 +2,7 @@ module
 
 public import Krepi.Proofs.PageTables.Refinement.BasicLemmas
 import Mathlib.Util.CountHeartbeats
+import Krepi.Proofs.PageTables.BitLemmas
 
 /-!
 # Page tables: one-step lemmas of the walk and the checks of the specification
@@ -24,7 +25,10 @@ again for every mutant of the code.
   `checkPhysical_eq`, with `poolFits_eq`, `poolFits_iff`, `widthOk_eq`, `widthOk_byte_iff`,
   `lt_64_of_widthOk` (a physical width of the code is below 64),
   `holds_lower` and `holds_upper`.
-- The direct address: `directAddress_eq`.
+- The direct address: `directAddress_eq`; the indices and the level 2
+  step of the walk of an address `DIRECT_BASE | a` of the direct map, those
+  of `a` (`index1_direct`, `index2_direct`, `index3_direct`,
+  `walk2_direct`), which the code walks with the physical address.
 -/
 
 @[expose] public section
@@ -129,6 +133,27 @@ theorem walk_level3 {s : Tables r N} {base v : UInt64} {t2 t3 : Nat} {e2 : UInt6
     s.walk base v = .ok (.level3 t2 t3 (s.entry t3 (index3 v))) := by
   simp only [Tables.walk, h, hv, hb, hc, bind, Except.bind, pure, Except.pure, Bool.not_true,
     Bool.false_eq_true, ↓reduceIte]
+
+/-! ## Addresses of the direct map -/
+
+theorem index1_direct {a : UInt64} (h : a.toNat < 2 ^ 39) :
+    index1 (DIRECT_BASE ||| a) = index1 a := by
+  rw [index1_eq, index1_eq, direct_or h, DIRECT_BASE_toNat]; omega
+
+theorem index2_direct {a : UInt64} (h : a.toNat < 2 ^ 39) :
+    index2 (DIRECT_BASE ||| a) = index2 a := by
+  rw [index2_eq, index2_eq, direct_or h, DIRECT_BASE_toNat]; omega
+
+theorem index3_direct {a : UInt64} (h : a.toNat < 2 ^ 39) :
+    index3 (DIRECT_BASE ||| a) = index3 a := by
+  rw [index3_eq, index3_eq, direct_or h, DIRECT_BASE_toNat]; omega
+
+/-- The level 2 step of the walk of the address `DIRECT_BASE | a` of the
+direct map is that of `a`, for `a` below $2^{39}$: the walk reads the
+indices of an address alone. -/
+theorem walk2_direct {s : Tables r N} {base a : UInt64} (h : a.toNat < 2 ^ 39) :
+    s.walk2 base (DIRECT_BASE ||| a) = s.walk2 base a := by
+  simp only [Tables.walk2, index1_direct h, index2_direct h]
 
 /-! ## The first checks -/
 
