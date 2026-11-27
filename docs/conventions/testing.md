@@ -1165,15 +1165,15 @@ one operator, and runs each through a run of the gate on the target, with
 a budget of 14,400 s, and, when the run is `SCOPED`, writes the list of
 the survivors
 ([source mutants and survivors](../formal-verification.md#source-mutants-and-survivors)).
-It is not part of the check: the job `calibration mutants calibration` of
-the workflow `formal calibration` runs it on the calibration target, and
-the jobs `formal mutants <item>` of the workflow `formal` on targets of
-production on a manual run of `main`, each after the qualification job of
-its run. Its unit tests run
-in the `test` step above: the generation on source texts in memory, the
-judgement of a build on the captured outputs of
-`xtask/src/formal/fixtures/mutants/`, and the runs on the Git repositories
-and fake tools of the tests of `cargo xtask formal run`.
+It is not part of the check: the job `calibration mutants calibration 1`
+of the workflow `formal calibration` runs it on the calibration target,
+and the jobs `formal mutants <target> <n>` of the workflow `formal` on
+targets of production on a manual run of `main`, each after the
+qualification job of its run. Its unit tests run in the `test` step
+above: the generation on source texts in memory, the judgement of a build
+on the captured outputs of `xtask/src/formal/fixtures/mutants/`, and the
+runs on the Git repositories and fake tools of the tests of
+`cargo xtask formal run`.
 
 `cargo xtask formal merge [--calibration] RECEIPT...` merges the receipts
 of the qualification job, of each lane and of the part of each formal

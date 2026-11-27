@@ -2825,7 +2825,8 @@ each part of each formal target of the head's registry, and the job
 `formal scoped <name>` each planned target that the pull request affects,
 alone; and the job `formal parts` merges the receipts of the parts. On a
 manual run whose input `mutants` asks for them, the jobs
-`formal mutants <item>` run source mutants after the job `formal run`.
+`formal mutants <target> <n>` run source mutants after the job
+`formal run`.
 Every
 job of the workflow that needs another has a condition that starts with
 `!cancelled()`, so that it runs unless the run was cancelled, also when a
@@ -2969,17 +2970,20 @@ lanes, or when the registered budget of a lane and the extraction margin
 are more than the shard limit, as `cargo xtask formal check` refuses them
 ([lanes](#lanes)), so the job of a lane has at most 122 minutes. On a
 manual run, the job also expands the input `mutants`, items separated by
-spaces, into the jobs of `formal mutants`, one for each item, numbered
-from 1 for each target in the order of the input: `<target>` for every
-operator, `<target>:<operator>+<operator>` for one or more operators, or
+spaces, into the jobs `formal mutants <target> <n>`, one for each item,
+with `n` its number from 1 among the items of its target in the order of
+the input: `<target>` for every operator,
+`<target>:<operator>+<operator>` for one or more operators, or
 `<target>:<operator>@<i>/<k>` for the `i`-th of `k` intervals of the
 mutants of one operator, with `1 <= i <= k <= 4`
-([source mutants and survivors](#source-mutants-and-survivors)). It fails,
-and no job of the run starts, on an item of another form, a target that is
-not a formal target of the registry, a word that is not an operator of
+([source mutants and survivors](#source-mutants-and-survivors)). It fails
+on an item of another form, a target that is not a formal target of the
+registry, a word that is not an operator of
 `cargo xtask formal mutants`, an interval of more than one operator or
-with `i` more than `k`, and a fifth item of one target; on every other
-event the jobs of `formal mutants` do not run. The
+with `i` more than `k`, and a fifth item of one target; then the
+qualification job, the lanes, the parts and the jobs of `formal mutants`
+do not run, and the verdicts fail. On every other event the jobs of
+`formal mutants` do not run. The
 limits of the jobs of the lanes, of the parts and of `formal scoped` are
 expressions of their matrix, so each such job writes its limit as
 `::notice title=timeout-minutes::<minutes>`, from which the record of the
@@ -3182,9 +3186,9 @@ passes, and so does `WAIVED`, whose waivers hold on the UTC date of the
 review; anything else fails, and so does a missing run or record
 ([current and fresh records](#current-and-fresh-records)).
 
-Each job `formal mutants <item>` runs the source mutants of one item of
-the input `mutants` of a manual run of `main`, which the job
-`formal limits` expanded. It needs `formal limits` and `formal run`, and
+Each job `formal mutants <target> <n>` runs the source mutants of the
+`n`-th item of `<target>` in the input `mutants` of a manual run of
+`main`, which the job `formal limits` expanded. It needs `formal limits` and `formal run`, and
 runs once `formal run` has ended, also when it failed. It checks out the
 commit, pulls the image, builds xtask, downloads the artifact of the
 qualification job of the run, of every attempt, into
@@ -3673,7 +3677,8 @@ staged, built and judged as a registered mutant, on two workers as those
 are, in the order of their points. With `--part I/K`, which takes exactly
 one `--operator` and `1 <= I <= K <= 4`, the run takes the mutants of that
 operator, numbered from 1 in the order in which they are generated, by the
-path of their file and then by their place in it, and runs those from
+path of their file and then by the line and column of their point in it,
+however their expressions nest, and runs those from
 `floor((I - 1) * n / K) + 1` to `floor(I * n / K)` of the `n`, so the `K`
 parts of an operator run each of its mutants once; the points without a
 text that occurs once count in the first part alone. A command line with
@@ -3695,7 +3700,10 @@ The run writes the list of survivors of the target,
 run, and prints its counts. The runs of one CI run that split the
 operators of a target, each in a job of its own, each write the list of
 their own run; the list of the target holds them all, with their counts
-added up and their survivors. Its fields:
+added up and their survivors. No command merges them: the list of the
+target is put together by hand from the lists of the jobs of one CI run,
+each of their runs an item of `runs`, and `cargo xtask formal check`
+checks it as below. Its fields:
 
 | Field | Meaning |
 | --- | --- |
@@ -3705,7 +3713,7 @@ added up and their survivors. Its fields:
 | `operators` | The operators of its runs |
 | `runs` | Each run of the list: its `run` directory, the `run_id` of its CI run, if any, its `operators`, its `part`, `<i>/<k>`, or `null`, the number of mutants that it `generated`, and the SHA-256 of its receipt, `receipt_sha256`, and of the qualification receipt that it read, `qualification_sha256`, or `null` for a run that read none |
 | `generated`, `killed`, `unbuildable`, `not_unique` | The numbers of mutants generated, killed and not built by `cargo check`, and of points without a text that occurs once, of its runs |
-| `survivors` | Each survivor: its `point`, `<file>:<line>:<column>`, its `operator`, `find` and `replace`, the inventory key of the `function` that it edits, the `run` directory of the run in which it survived, and the `class` and the `reason` that a reviewer gives it |
+| `survivors` | Each survivor: its `point`, `<file>:<line>:<column>`, its `operator`, `find` and `replace`, the inventory key of the `function` that it edits, the `receipt_sha256` of the run in which it survived, which names that run even where the run directories of two jobs have the same name, and the `class` and the `reason` that a reviewer gives it |
 
 A reviewer gives every survivor a class, `missing-lemma` for a property
 that the proofs lack, `no-theorem` for a function that no theorem covers,
@@ -3715,17 +3723,19 @@ theorem is about, is written with the class `no-theorem` and keeps it.
 `cargo xtask formal check` fails on a survivor without a class or a
 reason, on one in a function of `unclosed` of another class, on one of no
 run of its list, on a list that does not parse, is not of schema 2 or is
-not that of a registered target at its path, and on the runs of a list
-that are not of one CI run, or in which an operator is neither in one run
-without a part nor alone in the `k` runs of its parts `1/k` to `k/k`, as
-when two runs take the same mutants of an operator or none takes some of
-them; it names the functions of the survivors of
+not that of a registered target at its path, on a list whose `operators`
+are not those of its runs or whose number of mutants generated is not the
+sum of theirs, and on the runs of a list that are not of one CI run, two
+of which have the same receipt, or in which an operator is neither in one
+run without a part nor alone in the `k` runs of its parts `1/k` to `k/k`,
+as when two runs take the same mutants of an operator or none takes some
+of them; it names the functions of the survivors of
 class `no-theorem` in its report
 ([legacy inventory and admission](#legacy-inventory-and-admission)). A
 refinement task names the operators that it uses; an operator is added to
 this command, not by the task that uses it. In CI, the jobs
-`formal mutants <item>` run the command on targets of production on a
-manual run of `main`, after the qualification job of the run
+`formal mutants <target> <n>` run the command on targets of production
+on a manual run of `main`, after the qualification job of the run
 ([CI job](#ci-job)).
 
 ## Calibration target
@@ -3845,7 +3855,7 @@ credentials and run actions pinned to full commit SHAs:
   `calibration-formal-part-*` artifacts. It runs when the jobs above ran,
   unless the run was cancelled, and it waits for the planned example as
   well, since both run in one matrix job;
-- `calibration mutants calibration`, on a manual run whose input
+- `calibration mutants calibration 1`, on a manual run whose input
   `mutants` asks for it and on a pull request with the label, after
   `calibration run`, which it waits for with the planned example, since
   both run in one matrix job, runs the steps of the job `formal mutants` of
