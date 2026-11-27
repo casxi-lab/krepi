@@ -5,6 +5,7 @@ public import Krepi.Spec.PageTables.Witnesses.TableSets
 public import Krepi.Proofs.Fdt.Plan
 public import Krepi.Proofs.Fdt.PlanLemmas
 import Mathlib.Util.CountHeartbeats
+import Krepi.Proofs.PageTables.BitLemmas
 
 /-!
 # Page tables: the checks and the leaf search of the direct map, on the specification side
@@ -22,10 +23,16 @@ built once and not again for every mutant of the code.
   their start leaves them as they are).
 - The leaves of a usable range as the code walks them: `directLeaf` (the
   leaf at an address: a block at a multiple of 2 MiB with 2 MiB left, a page
-  elsewhere), `directLeaf_size`, `directLeaves_succ`, `directLeaves_stop`,
+  elsewhere), `directLeaf_form`, `directLeaf_of_block`, `directLeaf_of_page`,
+  `directLeaf_size`, `directLeaf_pa`, `directLeaf_va`, `directLeaf_va_toNat`,
+  `directLeaves_succ`,
+  `directLeaves_stop`,
   and the fuel: `leafFuel` (an upper bound on the leaves left from an
-  address), `leafFuel_step` (one leaf uses one), `leafFuel_start` (the fuel
-  `directFuel` of the specification covers a range).
+  address), `leafFuel_step` and `leafFuel_leaf` (one leaf uses one),
+  `leafFuel_start` (the fuel `directFuel` of the specification covers a
+  range), `directFuel_le` (at most `2 ^ 19` leaves in a range below
+  `2 ^ 39`) and `usable_room` (the room of the record of new tables before a
+  range).
 - The ranges before: `reachSpans`, `reachSpans_append`, and
   `any_meets_spans` (for ranges that start at or below a leaf, an earlier
   range shares an address with it exactly when the leaf starts below
@@ -105,6 +112,24 @@ theorem directLeaf_form (stop pa : Nat) :
     · simp [h1, h h1]
     · simp [h1]
 
+/-- `directLeaf` where a block goes. -/
+theorem directLeaf_of_block {stop pa : Nat} (h : pa % BLOCK_SIZE = 0 ∧ pa + BLOCK_SIZE ≤ stop) :
+    directLeaf stop pa = ⟨DIRECT_BASE ||| UInt64.ofNat pa, UInt64.ofNat pa,
+      blockDescriptor (UInt64.ofNat pa), .block⟩ := by
+  obtain ⟨h1, h2⟩ := h
+  unfold directLeaf
+  simp [h1, h2]
+
+/-- `directLeaf` where a page goes. -/
+theorem directLeaf_of_page {stop pa : Nat} (h : ¬ (pa % BLOCK_SIZE = 0 ∧ pa + BLOCK_SIZE ≤ stop)) :
+    directLeaf stop pa = ⟨DIRECT_BASE ||| UInt64.ofNat pa, UInt64.ofNat pa,
+      descriptor .readWrite (UInt64.ofNat pa), .page⟩ := by
+  rw [not_and] at h
+  unfold directLeaf
+  by_cases h1 : pa % BLOCK_SIZE = 0
+  · simp [h1, h h1]
+  · simp [h1]
+
 /-- The size of `directLeaf`, the step to the next leaf. -/
 theorem directLeaf_size (stop pa : Nat) :
     (directLeaf stop pa).form.size =
@@ -117,6 +142,14 @@ theorem directLeaf_pa (stop pa : Nat) : (directLeaf stop pa).pa = UInt64.ofNat p
 theorem directLeaf_va (stop pa : Nat) :
     (directLeaf stop pa).va = DIRECT_BASE ||| UInt64.ofNat pa := by
   unfold directLeaf; split <;> rfl
+
+/-- The virtual address of `directLeaf` below `2 ^ 39` is `DIRECT_BASE` plus
+its physical address. -/
+theorem directLeaf_va_toNat {stop pa : Nat} (h : pa < 2 ^ 39) :
+    (directLeaf stop pa).va.toNat = DIRECT_BASE.toNat + pa := by
+  have ha : (UInt64.ofNat pa).toNat = pa :=
+    UInt64.toNat_ofNat_of_lt' (Nat.lt_trans h (by decide))
+  rw [directLeaf_va, direct_or (by rw [ha]; exact h), ha]
 
 theorem directLeaves_succ (stop fuel : Nat) {pa : Nat} (h : pa < stop) :
     directLeaves stop (fuel + 1) pa =
@@ -172,6 +205,26 @@ theorem leafFuel_start {stop pa : Nat} (hpa : pa % PAGE_SIZE = 0) (hs : stop % P
   · by_cases h2 : pa % 2097152 = 0
     · simp only [h1, h2, ↓reduceIte]; omega
     · simp only [h1, h2, ↓reduceIte]; omega
+
+/-- The fuel of a usable range below `2 ^ 39`: at most `2 ^ 19` leaves. -/
+theorem directFuel_le {len : Nat} (h : len ≤ 2 ^ 39) : directFuel len ≤ 2 ^ 19 := by
+  have h1 : len / 2097152 ≤ 262144 :=
+    Nat.le_trans (Nat.div_le_div_right (c := 2097152) h) (by decide)
+  simp only [directFuel, BLOCK_SIZE, ENTRIES]
+  rw [show (2 : Nat) ^ 19 = 524288 from rfl]
+  omega
+
+/-- The bound on the record of new tables before a usable range of a boot
+memory map of at most 164 usable ranges: at most `2 ^ 19` leaves a range and
+two new tables a leaf. -/
+theorem usable_room {u n m idx : Nat} (h1 : u + 2 ^ 28 ≤ m) (h2 : n ≤ idx * 2 ^ 19)
+    (h3 : idx ≤ 163) : u + 2 * (n + 2 ^ 19) + 2 ≤ m := by
+  have hn : n ≤ 163 * 2 ^ 19 := Nat.le_trans h2 (Nat.mul_le_mul_right _ h3)
+  have hb : 2 * (n + 2 ^ 19) + 2 ≤ 2 ^ 28 :=
+    Nat.le_trans (Nat.add_le_add_right (Nat.mul_le_mul_left 2 (Nat.add_le_add_right hn _)) 2)
+      (Nat.le_of_ble_eq_true rfl)
+  rw [Nat.add_assoc]
+  exact Nat.le_trans (Nat.add_le_add_left hb u) h1
 
 /-! ## The ranges before -/
 
