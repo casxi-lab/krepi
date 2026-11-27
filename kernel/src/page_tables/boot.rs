@@ -24,6 +24,8 @@
 
 pub(super) mod direct;
 pub(super) mod layout;
+#[cfg(test)]
+pub(super) mod tests;
 
 use super::encoding::{BLOCK, is_valid, table_descriptor, type_bits};
 use super::walk::{index1, index2, index3, table_address};
