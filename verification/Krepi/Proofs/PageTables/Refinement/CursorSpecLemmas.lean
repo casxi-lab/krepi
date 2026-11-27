@@ -36,6 +36,9 @@ for every mutant of the code.
   the cursor reads), and the functions of `MapCursor` on it, `Cur.search`,
   `Cur.children`, `Cur.entry`, `Cur.newPage`, `Cur.leaf`, `Cur.heldPage`
   and `Cur.take`, and one call of the `next` of a plan, `Cur.step`.
+- The plan by runs, for the simulation of `mapPlan` by the cursor:
+  `runsBy_cons_head`, `runsBy_append_run` (a whole run at the front),
+  `mapPlan_append_run`, `runSteps_held`, `runSteps_new`.
 -/
 
 @[expose] public section
@@ -528,5 +531,67 @@ def Cur.step (find : Nat → Nat → Bool → Option Found) (place : Found → P
   | .seek =>
     (some (t.2.children (find t.2.search.1 t.2.search.2.1 t.2.search.2.2)).1,
       (t.2.children (find t.2.search.1 t.2.search.2.1 t.2.search.2.2)).2)
+
+/-! ## The plan by runs -/
+
+section Runs
+
+variable {α : Type}
+
+/-- The first run of a nonempty list starts with its head. -/
+theorem runsBy_cons_head (key : α → Nat) (s : α) (S : List α) :
+    ∃ run runs, runsBy key (s :: S) = (s :: run) :: runs := by
+  simp only [runsBy]
+  split
+  · rename_i y run runs _
+    split
+    · exact ⟨y :: run, runs, rfl⟩
+    · exact ⟨[], (y :: run) :: runs, rfl⟩
+  · exact ⟨[], _, rfl⟩
+
+/-- A run of one key followed by a list that starts with another key is the
+first run of the whole. -/
+theorem runsBy_append_run (key : α → Nat) (S : List α) :
+    ∀ (x : α) (R : List α), (∀ y ∈ R, key y = key x) → (∀ y ∈ S.head?, key y ≠ key x) →
+      runsBy key ((x :: R) ++ S) = (x :: R) :: runsBy key S
+  | x, [], _, hS => by
+    cases S with
+    | nil => rfl
+    | cons s S' =>
+      obtain ⟨run, runs, h⟩ := runsBy_cons_head key s S'
+      have hne : (key x == key s) = false :=
+        beq_eq_false_iff_ne.2 (fun e => hS s rfl e.symm)
+      rw [List.cons_append, List.nil_append, runsBy.eq_2 key x (s :: S'), h]
+      simp only [hne, Bool.false_eq_true, ↓reduceIte]
+  | x, r :: R, hR, hS => by
+    have ih := runsBy_append_run key S r R
+      (fun y hy => (hR y (List.mem_cons_of_mem r hy)).trans (hR r List.mem_cons_self).symm)
+      (fun y hy e => hS y hy (e.trans (hR r List.mem_cons_self)))
+    have hxr : (key x == key r) = true := beq_iff_eq.2 (hR r List.mem_cons_self).symm
+    simp only [List.cons_append] at ih ⊢
+    rw [runsBy.eq_2 key x (r :: (R ++ S)), ih]
+    simp only [hxr, ↓reduceIte]
+
+end Runs
+
+/-- `mapPlan` of placed leaves that start with a whole 1 GiB run: the steps
+of that run, then `mapPlan` of the rest. -/
+theorem mapPlan_append_run (base : UInt64) (q : Placed) (R S : List Placed)
+    (hR : ∀ y ∈ R, y.leaf.gibSlot = q.leaf.gibSlot)
+    (hS : ∀ y ∈ S.head?, y.leaf.gibSlot ≠ q.leaf.gibSlot) :
+    mapPlan base ((q :: R) ++ S) = runSteps base (q :: R) ++ mapPlan base S := by
+  rw [mapPlan_eq, mapPlan_eq, runsBy_append_run (·.leaf.gibSlot) S q R hR hS, List.flatMap_cons,
+    List.append_assoc]
+
+/-- The steps of a 1 GiB run under a level 2 table of the set, by its 2 MiB
+runs. -/
+theorem runSteps_held (base : UInt64) (q : Placed) (R : List Placed) (h : q.new2 = false) :
+    runSteps base (q :: R) = (runsBy (·.leaf.blockSlot) (q :: R)).flatMap (heldLevel2Steps base) := by
+  simp only [runSteps, h, Bool.false_eq_true, ↓reduceIte]
+
+/-- The steps of a 1 GiB run under a new level 2 table. -/
+theorem runSteps_new (base : UInt64) (q : Placed) (R : List Placed) (h : q.new2 = true) :
+    runSteps base (q :: R) = newLevel2Steps base (q :: R) := by
+  simp only [runSteps, h, ↓reduceIte]
 
 end Krepi.Proofs.PageTables.Refinement
