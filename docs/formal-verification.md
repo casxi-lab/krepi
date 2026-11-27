@@ -3358,8 +3358,9 @@ each target, in `work/targets/<name>/`, it
 
 A selected planned target is then concluded: `SCOPED` without a problem,
 and `REJECTED` with one, unless a command forces its conclusion. A target
-that registers more than 30 mutants is not extracted, and a selected one
-is `BUDGET`. The base round builds the generated modules of each target
+that registers more than 30 mutants in all its parts is not extracted,
+also in the run of one of its parts, and a selected one is `BUDGET`.
+The base round builds the generated modules of each target
 whose definitions type-check; for one whose definitions do not, nothing is
 built and the round is rejected, as for a qualification case whose code
 does not build. The phase `targets`, after the base round, takes each

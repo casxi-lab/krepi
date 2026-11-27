@@ -1024,6 +1024,9 @@ pub(super) fn target_phases<'a>(
     let read = read.and_then(|text| Ok((registry::parse(&text)?.targets, text)));
     let read = read.map_err(|error| format!("cannot read {path}: {error}"));
     let index = shard.and_then(merge::index);
+    // A part counts all the mutants of its target against the cap.
+    let counts = read.iter().flat_map(|(targets, _)| targets.iter());
+    let counts = BTreeMap::from_iter(counts.map(|t| (t.name.clone(), t.mutants.len())));
     let in_part = |t: &Target| {
         index
             .and_then(|i| t.in_part(i))
@@ -1098,7 +1101,9 @@ pub(super) fn target_phases<'a>(
                 all.retain(|t| t.state != State::Formal || !waived.contains(&t.name));
                 gate.receipt.lane = Some(start);
             }
-            (all.iter()).try_for_each(|t| extract_target(gate, t, chosen.contains(&t.name)))
+            (all.iter()).try_for_each(|t| {
+                extract_target(gate, t, chosen.contains(&t.name), counts[&t.name])
+            })
         }),
         Box::new(move |gate| {
             // Without a base round, the run lists the hand-written modules.
@@ -1198,9 +1203,15 @@ pub(super) fn waive(
 /// type-checks the generated definitions with warnings as errors, as
 /// commands of its unit when the run selects it, `chosen`, and of `base`
 /// otherwise; checks the registration of a selected formal target,
-/// concludes a selected planned one and records it. A target with more
-/// mutants than a target may register is not run and is `BUDGET`.
-fn extract_target(gate: &mut Gate, target: &Target, chosen: bool) -> Result<(), String> {
+/// concludes a selected planned one and records it. A target that registers
+/// more mutants than a target may, `registered` in all its parts, is not run
+/// and is `BUDGET`.
+fn extract_target(
+    gate: &mut Gate,
+    target: &Target,
+    chosen: bool,
+    registered: usize,
+) -> Result<(), String> {
     let (layout, name) = (gate.layout, &target.name);
     let unit = if chosen {
         target_unit(name)
@@ -1214,7 +1225,7 @@ fn extract_target(gate: &mut Gate, target: &Target, chosen: bool) -> Result<(), 
         proof_modules: target.proof_modules.clone(),
         ..receipt::Target::default()
     };
-    let many = target.mutants.len() > registry::MUTANTS;
+    let many = registered > registry::MUTANTS;
     let module = (target.module.as_deref()).filter(|module| qualify::is_module(module) && !many);
     let work = gate.work().join("targets").join(name);
     if let Some(module) = module {
@@ -1261,7 +1272,7 @@ fn extract_target(gate: &mut Gate, target: &Target, chosen: bool) -> Result<(), 
             (record.problems).extend(unread.iter().cloned().chain(found));
         }
     } else if many {
-        let (count, most) = (target.mutants.len(), registry::MUTANTS);
+        let (count, most) = (registered, registry::MUTANTS);
         let problem = format!("it registers {count} mutants, more than the {most} it may");
         record.problems.push(problem);
     } else {
@@ -2612,6 +2623,45 @@ pub(crate) mod tests {
             assert_eq!((unit.status, unit.reason.as_deref()), (Status::NotRun, why));
         }
         assert!(!receipt.part.expect("the part").seed_built);
+    }
+
+    #[test]
+    fn a_target_with_more_mutants_than_it_may_register_is_budget_in_its_first_part() {
+        // 31 mutants in two parts, neither of which holds more than 30.
+        let mut targets: serde_json::Value =
+            serde_json::from_str(&two_targets(1_800, registry::MUTANTS + 1)).expect("JSON");
+        let target = targets[0].as_object_mut().expect("the target t");
+        target.remove("budget");
+        let names = Vec::from_iter((0..=registry::MUTANTS).map(|i| format!("m{i}")));
+        let (one, two) = names.split_at(16);
+        let parts = serde_json::json!([{"mutants": one}, {"mutants": two}]);
+        target.insert("parts".to_string(), parts);
+        let fixture = with_targets("part-mutants", &targets.to_string());
+        let first = part_run(&fixture, "target/t/1");
+        let reason = "it registers 31 mutants, more than the 30 it may";
+        assert_eq!(
+            fixture::status(&first, "target/t"),
+            (Status::Budget, Some(reason))
+        );
+        assert_eq!(
+            first.written().status,
+            Status::Budget,
+            "{:?}",
+            first.failures()
+        );
+        assert!(fixture::commands(&first, "target/t").is_empty());
+        // The other part does not extract the target either.
+        let second = part_run(&fixture, "target/t/2");
+        let sites = Vec::from_iter(
+            fixture::commands(&second, "target/t")
+                .iter()
+                .map(|c| c.site),
+        );
+        assert!(!sites.contains(&Site::Charon), "{sites:?}");
+        for (done, mutant) in [(&first, "m0"), (&second, "m30")] {
+            let unit = format!("target/t/mutant/{mutant}");
+            assert_eq!(fixture::status(done, &unit).0, Status::NotRun);
+        }
     }
 
     /// [`with_targets`] in the layout of the calibration target: its
