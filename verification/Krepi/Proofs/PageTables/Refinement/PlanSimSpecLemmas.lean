@@ -45,7 +45,7 @@ no part in it.
   `slot_end_le`, `gib_end_le`, `end_le_gib`, `index1_gib`, `index2_slot`,
   `index2_fOf`, `index3_fOf`) and of the search (`find_first`, `find_none`).
 - The simulation: `CurBound` (what the cursor of the code needs at each
-  call), `Bnd` (the cursor at the first leaf of a 2 MiB slot), the steps of a
+  call), `CurOk` (that and an address that splits the leaves), `Bnd` (the cursor at the first leaf of a 2 MiB slot), the steps of a
   run of pages `pages_loop`, the 2 MiB slots under a level 2 table of the set
   `seg_held_block`, `seg_held_l3`, `seg_held_l2`, `seg_held`, `held_run`, a
   1 GiB slot under a new level 2 table `children_run`, `entries_run`,
@@ -922,6 +922,11 @@ def CurBound (NX TT : Nat) (c : Cur) : Prop :=
   c.next ≤ NX ∧ c.t2 ≤ TT ∧ c.t3 ≤ TT ∧ (c.phase = .newPages ∨ c.phase = .newTable → c.slot < 2 ^ 39) ∧
     (c.phase = .children ∨ c.phase = .entries ∨ c.phase = .root → c.gib < 2 ^ 39)
 
+/-- What the simulation guarantees at each call: `CurBound`, and an address
+of the cursor that splits the leaves `LP`. -/
+def CurOk (LP : List (MapLeaf × Place)) (NX TT : Nat) (c : Cur) : Prop :=
+  CurBound NX TT c ∧ ∃ L, SplitAt LP c.frm L
+
 /-- The cursor `c` at the first leaf of a 2 MiB slot, the leaves `L` left,
 the tables `a` of the leaves before them: the address of the cursor splits the
 leaves before `L`; the phase `leaf`, or `heldPages` in another 2 MiB slot than
@@ -952,6 +957,10 @@ theorem bnd_bound {c : Cur} {a : Alloc} {L : List (MapLeaf × Place)} (hb : Bnd 
   · rw [hb.next]; exact le_trans (next_le_stOf L a) hb.nx
   · rcases hb.phase with h | ⟨h, -⟩ <;> simp [h]
   · rcases hb.phase with h | ⟨h, -⟩ <;> simp [h]
+
+theorem bnd_ok {c : Cur} {a : Alloc} {L : List (MapLeaf × Place)} (hb : Bnd LP used NX TT c a L) :
+    CurOk LP NX TT c :=
+  ⟨bnd_bound hb, L, hb.split⟩
 
 /-- The leaves of a suffix of the leaves are in ascending order of their
 slots. -/
@@ -1007,7 +1016,7 @@ theorem pages_loop (H : SimOk off find place LP) {c : Cur} {L' : List (MapLeaf �
           { c with frm := z.1.pa.toNat + PAGE_SIZE })) :
     ∀ (Q : List (MapLeaf × Place)) (f : Nat), (∀ z ∈ Q, good z ∧ z.1.form = .page) →
       SplitAt LP f (Q ++ L') →
-      ∃ f', CurSteps (Cur.step find place base) (CurBound NX TT) { c with frm := f }
+      ∃ f', CurSteps (Cur.step find place base) (CurOk LP NX TT) { c with frm := f }
         (Q.map (fun z => .store c.t3 (index3 (UInt64.ofNat z.1.pa.toNat)) z.1.desc))
         { c with frm := f' } ∧ SplitAt LP f' L'
   | [], f, _, h => ⟨f, rfl, h⟩
@@ -1018,7 +1027,7 @@ theorem pages_loop (H : SimOk off find place LP) {c : Cur} {L' : List (MapLeaf �
       splitAt_next_page H h hp
     obtain ⟨f', hs, hsp⟩ := pages_loop H hP hst Q _
       (fun z' hz' => hQ z' (List.mem_cons_of_mem _ hz')) h2
-    exact ⟨f', curSteps_cons (hP f) h1 hs, hsp⟩
+    exact ⟨f', curSteps_cons ⟨hP f, _, h⟩ h1 hs, hsp⟩
 
 /-- The steps of the pages of a run, from their placed leaves. -/
 theorem map_store_pages (H : SimOk off find place LP) {Q : List (MapLeaf × Place)}
@@ -1037,7 +1046,7 @@ theorem map_store_pages (H : SimOk off find place LP) {Q : List (MapLeaf × Plac
 theorem seg_held_block (H : SimOk off find place LP) (hTT : ∀ x ∈ LP, PlaceLe TT x.2) {c : Cur}
     {a : Alloc} {x : MapLeaf × Place} {L' : List (MapLeaf × Place)} {t2 : Nat}
     (hb : Bnd LP used NX TT c a (x :: L')) (hf : x.1.form = .block) (hp : x.2 = .level2 t2) :
-    ∃ c', CurSteps (Cur.step find place base) (CurBound NX TT) c (heldLevel2Steps base (plOf a [x])) c' ∧
+    ∃ c', CurSteps (Cur.step find place base) (CurOk LP NX TT) c (heldLevel2Steps base (plOf a [x])) c' ∧
       Bnd LP used NX TT c' (stOf a [x]) L' := by
   have hx : x ∈ LP := splitAt_mem hb.split List.mem_cons_self
   obtain ⟨hst, hfind⟩ := bnd_first (base := base) H hb
@@ -1051,7 +1060,7 @@ theorem seg_held_block (H : SimOk off find place LP) (hTT : ∀ x ∈ LP, PlaceL
       index2_fOf H hx]
   have hafter := splitAt_after H hb.split
   have hsize : x.1.form.size = BLOCK_SIZE := by rw [hf]; rfl
-  refine ⟨_, by rw [hplan]; exact curSteps_cons (bnd_bound hb) (hst.trans h1) (curSteps_nil _), ?_⟩
+  refine ⟨_, by rw [hplan]; exact curSteps_cons (bnd_ok hb) (hst.trans h1) (curSteps_nil _), ?_⟩
   refine ⟨splitAt_next hb.split (by rw [hsize]; exact le_refl _)
       (fun y hy => by have := hafter y hy; rw [hsize] at this; exact this), Or.inl rfl, ?_, ?_, ?_, ?_,
     ?_, ?_, hb.t3⟩
@@ -1075,7 +1084,7 @@ theorem seg_held_l3 (H : SimOk off find place LP) (hTT : ∀ x ∈ LP, PlaceLe T
     (hb : Bnd LP used NX TT c a ((y :: Q') ++ L'))
     (hQ : ∀ z ∈ y :: Q', z.2 = .level3 t2 t3 ∧ z.1.form = .page ∧ z.1.blockSlot = y.1.blockSlot)
     (hL' : ∀ z ∈ L', y.1.blockSlot < z.1.blockSlot) :
-    ∃ c', CurSteps (Cur.step find place base) (CurBound NX TT) c
+    ∃ c', CurSteps (Cur.step find place base) (CurOk LP NX TT) c
       (heldLevel2Steps base (plOf a (y :: Q'))) c' ∧ Bnd LP used NX TT c' (stOf a (y :: Q')) L' := by
   have hy : y ∈ LP := splitAt_mem hb.split List.mem_cons_self
   have hmem : ∀ z ∈ (y :: Q') ++ L', z ∈ LP := fun z hz => splitAt_mem hb.split hz
@@ -1111,7 +1120,7 @@ theorem seg_held_l3 (H : SimOk off find place LP) (hTT : ∀ x ∈ LP, PlaceLe T
     Q' _ (fun z hz => ⟨⟨hmem z (List.mem_append_left _ (List.mem_cons_of_mem _ hz)),
       (slotOf_eq_iff H (hmem z (List.mem_append_left _ (List.mem_cons_of_mem _ hz))) hy).2
         (hQ z (List.mem_cons_of_mem _ hz)).2.2⟩, (hQ z (List.mem_cons_of_mem _ hz)).2.1⟩) hsplit1
-  refine ⟨_, by rw [hplan, List.map_cons]; exact curSteps_cons (bnd_bound hb) (hst.trans h1) hloop, ?_⟩
+  refine ⟨_, by rw [hplan, List.map_cons]; exact curSteps_cons (bnd_ok hb) (hst.trans h1) hloop, ?_⟩
   have hafter := splitAt_after H hb.split
   refine ⟨hsp, Or.inr ⟨rfl, fun z hz => ?_⟩, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · have hz : z ∈ L' := List.mem_of_mem_head? hz
@@ -1148,7 +1157,7 @@ theorem seg_held_l2 (H : SimOk off find place LP) (hTT : ∀ x ∈ LP, PlaceLe T
     {Q' L' : List (MapLeaf × Place)} {t2 : Nat} (hb : Bnd LP used NX TT c a ((y :: Q') ++ L'))
     (hQ : ∀ z ∈ y :: Q', z.2 = .level2 t2 ∧ z.1.form = .page ∧ z.1.blockSlot = y.1.blockSlot)
     (hL' : ∀ z ∈ L', y.1.blockSlot < z.1.blockSlot) :
-    ∃ c', CurSteps (Cur.step find place base) (CurBound NX TT) c
+    ∃ c', CurSteps (Cur.step find place base) (CurOk LP NX TT) c
       (heldLevel2Steps base (plOf a (y :: Q'))) c' ∧ Bnd LP used NX TT c' (stOf a (y :: Q')) L' := by
   have hy : y ∈ LP := splitAt_mem hb.split List.mem_cons_self
   have hmem : ∀ z ∈ (y :: Q') ++ L', z ∈ LP := fun z hz => splitAt_mem hb.split hz
@@ -1211,9 +1220,9 @@ theorem seg_held_l2 (H : SimOk off find place LP) (hTT : ∀ x ∈ LP, PlaceLe T
   refine ⟨⟨.leaf, slotOf y.1.pa.toNat + BLOCK_SIZE, c.next + 1, gibOf y.1.pa.toNat,
       slotOf y.1.pa.toNat, t2, c.next⟩, ?_, ?_⟩
   · rw [hplan, ← hb.next]
-    refine curSteps_cons (bnd_bound hb) (hst.trans h1) (curSteps_append ?_ hloop)
-    refine curSteps_cons (hbd f') hn (curSteps_cons ⟨?_, ht2, ?_, fun _ => hslot, by simp⟩ hnt
-      (curSteps_nil _))
+    refine curSteps_cons (bnd_ok hb) (hst.trans h1) (curSteps_append ?_ hloop)
+    refine curSteps_cons ⟨hbd f', _, hsp⟩ hn
+      (curSteps_cons ⟨⟨?_, ht2, ?_, fun _ => hslot, by simp⟩, _, hsp⟩ hnt (curSteps_nil _))
     · show c.next + 1 ≤ NX; omega
     · show c.next ≤ TT; omega
   · have hafter := splitAt_after H hb.split
@@ -1284,7 +1293,7 @@ theorem seg_held (H : SimOk off find place LP) (hTT : ∀ x ∈ LP, PlaceLe TT x
     {Q' L' : List (MapLeaf × Place)} (hb : Bnd LP used NX TT c a ((y :: Q') ++ L'))
     (hroot : y.2 ≠ .root) (hQ : ∀ z ∈ Q', z.1.blockSlot = y.1.blockSlot)
     (hL' : ∀ z ∈ L', y.1.blockSlot < z.1.blockSlot) :
-    ∃ c', CurSteps (Cur.step find place base) (CurBound NX TT) c
+    ∃ c', CurSteps (Cur.step find place base) (CurOk LP NX TT) c
       (heldLevel2Steps base (plOf a (y :: Q'))) c' ∧ Bnd LP used NX TT c' (stOf a (y :: Q')) L' := by
   have hy : y ∈ LP := splitAt_mem hb.split List.mem_cons_self
   have hmem : ∀ z ∈ Q', z ∈ LP := fun z hz =>
@@ -1330,7 +1339,7 @@ theorem held_run (H : SimOk off find place LP) (hTT : ∀ x ∈ LP, PlaceLe TT x
     ∀ (n : Nat) (R : List (MapLeaf × Place)) (c : Cur) (a : Alloc), R.length ≤ n →
       (∀ z ∈ R, z.2 ≠ .root) → (∀ z ∈ R, ∀ w ∈ L'', z.1.gibSlot < w.1.gibSlot) →
       Bnd LP used NX TT c a (R ++ L'') →
-      ∃ c', CurSteps (Cur.step find place base) (CurBound NX TT) c
+      ∃ c', CurSteps (Cur.step find place base) (CurOk LP NX TT) c
         ((runsBy (·.leaf.blockSlot) (plOf a R)).flatMap (heldLevel2Steps base)) c' ∧
         Bnd LP used NX TT c' (stOf a R) L''
   | _, [], c, a, _, _, _, hb => ⟨c, rfl, hb⟩
@@ -1467,7 +1476,7 @@ theorem children_run (H : SimOk off find place LP) (hnew : used < NX → NX ≤ 
       (∀ z ∈ R, slotOf z.1.pa.toNat ≠ c.slot) →
       (∀ y ∈ S0, y.1.form = .block) → SplitAt LP c.frm (S0 ++ (R ++ L'')) →
       used ≤ a.next → (stOf a R).next ≤ NX → c.t3 ≤ TT →
-      ∃ c', CurSteps (Cur.step find place base) (CurBound NX TT) c
+      ∃ c', CurSteps (Cur.step find place base) (CurOk LP NX TT) c
         ((runsBy (·.leaf.blockSlot) (plOf a R)).flatMap childSteps) c' ∧
         c'.phase = .children ∧ c'.gib = gib ∧ c'.t2 = n0 ∧ c'.next = (stOf a R).next ∧ c'.t3 ≤ TT ∧
         (stOf a R).level2 = a.level2 ∧
@@ -1612,7 +1621,7 @@ theorem children_run (H : SimOk off find place LP) (hnew : used < NX → NX ≤ 
           (by simp) (by simpa using hsp) (by rw [e1]; omega) hnx (by simp only [c1]; omega)
       refine ⟨c', ?_, hp', hg', ht2', hn', ht3', ?_, hl3, S1, hS1, hs1⟩
       · rw [hc0, ← hn]
-        refine curSteps_cons ⟨by omega, by omega, by omega, by simp [hp], fun _ => by omega⟩ h1
+        refine curSteps_cons ⟨⟨by omega, by omega, by omega, by simp [hp], fun _ => by omega⟩, _, hs⟩ h1
           (curSteps_append hc' hloop)
       · rw [hl2, e2]
 
@@ -1630,7 +1639,7 @@ theorem entries_run (H : SimOk off find place LP) (hnew : used < NX → NX ≤ T
       (∀ z ∈ R, z.2 = .root ∧ z.1.gibSlot = g ∧ gibOf z.1.pa.toNat = gib) →
       (∀ z ∈ R, ∀ w ∈ L'', z.1.blockSlot < w.1.blockSlot) →
       SplitAt LP c.frm (R ++ L'') → used < a.next → (stOf a R).next ≤ NX →
-      ∃ c', CurSteps (Cur.step find place base) (CurBound NX TT) c
+      ∃ c', CurSteps (Cur.step find place base) (CurOk LP NX TT) c
         ((runsBy (·.leaf.blockSlot) (plOf a R)).flatMap (level2Entry base)) c' ∧
         c'.phase = .entries ∧ c'.gib = gib ∧ c'.t2 = n0 ∧ c'.next = NXR ∧ c'.t3 = (stOf a R).next ∧
         SplitAt LP c'.frm L''
@@ -1709,7 +1718,7 @@ theorem entries_run (H : SimOk off find place LP) (hnew : used < NX → NX ≤ T
           (fun b t hb z hz => h3 b t (by rw [← e3]; exact hb) z
             (List.mem_cons_of_mem _ (by simpa using hz)))
           hR3p hR3L hsplit1 (by rw [show (stOf a [y]).next = a.next from e1]; exact hu) hnx
-      exact ⟨c', by rw [hc0]; exact curSteps_cons hbd h1 hc', hp', hg', ht2', hn', ht3', hs1⟩
+      exact ⟨c', by rw [hc0]; exact curSteps_cons ⟨hbd, _, hs⟩ h1 hc', hp', hg', ht2', hn', ht3', hs1⟩
     | page =>
       have hpages := hshape2 hf
       have hmiss : ∀ u, a.level3 ≠ some (y.1.blockSlot, u) := fun u h => by
@@ -1737,7 +1746,7 @@ theorem entries_run (H : SimOk off find place LP) (hnew : used < NX → NX ≤ T
           (by rw [e2, h2])
           (fun b t hb z hz => by rw [e3] at hb; cases hb; exact hafter z hz)
           hR3p hR3L hsplit1 (by rw [e1]; omega) hnx
-      exact ⟨c', by rw [hc0]; exact curSteps_cons hbd h1 hc', hp', hg', ht2', hn', ht3', hs1⟩
+      exact ⟨c', by rw [hc0]; exact curSteps_cons ⟨hbd, _, hs⟩ h1 hc', hp', hg', ht2', hn', ht3', hs1⟩
 
 /-- The value of the level 2 table of a leaf in the 1 GiB slot of the latest
 new level 2 table. -/
@@ -1765,7 +1774,7 @@ theorem seg_new (H : SimOk off find place LP) (hnew : used < NX → NX ≤ TT) {
     (hR : ∀ z ∈ x :: R', z.2 = .root ∧ z.1.gibSlot = x.1.gibSlot)
     (hL'' : ∀ w ∈ L'', x.1.gibSlot < w.1.gibSlot)
     (hA : LP = A ++ ((x :: R') ++ L'')) (hAg : ∀ y ∈ A, y.1.gibSlot < x.1.gibSlot) :
-    ∃ c', CurSteps (Cur.step find place base) (CurBound NX TT) c
+    ∃ c', CurSteps (Cur.step find place base) (CurOk LP NX TT) c
       (newLevel2Steps base (plOf a (x :: R'))) c' ∧ Bnd LP used NX TT c' (stOf a (x :: R')) L'' := by
   have hmem : ∀ z ∈ (x :: R') ++ L'', z ∈ LP := fun z hz => splitAt_mem hb.split hz
   have hx : x ∈ LP := hmem x List.mem_cons_self
@@ -1879,9 +1888,10 @@ theorem seg_new (H : SimOk off find place LP) (hnew : used < NX → NX ≤ TT) {
     rw [hroot]; simp only [hge, ht2e]
   refine ⟨{ { e1 with phase := .root } with phase := .leaf, frm := e1.gib + GIB_SIZE }, ?_, ?_⟩
   · rw [hplan]
-    refine curSteps_transfer (bnd_bound hb) he1 ?_ (by simp)
-    exact curSteps_append (curSteps_cons hbde hfence (curSteps_cons hbdr hroot' (curSteps_nil _)))
-      (curSteps_append (curSteps_cons hbd2 hz' he1s) hc2)
+    refine curSteps_transfer (bnd_ok hb) he1 ?_ (by simp)
+    exact curSteps_append (curSteps_cons ⟨hbde, _, hse⟩ hfence
+      (curSteps_cons ⟨hbdr, _, hse⟩ hroot' (curSteps_nil _)))
+      (curSteps_append (curSteps_cons ⟨hbd2, _, hs2⟩ hz' he1s) hc2)
   · refine ⟨?_, Or.inl rfl, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
     · show SplitAt LP (e1.gib + GIB_SIZE) L''
       rw [hge]
@@ -1909,7 +1919,7 @@ theorem seg_new (H : SimOk off find place LP) (hnew : used < NX → NX ≤ TT) {
 /-- After the last leaf: `Sync`, then none at a state that stays. -/
 theorem end_run (H : SimOk off find place LP) {c : Cur} {a : Alloc}
     (hb : Bnd LP used NX TT c a []) :
-    CurRuns (Cur.step find place base) (CurBound NX TT) c (mapPlan base (plOf a [])) := by
+    CurRuns (Cur.step find place base) (CurOk LP NX TT) c (mapPlan base (plOf a [])) := by
   have hf : find c.frm (2 ^ 64 - 1) false = none := find_none H hb.split (by simp)
   have hst : Cur.step find place base c = Cur.step find place base { c with phase := .leaf } := by
     rcases hb.phase with h | ⟨h, -⟩
@@ -1921,8 +1931,9 @@ theorem end_run (H : SimOk off find place LP) {c : Cur} {a : Alloc}
   have hbdd : CurBound NX TT { { c with phase := .leaf } with phase := .done } :=
     ⟨hbd.1, hbd.2.1, hbd.2.2.1, by simp, by simp⟩
   have h2 := step_done find place base (c := { { c with phase := .leaf } with phase := .done }) rfl
-  refine ⟨_, curSteps_cons hbd (hst.trans h1) (curSteps_nil _), hbdd, by rw [h2], by rw [h2]; exact hbdd,
-    by rw [h2, h2]⟩
+  have hok : CurOk LP NX TT { { c with phase := .leaf } with phase := .done } := ⟨hbdd, _, hb.split⟩
+  refine ⟨_, curSteps_cons (bnd_ok hb) (hst.trans h1) (curSteps_nil _), hok, by rw [h2],
+    by rw [h2]; exact hok, by rw [h2, h2]⟩
 
 /-- From the first leaf of a 1 GiB slot to the end: the plan of the leaves
 left, then none at a state that stays. -/
@@ -1931,7 +1942,7 @@ theorem main_run (H : SimOk off find place LP) (hTT : ∀ x ∈ LP, PlaceLe TT x
     ∀ (n : Nat) (L : List (MapLeaf × Place)) (c : Cur) (a : Alloc), L.length ≤ n →
       (∃ A, LP = A ++ L ∧ ∀ y ∈ A, ∀ z ∈ L, y.1.gibSlot < z.1.gibSlot) →
       Bnd LP used NX TT c a L →
-      CurRuns (Cur.step find place base) (CurBound NX TT) c (mapPlan base (plOf a L))
+      CurRuns (Cur.step find place base) (CurOk LP NX TT) c (mapPlan base (plOf a L))
   | _, [], c, a, _, _, hb => end_run H hb
   | 0, _ :: _, _, _, hn, _, _ => absurd hn (by simp)
   | n + 1, x :: L0, c, a, hn, ⟨A, hA, hAg⟩, hb => by
@@ -1970,7 +1981,7 @@ theorem main_run (H : SimOk off find place LP) (hTT : ∀ x ∈ LP, PlaceLe TT x
       rcases List.mem_append.1 hy with hy | hy
       · exact hAg y hy z (List.mem_cons_of_mem _ (List.mem_append_right _ hz))
       · rw [hRgib y hy]; exact hafter z hz
-    have hcases : ∃ c1, CurSteps (Cur.step find place base) (CurBound NX TT) c
+    have hcases : ∃ c1, CurSteps (Cur.step find place base) (CurOk LP NX TT) c
         (runSteps base (plOf a (x :: R'))) c1 ∧ Bnd LP used NX TT c1 (stOf a (x :: R')) L'' := by
       by_cases hroot : x.2 = .root
       · have hall : ∀ z ∈ x :: R', z.2 = .root ∧ z.1.gibSlot = x.1.gibSlot := fun z hz =>
@@ -2006,11 +2017,11 @@ the set that the places name, which is also at or above the next free table
 when the map takes a new table: the calls of `Cur.step find place base` from
 the cursor before the first leaf, with the record `used`, give `mapPlan` of
 the placed leaves of `assignTables used LP`, then none at a state that stays,
-each call from a state that keeps `CurBound`. -/
+each call from a state that keeps `CurOk`. -/
 theorem curRuns_mapPlan (H : SimOk off find place LP) (used TT : Nat)
     (hTT : ∀ x ∈ LP, PlaceLe TT x.2)
     (hnew : used < (assignTables used LP).1 → (assignTables used LP).1 ≤ TT) :
-    CurRuns (Cur.step find place base) (CurBound (assignTables used LP).1 TT)
+    CurRuns (Cur.step find place base) (CurOk LP (assignTables used LP).1 TT)
       ⟨.leaf, 0, used, noSlot, noSlot, 0, 0⟩ (mapPlan base (assignTables used LP).2) := by
   rw [assignTables_eq] at hnew ⊢
   refine main_run H hTT hnew LP.length LP _ _ (le_refl _) ⟨[], rfl, by simp⟩ ?_
@@ -2018,7 +2029,7 @@ theorem curRuns_mapPlan (H : SimOk off find place LP) (used TT : Nat)
     le_refl _, Nat.zero_le _, Nat.zero_le _⟩
 
 /-- **`Stands` for a map plan iterator.** An iterator whose call of `next`, from
-a state that keeps `Inv` and whose cursor `abs` keeps `CurBound`, is one call
+a state that keeps `Inv` and whose cursor `abs` keeps `CurOk`, is one call
 of `Cur.step find place base` on its cursor (an item related to the step, a
 state that keeps `Inv` whose cursor is the cursor after it, the same state
 when the cursor stays), at the cursor before the first leaf with the record
@@ -2029,7 +2040,7 @@ theorem stands_mapPlan {σ α : Type} {next : σ → Result (Option α × σ)} {
     {abs : σ → Cur} {Inv : σ → Prop} (H : SimOk off find place LP) (used TT : Nat)
     (hTT : ∀ x ∈ LP, PlaceLe TT x.2)
     (hnew : used < (assignTables used LP).1 → (assignTables used LP).1 ≤ TT)
-    (hnext : ∀ it, Inv it → CurBound (assignTables used LP).1 TT (abs it) → next it ⦃ o it' =>
+    (hnext : ∀ it, Inv it → CurOk LP (assignTables used LP).1 TT (abs it) → next it ⦃ o it' =>
       OptionRel rel o (Cur.step find place base (abs it)).1 ∧
         abs it' = (Cur.step find place base (abs it)).2 ∧ Inv it' ∧ (abs it' = abs it → it' = it) ⦄)
     (it : σ) (hi : Inv it) (hc : abs it = ⟨.leaf, 0, used, noSlot, noSlot, 0, 0⟩) :

@@ -158,7 +158,7 @@ theorem kernel_map_plan_stands (hU : Usize64) {N : Usize} (s : page_tables.Table
         it'.count = it.count) hSim s.used.val N.val
       (fun x hx => placeLe_of_place (hLL.place x hx)) hnewTT ?_ it ⟨rfl, rfl, rfl, rfl⟩ ?_
     · rintro it' ⟨h1, h2, h3, h4⟩ hbd
-      obtain ⟨hbn, hbt2, hbt3, hbslot, hbgib⟩ := hbd
+      obtain ⟨⟨hbn, hbt2, hbt3, hbslot, hbgib⟩, -⟩ := hbd
       have hcur' : CurFits it'.cursor it'.base := by
         refine ⟨by simp only [curOf] at hbn; omega, by simp only [curOf] at hbt2; rw [hmax]; omega,
           by simp only [curOf] at hbt3; rw [hmax]; omega, ?_, ?_, ?_, ?_⟩
