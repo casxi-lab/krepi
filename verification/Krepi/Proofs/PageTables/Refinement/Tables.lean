@@ -4,6 +4,7 @@ public import Krepi.Statements.PageTables.Tables
 import Mathlib.Util.CountHeartbeats
 import Krepi.Proofs.PageTables.Refinement.WalkLemmas
 import Krepi.Proofs.PageTables.Refinement.WriteLemmas
+import Krepi.Proofs.PageTables.Refinement.CopyLemmas
 
 /-!
 # Page tables: refinement of the descriptors, the ranges and the table sets
@@ -58,8 +59,8 @@ public theorem tablesReset : TablesReset :=
   fun _ _ _ s => reset_spec s
 
 /-- Proves `TablesCloneKernelFrom`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem tablesCloneKernelFrom : TablesCloneKernelFrom := by
-  sorry
+public theorem tablesCloneKernelFrom : TablesCloneKernelFrom :=
+  fun _ _ _ s source sourceBase base bits => clone_kernel_from_spec s source sourceBase base bits
 
 /-- Proves `ClonePlanNext`. Feature: `krepi.kernel.kernel-memory`. -/
 public theorem clonePlanNext : ClonePlanNext := fun _ _ _ _ _ h => advances_of_stands h

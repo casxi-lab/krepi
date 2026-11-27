@@ -1650,7 +1650,7 @@
       "name": "Krepi.Statements.PageTables.TablesCloneKernelFrom",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Tables.tablesCloneKernelFrom",
       "module": "Krepi.Proofs.PageTables.Refinement.Tables",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.ClonePlanNext",
