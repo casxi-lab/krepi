@@ -655,7 +655,7 @@ jobs:
                 "- Receipt `\($path)`, SHA-256 `\($sha)`: `\(.status)`, complete \(.complete), \(.seconds) s",
                 "- Phases: " + ([.phases | to_entries[] | "\(.key) \(.value.seconds) s"] | join(", ")),
                 "- Units: " + ([.units[].status] | group_by(.) | map("\(length) \(.[0])") | join(", ")),
-                "- Replay: \(.base.leanchecker.seconds // "none") s, largest process \(.base.leanchecker.max_rss // "none") B",
+                "- Replay: \(.base.leanchecker.seconds // "none") s; resident set at most \(.base.leanchecker.max_rss // "none") B, its own \(.base.leanchecker.max_rss_own)",
                 "- Resources: disk available at the start \(.resources.disk_available_at_start) B, " +
                   "least \(.resources.disk_least_available) B; largest process " +
                   "\(.resources.largest_process_max_rss) B; cgroup memory peak " +
