@@ -2588,7 +2588,9 @@ pub(crate) mod tests {
     #[test]
     fn a_part_whose_seed_outruns_its_budget_is_budget_and_one_whose_seed_fails_runs_no_mutant() {
         // The seed of the second part hangs after the extraction, whose
-        // seconds its budget of 3 s has already spent.
+        // seconds its budget of 3 s has already spent. The phase `targets`
+        // has the budget of the part too, so either may set the limit of the
+        // seed, as the commands before it took longer or shorter.
         let fixture = with_targets("part-budget", &parted_targets([1_800, 3]));
         fixture::lake_script(&fixture, "+Krepi", "exec sleep 30\n");
         let done = part_run(&fixture, "target/t/2");
@@ -2602,7 +2604,8 @@ pub(crate) mod tests {
             .iter()
             .find(|c| c.argv.ends_with(&["+Krepi".to_string()]));
         let hung = hung.expect("the build of the seed");
-        assert_eq!((hung.limit, hung.class), (LimitBy::Target, Class::Budget));
+        let part = matches!(hung.limit, LimitBy::Target | LimitBy::Phase);
+        assert!(part && hung.class == Class::Budget, "{hung:?}");
         assert!(!receipt.part.expect("the part").seed_built);
         // A seed whose proofs fail leaves the mutants of the part not run.
         let failed = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
