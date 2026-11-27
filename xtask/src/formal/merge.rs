@@ -489,10 +489,11 @@ pub fn merge(root: &Path, layout: &Layout, paths: &[PathBuf], job: Option<Durati
 /// registry's `targets` and those `waived`, each failure a problem of
 /// `problems`: coverage, the modules that the lanes and the qualification job
 /// hold do not overlap and are those that the job lists; names, no public
-/// constant of theirs is in two of them; waivers, each lane leaves out what
-/// the closure of the job gives of its modules; extraction, the lane of each
-/// formal target outside the waivers extracted it. They fail without the
-/// receipt of the job, whose absence is a problem already.
+/// constant of theirs is in two of them but a theorem of one type and
+/// universe parameters, which Lean imports from both; waivers, each lane
+/// leaves out what the closure of the job gives of its modules; extraction,
+/// the lane of each formal target outside the waivers extracted it. They fail
+/// without the receipt of the job, whose absence is a problem already.
 fn check(
     kept: &[&Receipt],
     targets: &[Target],
@@ -515,7 +516,11 @@ fn check(
     let (mut holders, mut declared) = (BTreeMap::<_, Vec<_>>::new(), BTreeMap::<_, Vec<_>>::new());
     for (part, lane, _) in &held {
         (lane.modules.iter()).for_each(|module| holders.entry(module).or_default().push(*part));
-        (lane.constants.iter()).for_each(|name| declared.entry(name).or_default().push(*part));
+        // A constant is `<name> <kind> <fingerprint>`.
+        for entry in &lane.constants {
+            let at = (entry.rmatch_indices(' ').nth(1)).map_or(entry.len(), |(at, _)| at);
+            (declared.entry(&entry[..at]).or_default()).push((*part, entry[at..].trim_start()));
+        }
     }
     for (module, parts) in &holders {
         let (parts, of) = (
@@ -529,8 +534,11 @@ fn check(
     let unheld = listed.keys().filter(|module| !holders.contains_key(module));
     found[0].extend(unheld.map(|m| format!("the hand-written module {m} is held by no part")));
     for (name, parts) in declared.iter().filter(|(_, parts)| parts.len() > 1) {
-        let parts = parts.join(", ");
-        found[1].push(format!("the public constant {name} is declared by {parts}"));
+        let sign = parts[0].1;
+        let same = sign.starts_with("theorem ") && (parts.iter()).all(|(_, s)| *s == sign);
+        let parts = Vec::from_iter(parts.iter().map(|(part, _)| *part)).join(", ");
+        let conflict = format!("the public constant {name} is declared by {parts}");
+        found[1].extend((!same).then_some(conflict));
     }
     let shown = |left: &BTreeMap<String, String>| Vec::from_iter(left.keys().cloned()).join(", ");
     for (part, lane, _) in held.iter().filter(|(part, ..)| lane(part).is_some()) {
@@ -1212,6 +1220,86 @@ pub(crate) mod tests {
         let problem = "the public constant Krepi.Qualification.Arithmetic.f is declared by qualification, lane/x";
         no_conclusion(&conflict, &[problem.to_string()]);
         assert!(!conflict.checks.names && conflict.checks.coverage);
+    }
+
+    #[test]
+    fn a_theorem_of_the_same_type_and_universe_parameters_in_two_parts_is_no_conflict() {
+        // Lean imports a theorem that two modules declare when its type and
+        // universe parameters are the same in both, as the equations that it
+        // generates where a `match` is used are: the qualification job and
+        // the lane of `Fdt` declare this pair on the proofs. It refuses any
+        // other constant of one name, and so does the merge.
+        let fixture = checkout("merge-same-theorem", r#"[{"name": "a"}, {"name": "b"}]"#);
+        let lanes = serde_json::json!({"schema": 1, "lanes": [
+            {"name": "x", "components": ["A"]}, {"name": "y", "components": ["B"]}]});
+        fixture.write(LAYOUT.lanes, &format!("{lanes:#}\n"));
+        fixture.commit_all();
+        let job = qualification(&fixture);
+        let lanes = base::lanes(fixture.root(), LAYOUT).expect("the lanes");
+        let (x, y) = (
+            lane_of(&fixture, &job, &lanes[0]),
+            lane_of(&fixture, &job, &lanes[1]),
+        );
+        let held = [&job, &x, &y];
+        let targets = ["a", "b"].map(|t| {
+            let part = format!("target/{t}/1");
+            write(&fixture, t, &receipt(&fixture, &part, &units_of(t)))
+        });
+        // The merge of the job and the two lanes, each with `constants`.
+        let merged = |constants: [Vec<String>; 3]| {
+            let names = ["q", "x", "y"];
+            let written = std::array::from_fn::<_, 3, _>(|i| {
+                let mut receipt = held[i].clone();
+                receipt.lane.as_mut().expect("the lane").constants = constants[i].clone();
+                write(&fixture, names[i], &receipt)
+            });
+            let ([q, x, y], [a, b]) = (written, targets.clone());
+            merge(fixture.root(), LAYOUT, &[q, a, b, x, y], None)
+        };
+        let first = "Aeneas.Std.U64.checked_add_bv_spec.match_1.congr_eq_1";
+        let second = "Aeneas.Std.U64.checked_add_bv_spec.match_1.congr_eq_2";
+        let pair = vec![
+            format!("{first} theorem 3405691582[]"),
+            format!("{second} theorem 4027431614[]"),
+        ];
+        let none = Vec::new;
+        for both in [
+            [pair.clone(), pair.clone(), none()],
+            [none(), pair.clone(), pair.clone()],
+        ] {
+            let ok = merged(both);
+            verified(&ok);
+            assert!(ok.checks.names);
+        }
+        // Another type, other universe parameters, or a constant that is not
+        // a theorem in one part or in both.
+        for (entries, parts) in [
+            (
+                [Some("theorem 1[]"), Some("theorem 2[]"), None],
+                "qualification, lane/x",
+            ),
+            (
+                [Some("theorem 1[u]"), Some("theorem 1[v]"), None],
+                "qualification, lane/x",
+            ),
+            (
+                [Some("other 1[]"), Some("theorem 1[]"), None],
+                "qualification, lane/x",
+            ),
+            (
+                [Some("theorem 1[]"), Some("theorem 1[]"), Some("other 1[]")],
+                "qualification, lane/x, lane/y",
+            ),
+            (
+                [None, Some("other 1[u]"), Some("other 1[u]")],
+                "lane/x, lane/y",
+            ),
+        ] {
+            let found = merged(entries.map(|e| Vec::from_iter(e.map(|e| format!("{first} {e}")))));
+            let problem = format!("the public constant {first} is declared by {parts}");
+            no_conclusion(&found, &[problem]);
+            assert!(!found.checks.names && found.checks.coverage);
+        }
     }
 
     #[test]

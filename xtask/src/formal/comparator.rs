@@ -85,11 +85,13 @@ pub fn phase<'a>(root: &Path, layout: &'a Layout, lane: &str, runs: Option<Strin
 }
 
 /// Runs the comparator on `units` in the stage of the one base record of
-/// the lane below `runs` of the commit and run of CI, whose deadline it
-/// takes; an error stops the phase.
+/// the lane below `runs` of the commit, tree, image and run of CI, whose
+/// deadline it takes; an error stops the phase.
 fn compare(gate: &mut Gate, units: Units, runs: &Path) -> Result<(), String> {
     let layout = *gate.layout();
-    let run = |r: &Receipt| (r.commit.clone(), r.trigger.run_id.clone(), r.shard.clone());
+    let of = |r: &Receipt| (r.commit.clone(), r.tree.clone(), r.trigger.run_id.clone());
+    let image = |r: &Receipt| r.image.as_ref().and_then(|image| image.reference.clone());
+    let run = |r: &Receipt| (of(r), image(r), r.shard.clone());
     let this = run(&gate.receipt);
     let entries = fs::read_dir(runs).into_iter().flatten().flatten();
     let found = entries.filter_map(|entry| record(&entry.path().join(BASE_RECORD)));
@@ -905,12 +907,24 @@ mod tests {
             .clone()
             .expect("the record that it read");
         assert_eq!(read.run, job.run.id);
-        // A record of another run of CI, or of another commit.
+        // A record of another run of CI, tree or image, or of another commit.
         let original = fs::read(record_of(&job)).expect("the record");
-        edit(&job, |receipt| {
-            receipt.trigger.run_id = Some("7".to_string())
-        });
-        stopped(&compared(&fixture), &none);
+        let elsewhere: [Edit; 3] = [
+            |receipt| receipt.trigger.run_id = Some("7".to_string()),
+            |receipt| receipt.tree = Some("0".repeat(40)),
+            |receipt| {
+                let reference = Some(merge::tests::image('b'));
+                receipt.image = Some(receipt::Image {
+                    reference,
+                    ..receipt::Image::default()
+                });
+            },
+        ];
+        for change in elsewhere {
+            fs::write(record_of(&job), &original).expect("restore the record");
+            edit(&job, change);
+            stopped(&compared(&fixture), &none);
+        }
         fs::write(record_of(&job), &original).expect("restore the record");
         fixture.write("README.md", "moved\n");
         fixture.commit_all();
@@ -1033,5 +1047,47 @@ mod tests {
                 run_of("comparator/t", "C1")
             ]
         );
+    }
+
+    #[test]
+    fn the_receipt_of_a_lane_has_the_larger_memory_and_the_least_disk_of_its_two_runs() {
+        // The free disk at the start is that of the base run, which starts
+        // the job; each run gives the larger reading of one memory peak and
+        // the smaller of the least free disk in turn.
+        let fixture = Fixture::new("comparator-resources");
+        let runs = fixture.root().join("runs");
+        let readings = |start, least, rss, peak| receipt::Resources {
+            disk_available_at_start: Some(start),
+            disk_least_available: Some(least),
+            largest_process_max_rss: Some(rss),
+            cgroup_memory_peak: Some(peak),
+        };
+        let (first, second) = (readings(1_000, 400, 50, 70), readings(900, 500, 60, 65));
+        for (base, own, combined) in [
+            (&first, &second, readings(1_000, 400, 60, 70)),
+            (&second, &first, readings(900, 400, 60, 70)),
+        ] {
+            let record = Receipt {
+                schema: BASE_SCHEMA,
+                run: "base".to_string(),
+                resources: base.clone(),
+                ..Receipt::default()
+            };
+            let text = receipt::render(&record);
+            fixture.write(&format!("runs/base/{BASE_RECORD}"), &text);
+            let read = BaseRecord {
+                sha256: sha256(text.as_bytes()),
+                run: "base".to_string(),
+                ..BaseRecord::default()
+            };
+            let mut lane = Receipt {
+                resources: own.clone(),
+                base_record: Some(read),
+                ..Receipt::default()
+            };
+            combine(&runs, &mut lane);
+            assert!(lane.failures.is_empty(), "{:?}", lane.failures);
+            assert_eq!(lane.resources, combined);
+        }
     }
 }

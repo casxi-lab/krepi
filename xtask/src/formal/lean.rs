@@ -554,8 +554,8 @@ run_cmd do
     logInfo m!\"krepi-audit statement {statement} {moduleOf statement} {exact}\"
 ";
 
-/// The audit file, not a module: it imports `root`, checks the type of each
-/// proved statement's theorem, and audits `own` modules but planned theorems.
+/// The audit file, not a module: it imports `Lean` and `root`, checks the
+/// type of each proved theorem, and audits `own` modules but planned ones.
 pub fn audit_source(root: &str, statements: &[Statement], own: &[String]) -> String {
     let quoted = |names: &mut dyn Iterator<Item = &String>| {
         let names: Vec<String> = names.map(|name| format!("`{name}")).collect();
@@ -574,7 +574,7 @@ pub fn audit_source(root: &str, statements: &[Statement], own: &[String]) -> Str
     let program = AUDIT_PROGRAM.replace("PLANNED", &quoted(&mut planned.into_iter()));
     let program = program.replace("OWN", &quoted(&mut own.iter()));
     let program = program.replace("STATEMENTS", &proved.join(", "));
-    format!("import {root}\nset_option pp.privateNames true\n\n{examples}\n{program}")
+    format!("import Lean\nimport {root}\nset_option pp.privateNames true\n{examples}\n{program}")
 }
 
 /// What the audit printed: module markers, each theorem's module and axioms,
@@ -1956,10 +1956,10 @@ mod tests {
             "Krepi.Qualification.Models.FromStr",
             "Krepi.Qualification.SingleLoop",
         ];
-        // The audit files that the two stages ran.
+        // The audit files that the two stages ran, but for their header.
         assert_eq!(
             audit_source("Krepi", &[], &modules(&qualification)),
-            include_str!("fixtures/base/audit/base.lean")
+            importing_lean(include_str!("fixtures/base/audit/base.lean"))
         );
         let statement = |name: &str, theorem: &str, state| Statement {
             name: name.to_string(),
@@ -2005,11 +2005,52 @@ mod tests {
         own.extend(modules(&qualification));
         own.extend(modules(&["Krepi.Spec.Counter", "Krepi.Statements.Counter"]));
         let source = audit_source("Krepi", &statements, &own);
-        assert_eq!(source, include_str!("fixtures/base/audit/counter.lean"));
+        let captured = include_str!("fixtures/base/audit/counter.lean");
+        assert_eq!(source, importing_lean(captured));
         let line = source.lines().nth(FIRST_EXAMPLE - 1);
         assert_eq!(
             line,
             Some("example : Krepi.Statements.Counter.S := Krepi.Proofs.Counter.t")
+        );
+        // Each line from the first `example` on is where the capture had it,
+        // so that the lines of its errors name the same `example`.
+        let from =
+            |text: &str| Vec::from_iter(text.lines().skip(FIRST_EXAMPLE - 1).map(String::from));
+        assert_eq!(from(&source), from(captured));
+    }
+
+    /// The audit file `captured`, as the stages of the captures ran it, with
+    /// the header that [`audit_source`] writes now: `import Lean` before the
+    /// import of the root, in place of the empty line after the header.
+    fn importing_lean(captured: &str) -> String {
+        let (header, rest) = captured.split_once("\n\n").expect("a header");
+        format!("import Lean\n{header}\n{rest}")
+    }
+
+    #[test]
+    fn the_audit_file_imports_lean_before_its_root() {
+        // Its programs use `Lean.Elab.Command`, which a root that imports no
+        // module, as that of the qualification job of the calibration, does
+        // not bring; the first `example` stays on its line.
+        let statement = Statement {
+            name: "Krepi.Statements.S".to_string(),
+            theorem: "Krepi.Proofs.t".to_string(),
+            module: "Krepi.Proofs".to_string(),
+            state: State::Proved,
+        };
+        let source = audit_source("Krepi", &[statement], &[]);
+        let header = [
+            "import Lean",
+            "import Krepi",
+            "set_option pp.privateNames true",
+            "example : Krepi.Statements.S := Krepi.Proofs.t",
+        ];
+        assert_eq!(Vec::from_iter(source.lines().take(FIRST_EXAMPLE)), header);
+        let empty = audit_source("Krepi", &[], &[]);
+        assert!(empty.starts_with(&header[..3].join("\n")), "{empty}");
+        assert_eq!(
+            empty.lines().nth(FIRST_EXAMPLE),
+            Some("open Lean Elab Command in")
         );
     }
 

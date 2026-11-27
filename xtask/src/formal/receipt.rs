@@ -240,9 +240,9 @@ pub struct BaseRecord {
 
 /// What the base round of a lane, or of the qualification job, holds: its
 /// name and components, its own hand-written modules, those that waivers
-/// leave out among them with their targets, the public constants of these
-/// modules and of the generated modules of its targets, and each target that
-/// it extracted with its role.
+/// leave out among them with their targets, the public constants of the
+/// modules of its root, each `<name> <kind> <fingerprint>`, and each target
+/// that it extracted with its role.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lane {
     pub name: String,

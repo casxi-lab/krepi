@@ -253,7 +253,8 @@ fn aeneas(root: &str) -> String {
 /// `artifacts/lake/statements/<statement>`, else the name without its last
 /// component when that file exists, and `true`; and for each module whose
 /// public constants it is to name, each `public theorem` and `public def` of
-/// its file. A
+/// its file, a `theorem` or `other`, with the checksum of the rest of its line
+/// and no universe parameter for its fingerprint. A
 /// heartbeat copy is counted ten heartbeats per line at each inserted line.
 /// `leanchecker` passes, and so does `lake comparator`, keyed `comparator`,
 /// whose configuration is its third argument. The range printer
@@ -309,8 +310,9 @@ case $key in
       echo "krepi-audit statement $statement $module ${exact:-true}"
     done
     for module in $(names mine); do
-      grep -E '^public (theorem|def) ' "$(path "$module").lean" 2>/dev/null | while read -r _ _ name _; do
-        echo "krepi-name $module.$name"
+      grep -E '^public (theorem|def) ' "$(path "$module").lean" 2>/dev/null | while read -r _ kind name rest; do
+        [ "$kind" = theorem ] || kind=other
+        echo "krepi-name $module.$name $kind $(echo "$rest" | cksum | cut -d ' ' -f 1)[]"
       done
     done ;;
   heartbeats)

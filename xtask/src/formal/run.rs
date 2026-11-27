@@ -2168,6 +2168,20 @@ pub(crate) mod tests {
         phases(&context, &shard_targets(shard), None)
     }
 
+    /// Runs the shard `shard` of `fixture` in `layout` with the phases that
+    /// [`command`] gives it outside a pull request, into a new run directory,
+    /// and writes its receipt.
+    pub(crate) fn layout_shard(fixture: &Fixture, layout: &Layout, shard: &str) -> Done {
+        let context = Context {
+            layout,
+            ..shard_context(fixture.root(), Some(shard), &no_variable, plenty)
+        };
+        let run = RunDir::create(fixture.root()).expect("create the run directory");
+        let (targets, sink) = (shard_targets(shard), Box::new(io::sink()));
+        let phases = phases(&context, &targets, None);
+        gate_with(&context, run, &targets, phases, sink)
+    }
+
     /// The phases of the qualification job of `fixture` but its
     /// qualification, with a base round that is verified.
     fn lane_job<'a>(fixture: &Fixture) -> Vec<Phase<'a>> {
@@ -2555,6 +2569,17 @@ pub(crate) mod tests {
         assert_eq!(record.schema, receipt::BASE_SCHEMA);
         assert_eq!(record.budgets.gate_seconds, 300 + 2_400 + 600);
         assert_eq!(Vec::from_iter(record.phases.keys()), ["base", "extraction"]);
+        // Its commands run by that deadline: the build of the base round,
+        // whose phase has 3,600 s, has what was left of the 3,300 s when it
+        // started.
+        let build = (record.commands.iter()).find(|c| c.site == Site::BaseBuild);
+        let build = build.expect("the base build");
+        assert_eq!(build.limit, LimitBy::Gate, "{build:?}");
+        let left = (300 + 2_400 + 600) as f64 - build.started;
+        assert!(
+            (left - 1.0..=left + 1.0).contains(&build.limit_seconds),
+            "{build:?}"
+        );
         // The comparator run writes the receipt of the lane with that record:
         // its start, budget, phases, units and commands, and the seconds of
         // both runs.
