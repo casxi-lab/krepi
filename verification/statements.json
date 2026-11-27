@@ -1524,25 +1524,25 @@
       "name": "Krepi.Statements.PageTables.OwnershipChoose",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipChoose",
       "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.OwnershipAssign",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipAssign",
       "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.OwnershipReserve",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipReserve",
       "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.ReservationInitialized",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.reservationInitialized",
       "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.OwnershipPublish",

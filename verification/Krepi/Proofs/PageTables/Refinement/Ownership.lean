@@ -2,6 +2,7 @@ module
 
 public import Krepi.Statements.PageTables.Ownership
 import Mathlib.Util.CountHeartbeats
+import Krepi.Proofs.PageTables.Refinement.PlaceLemmas
 
 /-!
 # Page tables: refinement of the page ownership table
@@ -17,27 +18,29 @@ each theorem.
 
 namespace Krepi.Proofs.PageTables.Refinement.Ownership
 
-open Krepi.Statements.PageTables
+open Krepi.Statements.PageTables Krepi.Proofs.PageTables.Refinement
 
 /-- Proves `OwnershipNew`. Feature: `krepi.kernel.kernel-memory`. -/
 public theorem ownershipNew : OwnershipNew := by
   sorry
 
 /-- Proves `OwnershipChoose`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem ownershipChoose : OwnershipChoose := by
-  sorry
+public theorem ownershipChoose : OwnershipChoose :=
+  fun _ _ _ t T owner pages alignment placement P ht _ hP =>
+    ownership_choose_spec t T owner pages alignment placement P ht hP
 
 /-- Proves `OwnershipAssign`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem ownershipAssign : OwnershipAssign := by
-  sorry
+public theorem ownershipAssign : OwnershipAssign :=
+  fun _ _ _ t T choice C zeroed ht _ hc _ => ownership_assign_spec t T choice C zeroed ht hc
 
 /-- Proves `OwnershipReserve`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem ownershipReserve : OwnershipReserve := by
-  sorry
+public theorem ownershipReserve : OwnershipReserve :=
+  fun _ _ _ t T owner pages alignment placement P ht _ hP =>
+    ownership_reserve_spec t T owner pages alignment placement P ht hP
 
 /-- Proves `ReservationInitialized`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem reservationInitialized : ReservationInitialized := by
-  sorry
+public theorem reservationInitialized : ReservationInitialized :=
+  fun _ r R zeroed h => reservation_initialized_spec r R zeroed h
 
 /-- Proves `OwnershipPublish`. Feature: `krepi.kernel.kernel-memory`. -/
 public theorem ownershipPublish : OwnershipPublish := by
