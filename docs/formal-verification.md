@@ -754,7 +754,7 @@ others are planned.
 | `cargo xtask formal check [--write] [--calibration]` | The inventory of the production functions against the `proves` and `unclosed` lists of the targets and against `open.json`, which it compares with what the contracts give, the rules of the registry ([proof targets](#proof-targets)) and of the waiver record ([waivers](#waivers)), the lists of survivors ([source mutants and survivors](#source-mutants-and-survivors)), the shard plan and the budget of each shard ([shard plan and disk guard](#shard-plan-and-disk-guard)), the lanes ([lanes](#lanes)) and the refusal of what the gate does not support yet ([legacy inventory and admission](#legacy-inventory-and-admission)); `--write` first writes `open.json`, and `--calibration` checks the calibration target, which no contract describes. It runs no tool and proves nothing |
 | `cargo xtask formal vectors [DOMAIN/COMPONENT]` | Replays the test vectors of a component's contract, or of each component whose contract names a replay, through its specification with the pinned Lean and compares the results line by line with those that its Rust host tests wrote ([test vectors](#test-vectors)). It writes no receipt and proves nothing |
 | `cargo xtask formal canary STEP [--outcomes TEXT]` | Runs one step of the toolchain canary on what its jobs fetched and built: give the rows of the run and their `limits` from the registry, `resolve` and `derive` the tool manifest of Aeneas main, check that the `patch` applies, `fill` the switch export and the statement hash, or conclude the run with its `verdict` from what its parts left and, with `--outcomes`, the result of the job `canary limits` ([toolchain canary](#toolchain-canary)). It fetches nothing and proves nothing |
-| `cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]` | Generates the source mutants of a formal target with every operator, or those named, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration, and `--keep` keeps the work directory of the run, as for `run` |
+| `cargo xtask formal mutants TARGET [--operator NAME]... [--part I/K] [--calibration] [--keep]` | Reads the qualification receipt of its CI run, then generates the source mutants of a formal target with every operator, or those named, with `--part` only an interval of those of one operator, runs each through a run of the gate on the target and writes the list of its survivors ([source mutants and survivors](#source-mutants-and-survivors)); `--calibration` takes a target of the calibration, and `--keep` keeps the work directory of the run, as for `run` |
 | `cargo xtask formal impact --base REV` | Lists, one item per line, the merge base of `REV` and `HEAD`, each path changed since with its Git status, without rename detection, the decision, `unaffected` when no changed path lies within a [gate input](#gate-inputs-and-snapshot) and `affected` otherwise, and the registered targets that the change affects, with their states: every target when an input of extraction changed, and otherwise each whose entry in `verification/targets.json` changed and each with a changed file of its `proof_modules`. A registry that cannot be read at the merge base, as after a change of its schema, counts as one without targets, so that every target is listed, after a line `unreadable verification/targets.json at the merge base: <why>`. Paths, names and that reason are printed escaped, so that none splits a line. It decides nothing, and exits with 1 only on a base that is not a revision or when Git or the registry at the head cannot be read |
 | `cargo xtask formal merge [--calibration] RECEIPT...` | Combines the receipts of the qualification job, of each lane and of the part of each formal target of the commit checked out into the conclusion of the whole gate, which passes when every unit and part outside the [waivers](#waivers) that hold is `VERIFIED`, and of its three hard gates, the axiom audits, the replays of `leanchecker` and the comparator, with its record and summary ([shards and merge](#shards-and-merge)); `--calibration` merges those of the calibration target |
 | `cargo xtask formal receipt [--require-fresh] [RECORD]` | Judges the record of a merge, by default `artifacts/formal/merge/record.json`, against the checkout ([current and fresh records](#current-and-fresh-records)): `CURRENT` when it has the gate inputs of the clean checkout, the pinned image and one conclusion for each registered unit and is complete, `VERIFIED` and passing, and `WAIVED` when it passes only within waivers that still hold; `--require-fresh` also requires the trigger of a run of CI, no planned statement and no waiver. It exits with 0 when the record is current, and fresh when asked, 3 when it is waived, 1 otherwise and 2 on a usage error. It runs no tool and proves nothing |
@@ -978,8 +978,9 @@ receipts of runs on a standard `ubuntu-24.04-arm` runner, never by a run.
 The entries are those of the runs that measured the parts:
 `verification/shards.json` has `qualification`, `lane/fdt` and
 `lane/page-tables`, and the plan of the calibration target has
-`qualification` and `target/calibration/1`, the part that once held every
-mutant of its target. Each entry has these fields:
+`qualification`, `lane/calibration` and its three parts
+`target/calibration/1` to `target/calibration/3`, all of one run. Each
+entry has these fields:
 
 | Field | Content |
 | --- | --- |
@@ -1027,9 +1028,9 @@ whichever worker runs it, and the run of the part has a deadline of 300 s
 and that budget from its start. Two workers build the mutants of a part
 side by side, each in a stage of its own that starts from the build of its
 target ([registered mutants](#registered-mutants)). On a standard
-`ubuntu-24.04-arm` runner the one part of the calibration target, with its
-30 mutants built one after another, took about 400 s, against its
-registered budget of 3,000 s, and the parts of the gate stayed well within
+`ubuntu-24.04-arm` runner each of the three parts of the calibration
+target, with ten of its 30 mutants, took about 90 s, against its
+registered budget of 1,000 s, and the parts of the gate stayed well within
 the wall-clock limit, the memory and the disk of the runner.
 
 The disk guard of a run, after the steps of the gate inputs and before the
@@ -1130,9 +1131,9 @@ and each part of each formal target of the registry,
 their receipts into the
 conclusion of the whole gate. A run without `--shard` and `--target` has
 every phase in one process, with one base round over every hand-written
-module; local runs, the measurement jobs of the workflow `formal measure`
-such as `leanchecker fresh` ([CI job](#ci-job)) and `formal mutants` use
-it, and its receipt is no part of a merge. `--shard` cannot be given with
+module; local runs and the measurement jobs of the workflow `formal measure`
+such as `leanchecker fresh` ([CI job](#ci-job)) use it, and its receipt is
+no part of a merge. `--shard` cannot be given with
 `--target`, and `--comparator` only with `--shard lane/<name>`: otherwise
 the command exits with 2 before a run starts.
 In CI the jobs `formal run`, `formal lane <name>`, which runs the
@@ -1193,7 +1194,8 @@ the merge, are among the required checks of `main`.
   targets in the same way, each whole, its unit and every mutant of its
   parts: their extraction, planned targets included, and the phase
   `targets` for the formal ones, without the guard, the qualification and
-  the base round, which a run of `cargo xtask formal mutants` keeps. Its
+  the base round, as a run of `cargo xtask formal mutants` does
+  ([source mutants and survivors](#source-mutants-and-survivors)). Its
   budget is 300 s and the registered budgets of its targets, each the sum
   of those of its parts. Its receipt is `SCOPED` and no part of a merge.
 - **The receipt of a part** names its part in `shard` and has the mode
@@ -2638,6 +2640,7 @@ has the same fields with schema 1, and `base_record` `null`
 | `handwritten` | For the qualification job, each hand-written module of the Lake project by name, with where its file lies by the [lanes](#lanes): its component, `qualification` or `shared`; or `null` |
 | `left_out` | For the qualification job, each hand-written module that the [waivers](#waivers) that hold leave out of the base round, with the target of the waiver; or `null` |
 | `part` | For a part of a target, the part and its seed, below, or `null` |
+| `source_mutants` | For a run of `cargo xtask formal mutants`, the qualification receipt that it read and its part, below, or `null` |
 | `proof_targets` | What the run found for each target that the phase `extraction` took, below, by its name: those that it selects and the formal ones, or in the part of a target and in a run of `cargo xtask formal run --target` those that it selects alone, in a lane the targets of the lane, also one that it did not extract since it registers more than 30 mutants or its module is not a Lean module path |
 | `guard` | What the guard found on a pull request, below, or `null` without a pull request event or when its phase did not finish |
 | `commands` | Every command, in the order of its `sequence` |
@@ -2732,6 +2735,14 @@ The `part` record has these fields:
 | `generated` | The SHA-256 of each Lean file that Aeneas wrote for the target, by its path below the output of Aeneas |
 | `seed_built` | Whether the build of the proofs of the target, which seeds its mutants, passed |
 
+The `source_mutants` record has these fields
+([source mutants and survivors](#source-mutants-and-survivors)):
+
+| Field | Content |
+| --- | --- |
+| `qualification` | The qualification receipt that the run read: its `sha256`, of its bytes; the `run_id` of its CI run, its `commit`, `tree` and the reference of its `image`, each `null` when it has none; its `status`; and whether it is `complete`; or `null` when the run did not find exactly one |
+| `part` | The part of the run, `<i>/<k>`, or `null` for every mutant of its operators |
+
 Each record of `proof_targets` has these fields:
 
 | Field | Content |
@@ -2764,9 +2775,8 @@ The `guard` record has these fields:
 
 CI keeps the receipts of its runs, so any change of a field takes a new
 schema, except that schema 7 is extended in place, with `part` and with
-the record of the qualification receipt that a run of source mutants
-reads, which is planned, so a receipt of schema 7 written before a field
-was added has no such field and reads it as `null`, and a merge reads the
+`source_mutants`, so a receipt of schema 7 written before a field was
+added has no such field and reads it as `null`, and a merge reads the
 receipts of one run only.
 Receipts come from two hosts. CI runs the gate on `linux-aarch64`
 in the pinned image, as the runner's user, which cannot write the image's
@@ -2784,8 +2794,8 @@ of their merge. It runs on every pull request to `main` when it is opened,
 reopened or updated, when a label is added or removed, and when its
 description is edited, since the guard reads the labels and the
 description; on every push to `main`; on a manual run, whose input `mode`
-is `full` or `weekly`, and whose inputs `mutants` and `operators` may ask
-for the source mutants of a target; and once a week, on Tuesdays at
+is `full` or `weekly`, and whose input `mutants` may ask for source
+mutants of formal targets; and once a week, on Tuesdays at
 12:37 UTC. The runs
 of one pull request share a concurrency group, and a newer run cancels an
 older one with all its jobs, also those that wait for others, so that no
@@ -2813,7 +2823,10 @@ job `formal lane <name>` runs each lane of `verification/lanes.json`, its
 base run and then its comparator run, the job `formal shard <name>/<i>`
 each part of each formal target of the head's registry, and the job
 `formal scoped <name>` each planned target that the pull request affects,
-alone; and the job `formal parts` merges the receipts of the parts. Every
+alone; and the job `formal parts` merges the receipts of the parts. On a
+manual run whose input `mutants` asks for them, the jobs
+`formal mutants <item>` run source mutants after the job `formal run`.
+Every
 job of the workflow that needs another has a condition that starts with
 `!cancelled()`, so that it runs unless the run was cancelled, also when a
 job that it needs failed or was skipped, as `formal fast` is on a run of
@@ -2954,7 +2967,19 @@ not run, and the verdicts fail. So it does when the name of a lane is not
 of these characters or another lane has it, when a component is in two
 lanes, or when the registered budget of a lane and the extraction margin
 are more than the shard limit, as `cargo xtask formal check` refuses them
-([lanes](#lanes)), so the job of a lane has at most 122 minutes. The
+([lanes](#lanes)), so the job of a lane has at most 122 minutes. On a
+manual run, the job also expands the input `mutants`, items separated by
+spaces, into the jobs of `formal mutants`, one for each item, numbered
+from 1 for each target in the order of the input: `<target>` for every
+operator, `<target>:<operator>+<operator>` for one or more operators, or
+`<target>:<operator>@<i>/<k>` for the `i`-th of `k` intervals of the
+mutants of one operator, with `1 <= i <= k <= 4`
+([source mutants and survivors](#source-mutants-and-survivors)). It fails,
+and no job of the run starts, on an item of another form, a target that is
+not a formal target of the registry, a word that is not an operator of
+`cargo xtask formal mutants`, an interval of more than one operator or
+with `i` more than `k`, and a fifth item of one target; on every other
+event the jobs of `formal mutants` do not run. The
 limits of the jobs of the lanes, of the parts and of `formal scoped` are
 expressions of their matrix, so each such job writes its limit as
 `::notice title=timeout-minutes::<minutes>`, from which the record of the
@@ -3157,20 +3182,31 @@ passes, and so does `WAIVED`, whose waivers hold on the UTC date of the
 review; anything else fails, and so does a missing run or record
 ([current and fresh records](#current-and-fresh-records)).
 
-The job `formal mutants` runs on a manual run of `main` whose input
-`mutants` names a target, beside the gate. It fails unless the target is
-a formal target of the registry and each word of the input `operators` is
-an operator of `cargo xtask formal mutants`, and then runs, in the pinned
-image with the flags of the gate,
-`cargo xtask formal mutants <target>` with an `--operator` for each word,
-or every operator when there is none, under `deadline.sh --stop-commands`
+Each job `formal mutants <item>` runs the source mutants of one item of
+the input `mutants` of a manual run of `main`, which the job
+`formal limits` expanded. It needs `formal limits` and `formal run`, and
+runs once `formal run` has ended, also when it failed. It checks out the
+commit, pulls the image, builds xtask, downloads the artifact of the
+qualification job of the run, of every attempt, into
+`artifacts/formal/qualification`, and then runs, in the pinned image with
+the flags of the gate and the variable `KREPI_FORMAL_QUALIFICATION` that
+names that directory, `cargo xtask formal mutants <target>` with an
+`--operator` for each operator of the item, none for every operator, and
+`--part <i>/<k>` for an interval, under `deadline.sh --stop-commands`
 with the 14,400 s of the command and the 300 s of its receipt, 245
 minutes; its step has two minutes more, and the job 20 more than its
-step, 267. It summarizes the receipt with workflow commands turned off and
+step, 267. The run reads the qualification receipt of the run there and
+runs no mutant unless it holds
+([source mutants and survivors](#source-mutants-and-survivors)), so a
+qualification job that failed, or left no receipt, makes it a tool
+failure with a receipt. The job summarizes the receipt, with the
+qualification receipt that it read, with workflow commands turned off and
 uploads the receipt, the summary, the record of the runner and the logs in
 `logs.tar.gz`, and the list of survivors of a run that passed, as the job
 of the mutants of the [calibration target](#calibration-target) does, as
-`formal-mutants-<commit>-<attempt>`.
+`formal-mutants-<target>-<n>-<commit>-<attempt>`, with `n` the number of
+the item among those of its target; the jobs of one run have artifacts of
+their own.
 
 The measurement jobs `leanchecker fresh`, `leanchecker prefix` and
 `lake comparator` are in the workflow `formal measure`,
@@ -3582,14 +3618,28 @@ and accepted otherwise. The ranges make no table when
 
 ### Source mutants and survivors
 
-`cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]`
-is a run of the gate with `--target TARGET`, `SCOPED` and never complete as
+`cargo xtask formal mutants TARGET [--operator NAME]... [--part I/K] [--calibration] [--keep]`
+is a run of the gate on `TARGET` alone, as a run with `--target TARGET` is
+([shards and merge](#shards-and-merge)), `SCOPED` and never complete as
 any run of named targets, with a budget of 14,400 s in place of the gate's
-7,200 s and those of its targets. Once the phase `targets` has verified the
-target, the run generates its source mutants from the export instead of
-running its registered ones, and runs each in the unit
-`mutants/<target>`, with the theorems of all the obligations of the target
-as its `fails`.
+7,200 s and those of its targets. It runs no guard, no qualification and
+no base round: those are the qualification job's, whose receipt of the
+same CI run it reads instead. After the steps of the gate inputs and the
+disk guard, and before its first phase, it takes the receipts of the
+qualification job, of `shard` `qualification`, among the files
+`receipt.json` at most three levels below the directory that
+`KREPI_FORMAL_QUALIFICATION` names, or below `artifacts/formal/runs/`
+without it, and of those of one CI run the latest attempt alone. There
+must be one, and it must be of the CI run, the commit, the tree and the
+image of the run, `VERIFIED` and complete; otherwise no phase runs, the
+run is a tool failure that gives the reason, every unit is `NOT_RUN`, and
+no mutant runs. Its receipt records what it read in `source_mutants`
+([receipt](#receipt)). The run then extracts the target alone and, in the
+phase `targets`, builds its proofs in their stage, the build that each
+mutant starts from, and audits them; once the target is verified, it
+generates its source mutants from the export instead of running its
+registered ones, and runs each in the unit `mutants/<target>`, with the
+theorems of all the obligations of the target as its `fails`.
 
 The points of the mutants are in the bodies of the functions of `proves`
 and `unclosed`, which the extraction reaches from the roots; `derived`
@@ -3620,31 +3670,42 @@ copied, edited and checked with
 `cargo check --lib --locked --quiet --target aarch64-unknown-none` at the
 call site `cargo-check`, in the environment of Charon, then extracted,
 staged, built and judged as a registered mutant, on two workers as those
-are, in the order of their points. A mutant that
+are, in the order of their points. With `--part I/K`, which takes exactly
+one `--operator` and `1 <= I <= K <= 4`, the run takes the mutants of that
+operator, numbered from 1 in the order in which they are generated, by the
+path of their file and then by their place in it, and runs those from
+`floor((I - 1) * n / K) + 1` to `floor(I * n / K)` of the `n`, so the `K`
+parts of an operator run each of its mutants once; the points without a
+text that occurs once count in the first part alone. A command line with
+`--part` and another number of operators, or an interval of another form,
+exits with 2 before a run starts. A mutant that
 `cargo check` does not build is not run and is counted. A mutant whose
 build is rejected is killed, and one whose build is accepted survives. An
 inconclusive mutant, and one with a command that fails as a tool or meets
 the budget, conclude the unit otherwise than `VERIFIED`, and the command
 then writes no list and exits with 1. So does a run that is not `SCOPED`
-for another reason, such as a unit of the qualification or of the base
-round that is not `VERIFIED`. A theorem of the obligations that is not a
+for another reason, such as a qualification receipt that does not hold or
+a target that is not verified. A theorem of the obligations that is not a
 top-level theorem of the proof modules, against which no error could
 count, concludes the unit `REJECTED` before any mutant is generated.
 
 The run writes the list of survivors of the target,
 `verification/mutants/<target>.json`, or that of the calibration below
-`verification/qualification/calibration/mutants/`, and prints its counts.
-Its fields:
+`verification/qualification/calibration/mutants/`, with itself as its one
+run, and prints its counts. The runs of one CI run that split the
+operators of a target, each in a job of its own, each write the list of
+their own run; the list of the target holds them all, with their counts
+added up and their survivors. Its fields:
 
 | Field | Meaning |
 | --- | --- |
-| `schema` | 1 |
+| `schema` | 2 |
 | `target` | The target |
-| `commit` | The commit of the run |
-| `operators` | The operators of the run |
-| `run`, `run_id`, `receipt_sha256` | The run directory of the run, the ID of the CI run, if any, and the SHA-256 of its receipt |
-| `generated`, `killed`, `unbuildable`, `not_unique` | The numbers of mutants generated, killed and not built by `cargo check`, and of points without a text that occurs once |
-| `survivors` | Each survivor: its `point`, `<file>:<line>:<column>`, its `operator`, `find` and `replace`, the inventory key of the `function` that it edits, and the `class` and the `reason` that a reviewer gives it |
+| `commit` | The commit of its runs |
+| `operators` | The operators of its runs |
+| `runs` | Each run of the list: its `run` directory, the `run_id` of its CI run, if any, its `operators`, its `part`, `<i>/<k>`, or `null`, the number of mutants that it `generated`, and the SHA-256 of its receipt, `receipt_sha256`, and of the qualification receipt that it read, `qualification_sha256`, or `null` for a run that read none |
+| `generated`, `killed`, `unbuildable`, `not_unique` | The numbers of mutants generated, killed and not built by `cargo check`, and of points without a text that occurs once, of its runs |
+| `survivors` | Each survivor: its `point`, `<file>:<line>:<column>`, its `operator`, `find` and `replace`, the inventory key of the `function` that it edits, the `run` directory of the run in which it survived, and the `class` and the `reason` that a reviewer gives it |
 
 A reviewer gives every survivor a class, `missing-lemma` for a property
 that the proofs lack, `no-theorem` for a function that no theorem covers,
@@ -3652,15 +3713,20 @@ or `equivalent` for a mutant with the meaning of the source, and a reason
 that is not blank. A survivor in a function of `unclosed`, which no
 theorem is about, is written with the class `no-theorem` and keeps it.
 `cargo xtask formal check` fails on a survivor without a class or a
-reason, on one in a function of `unclosed` of another class, and on a
-list that does not parse or is not that of a registered target at its
-path; it names the functions of the survivors of
+reason, on one in a function of `unclosed` of another class, on one of no
+run of its list, on a list that does not parse, is not of schema 2 or is
+not that of a registered target at its path, and on the runs of a list
+that are not of one CI run, or in which an operator is neither in one run
+without a part nor alone in the `k` runs of its parts `1/k` to `k/k`, as
+when two runs take the same mutants of an operator or none takes some of
+them; it names the functions of the survivors of
 class `no-theorem` in its report
 ([legacy inventory and admission](#legacy-inventory-and-admission)). A
 refinement task names the operators that it uses; an operator is added to
-this command, not by the task that uses it. In CI, the job
-`formal mutants` runs the command on a target of production on a manual
-run of `main` ([CI job](#ci-job)).
+this command, not by the task that uses it. In CI, the jobs
+`formal mutants <item>` run the command on targets of production on a
+manual run of `main`, after the qualification job of the run
+([CI job](#ci-job)).
 
 ## Calibration target
 
@@ -3687,8 +3753,8 @@ no image holds:
   and a change of the tools changes the files of `verification/` alone;
 - its registries: `targets.json`, `statements.json`, and `models.json`,
   `axioms.json` and `tcb.json`, which are empty; its shard plan
-  `shards.json`, with the entries `qualification` and
-  `target/calibration/1`
+  `shards.json`, with the entries `qualification`, `lane/calibration` and
+  `target/calibration/1` to `target/calibration/3`
   ([shard plan and disk guard](#shard-plan-and-disk-guard)); and its lanes
   `lanes.json`, with the lane `calibration` ([lanes](#lanes)).
 
@@ -3779,9 +3845,17 @@ credentials and run actions pinned to full commit SHAs:
   `calibration-formal-part-*` artifacts. It runs when the jobs above ran,
   unless the run was cancelled, and it waits for the planned example as
   well, since both run in one matrix job;
-- `calibration mutants`, on a manual run whose input `mutants` asks for it
-  and on a pull request with the label, runs
-  `cargo xtask formal mutants calibration --calibration`.
+- `calibration mutants calibration`, on a manual run whose input
+  `mutants` asks for it and on a pull request with the label, after
+  `calibration run`, which it waits for with the planned example, since
+  both run in one matrix job, runs the steps of the job `formal mutants` of
+  `formal` ([CI job](#ci-job)), which a unit test keeps equal but for
+  `--calibration`, the prefixes of the artifacts and the directory of the
+  lists of survivors, on one item that the workflow writes out,
+  `calibration` with every operator: it downloads the
+  `calibration-formal-part-qualification-*` artifacts of the run and runs
+  `cargo xtask formal mutants calibration --calibration`, which reads the
+  qualification receipt of the run from them.
 
 The parts of the calibration have the trigger `WEEKLY` on the schedule
 and none, so `MANUAL`, on the other events ([receipt](#receipt)). Each
@@ -3823,12 +3897,12 @@ The artifacts are
 `calibration-formal-part-qualification-<commit>-<attempt>` of the job
 `calibration run`,
 `calibration-formal-part-lane-<name>-<commit>-<attempt>`,
-`calibration-formal-part-target-<name>-1-<commit>-<attempt>`,
+`calibration-formal-part-target-<name>-<i>-<commit>-<attempt>`,
 `formal-calibration-planned-<commit>-<attempt>`,
 `formal-calibration-merge-<commit>-<attempt>` and
-`formal-calibration-mutants-<commit>-<attempt>`. The job of the mutants
-uploads the list of survivors as well, from `artifacts/formal/mutants/`
-and only when its run passed: a run that fails writes no list, and the
+`formal-calibration-mutants-calibration-1-<commit>-<attempt>`. The job of
+the mutants uploads the list of survivors as well, from
+`artifacts/formal/mutants/` and only when its run passed: a run that fails writes no list, and the
 checkout may hold the list of an earlier run.
 
 ## Specifications
