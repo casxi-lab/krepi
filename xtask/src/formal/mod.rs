@@ -162,7 +162,7 @@ impl Layout {
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "run",
-        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the part of the named targets, their extraction and the phase targets, --shard NAME only the qualification job, qualification, the base run of a lane, lane/<name>, whose comparator --comparator runs after it, or the part of a formal target, target/<name>/1, --calibration runs the calibration target, and --keep keeps the work directory of the run",
+        about: "Run the proof gate on a snapshot of the gate inputs, with the qualification of the tools, the extraction of the targets, the base round, the targets and, on a pull request, the guard, and write its receipt; --target NAME, which may be repeated, runs only the part of the named targets, their extraction and the phase targets, --shard NAME only the qualification job, qualification, the base run of a lane, lane/<name>, whose comparator --comparator runs after it, or a part of a formal target, target/<name>/<i>, --calibration runs the calibration target, and --keep keeps the work directory of the run",
         subcommands: &[],
     },
     Command {
@@ -237,7 +237,7 @@ fn cli() -> clap::Command {
                 Arg::new("shard")
                     .long("shard")
                     .value_name("NAME")
-                    .help("Run only the qualification job, qualification, a lane, lane/<name>, or the part of a formal target, target/<name>/1")
+                    .help("Run only the qualification job, qualification, a lane, lane/<name>, or a part of a formal target, target/<name>/<i>")
                     .conflicts_with("target")
                     .value_parser(merge::shard),
                 clap::arg!(--calibration "Run in the layout of the calibration target"),
@@ -462,9 +462,9 @@ mod tests {
             shard(&["run", "--shard", "lane/fdt", "--keep"]),
             (Some("lane/fdt".to_string()), BTreeSet::new(), true)
         );
-        let args = ["run", "--shard", "target/t/1", "--calibration", "--keep"];
+        let args = ["run", "--shard", "target/t/4", "--calibration", "--keep"];
         let t = BTreeSet::from(["t".to_string()]);
-        assert_eq!(shard(&args), (Some("target/t/1".to_string()), t, true));
+        assert_eq!(shard(&args), (Some("target/t/4".to_string()), t, true));
         // The comparator of a lane is a flag of its part.
         let matches =
             read(&["run", "--shard", "lane/fdt", "--comparator"]).expect("a command line");
@@ -507,7 +507,9 @@ mod tests {
             &["run", "--shard", "comparator/t"],
             &["run", "--shard", "targets/t"],
             &["run", "--shard", "target/t"],
-            &["run", "--shard", "target/t/2"],
+            &["run", "--shard", "target/t/0"],
+            &["run", "--shard", "target/t/5"],
+            &["run", "--shard", "target/t/02"],
             &["run", "--shard", "target/t/x/1"],
             &["run", "--shard", "lane/"],
             &["run", "--shard", "lane/a/b"],
@@ -888,7 +890,7 @@ mod tests {
             "prefix": "KrepiGen.Table.External.",
             "reason": "the external items of the table"
         }]});
-        let targets = serde_json::json!({"schema": 2, "specifications": [], "targets": [
+        let targets = serde_json::json!({"schema": 3, "specifications": [], "targets": [
             {"name": "slots", "state": "planned"},
             {
                 "name": "table",

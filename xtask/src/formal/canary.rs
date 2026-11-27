@@ -132,7 +132,7 @@ pub const REMOVAL: u64 = 1;
 pub struct Row {
     /// The lane, the target of the part, or `qualification`.
     pub name: String,
-    /// The part: `qualification`, `lane/<name>` or `target/<name>/1`.
+    /// The part: `qualification`, `lane/<name>` or `target/<name>/<i>`.
     pub part: String,
     /// The part in the names of its artifact, `/` written `-`.
     pub key: String,
@@ -2315,7 +2315,7 @@ mod tests {
         let targets = (formal.iter()).map(|(name, budget)| target(name, "formal", *budget));
         let later = planned.then(|| target("later", "planned", None));
         let targets = Vec::from_iter(targets.chain(later));
-        format!("{{\"schema\": 2, \"targets\": [{}]}}\n", targets.join(", "))
+        format!("{{\"schema\": 3, \"targets\": [{}]}}\n", targets.join(", "))
     }
 
     /// The rows of the lane `l` and the registry of the formal targets

@@ -3,11 +3,27 @@
   "parts": [
     {
       "part": "qualification",
-      "disk_peak": 458510336,
-      "seconds": 1078.872,
-      "cgroup_memory_peak": 10429386752,
-      "run_id": "43479078171",
-      "commit": "7e291ff0e7e67d36b71c5a37d15f482f8bbe5602"
+      "disk_peak": 540512256,
+      "seconds": 1472.853,
+      "cgroup_memory_peak": 3854680064,
+      "run_id": "45936037867",
+      "commit": "a1c24bb0b69b91461e12392d40aa28974906c024"
+    },
+    {
+      "part": "lane/fdt",
+      "disk_peak": 410169344,
+      "seconds": 1466.12,
+      "cgroup_memory_peak": 7352414208,
+      "run_id": "45936037867",
+      "commit": "a1c24bb0b69b91461e12392d40aa28974906c024"
+    },
+    {
+      "part": "lane/page-tables",
+      "disk_peak": 266371072,
+      "seconds": 531.845,
+      "cgroup_memory_peak": 3151708160,
+      "run_id": "45936037867",
+      "commit": "a1c24bb0b69b91461e12392d40aa28974906c024"
     }
   ]
 }

@@ -2078,11 +2078,11 @@ mod tests {
         let hash = hash(&mut fixture, &LAYOUT);
         let labelled = guard(&mut fixture, &base, &["spec"], Some(&approval(&hash)));
         assert_eq!(failed(&labelled), []);
-        let other = r#"{"schema": 3, "targets": []}"#;
+        let other = r#"{"schema": 4, "targets": []}"#;
         let base = commit(&fixture, &[(LAYOUT.registry, other)]);
         commit_registries(&fixture, &registries()[..1]);
         let record = guard(&mut fixture, &base, &[], None);
-        let error = "schema 3 where 2 is expected";
+        let error = "schema 4 where 3 is expected";
         assert_eq!(
             failed(&record),
             [(rule, why("the merge base", error).as_str())]
@@ -2281,7 +2281,7 @@ mod tests {
         let base = commit(&fixture, &[(LAYOUT.registry, r#"{"schema": 3}"#)]);
         let head = commit(
             &fixture,
-            &[(LAYOUT.registry, r#"{"schema": 2, "targets": []}"#)],
+            &[(LAYOUT.registry, r#"{"schema": 3, "targets": []}"#)],
         );
         fixture.write("artifacts/event.json", &event(&base, &head, &[], None));
         let done = run::tests::gate(&fixture, &[], Vec::from_iter(super::phase(&var)));

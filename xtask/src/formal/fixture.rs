@@ -72,7 +72,7 @@ impl Fixture {
         fixture.lock();
         fixture.write(
             "verification/targets.json",
-            "{\"schema\": 2, \"specifications\": [], \"targets\": []}\n",
+            "{\"schema\": 3, \"specifications\": [], \"targets\": []}\n",
         );
         fixture.write(
             "verification/shards.json",

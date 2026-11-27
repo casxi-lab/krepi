@@ -532,7 +532,7 @@ mod tests {
     /// The contract of the fixture component.
     const CONTRACT: &str = "docs/domains/memory/demo/contract.md";
 
-    const NO_TARGETS: &str = "{\"schema\": 2, \"specifications\": [], \"targets\": []}\n";
+    const NO_TARGETS: &str = "{\"schema\": 3, \"specifications\": [], \"targets\": []}\n";
 
     const NO_AXIOMS: &str = "{\"schema\": 1, \"axioms\": []}\n";
 
@@ -1163,7 +1163,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
         );
         for list in ["proves", "unclosed"] {
             let targets = format!(
-                r#"{{"schema": 2, "targets": [{{"name": "a", "state": "planned", "{list}": ["kernel/demo/src/lib.rs#f"]}}]}}"#
+                r#"{{"schema": 3, "targets": [{{"name": "a", "state": "planned", "{list}": ["kernel/demo/src/lib.rs#f"]}}]}}"#
             );
             assert_eq!(
                 problems(&[lib, (LAYOUT.registry, &targets)]),
@@ -1199,7 +1199,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
             LIB,
             "#[derive(Clone)]\npub struct S;\npub fn f() {}\npub fn g() {}\n",
         );
-        let targets = r#"{"schema": 2, "targets": [{"name": "a", "state": "planned",
+        let targets = r#"{"schema": 3, "targets": [{"name": "a", "state": "planned",
             "proves": ["kernel/demo/src/lib.rs#f", "kernel/demo/src/lib.rs#gone"],
             "unclosed": ["kernel/demo/src/lib.rs#g", "kernel/demo/src/lib.rs#f"],
             "derived": ["kernel/demo/src/lib.rs#S::clone", "kernel/demo/src/lib.rs#S::eq"]}]}"#;
@@ -1215,7 +1215,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
         );
         // A formal target with the obligation, theorem and mutant that it
         // needs.
-        let targets = r#"{"schema": 2, "targets": [{"name": "a", "module": "A", "start_from": ["f"],
+        let targets = r#"{"schema": 3, "targets": [{"name": "a", "module": "A", "start_from": ["f"],
             "proves": ["kernel/demo/src/lib.rs#f"], "unclosed": ["kernel/demo/src/lib.rs#g"],
             "obligations": [{"id": "o", "theorems": ["T.t"]}],
             "mutants": [{"name": "m", "file": "kernel/demo/src/lib.rs", "find": "f", "replace": "f", "fails": ["T.t"]}]}]}"#;
@@ -1225,7 +1225,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
         );
         let error = problems(&[lib, (LAYOUT.registry, r#"{"schema": 1, "targets": []}"#)]);
         assert!(
-            error.contains(&"schema 1 where 2 is expected".to_string()),
+            error.contains(&"schema 1 where 3 is expected".to_string()),
             "{error:?}"
         );
     }
@@ -1257,7 +1257,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
     /// which proves `f` of [`LIB`], and the planned target `b`, of 7,200 s.
     fn shard_of(budget: u64) -> String {
         format!(
-            r#"{{"schema": 2, "targets": [{{"name": "a", "module": "A", "start_from": ["f"], "budget": {budget},
+            r#"{{"schema": 3, "targets": [{{"name": "a", "module": "A", "start_from": ["f"], "budget": {budget},
             "proves": ["kernel/demo/src/lib.rs#f"],
             "obligations": [{{"id": "o", "theorems": ["T.t"]}}],
             "mutants": [{{"name": "m", "file": "kernel/demo/src/lib.rs", "find": "f", "replace": "f", "fails": ["T.t"]}}]}},
@@ -1445,7 +1445,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
     #[test]
     fn the_lists_of_survivors_fail_the_check_and_name_what_no_theorem_covers() {
         let lib = (LIB, "pub fn f() {}\npub fn g() {}\n");
-        let targets = r#"{"schema": 2, "targets": [{"name": "a", "state": "planned",
+        let targets = r#"{"schema": 3, "targets": [{"name": "a", "state": "planned",
             "proves": ["kernel/demo/src/lib.rs#f"], "unclosed": ["kernel/demo/src/lib.rs#g"]}]}"#;
         let survivor = |function: &str, class: Option<mutants::Category>| mutants::Survivor {
             point: format!("{LIB}:1:1"),
@@ -1530,7 +1530,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
 
     #[test]
     fn the_refusals_of_the_registries_fail_the_check() {
-        let targets = r#"{"schema": 2, "targets": [{"name": "a", "state": "planned", "premises": [{}], "exclude": ["k::f"]}]}"#;
+        let targets = r#"{"schema": 3, "targets": [{"name": "a", "state": "planned", "premises": [{}], "exclude": ["k::f"]}]}"#;
         assert_eq!(
             problems(&[(LIB, ""), (LAYOUT.registry, targets)]),
             [

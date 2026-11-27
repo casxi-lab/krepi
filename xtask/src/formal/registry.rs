@@ -11,13 +11,16 @@ use serde::Deserialize;
 use serde_json::Value;
 
 /// The schema version of the target registry.
-pub const SCHEMA: u32 = 2;
+pub const SCHEMA: u32 = 3;
 
-/// The budget of a target that registers none, in seconds.
+/// The budget of a target, or of a part of one, that registers none, in seconds.
 pub const BUDGET: u64 = 1_800;
 
 /// The most source mutants that a target may register.
 pub const MUTANTS: usize = 30;
+
+/// The most parts of a target, and the most that their budgets add up to.
+pub const PARTS: (usize, u64) = (4, 7_200);
 
 /// The registry, `verification/targets.json`.
 #[derive(Debug, Clone, Deserialize)]
@@ -60,8 +63,7 @@ pub struct Target {
     pub name: String,
     #[serde(default)]
     pub state: State,
-    #[serde(default = "budget")]
-    pub budget: u64,
+    pub budget: Option<u64>,
     pub module: Option<String>,
     pub feature: Option<String>,
     pub description: Option<String>,
@@ -90,10 +92,55 @@ pub struct Target {
     pub obligations: Vec<Obligation>,
     #[serde(default)]
     pub mutants: Vec<Mutant>,
+    #[serde(default)]
+    pub parts: Vec<Part>,
 }
 
 fn budget() -> u64 {
     BUDGET
+}
+
+/// A part of a target: its budget and the names of its registered mutants.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Part {
+    #[serde(default = "budget")]
+    pub budget: u64,
+    #[serde(default)]
+    pub mutants: Vec<String>,
+}
+
+impl Target {
+    /// The parts of the target, the first first: those that it registers, or
+    /// one with its budget and every registered mutant.
+    pub fn parts(&self) -> Vec<Part> {
+        if !self.parts.is_empty() {
+            return self.parts.clone();
+        }
+        let mutants = self.mutants.iter().map(|m| m.name.clone()).collect();
+        let budget = self.budget.unwrap_or(BUDGET);
+        vec![Part { budget, mutants }]
+    }
+
+    /// The budget of the target: the sum of those of its parts.
+    pub fn budget(&self) -> u64 {
+        (self.parts().iter().map(|part| part.budget)).fold(0, u64::saturating_add)
+    }
+
+    /// The target with its part `i`, from 1, alone, and the registered
+    /// mutants of that part; none when it has no such part.
+    pub fn in_part(&self, i: usize) -> Option<Target> {
+        let part = self.parts().into_iter().nth(i.checked_sub(1)?)?;
+        let ours = |m: &&Mutant| part.mutants.contains(&m.name);
+        let mutants = self.mutants.iter().filter(ours).cloned().collect();
+        let (budget, parts) = (None, vec![part]);
+        Some(Target {
+            budget,
+            mutants,
+            parts,
+            ..self.clone()
+        })
+    }
 }
 
 /// A cut point: the Charon pattern of the items translated without their
@@ -154,7 +201,7 @@ pub fn parse(text: &str) -> Result<Registry, String> {
 pub fn states(text: &str) -> Result<BTreeMap<String, (State, u64)>, String> {
     let targets = parse(text)?.targets.into_iter();
     Ok(targets
-        .map(|target| (target.name, (target.state, target.budget)))
+        .map(|target| (target.name.clone(), (target.state, target.budget())))
         .collect())
 }
 
@@ -169,8 +216,10 @@ fn blank(text: &Option<String>) -> bool {
 /// in `start_from`; a formal target has an obligation and a mutant, every
 /// obligation a theorem, every mutant a theorem of its target that is to
 /// fail; `proves`, `unclosed` and `derived` are disjoint; a cut point gives
-/// its source and reason; and no target registers more than [`MUTANTS`]
-/// mutants.
+/// its source and reason; no target registers more than [`MUTANTS`]
+/// mutants; and a target with parts has no budget of its own, at most as
+/// many parts, whose budgets add up to at most as much, as [`PARTS`] gives,
+/// and each of its mutants in exactly one part, which names no other.
 pub fn rules(registry: &Registry) -> Vec<String> {
     let mut problems = Vec::new();
     let (mut names, mut modules, mut theorems) =
@@ -252,6 +301,28 @@ pub fn rules(registry: &Registry) -> Vec<String> {
                     "target {name}: mutant {mutant_name} names {fails}, which is no theorem of the target's obligations"
                 ));
             }
+        }
+        let (k, sum, (most, limit)) = (target.parts.len(), target.budget(), PARTS);
+        if k > 0 {
+            let own = "it has parts and a budget of its own".to_string();
+            let mut found = Vec::from_iter(target.budget.map(|_| own));
+            let many = format!("{k} parts, more than the {most} that a target may have");
+            found.extend((k > most).then_some(many));
+            let over = format!("the budgets of its parts add up to {sum} s, more than {limit} s");
+            found.extend((sum > limit).then_some(over));
+            for mutant in &target.mutants {
+                let of = |part: &&Part| part.mutants.contains(&mutant.name);
+                let count = target.parts.iter().filter(of).count();
+                let not = format!("mutant {} is in {count} parts", mutant.name);
+                found.extend((count != 1).then_some(not));
+            }
+            let named = |m: &String| target.mutants.iter().any(|mutant| mutant.name == *m);
+            let parts = target.parts.iter().enumerate();
+            let other = parts.flat_map(|(i, p)| p.mutants.iter().map(move |m| (i + 1, m)));
+            let other = other.filter(|(_, m)| !named(m));
+            found.extend(other.map(|(i, m)| format!("part {i} names {m}, no mutant of it")));
+            let found = found.into_iter();
+            problems.extend(found.map(|found| format!("target {name}: {found}")));
         }
         let lists = [
             ("proves", &target.proves),
@@ -425,7 +496,7 @@ pub(crate) mod tests {
     /// without obligations and mutants, beside a specification.
     pub(crate) fn valid() -> Value {
         json!({
-            "schema": 2,
+            "schema": 3,
             "specifications": [{
                 "module": "Krepi.Spec.Table",
                 "feature": "krepi.memory.table",
@@ -488,7 +559,7 @@ pub(crate) mod tests {
     fn the_targets_are_read_with_their_states_and_budgets() {
         let registry = parse(&valid().to_string()).expect("a registry");
         let read: Vec<_> = (registry.targets.iter())
-            .map(|target| (target.name.as_str(), target.state, target.budget))
+            .map(|target| (target.name.as_str(), target.state, target.budget()))
             .collect();
         assert_eq!(
             read,
@@ -515,30 +586,30 @@ pub(crate) mod tests {
     #[test]
     fn a_registry_of_another_schema_or_shape_is_refused() {
         assert_eq!(
-            states(r#"{"schema": 1, "targets": []}"#),
-            Err("schema 1 where 2 is expected".to_string())
+            states(r#"{"schema": 2, "targets": []}"#),
+            Err("schema 2 where 3 is expected".to_string())
         );
         assert_eq!(
             states(r#"{"targets": []}"#),
-            Err("schema null where 2 is expected".to_string())
+            Err("schema null where 3 is expected".to_string())
         );
         for (text, error) in [
-            (r#"{"schema": 2}"#, "missing field `targets`"),
-            (r#"{"schema": 2, "targets": [{}]}"#, "missing field `name`"),
+            (r#"{"schema": 3}"#, "missing field `targets`"),
+            (r#"{"schema": 3, "targets": [{}]}"#, "missing field `name`"),
             (
-                r#"{"schema": 2, "targets": [{"name": "a", "state": "proved"}]}"#,
+                r#"{"schema": 3, "targets": [{"name": "a", "state": "proved"}]}"#,
                 "unknown variant `proved`",
             ),
             (
-                r#"{"schema": 2, "targets": [{"name": "a", "opaque": ["k::f"]}]}"#,
+                r#"{"schema": 3, "targets": [{"name": "a", "opaque": ["k::f"]}]}"#,
                 "invalid type: string",
             ),
             (
-                r#"{"schema": 2, "targets": [{"name": "a", "mutant": []}]}"#,
+                r#"{"schema": 3, "targets": [{"name": "a", "mutant": []}]}"#,
                 "unknown field `mutant`",
             ),
             (
-                r#"{"schema": 2, "targets": [{"name": "a", "proves": "f"}]}"#,
+                r#"{"schema": 3, "targets": [{"name": "a", "proves": "f"}]}"#,
                 "invalid type: string",
             ),
         ] {
@@ -801,14 +872,32 @@ pub(crate) mod tests {
         );
     }
 
+    /// The formal target of [`valid`] with `count` mutants, `m1` on, in parts
+    /// of `size` mutants in turn, each with `budget`.
+    fn parted(registry: &mut Value, count: usize, size: usize, budget: u64) {
+        let mutant = table(registry)["mutants"][0].clone();
+        let named = |i: usize| {
+            let mut mutant = mutant.clone();
+            mutant["name"] = json!(format!("m{i}"));
+            mutant
+        };
+        let names = Vec::from_iter((1..=count).map(|i| format!("m{i}")));
+        let parts = names
+            .chunks(size)
+            .map(|m| json!({"budget": budget, "mutants": m}));
+        let target = table(registry).as_object_mut().expect("the target");
+        target.remove("budget");
+        target.insert(
+            "mutants".into(),
+            Vec::from_iter((1..=count).map(named)).into(),
+        );
+        target.insert("parts".into(), Vec::from_iter(parts).into());
+    }
+
     #[test]
     fn more_mutants_than_a_target_may_register_fail() {
-        let mutants = |count: usize| {
-            broken(|registry| {
-                let mutant = table(registry)["mutants"][0].clone();
-                table(registry)["mutants"] = Value::Array(vec![mutant; count]);
-            })
-        };
+        // However many parts hold them.
+        let mutants = |count: usize| broken(|registry| parted(registry, count, 8, 1_000));
         assert_eq!(mutants(MUTANTS), Vec::<String>::new());
         assert_eq!(
             mutants(MUTANTS + 1),
@@ -816,12 +905,101 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn the_parts_of_a_target_are_read_with_their_budgets_and_mutants() {
+        let mut registry = valid();
+        parted(&mut registry, 3, 2, 1_000);
+        let second = table(&mut registry)["parts"][1].as_object_mut();
+        second.expect("the second part").remove("budget");
+        let read = parse(&registry.to_string()).expect("a registry");
+        let target = &read.targets[0];
+        let part = |budget, names: &[&str]| Part {
+            budget,
+            mutants: Vec::from_iter(names.iter().map(|name| name.to_string())),
+        };
+        let parts = [part(1_000, &["m1", "m2"]), part(BUDGET, &["m3"])];
+        assert_eq!(target.parts(), parts);
+        assert_eq!(target.budget(), 1_000 + BUDGET);
+        // Without parts, a target is one part with its budget and every
+        // mutant, and each part of a target is the target alone.
+        let whole = &parse(&valid().to_string()).expect("a registry").targets[0];
+        assert_eq!(whole.parts(), [part(900, &["bound"])]);
+        let second = target.in_part(2).expect("the second part");
+        let names = Vec::from_iter(second.mutants.iter().map(|m| m.name.as_str()));
+        assert_eq!(
+            (names, second.budget(), second.parts.len()),
+            (vec!["m3"], BUDGET, 1)
+        );
+        assert_eq!(whole.in_part(1).as_ref().map(Target::budget), Some(900));
+        assert!(target.in_part(3).is_none() && target.in_part(0).is_none());
+        assert_eq!(
+            states(&registry.to_string()).expect("the states")["table"].1,
+            2_800
+        );
+    }
+
+    #[test]
+    fn a_target_has_at_most_four_parts() {
+        let parts = |count: usize| broken(|registry| parted(registry, count, 1, 1_000));
+        assert_eq!(parts(PARTS.0), Vec::<String>::new());
+        assert_eq!(
+            parts(5),
+            ["target table: 5 parts, more than the 4 that a target may have"]
+        );
+    }
+
+    #[test]
+    fn the_budgets_of_the_parts_of_a_target_add_up_to_at_most_7200_s() {
+        let sum = |budget: u64| broken(|registry| parted(registry, 4, 1, budget));
+        assert_eq!(sum(1_800), Vec::<String>::new());
+        assert_eq!(
+            sum(1_801),
+            ["target table: the budgets of its parts add up to 7204 s, more than 7200 s"]
+        );
+    }
+
+    #[test]
+    fn each_mutant_of_a_target_with_parts_is_in_exactly_one_part() {
+        let edited = |edit: fn(&mut Value)| {
+            broken(|registry| {
+                parted(registry, 3, 2, 1_000);
+                edit(&mut table(registry)["parts"]);
+            })
+        };
+        // A mutant in no part, and one in two.
+        let none = edited(|parts| parts[1]["mutants"] = json!([]));
+        assert_eq!(none, ["target table: mutant m3 is in 0 parts"]);
+        let two = edited(|parts| parts[1]["mutants"] = json!(["m3", "m1"]));
+        assert_eq!(two, ["target table: mutant m1 is in 2 parts"]);
+        // A part names only mutants of its target.
+        let other = edited(|parts| parts[1]["mutants"] = json!(["m3", "bound"]));
+        assert_eq!(other, ["target table: part 2 names bound, no mutant of it"]);
+    }
+
+    #[test]
+    fn a_target_with_parts_has_no_budget_of_its_own() {
+        let problems = broken(|registry| {
+            parted(registry, 2, 1, 1_000);
+            table(registry)["budget"] = json!(2_000);
+        });
+        assert_eq!(
+            problems,
+            ["target table: it has parts and a budget of its own"]
+        );
+        // A part has only a budget and mutants.
+        let mut registry = valid();
+        parted(&mut registry, 2, 1, 1_000);
+        table(&mut registry)["parts"][0]["name"] = json!("first");
+        let error = parse(&registry.to_string()).expect_err("an unknown field");
+        assert!(error.contains("unknown field `name`"), "{error}");
+    }
+
     /// An empty model registry.
     const NO_MODELS: &str = r#"{"schema": 1, "models": []}"#;
 
     /// The problems of the gate's check for the planned target `target`.
     fn unsupported(target: &str) -> Vec<String> {
-        let targets = format!(r#"{{"schema": 2, "targets": [{target}]}}"#);
+        let targets = format!(r#"{{"schema": 3, "targets": [{target}]}}"#);
         check(&targets, NO_MODELS).expect("valid registries").1
     }
 
@@ -853,7 +1031,7 @@ pub(crate) mod tests {
     #[test]
     fn a_non_empty_model_registry_is_refused() {
         let models = r#"{"schema": 1, "models": [{"name": "m"}]}"#;
-        let (_, unsupported) = check(r#"{"schema": 2, "targets": []}"#, models).expect("valid");
+        let (_, unsupported) = check(r#"{"schema": 3, "targets": []}"#, models).expect("valid");
         assert_eq!(
             unsupported,
             ["models are not compared with their implementations yet"]

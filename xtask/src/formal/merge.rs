@@ -1,8 +1,8 @@
 //! The parts of the proof gate and their merge, as "Shards and merge" in
 //! `docs/formal-verification.md` describes: beside the qualification job,
-//! every lane of the base round and every formal target is a part of its
-//! own, whose registered budget is at most the shard limit, the wall-clock
-//! limit of the gate less the time of the merge; and
+//! every lane of the base round and every part of a formal target is a part
+//! of its own, whose registered budget is at most the shard limit, the
+//! wall-clock limit of the gate less the time of the merge; and
 //! `cargo xtask formal merge` combines the receipts of these parts of one
 //! commit into the conclusions of the gate and its hard gates, with waivers.
 
@@ -62,14 +62,13 @@ pub const STARTED: &str = "KREPI_FORMAL_MERGE_STARTED";
 /// qualification job, the job of each lane and that of each part of a target.
 pub const NEEDS: [(&str, &[&str]); 3] = [("gate", &[]), ("lane", &[]), ("shard", &[])];
 
-/// The parts of the formal targets of `targets`, by name, each with the
-/// registered budget of its target: every formal target has one part,
-/// `target/<name>/1`.
+/// The parts of the formal targets of `targets`, by name, each with its
+/// registered budget, those of two targets of one name added.
 pub fn shards(targets: &[Target]) -> BTreeMap<String, u64> {
     let mut shards = BTreeMap::new();
-    for target in targets.iter().filter(|t| t.state == State::Formal) {
-        let budget: &mut u64 = shards.entry(part(&target.name)).or_default();
-        *budget = budget.saturating_add(target.budget);
+    for (part, budget) in (targets.iter().filter(|t| t.state == State::Formal)).flat_map(parts) {
+        let sum: &mut u64 = shards.entry(part).or_default();
+        *sum = sum.saturating_add(budget);
     }
     shards
 }
@@ -88,9 +87,33 @@ pub fn budget_problems(targets: &[Target]) -> Vec<String> {
     over.collect()
 }
 
-/// The part of the target `name`, the one part of a target.
-pub fn part(name: &str) -> String {
-    format!("{}/1", run::target_unit(name))
+/// The parts of `target`, `target/<name>/<i>` from 1, each with its budget.
+pub fn parts(target: &Target) -> Vec<(String, u64)> {
+    let (unit, parts) = (run::target_unit(&target.name), target.parts().into_iter());
+    Vec::from_iter(
+        (1..)
+            .zip(parts)
+            .map(|(i, part)| (format!("{unit}/{i}"), part.budget)),
+    )
+}
+
+/// The number `i` of the part `target/<name>/<i>` of a target, or none.
+pub fn index(shard: &str) -> Option<usize> {
+    let (_, i) = shard
+        .strip_prefix(run::target_unit("").as_str())?
+        .rsplit_once('/')?;
+    i.parse().ok()
+}
+
+/// The part of a target of `targets` that concludes `unit`: the first for
+/// the unit of the target, and the part of a registered mutant for its unit.
+fn part_of(targets: &[Target], unit: &str) -> Option<String> {
+    let name = target(unit)?;
+    let mutant = unit.strip_prefix(&mutants::unit(name, ""));
+    let ours = |part: &registry::Part| mutant.is_none_or(|m| part.mutants.iter().any(|n| n == m));
+    let target = targets.iter().find(|target| target.name == name)?;
+    let i = target.parts().iter().position(ours)?;
+    Some(format!("{}/{}", run::target_unit(name), i + 1))
 }
 
 /// The target of the part or unit `name`, `target/<target>` and what may
@@ -118,15 +141,17 @@ pub fn budget(shard: &str) -> Duration {
 }
 
 /// The part that `--shard` names: `qualification`, `lane/<name>` or
-/// `target/<name>/1`.
+/// `target/<name>/<i>`, where `i` is at most the parts that a target may have.
 pub fn shard(name: &str) -> Result<String, String> {
     let named = |rest: Option<&str>| rest.is_some_and(|r| !r.is_empty() && !r.contains('/'));
+    let most = registry::PARTS.0;
     let part = name
-        .strip_suffix("/1")
-        .and_then(|part| part.strip_prefix("target/"));
-    let valid = name == qualify::PHASE || named(lane(name)) || named(part);
+        .strip_prefix("target/")
+        .and_then(|part| part.rsplit_once('/'));
+    let part = part.filter(|(_, i)| (1..=most).any(|n| n.to_string() == *i));
+    let valid = name == qualify::PHASE || named(lane(name)) || named(part.map(|(t, _)| t));
     let invalid = format!(
-        "`{name}` is not {}, lane/<name> or target/<name>/1",
+        "`{name}` is not {}, lane/<name> or target/<name>/<i> with i from 1 to {most}",
         qualify::PHASE
     );
     valid.then(|| name.to_string()).ok_or(invalid)
@@ -224,7 +249,7 @@ pub fn replayed(kept: &[&Receipt], root: &str) -> bool {
 /// Each unit that the checkout at `root` registers in `layout`, with its
 /// phase and the part that concludes it: of the qualification and the base
 /// round of the qualification job, of the base round and the comparator of
-/// each lane, and of the part of each formal target.
+/// each lane, and of the parts of each formal target.
 pub fn owned(root: &Path, layout: &Layout) -> Vec<(String, String, String)> {
     let [_, finish] = run::target_phases(root, layout, &BTreeSet::new(), None, None);
     let of = |phase: Phase, part: String| {
@@ -241,8 +266,10 @@ pub fn owned(root: &Path, layout: &Layout) -> Vec<(String, String, String)> {
     let compared = comparator::units(root, layout).unwrap_or_default();
     let compared = compared.into_iter().map(|(unit, (part, _))| (unit, part));
     units.extend(compared.map(|(unit, part)| (unit, comparator::PHASE.to_string(), part)));
+    let text = fs::read_to_string(root.join(layout.registry)).unwrap_or_default();
+    let targets = registry::parse(&text).map_or_else(|_| Vec::new(), |r| r.targets);
     for unit in finish.units {
-        let of_target = target(mutants::owner(&unit)).map(part).unwrap_or_default();
+        let of_target = part_of(&targets, &unit).unwrap_or_default();
         units.push((unit, finish.name.clone(), of_target));
     }
     units
@@ -438,6 +465,7 @@ pub fn merge(root: &Path, layout: &Layout, paths: &[PathBuf], job: Option<Durati
     let waived = (date.as_deref()).map_or_else(BTreeSet::new, |d| waiver::holding(&waivers, d));
     let kept = Vec::from_iter(receipts.iter().map(|(_, receipt)| receipt));
     merged.checks = check(&kept, &targets, &waived, &mut problems);
+    merged.checks.seeds = Some(seeds(&kept, &mut problems));
     // The conclusion, which only a merge without a problem synthesizes.
     let failures = receipts.iter().flat_map(|(_, receipt)| &receipt.failures);
     let mut statuses = Vec::from_iter(failures.map(|failure| failure.status));
@@ -567,6 +595,43 @@ fn check(
     (checks.coverage, checks.names, checks.waivers) = (coverage, names, waivers);
     checks.extraction = extraction;
     checks
+}
+
+/// The check of the seeds of the parts of the formal targets among the `kept`
+/// receipts, each failure a problem of `problems`: the receipt of each part
+/// of a target records its part, and the parts of one target took the same
+/// source tree, image and generated files, and each built its seed, or none
+/// did, as where the proofs of the target do not build.
+fn seeds(kept: &[&Receipt], problems: &mut Vec<String>) -> bool {
+    let (mut found, mut of) = (Vec::new(), BTreeMap::<_, Vec<_>>::new());
+    for receipt in kept {
+        let Some((shard, name)) = (receipt.shard.as_deref()).and_then(|s| Some((s, target(s)?)))
+        else {
+            continue;
+        };
+        match &receipt.part {
+            Some(part) => of.entry(name).or_default().push((shard, part)),
+            None => found.push(format!("the receipt of {shard} records no part")),
+        }
+    }
+    for (name, parts) in of {
+        let seed = |part: &receipt::TargetPart| (part.source_tree.clone(), part.image.clone());
+        let seed = |part| (seed(part), &part.generated);
+        let shown = |parts: Vec<&str>| parts.join(", ");
+        let all = shown(Vec::from_iter(parts.iter().map(|(shard, _)| *shard)));
+        let other = format!("the parts {all} of the target {name} took other seeds");
+        found.extend(
+            (parts.iter())
+                .any(|(_, p)| seed(p) != seed(parts[0].1))
+                .then_some(other),
+        );
+        let failed = Vec::from_iter(parts.iter().filter(|(_, p)| !p.seed_built));
+        let unbuilt = shown(Vec::from_iter(failed.iter().map(|(shard, _)| *shard)));
+        let unbuilt = format!("the seed of {unbuilt} did not build, that of another part did");
+        found.extend((!failed.is_empty() && failed.len() < parts.len()).then_some(unbuilt));
+    }
+    problems.extend(found.iter().cloned());
+    found.is_empty()
 }
 
 /// The summary of `merged`: its conclusion, wall clock and trigger, its hard
@@ -725,6 +790,23 @@ pub(crate) mod tests {
         let inputs = paths::gate_inputs(LAYOUT);
         let snapshot = paths::snapshot(&mut guard::Standalone(fixture.root()), &inputs);
         let before = Some(snapshot.expect("the snapshot of the head").2);
+        // The part of a target, the first of one, which built its seed.
+        let tree = before
+            .as_ref()
+            .and_then(|before| before[LAYOUT.kernel].clone());
+        let part = target(shard)
+            .zip(index(shard))
+            .map(|(name, i)| receipt::TargetPart {
+                target: name.to_string(),
+                i: i as u64,
+                k: 1,
+                budget_seconds: registry::BUDGET,
+                judges: i == 1,
+                source_tree: tree.map(|entry| entry.oid),
+                image: reference.clone(),
+                generated: BTreeMap::new(),
+                seed_built: true,
+            });
         Receipt {
             schema: SCHEMA,
             status: Status::Verified,
@@ -743,6 +825,7 @@ pub(crate) mod tests {
                 ..Inputs::default()
             },
             units: verified_units(units),
+            part,
             ..Receipt::default()
         }
     }
@@ -1144,7 +1227,7 @@ pub(crate) mod tests {
                 names: true,
                 waivers: true,
                 extraction: true,
-                seeds: None
+                seeds: Some(true)
             }
         );
         let module = |name: &str| name.to_string();
@@ -1224,11 +1307,14 @@ pub(crate) mod tests {
 
     #[test]
     fn a_theorem_of_the_same_type_and_universe_parameters_in_two_parts_is_no_conflict() {
-        // Lean imports a theorem that two modules declare when its type and
-        // universe parameters are the same in both, as the equations that it
-        // generates where a `match` is used are: the qualification job and
-        // the lane of `Fdt` declare this pair on the proofs. It refuses any
-        // other constant of one name, and so does the merge.
+        // The merge lets through a theorem that two parts declare with the
+        // same type hash and universe parameters, as Lean declares the
+        // equations that it generates where a `match` is used: the
+        // qualification job and the lane of `Fdt` declare this pair on the
+        // proofs. It reports every other pair of constants of one name, also
+        // a theorem and an axiom, which Lean imports together; Lean also
+        // requires two theorems of one name to have the same `all`, which
+        // the merge does not compare.
         let fixture = checkout("merge-same-theorem", r#"[{"name": "a"}, {"name": "b"}]"#);
         let lanes = serde_json::json!({"schema": 1, "lanes": [
             {"name": "x", "components": ["A"]}, {"name": "y", "components": ["B"]}]});
@@ -1876,6 +1962,132 @@ pub(crate) mod tests {
         registry::parse(text).expect("a registry").targets
     }
 
+    /// A checkout with the formal target `a` of the mutants `m1` and `m2`, each
+    /// in a part of its own, and the receipt of its qualification job.
+    fn two_parts(label: &str) -> (Fixture, PathBuf) {
+        let mutant = |name: &str| serde_json::json!({"name": name, "file": "f", "find": "a", "replace": "b", "fails": ["T.t"]});
+        let parts = serde_json::json!([{"budget": 1_000, "mutants": ["m1"]}, {"mutants": ["m2"]}]);
+        let targets = serde_json::json!([{"name": "a", "mutants": [mutant("m1"), mutant("m2")], "parts": parts}]);
+        let fixture = checkout(label, &targets.to_string());
+        let job = write(&fixture, "q", &qualification(&fixture));
+        (fixture, job)
+    }
+
+    /// The receipt of the part `i` of the two of [`two_parts`] in `fixture`,
+    /// which built its seed from one generated file, after `edit`.
+    fn part_of_two(fixture: &Fixture, i: usize, edit: &dyn Fn(&mut Receipt)) -> PathBuf {
+        let shard = format!("target/a/{i}");
+        let mut part = receipt(fixture, &shard, &units_of_part(fixture.root(), &shard));
+        let record = part.part.as_mut().expect("the record of the part");
+        record.k = 2;
+        record.generated = BTreeMap::from([("Funs.lean".to_string(), "f".repeat(64))]);
+        edit(&mut part);
+        write(fixture, &format!("a{i}"), &part)
+    }
+
+    #[test]
+    fn the_parts_of_a_target_merge_when_they_took_one_seed() {
+        let (fixture, job) = two_parts("merge-parts");
+        let part = |i, edit: &dyn Fn(&mut Receipt)| part_of_two(&fixture, i, edit);
+        let root = fixture.root();
+        let mutant = |m: &str| format!("target/a/mutant/{m}");
+        assert_eq!(
+            units_of_part(root, "target/a/1"),
+            ["target/a".to_string(), mutant("m1")]
+        );
+        assert_eq!(units_of_part(root, "target/a/2"), [mutant("m2")]);
+        let keep = |_: &mut Receipt| {};
+        let merged = merge_in(&fixture, &[job.clone(), part(1, &keep), part(2, &keep)]);
+        verified(&merged);
+        assert_eq!(merged.checks.seeds, Some(true));
+        let jobs = Vec::from_iter(merged.jobs.keys().map(String::as_str));
+        assert_eq!(
+            jobs,
+            [
+                "formal lane x",
+                "formal run",
+                "formal shard a/1",
+                "formal shard a/2"
+            ]
+        );
+        // Every part is required.
+        let missing = merge_in(&fixture, &[job.clone(), part(1, &keep)]);
+        let problems = [
+            "the unit target/a/mutant/m2 has no conclusion",
+            "0 receipts are of the part target/a/2, where one is expected",
+        ];
+        no_conclusion(&missing, &problems.map(String::from));
+        // Where the proofs of the target do not build, no part built its
+        // seed: the first part rejects the target, and no mutant ran.
+        let unbuilt = |receipt: &mut Receipt| {
+            receipt.part.as_mut().expect("the part").seed_built = false;
+            for (name, unit) in &mut receipt.units {
+                unit.status = [Status::NotRun, Status::Rejected][usize::from(name == "target/a")];
+            }
+        };
+        let rejected = merge_in(
+            &fixture,
+            &[job.clone(), part(1, &unbuilt), part(2, &unbuilt)],
+        );
+        assert_eq!(rejected.problems, Vec::<String>::new());
+        assert_eq!(
+            (rejected.status, rejected.checks.seeds),
+            (Status::Rejected, Some(true))
+        );
+    }
+
+    #[test]
+    fn the_parts_of_a_target_with_other_seeds_give_no_conclusion() {
+        let (fixture, job) = two_parts("merge-seeds");
+        let part = |i, edit: &dyn Fn(&mut Receipt)| part_of_two(&fixture, i, edit);
+        let keep = |_: &mut Receipt| {};
+        let merged = |edit: &dyn Fn(&mut Receipt)| {
+            merge_in(&fixture, &[job.clone(), part(1, &keep), part(2, edit)])
+        };
+        // Other generated files.
+        let other = merged(&|receipt| {
+            let generated = &mut receipt.part.as_mut().expect("the part").generated;
+            generated.insert("Funs.lean".to_string(), "e".repeat(64));
+        });
+        let problem = "the parts target/a/1, target/a/2 of the target a took other seeds";
+        no_conclusion(&other, &[problem.to_string()]);
+        assert_eq!(other.checks.seeds, Some(false));
+        // Another source tree or image, which the receipts would show too.
+        for edit in [
+            &|receipt: &mut Receipt| receipt.part.as_mut().expect("the part").source_tree = None,
+            &|receipt: &mut Receipt| receipt.part.as_mut().expect("the part").image = None,
+        ] as [&dyn Fn(&mut Receipt); 2]
+        {
+            no_conclusion(&merged(edit), &[problem.to_string()]);
+        }
+        // The seed of one part did not build, that of the other did.
+        let failed = merged(&|receipt| receipt.part.as_mut().expect("the part").seed_built = false);
+        let problem = "the seed of target/a/2 did not build, that of another part did";
+        no_conclusion(&failed, &[problem.to_string()]);
+        assert_eq!(failed.checks.seeds, Some(false));
+        // A receipt of a part that records no part.
+        let none = merged(&|receipt| receipt.part = None);
+        let problem = "the receipt of target/a/2 records no part";
+        no_conclusion(&none, &[problem.to_string()]);
+    }
+
+    #[test]
+    fn the_unit_of_a_target_has_its_conclusion_from_its_first_part_alone() {
+        let (fixture, job) = two_parts("merge-judged");
+        let part = |i, edit: &dyn Fn(&mut Receipt)| part_of_two(&fixture, i, edit);
+        let keep = |_: &mut Receipt| {};
+        let judged = |receipt: &mut Receipt| receipt.units.extend(verified_units(&units_of("a")));
+        let twice = merge_in(&fixture, &[job, part(1, &keep), part(2, &judged)]);
+        let shown = fixture.root().join("artifacts/parts/a2.json");
+        no_conclusion(
+            &twice,
+            &[
+                "the unit target/a has 2 conclusions".to_string(),
+                format!("{} concludes target/a of target/a/1", shown.display()),
+            ],
+        );
+    }
+
     #[test]
     fn the_shard_limit_is_the_wall_clock_limit_of_the_gate_less_the_merge() {
         assert_eq!(SHARD_LIMIT, Duration::from_secs(3_300));
@@ -1889,18 +2101,17 @@ pub(crate) mod tests {
             "../../../verification/qualification/calibration/targets.json"
         ));
         assert_eq!(budget_problems(&calibration), Vec::<String>::new());
-        // The planned target of the calibration is no shard.
-        assert_eq!(
-            shards(&calibration),
-            BTreeMap::from([("target/calibration/1".to_string(), 3_000)])
-        );
+        // The planned target of the calibration is no shard, and its formal
+        // target has three parts of 1,000 s.
+        let parts = (1..=3).map(|i| (format!("target/calibration/{i}"), 1_000));
+        assert_eq!(shards(&calibration), BTreeMap::from_iter(parts));
     }
 
     #[test]
     fn each_formal_target_is_a_shard_of_its_own_with_its_registered_budget() {
         let registry = |budget: u64| {
             targets(&format!(
-                r#"{{"schema": 2, "targets": [
+                r#"{{"schema": 3, "targets": [
                     {{"name": "a", "budget": {budget}}}, {{"name": "b"}},
                     {{"name": "p", "state": "planned", "budget": 9999}}]}}"#
             ))
@@ -1922,6 +2133,28 @@ pub(crate) mod tests {
                 )]
             );
         }
+        // Each part of a target with parts is a shard with its own budget.
+        let parted = |budget: u64| {
+            targets(&format!(
+                r#"{{"schema": 3, "targets": [{{"name": "c", "parts": [
+                    {{"budget": {budget}}}, {{"mutants": []}}]}}]}}"#
+            ))
+        };
+        let parts = [("target/c/1", 3_300), ("target/c/2", registry::BUDGET)];
+        let parts = parts.map(|(part, budget)| (part.to_string(), budget));
+        assert_eq!(shards(&parted(3_300)), BTreeMap::from(parts));
+        assert_eq!(budget_problems(&parted(3_300)), Vec::<String>::new());
+        assert_eq!(
+            budget_problems(&parted(3_301)),
+            [
+                "part target/c/1: its registered budget of 3301 s is more than the shard limit of 3300 s"
+            ]
+        );
+        let names = |shard: &'static str| (target(shard), index(shard), self::shard(shard).is_ok());
+        assert_eq!(names("target/c/2"), (Some("c"), Some(2), true));
+        assert_eq!(names("target/c/5"), (Some("c"), Some(5), false));
+        assert_eq!(names("lane/c"), (None, None, true));
+        assert_eq!(names("target/c/mutant/m"), (Some("c"), None, false));
     }
 
     /// The receipts of the qualification job and of the shard of `a`, whose

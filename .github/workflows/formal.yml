@@ -11,9 +11,10 @@
 # qualification job, runs `cargo xtask formal run --shard qualification`
 # in the pinned proof-tool image; beside it, the job `formal lane <name>`
 # runs the base run of each lane of verification/lanes.json and then its
-# comparator on the stage that it kept, the job `formal shard <name>/1` the
-# part of each formal target of the head's registry, and the job `formal
-# scoped <name>` each planned target that the pull request affects, alone;
+# comparator on the stage that it kept, the job `formal shard <name>/<i>`
+# each part of each formal target of the head's registry, and the job
+# `formal scoped <name>` each planned target that the pull request affects,
+# alone;
 # after them, the job `formal parts` merges the receipts of the parts on
 # the runner. The jobs `formal merge`, `formal
 # axioms`, `formal leanchecker` and `formal comparator` judge its record,
@@ -89,16 +90,18 @@ env:
 jobs:
   # Runs the gate: when the label full-check is added to a pull request
   # whose change affects the gate, by the decision of `formal fast`, and on
-  # a manual or scheduled run of main. The deadline of the part of a
-  # target, and of a planned target that the pull request affects, which
-  # runs alone, is 300 s and the budget of the target; then each has the
-  # 300 s of its receipt. Its step has the minutes of its deadline and
-  # receipt, rounded up, and two more, as `deadline.sh` kills its command a
-  # minute after its deadline; its job 15 minutes before the step, the step
-  # and 3 minutes after it. Every formal target has one part,
-  # `target/<name>/1`, whose registered budget may be at most the shard
-  # limit, 3,300 s, whatever its workers, as `cargo xtask formal check`
-  # requires; a job of the hosted runners ends after 360 minutes. The
+  # a manual or scheduled run of main. The deadline of a part of a target is
+  # 300 s and the budget of the part, and that of a planned target that the
+  # pull request affects, which runs alone, 300 s and the budgets of its
+  # parts; then each has the 300 s of its receipt. Its step has the minutes
+  # of its deadline and receipt, rounded up, and two more, as `deadline.sh`
+  # kills its command a minute after its deadline; its job 15 minutes before
+  # the step, the step and 3 minutes after it. A formal target has the parts
+  # that the registry gives it, at most four whose budgets add up to at most
+  # 7,200 s, or else one with its budget, `target/<name>/<i>` from 1; the
+  # registered budget of each may be at most the shard limit, 3,300 s,
+  # whatever its workers, as `cargo xtask formal check` requires; a job of
+  # the hosted runners ends after 360 minutes. The
   # deadline of a lane is 300 s, its registered budget, 2,400 s unless
   # verification/lanes.json gives another, and 600 s for the extraction of
   # its targets, which may be at most the shard limit; its base step has
@@ -165,21 +168,35 @@ jobs:
             [.lanes[] | {name, budget: (.budget // 2400), part: "lane/\(.name)", key: "lane-\(.name)"}]
               | map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 37 + 3)' \
             "$lanes")
+          # At most four parts of a target, whose budgets add up to at most
+          # 7,200 s.
+          split=$(jq -r '[.targets[] | select((.parts // [] | length) > 4 or ([.parts[]? | .budget // 1800] | add // 0) > 7200) | .name] | join(" ")' "$registry")
+          if [ -n "$split" ]; then
+            echo "the target $split has more than 4 parts or parts whose budgets add up to more than 7200 s" >&2
+            exit 1
+          fi
           # The targets of the state $1 with a name of the list $2, or with
-          # any name when it is null, grouped by their name with the sum of
-          # their budgets, and the limits of the step and the job of each.
+          # any name when it is null, grouped by their name with the budgets
+          # of their parts, those of one part added: the parts that the
+          # registry gives a target, or one with its budget.
           rows() {
-            jq -c --argjson margin "$((shard_margin + receipt_margin))" --arg state "$1" --argjson names "$2" '
+            jq -c --arg state "$1" --argjson names "$2" '
               [.targets[] | select((.state // "formal") == $state and ($names == null or (.name | IN($names[]))))
-                | {name, budget: (.budget // 1800)}]
-              | group_by(.name) | map({name: .[0].name, budget: (map(.budget) | add)})
-              | map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 3)' \
+                | {name, budgets: (if (.parts // []) == [] then [.budget // 1800] else [.parts[] | .budget // 1800] end)}]
+              | group_by(.name) | map({name: .[0].name, budgets: (map(.budgets) | transpose | map(add))})' \
               "$registry"
           }
-          # One part for each formal target, and one job for each planned
-          # target that the pull request affects, which runs it alone.
-          shards=$(rows formal null | jq -c 'map(.part = "target/\(.name)/1" | .key = "target-\(.name)-1" | .name += "/1")')
-          scoped=$(rows planned "$SCOPED")
+          # The limits of the step and the job of each row of its input.
+          limits() {
+            jq -c --argjson margin "$((shard_margin + receipt_margin))" \
+              'map(.step = ((.budget + $margin + 59) / 60 | floor) + 2 | .job = 15 + .step + 3)'
+          }
+          # One job for each part of each formal target, and one for each
+          # planned target that the pull request affects, which runs it alone
+          # with the budgets of its parts.
+          shards=$(rows formal null | jq -c '[.[] | .name as $target | .budgets | to_entries[] | (.key + 1) as $i
+            | {name: "\($target)/\($i)", budget: .value, part: "target/\($target)/\($i)", key: "target-\($target)-\($i)"}]' | limits)
+          scoped=$(rows planned "$SCOPED" | jq -c 'map({name, budget: (.budgets | add)})' | limits)
           over=$(jq -r --argjson limit "$shard_limit" \
             '[.[] | select(.budget > $limit) | .name] | join(" ")' <<< "$shards")
           if [ -n "$over" ]; then
@@ -684,8 +701,8 @@ jobs:
           if-no-files-found: warn
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
 
-  # The part of each formal target of the head's registry, beside the
-  # qualification job: `cargo xtask formal run --shard target/<name>/1` in a
+  # Each part of each formal target of the head's registry, beside the
+  # qualification job: `cargo xtask formal run --shard target/<name>/<i>` in a
   # container of the image, prepared as the qualification job is, with a
   # shorter probe and without the event, with the limits that the job
   # `formal limits` gives the part, which the job writes in a notice for

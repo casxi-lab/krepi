@@ -193,7 +193,7 @@ pub(crate) mod tests {
     /// The formal target `a` and the planned target `b`.
     fn targets() -> Vec<Target> {
         let text =
-            json!({"schema": 2, "targets": [{"name": "a"}, {"name": "b", "state": "planned"}]});
+            json!({"schema": 3, "targets": [{"name": "a"}, {"name": "b", "state": "planned"}]});
         registry::parse(&text.to_string())
             .expect("a registry")
             .targets
@@ -324,7 +324,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_waiver_leaves_out_the_proof_modules_that_no_other_formal_target_lists() {
-        let text = json!({"schema": 2, "targets": [
+        let text = json!({"schema": 3, "targets": [
             {"name": "t", "module": "T", "proof_modules": ["P.A", "P.Shared"]},
             {"name": "u", "module": "U", "proof_modules": ["P.Shared", "P.B"]},
             {"name": "p", "state": "planned", "module": "Q", "proof_modules": ["P.C"]},

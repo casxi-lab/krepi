@@ -1,11 +1,10 @@
 {
-  "schema": 2,
+  "schema": 3,
   "specifications": [],
   "targets": [
     {
       "name": "calibration",
       "module": "Calibration",
-      "budget": 3000,
       "description": "The calibration target of the proof gate: twelve functions of a crate in the shape of the kernel workspace, with a table of slots of fixed capacity and generations, a handle in bit fields, checked arithmetic, writes after a check and a bounded loop, each with a theorem about every input and mutants that fail them.",
       "start_from": [
         "crate::handle::encode",
@@ -393,6 +392,53 @@
           "replace": "== 0 {",
           "fails": [
             "Krepi.Proofs.Calibration.retired_spec"
+          ]
+        }
+      ],
+      "parts": [
+        {
+          "budget": 1000,
+          "mutants": [
+            "encode-index-bound",
+            "encode-generation-bound",
+            "encode-either-bound",
+            "encode-join",
+            "encode-shift",
+            "index-mask",
+            "generation-shift",
+            "next-decrement",
+            "next-same-generation",
+            "charge-adds"
+          ]
+        },
+        {
+          "budget": 1000,
+          "mutants": [
+            "split-no-parts",
+            "split-product",
+            "fits-start",
+            "fits-strict",
+            "fits-overflow",
+            "new-empty",
+            "new-full",
+            "new-either",
+            "new-in-use",
+            "alloc-bound"
+          ]
+        },
+        {
+          "budget": 1000,
+          "mutants": [
+            "alloc-no-step",
+            "alloc-index",
+            "retire-bound",
+            "retire-decrement",
+            "retire-result",
+            "current-generation",
+            "current-either",
+            "current-bound",
+            "retired-bound",
+            "retired-zero"
           ]
         }
       ]
