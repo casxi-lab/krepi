@@ -1,6 +1,7 @@
 module
 
 public import Krepi.Proofs.PageTables.Refinement.CursorSpecLemmas
+public import Krepi.Proofs.PageTables.ListLemmas
 import Mathlib.Util.CountHeartbeats
 
 /-!
@@ -28,7 +29,13 @@ the code.
   `checkLayoutRange` makes), `checkPages_zero`, `checkPages_succ`.
 - The checks of one range as nested conditions: `checkLayoutRange_eq`;
   `checkPages_length` and `checkLayoutRange_ok` (what a success adds).
+- `Tables.kernelMap` step by step: `checkPool_ok_facts`,
+  `kernelMap_pool_error`, `kernelMap_fold_error`, `kernelMap_fold_ok`.
 - Lists: `listRel_getElem`.
+- The insertion sort of the code: `insertAfter`, `insert_insertAfter`,
+  `sortByKey_concat` (`sortByKey` of a list with one more element at its end
+  is `insertAfter` of it), `insertAfter_append`, `insertAfter_of_le`,
+  `set_swap`, `listRel_insert`, `listRel_sortByKey`.
 -/
 
 @[expose] public section
@@ -246,6 +253,49 @@ theorem checkLayoutRange_ok {s : Tables .lower N} {base : UInt64} {bits : UInt8}
         have hl : j.range.len.toNat ≤ j.range.endNat := by simp only [PhysRange.endNat]; omega
         simp only [PAGE_SIZE]; omega
 
+/-! ## `Tables.kernelMap` step by step -/
+
+theorem checkPool_ok_facts {base : UInt64} {bits : UInt8} (h : checkPool N base bits = .ok ()) :
+    widthOk bits = true ∧ poolFits N base bits = true := by
+  rw [checkPool_eq] at h
+  split at h
+  · cases h
+  · split at h
+    · cases h
+    · split at h
+      · cases h
+      · rename_i h2 h3
+        exact ⟨by simpa using h2, by simpa using h3⟩
+
+theorem kernelMap_pool_error {s : Tables .lower N} {L : Layout} {base : UInt64} {bits : UInt8}
+    {x : TableError} (h : checkPool N base bits = .error x) :
+    s.kernelMap L base bits = .error x := by
+  simp only [Tables.kernelMap, h, bind, Except.bind]
+
+theorem kernelMap_fold_error {s : Tables .lower N} {L : Layout} {base : UInt64} {bits : UInt8}
+    {x : TableError} (hp : checkPool N base bits = .ok ())
+    (h : (sortByKey (·.range.start.toNat) L.ranges).foldlM
+      (s.checkLayoutRange base bits L.guards) ([], []) = .error x) :
+    s.kernelMap L base bits = .error x := by
+  simp only [Tables.kernelMap, hp, h, bind, Except.bind]
+
+/-- `Tables.kernelMap` after its checks pass: the write phase of the leaves
+that passed, with the next free index of `allocOf`. -/
+theorem kernelMap_fold_ok {s : Tables .lower N} {L : Layout} {base : UInt64} {bits : UInt8}
+    {earlier : List PhysRange} {leaves : List (MapLeaf × Place)}
+    (hp : checkPool N base bits = .ok ())
+    (h : (sortByKey (·.range.start.toNat) L.ranges).foldlM
+      (s.checkLayoutRange base bits L.guards) ([], []) = .ok (earlier, leaves)) :
+    s.kernelMap L base bits =
+      if N - s.used < (allocOf s.used leaves).next - s.used then .error .outOfTables
+      else .ok ({ s with used := (allocOf s.used leaves).next },
+        mapPlan base (allocOf s.used leaves).placed.reverse) := by
+  simp only [Tables.kernelMap, hp, h, bind, Except.bind, Tables.mapLeaves, assignTables, allocOf]
+  by_cases hc : N - s.used <
+      (List.foldl Alloc.add ⟨s.used, none, none, []⟩ leaves.reverse).next - s.used
+  · simp only [hc, ↓reduceIte]; rfl
+  · simp only [hc, ↓reduceIte]; rfl
+
 /-! ## Lists of ranges -/
 
 /-- Two lists that agree item by item agree at each index. -/
@@ -261,5 +311,107 @@ theorem listRel_getElem {α β : Type} {R : α → β → Prop} :
       exact listRel_getElem hlm i (by simpa using h1) (by simpa using h2)
   | [], _ :: _, h, _, _, _ => h.elim
   | _ :: _, [], h, _, _, _ => h.elim
+
+/-! ## The insertion sort of the code -/
+
+section InsertionSort
+
+variable {α : Type}
+
+/-- The insertion of `x` after the elements of a list from its front whose
+key is at most that of `x`: where `insert_range` moves the range at its
+index among the sorted ranges before it. -/
+def insertAfter (key : α → Nat) (x : α) : List α → List α
+  | [] => [x]
+  | z :: s => if key z ≤ key x then z :: insertAfter key x s else x :: z :: s
+
+/-- The insertion of `sortByKey` and `insertAfter` commute. -/
+theorem insert_insertAfter (key : α → Nat) (x y : α) :
+    ∀ s, sortByKey.insert key y (insertAfter key x s) =
+      insertAfter key x (sortByKey.insert key y s)
+  | [] => by
+    by_cases h : key y ≤ key x
+    · simp only [insertAfter, sortByKey.insert, h, ↓reduceIte]
+    · simp only [insertAfter, sortByKey.insert, h, ↓reduceIte]
+  | z :: s => by
+    by_cases hzx : key z ≤ key x <;> by_cases hyz : key y ≤ key z
+    · have hyx : key y ≤ key x := Nat.le_trans hyz hzx
+      simp only [insertAfter, sortByKey.insert, hzx, hyz, hyx, ↓reduceIte]
+    · simp only [insertAfter, sortByKey.insert, hzx, hyz, ↓reduceIte,
+        insert_insertAfter key x y s]
+    · by_cases hyx : key y ≤ key x
+      · simp only [insertAfter, sortByKey.insert, hzx, hyz, hyx, ↓reduceIte]
+      · simp only [insertAfter, sortByKey.insert, hzx, hyz, hyx, ↓reduceIte]
+    · have hyx : ¬ key y ≤ key x := by omega
+      simp only [insertAfter, sortByKey.insert, hzx, hyz, hyx, ↓reduceIte]
+
+/-- `sortByKey` of a list with one more element at its end inserts it after
+the elements of key at most its own. -/
+theorem sortByKey_concat (key : α → Nat) (x : α) :
+    ∀ l, sortByKey key (l ++ [x]) = insertAfter key x (sortByKey key l)
+  | [] => rfl
+  | y :: l => by
+    simp only [List.cons_append, sortByKey, sortByKey_concat key x l, insert_insertAfter]
+
+/-- Inserting before elements of larger key. -/
+theorem insertAfter_append (key : α → Nat) (x : α) (B : List α) (hB : ∀ b ∈ B, key x < key b) :
+    ∀ A, insertAfter key x (A ++ B) = insertAfter key x A ++ B
+  | [] => by
+    cases B with
+    | nil => rfl
+    | cons b B =>
+      have : ¬ key b ≤ key x := Nat.not_le.2 (hB b List.mem_cons_self)
+      simp only [List.nil_append, insertAfter, this, ↓reduceIte, List.singleton_append]
+  | a :: A => by
+    by_cases h : key a ≤ key x
+    · simp only [List.cons_append, insertAfter, h, ↓reduceIte, insertAfter_append key x B hB A]
+    · simp only [List.cons_append, insertAfter, h, ↓reduceIte]
+
+/-- Inserting after elements of key at most its own. -/
+theorem insertAfter_of_le (key : α → Nat) (x : α) :
+    ∀ A, (∀ a ∈ A, key a ≤ key x) → insertAfter key x A = A ++ [x]
+  | [], _ => rfl
+  | a :: A, h => by
+    simp only [insertAfter, h a List.mem_cons_self, ↓reduceIte, List.cons_append,
+      insertAfter_of_le key x A (fun b hb => h b (List.mem_cons_of_mem a hb))]
+
+/-- The swap of two neighbours at the end of a prefix. -/
+theorem set_swap (A : List α) (a x : α) (T : List α) :
+    ((A ++ a :: x :: T).set (A.length + 1) a).set A.length x = A ++ x :: a :: T := by
+  induction A with
+  | nil => rfl
+  | cons b A ih => simp only [List.cons_append, List.length_cons, List.set_cons_succ, ih]
+
+/-- The insertion of `sortByKey` of two lists that agree item by item, with
+keys that agree on related items. -/
+theorem listRel_insert {β : Type} {R : α → β → Prop} {k1 : α → Nat} {k2 : β → Nat}
+    (hk : ∀ a b, R a b → k1 a = k2 b) {x : α} {X : β} (hx : R x X) :
+    ∀ (l : List α) (L : List β), Krepi.Statements.ListRel R l L →
+      Krepi.Statements.ListRel R (sortByKey.insert k1 x l) (sortByKey.insert k2 X L)
+  | [], [], _ => ⟨hx, trivial⟩
+  | a :: l, b :: L, h => by
+    obtain ⟨hab, hlL⟩ := h
+    simp only [sortByKey.insert, hk x X hx, hk a b hab]
+    split
+    · exact ⟨hx, hab, hlL⟩
+    · exact ⟨hab, listRel_insert hk hx l L hlL⟩
+  | [], _ :: _, h => h.elim
+  | _ :: _, [], h => h.elim
+
+/-- `sortByKey` of two lists that agree item by item, with keys that agree on
+related items. -/
+theorem listRel_sortByKey {β : Type} {R : α → β → Prop} {k1 : α → Nat} {k2 : β → Nat}
+    (hk : ∀ a b, R a b → k1 a = k2 b) :
+    ∀ (l : List α) (L : List β), Krepi.Statements.ListRel R l L →
+      Krepi.Statements.ListRel R (sortByKey k1 l) (sortByKey k2 L)
+  | [], [], _ => trivial
+  | a :: l, b :: L, h => by
+    obtain ⟨hab, hlL⟩ := h
+    simp only [sortByKey]
+    exact listRel_insert hk hab _ _ (listRel_sortByKey hk l L hlL)
+  | [], _ :: _, h => h.elim
+  | _ :: _, [], h => h.elim
+
+end InsertionSort
 
 end Krepi.Proofs.PageTables.Refinement
