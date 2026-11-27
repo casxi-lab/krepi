@@ -17,7 +17,8 @@ code search for it. The module imports no generated definitions, so it is
 built once and not again for every mutant of the code.
 
 - Related lists: `listRel_append`, `listRel_take`, `listRel_drop`,
-  `listRel_getElem` (the elements at one index are related) and
+  `listRel_getElem` (the elements at one index are related),
+  `listRel_take_getElem?` (an element of the first entries of an array) and
   `listRel_replace` (an array whose entries before a position are kept,
   whose entries at it are new and related to a list, and whose entries
   after it are those of the array shifted, stands for the list with the
@@ -76,6 +77,16 @@ theorem listRel_getElem : ∀ {l : List α} {m : List β} (h : ListRel R l m) {i
   | [], [], _, _, hi => absurd hi (by simp)
   | a :: l, b :: m, h, 0, _ => h.1
   | a :: l, b :: m, h, i + 1, hi => listRel_getElem h.2 (by simpa using hi)
+
+/-- An element of the first `n` of a list related to a list: the element at
+the same index of the other list is related to it. -/
+theorem listRel_take_getElem? {l : List α} {m : List β} {n i : Nat} {a : α}
+    (h : ListRel R (l.take n) m) (hi : i < n) (ha : l[i]? = some a) :
+    ∃ b, m[i]? = some b ∧ R a b := by
+  have ha' : (l.take n)[i]? = some a := by simp only [List.getElem?_take, hi, ↓reduceIte, ha]
+  obtain ⟨hi', rfl⟩ := List.getElem?_eq_some_iff.1 ha'
+  have hm : i < m.length := listRel_length h ▸ hi'
+  exact ⟨m[i], List.getElem?_eq_getElem hm, listRel_getElem h hi'⟩
 
 end ListRel
 
