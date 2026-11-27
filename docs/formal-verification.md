@@ -3188,8 +3188,9 @@ review; anything else fails, and so does a missing run or record
 
 Each job `formal mutants <target> <n>` runs the source mutants of the
 `n`-th item of `<target>` in the input `mutants` of a manual run of
-`main`, which the job `formal limits` expanded. It needs `formal limits` and `formal run`, and
-runs once `formal run` has ended, also when it failed. It checks out the
+`main`, which the job `formal limits` expanded. It needs `formal limits`
+and `formal run`, and runs once `formal run` has ended, also when it
+failed. It checks out the
 commit, pulls the image, builds xtask, downloads the artifact of the
 qualification job of the run, of every attempt, into
 `artifacts/formal/qualification`, and then runs, in the pinned image with
