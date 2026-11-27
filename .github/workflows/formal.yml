@@ -25,10 +25,11 @@
 # judge. On a push to main, which is the merge of a pull request, the job
 # `formal receipt review` reviews the merge record of the merged head. On a
 # manual run of main whose input `mutants` names formal targets, the job
-# `formal limits` expands its items into the jobs `formal mutants <item>`,
-# each of which runs the source mutants of its item after the qualification
-# job, with the qualification receipt of the run. The measurement jobs are
-# in the workflow `formal measure`, `formal-measure.yml`.
+# `formal limits` expands its items into the jobs
+# `formal mutants <target> <n>`, each of which runs the source mutants of
+# its item after the qualification job, with the qualification receipt of
+# the run. The measurement jobs are in the workflow `formal measure`,
+# `formal-measure.yml`.
 # Actions are pinned to full commit SHAs; the comment names the release.
 name: formal
 
@@ -252,9 +253,8 @@ jobs:
               echo "more than 4 items name the target $target" >&2
               exit 1
             fi
-            mutants=$(jq -c --arg name "$item" --arg target "$target" --argjson n "$n" \
-              --arg args "${arguments[*]}" \
-              '. + [{name: $name, target: $target, n: $n, key: "\($target)-\($n)", args: $args}]' \
+            mutants=$(jq -c --arg target "$target" --argjson n "$n" --arg args "${arguments[*]}" \
+              '. + [{target: $target, n: $n, key: "\($target)-\($n)", args: $args}]' \
               <<< "$mutants")
           done
           {
@@ -2040,7 +2040,7 @@ jobs:
   # and its job 20 more. The calibration workflow runs the same steps on the
   # calibration target.
   mutants:
-    name: formal mutants ${{ matrix.name }}
+    name: formal mutants ${{ matrix.target }} ${{ matrix.n }}
     needs: [limits, gate]
     if: ${{ !cancelled() && needs.limits.result == 'success' && needs.limits.outputs.mutants != '[]' }}
     runs-on: ubuntu-24.04-arm

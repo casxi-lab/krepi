@@ -17,7 +17,7 @@
 # lanes and the parts on the runner with
 # `cargo xtask formal merge --calibration`. On a
 # manual run that asks for it, and on a pull request with the label, the
-# job `calibration mutants calibration`, after the job `calibration run`,
+# job `calibration mutants calibration 1`, after the job `calibration run`,
 # runs `cargo xtask formal mutants calibration --calibration` with the
 # qualification receipt of the run and uploads the list of survivors that
 # it writes. None of
@@ -890,7 +890,7 @@ jobs:
   # mutants` has a budget of 14,400 s; with the 300 s of its receipt, 245
   # minutes, its step two more and its job 20 more.
   mutants:
-    name: calibration mutants ${{ matrix.name }}
+    name: calibration mutants ${{ matrix.target }} ${{ matrix.n }}
     needs: calibration
     if: ${{ !cancelled() && needs.calibration.result != 'skipped' && (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.mutants)) }}
     runs-on: ubuntu-24.04-arm
@@ -901,8 +901,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: calibration
-            target: calibration
+          - target: calibration
             n: 1
             key: calibration-1
             args: ""

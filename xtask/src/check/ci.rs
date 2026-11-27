@@ -1092,9 +1092,25 @@ fn the_source_mutants_of_a_manual_run_follow_its_qualification_job() {
     let attempt = "${{ github.run_attempt }}";
     let name = format!("formal-mutants-${{{{ matrix.key }}}}-{head}-{attempt}");
     assert_eq!(upload_name(job), name);
+    // Each job is named by its target and its number among the items of
+    // that target, and so is that of the calibration, after the
+    // qualification job of the calibration on the events that run it.
+    let named = "mutants ${{ matrix.target }} ${{ matrix.n }}";
     assert_eq!(
         job["name"].as_str(),
-        Some("formal mutants ${{ matrix.name }}")
+        Some(format!("formal {named}").as_str())
+    );
+    let calibration = workflow(CALIBRATION);
+    let copy = &calibration["jobs"]["mutants"];
+    let copied = format!("calibration {named}");
+    assert_eq!(copy["name"].as_str(), Some(copied.as_str()));
+    let events = "(github.event_name == 'pull_request' || \
+                  (github.event_name == 'workflow_dispatch' && inputs.mutants))";
+    let condition =
+        format!("${{{{ !cancelled() && needs.calibration.result != 'skipped' && {events} }}}}");
+    assert_eq!(
+        (needs(copy), copy["if"].as_str()),
+        (vec!["calibration"], Some(condition.as_str()))
     );
     let parts = steps_using(&jobs["parts"], "actions/download-artifact");
     let pattern = parts[0]["with"]["pattern"].as_str().unwrap_or_default();
@@ -1133,10 +1149,7 @@ fn the_source_mutants_of_a_manual_run_follow_its_qualification_job() {
             "--operator literal --part 2/2"
         ])
     );
-    assert_eq!(
-        field("name"),
-        strings(&["b-2:literal@1/2", "a", "b-2:literal@2/2"])
-    );
+    assert_eq!(field("n"), [1, 1, 2].map(|n| serde_json::json!(n)));
     let keys = std::collections::BTreeSet::from_iter(field("key").iter().map(ToString::to_string));
     assert_eq!(keys.len(), rows.len());
     let (code, _, outputs) = limits_step(registry, "workflow_dispatch", "a:ordering+equality");
