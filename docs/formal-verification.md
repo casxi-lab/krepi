@@ -2763,11 +2763,11 @@ The `guard` record has these fields:
 | `rules` | Each rule, with why it fails, or `null` when it holds |
 
 CI keeps the receipts of its runs, so any change of a field takes a new
-schema. Schema 7 alone is extended in place, with `part` and with the
-record of the qualification receipt that a run of source mutants reads
-(planned), so a receipt of schema 7 written before a field was added has
-no such field and reads it as `null`, and a merge reads the receipts of
-one run only.
+schema, except that schema 7 is extended in place, with `part` and with
+the record of the qualification receipt that a run of source mutants
+reads, which is planned, so a receipt of schema 7 written before a field
+was added has no such field and reads it as `null`, and a merge reads the
+receipts of one run only.
 Receipts come from two hosts. CI runs the gate on `linux-aarch64`
 in the pinned image, as the runner's user, which cannot write the image's
 installation, and records the image ([CI job](#ci-job)). Local runs on
@@ -3507,8 +3507,8 @@ ran did not finish makes it `TOOL_FAILURE`. Each of them but `VERIFIED`
 fails the run. In a run that judges a target, its mutants are `NOT_RUN`
 when it is not verified; a part that does not judge it runs its mutants
 once its seed built, whatever the first part concludes, and leaves them
-`NOT_RUN` when the seed did not build; in both cases unless a command of
-the target's unit forces them.
+`NOT_RUN` when the seed did not build, unless a command of the target's
+unit forces them.
 When the ranges make no table, the target is a tool failure and its mutants
 are inconclusive. The run lists the build directory of the stage of the
 target, as it lists the installation, before the first mutant and after
