@@ -113,12 +113,16 @@ fn compare(gate: &mut Gate, units: Units, runs: &Path) -> Result<(), String> {
     }
     let base = (job.base.as_ref()).ok_or(format!("the run {} has no base round", job.run))?;
     // The challenges are the modules of a library of their own in the stage.
+    // Lake takes the name of the solution for the library of the namespace
+    // before the root module, so that library holds the root alone: the build
+    // reaches what the root imports, not the other parts that the stage holds.
     let stage = runs.join(format!("{}/work/{}/stage", job.run, base::PHASE));
     let stage = stage.join(Path::new(layout.project).file_name().unwrap_or_default());
     let lakefile = stage.join("lakefile.toml");
     let library = format!("\n[[lean_lib]]\nname = \"{LIBRARY}\"\n");
+    let globs = |glob: &str| format!("globs = [\"{}{glob}\"]", layout.namespace);
     let text = base::read(&lakefile)?.replace(&library, "") + &library;
-    base::write(&lakefile, &text)?;
+    base::write(&lakefile, &text.replace(&globs(".+"), &globs("")))?;
     // The challenges import all but the proofs and the proof modules of targets.
     let listed = BTreeSet::from_iter(job.proof_targets.values().flat_map(|t| &t.proof_modules));
     let below = format!("{}.", layout.proofs);
@@ -984,6 +988,66 @@ mod tests {
             lakefile,
             "-- lakefile.toml\n\n[[lean_lib]]\nname = \"KrepiChallenge\"\n"
         );
+    }
+
+    #[test]
+    fn the_comparator_of_a_lane_builds_its_root_and_no_module_of_another_part() {
+        // The stage of the lane `a` holds the hand-written modules of every
+        // part, among them one of the lane `b` that imports a generated module
+        // of `b`, which `a` does not extract. For the solution `Krepi`, Lake
+        // builds the library of that name of the Lake project of production:
+        // each module that its glob names, with what each imports; an import
+        // without a file fails the build, which the sandbox reports.
+        let mut fixture = checkout("comparator-other-part", &[COUNTER], json!({}));
+        let lakefiles = [
+            include_str!("../../../verification/lakefile.toml"),
+            include_str!("../../../verification/qualification/calibration/lakefile.toml"),
+        ];
+        for lakefile in lakefiles {
+            assert!(lakefile.contains("\nglobs = [\"Krepi.+\"]\n"), "{lakefile}");
+        }
+        fixture.write("verification/lakefile.toml", lakefiles[0]);
+        let plan = "module\n\npublic import KrepiGen.B.Funs\n";
+        fixture.write("verification/Krepi/Statements/B/Plan.lean", plan);
+        let path = fixture.root().join(LAYOUT.lanes);
+        let mut lanes: Value =
+            serde_json::from_str(&fs::read_to_string(&path).expect("lanes")).expect("JSON");
+        let b = json!({"name": "b", "components": ["B"], "modules": []});
+        lanes["lanes"].as_array_mut().expect("lanes").push(b);
+        fixture.write(LAYOUT.lanes, &format!("{lanes:#}\n"));
+        hashed(&mut fixture);
+        let script = "if grep -q '^globs = \\[\"Krepi\\.+\"]$' lakefile.toml; then\n  \
+              set -- $(find Krepi -name '*.lean')\n\
+            elif grep -q '^globs = \\[\"Krepi\"]$' lakefile.toml; then\n  \
+              set -- Krepi.lean\n\
+            else\n  \
+              echo 'error: the lakefile has no glob of the library Krepi' >&2; exit 2\n\
+            fi\n\
+            while [ $# -gt 0 ]; do\n  \
+              for module in $(sed -n 's/^public import \\(Krepi[A-Za-z.]*\\)$/\\1/p' \"$1\"); do\n    \
+                file=$(echo \"$module\" | tr . /).lean\n    \
+                if [ ! -f \"$file\" ]; then\n      \
+                  echo \"error: $1: bad import '$module'\"; echo 'error: Child exited with 1' >&2\n      \
+                  exit 1\n    \
+                fi\n    \
+                set -- \"$@\" \"$file\"\n  \
+              done\n  \
+              shift\n\
+            done\n";
+        lake_script(&fixture, "comparator", script);
+        let job = job(&fixture);
+        let at = stage(&job);
+        assert!(at.join("Krepi/Statements/B/Plan.lean").is_file());
+        assert!(!at.join("KrepiGen/B/Funs.lean").exists());
+        // The library holds the root alone, whose build reaches what it imports.
+        let done = compared(&fixture);
+        for unit in ["comparator/lane/a", "comparator/t"] {
+            assert_eq!(status(&done, unit), (Status::Verified, None));
+        }
+        assert_eq!(done.code, ExitCode::SUCCESS, "{:?}", done.failures());
+        let lakefile = fs::read_to_string(at.join("lakefile.toml")).expect("the lakefile");
+        let narrowed = lakefile.contains("\nglobs = [\"Krepi\"]\n");
+        assert!(narrowed && !lakefile.contains("Krepi.+"), "{lakefile}");
     }
 
     #[test]
