@@ -2218,8 +2218,8 @@ cannot read them. It
    the generated modules of the targets that the lane extracted, so that a
    build of every module below `Krepi` fails on those of the other parts.
    The build of the solution is thus that of the root and of what it
-   imports, which the base round built, and no module of another part is
-   built or exported;
+   imports, which the base round built, and no other module of the stage is
+   built;
 3. concludes each unit:
    - `SCOPED` when the base round left the statement of one of its
      theorems out under a [waiver](#waivers), which makes
