@@ -30,7 +30,8 @@ is the answer from the start.
   `any_overlap_spec`; the exclusion records, `copy_exclusions_spec`; the
   banks in address order, `insert_bank_loop_spec`, `insert_bank_spec` and
   `sort_banks_spec`; the free extents, `cut_spec` (against `cutNat`, which
-  is `Exclusion.cut` by `cut_eq_cutNat`), `cuts_at_spec`,
+  is `Exclusion.cut` by `cut_eq_cutNat`), `cuts_at_spec` (with `own_val_ite`,
+  the value of a choice between two words),
   `bank_extents_loop_spec`, `bank_extents_spec` and `initial_extents_spec`;
   and `ownership_new_spec` (the statement `OwnershipNew` without its premise
   `Usize64`).
@@ -622,6 +623,11 @@ whose ends fit in 64 bits. -/
       have := ‹¬ b = true›; rw [b_post] at this; simpa using this
     simp only [cutNat, hov, ↓reduceIte, Option.map_none]
 
+/-- The value of a choice between two words. -/
+theorem own_val_ite {c : Prop} [Decidable c] (a b : U64) :
+    (if c then a else b).val = if c then a.val else b.val := by
+  split <;> rfl
+
 /-- `cuts_at(exclusions, bank, at)`: the furthest end of the cuts that start
 at or below `at`, and the nearest start of the cuts above `at` or the end of
 the bank, for exclusions that stand for `Xs` and a bank on pages that stands
@@ -669,8 +675,8 @@ for `B`. -/
         rw [index1_post, ← hinv, own_foldl_drop hil]
         simp only [cutStep, hcut, Option.map_some, sweepStep]
         congr 1
-        simp only [Prod.mk.injEq]
-        constructor <;> split_ifs <;> scalar_tac
+        simp only [Prod.mk.injEq, own_val_ite, UScalar.le_equiv, UScalar.lt_equiv, gt_iff_lt]
+        constructor <;> split_ifs <;> omega
     · rw [← hinv, show i.val = Xs.length by scalar_tac, List.drop_length, List.foldl_nil]
   · refine ⟨by simp, ?_⟩
     rw [nearest_post, ← physRange_endNat hb]
