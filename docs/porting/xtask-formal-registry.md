@@ -24,10 +24,11 @@ License as part of krepi, as the
 state for the tooling taken from the CAS project.
 
 The rest of `xtask/src/formal/registry.rs` is new code: the targets and
-specifications of `verification/targets.json` in its schema 2, with the
-state and budget of a target and its cut points as objects; the static rules
-of the registry and of `verification/axioms.json`; and the refusal of what
-the gate does not support yet. `cargo xtask formal check` reports both:
+specifications of `verification/targets.json` in its schema 3, with the
+state, budget and parts of a target and its cut points as objects; the
+static rules of the registry and of `verification/axioms.json`; and the
+refusal of what the gate does not support yet. `cargo xtask formal check`
+reports both:
 the rules ([proof targets](../formal-verification.md#proof-targets)), and
 premises, `exclude` cut points and the models of
 `verification/models.json`. The rules cover those that the CAS project

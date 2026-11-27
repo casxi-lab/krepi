@@ -51,7 +51,12 @@ const CHANGES: &str = "ordering < <=,ordering <= <,ordering > >=,ordering >= >,\
     method saturating_sub saturating_add,method min max,method max min";
 
 /// The schema of a list of survivors.
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
+
+/// The variable that names the directory below which a run of `formal
+/// mutants` finds the qualification receipt of its run, by default the runs
+/// directory of the checkout.
+pub const QUALIFICATION: &str = "KREPI_FORMAL_QUALIFICATION";
 
 /// What separates a target's unit from the name of a registered mutant in
 /// the unit of the mutant.
@@ -81,6 +86,59 @@ pub fn generated_unit(target: &str) -> String {
 /// for a registered mutant, and its own otherwise.
 pub fn owner(unit: &str) -> &str {
     unit.split_once(MUTANT).map_or(unit, |(target, _)| target)
+}
+
+/// What a run of `formal mutants` generates: the source mutants of
+/// `operators`, and with `part`, `(i, k)`, only the `i`-th of `k` intervals
+/// of those of its one operator, in the order in which they are generated.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Source {
+    pub operators: Vec<String>,
+    pub part: Option<(usize, usize)>,
+}
+
+/// What the receipt of a run of `formal mutants` holds of it: the
+/// qualification receipt of its CI run that it read, and its part, `<i>/<k>`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Record {
+    pub qualification: Option<Qualified>,
+    pub part: Option<String>,
+}
+
+/// A qualification receipt that a run of `formal mutants` read: its
+/// SHA-256, the ID of its CI run, its commit, tree and image, its status and
+/// whether it is complete.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Qualified {
+    pub sha256: String,
+    pub run_id: Option<String>,
+    pub commit: Option<String>,
+    pub tree: Option<String>,
+    pub image: Option<String>,
+    pub status: Status,
+    pub complete: bool,
+}
+
+impl Qualified {
+    /// The qualification receipt `receipt` of the SHA-256 `sha256` as a run of
+    /// `formal mutants` records it.
+    pub fn of(sha256: &str, receipt: &Receipt) -> Qualified {
+        Qualified {
+            sha256: sha256.to_string(),
+            run_id: receipt.trigger.run_id.clone(),
+            commit: receipt.commit.clone(),
+            tree: receipt.tree.clone(),
+            image: (receipt.image.as_ref()).and_then(|image| image.reference.clone()),
+            status: receipt.status,
+            complete: receipt.complete,
+        }
+    }
+}
+
+/// The mutants of `n` that the part `(i, k)`, if any, runs, by their indices
+/// from 0: from `(i - 1) * n / k` up to `i * n / k`, rounded down.
+pub fn interval(n: usize, part: Option<(usize, usize)>) -> std::ops::Range<usize> {
+    part.map_or(0..n, |(i, k)| (i - 1) * n / k..i * n / k)
 }
 
 /// The units of the mutants of the selected formal target `target`: that
@@ -444,7 +502,7 @@ fn copy_tree(what: &str, from: &Path, to: &Path) -> Result<(), String> {
 
 /// Runs the mutants of the selected formal target `target` after its unit:
 /// with `project`, the stage project where its proofs built and passed the
-/// audit, its registered mutants, or the source mutants of `operators` when
+/// audit, its registered mutants, or the source mutants of `source` when
 /// the run generates them; without it, concludes their units as not run.
 /// The declaration ranges of that build, printed as a command of the
 /// target's unit, attribute the errors of every mutant's build; when they
@@ -456,9 +514,9 @@ pub fn after(
     gate: &mut Gate,
     target: &Target,
     project: Option<&Path>,
-    operators: Option<&[String]>,
+    source: Option<&Source>,
 ) -> Result<Option<String>, String> {
-    let units = units(target, operators.is_some());
+    let units = units(target, source.is_some());
     let conclude = |gate: &mut Gate, status, why: &str| {
         let why = Some(why.to_string());
         units
@@ -482,8 +540,8 @@ pub fn after(
     let seed = Some(project.join(BUILD)).filter(|seed| seed.is_dir());
     let listed = |before| lean::listing_of(SEED, &Vec::from_iter(seed.clone()), before);
     let before = listed(None)?;
-    if let Some(operators) = operators {
-        generated(gate, target, &ranges, operators, seed.as_deref())?;
+    if let Some(source) = source {
+        generated(gate, target, &ranges, source, seed.as_deref())?;
         return Ok(listed(Some(&before)).err());
     }
     let work = gate
@@ -625,7 +683,8 @@ fn pipeline<T: Sync, P: Send>(
 
 /// A source mutant: the point of its edit, `<file>:<line>:<column>` with
 /// the file of the repository, its operator, the edit, the inventory key of
-/// the function that it edits, and, in a list of survivors, the class and
+/// the function that it edits, and, in a list of survivors, the SHA-256 of
+/// the receipt of the run of the list that it survived, and the class and
 /// the reason that a reviewer gives it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -635,6 +694,7 @@ pub struct Survivor {
     pub find: String,
     pub replace: String,
     pub function: String,
+    pub receipt_sha256: String,
     pub class: Option<Category>,
     pub reason: Option<String>,
 }
@@ -650,8 +710,8 @@ pub enum Category {
 }
 
 /// The list of survivors of a target, `<mutants>/<target>.json`, with the
-/// commit and the operators of its run, the name of its run directory, the
-/// ID of the CI run, if any, and the SHA-256 of its receipt, and its counts.
+/// commit and the operators of its runs, the runs, their counts added up and
+/// their survivors.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct List {
@@ -659,14 +719,28 @@ pub struct List {
     pub target: String,
     pub commit: String,
     pub operators: Vec<String>,
-    pub run: String,
-    pub run_id: Option<String>,
-    pub receipt_sha256: String,
+    pub runs: Vec<Run>,
     pub generated: usize,
     pub killed: usize,
     pub unbuildable: usize,
     pub not_unique: usize,
     pub survivors: Vec<Survivor>,
+}
+
+/// A run of `formal mutants` in a list of survivors: its run directory, the
+/// ID of its CI run, if any, its operators and part, `<i>/<k>`, the number
+/// of mutants that it generated, and the SHA-256 of its receipt and of the
+/// qualification receipt that it read.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Run {
+    pub run: String,
+    pub run_id: Option<String>,
+    pub operators: Vec<String>,
+    pub part: Option<String>,
+    pub generated: usize,
+    pub receipt_sha256: String,
+    pub qualification_sha256: Option<String>,
 }
 
 /// The points of the body of a function: the start and the end of the
@@ -868,7 +942,8 @@ fn unique(text: &str, start: usize, end: usize) -> Option<(usize, usize)> {
 }
 
 /// The source mutants of `target` with `operators` in the files that `read`
-/// gives by their paths, of class `no-theorem` in a function of `unclosed`
+/// gives by their paths, by the path of their file and then by the line and
+/// column of their point, of class `no-theorem` in a function of `unclosed`
 /// and without a class otherwise, and the number of points without a text
 /// that occurs once in their file.
 pub fn generate(
@@ -901,6 +976,7 @@ pub fn generate(
         {
             let mut points = Points::default();
             points.visit_block(body);
+            points.0.sort_by_key(|(start, ..)| *start);
             for (start, end, operator, to) in points.0 {
                 let bytes = offset(text, &starts, start).zip(offset(text, &starts, end));
                 let Some((from, until)) =
@@ -925,6 +1001,7 @@ pub fn generate(
                         find: find.to_string(),
                         replace,
                         function,
+                        receipt_sha256: String::new(),
                         class: class.then_some(Category::NoTheorem),
                         reason: None,
                     });
@@ -935,18 +1012,19 @@ pub fn generate(
     Ok((mutants, not_unique))
 }
 
-/// Generates the source mutants of `target` with `operators` from the
+/// Generates the source mutants of `target` that `mutants` selects from the
 /// export and runs each in a stage of its own, which starts from the build
 /// of the target, `seed`, with the theorems of all its obligations to
 /// fail, as commands of its unit; concludes the unit, and
 /// writes the draft of its list of survivors when every mutant was decided.
 /// A theorem of the obligations outside the top-level theorems of the
-/// proofs rejects the unit before any mutant runs.
+/// proofs rejects the unit before any mutant runs. The points without a
+/// text that occurs once count in the first part alone.
 fn generated(
     gate: &mut Gate,
     target: &Target,
     ranges: &Ranges,
-    operators: &[String],
+    mutants: &Source,
     seed: Option<&Path>,
 ) -> Result<(), String> {
     let (layout, unit) = (*gate.layout(), generated_unit(&target.name));
@@ -957,8 +1035,12 @@ fn generated(
     }
     let source = gate.source();
     let read = |file: &str| fs::read_to_string(source.join(file)).ok();
-    let (points, not_unique) = generate(&read, target, operators)?;
-    let (operators, generated) = (operators.to_vec(), points.len());
+    let (points, not_unique) = generate(&read, target, &mutants.operators)?;
+    let range = interval(points.len(), mutants.part);
+    let not_unique = not_unique * usize::from(mutants.part.is_none_or(|(i, _)| i == 1));
+    let points = (points.into_iter().enumerate()).skip(range.start);
+    let points = Vec::from_iter(points.take(range.len()));
+    let (operators, generated) = (mutants.operators.clone(), points.len());
     let (target_name, schema) = (target.name.clone(), SCHEMA);
     let mut list = List {
         schema,
@@ -970,7 +1052,6 @@ fn generated(
     };
     let (mut failed, work) = (Vec::new(), gate.work().join("mutants").join(&target.name));
     let (gate, judged) = (&*gate, Mutex::new(BTreeMap::new()));
-    let points = Vec::from_iter(points.into_iter().enumerate());
     workers(
         &points,
         |(index, point)| {
@@ -1031,9 +1112,9 @@ fn generated(
 
 /// After a run of `formal mutants` of `target` that ended with `code`,
 /// writes its list of survivors from `draft`, the draft that the run `run`
-/// read before it removed its work directory, with the commit and the
-/// receipt summary, as `<mutants>/<target>.json` of `root`, and prints its
-/// counts; a run that is not `SCOPED` or left no draft writes no list.
+/// read before it removed its work directory, with the commit and the run,
+/// as `<mutants>/<target>.json` of `root`, and prints its counts; a run that
+/// is not `SCOPED` or left no draft writes no list.
 pub fn write_list(
     root: &Path,
     layout: &Layout,
@@ -1051,11 +1132,19 @@ pub fn write_list(
         println!("formal mutants: no list of survivors");
         return ExitCode::FAILURE;
     };
-    (list.commit, list.run) = (
-        receipt.commit.clone().unwrap_or_default(),
-        receipt.run.clone(),
-    );
-    (list.run_id, list.receipt_sha256) = (receipt.trigger.run_id.clone(), sha256(&bytes));
+    let record = receipt.source_mutants.clone().unwrap_or_default();
+    let item = Run {
+        run: receipt.run.clone(),
+        run_id: receipt.trigger.run_id.clone(),
+        operators: list.operators.clone(),
+        part: record.part,
+        generated: list.generated,
+        receipt_sha256: sha256(&bytes),
+        qualification_sha256: record.qualification.map(|read| read.sha256),
+    };
+    list.commit = receipt.commit.clone().unwrap_or_default();
+    (list.survivors.iter_mut()).for_each(|s| s.receipt_sha256.clone_from(&item.receipt_sha256));
+    list.runs = vec![item];
     let path = root.join(list_path(layout, target));
     let text = serde_json::to_string_pretty(&list).expect("a list") + "\n";
     if let Err(error) =
@@ -1074,10 +1163,12 @@ pub fn write_list(
 
 /// The problems of the lists of survivors in `tree` of `layout`, whose
 /// registry has `targets`: a list that does not parse, of another schema,
-/// of a target that the registry does not have or not at its path, a
-/// survivor without a class or a reason, and one in a function of
-/// `unclosed` of another class than `no-theorem`; and the inventory keys of
-/// the functions of the survivors that no theorem covers.
+/// of a target that the registry does not have or not at its path, the
+/// problems of its runs, two runs of the same receipt, operators or a number
+/// of mutants that are not those of its runs, a survivor of no run of the
+/// list, without a class or a reason, and one in a function of `unclosed` of
+/// another class than `no-theorem`; and the inventory keys of the functions
+/// of the survivors that no theorem covers.
 pub fn list_problems(
     tree: &Tree,
     layout: &Layout,
@@ -1107,8 +1198,28 @@ pub fn list_problems(
         if registered.is_none() || path != list_path(layout, &list.target) {
             problems.push(format!("{path}: not the list of a registered target"));
         }
+        let runs = inventory::runs_problems(&list).into_iter();
+        problems.extend(runs.map(|problem| format!("{path}: {problem}")));
+        let receipts = BTreeSet::from_iter(list.runs.iter().map(|run| &run.receipt_sha256));
+        if receipts.len() != list.runs.len() {
+            problems.push(format!("{path}: two of its runs have the same receipt"));
+        }
+        let ran = BTreeSet::from_iter(list.runs.iter().flat_map(|run| &run.operators));
+        if ran != BTreeSet::from_iter(&list.operators) {
+            problems.push(format!("{path}: its operators are not those of its runs"));
+        }
+        let sum: usize = list.runs.iter().map(|run| run.generated).sum();
+        if list.generated != sum {
+            let generated = list.generated;
+            problems.push(format!("{path}: {generated} generated, its runs {sum}"));
+        }
         for survivor in &list.survivors {
             let point = &survivor.point;
+            if !receipts.contains(&survivor.receipt_sha256) {
+                problems.push(format!(
+                    "{path}: the survivor at {point} is of no run of the list"
+                ));
+            }
             let blank = survivor
                 .reason
                 .as_deref()
@@ -1141,20 +1252,47 @@ pub fn cli(about: &'static str) -> clap::Command {
         .action(clap::ArgAction::Append)
         .value_parser(parser);
     let operator = operator.help("Generate the mutants of this operator only; may be repeated");
+    let part = clap::Arg::new("part").long("part").value_name("I/K");
+    let part = part.requires("operator").value_parser(part_of);
+    let part = part.help(
+        "Run only the I-th of K intervals of the mutants of the one operator, 1 <= I <= K <= 4",
+    );
     let calibration = clap::arg!(--calibration "Run in the layout of the calibration target");
     clap::Command::new("mutants")
         .about(about)
-        .args([target, operator, calibration])
+        .args([target, operator, part, calibration])
 }
 
-/// The operators that `cargo xtask formal mutants` was given, or all of
-/// them, in the order of [`OPERATORS`].
-pub fn operators(matches: &clap::ArgMatches) -> Vec<String> {
+/// The part `<i>/<k>` of `--part`, with `1 <= i <= k <= 4`.
+pub fn part_of(text: &str) -> Result<(usize, usize), String> {
+    let (i, k) = text.split_once('/').unwrap_or_default();
+    match (i.parse::<usize>(), k.parse::<usize>()) {
+        (Ok(i), Ok(k)) if 1 <= i && i <= k && k <= registry::PARTS.0 => Ok((i, k)),
+        _ => Err(format!(
+            "{text} is not <i>/<k> with 1 <= i <= k <= {}",
+            registry::PARTS.0
+        )),
+    }
+}
+
+/// What `cargo xtask formal mutants` was given: its operators, or all of
+/// them, in the order of [`OPERATORS`], and its part, which takes one.
+pub fn source(matches: &clap::ArgMatches) -> Result<Source, String> {
     let given = BTreeSet::from_iter(matches.get_many::<String>("operator").into_iter().flatten());
     let kept = OPERATORS
         .split(' ')
         .filter(|op| given.is_empty() || given.contains(&op.to_string()));
-    kept.map(str::to_string).collect()
+    let (operators, part) = (
+        Vec::from_iter(kept.map(str::to_string)),
+        matches.get_one("part"),
+    );
+    match part.is_some() && operators.len() != 1 {
+        true => Err("--part takes exactly one --operator".to_string()),
+        false => Ok(Source {
+            operators,
+            part: part.copied(),
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -1170,7 +1308,7 @@ mod tests {
     use crate::formal::fixture::{self, Fixture};
     use crate::formal::process::{Ended, Limit, LimitBy};
     use crate::formal::run::tests::{
-        Done, gate, gate_as, generating_run, plenty, register, target_run, two_targets,
+        Done, gate, gate_as, generating_run, plenty, register, source_run, target_run, two_targets,
         with_targets,
     };
 
@@ -1486,14 +1624,47 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(path).expect("the list")).expect("a list");
         let receipt = fs::read(done.run.receipt()).expect("the receipt");
         assert_eq!(
-            (list.schema, list.target.as_str(), list.operators),
-            (SCHEMA, "t", operators)
+            (list.schema, list.target.as_str(), &list.operators),
+            (SCHEMA, "t", &operators)
         );
-        assert_eq!(
-            (list.run, list.receipt_sha256),
-            (done.receipt.run.clone(), sha256(&receipt))
-        );
+        // Its one run, of which a run outside `formal mutants` records no
+        // qualification receipt and no part.
+        let run = Run {
+            run: done.receipt.run.clone(),
+            run_id: None,
+            operators,
+            part: None,
+            generated: list.generated,
+            receipt_sha256: sha256(&receipt),
+            qualification_sha256: None,
+        };
+        assert_eq!(list.runs, [run]);
         assert_eq!(Some(list.commit), done.receipt.commit);
+        // A survivor of the draft is written with the SHA-256 of the receipt
+        // of the run in which it survived.
+        let mut draft: List =
+            serde_json::from_str(done.draft.as_deref().expect("a draft")).expect("a draft list");
+        let survivor: List = serde_json::from_str(&self::list("t", None, None)).expect("a list");
+        draft.survivors = Vec::from_iter(survivor.survivors.into_iter().map(|mut s| {
+            s.receipt_sha256 = String::new();
+            s
+        }));
+        let text = serde_json::to_string(&draft).expect("JSON");
+        let code = write_list(
+            fixture.root(),
+            &Layout::PRODUCTION,
+            "t",
+            Some(&text),
+            &done.run,
+            &done.receipt,
+            done.code,
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        let path = fixture.root().join("verification/mutants/t.json");
+        let list: List =
+            serde_json::from_str(&fs::read_to_string(path).expect("the list")).expect("a list");
+        let runs = Vec::from_iter(list.survivors.iter().map(|s| s.receipt_sha256.as_str()));
+        assert_eq!(runs, [sha256(&receipt)]);
         // Without a verified target, no list is written.
         fixture::lake_script(&fixture, "+Krepi", "exit 1\n");
         let done = gate(
@@ -1598,6 +1769,83 @@ mod tests {
         assert!(fixture::commands(&done, "mutants/t").is_empty());
         assert_eq!(write(&done, &done.receipt), ExitCode::FAILURE);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_part_of_the_source_mutants_runs_its_interval_of_those_of_its_operator() {
+        // Three mutants of `literal` in `f`, which the target proves, and which
+        // `cargo check` does not build, and two points of it without a text
+        // that occurs once.
+        let fixture = with_targets("generated-parts", &two_targets(1_800, 1));
+        let mut registry: serde_json::Value = serde_json::from_str(&two_targets(1_800, 1)).unwrap();
+        registry[0]["proves"] = serde_json::json!(["kernel/src/lib.rs#f"]);
+        let source = "#![no_std]\npub fn f() -> u32 {\n    let a = 6;\n    let a = 6;\n    a + 7 + 8 + 9\n}\n";
+        fixture.write("kernel/src/lib.rs", source);
+        register(&fixture, &registry.to_string());
+        let shape = fixture.root().join("artifacts/shapes/t");
+        fixture.write(
+            "artifacts/shapes/KrepiGen.T.from",
+            shape.to_str().expect("UTF-8"),
+        );
+        let function = r#"{"rust_name": "krepi_kernel::f", "lean_name": "KrepiGen.T.f",
+            "lean_file": "KrepiGen/T/Funs.lean", "is_local": true, "is_opaque": false,
+            "source": {"file": "src/lib.rs"}}"#;
+        let translation = format!("{{\"functions\": [{function}], \"types\": []}}");
+        fixture.write("artifacts/shapes/t/translation.json", &translation);
+        for file in ["Types", "Funs"] {
+            fixture.write(&format!("artifacts/shapes/t/KrepiGen/T/{file}.lean"), "");
+        }
+        let cargo = "artifacts/formal/tools/cargo/bin/cargo";
+        let real = fs::read_to_string(fixture.root().join(cargo)).expect("the Cargo stand-in");
+        fixture.write(
+            cargo,
+            &real.replacen("\n", "\n[ \"$1\" = check ] && exit 1\n", 1),
+        );
+        fixture.chmod(cargo, 0o755);
+        // The whole operator, its two parts, of 1 and 2 mutants, and the first
+        // and the last of four parts, of none and 1; the first part alone
+        // counts the points without a text that occurs once. Each is numbered
+        // by the order in which they are generated, from 0 in the work
+        // directory of the run.
+        let runs: [(_, &[usize], _); 5] = [
+            (None, &[0, 1, 2], 2),
+            (Some((1, 2)), &[0], 2),
+            (Some((2, 2)), &[1, 2], 0),
+            (Some((1, 4)), &[], 2),
+            (Some((4, 4)), &[2], 0),
+        ];
+        for (part, indices, not_unique) in runs {
+            let count = indices.len();
+            let generate = Source {
+                operators: vec!["literal".to_string()],
+                part,
+            };
+            let done = gate(
+                &fixture,
+                &["t"],
+                source_run(&fixture, &["t"], Some(generate)),
+            );
+            let verified = (Status::Verified, None);
+            assert_eq!(fixture::status(&done, "mutants/t"), verified, "{part:?}");
+            let draft: List =
+                serde_json::from_str(done.draft.as_deref().expect("a draft")).expect("a list");
+            let counts = (
+                draft.generated,
+                draft.unbuildable,
+                draft.killed,
+                draft.not_unique,
+            );
+            assert_eq!(counts, (count, count, 0, not_unique), "{part:?}");
+            let checks = fixture::commands(&done, "mutants/t");
+            let index = |c: &receipt::Command| {
+                let at = c.cwd.split("/mutants/t/").nth(1)?.split('/').next()?;
+                at.parse::<usize>()
+                    .ok()
+                    .filter(|_| c.site == Site::CargoCheck)
+            };
+            let run = BTreeSet::from_iter(checks.iter().filter_map(|c| index(c)));
+            assert_eq!(Vec::from_iter(run), indices, "{part:?}");
+        }
     }
 
     /// The source of the tests of the generation, in the file `FILE`.
@@ -1738,17 +1986,36 @@ mod tests { fn t() { let _ = 1 + 1; } }
                 .iter()
                 .map(|m| (m.find.as_str(), m.replace.as_str())),
         );
-        // `x == 4` occurs twice, and the two lines of `twice` are the same.
+        // `x == 4` occurs twice, and the two lines of `twice` are the same;
+        // in the order of their places, `>>` before the `!=` that holds it.
         let expected = [
             ("== 4 |", "!= 4 |"),
-            ("!=", "=="),
             (">>", "<<"),
+            ("!=", "=="),
             ("== 4 }", "!= 4 }"),
         ];
         assert_eq!(edits, expected);
         assert_eq!(missing, 2);
         assert_eq!(unique("ab ab abc", 6, 7), Some((6, 9)));
         assert_eq!(unique("ab\nab", 3, 4), None);
+    }
+
+    /// A run `run` of a list of survivors, of the CI run `run_id`, with
+    /// `operators` and `part`, and a receipt of its own, [`receipt_of`].
+    fn run(run: &str, operators: &[&str], part: Option<&str>, run_id: &str) -> Run {
+        Run {
+            run: run.into(),
+            run_id: Some(run_id.into()),
+            operators: Vec::from_iter(operators.iter().map(|op| op.to_string())),
+            part: part.map(str::to_string),
+            receipt_sha256: receipt_of(run),
+            ..Run::default()
+        }
+    }
+
+    /// The SHA-256 of the receipt of the run `run` of [`run`].
+    fn receipt_of(run: &str) -> String {
+        run.repeat(64)
     }
 
     /// A list of `target` with one survivor of class `class` and `reason`.
@@ -1759,12 +2026,15 @@ mod tests { fn t() { let _ = 1 + 1; } }
             find: "used + cost".into(),
             replace: "used - cost".into(),
             function: "kernel/src/lib.rs#Table::charge".into(),
+            receipt_sha256: receipt_of("r"),
             class,
             reason: reason.map(str::to_string),
         };
         let list = List {
             schema: SCHEMA,
             target: target.into(),
+            operators: vec!["arithmetic".into()],
+            runs: vec![run("r", &["arithmetic"], None, "1")],
             survivors: vec![survivor],
             ..List::default()
         };
@@ -1838,6 +2108,217 @@ mod tests { fn t() { let _ = 1 + 1; } }
             problems[0].starts_with(&format!("{path}: not a list of survivors: ")),
             "{problems:?}"
         );
+    }
+
+    /// The problems of the list of the target `t` with `runs`, their
+    /// operators and a survivor of the run `survived`.
+    fn runs_checked(runs: Vec<Run>, survived: &str) -> Vec<String> {
+        let operators = BTreeSet::from_iter(runs.iter().flat_map(|run| run.operators.clone()));
+        checked(|list| {
+            list.survivors[0].receipt_sha256 = receipt_of(survived);
+            (list.operators, list.runs) = (Vec::from_iter(operators), runs);
+        })
+    }
+
+    /// The problems of the list of the target `t` of [`list`], with one
+    /// survivor of class `equivalent`, as `change` changes it.
+    fn checked(change: impl FnOnce(&mut List)) -> Vec<String> {
+        let mut list: List = serde_json::from_str(&list(
+            "t",
+            Some(Category::Equivalent),
+            Some("Same meaning."),
+        ))
+        .expect("a list");
+        change(&mut list);
+        let registry = r#"{"schema": 3, "specifications": [], "targets": [{"name": "t"}]}"#;
+        let targets = registry::parse(registry).expect("a registry").targets;
+        let text = serde_json::to_string(&list).expect("JSON");
+        let tree = Tree::from_files(&[("verification/mutants/t.json", &text)]);
+        let problems = list_problems(&tree, &Layout::PRODUCTION, &targets).0;
+        let prefix = "verification/mutants/t.json: ";
+        Vec::from_iter(
+            problems
+                .iter()
+                .map(|p| p.strip_prefix(prefix).unwrap_or(p).to_string()),
+        )
+    }
+
+    /// The problem of the runs of `operator` with the parts `parts`, `k` of them.
+    fn uncovered(operator: &str, k: usize, parts: &str) -> String {
+        format!(
+            "the runs of the operator {operator} are neither one without a part nor its parts 1/{k} to {k}/{k} alone: {parts}"
+        )
+    }
+
+    #[test]
+    fn the_runs_of_a_list_of_survivors_take_each_operator_whole_or_in_all_its_parts() {
+        // One run of several operators and the parts of another, of one CI run.
+        let runs = vec![
+            run("a", &["ordering", "equality"], None, "1"),
+            run("b", &["literal"], Some("2/3"), "1"),
+            run("c", &["literal"], Some("1/3"), "1"),
+            run("d", &["literal"], Some("3/3"), "1"),
+        ];
+        assert_eq!(runs_checked(runs.clone(), "c"), Vec::<String>::new());
+        assert_eq!(runs_checked(runs[..1].to_vec(), "a"), Vec::<String>::new());
+        // A survivor of no run of the list.
+        assert_eq!(
+            runs_checked(runs, "e"),
+            ["the survivor at kernel/src/lib.rs:5:22 is of no run of the list"]
+        );
+        // A part that takes two operators, and a list without runs.
+        let two = vec![run("a", &["ordering", "literal"], Some("1/1"), "1")];
+        assert_eq!(
+            runs_checked(two, "a"),
+            [
+                uncovered("literal", 1, "1/1"),
+                uncovered("ordering", 1, "1/1")
+            ]
+        );
+        assert_eq!(
+            runs_checked(Vec::new(), "a"),
+            [
+                "its runs are of 0 CI runs, not one",
+                "the survivor at kernel/src/lib.rs:5:22 is of no run of the list"
+            ]
+        );
+    }
+
+    #[test]
+    fn two_runs_of_a_list_whose_intervals_meet_fail_the_check() {
+        // The same interval twice, and the whole operator beside one of its
+        // parts.
+        let twice = vec![
+            run("a", &["literal"], Some("1/2"), "1"),
+            run("b", &["literal"], Some("1/2"), "1"),
+        ];
+        assert_eq!(
+            runs_checked(twice, "a"),
+            [uncovered("literal", 2, "1/2, 1/2")]
+        );
+        let both = vec![
+            run("a", &["literal", "method"], None, "1"),
+            run("b", &["literal"], Some("1/1"), "1"),
+        ];
+        assert_eq!(
+            runs_checked(both, "a"),
+            [uncovered("literal", 2, "none, 1/1")]
+        );
+        let whole = vec![
+            run("a", &["literal"], None, "1"),
+            run("b", &["literal"], None, "1"),
+        ];
+        assert_eq!(
+            runs_checked(whole, "a"),
+            [uncovered("literal", 2, "none, none")]
+        );
+    }
+
+    #[test]
+    fn a_list_whose_runs_miss_an_interval_fails_the_check() {
+        let missing = vec![
+            run("a", &["literal"], Some("1/3"), "1"),
+            run("b", &["literal"], Some("3/3"), "1"),
+        ];
+        assert_eq!(
+            runs_checked(missing, "a"),
+            [uncovered("literal", 2, "1/3, 3/3")]
+        );
+        let alone = vec![run("a", &["literal"], Some("2/2"), "1")];
+        assert_eq!(runs_checked(alone, "a"), [uncovered("literal", 1, "2/2")]);
+        // An operator of the list that none of its runs took.
+        let none = checked(|list| list.operators.push("method".into()));
+        assert_eq!(none, ["its operators are not those of its runs"]);
+    }
+
+    #[test]
+    fn two_runs_of_a_list_with_the_same_receipt_fail_the_check() {
+        // Two jobs whose run directories have the same name, and their
+        // survivors, are told apart by their receipts.
+        let mut runs = vec![
+            run("a", &["literal"], Some("1/2"), "1"),
+            run("a", &["literal"], Some("2/2"), "1"),
+        ];
+        runs[1].receipt_sha256 = receipt_of("b");
+        assert_eq!(runs_checked(runs.clone(), "b"), Vec::<String>::new());
+        runs[1].receipt_sha256 = receipt_of("a");
+        assert_eq!(
+            runs_checked(runs, "a"),
+            ["two of its runs have the same receipt"]
+        );
+    }
+
+    #[test]
+    fn a_list_whose_number_of_mutants_is_not_that_of_its_runs_fails_the_check() {
+        let sum = checked(|list| {
+            list.generated = 3;
+            list.runs[0].generated = 2;
+        });
+        assert_eq!(sum, ["3 generated, its runs 2"]);
+        let more = checked(|list| {
+            list.generated = 3;
+            list.runs[0].generated = 1;
+            list.runs.push(run("s", &["literal"], None, "1"));
+            list.runs[1].generated = 2;
+            list.operators.push("literal".into());
+        });
+        assert_eq!(more, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_list_with_the_runs_of_two_ci_runs_fails_the_check() {
+        let two = vec![
+            run("a", &["literal"], Some("1/2"), "1"),
+            run("b", &["literal"], Some("2/2"), "2"),
+        ];
+        assert_eq!(
+            runs_checked(two, "a"),
+            ["its runs are of 2 CI runs, not one"]
+        );
+        // A run outside CI is of no CI run, which is another.
+        let mut local = run("b", &["literal"], Some("2/2"), "1");
+        local.run_id = None;
+        let runs = vec![run("a", &["literal"], Some("1/2"), "1"), local];
+        assert_eq!(
+            runs_checked(runs, "a"),
+            ["its runs are of 2 CI runs, not one"]
+        );
+    }
+
+    #[test]
+    fn a_part_of_an_operator_takes_its_interval_of_the_mutants() {
+        // The intervals of the parts of one operator meet nowhere and cover its
+        // mutants, each from (i - 1) * n / k to i * n / k, rounded down.
+        assert_eq!(interval(10, None), 0..10);
+        assert_eq!(interval(10, Some((1, 3))), 0..3);
+        assert_eq!(interval(10, Some((2, 3))), 3..6);
+        assert_eq!(interval(10, Some((3, 3))), 6..10);
+        assert_eq!(interval(2, Some((1, 4))), 0..0);
+        for n in 0..40 {
+            for k in 1..=registry::PARTS.0 {
+                let ranges = Vec::from_iter((1..=k).map(|i| interval(n, Some((i, k)))));
+                assert_eq!(ranges[0].start, 0);
+                assert_eq!(ranges[k - 1].end, n);
+                assert!(ranges.windows(2).all(|pair| pair[0].end == pair[1].start));
+                let sizes = Vec::from_iter(ranges.iter().map(ExactSizeIterator::len));
+                assert!(sizes.iter().max().unwrap_or(&0) - sizes.iter().min().unwrap_or(&0) <= 1);
+            }
+        }
+        // The mutants of an operator are numbered by their places in their
+        // file, not by the syntax tree, in which the `-` holds `a * b + a`:
+        // the first of three parts takes the `*`.
+        let registry = serde_json::json!({"schema": 3, "specifications": [],
+            "targets": [{"name": "t", "proves": [format!("{FILE}#f")]}]});
+        let target = registry::parse(&registry.to_string()).expect("a registry");
+        let source = "pub fn f(a: u32, b: u32) -> u32 {\n    a * b + a - b\n}\n";
+        let read = |_: &str| Some(source.to_string());
+        let generated = generate(&read, &target.targets[0], &names(&["arithmetic"]));
+        let (mutants, _) = generated.expect("mutants");
+        let points = Vec::from_iter(mutants.iter().map(|m| m.point.as_str()));
+        let places = ["2:7", "2:11", "2:15"].map(|at| format!("{FILE}:{at}"));
+        assert_eq!(points, places);
+        let first = &mutants[interval(mutants.len(), Some((1, 3)))];
+        assert_eq!(Vec::from_iter(first.iter().map(|m| &m.point)), [&places[0]]);
     }
 
     #[test]
@@ -2123,6 +2604,7 @@ mod tests { fn t() { let _ = 1 + 1; } }
                 (Some("lanes"), Some("${{ steps.limits.outputs.lanes }}")),
                 (Some("shards"), Some("${{ steps.limits.outputs.shards }}")),
                 (Some("scoped"), Some("${{ steps.limits.outputs.scoped }}")),
+                (Some("mutants"), Some("${{ steps.limits.outputs.mutants }}")),
             ]
         );
         for (key, rows) in [("lane", "lanes"), ("shard", "shards"), ("scoped", "scoped")] {

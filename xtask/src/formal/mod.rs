@@ -182,7 +182,7 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "mutants",
-        about: "Generate the source mutants of TARGET with every operator, or those that --operator names, run each through the proof gate with the theorems of the target, and write the survivors to the list of survivors of the target; --calibration takes a target of the calibration, and --keep keeps the work directory of the run",
+        about: "Generate the source mutants of TARGET with every operator, or those that --operator names, and with --part I/K only the I-th of K intervals of those of its one operator, and once the qualification receipt of the CI run holds, run each through the proof gate with the theorems of the target and write the survivors to the list of survivors of the target; --calibration takes a target of the calibration, and --keep keeps the work directory of the run",
         subcommands: &[],
     },
     Command {
@@ -300,12 +300,15 @@ pub fn run(root: &Path, args: &[&str]) -> ExitCode {
         }
         Some(("mutants", matches)) => {
             let target = matches.get_one::<String>("target").cloned().into_iter();
-            let operators = Some(mutants::operators(matches));
+            let Ok(source) = mutants::source(matches).map_err(|error| eprintln!("error: {error}"))
+            else {
+                return ExitCode::from(2);
+            };
             run::command(
                 root,
                 layout(matches),
                 BTreeSet::from_iter(target),
-                operators,
+                Some(source),
                 (matches.get_flag("keep"), false),
                 None,
             )
@@ -410,11 +413,8 @@ mod tests {
             let (name, matches) = matches.subcommand().expect("a subcommand");
             assert_eq!(name, "mutants");
             let target = matches.get_one::<String>("target").cloned();
-            (
-                target,
-                mutants::operators(matches),
-                matches.get_flag("calibration"),
-            )
+            let source = mutants::source(matches).expect("a part with one operator, if any");
+            (target, source.operators, matches.get_flag("calibration"))
         };
         let all = Vec::from_iter(mutants::OPERATORS.split(' ').map(String::from));
         assert_eq!(mutants(&["mutants", "t"]), (Some("t".into()), all, false));
@@ -429,6 +429,35 @@ mod tests {
         ];
         let some = vec!["literal".to_string(), "method".to_string()];
         assert_eq!(mutants(&args), (Some("t".into()), some, true));
+        // A part takes exactly one operator, which it splits into at most four
+        // intervals.
+        let part = |args: &[&str]| {
+            let matches = read(args).expect("a valid command line");
+            mutants::source(matches.subcommand().expect("mutants").1)
+        };
+        let parted = part(&["mutants", "t", "--operator", "literal", "--part", "2/4"]);
+        assert_eq!(
+            parted,
+            Ok(mutants::Source {
+                operators: vec!["literal".to_string()],
+                part: Some((2, 4))
+            })
+        );
+        let twice = [
+            "mutants",
+            "t",
+            "--operator",
+            "literal",
+            "--operator",
+            "method",
+        ];
+        let twice = [&twice[..], &["--part", "1/2"]].concat();
+        assert_eq!(
+            part(&twice),
+            Err("--part takes exactly one --operator".to_string())
+        );
+        assert_eq!(mutants::part_of("4/4"), Ok((4, 4)));
+        assert_eq!(mutants::part_of("1/1"), Ok((1, 1)));
         for (args, component) in [(&["vectors"][..], None), (&["vectors", "d/c"], Some("d/c"))] {
             let matches = read(args).expect("a valid command line");
             let (name, matches) = matches.subcommand().expect("a subcommand");
@@ -551,6 +580,11 @@ mod tests {
             &["mutants"],
             &["mutants", "t", "--operator", "loops"],
             &["mutants", "t", "u"],
+            &["mutants", "t", "--part", "1/2"],
+            &["mutants", "t", "--operator", "literal", "--part", "0/2"],
+            &["mutants", "t", "--operator", "literal", "--part", "3/2"],
+            &["mutants", "t", "--operator", "literal", "--part", "1/5"],
+            &["mutants", "t", "--operator", "literal", "--part", "1"],
             &["vectors", "--frobnicate"],
             &["canary"],
             &["canary", "frobnicate"],

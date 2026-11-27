@@ -3,19 +3,43 @@
   "parts": [
     {
       "part": "qualification",
-      "disk_peak": 456228864,
-      "seconds": 1146.539,
-      "cgroup_memory_peak": 6563893248,
-      "run_id": "43479132128",
-      "commit": "7e291ff0e7e67d36b71c5a37d15f482f8bbe5602"
+      "disk_peak": 529674240,
+      "seconds": 1281.382,
+      "cgroup_memory_peak": 3429965824,
+      "run_id": "45961875425",
+      "commit": "f196c2547d7b4136006b843d6333e4da71adc09b"
+    },
+    {
+      "part": "lane/calibration",
+      "disk_peak": 95051776,
+      "seconds": 313.753,
+      "cgroup_memory_peak": 2912763904,
+      "run_id": "45961875425",
+      "commit": "f196c2547d7b4136006b843d6333e4da71adc09b"
     },
     {
       "part": "target/calibration/1",
-      "disk_peak": 201076736,
-      "seconds": 409.317,
-      "cgroup_memory_peak": 2786652160,
-      "run_id": "43479132128",
-      "commit": "7e291ff0e7e67d36b71c5a37d15f482f8bbe5602"
+      "disk_peak": 102191104,
+      "seconds": 91.191,
+      "cgroup_memory_peak": 3143114752,
+      "run_id": "45961875425",
+      "commit": "f196c2547d7b4136006b843d6333e4da71adc09b"
+    },
+    {
+      "part": "target/calibration/2",
+      "disk_peak": 102178816,
+      "seconds": 90.901,
+      "cgroup_memory_peak": 3218411520,
+      "run_id": "45961875425",
+      "commit": "f196c2547d7b4136006b843d6333e4da71adc09b"
+    },
+    {
+      "part": "target/calibration/3",
+      "disk_peak": 102322176,
+      "seconds": 94.775,
+      "cgroup_memory_peak": 3001307136,
+      "run_id": "45961875425",
+      "commit": "f196c2547d7b4136006b843d6333e4da71adc09b"
     }
   ]
 }

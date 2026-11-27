@@ -140,6 +140,9 @@ pub(crate) struct Context<'a> {
     /// Whether the run of a lane is that of its comparator, which reads the
     /// base record of its base run.
     pub comparator: bool,
+    /// What a run of `formal mutants` generates, once it has read the
+    /// qualification receipt of its CI run.
+    pub mutants: Option<&'a mutants::Source>,
 }
 
 /// A command, with the environment of `tool` and its input from `stdin`.
@@ -619,6 +622,13 @@ pub(crate) fn execute(
         {
             gate.fail(Status::ToolFailure, error);
         }
+        let below =
+            (context.var)(mutants::QUALIFICATION).map_or(context.root.join(RUNS), PathBuf::from);
+        if let Some(source) = context.mutants
+            && let Err(error) = qualification(&mut gate, &below, source.part)
+        {
+            gate.fail(Status::ToolFailure, error);
+        }
         // No command may write the library or Lean, from the first phase to the last.
         let listing = (gate.receipt.failures.is_empty()).then(|| backend_listing(&gate, None));
         if let Some(Err(error)) = &listing {
@@ -701,6 +711,55 @@ pub(super) fn conclude(receipt: &mut Receipt, scoped: bool) {
         false => outcome::run_status(&failures.chain(units).collect::<Vec<_>>(), scoped),
     };
     (receipt.complete, receipt.status) = (complete, status);
+}
+
+/// Reads into the receipt of the run of `gate`, of the source mutants of
+/// `part`, the qualification receipt of its CI run below `dir`: of the
+/// qualification receipts there, the latest attempt of each CI run, which
+/// must be one. Unless it is of the CI run, commit, tree and image of the
+/// run, `VERIFIED` and complete, the run runs no mutant, for the reason
+/// returned.
+fn qualification(gate: &mut Gate, dir: &Path, part: Option<(usize, usize)>) -> Result<(), String> {
+    let mut record = mutants::Record {
+        part: part.map(|(i, k)| format!("{i}/{k}")),
+        ..mutants::Record::default()
+    };
+    gate.receipt.source_mutants = Some(record.clone());
+    let walk = walkdir::WalkDir::new(dir).max_depth(3);
+    let found = (walk.into_iter().flatten()).filter(|e| e.file_name() == "receipt.json");
+    let found = Vec::from_iter(found.filter_map(|entry| {
+        let bytes = fs::read(entry.path()).ok()?;
+        let read = serde_json::from_slice::<Receipt>(&bytes).ok()?;
+        (read.shard.as_deref() == Some(qualify::PHASE)).then(|| (toolchain::sha256(&bytes), read))
+    }));
+    let attempt = |r: &Receipt| (r.trigger.attempt.as_ref()).and_then(|a| a.parse::<u64>().ok());
+    let later =
+        |r: &Receipt, o: &Receipt| o.trigger.run_id == r.trigger.run_id && attempt(o) > attempt(r);
+    let latest = (found.iter()).filter(|(_, r)| !found.iter().any(|(_, o)| later(r, o)));
+    let (latest, shown) = (Vec::from_iter(latest), dir.display());
+    let count = latest.len();
+    let not_one = format!(
+        "{shown} has {count} qualification receipts of the latest attempt of a run, not one"
+    );
+    let [(sha256, read)] = <[_; 1]>::try_from(latest).map_err(|_| not_one)?;
+    let read = mutants::Qualified::of(sha256, read);
+    let this = mutants::Qualified::of("", &gate.receipt);
+    let other = [
+        ("CI run", read.run_id != this.run_id),
+        ("commit", read.commit != this.commit),
+        ("tree", read.tree != this.tree),
+        ("image", read.image != this.image),
+    ];
+    let other = Vec::from_iter((other.into_iter()).filter(|o| o.1).map(|o| o.0)).join(", ");
+    let (status, not) = (word(&read.status), ["not ", ""][usize::from(read.complete)]);
+    let held = read.status == Status::Verified && read.complete;
+    record.qualification = Some(read);
+    gate.receipt.source_mutants = Some(record);
+    let failed = match other.is_empty() {
+        true => format!("the qualification job of the CI run is {status}, {not}complete"),
+        false => format!("the qualification receipt {sha256} is of another {other}"),
+    };
+    (other.is_empty() && held).then_some(()).ok_or(failed)
 }
 
 /// Checks the host, reads the tool manifest and takes the snapshot of the
@@ -787,7 +846,7 @@ fn export_and_check(
     if let Some(part) = part.filter(|part| merge::target(part).is_some() && of_part.is_none()) {
         return Err(format!("{registry} registers no part {part}"));
     }
-    let round = !alone(part, !targets.is_empty(), gate.fixed);
+    let round = !alone(part, !targets.is_empty());
     let imported = round && !base::planned_imports(&source, &gate.layout, &registered)?.is_empty();
     let formal = states.values().any(|(state, _)| *state == State::Formal);
     let extracts = !chosen.is_empty() || formal || imported;
@@ -1016,7 +1075,7 @@ pub(super) fn target_phases<'a>(
     root: &Path,
     layout: &Layout,
     named: &BTreeSet<String>,
-    generate: Option<Vec<String>>,
+    generate: Option<mutants::Source>,
     shard: Option<&str>,
 ) -> [Phase<'a>; 2] {
     let path = layout.registry;
@@ -1040,7 +1099,7 @@ pub(super) fn target_phases<'a>(
     let named = Vec::from_iter(named.iter().cloned());
     let chosen = selected(&states, &named, shard.is_some()).into_iter();
     let chosen = BTreeSet::from_iter(chosen.map(String::from));
-    let alone = alone(shard, !named.is_empty(), generate.is_some());
+    let alone = alone(shard, !named.is_empty());
     let lane = shard.and_then(merge::lane).map(str::to_string);
     // The base round builds the planned targets that hand-written modules
     // import, and that of a lane the targets of its modules.
@@ -1110,7 +1169,7 @@ pub(super) fn target_phases<'a>(
             if alone && !formal.is_empty() {
                 gate.handwritten = merge::handwritten(gate)?.0;
             }
-            let generate = generate.as_deref();
+            let generate = generate.as_ref();
             (formal.iter()).try_for_each(|t| finish_target(gate, t, generate))
         }),
     ];
@@ -1297,7 +1356,7 @@ fn extract_target(
 fn finish_target(
     gate: &mut Gate,
     target: &Target,
-    generate: Option<&[String]>,
+    generate: Option<&mutants::Source>,
 ) -> Result<(), String> {
     let (layout, source, unit) = (gate.layout, gate.source(), target_unit(&target.name));
     if (gate.records().conclusions.iter()).any(|(concluded, _)| *concluded == unit) {
@@ -1511,9 +1570,10 @@ pub(crate) fn finish(
 }
 
 /// Whether a run runs the part of its targets alone: the shard of a target,
-/// and a run that names targets without a shard or source mutants.
-fn alone(shard: Option<&str>, named: bool, generate: bool) -> bool {
-    shard.and_then(merge::target).is_some() || (shard.is_none() && named && !generate)
+/// and a run that names targets without a shard, such as that of source
+/// mutants, which reads the qualification receipt of its CI run instead.
+fn alone(shard: Option<&str>, named: bool) -> bool {
+    shard.and_then(merge::target).is_some() || (shard.is_none() && named)
 }
 
 /// The phases of a run of `targets` with `context`, the guard on a pull
@@ -1524,7 +1584,7 @@ fn alone(shard: Option<&str>, named: bool, generate: bool) -> bool {
 fn phases<'a>(
     context: &Context<'a>,
     targets: &BTreeSet<String>,
-    generate: Option<Vec<String>>,
+    generate: Option<mutants::Source>,
 ) -> Vec<Phase<'a>> {
     let (root, layout, shard) = (context.root, context.layout, context.shard);
     let lane = shard.and_then(merge::lane);
@@ -1533,7 +1593,7 @@ fn phases<'a>(
         return vec![comparator::phase(root, layout, lane, runs)];
     }
     let (alone, job) = (
-        alone(shard, !targets.is_empty(), generate.is_some()),
+        alone(shard, !targets.is_empty()),
         shard == Some(qualify::PHASE),
     );
     let qualifies = !alone && lane.is_none();
@@ -1554,7 +1614,7 @@ pub fn command(
     root: &Path,
     layout: &Layout,
     targets: BTreeSet<String>,
-    generate: Option<Vec<String>>,
+    generate: Option<mutants::Source>,
     (keep, comparator): (bool, bool),
     shard: Option<&str>,
 ) -> ExitCode {
@@ -1565,6 +1625,7 @@ pub fn command(
         return ExitCode::from(2);
     }
     let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+    let source = generate.clone();
     let context = Context {
         root,
         layout,
@@ -1578,6 +1639,7 @@ pub fn command(
         free: process::disk_available,
         shard,
         comparator,
+        mutants: source.as_ref(),
     };
     let lists = generate.as_ref().and_then(|_| targets.first().cloned());
     let run = RunDir::create(root);
@@ -1736,6 +1798,7 @@ pub(crate) mod tests {
             free,
             shard: None,
             comparator: false,
+            mutants: None,
         };
         gate_with(&context, run, &targets, phases, Box::new(io::sink()))
     }
@@ -1767,6 +1830,7 @@ pub(crate) mod tests {
             free: plenty,
             shard: None,
             comparator: false,
+            mutants: None,
         };
         gate_with(&context, run, targets, phases, progress)
     }
@@ -2132,6 +2196,20 @@ pub(crate) mod tests {
         named: &[&str],
         generate: Option<Vec<String>>,
     ) -> Vec<Phase<'a>> {
+        let generate = generate.map(|operators| mutants::Source {
+            operators,
+            part: None,
+        });
+        source_run(fixture, named, generate)
+    }
+
+    /// The phases of [`target_run`], which generate the source mutants that
+    /// `generate` selects when given.
+    pub(crate) fn source_run<'a>(
+        fixture: &Fixture,
+        named: &[&str],
+        generate: Option<mutants::Source>,
+    ) -> Vec<Phase<'a>> {
         let named = BTreeSet::from_iter(named.iter().map(|name| name.to_string()));
         let [extraction, finish] =
             target_phases(fixture.root(), &Layout::PRODUCTION, &named, generate, None);
@@ -2182,6 +2260,7 @@ pub(crate) mod tests {
             free,
             shard,
             comparator: false,
+            mutants: None,
         }
     }
 
@@ -2846,27 +2925,295 @@ pub(crate) mod tests {
         assert!(stage.join("Krepi/Proofs/T.lean").is_file());
     }
 
-    #[test]
-    fn a_run_of_formal_mutants_keeps_its_own_budget() {
-        // It runs every phase of the gate, with the budget of `formal mutants`
-        // in place of the gate's, which the budget of its target does not grow.
-        let fixture = with_targets("mutants-budget", &two_targets(1_800, 1));
+    /// The directory of the fixture below which a run of `formal mutants`
+    /// finds the qualification receipt of its CI run.
+    const QUALIFIED: &str = "artifacts/qualification";
+
+    /// Runs the source mutants of `source` of the target `t` of `fixture` as
+    /// `cargo xtask formal mutants` does, in the attempt 1 of the CI run 41,
+    /// with the qualification receipts below [`QUALIFIED`].
+    fn mutants_run(fixture: &Fixture, source: &mutants::Source) -> Done {
+        let below = fixture.root().join(QUALIFIED).display().to_string();
+        let var = |name: &str| match name {
+            mutants::QUALIFICATION => Some(below.clone()),
+            "GITHUB_RUN_ID" => Some("41".to_string()),
+            "GITHUB_RUN_ATTEMPT" => Some("1".to_string()),
+            _ => None,
+        };
         let context = Context {
             budget: Some(mutants::RUN_BUDGET),
-            ..shard_context(fixture.root(), None, &no_variable, plenty)
+            mutants: Some(source),
+            ..shard_context(fixture.root(), None, &var, plenty)
         };
         let named = BTreeSet::from(["t".to_string()]);
-        let operators = vec!["literal".to_string()];
-        let phases = phases(&context, &named, Some(operators.clone())).into_iter();
-        let names = Vec::from_iter(phases.map(|phase| phase.name));
-        assert_eq!(names, ["qualification", "extraction", "base", "targets"]);
         let run = RunDir::create(fixture.root()).expect("create the run directory");
-        let phases = generating_run(&fixture, &["t"], Some(operators));
-        let done = gate_with(&context, run, &named, phases, Box::new(io::sink()));
+        let phases = phases(&context, &named, Some(source.clone()));
+        gate_with(&context, run, &named, phases, Box::new(io::sink()))
+    }
+
+    /// Writes the receipt of a qualification job, `VERIFIED` and complete, of
+    /// the CI run, commit, tree and image of `like`, as `change` changes it,
+    /// in the run directory `name` below [`QUALIFIED`] of `fixture`, and
+    /// returns its SHA-256.
+    fn qualified(
+        fixture: &Fixture,
+        name: &str,
+        like: &Receipt,
+        change: impl FnOnce(&mut Receipt),
+    ) -> String {
+        let mut receipt = Receipt {
+            schema: receipt::SCHEMA,
+            status: Status::Verified,
+            complete: true,
+            trigger: like.trigger.clone(),
+            shard: Some(qualify::PHASE.to_string()),
+            image: like.image.clone(),
+            commit: like.commit.clone(),
+            tree: like.tree.clone(),
+            ..Receipt::default()
+        };
+        change(&mut receipt);
+        let text = receipt::render(&receipt);
+        fixture.write(&format!("{QUALIFIED}/runs/{name}/receipt.json"), &text);
+        toolchain::sha256(text.as_bytes())
+    }
+
+    /// Whether `done`, a run of `formal mutants`, ran no phase and no mutant
+    /// and is a tool failure for a reason that starts with `reason`.
+    fn ran_no_mutant(done: &Done, reason: &str) -> bool {
+        let none = done.receipt.phases.values().all(|phase| !phase.ran);
+        let unit = done.receipt.units.get("mutants/t").map(|unit| unit.status);
+        (
+            done.receipt.status,
+            unit,
+            none,
+            done.has_failure(Status::ToolFailure, reason),
+        ) == (Status::ToolFailure, Some(Status::NotRun), true, true)
+    }
+
+    #[test]
+    fn a_run_of_formal_mutants_keeps_its_own_budget() {
+        // It has the budget of `formal mutants` in place of the gate's, which
+        // the budget of its target does not grow.
+        let fixture = with_targets("mutants-budget", &two_targets(1_800, 1));
+        let source = mutants::Source {
+            operators: vec!["literal".to_string()],
+            part: None,
+        };
+        let like = mutants_run(&fixture, &source).receipt;
+        qualified(&fixture, "1-1-0", &like, |_| {});
+        let done = mutants_run(&fixture, &source);
         assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.failures());
         assert_eq!(done.receipt.budgets.gate_seconds, 14_400);
         let verified = (Status::Verified, None);
         assert_eq!(fixture::status(&done, "mutants/t"), verified);
+    }
+
+    #[test]
+    fn a_run_of_source_mutants_runs_no_qualification_and_no_base_round() {
+        // It extracts its target, builds its proofs, the seed of its mutants,
+        // and runs them in the phase `targets`, after the qualification job
+        // of its CI run, whose receipt it reads.
+        let fixture = with_targets("mutants-phases", &two_targets(1_800, 1));
+        let source = mutants::Source {
+            operators: vec!["literal".to_string()],
+            part: Some((2, 3)),
+        };
+        let context = Context {
+            budget: Some(mutants::RUN_BUDGET),
+            mutants: Some(&source),
+            ..shard_context(fixture.root(), None, &no_variable, plenty)
+        };
+        let named = BTreeSet::from(["t".to_string()]);
+        let phases = phases(&context, &named, Some(source.clone())).into_iter();
+        let names = Vec::from_iter(phases.map(|phase| phase.name));
+        assert_eq!(names, ["extraction", "targets"]);
+        let like = mutants_run(&fixture, &source).receipt;
+        let sha256 = qualified(&fixture, "1-1-0", &like, |_| {});
+        let done = mutants_run(&fixture, &source);
+        assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.failures());
+        let receipt = done.written();
+        assert_eq!(
+            Vec::from_iter(receipt.phases.keys()),
+            ["extraction", "targets"]
+        );
+        assert_eq!(
+            Vec::from_iter(receipt.units.keys()),
+            ["mutants/t", "target/t"]
+        );
+        let sites = BTreeSet::from_iter(done.sites());
+        for site in [Site::QualificationBuild, Site::BaseBuild, Site::Leanchecker] {
+            assert!(!sites.contains(&site), "{site:?}");
+        }
+        assert!(sites.contains(&Site::TargetBuild));
+        let read = mutants::Qualified {
+            sha256,
+            run_id: Some("41".to_string()),
+            commit: like.commit.clone(),
+            tree: like.tree.clone(),
+            image: None,
+            status: Status::Verified,
+            complete: true,
+        };
+        let record = mutants::Record {
+            qualification: Some(read),
+            part: Some("2/3".to_string()),
+        };
+        assert_eq!(receipt.source_mutants, Some(record));
+    }
+
+    #[test]
+    fn a_part_of_the_source_mutants_writes_its_part_and_what_it_read_in_its_list() {
+        // The list of the run holds it as its one run, with its part, its CI
+        // run and the SHA-256 of the qualification receipt that it read.
+        let fixture = with_targets("mutants-list", &two_targets(1_800, 1));
+        let source = mutants::Source {
+            operators: vec!["literal".to_string()],
+            part: Some((2, 3)),
+        };
+        let like = mutants_run(&fixture, &source).receipt;
+        let sha256 = qualified(&fixture, "1-1-0", &like, |_| {});
+        let done = mutants_run(&fixture, &source);
+        assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.failures());
+        let code = mutants::write_list(
+            fixture.root(),
+            &Layout::PRODUCTION,
+            "t",
+            done.draft.as_deref(),
+            &done.run,
+            &done.receipt,
+            done.code,
+        );
+        assert_eq!(code, ExitCode::SUCCESS);
+        let path = fixture
+            .root()
+            .join(mutants::list_path(&Layout::PRODUCTION, "t"));
+        let text = fs::read_to_string(path).expect("the list");
+        let list: mutants::List = serde_json::from_str(&text).expect("a list");
+        let runs = Vec::from_iter(list.runs.iter().map(|run| {
+            let (part, read) = (run.part.as_deref(), run.qualification_sha256.as_deref());
+            (part, read, run.run_id.as_deref(), run.operators.clone())
+        }));
+        let literal = vec!["literal".to_string()];
+        assert_eq!(
+            runs,
+            [(Some("2/3"), Some(sha256.as_str()), Some("41"), literal)]
+        );
+    }
+
+    #[test]
+    fn a_run_of_source_mutants_without_a_qualification_receipt_runs_no_mutant() {
+        let fixture = with_targets("mutants-without", &two_targets(1_800, 1));
+        let source = mutants::Source {
+            operators: vec!["literal".to_string()],
+            part: None,
+        };
+        let done = mutants_run(&fixture, &source);
+        let none = format!(
+            "{} has 0 qualification receipts",
+            fixture.root().join(QUALIFIED).display()
+        );
+        assert!(ran_no_mutant(&done, &none), "{:?}", done.failures());
+        assert!(fixture::commands(&done, "mutants/t").is_empty());
+        let record = mutants::Record::default();
+        assert_eq!(done.written().source_mutants, Some(record));
+        // A receipt of another part, such as a lane, is none either.
+        qualified(&fixture, "1-1-0", &done.receipt, |r| {
+            r.shard = Some("lane/l".into())
+        });
+        assert!(ran_no_mutant(&mutants_run(&fixture, &source), &none));
+    }
+
+    #[test]
+    fn a_qualification_receipt_of_another_ci_run_runs_no_source_mutant() {
+        let fixture = with_targets("mutants-other-run", &two_targets(1_800, 1));
+        let source = mutants::Source {
+            operators: vec!["literal".to_string()],
+            part: None,
+        };
+        let like = mutants_run(&fixture, &source).receipt;
+        let other = |r: &mut Receipt| r.trigger.run_id = Some("40".to_string());
+        let sha256 = qualified(&fixture, "1-1-0", &like, other);
+        let done = mutants_run(&fixture, &source);
+        let reason = format!("the qualification receipt {sha256} is of another CI run");
+        assert!(ran_no_mutant(&done, &reason), "{:?}", done.failures());
+        let record = done.written().source_mutants.expect("the record");
+        let read = record.qualification.expect("the receipt that it read");
+        assert_eq!((read.sha256, read.run_id), (sha256, Some("40".to_string())));
+        // Of the attempts of one CI run, the latest counts.
+        fs::remove_dir_all(fixture.root().join(QUALIFIED)).expect("remove the receipts");
+        let attempt = |attempt: &'static str, status| {
+            move |r: &mut Receipt| (r.trigger.attempt, r.status) = (Some(attempt.into()), status)
+        };
+        qualified(&fixture, "1-1-0", &like, attempt("1", Status::Rejected));
+        let sha256 = qualified(&fixture, "2-1-0", &like, attempt("2", Status::Verified));
+        let done = mutants_run(&fixture, &source);
+        assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.failures());
+        let read = done
+            .receipt
+            .source_mutants
+            .and_then(|record| record.qualification);
+        assert_eq!(read.map(|read| read.sha256), Some(sha256));
+        // Two of one attempt are not one.
+        qualified(&fixture, "3-1-0", &like, attempt("2", Status::Verified));
+        let done = mutants_run(&fixture, &source);
+        let two = "qualification receipts of the latest attempt of a run, not one";
+        assert!(
+            done.failures().iter().any(|f| f.ends_with(two)),
+            "{:?}",
+            done.failures()
+        );
+    }
+
+    #[test]
+    fn a_qualification_receipt_of_another_commit_runs_no_source_mutant() {
+        let fixture = with_targets("mutants-other-commit", &two_targets(1_800, 1));
+        let source = mutants::Source {
+            operators: vec!["literal".to_string()],
+            part: None,
+        };
+        let like = mutants_run(&fixture, &source).receipt;
+        let image = receipt::Image {
+            reference: Some(format!("ghcr.io/o/r@sha256:{}", "9".repeat(64))),
+            ..receipt::Image::default()
+        };
+        for other in ["tree", "image", "commit, tree"] {
+            let change = |r: &mut Receipt| match other {
+                "tree" => r.tree = Some("d".repeat(40)),
+                "image" => r.image = Some(image.clone()),
+                _ => (r.commit, r.tree) = (None, None),
+            };
+            fs::remove_dir_all(fixture.root().join(QUALIFIED)).unwrap_or_default();
+            let sha256 = qualified(&fixture, "1-1-0", &like, change);
+            let done = mutants_run(&fixture, &source);
+            let reason = format!("the qualification receipt {sha256} is of another {other}");
+            assert!(
+                ran_no_mutant(&done, &reason),
+                "{other}: {:?}",
+                done.failures()
+            );
+        }
+    }
+
+    #[test]
+    fn a_failed_or_unfinished_qualification_job_runs_no_source_mutant() {
+        let fixture = with_targets("mutants-failed-job", &two_targets(1_800, 1));
+        let source = mutants::Source {
+            operators: vec!["literal".to_string()],
+            part: None,
+        };
+        let like = mutants_run(&fixture, &source).receipt;
+        for (status, complete, reason) in [
+            (Status::Rejected, true, "REJECTED, complete"),
+            (Status::ToolFailure, false, "TOOL_FAILURE, not complete"),
+            (Status::Verified, false, "VERIFIED, not complete"),
+        ] {
+            let change = |r: &mut Receipt| (r.status, r.complete) = (status, complete);
+            qualified(&fixture, "1-1-0", &like, change);
+            let done = mutants_run(&fixture, &source);
+            let reason = format!("the qualification job of the CI run is {reason}");
+            assert!(ran_no_mutant(&done, &reason), "{:?}", done.failures());
+        }
     }
 
     #[test]
@@ -2895,17 +3242,17 @@ pub(crate) mod tests {
         assert_eq!(done.receipt.proof_targets["p"].unit, None);
         assert!(!done.receipt.units.contains_key("target/p"));
         assert_eq!(done.receipt.phases["extraction"].budget_seconds, 3_600);
-        // So does a run of `formal mutants`.
-        let context = Context {
-            budget: Some(mutants::RUN_BUDGET),
-            ..shard_context(fixture.root(), None, &no_variable, plenty)
+        // A run of `formal mutants`, which has no base round either, extracts
+        // its target alone.
+        let source = mutants::Source {
+            operators: vec!["literal".to_string()],
+            part: None,
         };
-        let named = BTreeSet::from(["t".to_string()]);
-        let run = RunDir::create(fixture.root()).expect("create the run directory");
-        let phases = generating_run(&fixture, &["t"], Some(vec!["literal".to_string()]));
-        let done = gate_with(&context, run, &named, phases, Box::new(io::sink()));
+        let like = mutants_run(&fixture, &source).receipt;
+        qualified(&fixture, "1-1-0", &like, |_| {});
+        let done = mutants_run(&fixture, &source);
         assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.failures());
-        assert_eq!(extracted(&done), ["p", "t"]);
+        assert_eq!(extracted(&done), ["t"]);
         assert!(!done.receipt.units.contains_key("target/p"));
     }
 
@@ -4950,6 +5297,7 @@ pub(crate) mod tests {
             free: plenty,
             shard: None,
             comparator: false,
+            mutants: None,
         };
         let run = RunDir::create(fixture.root()).expect("create the run directory");
         let phases = vec![phase("checks", LONG, &["u1"], |run| {

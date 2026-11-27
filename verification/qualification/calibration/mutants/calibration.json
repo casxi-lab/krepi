@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "target": "calibration",
   "commit": "686c5e5a6c8716e675970f9fae029d2025749998",
   "operators": [
@@ -13,9 +13,27 @@
     "condition",
     "method"
   ],
-  "run": "1794366879-7-0",
-  "run_id": "42951119220",
-  "receipt_sha256": "381019ed23c98bb28ed74e8f963e43602025762d341a28236b4821ed5489058d",
+  "runs": [
+    {
+      "run": "1794366879-7-0",
+      "run_id": "42951119220",
+      "operators": [
+        "ordering",
+        "equality",
+        "arithmetic",
+        "bitwise",
+        "logical",
+        "negation",
+        "literal",
+        "condition",
+        "method"
+      ],
+      "part": null,
+      "generated": 51,
+      "receipt_sha256": "381019ed23c98bb28ed74e8f963e43602025762d341a28236b4821ed5489058d",
+      "qualification_sha256": null
+    }
+  ],
   "generated": 51,
   "killed": 50,
   "unbuildable": 0,
@@ -27,6 +45,7 @@
       "find": "[0",
       "replace": "[1",
       "function": "verification/qualification/calibration/src/table.rs#Table::new",
+      "receipt_sha256": "381019ed23c98bb28ed74e8f963e43602025762d341a28236b4821ed5489058d",
       "class": "missing-lemma",
       "reason": "The theorem about Table::new states the capacity and that no slot is in use, but not that every generation starts at 0; a table made with generation 1 would count every slot as retired and refuse a handle of generation 0, so the mutant changes the meaning."
     }

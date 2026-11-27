@@ -404,8 +404,8 @@ so that a rerun of the downloading job alone still finds the artifact, to
 uploads of receipts, summaries, records of the run and the logs packed into
 `logs.tar.gz` in the jobs of the gate of the two formal workflows, to a
 download of the parts of their run by the pattern of their names in their
-merge jobs, to the steps of those of `formal` in the shard and merge jobs of
-the calibration, and to main commands that run under that script as the last
+merge jobs, to the steps of those of `formal` in the lane, shard, merge and
+mutants jobs of the calibration, and to main commands that run under that script as the last
 command of their step, at a deadline that with the limit of the pull before
 the check ends one or two minutes before the limit of their job. Other unit
 tests hold the workflow `formal` to its six checks of the gate, jobs of
@@ -1158,19 +1158,22 @@ contract or the registries. The job `calibration run` of the workflow
 tests run in the `test` step above, on trees of files in memory and on
 fixture contracts.
 
-`cargo xtask formal mutants TARGET [--operator NAME]... [--calibration] [--keep]`
-generates the source mutants of a formal target with its operators and runs
-each through a run of the gate on the target, with a budget of 14,400 s,
-and, when the run is `SCOPED`, writes the list of the survivors
+`cargo xtask formal mutants TARGET [--operator NAME]... [--part I/K] [--calibration] [--keep]`
+reads the qualification receipt of its CI run, generates the source
+mutants of a formal target with its operators, or an interval of those of
+one operator, and runs each through a run of the gate on the target, with
+a budget of 14,400 s, and, when the run is `SCOPED`, writes the list of
+the survivors
 ([source mutants and survivors](../formal-verification.md#source-mutants-and-survivors)).
-It is not part of the check: the job `calibration mutants` of the workflow
-`formal calibration` runs it on the calibration target, and the job
-`formal mutants` of the workflow `formal` on a target of production on a
-manual run of `main`. Its unit tests run
-in the `test` step above: the generation on source texts in memory, the
-judgement of a build on the captured outputs of
-`xtask/src/formal/fixtures/mutants/`, and the runs on the Git repositories
-and fake tools of the tests of `cargo xtask formal run`.
+It is not part of the check: the job `calibration mutants calibration 1`
+of the workflow `formal calibration` runs it on the calibration target,
+and the jobs `formal mutants <target> <n>` of the workflow `formal` on
+targets of production on a manual run of `main`, each after the
+qualification job of its run. Its unit tests run in the `test` step
+above: the generation on source texts in memory, the judgement of a build
+on the captured outputs of `xtask/src/formal/fixtures/mutants/`, and the
+runs on the Git repositories and fake tools of the tests of
+`cargo xtask formal run`.
 
 `cargo xtask formal merge [--calibration] RECEIPT...` merges the receipts
 of the qualification job, of each lane and of the part of each formal
@@ -1228,12 +1231,13 @@ calibration with `--shard target/<name>/<i>` in a job
 with `cargo xtask formal merge --calibration` in the job
 `calibration merge`, the planned target of the calibration alone, and, on
 a manual run that asks for it and on a pull request with the label,
-`cargo xtask formal mutants calibration --calibration`
+`cargo xtask formal mutants calibration --calibration` after the job
+`calibration run`
 ([calibration target](../formal-verification.md#calibration-target)).
 It is not required. A unit test keeps its limits equal to the deadlines
 of its gates and receipts, its lanes and its parts equal to the lanes and
-the formal targets of the calibration, and the steps of its lane, shard
-and merge jobs equal to those of `formal`.
+the formal targets of the calibration, and the steps of its lane, shard,
+merge and mutants jobs equal to those of `formal`.
 
 `cargo xtask formal vectors [DOMAIN/COMPONENT]` replays the frozen test
 vectors of a component through its specification with the pinned Lean and
@@ -1516,7 +1520,7 @@ to an exact version in the manifest of the crate that uses it:
 | `xtask/Cargo.toml` | `time` without default features | MIT OR Apache-2.0 | The calendar dates that `cargo xtask formal check` requires of the expiry of each waiver of `verification/waivers.json`, and the UTC date of the Unix time of the host's clock on which the qualification job of `cargo xtask formal run` and `cargo xtask formal merge` judge whether a waiver holds, and `cargo xtask formal receipt` whether the waivers that a record used still hold |
 | `xtask/Cargo.toml` | `toml` without default features, with `parse` and `serde` | MIT OR Apache-2.0 | Reading the Cargo manifests and configuration files, `suites.toml`, `toolchains.toml`, `rust-toolchain.toml`, Charon's `rust-toolchain`, `verification/extraction.toml`, the compile-fail cases of the `subset` step, the `vectors` blocks of the contracts, and Charon's `charon/Cargo.toml` and the channel manifest of a nightly that `cargo xtask formal canary` reads |
 | `xtask/Cargo.toml` | `walkdir` | MIT OR Unlicense | The listing of the tool installation that `cargo xtask formal run` takes at the start and at the end of a phase and of the run, without following symbolic links, the listing of the build of a target before its first mutant and after its last, and the copies of the package and of that build for each of its mutants |
-| `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step, and the YAML loader with which that step reads the actions that the steps of a workflow use, `cargo xtask run-record` reads the limits of the jobs of a workflow and the unit tests of the check read the committed workflows, and the YAML emitter with which a unit test of the check compares the steps of the shard and merge jobs of the two formal workflows |
+| `xtask/Cargo.toml` | `yaml-rust2` without default features | MIT OR Apache-2.0 | The YAML event parser of the `workflows` step, and the YAML loader with which that step reads the actions that the steps of a workflow use, `cargo xtask run-record` reads the limits of the jobs of a workflow and the unit tests of the check read the committed workflows, and the YAML emitter with which a unit test of the check compares the steps of the lane, shard, merge and mutants jobs of the two formal workflows |
 
 No test has a development dependency yet. Development dependencies are added
 only when a test category needs them, are pinned to an exact version and are
