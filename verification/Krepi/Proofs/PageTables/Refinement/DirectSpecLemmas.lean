@@ -5,6 +5,7 @@ public import Krepi.Spec.PageTables.Witnesses.TableSets
 public import Krepi.Proofs.Fdt.Plan
 public import Krepi.Proofs.Fdt.PlanLemmas
 public import Krepi.Proofs.PageTables.MapCheckLemmas
+public import Krepi.Proofs.PageTables.PoolLemmas
 import Mathlib.Util.CountHeartbeats
 import Krepi.Proofs.PageTables.BitLemmas
 
@@ -65,6 +66,11 @@ built once and not again for every mutant of the code.
   first leaf at or above the address of `usableLeaves` of the ranges, from an
   address where a leaf starts), and `usable_ranges_ok` (the usable ranges of
   a well-formed map are as it takes them).
+- The place that the cursor reads: `walk2_used_mono`, `place_used_mono` (a
+  walk or a place that succeeds is the same on the set whose record of
+  tables in use is larger, the set after the write phase) and
+  `placeOr_directLeaf` (the place that the cursor reads for a leaf found is
+  the place that the checks found).
 -/
 
 @[expose] public section
@@ -903,5 +909,90 @@ theorem usable_ranges_ok {p : Krepi.Spec.Fdt.MemoryPlan} (hp : p.WellFormed) :
   intro u hu
   obtain ⟨⟨-, hv⟩, h1, h2⟩ := hne u hu
   exact ⟨Krepi.Proofs.Fdt.nonempty_lt ⟨(hne u hu).1.1, hv⟩, h1, h2, hv⟩
+
+/-! ## The place that the cursor reads -/
+
+/-- A walk to level 2 that succeeds succeeds alike on the set whose record
+of tables in use is larger: the write phase records the new tables. -/
+theorem walk2_used_mono {r : Region} {N : Nat} {s : Tables r N} {base va : UInt64} {u : Nat}
+    (hu : s.used ≤ u) {o : Option (Nat × UInt64)} (h : s.walk2 base va = .ok o) :
+    ({ s with used := u } : Tables r N).walk2 base va = .ok o := by
+  have he : ∀ t i, ({ s with used := u } : Tables r N).entry t i = s.entry t i := fun _ _ => rfl
+  cases hv : isValid (s.entry 0 (index1 va)) with
+  | false =>
+    rw [walk2_invalid hv] at h
+    rw [walk2_invalid (by rw [he]; exact hv), h]
+  | true =>
+    cases hc : s.child? base (s.entry 0 (index1 va)) with
+    | none => rw [walk2_backing hv hc] at h; cases h
+    | some t =>
+      rw [walk2_some hv hc] at h
+      rw [walk2_some (by rw [he]; exact hv) (by rw [he]; exact child?_mono hu hc), he, h]
+
+/-- A place of a leaf that the walk finds is found alike on the set whose
+record of tables in use is larger. -/
+theorem place_used_mono {r : Region} {N : Nat} {s : Tables r N} {base : UInt64} {l : MapLeaf}
+    {u : Nat} (hu : s.used ≤ u) {p : Place} (h : s.place base l = .ok p) :
+    ({ s with used := u } : Tables r N).place base l = .ok p := by
+  have he : ∀ t i, ({ s with used := u } : Tables r N).entry t i = s.entry t i := fun _ _ => rfl
+  unfold Tables.place at h ⊢
+  cases hw : s.walk2 base l.va with
+  | error x => rw [hw] at h; cases h
+  | ok o =>
+    rw [walk2_used_mono hu hw]
+    rw [hw] at h
+    simp only [bind, Except.bind] at h ⊢
+    cases o with
+    | none => exact h
+    | some te =>
+      obtain ⟨t2, e2⟩ := te
+      simp only at h ⊢
+      cases hf : l.form with
+      | block =>
+        rw [hf] at h
+        simp only at h ⊢
+        split at h
+        · rename_i hv; simp only [hv, ↓reduceIte]; exact h
+        · rename_i hv
+          simp only [hv, Bool.false_eq_true, ↓reduceIte]
+          split at h
+          · cases h
+          · cases h
+      | page =>
+        rw [hf] at h
+        simp only at h ⊢
+        split at h
+        · rename_i hv; simp only [hv, ↓reduceIte]; exact h
+        · rename_i hv
+          simp only [hv, Bool.false_eq_true, ↓reduceIte]
+          split at h
+          · cases h
+          · rename_i hb
+            simp only [hb, Bool.false_eq_true, ↓reduceIte]
+            cases hc : s.child? base e2 with
+            | none => rw [hc] at h; cases h
+            | some t3 =>
+              rw [hc] at h
+              rw [child?_mono hu hc]
+              simp only [he] at h ⊢
+              exact h
+
+/-- The place that the cursor reads on the set after the write phase, for
+the leaf of the direct map at `pa` below `2 ^ 39` found by the search, is the
+place that the checks found on the set before it. -/
+theorem placeOr_directLeaf {r : Region} {N : Nat} {s : Tables r N} {base : UInt64} {u e pa : Nat}
+    (hu : s.used ≤ u) (hlow : pa < 2 ^ 39) {p : Place} (h : s.place base (directLeaf e pa) = .ok p) :
+    placeOr ({ s with used := u } : Tables r N) base (leafAtFound e pa) = p := by
+  have ha : (UInt64.ofNat pa).toNat = pa := UInt64.toNat_ofNat_of_lt' (Nat.lt_trans hlow (by decide))
+  have hl : (UInt64.ofNat pa).toNat < 2 ^ 39 := by rw [ha]; exact hlow
+  have hc : ({ s with used := u } : Tables r N).place base
+      (placeProbe (UInt64.ofNat (leafAtFound e pa).pa) (leafAtFound e pa).block) =
+      ({ s with used := u } : Tables r N).place base (directLeaf e pa) := by
+    refine place_congr _ _ ?_ ?_ ?_ ?_
+    · rw [directLeaf_va, index1_direct hl]; rfl
+    · rw [directLeaf_va, index2_direct hl]; rfl
+    · rw [directLeaf_va, index3_direct hl]; rfl
+    · rw [directLeaf_form]; simp only [placeProbe, leafAtFound, decide_eq_true_eq]
+  simp only [placeOr, hc, place_used_mono hu h]
 
 end Krepi.Proofs.PageTables.Refinement
