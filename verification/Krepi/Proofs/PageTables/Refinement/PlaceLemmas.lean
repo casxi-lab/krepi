@@ -561,7 +561,7 @@ theorem open_gap_loop_spec {E : Usize} (extents : Aeneas.Std.Array page_tables.E
         · rw [show i1.val - gap.val = at1.val by scalar_tac, he]
         · exfalso; scalar_tac
       · simp only [hj, ↓reduceIte, hinv j]
-        split_ifs <;> first | rfl | (exfalso; scalar_tac)
+        split_ifs <;> first | rfl | (exfalso; omega)
     · have : p.val = index.val + 1 := by scalar_tac
       rw [this] at hinv
       exact hinv
@@ -627,7 +627,7 @@ theorem placement_split_spec {E : Usize} (A : Aeneas.Std.Array page_tables.Exten
       subst_vars
       refine ⟨fun j hj => ?_, ?_⟩
       · simp only [Array.set_val_eq, List.getElem?_set]
-        split_ifs <;> first | rfl | (exfalso; scalar_tac)
+        split_ifs <;> first | rfl | (exfalso; omega)
       · simp only [Array.set_val_eq]
         rw [hx, i3_post, x_post, show index.val + 1 + 1 = index.val + 2 by omega,
           show 1 + 2 = 3 from rfl, drop_take_set_three (by omega)]
@@ -643,7 +643,7 @@ theorem placement_split_spec {E : Usize} (A : Aeneas.Std.Array page_tables.Exten
       subst_vars
       refine ⟨fun j hj => ?_, ?_⟩
       · simp only [Array.set_val_eq, List.getElem?_set]
-        split_ifs <;> first | rfl | (exfalso; scalar_tac)
+        split_ifs <;> first | rfl | (exfalso; omega)
       · simp only [Array.set_val_eq]
         rw [hx, x_post, show 1 + 1 = 2 from rfl, drop_take_set_two (by omega)]
         simp only [Extent.take, hB1, after_none hgt, Option.map_some, Option.map_none,
@@ -662,7 +662,7 @@ theorem placement_split_spec {E : Usize} (A : Aeneas.Std.Array page_tables.Exten
       subst_vars
       refine ⟨fun j hj => ?_, ?_⟩
       · simp only [Array.set_val_eq, List.getElem?_set]
-        split_ifs <;> first | rfl | (exfalso; scalar_tac)
+        split_ifs <;> first | rfl | (exfalso; omega)
       · simp only [Array.set_val_eq]
         rw [hx, i3_post, show 1 + 1 = 2 from rfl, drop_take_set_two (by omega)]
         simp only [Extent.take, before_none hlt, hB2, Option.map_some, Option.map_none,
@@ -677,7 +677,7 @@ theorem placement_split_spec {E : Usize} (A : Aeneas.Std.Array page_tables.Exten
       subst_vars
       refine ⟨fun j hj => ?_, ?_⟩
       · simp only [Array.set_val_eq, List.getElem?_set]
-        split_ifs <;> first | rfl | (exfalso; scalar_tac)
+        split_ifs <;> first | rfl | (exfalso; omega)
       · simp only [Array.set_val_eq]
         rw [hx, drop_take_set_one (by omega)]
         simp only [Extent.take, before_none hlt, after_none hgt, Option.map_none,
