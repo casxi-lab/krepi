@@ -1566,7 +1566,7 @@
       "name": "Krepi.Statements.PageTables.OwnershipOwner",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipOwner",
       "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.OwnershipValidate",
@@ -1578,7 +1578,7 @@
       "name": "Krepi.Statements.PageTables.OwnershipStats",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipStats",
       "module": "Krepi.Proofs.PageTables.Refinement.Ownership",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.Descriptor",

@@ -4,6 +4,7 @@ public import Krepi.Statements.PageTables.Ownership
 public import Krepi.Proofs.PageTables.Refinement.ReceiptLemmas
 import Mathlib.Util.CountHeartbeats
 import Krepi.Proofs.PageTables.Refinement.PlaceLemmas
+import Krepi.Proofs.PageTables.Refinement.OwnNewLemmas
 
 /-!
 # Page tables: refinement of the page ownership table
@@ -56,15 +57,15 @@ public theorem ownershipRelease : OwnershipRelease :=
   fun _ _ _ t T owner a A hT _ hA => ownership_release_spec t T owner a A hT hA
 
 /-- Proves `OwnershipOwner`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem ownershipOwner : OwnershipOwner := by
-  sorry
+public theorem ownershipOwner : OwnershipOwner :=
+  fun _ _ _ t T address h _ => ownership_owner_spec t T h address
 
 /-- Proves `OwnershipValidate`. Feature: `krepi.kernel.kernel-memory`. -/
 public theorem ownershipValidate : OwnershipValidate :=
   fun _ _ _ t T owner a A s hT _ hA => ownership_validate_spec t T owner a A s hT hA
 
 /-- Proves `OwnershipStats`. Feature: `krepi.kernel.kernel-memory`. -/
-public theorem ownershipStats : OwnershipStats := by
-  sorry
+public theorem ownershipStats : OwnershipStats :=
+  fun _ _ _ t T h hi => ownership_stats_spec t T h hi.1
 
 end Krepi.Proofs.PageTables.Refinement.Ownership
