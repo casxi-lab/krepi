@@ -1671,6 +1671,36 @@ mod tests {
     }
 
     #[test]
+    fn each_rule_of_a_build_that_failed_in_the_generated_modules_is_kept() {
+        let g = |status, log: &str| lean::generated_errors(status, log, "KrepiGen.T");
+        let (log, item) = (generated_log(), "- KrepiGen.T.Funs\n");
+        assert_eq!(g(1, &log).as_deref(), Some(UNTRANSLATED));
+        let job = |mark, module| format!("{mark} [1837/1861] Building {module} (1s)");
+        let warned = generated_log_with(&job('⚠', "KrepiGen.T.Types"));
+        let listed = warned.replace(item, &format!("{item}- KrepiGen.T.Types\n"));
+        let summary = format!("Some required targets logged failures:\n{item}");
+        // Lake's status, a message outside the generated files, a job of
+        // another module, a failed job without an error, no summary, and a
+        // summary that names a module that only warned.
+        let broken = [
+            (2, log.clone()),
+            (1, generated_log_with("warning: Krepi/Spec/T.lean:1:1: w")),
+            (1, generated_log_with(&job('⚠', "Krepi.Spec.T"))),
+            (1, generated_log_with(&job('✖', "KrepiGen.T.Types"))),
+            (1, log.replace(&summary, "")),
+            (1, listed),
+        ];
+        for (rule, (status, log)) in [1, 4, 5, 6, 8, 9].into_iter().zip(broken) {
+            assert_eq!(g(status, &log), None, "U{rule}");
+        }
+        let errors = "error: KrepiGen/T/Funs.lean:1:1: a\nerror: KrepiGen/T/Funs.lean:2:1: b";
+        let shown =
+            format!("{UNTRANSLATED}; KrepiGen/T/Funs.lean:1:1: a; KrepiGen/T/Funs.lean:2:1: b; …");
+        let more = generated_log_with(&format!("{errors}\nerror: KrepiGen/T/Funs.lean:3:1: c"));
+        assert_eq!(g(1, &more), Some(shown));
+    }
+
+    #[test]
     fn a_mutant_names_theorems_of_the_proofs() {
         let (fixture, _) = tables();
         let of = |name: &str| format!("Krepi.Proofs.Fixture.{name}");
@@ -2209,6 +2239,44 @@ mod tests {
     }
 
     #[test]
+    fn a_tool_failure_of_another_mutant_does_not_force_this_one() {
+        // The Charon of the first mutant fails once that of the second was
+        // killed and its work directory removed.
+        let fixture = literal_fixture("untranslated-other", &rejecting());
+        let charon = format!(
+            "w() {{ i=0; while eval \"$1\" && [ $i -lt 6000 ]; do sleep 0.01; i=$((i+1)); done; }}\n\
+            case $PWD in */mutants/t/0/*) w '[ ! -e ../../../1.on ]'; w '[ -d ../../../1 ]'; exit 1 ;; \
+            */mutants/t/1/*) : > ../../../1.on; kill -9 $$ ;; esac\n{}",
+            fixture::CHARON
+        );
+        fixture.tool("charon", &charon);
+        let done = literal_run(&fixture);
+        assert_eq!(fixture::status(&done, "mutants/t").0, Status::ToolFailure);
+        let record = done.receipt.source_mutants.expect("a record");
+        let points = Vec::from_iter(record.untranslated.iter().map(|u| u.point.as_str()));
+        assert_eq!(points, ["kernel/src/lib.rs:3:5"]);
+    }
+
+    #[test]
+    fn an_extraction_that_meets_the_budget_is_no_untranslated_mutant() {
+        let fixture = literal_fixture("untranslated-budget", &rejecting());
+        let sleeping = "case $PWD in */mutants/*) exec sleep 5 ;; esac\n";
+        fixture.tool("charon", &(sleeping.to_string() + fixture::CHARON));
+        let operators = Some(vec!["literal".to_string()]);
+        let mut phases = generating_run(&fixture, &["t"], operators);
+        let (duration, by) = (Duration::from_millis(500), LimitBy::Target);
+        let limited = run::tests::phase("limited", run::tests::LONG, &[], move |run| {
+            run.overrides = Some((Site::Charon, Limit { duration, by }, "charon".to_string()));
+            Ok(())
+        });
+        phases.insert(2, limited);
+        let done = gate(&fixture, &["t"], phases);
+        assert_eq!(fixture::status(&done, "mutants/t").0, Status::Budget);
+        let record = done.receipt.source_mutants.expect("a record");
+        assert_eq!(record.untranslated, []);
+    }
+
+    #[test]
     fn a_source_mutant_whose_generated_definitions_do_not_build_is_untranslated() {
         let script = first("cat \"$lake/generated.log\"; exit 1");
         first_untranslated(
@@ -2250,6 +2318,22 @@ mod tests {
         assert_eq!(problems, [over]);
     }
 
+    #[test]
+    fn the_cap_of_a_merged_list_is_counted_for_each_run() {
+        // 2 of the 20 mutants of r, which the 120 of the list would allow.
+        let problems = checked(|list| {
+            let mut s = run("s", &["literal"], None, "1");
+            (s.generated, list.runs[0].generated) = (100, 20);
+            list.runs.push(s);
+            list.operators.push("literal".into());
+            (list.generated, list.killed) = (120, 117);
+            list.untranslated = vec![untranslated("generated build: x"); 2];
+        });
+        let over =
+            "the run r has 2 untranslated mutants, more than the 1 that 20 generated mutants allow";
+        assert_eq!(problems, [over]);
+    }
+
     /// The registered mutant of [`with_targets`] `label`, whose build runs
     /// `build`, after a run of its target.
     fn registered(label: &str, build: &str) -> Done {
@@ -2286,6 +2370,17 @@ mod tests {
         let reason = format!("untranslated, extraction: {why}");
         let rejected = (Status::Rejected, Some(reason.as_str()));
         assert_eq!(fixture::status(&done, "target/t/mutant/m0"), rejected);
+    }
+
+    #[test]
+    fn a_failure_in_the_generated_modules_of_another_target_stays_inconclusive() {
+        let other = "sed -e 's/KrepiGen\\.T/KrepiGen.U/' -e 's#KrepiGen/T/#KrepiGen/U/#'";
+        let build =
+            format!("case $PWD in */mutants/*) {other} \"$lake/generated.log\"; exit 1 ;; esac\n");
+        let done = registered("mutant-another", &build);
+        let (status, reason) = fixture::status(&done, "target/t/mutant/m0");
+        let inconclusive = "inconclusive, the build did not fail in the proofs alone: ";
+        assert!(status == Status::Rejected && reason.is_some_and(|r| r.starts_with(inconclusive)));
     }
 
     #[test]

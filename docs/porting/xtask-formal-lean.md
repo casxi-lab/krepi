@@ -96,6 +96,11 @@ The other tests of the module are new.
 
 - A stage links the installation's library and does not clone it. Test:
   `tests::a_stage_holds_the_project_files_and_links_the_installation`.
+- A failed build that the rules of the proof modules do not confine is read
+  again for the generated modules of the target, whose failure alone makes
+  the mutant untranslated. Tests, in `mutants.rs`:
+  `tests::a_build_that_failed_in_the_generated_modules_alone_is_untranslated`
+  and `tests::each_rule_of_a_build_that_failed_in_the_generated_modules_is_kept`.
 
 ## Hardware evidence to re-obtain
 

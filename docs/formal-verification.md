@@ -3620,8 +3620,9 @@ one in the generated modules alone, so they never both hold; a log with
 failures in both, or in another module, keeps neither.
 
 A mutant whose translation fails is untranslated, which tells nothing
-about the proofs, in three cases, each with its reason: an extraction that
-is not complete, `extraction: not complete: ` and its diagnostics joined by
+about the proofs, in three cases of two kinds, `extraction` and
+`generated build`, each with its reason: an extraction that is not
+complete, `extraction: not complete: ` and its diagnostics joined by
 `; `; generated files that cannot be installed,
 `extraction: generated files cannot be installed: ` and why; and a build
 whose failure lies in the generated modules alone, `generated build: ` and
@@ -3783,7 +3784,8 @@ reason, on one in a function of `unclosed` of another class, on one of no
 run of its list, on a list that does not parse, is not of schema 3 or is
 not that of a registered target at its path, on a list whose `operators`
 are not those of its runs or whose number of mutants generated is not the
-sum of theirs or that of its four counts, on an untranslated mutant whose
+sum of theirs or that of the mutants killed, survived, not built and
+untranslated, on an untranslated mutant whose
 reason starts with neither `extraction` nor `generated build`, of no run
 of its list or of an operator that its run did not take, on a run with
 more untranslated mutants than it allows, and on the runs of a list that
