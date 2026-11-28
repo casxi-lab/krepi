@@ -113,7 +113,7 @@ jobs:
   limits:
     name: formal limits
     needs: fast
-    if: ${{ !cancelled() && ((github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'full-check' && needs.fast.result == 'success' && needs.fast.outputs.decision == 'affected') || (github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))) }}
+    if: ${{ !cancelled() && ((github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'full-check' && needs.fast.result == 'success' && needs.fast.outputs.decision == 'affected') || github.event_name == 'workflow_dispatch' || (github.ref == 'refs/heads/main' && github.event_name == 'schedule')) }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
     permissions:
