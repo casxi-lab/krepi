@@ -21,7 +21,7 @@ independent specifications and proved in Lean 4.
 ## Status
 
 The repository holds this README, the krepi logo, the contribution rules,
-the target architecture, the documentation conventions, empty proof
+the target architecture, the documentation conventions, the proof
 registries, a commit-message hook and the build tooling: a pinned Rust
 toolchain, the kernel and user-space Cargo workspaces and the repository
 checks. The kernel workspace holds an empty ABI crate, the AArch64 processor
@@ -44,8 +44,12 @@ that the checks boot with the runner. The kernel code and most of the tools
 are ported from the prototype, with their porting records. The proof tools are
 pinned by a manifest, a reviewed Aeneas patch and the recipe of a container
 image that CI builds and publishes
-([formal verification](docs/formal-verification.md#tools)); no proof exists
-yet. Continuous integration runs the repository checks and the QEMU boot
+([formal verification](docs/formal-verification.md#tools)). The device-tree
+and page-tables components have specifications whose statements are proved
+and formal proof targets that prove the refinement of their code; the rest
+of the kernel is not proved
+([formal verification](docs/formal-verification.md#status)). Continuous
+integration runs the repository checks and the QEMU boot
 suite on every pull request to `main` and on every push to `main`.
 
 The required host checks run from the repository root and need the tools that
