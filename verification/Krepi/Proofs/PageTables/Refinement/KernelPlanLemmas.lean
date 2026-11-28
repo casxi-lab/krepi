@@ -212,10 +212,10 @@ theorem kernel_map_plan_stands (hU : Usize64) {N : Usize} (s : page_tables.Table
       simp only [curOf, startCursor, phaseOf, no_slot_val]
       rfl
 
-/-- **`KernelMap` without its first premise.** `kernel_map` on a layout that
-stands for a layout, on a 64-bit `usize`: the set after the write phase of
-`Tables.kernelMap` with a plan iterator that stands for its plan, or its
-error with the set unchanged. -/
+/-- **The statement `KernelMap`, with `N` implicit.** `kernel_map` on a
+layout that stands for a layout, on a 64-bit `usize`: the set after the
+write phase of `Tables.kernelMap` with a plan iterator that stands for its
+plan, or its error with the set unchanged. -/
 theorem kernel_map_spec (hU : Usize64) {N : Usize} (s : page_tables.Tables N false)
     (layout : page_tables.Layout) (L : Layout) (base : U64) (bits : U8)
     (hL : LayoutRepr layout L) :

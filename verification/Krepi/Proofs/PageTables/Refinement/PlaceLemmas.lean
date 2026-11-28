@@ -17,7 +17,7 @@ everything that the specification checks, in the same order.
 
 - `page_limit_eq` (the constant of the code), `reservation_initialized_spec`
   (`Reservation::initialized`, the statement `ReservationInitialized`
-  without its premise).
+  without its premise `Usize64`).
 - The fit of a request: `FitRel` (the outcome of the code against `Fit`),
   `fitRel_none`, `fitRel_some`, `fitRel_err`, and the triples
   `extra_extents_spec` (`Extent.extra` on numbers), `low_fit_spec`,
@@ -27,7 +27,8 @@ everything that the specification checks, in the same order.
 - The scan: `placement_scan_loop_spec` (the loop, with the invariant that
   the scan from the current step and flag is the scan from the start) and
   `placement_scan_spec`; `ownership_choose_spec` (the statement
-  `OwnershipChoose` without its premises).
+  `OwnershipChoose` without its premises `Usize64` and
+  `Ownership.Invariant`).
 - The write of `take`: `free_containing_loop_spec` and
   `free_containing_spec` (the extent that `splitFirst` finds, by its
   index), `open_gap_loop_spec` and `open_gap_spec` (the extents after a
@@ -35,7 +36,8 @@ everything that the specification checks, in the same order.
   `placement_split_spec` (the pieces of `Extent.take` written in place);
   `ownership_take_spec`, `ownership_assign_spec` and
   `ownership_reserve_spec` (the statements `OwnershipAssign` and
-  `OwnershipReserve` without their premises).
+  `OwnershipReserve` without their premises `Usize64` and
+  `Ownership.Invariant`, and `assign` also without `Ownership.Chose`).
 -/
 
 @[expose] public section

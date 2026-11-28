@@ -23,7 +23,8 @@ without `Ownership.Invariant`.
 - The entries: `ownership_validate_spec`, `ownership_publish_spec`,
   `ownership_cancel_spec`, `ownership_release_spec`, the statements
   `OwnershipValidate`, `OwnershipPublish`, `OwnershipCancel` and
-  `OwnershipRelease` without their premises.
+  `OwnershipRelease` without their premises `Usize64` and
+  `Ownership.Invariant`.
 - Freeing an extent: `joins_spec`, `close_gap_spec` (the loop that closes a
   gap), `merge_freed_spec` (`mergeFreed`), with `receipt_freed_repr`,
   `receipt_joins_iff`, `receipt_merged_repr`, `receipt_freed_listRel`,
@@ -215,7 +216,8 @@ theorem receipt_found_repr {E X : Usize} {t : page_tables.Ownership E X} {T : Ow
   exact this
 
 /-- `Ownership::validate(owner, allocation, state)`: the statement
-`OwnershipValidate` without its premise. -/
+`OwnershipValidate` without its premises `Usize64` and
+`Ownership.Invariant`. -/
 theorem ownership_validate_spec {E X : Usize} (t : page_tables.Ownership E X)
     (T : Ownership E.val X.val) (owner : U64) (allocation : page_tables.Allocation) (A : Allocation)
     (state : page_tables.HoldState) (hT : OwnershipRepr t T) (hA : AllocationRepr allocation A) :
@@ -671,7 +673,7 @@ theorem receipt_ownershipRepr_with_extents {E X : Usize} {t : page_tables.Owners
   exact ⟨h1, hn, h3, h4, h5, h, h7, h8⟩
 
 /-- `Ownership::publish(owner, packet)`: the statement `OwnershipPublish`
-without its premises. -/
+without its premises `Usize64` and `Ownership.Invariant`. -/
 theorem ownership_publish_spec {E X : Usize} (t : page_tables.Ownership E X)
     (T : Ownership E.val X.val) (owner : U64) (packet : page_tables.Initialized) (I : Initialized)
     (hT : OwnershipRepr t T) (hI : InitializedRepr packet I) :
@@ -708,7 +710,7 @@ theorem ownership_publish_spec {E X : Usize} (t : page_tables.Ownership E X)
     exact ⟨⟨rfl, hI⟩, rfl⟩
 
 /-- `Ownership::release(owner, receipt)`: the statement `OwnershipRelease`
-without its premises. -/
+without its premises `Usize64` and `Ownership.Invariant`. -/
 theorem ownership_release_spec {E X : Usize} (t : page_tables.Ownership E X)
     (T : Ownership E.val X.val) (owner : U64) (receipt : page_tables.Allocation) (A : Allocation)
     (hT : OwnershipRepr t T) (hA : AllocationRepr receipt A) :
@@ -736,7 +738,7 @@ theorem ownership_release_spec {E X : Usize} (t : page_tables.Ownership E X)
     exact ⟨trivial, trivial⟩
 
 /-- `Ownership::cancel(owner, reservation)`: the statement `OwnershipCancel`
-without its premises. -/
+without its premises `Usize64` and `Ownership.Invariant`. -/
 theorem ownership_cancel_spec {E X : Usize} (t : page_tables.Ownership E X)
     (T : Ownership E.val X.val) (owner : U64) (reservation : page_tables.Reservation)
     (R : Reservation) (hT : OwnershipRepr t T) (hR : ReservationRepr reservation R) :

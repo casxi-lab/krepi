@@ -222,8 +222,8 @@ theorem direct_map_plan_stands (hU : Usize64) {N : Usize} (s : page_tables.Table
       simp only [curOf, startCursor, phaseOf, no_slot_val]
       rfl
 
-/-- **`DirectMap` without its first premise.** `direct_map` on a map that
-stands for a boot memory map that the fdt entries built, on a 64-bit
+/-- **The statement `DirectMap`, with `N` implicit.** `direct_map` on a map
+that stands for a boot memory map that the fdt entries built, on a 64-bit
 `usize`: the set after the write phase of `Tables.directMap` with a plan
 iterator that stands for its plan, or its error with the set unchanged. -/
 theorem direct_map_spec (hU : Usize64) {N : Usize} (s : page_tables.Tables N true)
