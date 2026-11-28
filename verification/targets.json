@@ -1628,13 +1628,9 @@
           "replace": "if ids & (1 << id) != 0 && false {",
           "fails": [
             "Krepi.Proofs.Fdt.Refinement.Cpus.fdtDiscoverCpus",
-            "Krepi.Proofs.Fdt.Refinement.address_cells_at_spec",
             "Krepi.Proofs.Fdt.Refinement.cpu_children_loop_spec",
             "Krepi.Proofs.Fdt.Refinement.cpu_of_child_spec",
-            "Krepi.Proofs.Fdt.Refinement.discover_cpus_spec",
-            "Krepi.Proofs.Fdt.Refinement.ids_complete_spec",
-            "Krepi.Proofs.Fdt.Refinement.psci_compatible_spec",
-            "Krepi.Proofs.Fdt.Refinement.size_cells_at_spec"
+            "Krepi.Proofs.Fdt.Refinement.discover_cpus_spec"
           ]
         },
         {
@@ -1846,7 +1842,7 @@
       "name": "page-tables",
       "module": "PageTables",
       "feature": "krepi.kernel.kernel-memory",
-      "description": "The module page_tables of the provable core: the descriptors and kinds of the stage 1 translation tables, the physical ranges, the table sets with their pools and the entries that look up, map, unmap, reset and copy them, with the write plans that they return, the kernel's mappings of its image and its devices, the kernel direct map, and the page ownership table with its placement, reservations, receipts and statistics. The roots are the functions of the core rows of the entry table of the component's contract, without its row of the adapter krepi_arch::mmu, and the next of the plan iterator types ClonePlan, KernelMapPlan and DirectMapPlan. Each function of those rows refines its specification below Krepi.Spec.PageTables under the premises that the proof path states: it returns the value, and the write plan where the specification gives one, or the error that it gives in the same order, for every input of its machine widths; clone_kernel_from, kernel_map and direct_map return their plan as an iterator. Each next refines the plan that the specification gives for its entry, the plan of Tables.cloneKernelFrom or mapPlan: its calls give the steps of that plan in order, and then none. The refinement theorems are below Krepi.Proofs.PageTables.Refinement, one for each root; the target also proves the eight functions of the module fdt that direct_map reaches through the usable ranges of a boot memory map.",
+      "description": "The module page_tables of the provable core: the descriptors and kinds of the stage 1 translation tables, the physical ranges, the table sets with their pools and the entries that look up, map, unmap, reset and copy them, with the write plans that they return, the kernel's mappings of its image and its devices, the kernel direct map, and the page ownership table with its placement, reservations, receipts and statistics. The roots are the functions of the core rows of the entry table of the component's contract, without its row of the adapter krepi_arch::mmu, and the next of the plan iterator types ClonePlan, KernelMapPlan and DirectMapPlan. Each function of those rows refines its specification below Krepi.Spec.PageTables under the premises that the proof path states, the invariants that the functions which build a table set, a range and a page ownership table establish for it, the rules that the callers and the boot wiring keep, among them the execution of each write plan by the adapter, an open obligation, a boot memory map that the fdt entries built, which the gate does not check, and a usize of 64 bits: it returns the value, and the write plan where the specification gives one, or the error that it gives in the same order, for every input of its machine widths; clone_kernel_from, kernel_map and direct_map return their plan as an iterator. Each next refines the plan that the specification gives for its entry, the plan of Tables.cloneKernelFrom or mapPlan: its calls give the steps of that plan in order, and then none. The refinement theorems are below Krepi.Proofs.PageTables.Refinement, one for each root; the target also proves the eight functions of the module fdt that direct_map reaches through the usable ranges of a boot memory map.",
       "start_from": [
         "krepi_kernel::page_tables::descriptor",
         "krepi_kernel::page_tables::direct_address",
