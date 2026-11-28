@@ -22,10 +22,10 @@ without them it ends as a tool failure, which fails the check and cancels
 the other lanes. There, run `cargo xtask check --skip-formal`, which
 records the formal step as not run, and `cargo xtask formal check`; every
 job of CI that runs the check runs the formal step and fails unless it
-passed. CI runs the same check, and then the QEMU boot suite, in one job on
-every pull request to `main` and on every push to `main`. Beside it, one
-job writes the images of the QEMU suites, another runs the suites of
-`suites.toml` on those images, and a summary job requires the three jobs to
+passed. CI runs the same check in one job and the QEMU boot suite in
+another on every pull request to `main` and on every push to `main`. Beside
+them, one job writes the images of the QEMU suites, another runs the suites of
+`suites.toml` on those images, and a summary job requires the four jobs to
 succeed; the slow tests run in the full line, which the label `full-check`
 starts on a reviewed head, and every night. The same label runs the proof
 gate on a head whose change affects it, which CI also runs on a manual run

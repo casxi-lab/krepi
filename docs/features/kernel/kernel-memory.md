@@ -506,8 +506,8 @@ unchanged. The page `0x8000` of the process, mapped into the target as
   borrow refuses; and an upper set given to `kernel_map`, which its type
   refuses.
 - **QEMU and board.** The cases `kernel-memory` and `boot-memory` of the
-  QEMU boot suite, which `cargo xtask qemu-boot` runs after the check in
-  the `check` workflow of CI and the suite `qemu-boot` of
+  QEMU boot suite, which `cargo xtask qemu-boot` runs in a job of its own
+  in the `check` workflow of CI and the suite `qemu-boot` of
   `cargo xtask suite` runs from the images of the image job, boot their
   test images in release on QEMU virt, `virt-8.2` with one Cortex-A76 and
   128 MiB under TCG, with the kernel tables of the boot wiring and the

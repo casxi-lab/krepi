@@ -326,9 +326,10 @@ CI runs in lines, each a workflow of `.github/workflows/` on GitHub-hosted
   `--skip-formal` would leave it `not run`, and uploads the receipt as the
   artifact `check-receipt-<commit>-<attempt>`. Whatever the check gave,
   the job also writes the known-failures ledger of its receipt and uploads
-  it as `known-failures-<commit>-<attempt>`. After the check, the same
-  job runs `cargo xtask qemu-boot --output-dir artifacts/qemu-boot`,
-  described below, and uploads that directory as the artifact
+  it as `known-failures-<commit>-<attempt>`. The job `qemu boot suite`
+  installs `qemu-system-arm` and the toolchain in the same way, runs
+  `cargo xtask qemu-boot --output-dir artifacts/qemu-boot`, described
+  below, and uploads that directory as the artifact
   `qemu-boot-<commit>-<attempt>`, also when the suite fails. The job `image`
   runs `cargo xtask image`, uploads the images as
   `images-<commit>-<attempt>` and gives the SHA-256 of each in one output,
@@ -338,7 +339,7 @@ CI runs in lines, each a workflow of `.github/workflows/` on GitHub-hosted
   on a pull request, so that a pull request runs the smoke cases and the
   suites that it selects and `main` every suite, both without the slow
   cases, and uploads its report as `suite-<commit>-<attempt>`. The job
-  `check summary` runs after the other three whatever their outcome and
+  `check summary` runs after the other four whatever their outcome and
   succeeds only if each of them did. A push to a pull request cancels the
   run of its earlier head; runs on `main` are not cancelled.
 - The full line, `full.yml`, runs only when the label `full-check` is added
@@ -362,10 +363,10 @@ Every job of these lines has a `timeout-minutes`. In the jobs that run
 command also ends at a deadline that `timeout` sets one or two minutes
 before the limit of its job, counting for the check the 3-minute limit of
 the pull of the image before it, so that the uploads still run when the
-command takes too long: the check has 14 minutes of the 19 of its job on the
+command takes too long: the check has 12 minutes of the 17 of its job on the
 pull request and main lines and 38 of 43 on the full and nightly lines.
-`cargo xtask qemu-boot` runs after the check in the same job without a
-deadline of its own. The step starts the command as the last command of its
+`cargo xtask qemu-boot` has such a deadline too, 8 minutes of the 10 of its
+job. The step starts the command as the last command of its
 script with `exec bash .github/scripts/deadline.sh`, so that this script is
 the process of the step and receives the signals with which the runner stops
 a step: SIGINT when the run is cancelled, SIGTERM some seconds later and
@@ -391,7 +392,9 @@ it on `main` records the run whose ID it takes. Unit tests of the check read
 the committed workflows and hold them to these limits, to the label of the
 full line as its only trigger, to `--slow` in the full and nightly lines
 only, to the one job named `cargo xtask check` and the summary of the pull
-request line, to the pull of the pinned image within 3 minutes before the
+request line, to the QEMU boot suite in a job of its own with a limit of 10
+minutes, which the summary waits for, to the pull of the pinned image
+within 3 minutes before the
 check and the requirement on its formal step after it in each job that runs
 the check, the job of the workflow `cache` included, to no mention of
 `--skip-formal` in any workflow, in any letter case and comments included,
@@ -879,7 +882,7 @@ Its unit tests run in the `test` step above, on data written for each rule.
 `cargo xtask qemu-boot` is the QEMU boot suite of the kernel: it builds the
 QEMU virt default image and the test images, boots them on QEMU virt
 through the library entry of the QEMU runner and judges every run; it is
-not part of the check, and CI runs it after the check as stated above. It
+not part of the check, and CI runs it in a job of its own as stated above. It
 builds the images with one command, `cargo build --locked --release
 --target aarch64-unknown-none-softfloat -p krepi-qemu-virt --bin
 krepi-qemu-virt --example el1-brk --example injected-serror --example
