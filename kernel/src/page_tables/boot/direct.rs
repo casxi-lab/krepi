@@ -170,6 +170,3 @@ impl<const N: usize> DirectMapPlan<'_, N> {
         }
     }
 }
-
-#[cfg(test)]
-pub(in crate::page_tables) mod tests;

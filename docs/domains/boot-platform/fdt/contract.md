@@ -921,9 +921,9 @@ afterwards.
 
 ## Open obligations
 
-The module `fdt` has no `unsafe` code and no assembly. Until its target lists
-the functions that it proves and reaches, the first two rows cover them. The
-other obligation is the board's: forming the slice of the hand-over tree
+The module `fdt` has no `unsafe` code and no assembly, and its target lists
+the functions that it proves and reaches, so no row covers them. The only
+row is the board's: forming the slice of the hand-over tree
 ([Extractability](#extractability)); the Pi 5 board adds its row with its crate.
 
 The target of the module has one open obligation of its own, which the
@@ -940,8 +940,6 @@ list that the specification gives for its iterator.
 
 | Obligation | Kind | Verified state | Carrier | Stage |
 | --- | --- | --- | --- | --- |
-| `kernel/src/fdt` | `code` | - | The refinement proof of the target fdt | `0.1` |
-| `kernel/src/fdt.rs` | `code` | - | The refinement proof of the target fdt | `0.1` |
 | `kernel/boards/qemu-virt/src/main.rs#image::device_tree` | `unsafe` | Neither (forms the byte slice of the tree at the start of RAM, where QEMU's loader places it, first of its 40-byte header and then of `totalsize` bytes) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
 
 ## Legacy test vectors

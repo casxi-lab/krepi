@@ -10230,3 +10230,305 @@ pub mod repr_c_array_field {
         }
     }
 }
+
+/// A table whose capacity is fixed when the code compiles and whose storage
+/// is given at `new`, as the pool of a table set and the extents of the page
+/// ownership table are: arrays of a const length, of arrays and of
+/// records, with a count of the slots in use that only the entries change.
+pub mod capacity_at_new {
+    /// The entries of a table.
+    pub const ENTRIES: usize = 512;
+
+    /// A run of pages and whether it is held.
+    #[derive(Clone, Copy)]
+    pub struct Extent {
+        pub start: u64,
+        pub pages: u64,
+        pub held: bool,
+    }
+
+    /// `N` tables, the number in use, and `E` extents, the number in use.
+    pub struct Table<const N: usize, const E: usize> {
+        tables: [[u64; ENTRIES]; N],
+        used: usize,
+        extents: [Extent; E],
+        count: usize,
+    }
+
+    impl<const N: usize, const E: usize> Table<N, E> {
+        /// The table of the storage `tables` and `extents`: its first table
+        /// in use, and one free extent of `pages` pages from `start`.
+        pub fn new(
+            tables: [[u64; ENTRIES]; N],
+            extents: [Extent; E],
+            start: u64,
+            pages: u64,
+        ) -> Self {
+            let mut table = Table {
+                tables,
+                used: 1,
+                extents,
+                count: 0,
+            };
+            if E > 0 {
+                table.extents[0] = Extent {
+                    start,
+                    pages,
+                    held: false,
+                };
+                table.count = 1;
+            }
+            table
+        }
+
+        /// Takes the next table and gives its index, or none when all `N`
+        /// are in use.
+        pub fn take_table(&mut self) -> Option<usize> {
+            if self.used >= N {
+                return None;
+            }
+            let index = self.used;
+            self.used += 1;
+            Some(index)
+        }
+
+        /// Gives every table back but the first.
+        pub fn reset(&mut self) {
+            self.used = 1;
+        }
+
+        /// Writes `d` into entry `entry` of table `table`; whether the table
+        /// is in use.
+        pub fn store(&mut self, table: usize, entry: usize, d: u64) -> bool {
+            if table >= self.used || table >= N || entry >= ENTRIES {
+                return false;
+            }
+            self.tables[table][entry] = d;
+            true
+        }
+
+        /// Appends an extent; whether a slot was free.
+        pub fn push(&mut self, extent: Extent) -> bool {
+            if self.count >= E {
+                return false;
+            }
+            self.extents[self.count] = extent;
+            self.count += 1;
+            true
+        }
+
+        /// The number of tables in use and of extents in use.
+        pub fn counts(&self) -> (usize, usize) {
+            (self.used, self.count)
+        }
+    }
+}
+
+/// `is_empty` of a slice, of bytes and of records, as the parse of a
+/// device tree and the page ownership table call it on their inputs.
+pub mod slice_is_empty {
+    /// A range of addresses.
+    #[derive(Clone, Copy)]
+    pub struct Span {
+        pub start: u64,
+        pub size: u64,
+    }
+
+    /// The first byte of `bytes`, or none for an empty slice.
+    pub fn first(bytes: &[u8]) -> Option<u8> {
+        if bytes.is_empty() {
+            return None;
+        }
+        Some(bytes[0])
+    }
+
+    /// The start of the first of `spans`, or `none` for an empty slice.
+    pub fn lowest_start(spans: &[Span], none: u64) -> u64 {
+        if spans.is_empty() {
+            none
+        } else {
+            spans[0].start
+        }
+    }
+}
+
+/// A read of an array of arrays of a const length `N` whose inner index is
+/// the result of a function call, as the walks of the page tables read
+/// their pool: with the outer index a constant, at the start of the function,
+/// and with the outer index a variable after a `match`, and one read in the
+/// right operand of a short-circuit `||`, which the tools guard with an
+/// assertion of the outer index before the read.
+pub mod nested_index_call {
+    /// The entries of a table.
+    pub const ENTRIES: usize = 512;
+
+    /// The index of `va` in a table of the first level.
+    fn index1(va: u64) -> usize {
+        ((va >> 30) & 0x1ff) as usize
+    }
+
+    /// The index of `va` in a table of the third level.
+    fn index3(va: u64) -> usize {
+        ((va >> 12) & 0x1ff) as usize
+    }
+
+    /// Whether a descriptor is valid.
+    fn is_valid(d: u64) -> bool {
+        d & 1 != 0
+    }
+
+    /// `N` tables, the first the root.
+    pub struct Pool<const N: usize> {
+        tables: [[u64; ENTRIES]; N],
+    }
+
+    impl<const N: usize> Pool<N> {
+        /// The pool of the storage `tables`.
+        pub fn new(tables: [[u64; ENTRIES]; N]) -> Self {
+            Pool { tables }
+        }
+
+        /// The entry of `va` in the root table.
+        pub fn root_entry(&self, va: u64) -> u64 {
+            self.tables[0][index1(va)]
+        }
+
+        /// The entry of `va` in table `child`, when there is one.
+        pub fn leaf(&self, child: Option<usize>, va: u64) -> Option<u64> {
+            let table = match child {
+                Some(table) => table,
+                None => return None,
+            };
+            Some(self.tables[table][index3(va)])
+        }
+
+        /// Whether `pa` may be written: always for a block, and otherwise
+        /// when the entry of `pa` in table `child` is not valid.
+        pub fn free_for(&self, block: bool, child: usize, pa: u64) -> bool {
+            if block || is_valid(self.tables[child][index3(pa)]) {
+                return block;
+            }
+            true
+        }
+    }
+}
+
+/// Constants whose initializers can fail at run time, an `as` conversion
+/// and a shift, as the attributes of a descriptor and the limits of the
+/// parse of a device tree are: the tools make each a computation that the
+/// functions bind before they use its value.
+pub mod fallible_constant {
+    /// The most nodes on a path.
+    pub const MAX_DEPTH: u64 = 32;
+
+    /// `MAX_DEPTH` as an index.
+    const DEPTH: usize = MAX_DEPTH as usize;
+
+    /// The bit that forbids execution at EL1.
+    const PXN: u64 = 1 << 53;
+
+    /// The bit of the access flag.
+    const ACCESS: u64 = 1 << 10;
+
+    /// The attributes of a page that is not executable.
+    pub fn no_execute(d: u64) -> u64 {
+        d | PXN | ACCESS
+    }
+
+    /// Whether `depth` nodes fit on a path.
+    pub fn depth_fits(depth: usize) -> bool {
+        depth <= DEPTH
+    }
+}
+
+/// A negated Boolean that a function returns, as a value and inside `Ok`,
+/// as the path check of a device tree and the availability of a range are.
+pub mod negation_return {
+    /// Whether `bytes` holds two `/` in a row.
+    fn double_slash(bytes: &[u8]) -> bool {
+        let mut index = 1;
+        while index < bytes.len() {
+            if bytes[index] == b'/' && bytes[index - 1] == b'/' {
+                return true;
+            }
+            index += 1;
+        }
+        false
+    }
+
+    /// Whether `path` is not empty and holds no `//`.
+    pub fn path_valid(path: &[u8]) -> bool {
+        if path.is_empty() {
+            return false;
+        }
+        !double_slash(path)
+    }
+
+    /// Whether `value` is not reserved, or an error for a value above
+    /// `limit`.
+    pub fn available(value: u64, limit: u64, reserved: bool) -> Result<bool, ()> {
+        if value > limit {
+            return Err(());
+        }
+        Ok(!reserved)
+    }
+}
+
+/// A field of `Option` of a `Copy` structure of an array and a count,
+/// reached through two fields of a value taken by value, taken apart with
+/// `match` with an early return for `None`, after which the bare array goes
+/// by value to a helper with a loop that indexes it, as the check of the
+/// timer interrupts of a CPU topology does.
+pub mod option_array_by_value {
+    /// The numbers of up to five interrupts.
+    #[derive(Clone, Copy)]
+    pub struct Interrupts {
+        pub numbers: [u32; 5],
+        pub count: u8,
+    }
+
+    /// A profile that may have interrupts.
+    #[derive(Clone, Copy)]
+    pub struct Profile {
+        pub interrupts: Option<Interrupts>,
+    }
+
+    /// A topology of a profile and a count.
+    #[derive(Clone, Copy)]
+    pub struct Topology {
+        pub profile: Profile,
+        pub count: usize,
+    }
+
+    /// Whether the first `records` of `numbers` are the cells of `cells`.
+    fn records_match(cells: &[u32], numbers: [u32; 5], records: usize) -> bool {
+        if cells.len() != records {
+            return false;
+        }
+        let mut index = 0;
+        while index < records && index < 5 {
+            if cells[index] != numbers[index] {
+                return false;
+            }
+            index += 1;
+        }
+        true
+    }
+
+    impl Topology {
+        /// Whether `cells` lists the interrupts of the profile; false for a
+        /// profile without interrupts.
+        pub fn check(self, cells: &[u32]) -> bool {
+            let interrupts = match self.profile.interrupts {
+                Some(interrupts) => interrupts,
+                None => return false,
+            };
+            let records = if interrupts.count > 5 {
+                5
+            } else {
+                interrupts.count as usize
+            };
+            records_match(cells, interrupts.numbers, records)
+        }
+    }
+}

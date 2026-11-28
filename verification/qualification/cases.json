@@ -2043,6 +2043,82 @@
       "external_functions": [],
       "external_types": [],
       "loop_sources": []
+    },
+    {
+      "name": "capacity-at-new",
+      "module": "Qual.CapacityAtNew",
+      "start_from": [
+        "crate::capacity_at_new"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
+    },
+    {
+      "name": "slice-is-empty",
+      "module": "Qual.SliceIsEmpty",
+      "start_from": [
+        "crate::slice_is_empty"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
+    },
+    {
+      "name": "nested-index-call",
+      "module": "Qual.NestedIndexCall",
+      "start_from": [
+        "crate::nested_index_call"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
+    },
+    {
+      "name": "fallible-constant",
+      "module": "Qual.FallibleConstant",
+      "start_from": [
+        "crate::fallible_constant"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": []
+    },
+    {
+      "name": "negation-return",
+      "module": "Qual.NegationReturn",
+      "start_from": [
+        "crate::negation_return"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "negation_return.double_slash_loop src/lib.rs"
+      ]
+    },
+    {
+      "name": "option-array-by-value",
+      "module": "Qual.OptionArrayByValue",
+      "start_from": [
+        "crate::option_array_by_value"
+      ],
+      "expect": "translated",
+      "diagnostics": [],
+      "external_functions": [],
+      "external_types": [],
+      "loop_sources": [
+        "option_array_by_value.records_match_loop src/lib.rs"
+      ]
     }
   ]
 }

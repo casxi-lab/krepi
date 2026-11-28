@@ -878,7 +878,10 @@ boot contract.
 The entries of the page-table logic that later components add, such as the entries of the
 tables of an address space and of their ASIDs, are open obligations of the contracts that add
 them, carried by the proof of contexts, user copies and the private VM, by release 0.2; the
-table below lists the obligations of the code of this page.
+table below lists the obligations of the code of this page. Five functions of the core that no
+entry reaches yet, `PhysRange::start` and `size`, `Reservation::allocation`,
+`Initialized::allocation` and `Initialized::failures`, are rows of their own until the entries
+that take pages call them.
 
 The target of the page-table logic has one open obligation of its own, which the
 target closes and the table therefore does not list. `kernel_map`, `direct_map`
@@ -894,8 +897,6 @@ the specification gives for its entry, `mapPlan` or the plan of the copy.
 
 | Obligation | Kind | Verified state | Carrier | Stage |
 | --- | --- | --- | --- | --- |
-| `kernel/src/page_tables` | `code` | - | The refinement proof of the target page-tables | `0.1` |
-| `kernel/src/page_tables.rs` | `code` | - | The refinement proof of the target page-tables | `0.1` |
 | `kernel/arch/src/mmu.rs#store_descriptor` | `unsafe` | Writes the translation tables that the page-table logic describes: one descriptor of a write plan | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
 | `kernel/arch/src/mmu.rs#zero_table` | `unsafe` | Writes the translation tables that the page-table logic describes: the 512 entries of a new table of a write plan | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
 | `kernel/arch/src/mmu.rs#synchronize` | `unsafe` | Neither (executes `DMB ISHST`, `DSB ISH` and `ISB` for a write plan, and `TLBI VMALLE1`, `DSB NSH` and `ISB` before the MMU is on) | The proof of the cache and TLB maintenance primitives and of the cache maintenance ranges | `0.2` |
@@ -908,6 +909,9 @@ the specification gives for its entry, `mapPlan` or the plan of the copy.
 | `kernel/boards/qemu-virt/src/main.rs#image::boot_memory` | `unsafe` | Neither (calls the boot wiring once, on the boot CPU, with the slice of the device tree) | The proof of the boot and board assembly, the kernel boot and initialization code and the unsafe sites | `0.2` |
 | `kernel/src/page_tables/range.rs#PhysRange::start` | `code` | - | The proof of contexts, user copies and the private VM | `0.2` |
 | `kernel/src/page_tables/range.rs#PhysRange::size` | `code` | - | The proof of contexts, user copies and the private VM | `0.2` |
+| `kernel/src/page_tables/ownership/receipts.rs#Reservation::allocation` | `code` | - | The proof of contexts, user copies and the private VM | `0.2` |
+| `kernel/src/page_tables/ownership/receipts.rs#Initialized::allocation` | `code` | - | The proof of contexts, user copies and the private VM | `0.2` |
+| `kernel/src/page_tables/ownership/receipts.rs#Initialized::failures` | `code` | - | The proof of contexts, user copies and the private VM | `0.2` |
 
 ## Legacy test vectors
 

@@ -23,28 +23,51 @@ tests:
   - kernel/src/page_tables/tests/banks.rs
   - kernel/src/page_tables/tests/boot.rs
   - kernel/src/page_tables/tests/capacity.rs
-  - kernel/src/page_tables/tests/differential.rs
   - kernel/src/page_tables/tests/examples.rs
   - kernel/src/page_tables/tests/kinds.rs
   - kernel/src/page_tables/tests/mapping.rs
   - kernel/src/page_tables/tests/models.rs
-  - kernel/src/page_tables/tests/old.rs
   - kernel/src/page_tables/tests/ownership.rs
   - kernel/src/page_tables/tests/paging.rs
   - kernel/src/page_tables/tests/plans.rs
   - kernel/src/page_tables/tests/reservations.rs
   - kernel/src/page_tables/tests/results.rs
-  - kernel/src/page_tables/boot/tests.rs
-  - kernel/src/page_tables/boot/tests/old.rs
-  - kernel/src/page_tables/boot/direct/tests.rs
-  - kernel/src/page_tables/boot/direct/tests/old.rs
-  - kernel/src/page_tables/boot/layout/tests.rs
-  - kernel/src/page_tables/boot/layout/tests/old.rs
   - kernel/arch/src/mmu/tests.rs
   - kernel/boards/qemu-virt/src/boot_memory/tests.rs
 suites:
   - qemu-boot
-theorems: none
+theorems:
+  - Krepi.Proofs.PageTables.Refinement.Tables.descriptor
+  - Krepi.Proofs.PageTables.Refinement.Tables.directAddress
+  - Krepi.Proofs.PageTables.Refinement.Tables.physRangeNew
+  - Krepi.Proofs.PageTables.Refinement.Tables.physRangeEnd
+  - Krepi.Proofs.PageTables.Refinement.Tables.physRangeContains
+  - Krepi.Proofs.PageTables.Refinement.Tables.physRangeOverlaps
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesLookupPage
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesLookupBlock
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesUsed
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesNew
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesReset
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesCloneKernelFrom
+  - Krepi.Proofs.PageTables.Refinement.Tables.clonePlanNext
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesMapPage
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesMapBlock
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesUnmapPage
+  - Krepi.Proofs.PageTables.Refinement.Boot.kernelMap
+  - Krepi.Proofs.PageTables.Refinement.Boot.kernelMapPlanNext
+  - Krepi.Proofs.PageTables.Refinement.Boot.directMap
+  - Krepi.Proofs.PageTables.Refinement.Boot.directMapPlanNext
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipNew
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipChoose
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipAssign
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipReserve
+  - Krepi.Proofs.PageTables.Refinement.Ownership.reservationInitialized
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipPublish
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipCancel
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipRelease
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipOwner
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipValidate
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipStats
 related:
   - krepi.platform.device-tree
   - krepi.platform.qemu-virt-boot
@@ -472,11 +495,9 @@ unchanged. The page `0x8000` of the process, mapped into the target as
   that the free pages are exactly the pages of the direct map; the
   capacities at the limit and one above, and the free tables of a pool
   whose record of tables in use is all its tables but one, all of them or
-  above them; the examples above; the results test, which compares every
-  output of the vector file with its expected output; and the differential
-  tests, which compare `kernel_map` and `direct_map` with a verbatim copy of
-  their code before their checks counted the new tables from 0. They
-  establish the rules on tables in host memory, not a CPU walking them.
+  above them; the examples above; and the results test, which compares
+  every output of the vector file with its expected output. They establish
+  the rules on tables in host memory, not a CPU walking them.
 - **Compile-time guards.** The `subset` step of `cargo xtask check` builds
   the four compile-fail cases of the module below `kernel/compile-fail/`: a
   `PhysRange` written without `PhysRange::new`, which its private fields
@@ -509,15 +530,19 @@ unchanged. The page `0x8000` of the process, mapped into the target as
   establish that the tables that the plans build translate and check
   permissions as the contract says on one CPU of QEMU virt; they establish
   nothing for the caches on, several CPUs or a board.
-- **Proofs.** None of the code. The proof target `page-tables` is
-  registered as planned in `verification/targets.json`, with the functions
-  of the core rows of the contract's
+- **Proofs.** The proof target `page-tables` of
+  `verification/targets.json` has the functions of the core rows of the
+  contract's
   [entry table](../../domains/memory/page-tables/contract.md#entry-points)
-  and the `next` of the three plan iterators as its roots; it is extracted
-  and type-checked when a run names it, and its refinement proofs are
-  planned. The statements of the specification are about the
-  specification, not the code. The results that the host tests write are
-  not yet compared with the replay of the specification.
+  and the `next` of the three plan iterators as its roots. For each root, a
+  theorem listed in `theorems` states that the function returns what the
+  specification gives, with its write plan, or its error in the same order,
+  for every input of its machine widths, under the premises of the
+  [proof path](../../domains/memory/page-tables/proof.md); the gate builds
+  and audits them and runs the registered mutants of the target, which the
+  proofs reject. The results that the host tests write are compared line
+  by line with the replay of the specification by
+  `cargo xtask formal vectors`.
 - **Unverified.** The bank shapes of the 1, 2, 4 and 16 GB models, which
   the tests take from the ranges that the fdt contract infers; the tables
   on a Raspberry Pi 5 and with the caches on; the ordering that the

@@ -11,19 +11,17 @@ The proof path of the `fdt` component: the target that is to refine the
 premises of its theorems with the guards that keep them, the code shapes
 that the implementation adopts so that the tools translate it into code a
 proof can rely on, its trusted boundary, its mutants and what no theorem
-states. The module `fdt` does not exist yet, so the target is registered in
-`verification/targets.json` in the state `planned`, with its name, module,
-description and roots alone ([proof targets](../../../formal-verification.md#proof-targets)).
-Its obligations, its mutants and the lists of the functions that it proves
-and reaches are registered once the code exists, as this page plans them;
-until then the target is extracted and type-checked only when a run names
-it.
+states. The target is registered in `verification/targets.json` as a formal
+target, with its roots, the functions that it proves and reaches, its
+obligations, its proof modules and its mutants in two parts
+([proof targets](../../../formal-verification.md#proof-targets)), and the
+gate verifies it.
 
 The statements of the specification itself, its invariants, its
 properties, its specification tests and the statements that its
 unreachable error branches are never taken, are registered in
 [`verification/statements.json`](../../../../verification/statements.json)
-as planned and are proved by proof pull requests below
+and proved below
 [`verification/Krepi/Proofs/Fdt/`](../../../../verification/Krepi/Proofs/Fdt/)
 ([statements and proofs](../../../formal-verification.md#statements-and-proofs)).
 They are not obligations of the target: the refinement theorems of the
@@ -36,12 +34,12 @@ target take the invariants that they establish as hypotheses
 
 | Field | Value |
 | --- | --- |
-| Name | `fdt`, in the state `planned` |
+| Name | `fdt`, formal |
 | Module | `Fdt`, the namespace of the generated definitions |
-| Feature | None: no feature document describes the component, whose requirements list no feature, and a feature ID is that of a feature document ([documentation](../../../conventions/documentation.md#location-and-identity)) |
+| Feature | `krepi.platform.device-tree`, the [device tree](../../../features/platform/device-tree.md), whose `theorems` are the refinement theorems of the roots |
 | Entries | The 11 rows of the [entry table](contract.md#entry-points), lines 109 to 119 of the contract: one target, not split |
-| Roots | The 60 functions that the rows name, below |
-| Budget | The default of 1,800 s ([cluster and budget](#cluster-and-budget)) |
+| Roots | 64: the 60 functions that the rows name, below, and the `next` of the four iterator types ([iterators](#fdt)) |
+| Budget | Two parts, each with a budget of its own ([cluster and budget](#cluster-and-budget)) |
 
 The roots are the full paths of the functions that the rows of the entry
 table name, in the crate `krepi_kernel` of the root package and its module
@@ -51,7 +49,11 @@ is a function of the nearest type named before it in the same row, so
 `BootMemory::ram`. `cells_u64`, which no type precedes, is a function of
 the module, as the contract calls it, `cells_u64(bytes, cells)`. The value
 types of line 118 and the constants of line 119 are not roots: the
-extraction reaches them through the functions that use them.
+extraction reaches them through the functions that use them. Neither are
+the other public types of the module, which line 118 does not list: the
+iterator types `Nodes`, `Reservations` and `AvailableRanges`, `Reg` and
+`AddressMap`, which lines 110 and 115 name through their functions, and
+`MappingKind`, which `AddressMap::kind` returns.
 
 | Line | Functions | Roots |
 | ---: | ---: | --- |
@@ -68,43 +70,48 @@ extraction reaches them through the functions that use them.
 | 119 | 0 | None: the eight constants |
 
 **Iterators.** `Fdt::nodes`, `Fdt::reservations`, the entries of a `Reg`
-and `MemoryPlan::available_ranges` give iterators, whose types the contract
-does not name. The `next` of an iterator is reached from the roots that
-walk it, and a root that only returns an iterator does not reach it: no
-function of the module walks the usable ranges, so the `next` of the
-iterator of `available_ranges` is reached by no root. Its refinement
-theorem needs that `next` to state the ranges that the iteration gives, as
-`MemoryPlan.availableRanges` lists them. This is an open obligation of the
-target, which the contract records in its
-[open obligations](contract.md#open-obligations): the `next` of each
-iterator type joins `start_from` once the implementation names the types,
-and before the implementation merges. Its carriers are the implementation,
-which names the types and adds their `next` to the roots, and the
-refinement proof of the target, which proves each `next` against the
-representation of an iterator by its list ([premises](#premises)). The new
-roots change the roots of the target, which is reviewed as a change of a
-statement ([guard](../../../formal-verification.md#guard)).
+and `MemoryPlan::available_ranges` give iterators of the types `Nodes`,
+`Reservations`, `Reg` and `AvailableRanges`, which the contract names in
+its [open obligations](contract.md#open-obligations). A root that only
+returns an iterator does not reach its `next`, and no function of the
+module walks the usable ranges, so the `next` of each type is a root of its
+own. Its refinement theorem follows from the representation of an iterator
+by its list alone, `Stands` of `Krepi.Statements.Basic`
+([premises](#premises)): the theorem of the function that gives the
+iterator relates the calls of `next` from every state that the iterator
+reaches to the list of the specification, and so covers the code of
+`next`. A source mutant that survives in the code of a `next` is therefore
+classified by the theorems of the functions that give its iterator.
 
 **Obligations.** One for each root: its refinement theorem states that, for
-every input of its machine widths ([widths and quantifiers](specification.md#widths-and-quantifiers))
-and under the premises below that its inputs need, the function returns the
-value that its specification gives, related to it by the representation of
-the value types, or fails with the error that its specification gives, and
-that a failure returns nothing else. The mutants below name the theorem
-that each must fail as the refinement theorem of a function; the
-registration gives each theorem its Lean name. A function with a loop is
-proved to return as well, since Aeneas translates a loop as a function
-that may diverge.
+every input of its machine widths ([widths and
+quantifiers](specification.md#widths-and-quantifiers)) and under the
+premises below that its inputs need, the function returns the value that
+its specification gives, related to it by the representation of the value
+types, or fails with the error that its specification gives, and that a
+failure returns nothing else. A function with a loop is proved to return as
+well, since Aeneas translates a loop as a function that may diverge. The
+refinement theorems lie below `Krepi.Proofs.Fdt.Refinement`, in five
+modules that restate the triples of the generated functions that the other
+modules prove, each a `@[step]` lemma about one function, so that the build
+of a mutant fails in the triple of the function that it edits, and the
+modules that import a module that fails are not built. Each obligation
+holds the refinement theorem of its root and the theorems that its proof
+uses and that unfold a generated definition, the triples and the lemmas
+about generated constants such as `max_name_val`, each in the first
+obligation in the order of the roots whose proof uses it; the 18 modules
+that hold them are the proof modules of the target.
 
 ### Premises
 
 The refinement theorems take these hypotheses. Each is an invariant of the
-specification ([invariants](specification.md#invariants)) or a condition of
-the boot, with the function or the code that establishes it, what
-preserves it and what relies on it. The translation of the module does not
-show which module may build a value, so the
-[compile-time guards](#compile-time-guards) make each premise of a value
-true of every value that another module holds.
+specification ([invariants](specification.md#invariants)), a condition of
+the boot, a representation of a value or of an external declaration, or the
+platform of the extraction, with the function or the code that establishes
+it, what preserves it and what relies on it. The translation of the module
+does not show which module may build a value, so the [compile-time
+guards](#compile-time-guards) make each premise of a value true of every
+value that another module holds.
 
 | Premise | Established by | Preserved by | Consumed by |
 | --- | --- | --- | --- |
@@ -116,7 +123,9 @@ true of every value that another module holds.
 | A `BootMemory` keeps `BootMemory.Consistent`, with the limit and the alignment that it holds | `Fdt::discover_boot_memory`, which gives it those of its profile (`DiscoverBootMemoryConsistent`) | No entry changes it | `is_available` and `find_available`, which exclude the image and the tree (`FindAvailableNoLimitExceeded`); `MemoryPlan::from_boot_memory` |
 | A `CpuTopology` keeps `CpuTopology.Supported` | `Fdt::discover_cpus` (`DiscoverCpusSupported`) | No entry changes it | `CpuTopology::affinity` and `validate_timers`; the start of the secondary CPUs in the boot code |
 | A `MemoryPlan` keeps `MemoryPlan.WellFormed` | `MemoryPlan::all_ram`, `new` and `from_boot_memory` (`AllRamWellFormed`, `MemoryPlanNewWellFormed`, `FromBootMemoryWellFormed`) | The publication of the boot memory map, which keeps it unchanged (`PublishPlanWellFormed`, `PublishTopologyWellFormed`, `StartSecondariesWellFormed`) | The queries; `described_bytes` and `managed_bytes`, whose sums fit 64 bits; `available_ranges` (`AvailableRangesWellFormed`, `UsableRangesExact`); the kernel direct map and the page ownership table of the [page-tables](../../memory/page-tables/contract.md) component |
-| An iterator of the module stands for a list of the specification: its calls of `next` give the items of that list in order, and then none. The nodes are those of `Fdt.nodes`, the reservation entries those of `Fdt.reservations`, the entries of a `Reg` those of `Reg.entries`, and the usable ranges those of `MemoryPlan.availableRanges` | The functions that give the iterators, `Fdt::nodes`, `Fdt::reservations`, `Reg::new` and `Node::reg`, and `MemoryPlan::available_ranges`, whose refinement theorems relate the iterator that each gives to its list | Each `next`, which advances only the iterator's own cursor over checked bytes or values and does not fail ([check and execute](contract.md#check-and-execute)), and gives the head of the rest of the list | The functions that walk an iterator, such as `Fdt::find_node` and the discoveries over the nodes and `Fdt::discover_memory` over the entries of a `Reg`; the callers of `available_ranges`, the kernel direct map and the page ownership table of the page-tables component, to which `UsableRangesExact` and `AvailableRangesWellFormed` carry over |
+| An iterator of the module stands for a list of the specification (`Stands`): its calls of `next` give the items of that list in order, and then none, at every later call too, the iterator staying where it is (the fixed point, which `fixed_iff` of the refinement modules states as a triple). The nodes are those of `Fdt.nodes`, the reservation entries those of `Fdt.reservations`, the entries of a `Reg` those of `Reg.entries`, and the usable ranges those of `MemoryPlan.availableRanges` | The functions that give the iterators, `Fdt::nodes`, `Fdt::reservations`, `Reg::new` and `Node::reg`, and `MemoryPlan::available_ranges`, whose refinement theorems relate the iterator that each gives to its list | Each `next`, which advances only the iterator's own cursor over checked bytes or values and does not fail ([check and execute](contract.md#check-and-execute)), and gives the head of the rest of the list | The functions that walk an iterator, such as `Fdt::find_node` and the discoveries over the nodes and `Fdt::discover_memory` over the entries of a `Reg`; the callers of `available_ranges`, the kernel direct map and the page ownership table of the page-tables component, to which `UsableRangesExact` and `AvailableRangesWellFormed` carry over |
+| A `&str` argument stands for the name or path of the specification (`StrRepr`): `as_bytes`, which the translation keeps as a declaration without a body ([trusted boundary](#trusted-boundary)), returns the bytes of the UTF-8 encoding of that string. The generated `Str` is `Slice U8` | Rust: a `&str` holds UTF-8, and `as_bytes` returns its bytes | Nothing changes a `&str` | `Node::property`, `Node::string_property` and `Fdt::find_node`, the three functions that read a name or a path through `as_bytes`; their theorems hold for every interpretation of the declaration that meets the premise |
+| A `usize` has 64 bits (`Usize64`, `System.Platform.numBits = 64`), the first premise of every refinement theorem | The extraction triple, `aarch64-unknown-none`, and the 64-bit platforms that the contract describes | - | Every refinement theorem: it does not restrict the inputs, it names the platform of the contract and of the extraction |
 | The bytes of the hand-over tree do not change while the kernel runs | The firmware or the loader of QEMU, before the cold entry; the board, which forms the slice of the tree ([open obligations](contract.md#open-obligations)) | The boot memory map, which keeps their pages as boot storage ([state fields](contract.md#state-fields)) | Every tree of the hand-over bytes, and the CPU topology that the boot publishes from it (`BootState.FromHandOver`) |
 
 ### Compile-time guards
@@ -130,18 +139,20 @@ each with a compile-fail case that the `subset` step runs
    `BootMemory`, `CpuTopology`, `MemoryPlan` and the iterator types
    keep their fields private to the module, so that only the functions of
    the premises build them, and a value that another module holds keeps
-   the premise of its type. The case for each type writes a struct literal
-   of it in another module and expects `E0451`. `Span`, `ReservedRegion`,
+   the premise of its type. One case stands for the guard of every type:
+   `kernel/compile-fail/fdt-private-fields.toml` writes a struct literal of
+   `Fdt` in another module and expects `E0451`. `Span`, `ReservedRegion`,
    `HandOverProfile`, `CpuProfile` and `TimerInterrupts` carry no invariant
    and have public fields: their specification holds for every value.
 2. **Borrowed bytes.** A tree borrows the slice of its bytes for its
    lifetime, and its nodes and iterators borrow the tree, so no write to
-   the bytes compiles while any of them lives. The case writes a byte of a
-   slice while a tree of it lives and expects `E0506`.
+   the bytes compiles while any of them lives. The case
+   `kernel/compile-fail/fdt-borrowed-bytes.toml` writes a byte of a slice
+   while a tree of it lives and expects `E0506`.
 3. **No duplication guard.** No value of the component carries a right
    that a copy would break: every value is immutable once built, so its
-   types may implement `Clone` and `Copy`, and no guard against them is
-   planned.
+   types may implement `Clone` and `Copy`, and none has a guard against
+   them.
 
 The `subset` step also checks the module mechanically for `static mut`,
 interior mutability and `cfg` outside its allowlist
@@ -165,52 +176,67 @@ imports the generated definitions of both targets: their enumerations and
 external declarations would clash
 ([R6](../../../conventions/provable-subset.md#r6-enumeration-names-across-targets)).
 
-Estimates for the budget:
-
-- The statements of the specification: the proofs of its 41 statements of
-  invariants and 8 properties about 7,000 lines (4,500 to 11,000), and of
-  its 20 specification tests about 600 lines (300 to 1,500); the 13
-  statements of unreachable branches are not estimated apart, and the
-  proofs of all of them about 8,000 lines (5,000 to 14,000). The witnesses
-  are proved in the specification.
-- The gate: the target keeps the default budget of 1,800 s, which its
-  extraction, the type check of its generated definitions, the build of its
-  proofs and its mutants share. The modules of the specification that its
-  proofs import build in about 30 s from scratch, of which the witnesses
-  take about 24 s, and `leanchecker` evaluates the witnesses again, about
-  20 s more. The shard of the calibration target, 12 functions and 30
-  mutants, took 409 s; the shard of this target is measured when its
-  obligations are registered, and its budget is set from that measurement.
+Budget and parts: the gate runs the 29 registered mutants of the target in
+two parts, each a job with its own budget
+([shards and merge](../../../formal-verification.md#shards-and-merge)). The
+registry puts the mutants of the [mutant table](#mutants) into the parts in
+turn, the first into part 1, the second into part 2 and so on, so that the
+parts take 15 and 14. Each part extracts the target, builds its proofs
+and then runs its mutants; part 1 also concludes the target. The budget of
+each part is 1.5 times the seconds that the part took on the standard
+runner, rounded up to a minute, at most 1,800 s and at least 1.25 times
+those seconds, and the parts of a target have at most 7,200 s in all. The
+number of parts is the least for which no part takes more than 1,440 s.
+Each mutant extracts the target again and builds the generated definitions
+and the proof modules that the edit reaches. On the standard runner each
+of four parts took 581 s to 689 s, about 170 s to extract and build the
+target and up to 69 s for each of its mutants, so two parts of 15 and 14
+mutants come to about 1,210 s each and one part of 29 would pass 1,440 s;
+the measurement of the two parts on the standard runner decides their
+budgets.
 
 ## Trusted boundary
 
-The target relies on these rows of the
-[trusted boundary](../../../formal-verification.md#trusted-boundary): the
-Lean kernel and the three standard axioms; Mathlib and the Aeneas Lean
-library; Charon, the Rust nightly and Aeneas; and the compiler, which no
-proof covers. It relies on no assembly, `unsafe` code, atomics, IRQ path or
-hardware: the module has none. The bytes that the firmware hands over are
-its input, which it checks; the board's forming of their slice is an open
-obligation, not a trusted item ([unclosed dependencies](#unclosed-dependencies)).
+The target relies on these rows of the [trusted
+boundary](../../../formal-verification.md#trusted-boundary): the Lean
+kernel and the three standard axioms; Mathlib and the Aeneas Lean library;
+Charon, the Rust nightly and Aeneas; the compiler, which no proof covers;
+and the unconstrained declarations, one item ([below](#trusted-boundary)).
+It relies on no assembly, `unsafe` code, atomics, IRQ path or hardware: the
+module has none. The bytes that the firmware hands over are its input,
+which it checks; the board's forming of their slice is an open obligation,
+not a trusted item ([unclosed dependencies](#unclosed-dependencies)).
 
-The target is to add no item to the boundary:
+The target adds one item to the boundary, an unconstrained declaration
+with its premise, and no cut point, model or trusted axiom:
 
 - **Cut points.** None: no function of the module reads hardware or global
   state, so none needs to be translated without its body.
 - **Models and trusted axioms.** None: no item of `models.json` or
   `tcb.json`, and no `trusted_axioms`. The witnesses of the specification
-  use `decide +kernel`, which the kernel checks, and no native decision.
-- **Derived methods.** The module calls no method that a `#[derive(..)]`
-  defines, such as a derived `eq` of spans, which would stay unverified: it
+  use `decide +kernel`, which the kernel checks, and the proofs use no
+  native decision and no axiom of the Aeneas library that `tcb.json` would
+  have to admit.
+- **Derived methods.** The extraction translates the `clone` that
+  `#[derive(Clone)]` defines for `ReservedRegion`, `Span` and
+  `parser::Frame`, which no function of the module calls; the target lists
+  them in `derived`, and they stay unverified. The module calls no method
+  that a `#[derive(..)]` defines, such as a derived `eq` of spans: it
   compares values field by field.
-- **Unconstrained items.** None when the module keeps the
-  [code shapes](#code-shapes). Each library item below would otherwise be
-  reached as an external declaration without a model. A theorem must hold
+- **Unconstrained items.** One, `core::str::{str}::as_bytes`, which
+  `Node::property`, `Node::string_property` and `Fdt::find_node` call on
+  the name or path that they take. The translation keeps it as a
+  declaration without a body and without a model, which is refused while
+  models are not compared with their implementations
+  ([models](../../../formal-verification.md#models)); a theorem must hold
   for every interpretation of such a declaration
-  ([R2](../../../conventions/provable-subset.md#r2-iteratorany)), so no
-  result that depends on it could be proved, and a model of it is refused
-  while models are not compared with their implementations
-  ([models](../../../formal-verification.md#models)).
+  ([R2](../../../conventions/provable-subset.md#r2-iteratorany)), so the
+  theorems of the three functions take the premise `StrRepr`
+  ([premises](#premises)) and hold for every interpretation that meets it.
+  No other library item is reached while the module keeps the
+  [code shapes](#code-shapes); each item below would otherwise be reached
+  as an external declaration without a model, and no result that depends
+  on it could be proved.
 
 | Library item | Where the module would reach it | Shape that avoids it |
 | --- | --- | --- |
@@ -225,10 +251,9 @@ The target is to add no item to the boundary:
 
 The target leaves open what the contract lists in
 [open obligations](contract.md#open-obligations): the forming of the slice
-of the hand-over tree by each board, and, until the implementation names
-its iterator types, the `next` of each of them, which then joins the roots
-([iterators](#fdt)). It cuts no function, and it reaches no function of
-another component.
+of the hand-over tree by each board. Its `unclosed` is empty: it proves
+every function of the module that it reaches, it cuts no function, and it
+reaches no function of another component.
 
 ## Mutants
 
@@ -236,9 +261,15 @@ The target registers 29 source mutants, 1 to 3 for each row of the entry
 table, among them off-by-one changes of three limits of the parse,
 `MAX_DEPTH`, `MAX_PROPERTY_NAME` and `MAX_BLOB_SIZE`, and of three other
 limits. Each is registered with its file, the text that it finds
-and replaces and the theorems that must fail once the code exists; the
-table describes the edit. Each must make the refinement theorem of the
-function that it names fail.
+and replaces, the part that runs it ([cluster and budget](#cluster-and-budget))
+and the theorems of which one must fail: the refinement theorem of the
+function that it names and the theorems of that proof that unfold the
+function or constant that the edit changes, where the build of the mutant
+fails ([obligations](#fdt)). The table describes the edit.
+`parse-depth-off-by-one` and `memory-ranges-off-by-one` pass their check
+and then fail at the write beyond the array of the open nodes or of the RAM
+ranges, a panic in Rust and a failed `update` in the generated code,
+rather than admitting the node or the range.
 
 | Name | Line | Source change | Must fail |
 | --- | ---: | --- | --- |
@@ -333,7 +364,9 @@ qualification cases that record the outcome of the shape in
    `generic-into-iterator-loop`). The iterators of the module implement
    `next` alone, which advances a private cursor over checked bytes or
    values and does not fail ([check and execute](contract.md#check-and-execute));
-   the module walks them by calling `next` in a `while` loop.
+   the module walks them by calling `next` in a `while` loop
+   (`own-iterator-next`, `iterator-driven-loop`), and a view of the tree
+   that a function takes by value borrows it (`borrowed-view-by-value`).
 6. **No closures, no allocation.** `match` takes the place of combinators
    with closures, and no function takes a callback
    ([R4](../../../conventions/provable-subset.md#r4-closures-as-callbacks),
@@ -392,9 +425,16 @@ qualification cases that record the outcome of the shape in
     an array index
     ([constructs the tools do not support](../../../conventions/provable-subset.md#constructs-the-tools-do-not-support)).
 
-The qualification cases cover these shapes. A shape of the implementation
-that no case records gets a case of its own before the target is
-registered as formal.
+The qualification cases cover these shapes, and four cases record shapes
+of the module that the list above does not name: `slice-is-empty`, the
+`is_empty` of a slice; `fallible-constant`, the limits that `fdt.rs`
+converts with `as`, which the tools make computations that the functions
+bind; `negation-return`, a negated Boolean returned, as `path_valid` and
+`MemoryPlan::is_available` return one; and `option-array-by-value`, the
+timer interrupts of a profile, an `Option` of a `Copy` structure that
+`CpuTopology::validate_timers` takes apart before it passes their array to
+a helper with a loop. A shape of the implementation that no case records
+gets a case of its own before the code that has it merges.
 
 ## Not proved
 

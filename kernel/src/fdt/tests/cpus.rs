@@ -112,6 +112,47 @@ fn cpu_status_model_and_enable_method_are_required() {
     }
 }
 
+/// CPU 0 needs the `enable-method` `psci` on the Pi 5, whose profile sets
+/// `cpu0_enable_method`, and not on QEMU virt: CPU 0 without it or with
+/// `spin-table` is `BadProperty` on the Pi 5 and accepted on QEMU virt.
+#[test]
+fn cpu0_needs_its_enable_method_on_the_pi5_alone() {
+    for cpu0 in [None, Some(&b"spin-table\0"[..])] {
+        for (profile, method, shift) in [(PI5_CPUS, "smc\0", 8), (QEMU_HVC_CPUS, "hvc\0", 0)] {
+            let mut b = Builder::default();
+            b.root();
+            b.begin("cpus");
+            b.cells("#address-cells", &[1]);
+            b.cells("#size-cells", &[0]);
+            for id in 0..4u32 {
+                b.begin(&std::format!("cpu@{id}"));
+                b.property("device_type", b"cpu\0");
+                b.property("compatible", b"arm,cortex-a76\0");
+                b.cells("reg", &[id << shift]);
+                match (id, cpu0) {
+                    (0, None) => {}
+                    (0, Some(enable)) => b.property("enable-method", enable),
+                    _ => b.property("enable-method", b"psci\0"),
+                }
+                b.end();
+            }
+            b.end();
+            b.begin("psci");
+            b.property("compatible", b"arm,psci-1.0\0arm,psci-0.2\0arm,psci\0");
+            b.property("method", method.as_bytes());
+            b.end();
+            b.end();
+            let bytes = b.finish();
+            let topology = Fdt::parse(&bytes).unwrap().discover_cpus(profile);
+            if profile == PI5_CPUS {
+                assert_eq!(topology.unwrap_err(), Error::BadProperty);
+            } else {
+                assert_eq!(topology.unwrap().count(), 4);
+            }
+        }
+    }
+}
+
 #[test]
 fn cpu_reg_cell_width_is_checked_without_truncation() {
     for cells_count in [1, 2] {

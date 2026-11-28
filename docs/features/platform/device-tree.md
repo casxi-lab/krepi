@@ -29,11 +29,7 @@ tests:
   - kernel/src/fdt/tests/parser.rs
   - kernel/src/fdt/tests/profiles.rs
   - kernel/src/fdt/tests/results.rs
-  - kernel/src/fdt/tests/results/differential.rs
-  - kernel/src/fdt/tests/results/differential/lengths.rs
   - kernel/src/fdt/tests/translation.rs
-  - kernel/src/fdt/cpus/tests.rs
-  - kernel/src/fdt/cpus/tests/before.rs
   - kernel/src/fdt/hand_over/tests.rs
   - kernel/src/fdt/hand_over/tests/boundaries.rs
   - kernel/src/fdt/hand_over/tests/builder.rs
@@ -41,14 +37,74 @@ tests:
   - kernel/src/fdt/hand_over/tests/models.rs
   - kernel/src/fdt/hand_over/tests/platform.rs
   - kernel/src/fdt/hand_over/tests/selection.rs
-  - kernel/src/fdt/nodes/tests.rs
-  - kernel/src/fdt/nodes/tests/old.rs
   - kernel/src/fdt/plan/tests.rs
-  - kernel/src/fdt/plan/tests/before.rs
-  - kernel/src/fdt/plan/tests/old.rs
 suites:
   - qemu-boot
-theorems: none
+theorems:
+  - Krepi.Proofs.Fdt.Refinement.Tree.fdtParse
+  - Krepi.Proofs.Fdt.Refinement.Tree.fdtNodes
+  - Krepi.Proofs.Fdt.Refinement.Tree.nodesNext
+  - Krepi.Proofs.Fdt.Refinement.Tree.fdtFindNode
+  - Krepi.Proofs.Fdt.Refinement.Tree.fdtReservations
+  - Krepi.Proofs.Fdt.Refinement.Tree.reservationsNext
+  - Krepi.Proofs.Fdt.Refinement.Tree.fdtTotalSize
+  - Krepi.Proofs.Fdt.Refinement.Tree.nodeName
+  - Krepi.Proofs.Fdt.Refinement.Tree.nodeParent
+  - Krepi.Proofs.Fdt.Refinement.Tree.nodeProperty
+  - Krepi.Proofs.Fdt.Refinement.Tree.nodeStringProperty
+  - Krepi.Proofs.Fdt.Refinement.Tree.nodeEnabled
+  - Krepi.Proofs.Fdt.Refinement.Tree.nodeAddressCells
+  - Krepi.Proofs.Fdt.Refinement.Tree.nodeSizeCells
+  - Krepi.Proofs.Fdt.Refinement.Tree.nodeReg
+  - Krepi.Proofs.Fdt.Refinement.Tree.nodeRanges
+  - Krepi.Proofs.Fdt.Refinement.Tree.nodeDmaRanges
+  - Krepi.Proofs.Fdt.Refinement.Tree.nodeTranslateReg
+  - Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverMemory
+  - Krepi.Proofs.Fdt.Refinement.Discovery.memoryMapRam
+  - Krepi.Proofs.Fdt.Refinement.Discovery.memoryMapReserved
+  - Krepi.Proofs.Fdt.Refinement.Discovery.memoryMapDynamic
+  - Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverBootMemory
+  - Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryRam
+  - Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryReserved
+  - Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryDynamic
+  - Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryDtb
+  - Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryImage
+  - Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryRamBytes
+  - Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryIsAvailable
+  - Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryFindAvailable
+  - Krepi.Proofs.Fdt.Refinement.Cpus.fdtDiscoverCpus
+  - Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyCount
+  - Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyProfile
+  - Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyAffinity
+  - Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyValidateTimers
+  - Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileLogicalId
+  - Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileAffinityShift
+  - Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileConduit
+  - Krepi.Proofs.Fdt.Refinement.Translate.cellsU64
+  - Krepi.Proofs.Fdt.Refinement.Translate.regNew
+  - Krepi.Proofs.Fdt.Refinement.Translate.regNext
+  - Krepi.Proofs.Fdt.Refinement.Translate.addressMapNew
+  - Krepi.Proofs.Fdt.Refinement.Translate.addressMapKind
+  - Krepi.Proofs.Fdt.Refinement.Translate.addressMapToParent
+  - Krepi.Proofs.Fdt.Refinement.Translate.addressMapToChild
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanAllRam
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanNew
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanFromBootMemory
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanManagedBanks
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanRam
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanReservations
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanBootRanges
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanFirmwareRanges
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanDescribedBytes
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanManagedBytes
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanContainsRam
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanIsAvailable
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanPermitsBacking
+  - Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanAvailableRanges
+  - Krepi.Proofs.Fdt.Refinement.Plan.availableRangesNext
+  - Krepi.Proofs.Fdt.Refinement.Translate.spanNew
+  - Krepi.Proofs.Fdt.Refinement.Translate.spanEnd
+  - Krepi.Proofs.Fdt.Refinement.Translate.spanContains
 related:
   - krepi.platform.qemu-virt-boot
 ---
@@ -127,9 +183,8 @@ planned.
   -p krepi-kernel` runs the tests of the module. With
   `KREPI_VECTOR_RESULTS` set to a directory, the results test writes the
   outputs of the frozen vectors to `boot-platform/fdt.results` below it
-  ([host results](../../formal-verification.md#host-results)). The three
-  ignored tests of the trees that the Raspberry Pi firmware ships, the two
-  firmware tests and the differential test of the shipped trees, read their
+  ([host results](../../formal-verification.md#host-results)). The two
+  ignored tests of the trees that the Raspberry Pi firmware ships read their
   files from the directories that `KREPI_PI5_SOURCE_DTB_DIR` and
   `KREPI_PI5_VALIDATED_DTB_DIR` name.
 
@@ -316,14 +371,10 @@ reservations, and, with the tree at the start of RAM and the image at
   reservations; the five RAM models of the Pi 5; the examples above; and
   the results test, which compares every output of the vector file with its
   expected output. They establish the rules on trees that the tests build,
-  not on the trees that a board hands over. The differential tests compare
-  the board-neutral entries with a verbatim copy of the code before them on
-  the board profiles, and `MemoryPlan::from_boot_memory` and
-  `Fdt::find_node` with a verbatim copy of their code before they stopped
-  adding a constant to the length of an argument; further tests check
-  profile values that no board gives against the contract. The three
-  ignored tests of the firmware trees need files outside the repository
-  and do not run in CI.
+  not on the trees that a board hands over. Further tests check profile
+  values that no board gives against the contract. The two ignored tests
+  of the firmware trees need files outside the repository and do not run
+  in CI.
 - **Compile-time guards.** The `subset` step of `cargo xtask check` builds
   the two compile-fail cases below `kernel/compile-fail/`: a tree built
   without the parse, which the private fields refuse, and a byte of the
@@ -343,13 +394,16 @@ reservations, and, with the tree at the start of RAM and the image at
   map. They establish the parse and the boot memory map of the tree that
   QEMU hands over, and that the seeds reach no result, on QEMU virt; they
   establish nothing for a Pi 5 tree, which a board run checks.
-- **Proofs.** None of the code. The proof target `fdt` is registered as
-  planned in `verification/targets.json`, with the roots that the
-  [proof path](../../domains/boot-platform/fdt/proof.md) names; it is
-  extracted and type-checked when a run names it, and its refinement proofs
-  are planned. The statements of the specification are about the
-  specification, not the code. The results that the host tests write are
-  not yet compared with the replay of the specification.
+- **Proofs.** The proof target `fdt` of `verification/targets.json` has
+  the roots that the [proof path](../../domains/boot-platform/fdt/proof.md)
+  names, the functions of the entry table of the contract and the `next` of
+  its four iterator types. For each root, a theorem listed in `theorems`
+  states that the function returns what the specification gives, or its
+  error in the same order, for every input of its machine widths, under the
+  premises of the proof path; the gate builds and audits them and runs the
+  registered mutants of the target, which the proofs reject. The results
+  that the host tests write are compared line by line with the replay of
+  the specification by `cargo xtask formal vectors`.
 - **Unverified.** The hand-over trees of the 1, 2, 4 and 16 GB models,
   which the tests take from the ranges that the contract infers, and the
   tree that a Raspberry Pi 5 hands over at boot; the trees of a QEMU other

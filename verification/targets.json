@@ -3,57 +3,57 @@
   "specifications": [
     {
       "module": "Krepi.Spec.Fdt.Basic",
-      "feature": null,
+      "feature": "krepi.platform.device-tree",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.Fdt.Bytes",
-      "feature": null,
+      "feature": "krepi.platform.device-tree",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.Fdt.Parse",
-      "feature": null,
+      "feature": "krepi.platform.device-tree",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.Fdt.Nodes",
-      "feature": null,
+      "feature": "krepi.platform.device-tree",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.Fdt.Translate",
-      "feature": null,
+      "feature": "krepi.platform.device-tree",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.Fdt.Discovery",
-      "feature": null,
+      "feature": "krepi.platform.device-tree",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.Fdt.BootMemory",
-      "feature": null,
+      "feature": "krepi.platform.device-tree",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.Fdt.Cpus",
-      "feature": null,
+      "feature": "krepi.platform.device-tree",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.Fdt.Plan",
-      "feature": null,
+      "feature": "krepi.platform.device-tree",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.Fdt.Boot",
-      "feature": null,
+      "feature": "krepi.platform.device-tree",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.Fdt.Witnesses",
-      "feature": null,
+      "feature": "krepi.platform.device-tree",
       "theorems": [
         "Krepi.Spec.Fdt.Witnesses.parseOk",
         "Krepi.Spec.Fdt.Witnesses.parseTruncated",
@@ -269,47 +269,47 @@
     },
     {
       "module": "Krepi.Spec.PageTables.Basic",
-      "feature": null,
+      "feature": "krepi.kernel.kernel-memory",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.PageTables.Descriptor",
-      "feature": null,
+      "feature": "krepi.kernel.kernel-memory",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.PageTables.Tables",
-      "feature": null,
+      "feature": "krepi.kernel.kernel-memory",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.PageTables.Plan",
-      "feature": null,
+      "feature": "krepi.kernel.kernel-memory",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.PageTables.Map",
-      "feature": null,
+      "feature": "krepi.kernel.kernel-memory",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.PageTables.Boot",
-      "feature": null,
+      "feature": "krepi.kernel.kernel-memory",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.PageTables.Ownership",
-      "feature": null,
+      "feature": "krepi.kernel.kernel-memory",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.PageTables.Tokens",
-      "feature": null,
+      "feature": "krepi.kernel.kernel-memory",
       "theorems": []
     },
     {
       "module": "Krepi.Spec.PageTables.Witnesses.TableSets",
-      "feature": null,
+      "feature": "krepi.kernel.kernel-memory",
       "theorems": [
         "Krepi.Spec.PageTables.Witnesses.TableSets.descriptorOk",
         "Krepi.Spec.PageTables.Witnesses.TableSets.directAddressOk",
@@ -396,7 +396,7 @@
     },
     {
       "module": "Krepi.Spec.PageTables.Witnesses.PageOwnership",
-      "feature": null,
+      "feature": "krepi.kernel.kernel-memory",
       "theorems": [
         "Krepi.Spec.PageTables.Witnesses.PageOwnership.newOk",
         "Krepi.Spec.PageTables.Witnesses.PageOwnership.newInvalidAlignment",
@@ -462,10 +462,9 @@
   "targets": [
     {
       "name": "fdt",
-      "state": "planned",
       "module": "Fdt",
-      "feature": null,
-      "description": "The module fdt of the provable core: the bounded parse of an untrusted flattened device tree, the access to its nodes and properties, the translation of addresses through reg, ranges and dma-ranges, the discovery of memory, of the boot memory of a hand-over tree and of the CPUs, the selection of boot storage, the boot memory map and the functions of Span. The roots are the functions that the entry table of the component's contract names and the next of the iterator types Nodes, Reservations, Reg and AvailableRanges. Each function of the entry table refines its specification below Krepi.Spec.Fdt: it returns the value that the specification gives, or the error that it gives in the same order, for every input of its machine widths. Each next refines the list that the specification gives for its iterator: its calls give the items of that list in order, and then none. Planned: the functions exist, and their refinement is not proved yet.",
+      "feature": "krepi.platform.device-tree",
+      "description": "The module fdt of the provable core: the bounded parse of an untrusted flattened device tree, the access to its nodes and properties, the translation of addresses through reg, ranges and dma-ranges, the discovery of memory, of the boot memory of a hand-over tree and of the CPUs, the selection of boot storage, the boot memory map and the functions of Span. The roots are the functions that the entry table of the component's contract names and the next of the iterator types Nodes, Reservations, Reg and AvailableRanges. Each function of the entry table refines its specification below Krepi.Spec.Fdt under the premises that the proof path states, the invariants that the functions which build a tree, a node, a Reg, an AddressMap, a MemoryMap, a BootMemory, a CpuTopology and a MemoryPlan establish for it, the bytes of a &str as the name or path that it stands for, and a usize of 64 bits: it returns the value that the specification gives, or the error that it gives in the same order, for every input of its machine widths. Each next refines the list that the specification gives for its iterator: its calls give the items of that list in order, and then none. The refinement theorems are below Krepi.Proofs.Fdt.Refinement, one for each root.",
       "start_from": [
         "krepi_kernel::fdt::Fdt::parse",
         "krepi_kernel::fdt::Fdt::nodes",
@@ -531,14 +530,1309 @@
         "krepi_kernel::fdt::Span::new",
         "krepi_kernel::fdt::Span::end",
         "krepi_kernel::fdt::Span::contains"
+      ],
+      "proves": [
+        "kernel/src/fdt.rs#cells_u64",
+        "kernel/src/fdt/cpus.rs#CpuProfile::affinity_shift",
+        "kernel/src/fdt/cpus.rs#CpuProfile::conduit",
+        "kernel/src/fdt/cpus.rs#CpuProfile::logical_id",
+        "kernel/src/fdt/cpus.rs#CpuTopology::affinity",
+        "kernel/src/fdt/cpus.rs#CpuTopology::count",
+        "kernel/src/fdt/cpus.rs#CpuTopology::profile",
+        "kernel/src/fdt/cpus.rs#CpuTopology::validate_timers",
+        "kernel/src/fdt/cpus.rs#Fdt::discover_cpus",
+        "kernel/src/fdt/cpus.rs#cpu_children",
+        "kernel/src/fdt/cpus.rs#cpu_of_child",
+        "kernel/src/fdt/cpus.rs#id_of",
+        "kernel/src/fdt/cpus.rs#ids_complete",
+        "kernel/src/fdt/cpus.rs#method_is",
+        "kernel/src/fdt/cpus.rs#psci_compatible",
+        "kernel/src/fdt/cpus.rs#timer_records",
+        "kernel/src/fdt/discovery.rs#Fdt::discover_memory",
+        "kernel/src/fdt/discovery.rs#MemoryMap::dynamic",
+        "kernel/src/fdt/discovery.rs#MemoryMap::ram",
+        "kernel/src/fdt/discovery.rs#MemoryMap::reserved",
+        "kernel/src/fdt/discovery.rs#add_map_entries",
+        "kernel/src/fdt/discovery.rs#add_ram",
+        "kernel/src/fdt/discovery.rs#add_ram_children",
+        "kernel/src/fdt/discovery.rs#add_ram_entries",
+        "kernel/src/fdt/discovery.rs#add_reserved_children",
+        "kernel/src/fdt/discovery.rs#add_reserved_entries",
+        "kernel/src/fdt/discovery.rs#add_reserved_memory",
+        "kernel/src/fdt/discovery.rs#memory_name",
+        "kernel/src/fdt/discovery.rs#push_reserved",
+        "kernel/src/fdt/discovery.rs#ram_of_child",
+        "kernel/src/fdt/discovery.rs#reserved_memory_binding",
+        "kernel/src/fdt/discovery.rs#reserved_of_child",
+        "kernel/src/fdt/format.rs#align4",
+        "kernel/src/fdt/format.rs#alphanumeric",
+        "kernel/src/fdt/format.rs#c_string",
+        "kernel/src/fdt/format.rs#continues",
+        "kernel/src/fdt/format.rs#find_nul",
+        "kernel/src/fdt/format.rs#fits",
+        "kernel/src/fdt/format.rs#intersects",
+        "kernel/src/fdt/format.rs#is_utf8",
+        "kernel/src/fdt/format.rs#name_at",
+        "kernel/src/fdt/format.rs#name_byte",
+        "kernel/src/fdt/format.rs#name_bytes",
+        "kernel/src/fdt/format.rs#padded_end",
+        "kernel/src/fdt/format.rs#same_bytes",
+        "kernel/src/fdt/format.rs#scalar_end",
+        "kernel/src/fdt/format.rs#starts_with",
+        "kernel/src/fdt/format.rs#u32_at",
+        "kernel/src/fdt/format.rs#u64_at",
+        "kernel/src/fdt/format.rs#zeros",
+        "kernel/src/fdt/hand_over.rs#BootMemory::dtb",
+        "kernel/src/fdt/hand_over.rs#BootMemory::dynamic",
+        "kernel/src/fdt/hand_over.rs#BootMemory::image",
+        "kernel/src/fdt/hand_over.rs#BootMemory::is_available",
+        "kernel/src/fdt/hand_over.rs#BootMemory::ram",
+        "kernel/src/fdt/hand_over.rs#BootMemory::ram_bytes",
+        "kernel/src/fdt/hand_over.rs#BootMemory::reserved",
+        "kernel/src/fdt/hand_over.rs#Fdt::discover_boot_memory",
+        "kernel/src/fdt/hand_over.rs#check_compatible",
+        "kernel/src/fdt/hand_over.rs#check_hand_over",
+        "kernel/src/fdt/hand_over.rs#check_storage",
+        "kernel/src/fdt/hand_over.rs#compatible_entries",
+        "kernel/src/fdt/hand_over.rs#has_entry",
+        "kernel/src/fdt/hand_over.rs#holds_required",
+        "kernel/src/fdt/hand_over.rs#is_aligned",
+        "kernel/src/fdt/hand_over.rs#ram_bytes",
+        "kernel/src/fdt/hand_over.rs#touches_region",
+        "kernel/src/fdt/hand_over/selection.rs#BootMemory::find_available",
+        "kernel/src/fdt/hand_over/selection.rs#align_up",
+        "kernel/src/fdt/hand_over/selection.rs#furthest_touched",
+        "kernel/src/fdt/hand_over/selection.rs#search_range",
+        "kernel/src/fdt/hand_over/selection.rs#search_ranges",
+        "kernel/src/fdt/nodes.rs#Fdt::find_node",
+        "kernel/src/fdt/nodes.rs#Fdt::nodes",
+        "kernel/src/fdt/nodes.rs#Node::address_cells",
+        "kernel/src/fdt/nodes.rs#Node::address_map",
+        "kernel/src/fdt/nodes.rs#Node::dma_ranges",
+        "kernel/src/fdt/nodes.rs#Node::enabled",
+        "kernel/src/fdt/nodes.rs#Node::name",
+        "kernel/src/fdt/nodes.rs#Node::parent",
+        "kernel/src/fdt/nodes.rs#Node::property",
+        "kernel/src/fdt/nodes.rs#Node::ranges",
+        "kernel/src/fdt/nodes.rs#Node::reg",
+        "kernel/src/fdt/nodes.rs#Node::size_cells",
+        "kernel/src/fdt/nodes.rs#Node::string_property",
+        "kernel/src/fdt/nodes.rs#Node::translate_reg",
+        "kernel/src/fdt/nodes.rs#Nodes::next",
+        "kernel/src/fdt/nodes.rs#Reservations::next",
+        "kernel/src/fdt/nodes.rs#address_cells_at",
+        "kernel/src/fdt/nodes.rs#cells_at",
+        "kernel/src/fdt/nodes.rs#child_named",
+        "kernel/src/fdt/nodes.rs#climb",
+        "kernel/src/fdt/nodes.rs#component_end",
+        "kernel/src/fdt/nodes.rs#descend",
+        "kernel/src/fdt/nodes.rs#descend_to_last",
+        "kernel/src/fdt/nodes.rs#double_slash",
+        "kernel/src/fdt/nodes.rs#enabled_at",
+        "kernel/src/fdt/nodes.rs#find_path",
+        "kernel/src/fdt/nodes.rs#first_node",
+        "kernel/src/fdt/nodes.rs#flag_at",
+        "kernel/src/fdt/nodes.rs#has_property",
+        "kernel/src/fdt/nodes.rs#innermost",
+        "kernel/src/fdt/nodes.rs#is_child",
+        "kernel/src/fdt/nodes.rs#map_at",
+        "kernel/src/fdt/nodes.rs#node_at_offset",
+        "kernel/src/fdt/nodes.rs#node_of",
+        "kernel/src/fdt/nodes.rs#node_step",
+        "kernel/src/fdt/nodes.rs#parent_at",
+        "kernel/src/fdt/nodes.rs#path_valid",
+        "kernel/src/fdt/nodes.rs#piece_at",
+        "kernel/src/fdt/nodes.rs#property_range",
+        "kernel/src/fdt/nodes.rs#reg_at",
+        "kernel/src/fdt/nodes.rs#reservation_step",
+        "kernel/src/fdt/nodes.rs#size_cells_at",
+        "kernel/src/fdt/nodes.rs#string_at",
+        "kernel/src/fdt/nodes.rs#string_is",
+        "kernel/src/fdt/nodes.rs#value_at",
+        "kernel/src/fdt/parser.rs#Fdt::parse",
+        "kernel/src/fdt/parser.rs#Fdt::reservations",
+        "kernel/src/fdt/parser.rs#Fdt::total_size",
+        "kernel/src/fdt/parser.rs#begin_node",
+        "kernel/src/fdt/parser.rs#block",
+        "kernel/src/fdt/parser.rs#decode_begin",
+        "kernel/src/fdt/parser.rs#decode_property",
+        "kernel/src/fdt/parser.rs#decode_token",
+        "kernel/src/fdt/parser.rs#end_node",
+        "kernel/src/fdt/parser.rs#end_structure",
+        "kernel/src/fdt/parser.rs#header",
+        "kernel/src/fdt/parser.rs#overlaps_earlier",
+        "kernel/src/fdt/parser.rs#place",
+        "kernel/src/fdt/parser.rs#property",
+        "kernel/src/fdt/parser.rs#repeats_name",
+        "kernel/src/fdt/parser.rs#reservation_entry",
+        "kernel/src/fdt/parser.rs#reservation_map",
+        "kernel/src/fdt/parser.rs#walk_tokens",
+        "kernel/src/fdt/plan.rs#MemoryPlan::all_ram",
+        "kernel/src/fdt/plan.rs#MemoryPlan::available_ranges",
+        "kernel/src/fdt/plan.rs#MemoryPlan::boot_ranges",
+        "kernel/src/fdt/plan.rs#MemoryPlan::contains_ram",
+        "kernel/src/fdt/plan.rs#MemoryPlan::described_bytes",
+        "kernel/src/fdt/plan.rs#MemoryPlan::firmware_ranges",
+        "kernel/src/fdt/plan.rs#MemoryPlan::from_boot_memory",
+        "kernel/src/fdt/plan.rs#MemoryPlan::is_available",
+        "kernel/src/fdt/plan.rs#MemoryPlan::managed_banks",
+        "kernel/src/fdt/plan.rs#MemoryPlan::managed_bytes",
+        "kernel/src/fdt/plan.rs#MemoryPlan::new",
+        "kernel/src/fdt/plan.rs#MemoryPlan::permits_backing",
+        "kernel/src/fdt/plan.rs#MemoryPlan::ram",
+        "kernel/src/fdt/plan.rs#MemoryPlan::reservations",
+        "kernel/src/fdt/plan.rs#add_banks",
+        "kernel/src/fdt/plan.rs#add_boot",
+        "kernel/src/fdt/plan.rs#add_firmware",
+        "kernel/src/fdt/plan.rs#admit_banks",
+        "kernel/src/fdt/plan.rs#build",
+        "kernel/src/fdt/plan.rs#check_span",
+        "kernel/src/fdt/plan.rs#check_window",
+        "kernel/src/fdt/plan.rs#insert_bank",
+        "kernel/src/fdt/plan.rs#manage_window",
+        "kernel/src/fdt/plan.rs#pages_of",
+        "kernel/src/fdt/plan.rs#sort_banks",
+        "kernel/src/fdt/plan.rs#sum_sizes",
+        "kernel/src/fdt/plan/available.rs#AvailableRanges::next",
+        "kernel/src/fdt/plan/available.rs#available_step",
+        "kernel/src/fdt/plan/available.rs#furthest_holding",
+        "kernel/src/fdt/plan/available.rs#nearest_start",
+        "kernel/src/fdt/span.rs#Span::contains",
+        "kernel/src/fdt/span.rs#Span::end",
+        "kernel/src/fdt/span.rs#Span::new",
+        "kernel/src/fdt/span.rs#below_end",
+        "kernel/src/fdt/span.rs#ends_within",
+        "kernel/src/fdt/span.rs#holds",
+        "kernel/src/fdt/span.rs#in_one_range",
+        "kernel/src/fdt/span.rs#overlaps",
+        "kernel/src/fdt/span.rs#part",
+        "kernel/src/fdt/span.rs#prefix",
+        "kernel/src/fdt/span.rs#touches",
+        "kernel/src/fdt/span.rs#touches_any",
+        "kernel/src/fdt/span.rs#valid",
+        "kernel/src/fdt/translation.rs#AddressMap::kind",
+        "kernel/src/fdt/translation.rs#AddressMap::new",
+        "kernel/src/fdt/translation.rs#AddressMap::to_child",
+        "kernel/src/fdt/translation.rs#AddressMap::to_parent",
+        "kernel/src/fdt/translation.rs#Reg::new",
+        "kernel/src/fdt/translation.rs#Reg::next",
+        "kernel/src/fdt/translation.rs#check_map",
+        "kernel/src/fdt/translation.rs#check_reg",
+        "kernel/src/fdt/translation.rs#check_reg_entries",
+        "kernel/src/fdt/translation.rs#check_width",
+        "kernel/src/fdt/translation.rs#check_windows",
+        "kernel/src/fdt/translation.rs#reg_entry",
+        "kernel/src/fdt/translation.rs#reg_step",
+        "kernel/src/fdt/translation.rs#reg_stride",
+        "kernel/src/fdt/translation.rs#stride",
+        "kernel/src/fdt/translation.rs#through_windows",
+        "kernel/src/fdt/translation.rs#translate_map",
+        "kernel/src/fdt/translation.rs#window"
+      ],
+      "unclosed": [],
+      "derived": [
+        "kernel/src/fdt.rs#ReservedRegion::clone",
+        "kernel/src/fdt.rs#Span::clone",
+        "kernel/src/fdt/parser.rs#Frame::clone"
+      ],
+      "unconstrained": [
+        "core::str::{str}::as_bytes"
+      ],
+      "proof_modules": [
+        "Krepi.Proofs.Fdt.Refinement.AccessorLemmas",
+        "Krepi.Proofs.Fdt.Refinement.BootLemmas",
+        "Krepi.Proofs.Fdt.Refinement.Cpus",
+        "Krepi.Proofs.Fdt.Refinement.CpusLemmas",
+        "Krepi.Proofs.Fdt.Refinement.Discovery",
+        "Krepi.Proofs.Fdt.Refinement.FormatLemmas",
+        "Krepi.Proofs.Fdt.Refinement.MemoryLemmas",
+        "Krepi.Proofs.Fdt.Refinement.NodePropertyLemmas",
+        "Krepi.Proofs.Fdt.Refinement.NodeWalkLemmas",
+        "Krepi.Proofs.Fdt.Refinement.ParseHeaderLemmas",
+        "Krepi.Proofs.Fdt.Refinement.ParseWalkLemmas",
+        "Krepi.Proofs.Fdt.Refinement.Plan",
+        "Krepi.Proofs.Fdt.Refinement.PlanBuildLemmas",
+        "Krepi.Proofs.Fdt.Refinement.PlanQueryLemmas",
+        "Krepi.Proofs.Fdt.Refinement.SpanLemmas",
+        "Krepi.Proofs.Fdt.Refinement.Translate",
+        "Krepi.Proofs.Fdt.Refinement.TranslateLemmas",
+        "Krepi.Proofs.Fdt.Refinement.Tree"
+      ],
+      "obligations": [
+        {
+          "id": "fdt::Fdt::parse",
+          "statement": "FdtParse: fdt::Fdt::parse returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.fdtParse",
+            "Krepi.Proofs.Fdt.Refinement.align4_spec",
+            "Krepi.Proofs.Fdt.Refinement.alphanumeric_spec",
+            "Krepi.Proofs.Fdt.Refinement.begin_node_spec",
+            "Krepi.Proofs.Fdt.Refinement.below_end_spec",
+            "Krepi.Proofs.Fdt.Refinement.block_spec",
+            "Krepi.Proofs.Fdt.Refinement.c_string_spec",
+            "Krepi.Proofs.Fdt.Refinement.continues_spec",
+            "Krepi.Proofs.Fdt.Refinement.decode_begin_spec",
+            "Krepi.Proofs.Fdt.Refinement.decode_property_spec",
+            "Krepi.Proofs.Fdt.Refinement.decode_token_spec",
+            "Krepi.Proofs.Fdt.Refinement.depth_spec",
+            "Krepi.Proofs.Fdt.Refinement.end_node_spec",
+            "Krepi.Proofs.Fdt.Refinement.end_structure_spec",
+            "Krepi.Proofs.Fdt.Refinement.fdt_parse_spec",
+            "Krepi.Proofs.Fdt.Refinement.find_nul_spec",
+            "Krepi.Proofs.Fdt.Refinement.fits_spec",
+            "Krepi.Proofs.Fdt.Refinement.header_size_val",
+            "Krepi.Proofs.Fdt.Refinement.header_spec",
+            "Krepi.Proofs.Fdt.Refinement.intersects_spec",
+            "Krepi.Proofs.Fdt.Refinement.is_utf8_spec",
+            "Krepi.Proofs.Fdt.Refinement.magic_iff",
+            "Krepi.Proofs.Fdt.Refinement.max_blob_val",
+            "Krepi.Proofs.Fdt.Refinement.max_name_val",
+            "Krepi.Proofs.Fdt.Refinement.max_props_val",
+            "Krepi.Proofs.Fdt.Refinement.max_res_val",
+            "Krepi.Proofs.Fdt.Refinement.name_at_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.name_at_spec",
+            "Krepi.Proofs.Fdt.Refinement.name_byte_spec",
+            "Krepi.Proofs.Fdt.Refinement.name_bytes_spec",
+            "Krepi.Proofs.Fdt.Refinement.overlaps_earlier_spec",
+            "Krepi.Proofs.Fdt.Refinement.overlaps_spec",
+            "Krepi.Proofs.Fdt.Refinement.padded_end_spec",
+            "Krepi.Proofs.Fdt.Refinement.piece_at_spec",
+            "Krepi.Proofs.Fdt.Refinement.place_spec",
+            "Krepi.Proofs.Fdt.Refinement.property_spec",
+            "Krepi.Proofs.Fdt.Refinement.push_spec",
+            "Krepi.Proofs.Fdt.Refinement.repeats_name_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.repeats_name_spec",
+            "Krepi.Proofs.Fdt.Refinement.reservation_entry_spec",
+            "Krepi.Proofs.Fdt.Refinement.reservation_map_spec",
+            "Krepi.Proofs.Fdt.Refinement.same_bytes_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.scalar_end_eq_spec",
+            "Krepi.Proofs.Fdt.Refinement.scalar_end_spec",
+            "Krepi.Proofs.Fdt.Refinement.scalar_tail2_spec",
+            "Krepi.Proofs.Fdt.Refinement.scalar_tail3_spec",
+            "Krepi.Proofs.Fdt.Refinement.scalar_tail4_spec",
+            "Krepi.Proofs.Fdt.Refinement.span_new_spec",
+            "Krepi.Proofs.Fdt.Refinement.tokens_spec",
+            "Krepi.Proofs.Fdt.Refinement.u32_at_spec",
+            "Krepi.Proofs.Fdt.Refinement.u64_at_spec",
+            "Krepi.Proofs.Fdt.Refinement.walkOf_start",
+            "Krepi.Proofs.Fdt.Refinement.walk_tokens_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.walk_tokens_spec",
+            "Krepi.Proofs.Fdt.Refinement.zeros_spec"
+          ]
+        },
+        {
+          "id": "fdt::Fdt::nodes",
+          "statement": "FdtNodes: fdt::Fdt::nodes returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.fdtNodes",
+            "Krepi.Proofs.Fdt.Refinement.fdt_nodes_spec",
+            "Krepi.Proofs.Fdt.Refinement.innermost_spec",
+            "Krepi.Proofs.Fdt.Refinement.node_of_spec",
+            "Krepi.Proofs.Fdt.Refinement.node_step_end",
+            "Krepi.Proofs.Fdt.Refinement.node_step_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.node_step_spec",
+            "Krepi.Proofs.Fdt.Refinement.nodes_next_sim",
+            "Krepi.Proofs.Fdt.Refinement.start_repr"
+          ]
+        },
+        {
+          "id": "fdt::Nodes::next",
+          "statement": "NodesNext: the calls of fdt::Nodes::next give the items of the list or plan that the iterator stands for, in order, and then none",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodesNext"
+          ]
+        },
+        {
+          "id": "fdt::Fdt::find_node",
+          "statement": "FdtFindNode: fdt::Fdt::find_node returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.fdtFindNode",
+            "Krepi.Proofs.Fdt.Refinement.child_named_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.child_named_spec",
+            "Krepi.Proofs.Fdt.Refinement.component_end_spec",
+            "Krepi.Proofs.Fdt.Refinement.descend_to_last_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.double_slash_spec",
+            "Krepi.Proofs.Fdt.Refinement.fdt_find_node_spec",
+            "Krepi.Proofs.Fdt.Refinement.first_node_spec",
+            "Krepi.Proofs.Fdt.Refinement.is_child_spec",
+            "Krepi.Proofs.Fdt.Refinement.path_valid_spec",
+            "Krepi.Proofs.Fdt.Refinement.same_bytes_spec"
+          ]
+        },
+        {
+          "id": "fdt::Fdt::reservations",
+          "statement": "FdtReservations: fdt::Fdt::reservations returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.fdtReservations",
+            "Krepi.Proofs.Fdt.Refinement.fdt_reservations_spec",
+            "Krepi.Proofs.Fdt.Refinement.reservation_step_spec",
+            "Krepi.Proofs.Fdt.Refinement.reservations_next_end",
+            "Krepi.Proofs.Fdt.Refinement.reservations_next_ok",
+            "Krepi.Proofs.Fdt.Refinement.reservations_stands"
+          ]
+        },
+        {
+          "id": "fdt::Reservations::next",
+          "statement": "ReservationsNext: the calls of fdt::Reservations::next give the items of the list or plan that the iterator stands for, in order, and then none",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.reservationsNext"
+          ]
+        },
+        {
+          "id": "fdt::Fdt::total_size",
+          "statement": "FdtTotalSize: fdt::Fdt::total_size returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.fdtTotalSize",
+            "Krepi.Proofs.Fdt.Refinement.fdt_total_size_spec",
+            "Krepi.Proofs.Fdt.Refinement.total_size_spec"
+          ]
+        },
+        {
+          "id": "fdt::Node::name",
+          "statement": "NodeName: fdt::Node::name returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeName",
+            "Krepi.Proofs.Fdt.Refinement.node_name_spec"
+          ]
+        },
+        {
+          "id": "fdt::Node::parent",
+          "statement": "NodeParent: fdt::Node::parent returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeParent",
+            "Krepi.Proofs.Fdt.Refinement.node_at_offset_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.node_at_offset_spec",
+            "Krepi.Proofs.Fdt.Refinement.node_parent_spec",
+            "Krepi.Proofs.Fdt.Refinement.parent_at_spec"
+          ]
+        },
+        {
+          "id": "fdt::Node::property",
+          "statement": "NodeProperty: fdt::Node::property returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeProperty",
+            "Krepi.Proofs.Fdt.Refinement.node_property_spec",
+            "Krepi.Proofs.Fdt.Refinement.property_range_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.value_at_spec"
+          ]
+        },
+        {
+          "id": "fdt::Node::string_property",
+          "statement": "NodeStringProperty: fdt::Node::string_property returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeStringProperty",
+            "Krepi.Proofs.Fdt.Refinement.node_string_property_spec",
+            "Krepi.Proofs.Fdt.Refinement.string_at_spec"
+          ]
+        },
+        {
+          "id": "fdt::Node::enabled",
+          "statement": "NodeEnabled: fdt::Node::enabled returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeEnabled",
+            "Krepi.Proofs.Fdt.Refinement.enabled_at_spec",
+            "Krepi.Proofs.Fdt.Refinement.node_enabled_spec"
+          ]
+        },
+        {
+          "id": "fdt::Node::address_cells",
+          "statement": "NodeAddressCells: fdt::Node::address_cells returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeAddressCells",
+            "Krepi.Proofs.Fdt.Refinement.address_cells_at_spec",
+            "Krepi.Proofs.Fdt.Refinement.cells_at_spec",
+            "Krepi.Proofs.Fdt.Refinement.node_address_cells_spec"
+          ]
+        },
+        {
+          "id": "fdt::Node::size_cells",
+          "statement": "NodeSizeCells: fdt::Node::size_cells returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeSizeCells",
+            "Krepi.Proofs.Fdt.Refinement.node_size_cells_spec",
+            "Krepi.Proofs.Fdt.Refinement.size_cells_at_spec"
+          ]
+        },
+        {
+          "id": "fdt::Node::reg",
+          "statement": "NodeReg: fdt::Node::reg returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeReg",
+            "Krepi.Proofs.Fdt.Refinement.cells_u64_spec",
+            "Krepi.Proofs.Fdt.Refinement.check_reg_entries_spec",
+            "Krepi.Proofs.Fdt.Refinement.check_reg_spec",
+            "Krepi.Proofs.Fdt.Refinement.check_width_spec",
+            "Krepi.Proofs.Fdt.Refinement.node_reg_spec",
+            "Krepi.Proofs.Fdt.Refinement.parent_at_node_spec",
+            "Krepi.Proofs.Fdt.Refinement.reg_at_spec",
+            "Krepi.Proofs.Fdt.Refinement.reg_entry_spec",
+            "Krepi.Proofs.Fdt.Refinement.reg_next_end",
+            "Krepi.Proofs.Fdt.Refinement.reg_next_entry",
+            "Krepi.Proofs.Fdt.Refinement.reg_stands",
+            "Krepi.Proofs.Fdt.Refinement.reg_step_spec",
+            "Krepi.Proofs.Fdt.Refinement.reg_stride_spec"
+          ]
+        },
+        {
+          "id": "fdt::Node::ranges",
+          "statement": "NodeRanges: fdt::Node::ranges returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeRanges",
+            "Krepi.Proofs.Fdt.Refinement.check_map_spec",
+            "Krepi.Proofs.Fdt.Refinement.check_windows_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.check_windows_spec",
+            "Krepi.Proofs.Fdt.Refinement.map_at_spec",
+            "Krepi.Proofs.Fdt.Refinement.node_address_map_spec",
+            "Krepi.Proofs.Fdt.Refinement.node_ranges_spec",
+            "Krepi.Proofs.Fdt.Refinement.stride_spec",
+            "Krepi.Proofs.Fdt.Refinement.window_spec"
+          ]
+        },
+        {
+          "id": "fdt::Node::dma_ranges",
+          "statement": "NodeDmaRanges: fdt::Node::dma_ranges returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeDmaRanges",
+            "Krepi.Proofs.Fdt.Refinement.node_dma_ranges_spec"
+          ]
+        },
+        {
+          "id": "fdt::Node::translate_reg",
+          "statement": "NodeTranslateReg: fdt::Node::translate_reg returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeTranslateReg",
+            "Krepi.Proofs.Fdt.Refinement.climb_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.climb_spec",
+            "Krepi.Proofs.Fdt.Refinement.ends_within_spec",
+            "Krepi.Proofs.Fdt.Refinement.holds_spec",
+            "Krepi.Proofs.Fdt.Refinement.node_translate_reg_spec",
+            "Krepi.Proofs.Fdt.Refinement.span_end_spec",
+            "Krepi.Proofs.Fdt.Refinement.through_windows_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.through_windows_spec",
+            "Krepi.Proofs.Fdt.Refinement.translate_map_spec"
+          ]
+        },
+        {
+          "id": "fdt::Fdt::discover_memory",
+          "statement": "FdtDiscoverMemory: fdt::Fdt::discover_memory returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverMemory",
+            "Krepi.Proofs.Fdt.Refinement.add_map_entries_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_map_entries_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_ram_children_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_ram_children_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_ram_entries_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_ram_entries_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_ram_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_reserved_children_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_reserved_children_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_reserved_entries_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_reserved_entries_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_reserved_memory_spec",
+            "Krepi.Proofs.Fdt.Refinement.descend_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.fdt_discover_memory_spec",
+            "Krepi.Proofs.Fdt.Refinement.find_path_spec",
+            "Krepi.Proofs.Fdt.Refinement.flag_at_spec",
+            "Krepi.Proofs.Fdt.Refinement.has_property_spec",
+            "Krepi.Proofs.Fdt.Refinement.memory_name_spec",
+            "Krepi.Proofs.Fdt.Refinement.no_memory_state",
+            "Krepi.Proofs.Fdt.Refinement.prefix_spec",
+            "Krepi.Proofs.Fdt.Refinement.push_reserved_spec",
+            "Krepi.Proofs.Fdt.Refinement.ram_of_child_spec",
+            "Krepi.Proofs.Fdt.Refinement.ram_ranges_spec",
+            "Krepi.Proofs.Fdt.Refinement.reserved_memory_binding_spec",
+            "Krepi.Proofs.Fdt.Refinement.reserved_of_child_spec",
+            "Krepi.Proofs.Fdt.Refinement.reserved_regions_spec",
+            "Krepi.Proofs.Fdt.Refinement.starts_with_spec",
+            "Krepi.Proofs.Fdt.Refinement.touches_any_spec",
+            "Krepi.Proofs.Fdt.Refinement.touches_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryMap::ram",
+          "statement": "MemoryMapRam: fdt::MemoryMap::ram returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.memoryMapRam",
+            "Krepi.Proofs.Fdt.Refinement.memory_map_ram_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryMap::reserved",
+          "statement": "MemoryMapReserved: fdt::MemoryMap::reserved returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.memoryMapReserved",
+            "Krepi.Proofs.Fdt.Refinement.memory_map_reserved_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryMap::dynamic",
+          "statement": "MemoryMapDynamic: fdt::MemoryMap::dynamic returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.memoryMapDynamic",
+            "Krepi.Proofs.Fdt.Refinement.memory_map_dynamic_spec"
+          ]
+        },
+        {
+          "id": "fdt::Fdt::discover_boot_memory",
+          "statement": "FdtDiscoverBootMemory: fdt::Fdt::discover_boot_memory returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverBootMemory",
+            "Krepi.Proofs.Fdt.Refinement.check_compatible_spec",
+            "Krepi.Proofs.Fdt.Refinement.check_hand_over_spec",
+            "Krepi.Proofs.Fdt.Refinement.check_storage_spec",
+            "Krepi.Proofs.Fdt.Refinement.compatible_entries_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.compatible_entries_spec",
+            "Krepi.Proofs.Fdt.Refinement.fdt_discover_boot_memory_spec",
+            "Krepi.Proofs.Fdt.Refinement.has_entry_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.has_entry_spec",
+            "Krepi.Proofs.Fdt.Refinement.holds_required_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.holds_required_spec",
+            "Krepi.Proofs.Fdt.Refinement.in_one_range_spec",
+            "Krepi.Proofs.Fdt.Refinement.is_aligned_spec",
+            "Krepi.Proofs.Fdt.Refinement.ram_bytes_spec"
+          ]
+        },
+        {
+          "id": "fdt::BootMemory::ram",
+          "statement": "BootMemoryRam: fdt::BootMemory::ram returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryRam",
+            "Krepi.Proofs.Fdt.Refinement.boot_memory_ram_spec"
+          ]
+        },
+        {
+          "id": "fdt::BootMemory::reserved",
+          "statement": "BootMemoryReserved: fdt::BootMemory::reserved returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryReserved",
+            "Krepi.Proofs.Fdt.Refinement.boot_memory_reserved_spec"
+          ]
+        },
+        {
+          "id": "fdt::BootMemory::dynamic",
+          "statement": "BootMemoryDynamic: fdt::BootMemory::dynamic returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryDynamic",
+            "Krepi.Proofs.Fdt.Refinement.boot_memory_dynamic_spec"
+          ]
+        },
+        {
+          "id": "fdt::BootMemory::dtb",
+          "statement": "BootMemoryDtb: fdt::BootMemory::dtb returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryDtb",
+            "Krepi.Proofs.Fdt.Refinement.boot_memory_dtb_spec"
+          ]
+        },
+        {
+          "id": "fdt::BootMemory::image",
+          "statement": "BootMemoryImage: fdt::BootMemory::image returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryImage",
+            "Krepi.Proofs.Fdt.Refinement.boot_memory_image_spec"
+          ]
+        },
+        {
+          "id": "fdt::BootMemory::ram_bytes",
+          "statement": "BootMemoryRamBytes: fdt::BootMemory::ram_bytes returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryRamBytes",
+            "Krepi.Proofs.Fdt.Refinement.boot_memory_ram_bytes_spec"
+          ]
+        },
+        {
+          "id": "fdt::BootMemory::is_available",
+          "statement": "BootMemoryIsAvailable: fdt::BootMemory::is_available returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryIsAvailable",
+            "Krepi.Proofs.Fdt.Refinement.boot_memory_is_available_spec",
+            "Krepi.Proofs.Fdt.Refinement.touches_region_spec",
+            "Krepi.Proofs.Fdt.Refinement.valid_spec"
+          ]
+        },
+        {
+          "id": "fdt::BootMemory::find_available",
+          "statement": "BootMemoryFindAvailable: fdt::BootMemory::find_available returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryFindAvailable",
+            "Krepi.Proofs.Fdt.Refinement.align_up_spec",
+            "Krepi.Proofs.Fdt.Refinement.boot_memory_find_available_spec",
+            "Krepi.Proofs.Fdt.Refinement.furthest_touched_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.furthest_touched_spec",
+            "Krepi.Proofs.Fdt.Refinement.search_range_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.search_range_spec",
+            "Krepi.Proofs.Fdt.Refinement.search_ranges_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.search_ranges_spec"
+          ]
+        },
+        {
+          "id": "fdt::Fdt::discover_cpus",
+          "statement": "FdtDiscoverCpus: fdt::Fdt::discover_cpus returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Cpus.fdtDiscoverCpus",
+            "Krepi.Proofs.Fdt.Refinement.cpu_children_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.cpu_children_spec",
+            "Krepi.Proofs.Fdt.Refinement.cpu_of_child_spec",
+            "Krepi.Proofs.Fdt.Refinement.cpu_profile_affinity_shift_spec",
+            "Krepi.Proofs.Fdt.Refinement.cpu_profile_conduit_spec",
+            "Krepi.Proofs.Fdt.Refinement.discover_cpus_spec",
+            "Krepi.Proofs.Fdt.Refinement.find_path_valid_spec",
+            "Krepi.Proofs.Fdt.Refinement.id_of_spec",
+            "Krepi.Proofs.Fdt.Refinement.ids_complete_spec",
+            "Krepi.Proofs.Fdt.Refinement.method_is_spec",
+            "Krepi.Proofs.Fdt.Refinement.psci_compatible_spec",
+            "Krepi.Proofs.Fdt.Refinement.string_is_spec"
+          ]
+        },
+        {
+          "id": "fdt::CpuTopology::count",
+          "statement": "CpuTopologyCount: fdt::CpuTopology::count returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyCount",
+            "Krepi.Proofs.Fdt.Refinement.cpu_topology_count_spec"
+          ]
+        },
+        {
+          "id": "fdt::CpuTopology::profile",
+          "statement": "CpuTopologyProfile: fdt::CpuTopology::profile returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyProfile",
+            "Krepi.Proofs.Fdt.Refinement.cpu_topology_profile_spec"
+          ]
+        },
+        {
+          "id": "fdt::CpuTopology::affinity",
+          "statement": "CpuTopologyAffinity: fdt::CpuTopology::affinity returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyAffinity",
+            "Krepi.Proofs.Fdt.Refinement.cpu_topology_affinity_spec"
+          ]
+        },
+        {
+          "id": "fdt::CpuTopology::validate_timers",
+          "statement": "CpuTopologyValidateTimers: fdt::CpuTopology::validate_timers returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Cpus.cpuTopologyValidateTimers",
+            "Krepi.Proofs.Fdt.Refinement.timer_records_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.timer_records_spec",
+            "Krepi.Proofs.Fdt.Refinement.validate_timers_spec"
+          ]
+        },
+        {
+          "id": "fdt::CpuProfile::logical_id",
+          "statement": "CpuProfileLogicalId: fdt::CpuProfile::logical_id returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileLogicalId",
+            "Krepi.Proofs.Fdt.Refinement.cpu_profile_logical_id_spec"
+          ]
+        },
+        {
+          "id": "fdt::CpuProfile::affinity_shift",
+          "statement": "CpuProfileAffinityShift: fdt::CpuProfile::affinity_shift returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileAffinityShift"
+          ]
+        },
+        {
+          "id": "fdt::CpuProfile::conduit",
+          "statement": "CpuProfileConduit: fdt::CpuProfile::conduit returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileConduit"
+          ]
+        },
+        {
+          "id": "fdt::cells_u64",
+          "statement": "CellsU64: fdt::cells_u64 returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.cellsU64"
+          ]
+        },
+        {
+          "id": "fdt::Reg::new",
+          "statement": "RegNew: fdt::Reg::new returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.regNew",
+            "Krepi.Proofs.Fdt.Refinement.reg_new_spec"
+          ]
+        },
+        {
+          "id": "fdt::Reg::next",
+          "statement": "RegNext: the calls of fdt::Reg::next give the items of the list or plan that the iterator stands for, in order, and then none",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.regNext"
+          ]
+        },
+        {
+          "id": "fdt::AddressMap::new",
+          "statement": "AddressMapNew: fdt::AddressMap::new returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.addressMapNew",
+            "Krepi.Proofs.Fdt.Refinement.address_map_new_spec"
+          ]
+        },
+        {
+          "id": "fdt::AddressMap::kind",
+          "statement": "AddressMapKind: fdt::AddressMap::kind returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.addressMapKind",
+            "Krepi.Proofs.Fdt.Refinement.address_map_kind_spec"
+          ]
+        },
+        {
+          "id": "fdt::AddressMap::to_parent",
+          "statement": "AddressMapToParent: fdt::AddressMap::to_parent returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.addressMapToParent",
+            "Krepi.Proofs.Fdt.Refinement.address_map_to_parent_spec"
+          ]
+        },
+        {
+          "id": "fdt::AddressMap::to_child",
+          "statement": "AddressMapToChild: fdt::AddressMap::to_child returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.addressMapToChild",
+            "Krepi.Proofs.Fdt.Refinement.address_map_to_child_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::all_ram",
+          "statement": "MemoryPlanAllRam: fdt::MemoryPlan::all_ram returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanAllRam",
+            "Krepi.Proofs.Fdt.Refinement.add_banks_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_boot_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_firmware_spec",
+            "Krepi.Proofs.Fdt.Refinement.admit_banks_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.admit_banks_spec",
+            "Krepi.Proofs.Fdt.Refinement.all_ram_spec",
+            "Krepi.Proofs.Fdt.Refinement.build_spec",
+            "Krepi.Proofs.Fdt.Refinement.check_span_spec",
+            "Krepi.Proofs.Fdt.Refinement.insert_bank_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.insert_bank_spec",
+            "Krepi.Proofs.Fdt.Refinement.max_ram_bytes_eq",
+            "Krepi.Proofs.Fdt.Refinement.no_plan_boot_count",
+            "Krepi.Proofs.Fdt.Refinement.no_plan_managed_count",
+            "Krepi.Proofs.Fdt.Refinement.no_plan_ram_count",
+            "Krepi.Proofs.Fdt.Refinement.pages_of_spec",
+            "Krepi.Proofs.Fdt.Refinement.sort_banks_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::new",
+          "statement": "MemoryPlanNew: fdt::MemoryPlan::new returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanNew",
+            "Krepi.Proofs.Fdt.Refinement.check_window_spec",
+            "Krepi.Proofs.Fdt.Refinement.contains_ram_spec",
+            "Krepi.Proofs.Fdt.Refinement.manage_window_spec",
+            "Krepi.Proofs.Fdt.Refinement.max_window_bytes_eq",
+            "Krepi.Proofs.Fdt.Refinement.memory_plan_ram_spec",
+            "Krepi.Proofs.Fdt.Refinement.new_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::from_boot_memory",
+          "statement": "MemoryPlanFromBootMemory: fdt::MemoryPlan::from_boot_memory returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanFromBootMemory",
+            "Krepi.Proofs.Fdt.Refinement.from_boot_memory_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.from_boot_memory_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::managed_banks",
+          "statement": "MemoryPlanManagedBanks: fdt::MemoryPlan::managed_banks returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanManagedBanks",
+            "Krepi.Proofs.Fdt.Refinement.memory_plan_managed_banks_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::ram",
+          "statement": "MemoryPlanRam: fdt::MemoryPlan::ram returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanRam"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::reservations",
+          "statement": "MemoryPlanReservations: fdt::MemoryPlan::reservations returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanReservations",
+            "Krepi.Proofs.Fdt.Refinement.memory_plan_reservations_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::boot_ranges",
+          "statement": "MemoryPlanBootRanges: fdt::MemoryPlan::boot_ranges returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanBootRanges",
+            "Krepi.Proofs.Fdt.Refinement.memory_plan_boot_ranges_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::firmware_ranges",
+          "statement": "MemoryPlanFirmwareRanges: fdt::MemoryPlan::firmware_ranges returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanFirmwareRanges",
+            "Krepi.Proofs.Fdt.Refinement.memory_plan_firmware_ranges_spec",
+            "Krepi.Proofs.Fdt.Refinement.part_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::described_bytes",
+          "statement": "MemoryPlanDescribedBytes: fdt::MemoryPlan::described_bytes returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanDescribedBytes",
+            "Krepi.Proofs.Fdt.Refinement.described_bytes_spec",
+            "Krepi.Proofs.Fdt.Refinement.sum_sizes_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::managed_bytes",
+          "statement": "MemoryPlanManagedBytes: fdt::MemoryPlan::managed_bytes returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanManagedBytes",
+            "Krepi.Proofs.Fdt.Refinement.managed_bytes_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::contains_ram",
+          "statement": "MemoryPlanContainsRam: fdt::MemoryPlan::contains_ram returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanContainsRam"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::is_available",
+          "statement": "MemoryPlanIsAvailable: fdt::MemoryPlan::is_available returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanIsAvailable",
+            "Krepi.Proofs.Fdt.Refinement.is_available_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::permits_backing",
+          "statement": "MemoryPlanPermitsBacking: fdt::MemoryPlan::permits_backing returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanPermitsBacking",
+            "Krepi.Proofs.Fdt.Refinement.permits_backing_spec"
+          ]
+        },
+        {
+          "id": "fdt::MemoryPlan::available_ranges",
+          "statement": "MemoryPlanAvailableRanges: fdt::MemoryPlan::available_ranges returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanAvailableRanges",
+            "Krepi.Proofs.Fdt.Refinement.available_ranges_next_end",
+            "Krepi.Proofs.Fdt.Refinement.available_ranges_next_spec",
+            "Krepi.Proofs.Fdt.Refinement.available_ranges_spec",
+            "Krepi.Proofs.Fdt.Refinement.available_ranges_stands",
+            "Krepi.Proofs.Fdt.Refinement.available_step_loop_body_end",
+            "Krepi.Proofs.Fdt.Refinement.available_step_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.available_step_spec",
+            "Krepi.Proofs.Fdt.Refinement.furthest_holding_spec",
+            "Krepi.Proofs.Fdt.Refinement.nearest_start_spec"
+          ]
+        },
+        {
+          "id": "fdt::AvailableRanges::next",
+          "statement": "AvailableRangesNext: the calls of fdt::AvailableRanges::next give the items of the list or plan that the iterator stands for, in order, and then none",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.availableRangesNext"
+          ]
+        },
+        {
+          "id": "fdt::Span::new",
+          "statement": "SpanNew: fdt::Span::new returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.spanNew"
+          ]
+        },
+        {
+          "id": "fdt::Span::end",
+          "statement": "SpanEnd: fdt::Span::end returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.spanEnd"
+          ]
+        },
+        {
+          "id": "fdt::Span::contains",
+          "statement": "SpanContains: fdt::Span::contains returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.spanContains",
+            "Krepi.Proofs.Fdt.Refinement.span_contains_spec"
+          ]
+        }
+      ],
+      "mutants": [
+        {
+          "name": "parse-depth-off-by-one",
+          "file": "src/fdt/parser.rs",
+          "find": "if walk.open >= DEPTH {",
+          "replace": "if walk.open > DEPTH {",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.fdtParse",
+            "Krepi.Proofs.Fdt.Refinement.begin_node_spec",
+            "Krepi.Proofs.Fdt.Refinement.place_spec"
+          ]
+        },
+        {
+          "name": "parse-name-padding-unchecked",
+          "file": "src/fdt/parser.rs",
+          "find": "padded_end(structure, nul + 1, true)",
+          "replace": "padded_end(structure, nul + 1, false)",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.fdtParse",
+            "Krepi.Proofs.Fdt.Refinement.decode_begin_spec",
+            "Krepi.Proofs.Fdt.Refinement.decode_token_spec"
+          ]
+        },
+        {
+          "name": "parse-reservation-overlap-unchecked",
+          "file": "src/fdt/parser.rs",
+          "find": "if overlaps_earlier(blob, layout.reservations, cursor, span)? {",
+          "replace": "if overlaps_earlier(blob, layout.reservations, cursor, span)? && false {",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.fdtParse",
+            "Krepi.Proofs.Fdt.Refinement.reservation_entry_spec",
+            "Krepi.Proofs.Fdt.Refinement.reservation_map_spec"
+          ]
+        },
+        {
+          "name": "find-node-first-sibling",
+          "file": "src/fdt/nodes.rs",
+          "find": "                    if seen {\n                        return Err(Error::AmbiguousMapping);",
+          "replace": "                    if seen {\n                        return Ok(found);",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.fdtFindNode",
+            "Krepi.Proofs.Fdt.Refinement.child_named_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.child_named_spec",
+            "Krepi.Proofs.Fdt.Refinement.descend_to_last_loop_spec"
+          ]
+        },
+        {
+          "name": "enabled-rejects-ok",
+          "file": "src/fdt/nodes.rs",
+          "find": "|| same_bytes(structure, start, end, b\"ok\"))",
+          "replace": "|| false)",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeEnabled",
+            "Krepi.Proofs.Fdt.Refinement.enabled_at_spec"
+          ]
+        },
+        {
+          "name": "address-cells-inherited",
+          "file": "src/fdt/nodes.rs",
+          "find": "    cells_at(structure, strings, node, b\"#address-cells\", 2)\n",
+          "replace": "    let default = match parent_at(structure, node) {\n        Some(parent) => cells_at(structure, strings, parent, b\"#address-cells\", 2)?,\n        None => 2,\n    };\n    cells_at(structure, strings, node, b\"#address-cells\", default)\n",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.nodeAddressCells",
+            "Krepi.Proofs.Fdt.Refinement.address_cells_at_spec"
+          ]
+        },
+        {
+          "name": "memory-overlap-unchecked",
+          "file": "src/fdt/discovery.rs",
+          "find": "if touches_any(prefix(&map.ram, map.ram_count), span) {",
+          "replace": "if touches_any(prefix(&map.ram, map.ram_count), span) && false {",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverMemory",
+            "Krepi.Proofs.Fdt.Refinement.add_ram_entries_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_ram_spec"
+          ]
+        },
+        {
+          "name": "memory-ranges-off-by-one",
+          "file": "src/fdt/discovery.rs",
+          "find": "if map.ram_count >= RAM_RANGES {",
+          "replace": "if map.ram_count > RAM_RANGES {",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverMemory",
+            "Krepi.Proofs.Fdt.Refinement.add_ram_entries_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_ram_spec"
+          ]
+        },
+        {
+          "name": "dynamic-not-counted",
+          "file": "src/fdt/discovery.rs",
+          "find": "map.dynamic += 1;",
+          "replace": "map.dynamic += 0;",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverMemory",
+            "Krepi.Proofs.Fdt.Refinement.add_reserved_children_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.ram_of_child_spec",
+            "Krepi.Proofs.Fdt.Refinement.reserved_of_child_spec"
+          ]
+        },
+        {
+          "name": "hand-over-size-off-by-one",
+          "file": "src/fdt/hand_over.rs",
+          "find": "if tree.total_size() > hand_over.max_blob_size {",
+          "replace": "if tree.total_size() > hand_over.max_blob_size\n        && tree.total_size() - 1 > hand_over.max_blob_size\n    {",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverBootMemory",
+            "Krepi.Proofs.Fdt.Refinement.check_hand_over_spec",
+            "Krepi.Proofs.Fdt.Refinement.fdt_discover_boot_memory_spec"
+          ]
+        },
+        {
+          "name": "hand-over-image-on-tree-unchecked",
+          "file": "src/fdt/hand_over.rs",
+          "find": "if touches(image, dtb) {",
+          "replace": "if touches(image, dtb) && false {",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.fdtDiscoverBootMemory",
+            "Krepi.Proofs.Fdt.Refinement.check_hand_over_spec",
+            "Krepi.Proofs.Fdt.Refinement.fdt_discover_boot_memory_spec"
+          ]
+        },
+        {
+          "name": "is-available-ignores-tree",
+          "file": "src/fdt/hand_over.rs",
+          "find": "|| touches(self.dtb, span)",
+          "replace": "|| false",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryIsAvailable",
+            "Krepi.Proofs.Fdt.Refinement.boot_memory_is_available_spec"
+          ]
+        },
+        {
+          "name": "find-available-unaligned",
+          "file": "src/fdt/hand_over/selection.rs",
+          "find": "Some(furthest) => start = align_up(furthest, alignment)?,",
+          "replace": "Some(furthest) => start = furthest,",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryFindAvailable",
+            "Krepi.Proofs.Fdt.Refinement.search_range_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.search_range_spec",
+            "Krepi.Proofs.Fdt.Refinement.search_ranges_loop_spec"
+          ]
+        },
+        {
+          "name": "find-available-touch-at-end",
+          "file": "src/fdt/hand_over/selection.rs",
+          "find": "if touches(span, candidate) && (!touched || span.start + span.size > end) {",
+          "replace": "let longer = Span {\n            start: candidate.start,\n            size: candidate.size + 1,\n        };\n        if touches(span, longer) && (!touched || span.start + span.size > end) {",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Discovery.bootMemoryFindAvailable",
+            "Krepi.Proofs.Fdt.Refinement.furthest_touched_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.furthest_touched_spec",
+            "Krepi.Proofs.Fdt.Refinement.search_range_loop_spec"
+          ]
+        },
+        {
+          "name": "cpus-repeated-id-accepted",
+          "file": "src/fdt/cpus.rs",
+          "find": "if ids & (1 << id) != 0 {",
+          "replace": "if ids & (1 << id) != 0 && false {",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Cpus.fdtDiscoverCpus",
+            "Krepi.Proofs.Fdt.Refinement.cpu_children_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.cpu_of_child_spec",
+            "Krepi.Proofs.Fdt.Refinement.discover_cpus_spec"
+          ]
+        },
+        {
+          "name": "logical-id-unmasked",
+          "file": "src/fdt/cpus.rs",
+          "find": "id_of(self, mpidr & AFFINITY_MASK)",
+          "replace": "id_of(self, mpidr)",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Cpus.cpuProfileLogicalId",
+            "Krepi.Proofs.Fdt.Refinement.cpu_profile_logical_id_spec"
+          ]
+        },
+        {
+          "name": "cells-high-cell-dropped",
+          "file": "src/fdt.rs",
+          "find": "    format::u64_at(bytes, 0)\n",
+          "replace": "    match format::u32_at(bytes, 4) {\n        Ok(low) => Ok(low as u64),\n        Err(error) => Err(error),\n    }\n",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.cellsU64",
+            "Krepi.Proofs.Fdt.Refinement.cells_u64_spec"
+          ]
+        },
+        {
+          "name": "translate-first-window",
+          "file": "src/fdt/translation.rs",
+          "find": "            if seen {\n                return Err(Error::AmbiguousMapping);",
+          "replace": "            if seen {\n                return match found {\n                    Some(span) => Ok(span),\n                    None => Err(Error::Unmapped),\n                };",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.addressMapToParent",
+            "Krepi.Proofs.Fdt.Refinement.through_windows_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.through_windows_spec",
+            "Krepi.Proofs.Fdt.Refinement.translate_map_spec"
+          ]
+        },
+        {
+          "name": "reg-low-4gib-unchecked",
+          "file": "src/fdt/translation.rs",
+          "find": "    check_width(span, address_cells)?;",
+          "replace": "    check_width(span, 2)?;",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.regNew",
+            "Krepi.Proofs.Fdt.Refinement.check_reg_entries_spec",
+            "Krepi.Proofs.Fdt.Refinement.reg_entry_spec",
+            "Krepi.Proofs.Fdt.Refinement.reg_new_spec",
+            "Krepi.Proofs.Fdt.Refinement.reg_step_spec"
+          ]
+        },
+        {
+          "name": "plan-boot-storage-off-by-one",
+          "file": "src/fdt/plan.rs",
+          "find": "|| count > BOOT_SPANS",
+          "replace": "|| count > BOOT_SPANS + 1",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanAllRam",
+            "Krepi.Proofs.Fdt.Refinement.build_spec"
+          ]
+        },
+        {
+          "name": "plan-boot-storage-inward",
+          "file": "src/fdt/plan.rs",
+          "find": "let pages = pages_of(boot[index])?;",
+          "replace": "pages_of(boot[index])?;\n        let span = boot[index];\n        let start = (span.start + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1);\n        let stop = (span.start + span.size) & !(PAGE_SIZE - 1);\n        let size = if stop > start { stop - start } else { 0 };\n        let pages = Span { start, size };",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanAllRam",
+            "Krepi.Proofs.Fdt.Refinement.add_boot_spec",
+            "Krepi.Proofs.Fdt.Refinement.add_firmware_spec",
+            "Krepi.Proofs.Fdt.Refinement.build_spec"
+          ]
+        },
+        {
+          "name": "plan-window-outside-ram",
+          "file": "src/fdt/plan.rs",
+          "find": "if !plan.contains_ram(window) {",
+          "replace": "if !plan.contains_ram(window) && false {",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanNew",
+            "Krepi.Proofs.Fdt.Refinement.manage_window_spec",
+            "Krepi.Proofs.Fdt.Refinement.new_spec"
+          ]
+        },
+        {
+          "name": "available-ranges-past-reservation",
+          "file": "src/fdt/plan/available.rs",
+          "find": "let start = reservations[index].start;",
+          "replace": "let start = reservations[index].start + reservations[index].size;",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanAvailableRanges",
+            "Krepi.Proofs.Fdt.Refinement.available_step_loop_body_end",
+            "Krepi.Proofs.Fdt.Refinement.available_step_loop_spec",
+            "Krepi.Proofs.Fdt.Refinement.nearest_start_spec"
+          ]
+        },
+        {
+          "name": "permits-backing-all-banks",
+          "file": "src/fdt/plan.rs",
+          "find": "in_one_range(self.managed_banks(), range) && self.is_available(range)",
+          "replace": "in_one_range(self.ram(), range) && self.is_available(range)",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanPermitsBacking",
+            "Krepi.Proofs.Fdt.Refinement.permits_backing_spec"
+          ]
+        },
+        {
+          "name": "managed-bytes-of-banks",
+          "file": "src/fdt/plan.rs",
+          "find": "sum_sizes(self.managed_banks())",
+          "replace": "sum_sizes(self.ram())",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Plan.memoryPlanManagedBytes",
+            "Krepi.Proofs.Fdt.Refinement.managed_bytes_spec"
+          ]
+        },
+        {
+          "name": "span-new-wraps",
+          "file": "src/fdt/span.rs",
+          "find": "        match start.checked_add(size) {",
+          "replace": "        match start.checked_add(0) {",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.spanNew",
+            "Krepi.Proofs.Fdt.Refinement.span_new_spec"
+          ]
+        },
+        {
+          "name": "span-contains-end-off-by-one",
+          "file": "src/fdt/span.rs",
+          "find": "Ok(self.start <= other.start && other_end <= end)",
+          "replace": "Ok(self.start <= other.start && (other_end <= end || other_end - 1 == end))",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Translate.spanContains",
+            "Krepi.Proofs.Fdt.Refinement.span_contains_spec"
+          ]
+        },
+        {
+          "name": "max-property-name-off-by-one",
+          "file": "src/fdt.rs",
+          "find": "pub const MAX_PROPERTY_NAME: u64 = 64;",
+          "replace": "pub const MAX_PROPERTY_NAME: u64 = 65;",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.fdtParse",
+            "Krepi.Proofs.Fdt.Refinement.decode_property_spec",
+            "Krepi.Proofs.Fdt.Refinement.max_name_val"
+          ]
+        },
+        {
+          "name": "max-blob-size-off-by-one",
+          "file": "src/fdt.rs",
+          "find": "pub const MAX_BLOB_SIZE: u64 = 0x20_0000;",
+          "replace": "pub const MAX_BLOB_SIZE: u64 = 0x20_0001;",
+          "fails": [
+            "Krepi.Proofs.Fdt.Refinement.Tree.fdtParse",
+            "Krepi.Proofs.Fdt.Refinement.header_spec",
+            "Krepi.Proofs.Fdt.Refinement.max_blob_val"
+          ]
+        }
+      ],
+      "parts": [
+        {
+          "budget": 1800,
+          "mutants": [
+            "parse-depth-off-by-one",
+            "parse-reservation-overlap-unchecked",
+            "enabled-rejects-ok",
+            "memory-overlap-unchecked",
+            "dynamic-not-counted",
+            "hand-over-image-on-tree-unchecked",
+            "find-available-unaligned",
+            "cpus-repeated-id-accepted",
+            "cells-high-cell-dropped",
+            "reg-low-4gib-unchecked",
+            "plan-boot-storage-inward",
+            "available-ranges-past-reservation",
+            "managed-bytes-of-banks",
+            "span-contains-end-off-by-one",
+            "max-blob-size-off-by-one"
+          ]
+        },
+        {
+          "budget": 1800,
+          "mutants": [
+            "parse-name-padding-unchecked",
+            "find-node-first-sibling",
+            "address-cells-inherited",
+            "memory-ranges-off-by-one",
+            "hand-over-size-off-by-one",
+            "is-available-ignores-tree",
+            "find-available-touch-at-end",
+            "logical-id-unmasked",
+            "translate-first-window",
+            "plan-boot-storage-off-by-one",
+            "plan-window-outside-ram",
+            "permits-backing-all-banks",
+            "span-new-wraps",
+            "max-property-name-off-by-one"
+          ]
+        }
       ]
     },
     {
       "name": "page-tables",
-      "state": "planned",
       "module": "PageTables",
-      "feature": null,
-      "description": "The module page_tables of the provable core: the descriptors and kinds of the stage 1 translation tables, the physical ranges, the table sets with their pools and the entries that look up, map, unmap, reset and copy them, with the write plans that they return, the kernel's mappings of its image and its devices, the kernel direct map, and the page ownership table with its placement, reservations, receipts and statistics. The roots are the functions of the core rows of the entry table of the component's contract, without its row of the adapter krepi_arch::mmu, and the next of the plan iterator types ClonePlan, KernelMapPlan and DirectMapPlan. Each function of those rows refines its specification below Krepi.Spec.PageTables under the premises that the proof path states: it returns the value, and the write plan where the specification gives one, or the error that it gives in the same order, for every input of its machine widths; clone_kernel_from, kernel_map and direct_map return their plan as an iterator. Each next refines the plan that the specification gives for its entry, the plan of Tables.cloneKernelFrom or mapPlan: its calls give the steps of that plan in order, and then none. Planned: the functions exist, and their refinement is not proved yet.",
+      "feature": "krepi.kernel.kernel-memory",
+      "description": "The module page_tables of the provable core: the descriptors and kinds of the stage 1 translation tables, the physical ranges, the table sets with their pools and the entries that look up, map, unmap, reset and copy them, with the write plans that they return, the kernel's mappings of its image and its devices, the kernel direct map, and the page ownership table with its placement, reservations, receipts and statistics. The roots are the functions of the core rows of the entry table of the component's contract, without its row of the adapter krepi_arch::mmu, and the next of the plan iterator types ClonePlan, KernelMapPlan and DirectMapPlan. Each function of those rows refines its specification below Krepi.Spec.PageTables under the premises that the proof path states, the invariants that the functions which build a table set, a range and a page ownership table establish for it, the rules that the callers and the boot wiring keep, among them the execution of each write plan by the adapter, an open obligation, a boot memory map that the fdt entries built, which the gate does not check, and a usize of 64 bits: it returns the value, and the write plan where the specification gives one, or the error that it gives in the same order, for every input of its machine widths; clone_kernel_from, kernel_map and direct_map return their plan as an iterator. Each next refines the plan that the specification gives for its entry, the plan of Tables.cloneKernelFrom or mapPlan: its calls give the steps of that plan in order, and then none. The refinement theorems are below Krepi.Proofs.PageTables.Refinement, one for each root; the target also proves the eight functions of the module fdt that direct_map reaches through the usable ranges of a boot memory map.",
       "start_from": [
         "krepi_kernel::page_tables::descriptor",
         "krepi_kernel::page_tables::direct_address",
@@ -571,6 +1865,939 @@
         "krepi_kernel::page_tables::Ownership::owner",
         "krepi_kernel::page_tables::Ownership::validate",
         "krepi_kernel::page_tables::Ownership::stats"
+      ],
+      "proves": [
+        "kernel/src/fdt/plan.rs#MemoryPlan::available_ranges",
+        "kernel/src/fdt/plan.rs#MemoryPlan::managed_banks",
+        "kernel/src/fdt/plan.rs#MemoryPlan::reservations",
+        "kernel/src/fdt/plan/available.rs#AvailableRanges::next",
+        "kernel/src/fdt/plan/available.rs#available_step",
+        "kernel/src/fdt/plan/available.rs#furthest_holding",
+        "kernel/src/fdt/plan/available.rs#nearest_start",
+        "kernel/src/fdt/span.rs#prefix",
+        "kernel/src/page_tables.rs#descriptor",
+        "kernel/src/page_tables.rs#direct_address",
+        "kernel/src/page_tables.rs#direct_map",
+        "kernel/src/page_tables.rs#kernel_map",
+        "kernel/src/page_tables/boot.rs#MapCheck::new",
+        "kernel/src/page_tables/boot.rs#MapCheck::passed",
+        "kernel/src/page_tables/boot.rs#MapCursor::children",
+        "kernel/src/page_tables/boot.rs#MapCursor::entry",
+        "kernel/src/page_tables/boot.rs#MapCursor::held_page",
+        "kernel/src/page_tables/boot.rs#MapCursor::leaf",
+        "kernel/src/page_tables/boot.rs#MapCursor::new_page",
+        "kernel/src/page_tables/boot.rs#MapCursor::search",
+        "kernel/src/page_tables/boot.rs#MapCursor::take",
+        "kernel/src/page_tables/boot.rs#Tables::place",
+        "kernel/src/page_tables/boot.rs#check_leaf",
+        "kernel/src/page_tables/boot.rs#write_phase",
+        "kernel/src/page_tables/boot/direct.rs#DirectMapPlan::next",
+        "kernel/src/page_tables/boot/direct.rs#check_leaves",
+        "kernel/src/page_tables/boot/direct.rs#check_range",
+        "kernel/src/page_tables/boot/direct.rs#check_usable",
+        "kernel/src/page_tables/boot/direct.rs#leaf_at",
+        "kernel/src/page_tables/boot/direct.rs#range_leaf",
+        "kernel/src/page_tables/boot/direct.rs#usable_leaf",
+        "kernel/src/page_tables/boot/layout.rs#KernelMapPlan::next",
+        "kernel/src/page_tables/boot/layout.rs#LayoutKind::kind",
+        "kernel/src/page_tables/boot/layout.rs#check_layout",
+        "kernel/src/page_tables/boot/layout.rs#check_pages",
+        "kernel/src/page_tables/boot/layout.rs#check_range",
+        "kernel/src/page_tables/boot/layout.rs#holds_guard",
+        "kernel/src/page_tables/boot/layout.rs#insert_range",
+        "kernel/src/page_tables/boot/layout.rs#layout_leaf",
+        "kernel/src/page_tables/boot/layout.rs#sort_ranges",
+        "kernel/src/page_tables/copy.rs#ClonePlan::next",
+        "kernel/src/page_tables/copy.rs#Tables::clone_kernel_from",
+        "kernel/src/page_tables/copy.rs#all_reached",
+        "kernel/src/page_tables/copy.rs#check_leaves",
+        "kernel/src/page_tables/copy.rs#copy_kind",
+        "kernel/src/page_tables/copy.rs#copyable",
+        "kernel/src/page_tables/copy.rs#next_valid",
+        "kernel/src/page_tables/copy.rs#reach",
+        "kernel/src/page_tables/copy.rs#walk_level2",
+        "kernel/src/page_tables/copy.rs#walk_root",
+        "kernel/src/page_tables/encoding.rs#Kind::bits",
+        "kernel/src/page_tables/encoding.rs#block_descriptor",
+        "kernel/src/page_tables/encoding.rs#is_valid",
+        "kernel/src/page_tables/encoding.rs#output_address",
+        "kernel/src/page_tables/encoding.rs#table_descriptor",
+        "kernel/src/page_tables/encoding.rs#type_bits",
+        "kernel/src/page_tables/ownership.rs#Holding::owner",
+        "kernel/src/page_tables/ownership.rs#Ownership::new",
+        "kernel/src/page_tables/ownership.rs#Ownership::owner",
+        "kernel/src/page_tables/ownership.rs#Ownership::room",
+        "kernel/src/page_tables/ownership.rs#Ownership::stats",
+        "kernel/src/page_tables/ownership.rs#any_overlap",
+        "kernel/src/page_tables/ownership.rs#bank_extents",
+        "kernel/src/page_tables/ownership.rs#copy_exclusions",
+        "kernel/src/page_tables/ownership.rs#cut",
+        "kernel/src/page_tables/ownership.rs#cuts_at",
+        "kernel/src/page_tables/ownership.rs#extent_stats",
+        "kernel/src/page_tables/ownership.rs#first_excluder",
+        "kernel/src/page_tables/ownership.rs#holding_extent",
+        "kernel/src/page_tables/ownership.rs#holds_page",
+        "kernel/src/page_tables/ownership.rs#in_banks",
+        "kernel/src/page_tables/ownership.rs#initial_extents",
+        "kernel/src/page_tables/ownership.rs#insert_bank",
+        "kernel/src/page_tables/ownership.rs#is_free",
+        "kernel/src/page_tables/ownership.rs#on_pages",
+        "kernel/src/page_tables/ownership.rs#overlaps_later",
+        "kernel/src/page_tables/ownership.rs#precedes",
+        "kernel/src/page_tables/ownership.rs#rank",
+        "kernel/src/page_tables/ownership.rs#sort_banks",
+        "kernel/src/page_tables/ownership.rs#touches_page",
+        "kernel/src/page_tables/ownership/placement.rs#Ownership::assign",
+        "kernel/src/page_tables/ownership/placement.rs#Ownership::choose",
+        "kernel/src/page_tables/ownership/placement.rs#Ownership::reserve",
+        "kernel/src/page_tables/ownership/placement.rs#Ownership::take",
+        "kernel/src/page_tables/ownership/placement.rs#extra_extents",
+        "kernel/src/page_tables/ownership/placement.rs#fit",
+        "kernel/src/page_tables/ownership/placement.rs#free_containing",
+        "kernel/src/page_tables/ownership/placement.rs#high_fit",
+        "kernel/src/page_tables/ownership/placement.rs#low_fit",
+        "kernel/src/page_tables/ownership/placement.rs#open_gap",
+        "kernel/src/page_tables/ownership/placement.rs#scan",
+        "kernel/src/page_tables/ownership/placement.rs#split",
+        "kernel/src/page_tables/ownership/receipts.rs#Ownership::cancel",
+        "kernel/src/page_tables/ownership/receipts.rs#Ownership::find_held",
+        "kernel/src/page_tables/ownership/receipts.rs#Ownership::publish",
+        "kernel/src/page_tables/ownership/receipts.rs#Ownership::release",
+        "kernel/src/page_tables/ownership/receipts.rs#Ownership::validate",
+        "kernel/src/page_tables/ownership/receipts.rs#Reservation::initialized",
+        "kernel/src/page_tables/ownership/receipts.rs#close_gap",
+        "kernel/src/page_tables/ownership/receipts.rs#held_extent",
+        "kernel/src/page_tables/ownership/receipts.rs#holds_as",
+        "kernel/src/page_tables/ownership/receipts.rs#joins",
+        "kernel/src/page_tables/ownership/receipts.rs#merge_freed",
+        "kernel/src/page_tables/ownership/receipts.rs#same_state",
+        "kernel/src/page_tables/range.rs#PhysRange::contains",
+        "kernel/src/page_tables/range.rs#PhysRange::end",
+        "kernel/src/page_tables/range.rs#PhysRange::new",
+        "kernel/src/page_tables/range.rs#PhysRange::overlaps",
+        "kernel/src/page_tables/walk.rs#Tables::child",
+        "kernel/src/page_tables/walk.rs#Tables::in_use",
+        "kernel/src/page_tables/walk.rs#Tables::lookup_block",
+        "kernel/src/page_tables/walk.rs#Tables::lookup_page",
+        "kernel/src/page_tables/walk.rs#Tables::new",
+        "kernel/src/page_tables/walk.rs#Tables::page_leaf",
+        "kernel/src/page_tables/walk.rs#Tables::used",
+        "kernel/src/page_tables/walk.rs#Tables::walk_level2",
+        "kernel/src/page_tables/walk.rs#check_entry",
+        "kernel/src/page_tables/walk.rs#check_physical",
+        "kernel/src/page_tables/walk.rs#check_pool",
+        "kernel/src/page_tables/walk.rs#child_index",
+        "kernel/src/page_tables/walk.rs#in_region",
+        "kernel/src/page_tables/walk.rs#index1",
+        "kernel/src/page_tables/walk.rs#index2",
+        "kernel/src/page_tables/walk.rs#index3",
+        "kernel/src/page_tables/walk.rs#pool_fits",
+        "kernel/src/page_tables/walk.rs#table_address",
+        "kernel/src/page_tables/walk.rs#width_ok",
+        "kernel/src/page_tables/write.rs#Tables::free_tables",
+        "kernel/src/page_tables/write.rs#Tables::map_below",
+        "kernel/src/page_tables/write.rs#Tables::map_block",
+        "kernel/src/page_tables/write.rs#Tables::map_page",
+        "kernel/src/page_tables/write.rs#Tables::reset",
+        "kernel/src/page_tables/write.rs#Tables::unmap_page",
+        "kernel/src/page_tables/write.rs#plan",
+        "kernel/src/page_tables/write.rs#two_steps"
+      ],
+      "unclosed": [],
+      "derived": [
+        "kernel/src/page_tables.rs#Exclusion::clone",
+        "kernel/src/page_tables.rs#Extent::clone",
+        "kernel/src/page_tables.rs#PhysRange::clone",
+        "kernel/src/page_tables.rs#Step::clone"
+      ],
+      "unconstrained": [],
+      "proof_modules": [
+        "Krepi.Proofs.PageTables.Refinement.Boot",
+        "Krepi.Proofs.PageTables.Refinement.CopyLemmas",
+        "Krepi.Proofs.PageTables.Refinement.CursorLemmas",
+        "Krepi.Proofs.PageTables.Refinement.DirectLemmas",
+        "Krepi.Proofs.PageTables.Refinement.DirectPlanLemmas",
+        "Krepi.Proofs.PageTables.Refinement.FdtQueryLemmas",
+        "Krepi.Proofs.PageTables.Refinement.KernelPlanLemmas",
+        "Krepi.Proofs.PageTables.Refinement.LayoutLemmas",
+        "Krepi.Proofs.PageTables.Refinement.OwnNewLemmas",
+        "Krepi.Proofs.PageTables.Refinement.Ownership",
+        "Krepi.Proofs.PageTables.Refinement.PlaceLemmas",
+        "Krepi.Proofs.PageTables.Refinement.ReceiptLemmas",
+        "Krepi.Proofs.PageTables.Refinement.Tables",
+        "Krepi.Proofs.PageTables.Refinement.WalkLemmas",
+        "Krepi.Proofs.PageTables.Refinement.WriteLemmas"
+      ],
+      "obligations": [
+        {
+          "id": "page_tables::descriptor",
+          "statement": "Descriptor: page_tables::descriptor returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.descriptor",
+            "Krepi.Proofs.PageTables.Refinement.access_eq",
+            "Krepi.Proofs.PageTables.Refinement.descriptor_spec",
+            "Krepi.Proofs.PageTables.Refinement.el0_eq",
+            "Krepi.Proofs.PageTables.Refinement.inner_shareable_eq",
+            "Krepi.Proofs.PageTables.Refinement.kind_bits_spec",
+            "Krepi.Proofs.PageTables.Refinement.normal_eq",
+            "Krepi.Proofs.PageTables.Refinement.not_global_eq",
+            "Krepi.Proofs.PageTables.Refinement.pxn_eq",
+            "Krepi.Proofs.PageTables.Refinement.read_only_eq",
+            "Krepi.Proofs.PageTables.Refinement.uxn_eq",
+            "Krepi.Proofs.PageTables.Refinement.word64_address_mask",
+            "Krepi.Proofs.PageTables.Refinement.word64_table_or_page"
+          ]
+        },
+        {
+          "id": "page_tables::direct_address",
+          "statement": "DirectAddress: page_tables::direct_address returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.directAddress",
+            "Krepi.Proofs.PageTables.Refinement.direct_address_repr_spec",
+            "Krepi.Proofs.PageTables.Refinement.direct_address_spec",
+            "Krepi.Proofs.PageTables.Refinement.phys_range_end_spec",
+            "Krepi.Proofs.PageTables.Refinement.va_limit_eq",
+            "Krepi.Proofs.PageTables.Refinement.word64_direct_base"
+          ]
+        },
+        {
+          "id": "page_tables::PhysRange::new",
+          "statement": "PhysRangeNew: page_tables::PhysRange::new returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.physRangeNew",
+            "Krepi.Proofs.PageTables.Refinement.phys_range_new_spec"
+          ]
+        },
+        {
+          "id": "page_tables::PhysRange::end",
+          "statement": "PhysRangeEnd: page_tables::PhysRange::end returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.physRangeEnd",
+            "Krepi.Proofs.PageTables.Refinement.phys_range_end_repr_spec"
+          ]
+        },
+        {
+          "id": "page_tables::PhysRange::contains",
+          "statement": "PhysRangeContains: page_tables::PhysRange::contains returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.physRangeContains",
+            "Krepi.Proofs.PageTables.Refinement.phys_range_contains_repr_spec",
+            "Krepi.Proofs.PageTables.Refinement.phys_range_contains_spec"
+          ]
+        },
+        {
+          "id": "page_tables::PhysRange::overlaps",
+          "statement": "PhysRangeOverlaps: page_tables::PhysRange::overlaps returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.physRangeOverlaps",
+            "Krepi.Proofs.PageTables.Refinement.phys_range_overlaps_repr_spec",
+            "Krepi.Proofs.PageTables.Refinement.phys_range_overlaps_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Tables::lookup_page",
+          "statement": "TablesLookupPage: page_tables::Tables::lookup_page returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesLookupPage",
+            "Krepi.Proofs.PageTables.Refinement.check_entry_spec",
+            "Krepi.Proofs.PageTables.Refinement.child_index_spec",
+            "Krepi.Proofs.PageTables.Refinement.child_spec",
+            "Krepi.Proofs.PageTables.Refinement.direct_base_val",
+            "Krepi.Proofs.PageTables.Refinement.in_region_spec",
+            "Krepi.Proofs.PageTables.Refinement.in_use_spec",
+            "Krepi.Proofs.PageTables.Refinement.index1_spec",
+            "Krepi.Proofs.PageTables.Refinement.index2_spec",
+            "Krepi.Proofs.PageTables.Refinement.index3_spec",
+            "Krepi.Proofs.PageTables.Refinement.is_valid_spec",
+            "Krepi.Proofs.PageTables.Refinement.lookup_page_spec",
+            "Krepi.Proofs.PageTables.Refinement.output_address_spec",
+            "Krepi.Proofs.PageTables.Refinement.page_leaf_spec",
+            "Krepi.Proofs.PageTables.Refinement.page_size_eq",
+            "Krepi.Proofs.PageTables.Refinement.pool_fits_spec",
+            "Krepi.Proofs.PageTables.Refinement.type_bits_spec",
+            "Krepi.Proofs.PageTables.Refinement.walk_level2_spec",
+            "Krepi.Proofs.PageTables.Refinement.width_ok_spec",
+            "Krepi.Proofs.PageTables.Refinement.word64_block"
+          ]
+        },
+        {
+          "id": "page_tables::Tables::lookup_block",
+          "statement": "TablesLookupBlock: page_tables::Tables::lookup_block returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesLookupBlock",
+            "Krepi.Proofs.PageTables.Refinement.block_size_eq",
+            "Krepi.Proofs.PageTables.Refinement.lookup_block_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Tables::used",
+          "statement": "TablesUsed: page_tables::Tables::used returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesUsed",
+            "Krepi.Proofs.PageTables.Refinement.used_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Tables::new",
+          "statement": "TablesNew: page_tables::Tables::new returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesNew",
+            "Krepi.Proofs.PageTables.Refinement.entries_eq",
+            "Krepi.Proofs.PageTables.Refinement.new_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Tables::reset",
+          "statement": "TablesReset: page_tables::Tables::reset returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesReset",
+            "Krepi.Proofs.PageTables.Refinement.reset_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Tables::clone_kernel_from",
+          "statement": "TablesCloneKernelFrom: page_tables::Tables::clone_kernel_from returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesCloneKernelFrom",
+            "Krepi.Proofs.PageTables.Refinement.all_reached_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.all_reached_spec",
+            "Krepi.Proofs.PageTables.Refinement.check_pool_spec",
+            "Krepi.Proofs.PageTables.Refinement.clone_kernel_from_spec",
+            "Krepi.Proofs.PageTables.Refinement.clone_next_cons",
+            "Krepi.Proofs.PageTables.Refinement.clone_next_done",
+            "Krepi.Proofs.PageTables.Refinement.clone_ok_writes",
+            "Krepi.Proofs.PageTables.Refinement.clone_stands",
+            "Krepi.Proofs.PageTables.Refinement.clone_writes_err",
+            "Krepi.Proofs.PageTables.Refinement.copy_check_leaves_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.copy_check_leaves_spec",
+            "Krepi.Proofs.PageTables.Refinement.copy_isPlain_iff",
+            "Krepi.Proofs.PageTables.Refinement.copy_kind_spec",
+            "Krepi.Proofs.PageTables.Refinement.copy_leaves_eq",
+            "Krepi.Proofs.PageTables.Refinement.copy_level2_eq",
+            "Krepi.Proofs.PageTables.Refinement.copy_reach_spec",
+            "Krepi.Proofs.PageTables.Refinement.copy_root_eq",
+            "Krepi.Proofs.PageTables.Refinement.copy_unreached_eq",
+            "Krepi.Proofs.PageTables.Refinement.copy_walk_level2_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.copy_walk_level2_spec",
+            "Krepi.Proofs.PageTables.Refinement.copy_walk_root_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.copy_walk_root_spec",
+            "Krepi.Proofs.PageTables.Refinement.copyable_spec",
+            "Krepi.Proofs.PageTables.Refinement.next_valid_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.next_valid_spec",
+            "Krepi.Proofs.PageTables.Refinement.table_address_spec",
+            "Krepi.Proofs.PageTables.Refinement.table_descriptor_spec"
+          ]
+        },
+        {
+          "id": "page_tables::ClonePlan::next",
+          "statement": "ClonePlanNext: the calls of page_tables::ClonePlan::next give the items of the list or plan that the iterator stands for, in order, and then none",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.clonePlanNext"
+          ]
+        },
+        {
+          "id": "page_tables::Tables::map_page",
+          "statement": "TablesMapPage: page_tables::Tables::map_page returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesMapPage",
+            "Krepi.Proofs.PageTables.Refinement.check_physical_spec",
+            "Krepi.Proofs.PageTables.Refinement.free_tables_spec",
+            "Krepi.Proofs.PageTables.Refinement.map_below_spec",
+            "Krepi.Proofs.PageTables.Refinement.map_page_spec",
+            "Krepi.Proofs.PageTables.Refinement.plan_spec",
+            "Krepi.Proofs.PageTables.Refinement.two_steps_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Tables::map_block",
+          "statement": "TablesMapBlock: page_tables::Tables::map_block returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesMapBlock",
+            "Krepi.Proofs.PageTables.Refinement.block_descriptor_spec",
+            "Krepi.Proofs.PageTables.Refinement.map_block_spec",
+            "Krepi.Proofs.PageTables.Refinement.word64_block_address_mask"
+          ]
+        },
+        {
+          "id": "page_tables::Tables::unmap_page",
+          "statement": "TablesUnmapPage: page_tables::Tables::unmap_page returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesUnmapPage",
+            "Krepi.Proofs.PageTables.Refinement.unmap_page_spec"
+          ]
+        },
+        {
+          "id": "page_tables::kernel_map",
+          "statement": "KernelMap: page_tables::kernel_map returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Boot.kernelMap",
+            "Krepi.Proofs.PageTables.Refinement.boot_place_spec",
+            "Krepi.Proofs.PageTables.Refinement.check_layout_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.check_layout_spec",
+            "Krepi.Proofs.PageTables.Refinement.check_leaf_spec",
+            "Krepi.Proofs.PageTables.Refinement.check_pages_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.check_pages_spec",
+            "Krepi.Proofs.PageTables.Refinement.check_range_spec",
+            "Krepi.Proofs.PageTables.Refinement.children_spec",
+            "Krepi.Proofs.PageTables.Refinement.entry_spec",
+            "Krepi.Proofs.PageTables.Refinement.gib_size_eq",
+            "Krepi.Proofs.PageTables.Refinement.held_page_spec",
+            "Krepi.Proofs.PageTables.Refinement.holds_guard_spec",
+            "Krepi.Proofs.PageTables.Refinement.insert_range_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.kernel_map_plan_next_spec",
+            "Krepi.Proofs.PageTables.Refinement.kernel_map_plan_stands",
+            "Krepi.Proofs.PageTables.Refinement.kernel_map_set_spec",
+            "Krepi.Proofs.PageTables.Refinement.kernel_map_spec",
+            "Krepi.Proofs.PageTables.Refinement.layout_kind_spec",
+            "Krepi.Proofs.PageTables.Refinement.layout_leaf_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.layout_leaf_spec",
+            "Krepi.Proofs.PageTables.Refinement.leaf_spec",
+            "Krepi.Proofs.PageTables.Refinement.map_check_new_spec",
+            "Krepi.Proofs.PageTables.Refinement.map_check_passed_spec",
+            "Krepi.Proofs.PageTables.Refinement.max_layout_ranges_eq",
+            "Krepi.Proofs.PageTables.Refinement.new_page_spec",
+            "Krepi.Proofs.PageTables.Refinement.no_limit_val",
+            "Krepi.Proofs.PageTables.Refinement.no_slot_val",
+            "Krepi.Proofs.PageTables.Refinement.search_spec",
+            "Krepi.Proofs.PageTables.Refinement.sort_ranges_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.sort_ranges_spec",
+            "Krepi.Proofs.PageTables.Refinement.take_spec",
+            "Krepi.Proofs.PageTables.Refinement.write_phase_spec"
+          ]
+        },
+        {
+          "id": "page_tables::KernelMapPlan::next",
+          "statement": "KernelMapPlanNext: the calls of page_tables::KernelMapPlan::next give the items of the list or plan that the iterator stands for, in order, and then none",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Boot.kernelMapPlanNext"
+          ]
+        },
+        {
+          "id": "page_tables::direct_map",
+          "statement": "DirectMap: page_tables::direct_map returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Boot.directMap",
+            "Krepi.Proofs.PageTables.Refinement.available_ranges_next_end",
+            "Krepi.Proofs.PageTables.Refinement.available_ranges_next_spec",
+            "Krepi.Proofs.PageTables.Refinement.available_ranges_spec",
+            "Krepi.Proofs.PageTables.Refinement.available_ranges_stands",
+            "Krepi.Proofs.PageTables.Refinement.available_step_loop_body_end",
+            "Krepi.Proofs.PageTables.Refinement.available_step_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.available_step_spec",
+            "Krepi.Proofs.PageTables.Refinement.check_leaves_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.check_usable_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.check_usable_spec",
+            "Krepi.Proofs.PageTables.Refinement.direct_check_range_spec",
+            "Krepi.Proofs.PageTables.Refinement.direct_map_plan_next_spec",
+            "Krepi.Proofs.PageTables.Refinement.direct_map_plan_stands",
+            "Krepi.Proofs.PageTables.Refinement.direct_map_set_spec",
+            "Krepi.Proofs.PageTables.Refinement.direct_map_spec",
+            "Krepi.Proofs.PageTables.Refinement.furthest_holding_spec",
+            "Krepi.Proofs.PageTables.Refinement.leaf_at_spec",
+            "Krepi.Proofs.PageTables.Refinement.memory_plan_managed_banks_spec",
+            "Krepi.Proofs.PageTables.Refinement.memory_plan_reservations_spec",
+            "Krepi.Proofs.PageTables.Refinement.nearest_start_spec",
+            "Krepi.Proofs.PageTables.Refinement.prefix_spec",
+            "Krepi.Proofs.PageTables.Refinement.range_leaf_spec",
+            "Krepi.Proofs.PageTables.Refinement.searchList_start",
+            "Krepi.Proofs.PageTables.Refinement.usable_leaf_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.usable_leaf_spec"
+          ]
+        },
+        {
+          "id": "page_tables::DirectMapPlan::next",
+          "statement": "DirectMapPlanNext: the calls of page_tables::DirectMapPlan::next give the items of the list or plan that the iterator stands for, in order, and then none",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Boot.directMapPlanNext"
+          ]
+        },
+        {
+          "id": "page_tables::Ownership::new",
+          "statement": "OwnershipNew: page_tables::Ownership::new returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipNew",
+            "Krepi.Proofs.PageTables.Refinement.any_overlap_spec",
+            "Krepi.Proofs.PageTables.Refinement.bank_extents_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.bank_extents_spec",
+            "Krepi.Proofs.PageTables.Refinement.copy_exclusions_spec",
+            "Krepi.Proofs.PageTables.Refinement.cut_spec",
+            "Krepi.Proofs.PageTables.Refinement.cuts_at_spec",
+            "Krepi.Proofs.PageTables.Refinement.initial_extents_spec",
+            "Krepi.Proofs.PageTables.Refinement.insert_bank_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.insert_bank_spec",
+            "Krepi.Proofs.PageTables.Refinement.on_pages_spec",
+            "Krepi.Proofs.PageTables.Refinement.overlaps_later_spec",
+            "Krepi.Proofs.PageTables.Refinement.ownership_new_spec",
+            "Krepi.Proofs.PageTables.Refinement.sort_banks_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Ownership::choose",
+          "statement": "OwnershipChoose: page_tables::Ownership::choose returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipChoose",
+            "Krepi.Proofs.PageTables.Refinement.extra_extents_spec",
+            "Krepi.Proofs.PageTables.Refinement.high_fit_spec",
+            "Krepi.Proofs.PageTables.Refinement.is_free_spec",
+            "Krepi.Proofs.PageTables.Refinement.low_fit_spec",
+            "Krepi.Proofs.PageTables.Refinement.ownership_choose_spec",
+            "Krepi.Proofs.PageTables.Refinement.page_limit_eq",
+            "Krepi.Proofs.PageTables.Refinement.placement_fit_spec",
+            "Krepi.Proofs.PageTables.Refinement.placement_scan_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.placement_scan_spec",
+            "Krepi.Proofs.PageTables.Refinement.room_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Ownership::assign",
+          "statement": "OwnershipAssign: page_tables::Ownership::assign returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipAssign",
+            "Krepi.Proofs.PageTables.Refinement.free_containing_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.free_containing_spec",
+            "Krepi.Proofs.PageTables.Refinement.open_gap_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.open_gap_spec",
+            "Krepi.Proofs.PageTables.Refinement.ownership_assign_spec",
+            "Krepi.Proofs.PageTables.Refinement.ownership_take_spec",
+            "Krepi.Proofs.PageTables.Refinement.placement_split_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Ownership::reserve",
+          "statement": "OwnershipReserve: page_tables::Ownership::reserve returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipReserve",
+            "Krepi.Proofs.PageTables.Refinement.ownership_reserve_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Reservation::initialized",
+          "statement": "ReservationInitialized: page_tables::Reservation::initialized returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.reservationInitialized",
+            "Krepi.Proofs.PageTables.Refinement.reservation_initialized_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Ownership::publish",
+          "statement": "OwnershipPublish: page_tables::Ownership::publish returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipPublish",
+            "Krepi.Proofs.PageTables.Refinement.find_held_spec",
+            "Krepi.Proofs.PageTables.Refinement.held_extent_spec",
+            "Krepi.Proofs.PageTables.Refinement.holds_as_spec",
+            "Krepi.Proofs.PageTables.Refinement.ownership_publish_spec",
+            "Krepi.Proofs.PageTables.Refinement.same_state_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Ownership::cancel",
+          "statement": "OwnershipCancel: page_tables::Ownership::cancel returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipCancel",
+            "Krepi.Proofs.PageTables.Refinement.close_gap_spec",
+            "Krepi.Proofs.PageTables.Refinement.joins_spec",
+            "Krepi.Proofs.PageTables.Refinement.merge_freed_spec",
+            "Krepi.Proofs.PageTables.Refinement.ownership_cancel_spec",
+            "Krepi.Proofs.PageTables.Refinement.receipt_merge_last_spec",
+            "Krepi.Proofs.PageTables.Refinement.receipt_merge_tail_first_spec",
+            "Krepi.Proofs.PageTables.Refinement.receipt_merge_tail_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Ownership::release",
+          "statement": "OwnershipRelease: page_tables::Ownership::release returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipRelease",
+            "Krepi.Proofs.PageTables.Refinement.ownership_release_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Ownership::owner",
+          "statement": "OwnershipOwner: page_tables::Ownership::owner returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipOwner",
+            "Krepi.Proofs.PageTables.Refinement.first_excluder_spec",
+            "Krepi.Proofs.PageTables.Refinement.holding_extent_spec",
+            "Krepi.Proofs.PageTables.Refinement.holding_owner_spec",
+            "Krepi.Proofs.PageTables.Refinement.holds_page_spec",
+            "Krepi.Proofs.PageTables.Refinement.in_banks_spec",
+            "Krepi.Proofs.PageTables.Refinement.ownership_owner_spec",
+            "Krepi.Proofs.PageTables.Refinement.precedes_spec",
+            "Krepi.Proofs.PageTables.Refinement.rank_spec",
+            "Krepi.Proofs.PageTables.Refinement.touches_page_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Ownership::validate",
+          "statement": "OwnershipValidate: page_tables::Ownership::validate returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipValidate",
+            "Krepi.Proofs.PageTables.Refinement.ownership_validate_spec"
+          ]
+        },
+        {
+          "id": "page_tables::Ownership::stats",
+          "statement": "OwnershipStats: page_tables::Ownership::stats returns what its specification gives, related by the representation of the value types, or fails with the error that it gives in the same order, for every input of its machine widths under the premises of the proof path",
+          "theorems": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipStats",
+            "Krepi.Proofs.PageTables.Refinement.extent_stats_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.extent_stats_spec",
+            "Krepi.Proofs.PageTables.Refinement.ownership_stats_spec"
+          ]
+        }
+      ],
+      "mutants": [
+        {
+          "name": "read-write-executable",
+          "file": "src/page_tables/encoding.rs",
+          "find": "Kind::ReadWrite => INNER_SHAREABLE | NORMAL | ACCESS | PXN | UXN,",
+          "replace": "Kind::ReadWrite => INNER_SHAREABLE | NORMAL | ACCESS | UXN,",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.descriptor",
+            "Krepi.Proofs.PageTables.Refinement.descriptor_spec",
+            "Krepi.Proofs.PageTables.Refinement.kind_bits_spec"
+          ]
+        },
+        {
+          "name": "direct-address-limit-off-by-one",
+          "file": "src/page_tables.rs",
+          "find": "if range.end() <= VA_LIMIT {",
+          "replace": "if range.end() <= VA_LIMIT + 1 {",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.directAddress",
+            "Krepi.Proofs.PageTables.Refinement.direct_address_repr_spec",
+            "Krepi.Proofs.PageTables.Refinement.direct_address_spec"
+          ]
+        },
+        {
+          "name": "lookup-block-rounds-down",
+          "file": "src/page_tables/walk.rs",
+          "find": "check_entry(UPPER, N, va, BLOCK_SIZE, base, bits)?;\n        let entry = match self.walk_level2(va, base)? {",
+          "replace": "check_entry(UPPER, N, va, 1, base, bits)?;\n        let entry = match self.walk_level2(va, base)? {",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesLookupBlock",
+            "Krepi.Proofs.PageTables.Refinement.lookup_block_spec"
+          ]
+        },
+        {
+          "name": "reset-keeps-record",
+          "file": "src/page_tables/write.rs",
+          "find": "self.used = 1;",
+          "replace": "self.used = self.used;",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesReset",
+            "Krepi.Proofs.PageTables.Refinement.reset_spec"
+          ]
+        },
+        {
+          "name": "clone-copies-private-leaf",
+          "file": "src/page_tables/copy.rs",
+          "find": "|| d == descriptor(Kind::Device, address)\n}",
+          "replace": "|| d == descriptor(Kind::Device, address)\n        || d == descriptor(Kind::KernelPrivateReadWrite, address)\n}",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesCloneKernelFrom",
+            "Krepi.Proofs.PageTables.Refinement.copy_kind_spec",
+            "Krepi.Proofs.PageTables.Refinement.copyable_spec"
+          ]
+        },
+        {
+          "name": "clone-reach-unchecked",
+          "file": "src/page_tables/copy.rs",
+          "find": "if !all_reached(&levels, source.used) {",
+          "replace": "if !all_reached(&levels, source.used) && false {",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesCloneKernelFrom",
+            "Krepi.Proofs.PageTables.Refinement.clone_kernel_from_spec"
+          ]
+        },
+        {
+          "name": "map-page-overwrites-valid",
+          "file": "src/page_tables/write.rs",
+          "find": "if is_valid(self.pool[level3][index3(va)]) {",
+          "replace": "if is_valid(self.pool[level3][index3(va)]) && false {",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesMapPage",
+            "Krepi.Proofs.PageTables.Refinement.map_below_spec",
+            "Krepi.Proofs.PageTables.Refinement.map_page_spec"
+          ]
+        },
+        {
+          "name": "map-page-store-before-fence",
+          "file": "src/page_tables/write.rs",
+          "find": "                    Step::Fence,\n                    Step::Store(\n                        table,\n                        index2(va),\n                        table_descriptor(table_address(base, level3)),\n                    ),\n",
+          "replace": "                    Step::Store(\n                        table,\n                        index2(va),\n                        table_descriptor(table_address(base, level3)),\n                    ),\n                    Step::Fence,\n",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesMapPage",
+            "Krepi.Proofs.PageTables.Refinement.map_below_spec",
+            "Krepi.Proofs.PageTables.Refinement.map_page_spec"
+          ]
+        },
+        {
+          "name": "map-block-over-table",
+          "file": "src/page_tables/write.rs",
+          "find": "        if is_valid(entry) && type_bits(entry) != BLOCK {\n            if let None = self.child(entry, base) {\n                return Err(TableError::TableBacking);\n            }\n        }\n        if is_valid(entry) {\n",
+          "replace": "        if is_valid(entry) && type_bits(entry) != BLOCK {\n            if let None = self.child(entry, base) {\n                return Err(TableError::TableBacking);\n            }\n        }\n        if is_valid(entry) && type_bits(entry) == BLOCK {\n",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesMapBlock",
+            "Krepi.Proofs.PageTables.Refinement.map_block_spec"
+          ]
+        },
+        {
+          "name": "map-block-output-unaligned",
+          "file": "src/page_tables/write.rs",
+          "find": "check_physical(pa, BLOCK_SIZE, bits)?;",
+          "replace": "check_physical(pa, PAGE_SIZE, bits)?;",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesMapBlock",
+            "Krepi.Proofs.PageTables.Refinement.map_block_spec"
+          ]
+        },
+        {
+          "name": "unmap-without-invalidate",
+          "file": "src/page_tables/write.rs",
+          "find": "let plan = two_steps(Step::Store(level3, index3(va), 0), Step::Invalidate(va));",
+          "replace": "let plan = two_steps(Step::Store(level3, index3(va), 0), Step::Sync);",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesUnmapPage",
+            "Krepi.Proofs.PageTables.Refinement.unmap_page_spec"
+          ]
+        },
+        {
+          "name": "unmap-page-of-block",
+          "file": "src/page_tables/write.rs",
+          "find": "        let (level3, leaf) = self.page_leaf(va, base)?;\n",
+          "replace": "        match self.walk_level2(va, base)? {\n            Some((table, entry)) => {\n                if is_valid(entry) && type_bits(entry) == BLOCK {\n                    let plan = two_steps(Step::Store(table, index2(va), 0), Step::Invalidate(va));\n                    return Ok((plan, output_address(entry)));\n                }\n            }\n            None => {}\n        }\n        let (level3, leaf) = self.page_leaf(va, base)?;\n",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Tables.tablesUnmapPage",
+            "Krepi.Proofs.PageTables.Refinement.unmap_page_spec"
+          ]
+        },
+        {
+          "name": "kernel-map-guard-unchecked",
+          "file": "src/page_tables/boot.rs",
+          "find": "if pa < check.reach || guard {",
+          "replace": "if pa < check.reach {",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Boot.kernelMap",
+            "Krepi.Proofs.PageTables.Refinement.check_leaf_spec",
+            "Krepi.Proofs.PageTables.Refinement.check_pages_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.leaf_spec"
+          ]
+        },
+        {
+          "name": "direct-map-tables-off-by-one",
+          "file": "src/page_tables/boot.rs",
+          "find": "if set.free_tables() < check.new_tables {",
+          "replace": "if set.free_tables() + 1 < check.new_tables {",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Boot.directMap",
+            "Krepi.Proofs.PageTables.Refinement.direct_map_set_spec",
+            "Krepi.Proofs.PageTables.Refinement.write_phase_spec"
+          ]
+        },
+        {
+          "name": "direct-map-block-past-range",
+          "file": "src/page_tables/boot/direct.rs",
+          "find": "if pa % BLOCK_SIZE == 0 && end - pa >= BLOCK_SIZE {",
+          "replace": "if pa % BLOCK_SIZE == 0 && end - pa > 0 {",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Boot.directMap",
+            "Krepi.Proofs.PageTables.Refinement.check_leaves_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.leaf_at_spec",
+            "Krepi.Proofs.PageTables.Refinement.range_leaf_spec"
+          ]
+        },
+        {
+          "name": "new-extents-off-by-one",
+          "file": "src/page_tables/ownership.rs",
+          "find": "if used >= E {",
+          "replace": "if used > E {",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipNew",
+            "Krepi.Proofs.PageTables.Refinement.bank_extents_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.bank_extents_spec",
+            "Krepi.Proofs.PageTables.Refinement.initial_extents_spec"
+          ]
+        },
+        {
+          "name": "new-exclusion-inward",
+          "file": "src/page_tables/ownership.rs",
+          "find": "    let down = exclusion.start & !(PAGE_SIZE - 1);\n    let start = if down > bank.start { down } else { bank.start };\n    // An end below that of the bank rounds up to at most the end of the\n    // bank, so the rounding does not pass 64 bits.\n    let stop = if exclusion.end() < bank.end() {\n        (exclusion.end() + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1)\n",
+          "replace": "    let down = (exclusion.start + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1);\n    let start = if down > bank.start { down } else { bank.start };\n    // An end below that of the bank rounds up to at most the end of the\n    // bank, so the rounding does not pass 64 bits.\n    let stop = if exclusion.end() < bank.end() {\n        exclusion.end() & !(PAGE_SIZE - 1)\n",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipNew",
+            "Krepi.Proofs.PageTables.Refinement.cut_spec",
+            "Krepi.Proofs.PageTables.Refinement.cuts_at_spec"
+          ]
+        },
+        {
+          "name": "new-overlap-unchecked",
+          "file": "src/page_tables/ownership.rs",
+          "find": "if any_overlap(banks) {",
+          "replace": "if any_overlap(banks) && false {",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipNew",
+            "Krepi.Proofs.PageTables.Refinement.ownership_new_spec"
+          ]
+        },
+        {
+          "name": "choose-high-from-lowest",
+          "file": "src/page_tables/ownership/placement.rs",
+          "find": "Direction::High => extents[count - 1 - step],",
+          "replace": "Direction::High => extents[step],",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipChoose",
+            "Krepi.Proofs.PageTables.Refinement.ownership_choose_spec",
+            "Krepi.Proofs.PageTables.Refinement.placement_scan_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.placement_scan_spec"
+          ]
+        },
+        {
+          "name": "choose-alignment-unchecked",
+          "file": "src/page_tables/ownership/placement.rs",
+          "find": "if alignment == 0 || (alignment & (alignment - 1)) != 0 {",
+          "replace": "if alignment == 0 {",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipChoose",
+            "Krepi.Proofs.PageTables.Refinement.ownership_choose_spec"
+          ]
+        },
+        {
+          "name": "assign-keeps-counter",
+          "file": "src/page_tables/ownership/placement.rs",
+          "find": "        self.take(choice, HoldState::Published)\n",
+          "replace": "        let counter = self.counter;\n        let taken = self.take(choice, HoldState::Published);\n        self.counter = counter;\n        taken\n",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipAssign",
+            "Krepi.Proofs.PageTables.Refinement.ownership_assign_spec"
+          ]
+        },
+        {
+          "name": "reserve-published",
+          "file": "src/page_tables/ownership/placement.rs",
+          "find": "let allocation = self.take(choice, HoldState::Reserved)?;",
+          "replace": "let allocation = self.take(choice, HoldState::Published)?;",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipReserve",
+            "Krepi.Proofs.PageTables.Refinement.ownership_reserve_spec"
+          ]
+        },
+        {
+          "name": "initialized-ignores-failure",
+          "file": "src/page_tables/ownership/receipts.rs",
+          "find": "        if zeroed {\n",
+          "replace": "        if zeroed || true {\n",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.reservationInitialized",
+            "Krepi.Proofs.PageTables.Refinement.reservation_initialized_spec"
+          ]
+        },
+        {
+          "name": "publish-ignores-state",
+          "file": "src/page_tables/ownership/receipts.rs",
+          "find": "        match self.find_held(owner, allocation, HoldState::Reserved) {\n",
+          "replace": "        let found = match self.find_held(owner, allocation, HoldState::Reserved) {\n            Ok(index) => Ok(index),\n            Err(_) => self.find_held(owner, allocation, HoldState::Published),\n        };\n        match found {\n",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipPublish",
+            "Krepi.Proofs.PageTables.Refinement.ownership_publish_spec"
+          ]
+        },
+        {
+          "name": "cancel-after-attempt",
+          "file": "src/page_tables/ownership/receipts.rs",
+          "find": "if reservation.attempted {",
+          "replace": "if reservation.attempted && false {",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipCancel",
+            "Krepi.Proofs.PageTables.Refinement.ownership_cancel_spec"
+          ]
+        },
+        {
+          "name": "release-without-merge",
+          "file": "src/page_tables/ownership/receipts.rs",
+          "find": "HoldState::Published)?;\n        self.extent_count = merge_freed(&mut self.extents, self.extent_count, index);\n",
+          "replace": "HoldState::Published)?;\n        self.extents[index].holding = Holding::Free;\n",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipRelease",
+            "Krepi.Proofs.PageTables.Refinement.ownership_release_spec"
+          ]
+        },
+        {
+          "name": "release-stale-generation",
+          "file": "src/page_tables/ownership/receipts.rs",
+          "find": "&& generation == allocation.generation",
+          "replace": "&& (generation == allocation.generation || true)",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipRelease",
+            "Krepi.Proofs.PageTables.Refinement.held_extent_spec",
+            "Krepi.Proofs.PageTables.Refinement.holds_as_spec"
+          ]
+        },
+        {
+          "name": "owner-last-excluder",
+          "file": "src/page_tables/ownership.rs",
+          "find": "if touches_page(record.range, page) && precedes(record.owner, first) {",
+          "replace": "if touches_page(record.range, page) {",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipOwner",
+            "Krepi.Proofs.PageTables.Refinement.first_excluder_spec",
+            "Krepi.Proofs.PageTables.Refinement.ownership_owner_spec"
+          ]
+        },
+        {
+          "name": "stats-reserved-as-free",
+          "file": "src/page_tables/ownership.rs",
+          "find": "        if is_free(extents[index].holding) {\n",
+          "replace": "        let holding = extents[index].holding;\n        let reserved = match holding {\n            Holding::Held(_, _, state) => match state {\n                super::HoldState::Reserved => true,\n                super::HoldState::Published => false,\n            },\n            Holding::Free => false,\n        };\n        if is_free(extents[index].holding) || reserved {\n",
+          "fails": [
+            "Krepi.Proofs.PageTables.Refinement.Ownership.ownershipStats",
+            "Krepi.Proofs.PageTables.Refinement.extent_stats_loop_spec",
+            "Krepi.Proofs.PageTables.Refinement.extent_stats_spec",
+            "Krepi.Proofs.PageTables.Refinement.ownership_stats_spec"
+          ]
+        }
+      ],
+      "parts": [
+        {
+          "budget": 1800,
+          "mutants": [
+            "read-write-executable",
+            "lookup-block-rounds-down",
+            "clone-copies-private-leaf",
+            "map-page-overwrites-valid",
+            "map-block-over-table",
+            "unmap-without-invalidate",
+            "kernel-map-guard-unchecked",
+            "direct-map-block-past-range",
+            "new-exclusion-inward",
+            "choose-high-from-lowest",
+            "assign-keeps-counter",
+            "initialized-ignores-failure",
+            "cancel-after-attempt",
+            "release-stale-generation",
+            "stats-reserved-as-free"
+          ]
+        },
+        {
+          "budget": 1800,
+          "mutants": [
+            "direct-address-limit-off-by-one",
+            "reset-keeps-record",
+            "clone-reach-unchecked",
+            "map-page-store-before-fence",
+            "map-block-output-unaligned",
+            "unmap-page-of-block",
+            "direct-map-tables-off-by-one",
+            "new-extents-off-by-one",
+            "new-overlap-unchecked",
+            "choose-alignment-unchecked",
+            "reserve-published",
+            "publish-ignores-state",
+            "release-without-merge",
+            "owner-last-excluder"
+          ]
+        }
       ]
     }
   ]

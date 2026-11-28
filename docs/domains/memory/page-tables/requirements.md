@@ -69,7 +69,9 @@ bits hold.
   `Tables::lookup_page` and `lookup_block`.
 - **Contract.** [Descriptors and attributes](contract.md#descriptors-and-attributes).
 - **Specification.** [PGT-R01](specification.md#pgt-r01) of the specification.
-- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
+- **Proof path.** The formal target `page-tables`, whose obligations hold
+  the refinement theorem of each function among these entry points of the
+  core ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `pt-01`, `pt-02`, `pt-06`, `pt-11`,
   `pt-15` and `pt-21` as host tests of the module `page_tables`,
   and a host test of each row of the kind table against bits written from
@@ -98,7 +100,9 @@ after every refusal.
   [Write plans and publication](contract.md#write-plans-and-publication)
   and [Check and execute](contract.md#check-and-execute).
 - **Specification.** [PGT-R02](specification.md#pgt-r02) of the specification.
-- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
+- **Proof path.** The formal target `page-tables`, whose obligations hold
+  the refinement theorem of each function among these entry points of the
+  core ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `pt-01`, `pt-03`, `pt-04`, `pt-05`,
   `pt-13` and `pt-14` as host tests. They show the logic on a pool in host
   memory; they do not show a CPU walking the tables.
@@ -122,7 +126,9 @@ of 9 tables and the refusal of one more with `OutOfTables`.
 - **Contract.** [Abstract mapping](contract.md#abstract-mapping) and
   [Kernel direct map](contract.md#kernel-direct-map).
 - **Specification.** [PGT-R03](specification.md#pgt-r03) of the specification.
-- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
+- **Proof path.** The formal target `page-tables`, whose obligations hold
+  the refinement theorem of each function among these entry points of the
+  core ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `pt-15`, `pt-16` and `pt-17` as host
   tests. They build the descriptors of 8 GiB without touching 8 GiB of RAM.
 
@@ -142,7 +148,9 @@ plan of `unmap_page` equals the order of the contract.
 - **Contract.** [Abstract mapping](contract.md#abstract-mapping) and
   [Write plans and publication](contract.md#write-plans-and-publication).
 - **Specification.** [PGT-R04](specification.md#pgt-r04) of the specification.
-- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
+- **Proof path.** The formal target `page-tables`, whose obligations hold
+  the refinement theorem of each function among these entry points of the
+  core ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `pt-05`, `pt-09` and `pt-11` as host
   tests, and the host test of the plans of the
   [contract](contract.md#testing-obligations). They show the logic and the
@@ -181,7 +189,10 @@ of the mapped and the excluded ranges behave as the map says.
   [Table pool](contract.md#table-pool) and
   [Check and execute](contract.md#check-and-execute).
 - **Specification.** [PGT-R05](specification.md#pgt-r05) of the specification.
-- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
+- **Proof path.** The formal target `page-tables`, whose obligations hold
+  the refinement theorem of each function among these entry points of the
+  core ([proof path](proof.md#page-tables)); those of `krepi_arch::mmu` are
+  [open obligations](contract.md#open-obligations).
 - **Evidence.** The frozen vectors `dm-01` to `dm-04` as host tests, `dm-04`
   for the 8 GB model; the host tests of the 1, 2, 4 and 16 GB models and of
   the pool at capacity of the [contract](contract.md#testing-obligations);
@@ -219,7 +230,10 @@ layout whose text and data share a page is refused.
 - **Contract.** [Kernel mappings](contract.md#kernel-mappings) and
   [Descriptors and attributes](contract.md#descriptors-and-attributes).
 - **Specification.** [PGT-R06](specification.md#pgt-r06) of the specification.
-- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
+- **Proof path.** The formal target `page-tables`, whose obligations hold
+  the refinement theorem of each function among these entry points of the
+  core ([proof path](proof.md#page-tables)); those of `krepi_arch::mmu` are
+  [open obligations](contract.md#open-obligations).
 - **Evidence.** The case `kernel-memory` of `cargo xtask qemu-boot`, in
   CI, which takes the permission fault of a write to the read-only data,
   the instruction abort of a branch to an execute-never page and the
@@ -249,8 +263,9 @@ order of the contract, written from it.
   `krepi_arch::mmu::apply`.
 - **Contract.** [Write plans and publication](contract.md#write-plans-and-publication).
 - **Specification.** [PGT-R07](specification.md#pgt-r07) of the specification.
-- **Proof path.** The target `page-tables`, registered as planned
-  ([proof path](proof.md#page-tables)); the stores, the barriers and the
+- **Proof path.** The formal target `page-tables`, whose obligations hold
+  the refinement theorem of each function among these entry points of the
+  core ([proof path](proof.md#page-tables)); the stores, the barriers and the
   register writes are [open obligations](contract.md#open-obligations).
 - **Evidence.** The host tests of the plans; the QEMU cases of PGT-R05 and
   PGT-R06, which run with the tables that the plans built. They show the
@@ -275,7 +290,9 @@ map, and the frozen vectors hold.
 - **Entry points.** `Ownership::new`, `owner` and `stats`.
 - **Contract.** [Page ownership](contract.md#page-ownership).
 - **Specification.** [PGT-R08](specification.md#pgt-r08) of the specification.
-- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
+- **Proof path.** The formal target `page-tables`, whose obligations hold
+  the refinement theorem of each function among these entry points of the
+  core ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `own-03`, `own-04`, `own-05`, `own-17`,
   `own-18`, `own-19`, `own-21` and `own-22` as host tests, with the
   independent page model of `own-22`, and the host test of each board shape
@@ -302,7 +319,10 @@ criterion: the frozen vectors hold.
 - **Contract.** [Page ownership](contract.md#page-ownership) and
   [Check and execute](contract.md#check-and-execute).
 - **Specification.** [PGT-R09](specification.md#pgt-r09) of the specification.
-- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
+- **Proof path.** The formal target `page-tables`, whose obligations hold
+  the refinement theorem of each function among these entry points of the
+  core ([proof path](proof.md#page-tables)); those of `krepi_arch::mmu` are
+  [open obligations](contract.md#open-obligations).
 - **Evidence.** The frozen vectors `own-01`, `own-06` to `own-11`, `own-16`,
   `own-18`, `own-20`, `own-21` and `own-22` as host tests. They model the
   zeroing by the test; the QEMU and board runs that allocate, write, release
@@ -325,7 +345,9 @@ vectors hold.
   `Ownership::publish`, `cancel`, `validate`, `release` and `stats`.
 - **Contract.** [Page ownership](contract.md#page-ownership).
 - **Specification.** [PGT-R10](specification.md#pgt-r10) of the specification.
-- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
+- **Proof path.** The formal target `page-tables`, whose obligations hold
+  the refinement theorem of each function among these entry points of the
+  core ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `own-23` to `own-28` as host tests. They
   show the bookkeeping of a reservation; they do not show the zeroing on a
   CPU.
@@ -351,7 +373,9 @@ refused.
 - **Contract.** [Table pool](contract.md#table-pool) and
   [Page ownership](contract.md#page-ownership).
 - **Specification.** [PGT-R11](specification.md#pgt-r11) of the specification.
-- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
+- **Proof path.** The formal target `page-tables`, whose obligations hold
+  the refinement theorem of each function among these entry points of the
+  core ([proof path](proof.md#page-tables)).
 - **Evidence.** The host tests of the capacities of the
   [contract](contract.md#testing-obligations), and the frozen vectors
   `dm-03`, `own-05` and `own-08`.
@@ -379,7 +403,9 @@ contract.
   [Abstract mapping](contract.md#abstract-mapping) and
   [Write plans and publication](contract.md#write-plans-and-publication).
 - **Specification.** [PGT-R12](specification.md#pgt-r12) of the specification.
-- **Proof path.** The target `page-tables`, registered as planned ([proof path](proof.md#page-tables)).
+- **Proof path.** The formal target `page-tables`, whose obligations hold
+  the refinement theorem of each function among these entry points of the
+  core ([proof path](proof.md#page-tables)).
 - **Evidence.** The frozen vectors `pt-07`, `pt-08`, `pt-10`, `pt-12` and
   `pt-18` as host tests, and the host test of the plans of the
   [contract](contract.md#testing-obligations). They show the copy on sets

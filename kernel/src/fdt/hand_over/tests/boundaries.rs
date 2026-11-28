@@ -28,6 +28,27 @@ fn rejects_missing_wrong_and_malformed_compatible_values() {
     }
 }
 
+/// The Pi 5 profile requires each of its two entries, in any order: a root
+/// `compatible` with `raspberrypi,5-model-b` alone or `brcm,bcm2712` alone
+/// fails with `BadProperty`, and the two in reverse order are accepted.
+#[test]
+fn requires_each_pi5_compatible_entry_in_any_order() {
+    for (compatible, expected) in [
+        (&b"raspberrypi,5-model-b\0"[..], Err(Error::BadProperty)),
+        (b"brcm,bcm2712\0", Err(Error::BadProperty)),
+        (b"brcm,bcm2712\0raspberrypi,5-model-b\0", Ok(0x2_0000_0000)),
+    ] {
+        let mut b = Builder::default();
+        b.begin("");
+        b.cells("#address-cells", &[2]);
+        b.cells("#size-cells", &[2]);
+        b.property("compatible", compatible);
+        ram(&mut b, &[0, 0, 2, 0]);
+        let memory = report(&finish(b));
+        assert_eq!(memory.map(|memory| memory.ram_bytes()), expected);
+    }
+}
+
 #[test]
 fn rejects_wrong_root_cells_and_oversized_handoff() {
     let mut b = Builder::default();

@@ -24,8 +24,8 @@ list whose length the contract bounds or on fuel from the contract's
 [`verification/Krepi/Spec/PageTables/`](../../../../verification/Krepi/Spec/PageTables/)
 and import Lean core, the earlier modules of the component and, for the boot
 memory map, the modules of the fdt specification. The
-[proof path](proof.md) plans the proof of the code against this
-specification, as the planned target `page-tables`.
+[proof path](proof.md) gives the proof of the code against this
+specification, the formal target `page-tables`.
 
 This page describes the modules of the state machine: the descriptors and
 kinds, the physical ranges, the pools with the record of their tables in use,
@@ -43,13 +43,13 @@ definition there, registered in
 [`verification/statements.json`](../../../../verification/statements.json)
 with its theorem below
 [`verification/Krepi/Proofs/PageTables/`](../../../../verification/Krepi/Proofs/PageTables/),
-whose proof is planned: it is `sorry` until a proof pull request proves it
+which proves it
 ([statements and proofs](../../../formal-verification.md#statements-and-proofs)).
 The specification tests, for each requirement one input that the
 specification must accept and one that it must reject, are stated the same
 way in `Stp` below
 [`verification/Krepi/SpecTests/PageTables/`](../../../../verification/Krepi/SpecTests/PageTables/),
-with their planned theorems in `Krepi.Proofs.PageTables.Stp`
+with their theorems in `Krepi.Proofs.PageTables.Stp`
 ([Specification tests](#specification-tests)). The witnesses that the
 specification is not vacuous are two further modules below
 [`verification/Krepi/Spec/PageTables/Witnesses/`](../../../../verification/Krepi/Spec/PageTables/Witnesses/),
@@ -621,7 +621,7 @@ for each requirement, one input that the specification must accept, with the
 result that it must give, and one that it must reject, with the error that it
 must give. Each test is a proposition, registered in `statements.json` with
 its theorem in `Krepi.Proofs.PageTables.Stp`, the name of the test with a
-lower-case first letter, whose proof is planned. Each instantiates the
+lower-case first letter, which proves it. Each instantiates the
 criterion of its requirement, the sentence that begins "The criterion:", and
 quotes the words that it instantiates, which the last column gives. The
 expected results are literals written from the requirements and the
@@ -740,7 +740,7 @@ either above 1 s.
 | 115 | 3 | 3 | 9 | 7 | 2 |
 | 116 | 2 | 2 | 7 | 5 | 0 |
 | 117 | 3 | 3 | 3 | 2 | 0 |
-| Total | 28 | 28 | 68 | 73 | 5 statements, all planned |
+| Total | 28 | 28 | 68 | 73 | 5 statements, all proved |
 
 The two statements of the page ownership table each cover a branch of
 rows 114 and 115, so the column counts them at both lines.
@@ -770,11 +770,10 @@ table under its entry before the next entry. The last check of each order,
 of `Ownership::new`, `MetadataExhausted` and `OutOfMemory` of the scan and
 `InvalidAllocation`, has no later rule; the two rules of `PhysRange::new`
 cannot be broken by one input, since a range of length 0 ends at its start.
-With the earlier rule repaired, each of these inputs fails with the error of
-the later rule, so each witness tells the order of the contract from the
-reverse one. Each input fails with the error of the earlier rule, with the
-error of the later rule once the earlier is repaired, and succeeds once both
-are, a pool that ends above $2^{\mathrm{bits}}$ being repaired by the width.
+Each input fails with the error of the earlier rule, with the error of the
+later rule once the earlier is repaired, so that each witness tells the order
+of the contract from the reverse one, and succeeds once both are, a pool that
+ends above $2^{\mathrm{bits}}$ being repaired by the width.
 The pool that ends above $2^{\mathrm{bits}}$ is that of `BASE` at the width
 32, whose walk is sound there, for the entries on one address and for the
 source of `clone_kernel_from`, whose target pool is then at `0x8000_0000`;
@@ -794,7 +793,7 @@ three refusals are those of choices outside its requirement, which a choice
 of `choose` on the same table never meets (`TakeAcceptsChoice`).
 
 An error branch that no input of its entry reaches has no witness. For each,
-a planned proposition states the fact that keeps the entry from it, and a
+a registered proposition states the fact that keeps the entry from it, and a
 theorem of the same name with a lower-case first letter below
 `Krepi.Proofs.PageTables.Witnesses` proves it; the error of the branch is
 witnessed through another branch of the same entry.
@@ -1002,11 +1001,11 @@ reservation keeps its name, as the test keeps the value that it gets back.
   receipt is the output of `assign`, with `true` when the callback succeeds
   and `false` when it fails; a request that `choose` refuses asks for no
   zeroing and has no `assign` ([behaviour changes](contract.md#legacy-test-vectors),
-  lines 1006 to 1009). The staged `initialize` with its callback is
+  lines 1010 to 1013). The staged `initialize` with its callback is
   `Reservation::initialized` with the outcome of the callback.
 - The assertions of `own-07`, `own-11` and `own-24` on the counts of failed
-  requests and of failed zeroings of the table have no case (lines 1010 to
-  1012); the count of failures of a reservation is the reservation's and has
+  requests and of failed zeroings of the table have no case (lines 1014 to
+  1016); the count of failures of a reservation is the reservation's and has
   its cases.
 - A table that the test unwraps is a case, `ok`, as every unwrapped call. The
   tests' helper `range(start, bytes)`, which unwraps `PhysRange::new`, writes
@@ -1042,7 +1041,7 @@ these modules answer 47, in 9,382 cases; 6 do not apply.
 | --- | --- | --- |
 | Replayed, 44 | `pt-01` to `pt-16`, `pt-18`, `pt-21`, `dm-01` to `dm-03`, `own-01` to `own-11`, `own-16` to `own-21` and `own-23` to `own-28` | Every case is a line of the vector file; the 7 GiB of `own-21` are two extents, so its cases take no more than the others |
 | Replayed with a large input, 3 | `pt-17`, `dm-04`, `own-22` | `pt-17`: 4,103 cases, the 4,096 calls of its loop each a case whose earlier calls are a `map_blocks` item. `dm-04`: the property vector of its row, 4,097 lines by the rule of the row. `own-22`: the property vector of its row, 801 lines, whose earlier steps are a `mixed_steps` item. The generator of the file takes the expected outputs of the three from models of the rules of the contract that do not use the specification, for `own-22` a model of each page of each bank as busy or free, and checks them against the literals of the rows |
-| Not applicable, 6 | `pt-19`, `pt-20`, `own-12` to `own-15` | `pt-19` and `pt-20`: the direct map never changes after boot, so the sealing of a page, with the split and merge of its block, is not carried ([behaviour changes](contract.md#legacy-test-vectors), lines 1016 to 1018). `own-12` to `own-15`: the kernel has no byte heap (line 1019); the failure of a page request of `own-15` is in `own-07` and `own-28` |
+| Not applicable, 6 | `pt-19`, `pt-20`, `own-12` to `own-15` | `pt-19` and `pt-20`: the direct map never changes after boot, so the sealing of a page, with the split and merge of its block, is not carried ([behaviour changes](contract.md#legacy-test-vectors), lines 1020 to 1022). `own-12` to `own-15`: the kernel has no byte heap (line 1023); the failure of a page request of `own-15` is in `own-07` and `own-28` |
 
 The comments of the vector file name the vectors that are not applicable.
 The replay module checks one representative case of each vector of the file,
@@ -1104,7 +1103,7 @@ that
 [`Krepi.SpecTests.PageTables.Replay`](../../../../verification/Krepi/SpecTests/PageTables/Replay.lean)
 answers through them, and the [specification tests](#specification-tests),
 one input that the specification must accept and one that it must reject,
-whose theorems in `Krepi.Proofs.PageTables.Stp` are planned. The parts of
+whose theorems in `Krepi.Proofs.PageTables.Stp` are proved. The parts of
 [PGT-R05](requirements.md#pgt-r05) to
 [PGT-R07](requirements.md#pgt-r07) that a CPU shows, the translation with
 the MMU on and the effect of the barriers, belong to the adapter, an
@@ -1121,7 +1120,7 @@ to those of the direct map, are `NewOneOwner` and
 specification test `OwnershipOfBoardShapes` on the boot memory maps of QEMU
 virt and the five Pi 5 models. The registered statements of
 [invariants](#invariants) and
-[properties](#properties), whose theorems are planned, are listed for each
+[properties](#properties), whose theorems are proved, are listed for each
 requirement; the statements of the shared state serve the
 [state fields](contract.md#state-fields), which no requirement observes. The
 last row is the section of liveness, time and performance of the
@@ -1302,11 +1301,12 @@ another new table is complete before the `Zero` of the other. Every valid
 entry that a plan stores into the root, and every valid entry other than a
 block that it stores into a level 2 table, is a table descriptor with no
 attribute, the form that the walk follows, so that the tables that the check
-reads as reached are those that the walk reaches. The rest of the rule of maps (lines 413 to 418), the leaves in address order
-from one table to the next and in the tables that the set holds, and one 2
-MiB slot after the other under a level 2 table that the set holds, is not
-stated here: the specification test `PlansFollowContractOrder` shows it only
-on sets that hold the root alone, within one 1 GiB slot. These orders leave
+reads as reached are those that the walk reaches. The rest of the rule of
+maps (lines 413 to 418), the leaves in address order from one table to the
+next and in the tables that the set holds, and one 2 MiB slot after the
+other under a level 2 table that the set holds, is not stated here: the
+specification test `PlansFollowContractOrder` shows it only on sets that
+hold the root alone, within one 1 GiB slot. These orders leave
 the same set, since every new table is complete and fenced before the one
 store of its table descriptor and a leaf in a table that the set holds is one
 store into an invalid entry; the plans of the specification follow them by

@@ -19,7 +19,7 @@ use super::{
 };
 
 #[cfg(test)]
-pub(super) mod tests;
+mod tests;
 
 /// The page of the boot memory map, 4 KiB.
 const PAGE_SIZE: u64 = 0x1000;

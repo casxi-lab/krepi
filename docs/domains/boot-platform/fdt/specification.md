@@ -43,17 +43,18 @@ prove is a definition there, registered in
 [`verification/statements.json`](../../../../verification/statements.json)
 with its theorem below
 [`verification/Krepi/Proofs/Fdt/`](../../../../verification/Krepi/Proofs/Fdt/),
-whose proof is planned: it is `sorry` until a proof pull request proves it
+which proves it
 ([statements and proofs](../../../formal-verification.md#statements-and-proofs)).
 The specification tests, for each requirement one input that the
 specification must accept and one that it must reject, are stated the same
 way in `Stp` below
 [`verification/Krepi/SpecTests/Fdt/`](../../../../verification/Krepi/SpecTests/Fdt/),
-on trees that `Builder` there writes, with their planned theorems in
+on trees that `Builder` there writes, with their theorems in
 `Krepi.Proofs.Fdt.Stp`; `Replay` there replays the vectors. The witnesses
 that the specification is not vacuous are theorems of `Witnesses` below
 `Krepi/Spec/Fdt`, all proved there; the statements that its unreachable
-error branches are never taken are planned ([Witnesses](#witnesses)).
+error branches are never taken are proved below `Krepi.Proofs.Fdt`
+([Witnesses](#witnesses)).
 
 ## Widths and quantifiers
 
@@ -429,7 +430,7 @@ contract.
 
 | Invariant | Kind | States | Established by | Preserved by | Read by | Decidable |
 | --- | --- | --- | --- | --- | --- | --- |
-| `Fdt.WellFormed` | Structural: the nodes and the reservation entries of a tree | `totalsize` from 40 to `MAX_BLOB_SIZE`; at most `MAX_RESERVATIONS` reservation entries, each nonempty, within 64 bits and disjoint from the others; 1 to `MAX_TOKENS` nodes, the root first without a parent and with the empty name, every other node with a parent before it and a name that is not empty, the characters of the names, a depth of at most `MAX_DEPTH - 1`, at most `MAX_PROPERTIES` properties of distinct names of 1 to `MAX_PROPERTY_NAME` bytes and their characters (format and bounds, lines 151 to 187) | `Fdt::parse` | No entry changes a tree | The node access; `Node::translate_reg`, whose fuel of `MAX_DEPTH` buses it bounds; `discover_memory` and `discover_boot_memory`, which find the root and take the reservation entries as reserved regions | Yes: `Fdt.checkWellFormed` |
+| `Fdt.WellFormed` | Structural: the nodes and the reservation entries of a tree | `totalsize` from 40 to `MAX_BLOB_SIZE`; at most `MAX_RESERVATIONS` reservation entries, each nonempty, within 64 bits and disjoint from the others; 1 to `MAX_TOKENS` nodes, the root first without a parent and with the empty name, every other node with a parent before it and a name that is not empty, the characters of the names, a depth of at most `MAX_DEPTH - 1`, at most `MAX_PROPERTIES` properties of distinct names of 1 to `MAX_PROPERTY_NAME` bytes and their characters (format and bounds, lines 151 to 186) | `Fdt::parse` | No entry changes a tree | The node access; `Node::translate_reg`, whose fuel of `MAX_DEPTH` buses it bounds; `discover_memory` and `discover_boot_memory`, which find the root and take the reservation entries as reserved regions | Yes: `Fdt.checkWellFormed` |
 | `Reg.WellFormed` | Structural: the entries of a `Reg` | At least one entry, each within the width of its address cells (lines 694 to 698 and 741 to 744) | `Reg::new`; `Node::reg` in the cells of the parent | No entry changes a `Reg` | `discover_memory`, whose RAM ranges and reserved regions are such entries; the device bindings | Yes: `Reg.checkWellFormed` |
 | `AddressMap.WellFormed` | Structural: the windows of a map | Child and parent address cells of 1 or 2, at most 2 size cells; every window nonempty, of one size on both sides and each side within its width (lines 700 to 706) | `AddressMap::new`; `Node::ranges` and `dma_ranges` | No entry changes a map | `to_parent` and `to_child`, whose translated span therefore stays within the width of its side; `Node::translate_reg` | Yes: `AddressMap.checkWellFormed` |
 | `MemoryMap.WellFormed` | Structural: the RAM ranges and the reserved regions | 1 to `MAX_MEMORY_REGIONS` RAM ranges, each nonempty and within 64 bits, no two sharing an address; at most `MAX_RESERVED_REGIONS` reserved regions, each nonempty and within 64 bits, none both `no-map` and `reusable`; at most `MAX_TOKENS` dynamic reservations, so that the count fits its width (lines 451 to 484) | `discover_memory` and `discover_boot_memory`, on a tree that keeps `Fdt.WellFormed` | No entry changes a memory map | `discover_boot_memory`, whose sum of the RAM ranges therefore fits 64 bits; the queries of the boot memory; `MemoryPlan::all_ram` and `from_boot_memory`, which take the RAM ranges as banks and the reserved regions as firmware reservations | Yes: `MemoryMap.checkWellFormed` |
@@ -543,7 +544,7 @@ requirement, one input that the specification must accept, with the result
 that it must give, and one that it must reject, with the error that it must
 give. Each test is a proposition, registered in `statements.json` with its
 theorem in `Krepi.Proofs.Fdt.Stp`, the name of the test with a lower-case
-first letter, whose proof is planned. The expected results are literals
+first letter, which proves it. The expected results are literals
 worked out from the requirements and the contract, never computed by the
 specification. Every input is below 1 KiB but the two trees of FDT-R05, which
 are the limit of 128 KiB itself.
@@ -623,7 +624,7 @@ audit of each of its theorems lists no axiom but `propext`,
 | 116 | 3 | 3 | 21 | 1 |
 | 117 | 11 | 11 | 0 | 0 |
 | 118 | 3 | 3 | 3 | 0 |
-| Total | 60 | 62 | 118 | 13, all planned |
+| Total | 60 | 62 | 118 | 13, all proved |
 
 `MemoryMap::dynamic` and `BootMemory::dynamic` have a second success
 witness with a nonzero count, on trees with dynamic reservations below
@@ -656,7 +657,7 @@ specification and `Builder` write are the bytes of `String.toByteArray`,
 which equals `String.toUTF8`.
 
 An error branch that no input of its entry reaches has no witness. For each,
-a planned proposition states that the entry, or the step of it where the
+a registered proposition states that the entry, or the step of it where the
 branch lies, never takes it; the error of the branch is witnessed through
 another branch where the function has one. All but the last are the checks
 that the [readings of the contract](#readings-of-the-contract) keep at their
@@ -825,7 +826,7 @@ names and have no line in the vector file. Of the 55:
 | Replayed, 48 | `fdt-parser-1` to `-6` and `-9`, `fdt-translation-1` to `-5`, `fdt-discovery-1` to `-6`, `fdt-cpus-1` to `-6`, `fdt-pi5-1` to `-4`, `fdt-pi5-boundaries-1`, `-3` to `-5`, `fdt-pi5-selection-1` to `-3`, `fdt-pi5-platform-1` and `-2`, `platform-1`, `platform-3` to `platform-10`, `platform-12` and `platform-13` | Every case is a line of the vector file |
 | Replayed with a large input, 1 | `fdt-pi5-boundaries-2` | Its second case is a tree longer than 128 KiB, a line of the vector file that the generator of the file builds; the representative case of the replay module is the first |
 | Replayed in part, 4 | `fdt-parser-7`, `fdt-parser-8`, `platform-2`, `platform-11` | `fdt-parser-7`: its two cases of the padding bound call a function internal to the parse, which no entry reaches with them, as the row of the contract states. `fdt-parser-8`: the odd host address is no input of the specification, which reads bytes one at a time. `platform-2`: its three cases of the page allocator, two allocations and the free bytes, go through the page ownership table of the page-tables component, whose vectors cover them; the boot memory map that it takes is replayed. `platform-11`: the comparison of the usable bytes with the free bytes of a page allocator goes through the same table; the case compares them instead with the managed bytes less `0x80000`, `0x38000`, `0x14000` and `0x2000`, the difference that the row writes |
-| Not applicable, 2 | `fdt-pi5-firmware-1`, `fdt-pi5-firmware-2` | Their inputs are the trees that the Raspberry Pi firmware ships and trees merged from them, device-tree files outside the prototype tree that the repository does not hold, lines 971 to 974; the requirements that they evidence have other vectors and the specification tests |
+| Not applicable, 2 | `fdt-pi5-firmware-1`, `fdt-pi5-firmware-2` | Their inputs are the trees that the Raspberry Pi firmware ships and trees merged from them, device-tree files outside the prototype tree that the repository does not hold, lines 969 to 972; the requirements that they evidence have other vectors and the specification tests |
 
 The comments of the vector file name the cases that are not applicable. The
 replay module checks one representative case of each vector of the file, and
@@ -887,10 +888,10 @@ state it, and its evidence on the specification: the cases of the
 [vector file](../../../../verification/vectors/boot-platform/fdt.vectors)
 that [`Krepi.SpecTests.Fdt.Replay`](../../../../verification/Krepi/SpecTests/Fdt/Replay.lean)
 answers; the registered statements of [invariants](#invariants) and
-[properties](#properties), whose theorems are planned; and the
+[properties](#properties), whose theorems are proved; and the
 [specification tests](#specification-tests), one input that the
 specification must accept and one that it must reject for each requirement,
-whose theorems in `Krepi.Proofs.Fdt.Stp` are planned. The last row
+whose theorems in `Krepi.Proofs.Fdt.Stp` are proved. The last row
 is the section of liveness, time and performance of the requirements, which
 has no ID. The statements of the boot state serve the
 [state fields](contract.md#state-fields), which no requirement observes.

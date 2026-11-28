@@ -69,6 +69,24 @@ fn a_pi5_tree_one_byte_over_128_kib_fails() {
     );
 }
 
+/// The limit of the Pi 5 hand-over profile is the 128 KiB of the contract,
+/// written here as `0x2_0000` rather than read from the profile: a tree of
+/// that many bytes is accepted with its span, and one of a byte more fails
+/// with `LimitExceeded`.
+#[test]
+fn the_pi5_limit_is_the_128_kib_of_the_contract() {
+    for (total, expected) in [
+        (0x2_0000, Ok(Span::new(DTB, 0x2_0000).unwrap())),
+        (0x2_0001, Err(Error::LimitExceeded)),
+    ] {
+        let bytes = padded(pi5(), total);
+        let memory = Fdt::parse(&bytes)
+            .unwrap()
+            .discover_boot_memory(PI5_HAND_OVER, DTB, IMAGE);
+        assert_eq!(memory.map(|memory| memory.dtb()), expected);
+    }
+}
+
 /// 32 nodes on a path, the root included: a node at depth 31.
 #[test]
 fn a_node_at_depth_31_is_accepted() {
