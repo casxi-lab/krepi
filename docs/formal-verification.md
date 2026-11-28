@@ -2640,7 +2640,7 @@ has the same fields with schema 1, and `base_record` `null`
 | `handwritten` | For the qualification job, each hand-written module of the Lake project by name, with where its file lies by the [lanes](#lanes): its component, `qualification` or `shared`; or `null` |
 | `left_out` | For the qualification job, each hand-written module that the [waivers](#waivers) that hold leave out of the base round, with the target of the waiver; or `null` |
 | `part` | For a part of a target, the part and its seed, below, or `null` |
-| `source_mutants` | For a run of `cargo xtask formal mutants`, the qualification receipt that it read and its part, below, or `null` |
+| `source_mutants` | For a run of `cargo xtask formal mutants`, the qualification receipt that it read, its part and its untranslated mutants, below, or `null` |
 | `proof_targets` | What the run found for each target that the phase `extraction` took, below, by its name: those that it selects and the formal ones, or in the part of a target and in a run of `cargo xtask formal run --target` those that it selects alone, in a lane the targets of the lane, also one that it did not extract since it registers more than 30 mutants or its module is not a Lean module path |
 | `guard` | What the guard found on a pull request, below, or `null` without a pull request event or when its phase did not finish |
 | `commands` | Every command, in the order of its `sequence` |
@@ -2742,6 +2742,7 @@ The `source_mutants` record has these fields
 | --- | --- |
 | `qualification` | The qualification receipt that the run read: its `sha256`, of its bytes; the `run_id` of its CI run, its `commit`, `tree` and the reference of its `image`, each `null` when it has none; its `status`; and whether it is `complete`; or `null` when the run did not find exactly one |
 | `part` | The part of the run, `<i>/<k>`, or `null` for every mutant of its operators |
+| `untranslated` | Each untranslated mutant of the run, by its point, as in the list of survivors without `receipt_sha256`, also when the unit is not `VERIFIED` |
 
 Each record of `proof_targets` has these fields:
 
@@ -2774,10 +2775,11 @@ The `guard` record has these fields:
 | `rules` | Each rule, with why it fails, or `null` when it holds |
 
 CI keeps the receipts of its runs, so any change of a field takes a new
-schema, except that schema 7 is extended in place, with `part` and with
-`source_mutants`, so a receipt of schema 7 written before a field was
-added has no such field and reads it as `null`, and a merge reads the
-receipts of one run only.
+schema, except that schema 7 is extended in place, with `part`, with
+`source_mutants` and with its `untranslated`, so a receipt of schema 7
+written before a field was added has no such field and reads it as `null`,
+or as no untranslated mutant, and a merge reads the receipts of one run
+only.
 Receipts come from two hosts. CI runs the gate on `linux-aarch64`
 in the pinned image, as the runner's user, which cannot write the image's
 installation, and records the image ([CI job](#ci-job)). Local runs on
@@ -3527,8 +3529,11 @@ For each mutant:
    `find` replaced with `replace`;
 4. the copy is extracted as the target is, with the extraction triple, its
    roots and its cut points, and what the tools generated is installed in a
-   new stage of its own; an extraction that is not complete and generated
-   files that cannot be installed make the mutant inconclusive;
+   new stage of its own; an extraction that is not complete, unless one of
+   its commands failed as a tool or met the budget, and generated files
+   that cannot be installed leave the mutant untranslated
+   ([judging the build of a mutant](#judging-the-build-of-a-mutant)), as
+   does Rust that does not compile, since no `cargo check` runs;
 5. the build directory of the stage of the target, `.lake/build` below its
    Lake project, is copied into the new stage: Lake replays a module whose
    source and imported modules are those of the build of the target, such
@@ -3542,9 +3547,11 @@ For each mutant:
 
 The mutant is `VERIFIED` when its build is rejected, `REJECTED` when it is
 accepted, with the reason `the mutant was not rejected by` and its `fails`,
-when it is inconclusive, with a reason that starts with `inconclusive`, and
-in the two cases before its build; a build that Lake or a Lean process it
-ran did not finish makes it `TOOL_FAILURE`. Each of them but `VERIFIED`
+when it is untranslated, with the reason `untranslated, ` and that of its
+case, such as `untranslated, generated build: ` and the errors, when it is
+inconclusive, with a reason that starts with `inconclusive`, and in the
+two cases before its build; a build that Lake or a Lean process it ran
+did not finish makes it `TOOL_FAILURE`. Each of them but `VERIFIED`
 fails the run. In a run that judges a target, its mutants are `NOT_RUN`
 when it is not verified; a part that does not judge it runs its mutants
 once its seed built, whatever the first part concludes, and leaves them
@@ -3561,8 +3568,9 @@ run whatever its mutants concluded.
 A build that passes is accepted. A build whose Lake or a Lean process that
 it ran was killed or ran out of time tells nothing. Otherwise the log of
 the failed build is read; it is confined to the proof modules when all of
-these rules hold, and the mutant is inconclusive, with the rules that do
-not, otherwise:
+these rules hold, and otherwise the mutant is untranslated when the rules
+of the generated modules below hold, and inconclusive, with the rules of
+this list that do not hold, when they do not either:
 
 1. Lake exits with 1;
 2. no line is `error: Lean exited with code <n>`, which Lean 4.35.0 prints
@@ -3584,6 +3592,42 @@ not, otherwise:
 
 A job line is `<mark> [<i>/<n>] <verb> <module> (<time>)`; `trace:` lines,
 other `info:` lines and the continuation lines of a message do not count.
+
+The generated modules of a target are those whose names start with
+`KrepiGen.<module>.`, where `<module>` is the `module` of the target, and
+whose files lie in the stage below `KrepiGen/<module path>/`, the module
+with its dots as slashes, such as `KrepiGen/Fdt/` for `Fdt`, with the
+reviewed external declarations installed there. The failure lies in them
+alone when all of these rules hold, which are read as those above:
+
+1. Lake exits with 1;
+2. no line is `error: Lean exited with code <n>`;
+3. no line is `info: stdout:`, `info: stderr:` or `info: stdout/stderr:`;
+4. every `error:` and `warning:` message with a position is in the file of
+   a generated module, and one of them is an error;
+5. every job line marked `⚠` or `✖` is of a generated module, and one is
+   marked `✖`;
+6. each `✖` job has an error in its own file after its job line and before
+   the next one;
+7. no other `error:` or `warning:` line appears than the last
+   `error: build failed`;
+8. the log has the failure summary;
+9. the summary lists generated modules alone, each with a `✖` job and an
+   error in its file.
+
+The first list asks the failure to lie in the proof modules alone and this
+one in the generated modules alone, so they never both hold; a log with
+failures in both, or in another module, keeps neither.
+
+A mutant whose translation fails is untranslated, which tells nothing
+about the proofs, in three cases, each with its reason: an extraction that
+is not complete, `extraction: not complete: ` and its diagnostics joined by
+`; `; generated files that cannot be installed,
+`extraction: generated files cannot be installed: ` and why; and a build
+whose failure lies in the generated modules alone, `generated build: ` and
+each error in their files as `<file>:<line>:<column>: <message>`, in the
+order of the log and joined by `; `, the first three and `…` when there
+are more.
 
 The errors of a confined log are placed by the declaration ranges of the
 build of the target. Its stage prints them with
@@ -3687,6 +3731,13 @@ text that occurs once count in the first part alone. A command line with
 exits with 2 before a run starts. A mutant that
 `cargo check` does not build is not run and is counted. A mutant whose
 build is rejected is killed, and one whose build is accepted survives. An
+untranslated mutant is neither: it is counted and listed with its reason,
+and the unit stays `VERIFIED` while a run of `g` mutants has at most
+`max(1, floor(g / 20))` of them, 1 of 16 mutants and 5 of 103. With more,
+the unit is `REJECTED` with the reason
+`<n> untranslated mutants, more than the <a> that <g> generated mutants allow: `
+and the point and reason of each, joined by `; `, before that of the
+inconclusive mutants, if any, and its receipt lists them as well. An
 inconclusive mutant, and one with a command that fails as a tool or meets
 the budget, conclude the unit otherwise than `VERIFIED`, and the command
 then writes no list and exits with 1. So does a run that is not `SCOPED`
@@ -3701,20 +3752,26 @@ The run writes the list of survivors of the target,
 run, and prints its counts. The runs of one CI run that split the
 operators of a target, each in a job of its own, each write the list of
 their own run; the list of the target holds them all, with their counts
-added up and their survivors. No command merges them: the list of the
+added up, their survivors and their untranslated mutants. No command
+merges them: the list of the
 target is put together by hand from the lists of the jobs of one CI run,
 each of their runs an item of `runs`, and `cargo xtask formal check`
 checks it as below. Its fields:
 
 | Field | Meaning |
 | --- | --- |
-| `schema` | 2 |
+| `schema` | 3 |
 | `target` | The target |
 | `commit` | The commit of its runs |
 | `operators` | The operators of its runs |
 | `runs` | Each run of the list: its `run` directory, the `run_id` of its CI run, if any, its `operators`, its `part`, `<i>/<k>`, or `null`, the number of mutants that it `generated`, and the SHA-256 of its receipt, `receipt_sha256`, and of the qualification receipt that it read, `qualification_sha256`, or `null` for a run that read none |
 | `generated`, `killed`, `unbuildable`, `not_unique` | The numbers of mutants generated, killed and not built by `cargo check`, and of points without a text that occurs once, of its runs |
 | `survivors` | Each survivor: its `point`, `<file>:<line>:<column>`, its `operator`, `find` and `replace`, the inventory key of the `function` that it edits, the `receipt_sha256` of the run in which it survived, which names that run even where the run directories of two jobs have the same name, and the `class` and the `reason` that a reviewer gives it |
+| `untranslated` | Each untranslated mutant, by its run and point: its `point`, `operator`, `find` and `replace`, the `receipt_sha256` of its run and its `reason` |
+
+The number of mutants generated is the sum of those killed, survived, not
+built and untranslated; the numbers of survivors and untranslated mutants
+are the lengths of their lists.
 
 A reviewer gives every survivor a class, `missing-lemma` for a property
 that the proofs lack, `no-theorem` for a function that no theorem covers,
@@ -3723,10 +3780,14 @@ that is not blank. A survivor in a function of `unclosed`, which no
 theorem is about, is written with the class `no-theorem` and keeps it.
 `cargo xtask formal check` fails on a survivor without a class or a
 reason, on one in a function of `unclosed` of another class, on one of no
-run of its list, on a list that does not parse, is not of schema 2 or is
+run of its list, on a list that does not parse, is not of schema 3 or is
 not that of a registered target at its path, on a list whose `operators`
 are not those of its runs or whose number of mutants generated is not the
-sum of theirs, and on the runs of a list that are not of one CI run, two
+sum of theirs or that of its four counts, on an untranslated mutant whose
+reason starts with neither `extraction` nor `generated build`, of no run
+of its list or of an operator that its run did not take, on a run with
+more untranslated mutants than it allows, and on the runs of a list that
+are not of one CI run, two
 of which have the same receipt, or in which an operator is neither in one
 run without a part nor alone in the `k` runs of its parts `1/k` to `k/k`,
 as when two runs take the same mutants of an operator or none takes some
