@@ -23,8 +23,9 @@ the platform hold for every target.
   `bne_zero_iff` and `not_bne_zero_iff` (a `!=` of the code against 0), and
   `byte_lt_iff`, `byte_le_iff`.
 - The width of `usize`: `usize_numBits_le` (at most 64 bits),
-  `usize_cast_u64_val` (a `usize` read as a 64-bit word keeps its value) and
-  `lt_usize_pow` (a number below $2^{32}$ fits in `usize`).
+  `usize_cast_u64_val` (a `usize` read as a 64-bit word keeps its value),
+  `lt_usize_pow` (a number below $2^{32}$ fits in `usize`) and
+  `usize_max_ge` (the largest `usize` is at least $2^{32} - 1$).
 - Bits as numbers: `and_511` (a mask of the low nine bits is the rest
   modulo 512), `shiftRight_and_511` (an index of nine bits), `one_shiftLeft`
   (`1 <<< b` is `2 ^ b` below 64 bits).
@@ -106,6 +107,13 @@ theorem usize_cast_u64_val (x : Usize) : (UScalar.cast .U64 x).val = x.val :=
 theorem lt_usize_pow {n : Nat} (h : n < 2 ^ 32) : n < 2 ^ UScalarTy.Usize.numBits := by
   rw [UScalarTy.Usize_numBits_eq]
   rcases System.Platform.numBits_eq with h' | h' <;> rw [h'] <;> omega
+
+/-- The largest `usize` is at least $2^{32} - 1$, on either width. -/
+theorem usize_max_ge : 2 ^ 32 - 1 ≤ Usize.max := by
+  rw [Usize.max, Usize.numBits, UScalarTy.Usize_numBits_eq]
+  rcases System.Platform.numBits_eq with h' | h'
+  · rw [h']
+  · rw [h']; exact Nat.le_of_ble_eq_true rfl
 
 /-! ## Bits as numbers -/
 

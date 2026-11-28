@@ -29,13 +29,17 @@ for every mutant of the code.
 - The count of new tables: `noSlot`, `SlotRel`, `AllocRel` (what the record
   of the checks of the code holds about the fold of `Alloc.add`),
   `countStep` (how the code changes that record for one leaf, with
-  `countStep_le`, `countStep_ge`), `cacheStep_rel` (one level of it) and
+  `countStep_le`, `countStep_ge`, and `countStep_add`: the count of the code
+  from 0 plus the record of the set), `cacheStep_rel` (one level of it) and
   `allocRel_add` (one leaf keeps `AllocRel`), with `allocRel_init`.
 - The cursor of a map plan on numbers, as the code computes it: `gibOf`,
   `slotOf` (with `slotOf_ne_noSlot`, `gibOf_ne_noSlot`), `CurPhase`, `Cur`, `Found`, `Turn`, `placeOr` (the place that
   the cursor reads), and the functions of `MapCursor` on it, `Cur.search`,
   `Cur.children`, `Cur.entry`, `Cur.newPage`, `Cur.leaf`, `Cur.heldPage`
-  and `Cur.take`, and one call of the `next` of a plan, `Cur.step`.
+  and `Cur.take`, and one call of the `next` of a plan, `Cur.step`; a call
+  takes no table back (`children_next_ge`, `take_next_le_step`), and `leaf`
+  takes one or two (`leaf_next_root`, `leaf_next_level2`); `children` keeps
+  the 1 GiB slot (`children_gib`).
 - The plan by runs, for the simulation of `mapPlan` by the cursor:
   `runsBy_cons_head`, `runsBy_append_run` (a whole run at the front),
   `mapPlan_append_run`, `runSteps_held`, `runSteps_new`.
@@ -205,11 +209,12 @@ def SlotRel (size off code : Nat) : Option (Nat × Nat) → Prop
   | none => code = noSlot
   | some (k, _) => code % size = 0 ∧ (off + code) / size = k
 
-/-- The record of the new tables that the checks of the code keep, `next`,
-the 1 GiB slot `gib` and the 2 MiB slot `slot` (physical addresses), against
-the fold `a` of `Alloc.add` over the same leaves, whose virtual addresses are
-`off` plus their physical addresses: the same next free index, and slots that
-stand for the keys of its two levels. -/
+/-- The new tables that the checks of the code count, as the next free index
+`next` (the record of the set plus their count), with the 1 GiB slot `gib`
+and the 2 MiB slot `slot` (physical addresses), against the fold `a` of
+`Alloc.add` over the same leaves, whose virtual addresses are `off` plus
+their physical addresses: the same next free index, and slots that stand for
+the keys of its two levels. -/
 def AllocRel (off next gib slot : Nat) (a : Alloc) : Prop :=
   a.next = next ∧ SlotRel GIB_SIZE off gib a.level2 ∧ SlotRel BLOCK_SIZE off slot a.level3
 
@@ -218,7 +223,8 @@ leaf at the physical address `pa`, a block when `block`, of place `p`: a
 leaf whose root entry is invalid takes the new level 2 table of its 1 GiB
 slot unless the latest one is of that slot; a page whose root or level 2
 entry is invalid takes the new level 3 table of its 2 MiB slot unless the
-latest one is of that slot. -/
+latest one is of that slot. `next` is a next free index or, as the code
+keeps it, the count of the new tables from 0 (`countStep_add`). -/
 def countStep (block : Bool) (p : Place) (pa next gib slot : Nat) : Nat × Nat × Nat :=
   match p with
   | .root =>
@@ -252,6 +258,15 @@ theorem countStep_ge (block : Bool) (p : Place) (pa next gib slot : Nat) :
     next ≤ (countStep block p pa next gib slot).1 := by
   unfold countStep
   cases p <;> cases block <;> simp only [Bool.false_eq_true, ↓reduceIte] <;> (try split_ifs) <;> omega
+
+/-- `countStep` from `u + n` adds to `u + n` what it adds to the count `n`:
+the checks of the code count the new tables from 0, and the record of the
+set plus that count is the next free index of `Alloc`. -/
+theorem countStep_add (u : Nat) (block : Bool) (p : Place) (pa n gib slot : Nat) :
+    countStep block p pa (u + n) gib slot =
+      (u + (countStep block p pa n gib slot).1, (countStep block p pa n gib slot).2) := by
+  unfold countStep
+  cases p <;> cases block <;> simp only [Bool.false_eq_true, ↓reduceIte] <;> (try split_ifs) <;> rfl
 
 private theorem slot_new {size off pa : Nat} (hs : 0 < size) (hoff : off % size = 0) (t : Nat) :
     SlotRel size off (pa / size * size) (some ((off + pa) / size, t)) := by
@@ -531,6 +546,53 @@ def Cur.step (find : Nat → Nat → Bool → Option Found) (place : Found → P
   | .seek =>
     (some (t.2.children (find t.2.search.1 t.2.search.2.1 t.2.search.2.2)).1,
       (t.2.children (find t.2.search.1 t.2.search.2.1 t.2.search.2.2)).2)
+
+/-- `MapCursor::children` takes no table back. -/
+theorem children_next_ge (c : Cur) (f : Option Found) : c.next ≤ (c.children f).2.next := by
+  cases f with
+  | none => exact Nat.le_refl _
+  | some p =>
+    simp only [Cur.children]
+    split
+    · exact Nat.le_refl _
+    · exact Nat.le_succ _
+
+/-- A call of `children` keeps the 1 GiB slot. -/
+theorem children_gib (c : Cur) (o : Option Found) : (c.children o).2.gib = c.gib := by
+  cases o with
+  | none => rfl
+  | some p =>
+    simp only [Cur.children]
+    by_cases h : slotOf p.pa = c.slot
+    · simp only [h, ↓reduceIte]
+    · simp only [h, ↓reduceIte]
+
+/-- The next free table after `leaf` on a leaf of place `root` (its root
+entry is invalid, or the walk failed): one more for its new level 2 table,
+and one more for the new level 3 table of a page. -/
+theorem leaf_next_root {place : Found → Place} {c : Cur} {l : Found} (h : place l = .root) :
+    (c.leaf place (some l)).2.next = if l.block then c.next + 1 else c.next + 2 := by
+  cases hb : l.block <;>
+    simp only [Cur.leaf, h, hb, Bool.false_eq_true, ↓reduceIte, Cur.children, slotOf_ne_noSlot]
+
+/-- The next free table after `leaf` on a leaf under a level 2 table of the
+set: one more for the new level 3 table of a page. -/
+theorem leaf_next_level2 {place : Found → Place} {c : Cur} {l : Found} {t2 : Nat}
+    (h : place l = .level2 t2) :
+    (c.leaf place (some l)).2.next = if l.block then c.next else c.next + 1 := by
+  cases hb : l.block <;> simp only [Cur.leaf, h, hb, Bool.false_eq_true, ↓reduceIte]
+
+/-- The next free table after `take` is at or below the one after the whole
+call of `Cur.step`, which adds the tables of `children` on a `seek`. -/
+theorem take_next_le_step (find : Nat → Nat → Bool → Option Found) (place : Found → Place)
+    (base : UInt64) (c : Cur) :
+    (c.take place base (find c.search.1 c.search.2.1 c.search.2.2)).2.next ≤
+      (c.step find place base).2.next := by
+  simp only [Cur.step]
+  split
+  · exact Nat.le_refl _
+  · exact Nat.le_refl _
+  · exact children_next_ge _ _
 
 /-! ## The plan by runs -/
 

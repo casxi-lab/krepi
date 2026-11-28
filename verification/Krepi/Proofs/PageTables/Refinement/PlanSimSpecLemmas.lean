@@ -15,14 +15,15 @@ any place that reads the place of each leaf, that the calls of `Cur.step`
 from the cursor before the first leaf give exactly `mapPlan` of the placed
 leaves of `assignTables`, then none at a state that stays; and it turns that
 into `Stands` for any iterator whose `next` is one such call. It imports no
-generated definitions, and the record of the tables of the checks of the
-code (the count that overflows for a record near the largest `usize`) plays
-no part in it.
+generated definitions. The cursor's next free table stays at or below the
+record after the write phase at each call and after it (`CurBound`), which
+is what bounds the tables that the cursor of the code takes.
 
 - Runs of a step function: `CurSteps`, `CurRuns`, `curSteps_nil`,
   `curSteps_cons`, `curSteps_append`, `curSteps_of_step_eq`,
-  `curSteps_transfer`, `curRuns_of_steps`, and `stands_of_curRuns` (an
-  iterator stands for the list that the run of its cursor gives).
+  `curSteps_transfer`, `curRuns_of_steps`, `curSteps_first`, and
+  `stands_of_curRuns` (an iterator stands for the list that the run of its
+  cursor gives; each call may rely on the invariant before and after it).
 - One call of `Cur.step` in each phase: `step_leaf_none`, `step_leaf_root`,
   `step_leaf_level2_block`, `step_leaf_level2_page`, `step_leaf_level3`,
   `step_held_leaf`, `step_held_same`, `step_newPages_some`,
@@ -104,16 +105,23 @@ theorem curRuns_of_steps {c c' : Cur} {l1 l2 : List Step} (h1 : CurSteps step P 
   obtain ⟨c'', h, hrest⟩ := h2
   exact ⟨c'', curSteps_append h h1, hrest⟩
 
+/-- The first state of steps that reach a state where `P` holds keeps `P`. -/
+theorem curSteps_first {c c' : Cur} {l : List Step} (h : CurSteps step P c l c') (hp : P c') :
+    P c := by
+  cases l with
+  | nil => have : c = c' := h; subst this; exact hp
+  | cons s l => exact h.1
+
 end Runs
 
 /-- An iterator stands for each list that the run of the cursor of its
 state gives, when each call of its `next` from a state that keeps `Inv` and
-whose cursor `abs` keeps `P` gives an item related to the step of `step`, a
-state that keeps `Inv` whose cursor is the cursor after `step`, and the same
-state when the cursor stays. -/
+whose cursor `abs` keeps `P`, as the cursor after `step` does, gives an item
+related to the step of `step`, a state that keeps `Inv` whose cursor is the
+cursor after `step`, and the same state when the cursor stays. -/
 theorem stands_of_curRuns {σ α : Type} {next : σ → Result (Option α × σ)} {rel : α → Step → Prop}
     {abs : σ → Cur} {Inv : σ → Prop} {step : Cur → Option Step × Cur} {P : Cur → Prop}
-    (hnext : ∀ it, Inv it → P (abs it) → next it ⦃ o it' =>
+    (hnext : ∀ it, Inv it → P (abs it) → P (step (abs it)).2 → next it ⦃ o it' =>
       OptionRel rel o (step (abs it)).1 ∧ abs it' = (step (abs it)).2 ∧ Inv it' ∧
         (abs it' = abs it → it' = it) ⦄) :
     ∀ (l : List Step) (it : σ), Inv it → CurRuns step P (abs it) l → Stands next rel it l := by
@@ -127,12 +135,13 @@ theorem stands_of_curRuns {σ α : Type} {next : σ → Result (Option α × σ)
       have hc : abs it = c' := hs
       subst hc
       rw [stands_nil]
-      refine spec_mono (hnext it hi hp) ?_
+      refine spec_mono (hnext it hi hp hp') ?_
       rintro ⟨o, it'⟩ ⟨ho, habs, hi', -⟩
       rw [hn] at ho
       have ho' : o = none := by cases o <;> simp_all
       refine ⟨ho', ?_⟩
-      obtain ⟨⟨o2, it2⟩, heq, ho2, habs2, -, hfx⟩ := spec_iff.1 (hnext it' hi' (by rw [habs]; exact hp'))
+      obtain ⟨⟨o2, it2⟩, heq, ho2, habs2, -, hfx⟩ := spec_iff.1 (hnext it' hi' (by rw [habs]; exact hp')
+        (by rw [habs, hfix]; exact hp'))
       rw [habs, hfix] at ho2 habs2
       have h1 : o2 = none := by cases o2 <;> simp_all
       have h2 : it2 = it' := hfx (by rw [habs2, habs])
@@ -141,7 +150,7 @@ theorem stands_of_curRuns {σ α : Type} {next : σ → Result (Option α × σ)
       intro it c' hi hs hp hn hp' hfix
       obtain ⟨hp0, hs0, hrest⟩ := hs
       rw [stands_cons]
-      refine spec_mono (hnext it hi hp0) ?_
+      refine spec_mono (hnext it hi hp0 (curSteps_first hrest hp)) ?_
       rintro ⟨o, it'⟩ ⟨ho, habs, hi', -⟩
       rw [hs0] at ho
       cases o with
@@ -2029,18 +2038,19 @@ theorem curRuns_mapPlan (H : SimOk off find place LP) (used TT : Nat)
     le_refl _, Nat.zero_le _, Nat.zero_le _⟩
 
 /-- **`Stands` for a map plan iterator.** An iterator whose call of `next`, from
-a state that keeps `Inv` and whose cursor `abs` keeps `CurOk`, is one call
-of `Cur.step find place base` on its cursor (an item related to the step, a
-state that keeps `Inv` whose cursor is the cursor after it, the same state
-when the cursor stays), at the cursor before the first leaf with the record
-`used`, stands for `mapPlan` of the placed leaves of `assignTables used LP`,
-for leaves, search and place that satisfy `SimOk` and a bound `TT` of the
-tables as in `curRuns_mapPlan`. -/
+a state that keeps `Inv` and whose cursor `abs` keeps `CurOk`, as the cursor
+after the call does, is one call of `Cur.step find place base` on its cursor
+(an item related to the step, a state that keeps `Inv` whose cursor is the
+cursor after it, the same state when the cursor stays), at the cursor before
+the first leaf with the record `used`, stands for `mapPlan` of the placed
+leaves of `assignTables used LP`, for leaves, search and place that satisfy
+`SimOk` and a bound `TT` of the tables as in `curRuns_mapPlan`. -/
 theorem stands_mapPlan {σ α : Type} {next : σ → Result (Option α × σ)} {rel : α → Step → Prop}
     {abs : σ → Cur} {Inv : σ → Prop} (H : SimOk off find place LP) (used TT : Nat)
     (hTT : ∀ x ∈ LP, PlaceLe TT x.2)
     (hnew : used < (assignTables used LP).1 → (assignTables used LP).1 ≤ TT)
-    (hnext : ∀ it, Inv it → CurOk LP (assignTables used LP).1 TT (abs it) → next it ⦃ o it' =>
+    (hnext : ∀ it, Inv it → CurOk LP (assignTables used LP).1 TT (abs it) →
+      CurOk LP (assignTables used LP).1 TT (Cur.step find place base (abs it)).2 → next it ⦃ o it' =>
       OptionRel rel o (Cur.step find place base (abs it)).1 ∧
         abs it' = (Cur.step find place base (abs it)).2 ∧ Inv it' ∧ (abs it' = abs it → it' = it) ⦄)
     (it : σ) (hi : Inv it) (hc : abs it = ⟨.leaf, 0, used, noSlot, noSlot, 0, 0⟩) :

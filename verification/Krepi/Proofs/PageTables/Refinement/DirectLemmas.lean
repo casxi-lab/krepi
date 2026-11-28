@@ -24,33 +24,27 @@ search of its plan.
   (`Tables.checkUsableRange`), `check_usable_loop_spec` and
   `check_usable_spec` (the fold of `Tables.checkUsableRange` over the usable
   ranges that the iterator of the boot memory map gives).
-- `DirectRoom` (the one premise on the record of the set that the count of
-  new tables of the code needs), `DirectMapStart`, `memoryPlanRepr_lengths`
-  and `direct_map_set_spec`: `direct_map` gives the error of
-  `Tables.directMap` with the set unchanged, or its set after the write phase
-  and a plan iterator at its start, for a boot memory map that the fdt
-  entries built.
+- `DirectMapStart`, `memoryPlanRepr_lengths` and `direct_map_set_spec`:
+  `direct_map` gives the error of `Tables.directMap` with the set unchanged,
+  or its set after the write phase and a plan iterator at its start whose set
+  is that set, for a boot memory map that the fdt entries built.
 - The leaf search of the plan: `searchList` (the ranges of a state of the
   search), `usable_leaf_loop_spec` and `usable_leaf_spec` (`usableFind` of
   those ranges; the ranges of the state where the search stopped are a
   suffix of them), `directFind`, `SearchOk`, `found_of_usableFind`, and
   `direct_map_plan_next_spec` (`DirectMapPlan::next` is one `Cur.step` with
-  the search `directFind` of its state).
+  the search `directFind` of its state, which stays while the 1 GiB slot of
+  the cursor stays).
 - The search from the start of the plan: `searchList_start`,
   `directFind_eq_of_skip`, `searchOk_start` and `directFind_eq_firstFound`
   (the search of a state is the first leaf at or above an address of
   `usableLeaves` of the usable ranges).
-- `direct_map_of_stands`: the conclusion of the statement `DirectMap` for an
-  input with the room of `DirectRoom`, from the simulation of `mapPlan` by
-  the plan iterator.
 
 The checks of the leaves rely on `check_leaf_spec`, whose count of new tables
-starts from the record `used` of the set and cannot overflow only while that
-record is far enough below the largest `usize`: `DirectRoom` states that
-premise once, and the triples that need it (`check_leaves_loop_spec`,
-`direct_check_range_spec`, `check_usable_loop_spec`, `check_usable_spec`,
-`direct_map_set_spec`, `direct_map_of_stands`) take it or the bound that it
-gives. The leaf search, the plan step and the fdt queries do not need it.
+starts from 0 and grows by at most two a leaf: at most 164 usable ranges of
+at most `2 ^ 19` leaves keep it below `2 ^ 28`, within `usize` on either
+width (`usable_room`, `usize_max_ge`). No triple here has a premise on the
+record of tables in use of the set.
 -/
 
 @[expose] public section
@@ -126,13 +120,15 @@ a block exactly at a multiple of 2 MiB with at least 2 MiB left. -/
 
 /-- What the record of the checks of the code holds against the leaves `acc`
 that passed, latest first, after usable ranges whose largest end is `reach`:
-that end, the record of new tables of `allocOf used acc` at the virtual
-addresses `DIRECT_BASE | pa`, and at most two new tables a leaf. -/
+that end, the new tables of `allocOf used acc` (the record `used` of the set
+plus the count of the code) at the virtual addresses `DIRECT_BASE | pa`, and
+at most two new tables a leaf. -/
 def UsableRel (used reach : Nat) (check : page_tables.boot.MapCheck)
     (acc : List (MapLeaf × Place)) : Prop :=
   check.reach.val = reach ∧
-    AllocRel DIRECT_BASE.toNat check.next.val check.gib.val check.slot.val (allocOf used acc) ∧
-    check.next.val ≤ used + 2 * acc.length ∧ used ≤ check.next.val
+    AllocRel DIRECT_BASE.toNat (used + check.new_tables.val) check.gib.val check.slot.val
+      (allocOf used acc) ∧
+    check.new_tables.val ≤ 2 * acc.length
 
 /-- The check of one leaf at `pa` of a usable range that ends at `e` by the
 code (`check_leaf` without a guard) is the free-slot check of the leaf of
@@ -160,10 +156,10 @@ theorem checkPlace_leaf {N : Usize} (set : page_tables.Tables N true) (base : U6
 /-- The loop of `check_leaves` from the leaf at `pa` up to `e`, on a pool of
 at least one table, for an end at or below `2 ^ 39` on a page boundary, a
 leaf on a page boundary from `start`, ranges before that start at or below
-`start`, `fuel` at least the leaves left (`leafFuel`) and a record of new
-tables that cannot overflow on them: the fold of the free-slot checks of
-those leaves (`checkLeavesFrom`), the record standing for the leaves that
-passed (`UsableRel`). -/
+`start`, `fuel` at least the leaves left (`leafFuel`) and room in `usize`
+for two new tables for each leaf that passed and each unit of fuel: the fold
+of the free-slot checks of those leaves (`checkLeavesFrom`), the record
+standing for the leaves that passed (`UsableRel`). -/
 theorem check_leaves_loop_spec {N : Usize} (set : page_tables.Tables N true)
     (base top : U64) (earlier : List Krepi.Spec.Fdt.Span) (used start : Nat)
     (hN : 0 < N.val) (he : top.val ≤ 2 ^ 39) (he4 : top.val % 4096 = 0)
@@ -172,7 +168,7 @@ theorem check_leaves_loop_spec {N : Usize} (set : page_tables.Tables N true)
     (hpa : start ≤ pa.val) (hpa4 : pa.val % 4096 = 0) (hpae : pa.val ≤ top.val)
     (hfuel : leafFuel top.val pa.val ≤ fuel)
     (hrel : UsableRel used (reachSpans earlier) check acc)
-    (hov : used + 2 * (acc.length + fuel) + 2 ≤ Usize.max) :
+    (hov : 2 * (acc.length + fuel) + 2 ≤ Usize.max) :
     page_tables.boot.direct.check_leaves_loop set check top base pa ⦃ r c =>
       Agrees (fun _ acc' => UsableRel used (reachSpans earlier) c acc') tableErrorOf r
         (checkLeavesFrom (tablesOf set) (word64 base) (usableTaken earlier) top.val fuel pa.val
@@ -183,12 +179,12 @@ theorem check_leaves_loop_spec {N : Usize} (set : page_tables.Tables N true)
     (inv := fun (x : page_tables.boot.MapCheck × U64) =>
       start ≤ x.2.val ∧ x.2.val % 4096 = 0 ∧ x.2.val ≤ top.val ∧
       ∃ acc' f, leafFuel top.val x.2.val ≤ f ∧ UsableRel used (reachSpans earlier) x.1 acc' ∧
-        used + 2 * (acc'.length + f) + 2 ≤ Usize.max ∧
+        2 * (acc'.length + f) + 2 ≤ Usize.max ∧
         checkLeavesFrom (tablesOf set) (word64 base) (usableTaken earlier) top.val f x.2.val acc' =
         checkLeavesFrom (tablesOf set) (word64 base) (usableTaken earlier) top.val fuel pa.val acc)
   · rintro ⟨c, p⟩ ⟨h1, h2, h3, acc', f, hf, hr, hov', hspec⟩
     simp only at h1 h2 h3 hf hr hov' hspec
-    have hn : c.next.val + 2 ≤ Usize.max := by obtain ⟨-, -, h, -⟩ := hr; omega
+    have hn : c.new_tables.val + 2 ≤ Usize.max := by obtain ⟨-, -, h⟩ := hr; omega
     have hst : ∀ x ∈ earlier, x.start.toNat ≤ p.val := fun x hx => Nat.le_trans (hstart x hx) h1
     unfold page_tables.boot.direct.check_leaves_loop.body
     simp only [block_size_eq, page_size_eq]
@@ -211,21 +207,20 @@ theorem check_leaves_loop_spec {N : Usize} (set : page_tables.Tables N true)
       have hc2 := congrArg (fun x => x.2.1) hcount
       have hc3 := congrArg (fun x => x.2.2) hcount
       simp only at hc1 hc2 hc3
-      have hle2 := countStep_le leaf.block P p.val c.next.val c.gib.val c.slot.val
-      have hge2 := countStep_ge leaf.block P p.val c.next.val c.gib.val c.slot.val
-      have hnb := hr.2.2.1
-      have hnu := hr.2.2.2
+      have hle2 := countStep_le leaf.block P p.val c.new_tables.val c.gib.val c.slot.val
+      have hnb := hr.2.2
       have hva : (directLeaf top.val p.val).va.toNat = DIRECT_BASE.toNat + p.val :=
         directLeaf_va_toNat hlow
       have hform : (directLeaf top.val p.val).form = if leaf.block then .block else .page := by
         rw [directLeaf_form, leaf_post]; simp only [decide_eq_true_eq]
       have hrel' : UsableRel used (reachSpans earlier) check1
           ((directLeaf top.val p.val, P) :: acc') := by
-        refine ⟨by rw [hreach']; exact hr.1, ?_, ?_, ?_⟩
-        · rw [allocOf_cons, hc1, hc2, hc3]
-          exact allocRel_add hr.2.1 (by decide) hva hform
+        refine ⟨by rw [hreach']; exact hr.1, ?_, ?_⟩
+        · have ha := allocRel_add (p := P) hr.2.1 (by decide) hva hform
+          rw [countStep_add] at ha
+          rw [allocOf_cons, hc1, hc2, hc3]
+          exact ha
         · rw [hc1, List.length_cons]; omega
-        · rw [hc1]; omega
       have hsz := directLeaf_size top.val p.val
       by_cases hb : p.val % BLOCK_SIZE = 0 ∧ p.val + BLOCK_SIZE ≤ top.val
       · have hlb : leaf.block = true := by rw [leaf_post]; exact decide_eq_true hb
@@ -264,15 +259,6 @@ theorem check_leaves_loop_spec {N : Usize} (set : page_tables.Tables N true)
       exact hr
   · exact ⟨hpa, hpa4, hpae, acc, fuel, hfuel, hrel, hov, rfl⟩
 
-/-- The premise on the record `used` of the tables in use of the set that
-the checks of `direct_map` need: at least `2 ^ 28` below the largest
-`usize`, room for two new tables for each of the at most `164 · 2 ^ 19`
-leaves of the usable ranges of a boot memory map. The checks of the code
-count the new tables from the record (`MapCheck::new(set.used)`), so a larger
-record can overflow their count; every triple of the direct map that needs
-the premise takes it through this definition. -/
-def DirectRoom (used : Nat) : Prop := used + 2 ^ 28 ≤ Usize.max
-
 /-- `checkUsableRange_eq` on the set of the code, whose region is that of
 `regionOf true`. -/
 theorem checkUsableRange_tablesOf {N : Usize} (set : page_tables.Tables N true) (base : UInt64)
@@ -289,17 +275,17 @@ theorem checkUsableRange_tablesOf {N : Usize} (set : page_tables.Tables N true) 
 
 /-- `check_range(set, check, range, base, bits)` on a pool of at least one
 table, for a span whose end fits in 64 bits, after usable ranges that start
-at or below it, a width below 64 and a record of new tables that cannot
-overflow on the leaves of a range below `2 ^ 39`: the checks of the range,
-`Tables.checkUsableRange`, the record standing for the leaves that passed
-after the range (`UsableRel`). -/
+at or below it, a width below 64 and room in `usize` for two new tables for
+each leaf that passed and each leaf of a range below `2 ^ 39`: the checks of
+the range, `Tables.checkUsableRange`, the record standing for the leaves
+that passed after the range (`UsableRel`). -/
 theorem direct_check_range_spec {N : Usize} (set : page_tables.Tables N true)
     (check : page_tables.boot.MapCheck) (range : fdt.Span) (base : U64) (bits : U8)
     (earlier : List Krepi.Spec.Fdt.Span) (acc : List (MapLeaf × Place)) (used : Nat)
     (hN : 0 < N.val) (hfit : range.start.val + range.size.val < 2 ^ 64) (hb : bits.val < 64)
     (hstart : ∀ x ∈ earlier, x.start.toNat ≤ range.start.val)
     (hrel : UsableRel used (reachSpans earlier) check acc)
-    (hov : used + 2 * (acc.length + 2 ^ 19) + 2 ≤ Usize.max) :
+    (hov : 2 * (acc.length + 2 ^ 19) + 2 ≤ Usize.max) :
     page_tables.boot.direct.check_range set check range base bits ⦃ r c =>
       Agrees (fun _ (x : List Krepi.Spec.Fdt.Span × List (MapLeaf × Place)) =>
           x.1 = earlier ++ [spanOf range] ∧ UsableRel used (reachSpans x.1) c x.2) tableErrorOf r
@@ -368,12 +354,11 @@ theorem direct_check_range_spec {N : Usize} (set : page_tables.Tables N true)
     · obtain ⟨acc', hacc', hrel'⟩ := agrees_ok_iff.1 (agrees_of_branch_ok cf_post ‹_› hr)
       rw [hacc']
       refine ⟨rfl, ?_⟩
-      obtain ⟨h1, h2, h3, h4⟩ := hrel'
-      refine ⟨?_, ?_, ?_, ?_⟩
+      obtain ⟨h1, h2, h3⟩ := hrel'
+      refine ⟨?_, ?_, ?_⟩
       · rw [check2_post, h1, reachSpans_append, hE, ← end_post]
       · rw [check2_post1, check2_post2, check2_post3]; exact h2
       · rw [check2_post1]; exact h3
-      · rw [check2_post1]; exact h4
     · rw [agrees_err_of_branch cf_post ‹_› residual_post hr, r1_post, e_post]
       rfl
 
@@ -381,28 +366,25 @@ theorem direct_check_range_spec {N : Usize} (set : page_tables.Tables N true)
 ranges, on a pool of at least one table, for managed banks within 64 bits,
 nonempty reservations, usable ranges `Us` within 64 bits, apart in address
 order and at most 164, of which the ranges `y.1` are checked and the rest are
-those of the iterator, a width below 64 and a record of the set with the
-room of `DirectRoom`: the fold of `Tables.checkUsableRange`
-over the ranges left, from the ranges checked and the leaves that passed
-(`UsableRel`). -/
-theorem check_usable_loop_spec {N : Usize}
-    (a : Aeneas.Std.Array (Aeneas.Std.Array U64 512#usize) N) (i : Usize) (base : U64) (bits : U8)
-    (M Rs Us : List Krepi.Spec.Fdt.Span) (hN : 0 < N.val) (hb : bits.val < 64)
+those of the iterator, at most `2 ^ 19` leaves a range checked, and a width
+below 64: the fold of `Tables.checkUsableRange` over the ranges left, from
+the ranges checked and the leaves that passed (`UsableRel`). -/
+theorem check_usable_loop_spec {N : Usize} (set : page_tables.Tables N true) (base : U64)
+    (bits : U8) (M Rs Us : List Krepi.Spec.Fdt.Span) (hN : 0 < N.val) (hb : bits.val < 64)
     (hM : ∀ b ∈ M, b.Valid) (hRs : ∀ r ∈ Rs, r.Nonempty) (hUs : ∀ u ∈ Us, u.Valid)
     (hsort : Us.Pairwise (fun x y => x.endNat ≤ y.start.toNat)) (hlen : Us.length ≤ 164)
-    (hov : DirectRoom i.val)
     (ranges : fdt.AvailableRanges) (hm : spansOf ranges.managed = M)
     (hr : spansOf ranges.reservations = Rs) (check : page_tables.boot.MapCheck)
     (y : List Krepi.Spec.Fdt.Span × List (MapLeaf × Place))
     (hsplit : y.1 ++ availableFrom M Rs ranges.cursor.bank.val ranges.cursor.at.val = Us)
     (hy2 : y.2.length ≤ y.1.length * 2 ^ 19)
-    (hrel : UsableRel i.val (reachSpans y.1) check y.2) :
-    page_tables.boot.direct.check_usable_loop a i base bits ranges check ⦃ r =>
+    (hrel : UsableRel set.used.val (reachSpans y.1) check y.2) :
+    page_tables.boot.direct.check_usable_loop set base bits ranges check ⦃ r =>
       Agrees (fun c (z : List Krepi.Spec.Fdt.Span × List (MapLeaf × Place)) =>
-          UsableRel i.val (reachSpans z.1) c z.2) tableErrorOf r
+          UsableRel set.used.val (reachSpans z.1) c z.2) tableErrorOf r
         ((availableFrom M Rs ranges.cursor.bank.val ranges.cursor.at.val).foldlM
-          ((tablesOf ({ pool := a, used := i } : page_tables.Tables N true)).checkUsableRange
-            (word64 base) (byte bits)) y) ⦄ := by
+          ((tablesOf set).checkUsableRange (word64 base) (byte bits)) y) ⦄ := by
+  have h28 : 2 ^ 28 ≤ Usize.max := Nat.le_trans (Nat.le_of_ble_eq_true rfl) usize_max_ge
   unfold page_tables.boot.direct.check_usable_loop
   apply loop.spec_decr_nat
     (measure := fun (x : fdt.AvailableRanges × page_tables.boot.MapCheck) =>
@@ -411,13 +393,11 @@ theorem check_usable_loop_spec {N : Usize}
       spansOf x.1.managed = M ∧ spansOf x.1.reservations = Rs ∧
       ∃ y' : List Krepi.Spec.Fdt.Span × List (MapLeaf × Place),
         y'.1 ++ availableFrom M Rs x.1.cursor.bank.val x.1.cursor.at.val = Us ∧
-        y'.2.length ≤ y'.1.length * 2 ^ 19 ∧ UsableRel i.val (reachSpans y'.1) x.2 y'.2 ∧
+        y'.2.length ≤ y'.1.length * 2 ^ 19 ∧ UsableRel set.used.val (reachSpans y'.1) x.2 y'.2 ∧
         (availableFrom M Rs x.1.cursor.bank.val x.1.cursor.at.val).foldlM
-          ((tablesOf ({ pool := a, used := i } : page_tables.Tables N true)).checkUsableRange
-            (word64 base) (byte bits)) y' =
+          ((tablesOf set).checkUsableRange (word64 base) (byte bits)) y' =
         (availableFrom M Rs ranges.cursor.bank.val ranges.cursor.at.val).foldlM
-          ((tablesOf ({ pool := a, used := i } : page_tables.Tables N true)).checkUsableRange
-            (word64 base) (byte bits)) y)
+          ((tablesOf set).checkUsableRange (word64 base) (byte bits)) y)
   · rintro ⟨rs, c⟩ ⟨h1, h2, ⟨e, l⟩, hy1, hy2', hyr, hspec⟩
     simp only at h1 h2 hy1 hy2' hyr hspec
     unfold page_tables.boot.direct.check_usable_loop.body
@@ -450,8 +430,8 @@ theorem check_usable_loop_spec {N : Usize}
         have := congrArg List.length hy1
         rw [ho, List.length_append, List.length_cons] at this
         omega
-      have hcr := direct_check_range_spec { pool := a, used := i } c range base bits e l i.val hN
-        hfit hb hst hyr (usable_room hov hy2' he)
+      have hcr := direct_check_range_spec set c range base bits e l set.used.val hN
+        hfit hb hst hyr (usable_room h28 hy2' he)
       refine WP.spec_bind hcr ?_
       rintro ⟨r, check1⟩ hr1
       rw [ho, List.foldlM_cons] at hspec
@@ -470,16 +450,14 @@ theorem check_usable_loop_spec {N : Usize}
 /-- `check_usable(set, ranges, base, bits)` on a pool of at least one table,
 for an iterator at the start of the usable ranges `Us` of managed banks `M`
 within 64 bits and nonempty reservations `Rs`, with `Us` within 64 bits,
-apart in address order and at most 164, a width below 64 and a record of the
-set with the room of `DirectRoom`: the fold of
+apart in address order and at most 164, and a width below 64: the fold of
 `Tables.checkUsableRange` over `Us`, with the record of the checks standing
 for its result (`UsableRel`). -/
 theorem check_usable_spec {N : Usize} (set : page_tables.Tables N true)
     (ranges : fdt.AvailableRanges) (base : U64) (bits : U8) (M Rs Us : List Krepi.Spec.Fdt.Span)
     (hN : 0 < N.val) (hb : bits.val < 64) (hM : ∀ b ∈ M, b.Valid) (hRs : ∀ r ∈ Rs, r.Nonempty)
     (hUs : ∀ u ∈ Us, u.Valid) (hsort : Us.Pairwise (fun x y => x.endNat ≤ y.start.toNat))
-    (hlen : Us.length ≤ 164) (hov : DirectRoom set.used.val)
-    (hm : spansOf ranges.managed = M) (hr : spansOf ranges.reservations = Rs)
+    (hlen : Us.length ≤ 164) (hm : spansOf ranges.managed = M) (hr : spansOf ranges.reservations = Rs)
     (hstart : availableFrom M Rs ranges.cursor.bank.val ranges.cursor.at.val = Us) :
     page_tables.boot.direct.check_usable set ranges base bits ⦃ r =>
       Agrees (fun c (z : List Krepi.Spec.Fdt.Span × List (MapLeaf × Place)) =>
@@ -488,13 +466,12 @@ theorem check_usable_spec {N : Usize} (set : page_tables.Tables N true)
   unfold page_tables.boot.direct.check_usable
   step*
   have hrel : UsableRel set.used.val (reachSpans []) check [] := by
-    refine ⟨check_post, ?_, ?_, ?_⟩
-    · rw [check_post1, ‹check.gib.val = noSlot›, ‹check.slot.val = noSlot›]
+    refine ⟨check_post, ?_, ?_⟩
+    · rw [check_post1, ‹check.gib.val = noSlot›, ‹check.slot.val = noSlot›, Nat.add_zero]
       exact allocRel_init _ set.used.val
     · rw [check_post1]; simp
-    · rw [check_post1]
-  have h := check_usable_loop_spec set.pool set.used base bits M Rs Us hN hb hM hRs hUs hsort hlen
-    hov ranges hm hr check ([], []) (by rw [List.nil_append, hstart]) (Nat.zero_le _) hrel
+  have h := check_usable_loop_spec set base bits M Rs Us hN hb hM hRs hUs hsort hlen
+    ranges hm hr check ([], []) (by rw [List.nil_append, hstart]) (Nat.zero_le _) hrel
   rw [hstart] at h
   exact h
 
@@ -525,17 +502,19 @@ theorem memoryPlanRepr_lengths {p : fdt.MemoryPlan} {P : Krepi.Spec.Fdt.MemoryPl
   omega
 
 /-- `direct_map(set, memory, base, bits)` for a map that stands for a boot
-memory map that the fdt entries built (`BuiltPlan`) and a record of the set
-with the room of `DirectRoom`: the error of `Tables.directMap` with the set
-unchanged, or its set after the write phase with a plan iterator at its
-start (`DirectMapStart`). That the iterator stands for `mapPlan` (the
-simulation) is not proved here. -/
+memory map that the fdt entries built (`BuiltPlan`): the error of
+`Tables.directMap` with the set unchanged, or its set after the write phase
+with a plan iterator at its start (`DirectMapStart`) whose set is the set
+that `direct_map` returns. That the iterator stands for `mapPlan` is
+`direct_map_plan_stands`
+(`Krepi.Proofs.PageTables.Refinement.DirectPlanLemmas`). -/
 theorem direct_map_set_spec {N : Usize} (s : page_tables.Tables N true) (memory : fdt.MemoryPlan)
     (P : Krepi.Spec.Fdt.MemoryPlan) (base : U64) (bits : U8) (hP : MemoryPlanRepr memory P)
-    (hB : Witnesses.TableSets.BuiltPlan P) (hov : DirectRoom s.used.val) :
+    (hB : Witnesses.TableSets.BuiltPlan P) :
     page_tables.direct_map s memory base bits ⦃ r s' =>
       Writes (fun s' S => tablesOf s' = S) (fun it _ => DirectMapStart s P base it)
-        (tableErrorOf · = ·) s r s' ((tablesOf s).directMap P (word64 base) (byte bits)) ⦄ := by
+        (tableErrorOf · = ·) s r s' ((tablesOf s).directMap P (word64 base) (byte bits)) ∧
+        ∀ it, r = .Ok it → it.set = s' ⦄ := by
   have hw := builtPlan_wellFormed hB
   obtain ⟨hne, hpw, hlen⟩ := usable_wf hw
   have hsorted := usable_sorted hw
@@ -556,49 +535,53 @@ theorem direct_map_set_spec {N : Usize} (s : page_tables.Tables N true) (memory 
         P.availableRanges := by
       rw [ar_post2, ar_post3, availableRanges_eq]
     have hcu := check_usable_spec s ar base bits P.managed P.reservations P.availableRanges hN hb
-      hM hRs hUs hpw hlen' hov ar_post ar_post1 hstart
+      hM hRs hUs hpw hlen' ar_post ar_post1 hstart
     refine WP.spec_bind hcu ?_
     intro r1 hr1
     step*
-    · obtain ⟨⟨earlier, leaves⟩, -, hrel⟩ :=
-        agrees_ok_iff.1 (agrees_of_branch_ok cf1_post ‹_› hr1)
-      exact hrel.2.2.2
     · obtain ⟨⟨earlier, leaves⟩, hy, hrel⟩ :=
         agrees_ok_iff.1 (agrees_of_branch_ok cf1_post ‹_› hr1)
-      have hnext : (allocOf s.used.val leaves).next = val.next.val := hrel.2.1.1
-      rw [directMap_fold_ok (s := tablesOf s) hp (by rw [hsorted]; exact hy), tablesOf_used, hnext]
+      have hnext : (allocOf s.used.val leaves).next = s.used.val + val.new_tables.val := hrel.2.1.1
+      rw [directMap_fold_ok (s := tablesOf s) hp (by rw [hsorted]; exact hy), tablesOf_used, hnext,
+        Nat.add_sub_cancel_left]
       have hr2 := branch_ok cf2_post ‹_›
-      by_cases hcond : N.val - s.used.val < val.next.val - s.used.val
+      by_cases hcond : N.val - s.used.val < val.new_tables.val
       · simp only [hcond, ↓reduceIte] at r2_post
         rw [hr2] at r2_post
         cases r2_post.1
       · simp only [hcond, ↓reduceIte] at r2_post ⊢
         rw [hr2] at r2_post
-        obtain ⟨hv1, hs1⟩ := r2_post
+        obtain ⟨hv1, hpool1, hused1⟩ := r2_post
         cases hv1
-        refine ⟨⟨by rw [hs1], rfl, rfl, ar_post, ar_post1, ar_post2, ar_post3, rfl, rfl⟩, ?_⟩
-        rw [hs1]
+        refine ⟨⟨⟨hpool1, rfl, rfl, ar_post, ar_post1, ar_post2, ar_post3, rfl, rfl⟩, ?_⟩,
+          fun it h => by cases h; rfl⟩
+        show (⟨poolOf set1.pool, set1.used.val⟩ : Tables .upper N.val) = _
+        rw [hpool1, hused1]
         rfl
     · obtain ⟨⟨earlier, leaves⟩, hy, hrel⟩ :=
         agrees_ok_iff.1 (agrees_of_branch_ok cf1_post ‹_› hr1)
-      have hnext : (allocOf s.used.val leaves).next = val.next.val := hrel.2.1.1
-      rw [directMap_fold_ok (s := tablesOf s) hp (by rw [hsorted]; exact hy), tablesOf_used, hnext]
+      have hnext : (allocOf s.used.val leaves).next = s.used.val + val.new_tables.val := hrel.2.1.1
+      rw [directMap_fold_ok (s := tablesOf s) hp (by rw [hsorted]; exact hy), tablesOf_used, hnext,
+        Nat.add_sub_cancel_left]
       have hr2 := branch_err cf2_post ‹_› residual_post
-      by_cases hcond : N.val - s.used.val < val.next.val - s.used.val
+      by_cases hcond : N.val - s.used.val < val.new_tables.val
       · simp only [hcond, ↓reduceIte] at r2_post ⊢
         rw [hr2] at r2_post
         obtain ⟨he, hs1⟩ := r2_post
         cases he
+        refine ⟨?_, fun it h => by rw [r3_post] at h; cases h⟩
         rw [r3_post, ← e_post, hs1]
         exact ⟨rfl, rfl⟩
       · simp only [hcond, ↓reduceIte] at r2_post
         rw [hr2] at r2_post
         cases r2_post.1
-    · rw [directMap_fold_error (s := tablesOf s) hp
+    · refine ⟨?_, fun it h => by rw [r2_post] at h; cases h⟩
+      rw [directMap_fold_error (s := tablesOf s) hp
         (by rw [hsorted]; exact agrees_err_of_branch cf1_post ‹_› residual_post hr1), r2_post,
         e_post]
       exact ⟨rfl, rfl⟩
-  · rw [directMap_pool_error (s := tablesOf s)
+  · refine ⟨?_, fun it h => by rw [r1_post] at h; cases h⟩
+    rw [directMap_pool_error (s := tablesOf s)
       (agrees_err_of_branch cf_post ‹_› residual_post r_post), r1_post, e_post]
     exact ⟨rfl, rfl⟩
 
@@ -796,10 +779,14 @@ theorem found_of_usableFind {o : Option page_tables.boot.Leaf} {L : List Krepi.S
 
 /-- `DirectMapPlan::next()` on a pool of at least one table, for an iterator
 of the usable ranges over managed banks `M` within 64 bits and nonempty
-reservations `Rs`, ranges of the state of `SearchOk`, and a cursor that does
-not overflow in this call: one call of `Cur.step` with the leaf search
+reservations `Rs`, ranges of the state of `SearchOk`, a cursor whose tables
+and slots do not overflow in this call, and a next free table after the call
+that fits in `usize`: one call of `Cur.step` with the leaf search
 `directFind` of the state and the place that the cursor reads; the set and
-the base stay, and the ranges of the new state are those of the state
+the base stay; when the 1 GiB slot of the cursor after the call is that of
+the cursor before it, the iterator of the usable ranges and the current
+range of the state stay (the code takes the state of the search only when
+the slot changes); and the ranges of the new state are those of the state
 without some first ranges, which end at or below the address of the cursor
 (`Cur.step` then searches the same leaves from any address at or above it,
 `usableFind_skip`). -/
@@ -811,13 +798,15 @@ theorem direct_map_plan_next_spec {N : Usize} (it : page_tables.DirectMapPlan N)
     (hs : it.cursor.phase = .NewPages → it.cursor.slot.val + 2 ^ 21 < 2 ^ 64)
     (hg : it.cursor.phase = .Children ∨ it.cursor.phase = .Entries →
       it.cursor.gib.val + 2 ^ 30 < 2 ^ 64)
+    (hn : ((curOf it.cursor).step (directFind M Rs it.ranges it.range)
+        (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)).2.next ≤ Usize.max)
     (hseek : ((curOf it.cursor).take (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)
         (directFind M Rs it.ranges it.range (curOf it.cursor).search.1
           (curOf it.cursor).search.2.1 (curOf it.cursor).search.2.2)).1 = .seek →
       let c' := ((curOf it.cursor).take (placeOr (tablesOf it.set) (word64 it.base))
         (word64 it.base) (directFind M Rs it.ranges it.range (curOf it.cursor).search.1
           (curOf it.cursor).search.2.1 (curOf it.cursor).search.2.2)).2
-      c'.next + 1 ≤ Usize.max ∧ c'.t2 + 1 ≤ Usize.max ∧ c'.gib + 2 ^ 30 < 2 ^ 64) :
+      c'.t2 + 1 ≤ Usize.max ∧ c'.gib + 2 ^ 30 < 2 ^ 64) :
     page_tables.boot.direct.DirectMapPlan.next it ⦃ o it' =>
       o.map stepOf = ((curOf it.cursor).step (directFind M Rs it.ranges it.range)
           (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)).1 ∧
@@ -825,6 +814,7 @@ theorem direct_map_plan_next_spec {N : Usize} (it : page_tables.DirectMapPlan N)
           (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)).2 ∧
         it'.set = it.set ∧ it'.base = it.base ∧
         spansOf it'.ranges.managed = M ∧ spansOf it'.ranges.reservations = Rs ∧
+        (it'.cursor.gib = it.cursor.gib → it'.ranges = it.ranges ∧ it'.range = it.range) ∧
         ∃ skipped, searchList M Rs it.ranges it.range =
             skipped ++ searchList M Rs it'.ranges it'.range ∧
           ∀ u ∈ skipped, u.endNat ≤ it.cursor.from.val ⦄ := by
@@ -841,12 +831,17 @@ theorem direct_map_plan_next_spec {N : Usize} (it : page_tables.DirectMapPlan N)
   have hfd : foundOf found = directFind M Rs it.ranges it.range (curOf it.cursor).search.1
       (curOf it.cursor).search.2.1 (curOf it.cursor).search.2.2 := by
     rw [hfound, hfv, hlv, hpv]; rfl
-  refine WP.spec_bind (take_spec it.cursor it.set it.base found hN hfl hcur) ?_
+  have hnt : ((curOf it.cursor).take (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)
+      (foundOf found)).2.next ≤ Usize.max := by
+    rw [hfd]
+    exact Nat.le_trans (take_next_le_step (directFind M Rs it.ranges it.range)
+      (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base) (curOf it.cursor)) hn
+  refine WP.spec_bind (take_spec it.cursor it.set it.base found hN hfl hcur hnt) ?_
   rintro ⟨mt, mc⟩ ⟨hmt, hmc⟩
   rw [hfd] at hmt hmc
   -- the state of the search after the call, and what it keeps
-  obtain ⟨st, hst, hsm, hsr, hsl, hskp⟩ : ∃ st : (Slice fdt.Span × Slice fdt.Span × fdt.Cursor ×
-      fdt.Span),
+  obtain ⟨st, hst, hsm, hsr, hsl, hskp, hsame⟩ : ∃ st : (Slice fdt.Span × Slice fdt.Span ×
+      fdt.Cursor × fdt.Span),
       (if (mc.gib != it.cursor.gib) = true then
           ok (ar.managed, ar.reservations, ar.cursor, rg)
         else ok (it.ranges.managed, it.ranges.reservations, it.ranges.cursor, it.range) :
@@ -857,7 +852,9 @@ theorem direct_map_plan_next_spec {N : Usize} (it : page_tables.DirectMapPlan N)
         ∀ u ∈ sk, u.endNat ≤ it.cursor.from.val) ∧
       (∀ f l p, it.cursor.from.val ≤ f →
         usableFind ((searchList M Rs ⟨st.1, st.2.1, st.2.2.1⟩ st.2.2.2).map spanView) f l p =
-          directFind M Rs it.ranges it.range f l p) := by
+          directFind M Rs it.ranges it.range f l p) ∧
+      (¬ (mc.gib != it.cursor.gib) = true →
+        st = (it.ranges.managed, it.ranges.reservations, it.ranges.cursor, it.range)) := by
     by_cases hgc : (mc.gib != it.cursor.gib) = true
     · have hpf : pages = false := by
         cases hpg : pages
@@ -871,7 +868,7 @@ theorem direct_map_plan_next_spec {N : Usize} (it : page_tables.DirectMapPlan N)
       have hb : ∀ u ∈ skipped, u.endNat ≤ it.cursor.from.val := by
         intro u hu; rw [← hfrm, ← hfv]; exact hskb hpf u hu
       refine ⟨(ar.managed, ar.reservations, ar.cursor, rg), by simp only [hgc, ↓reduceIte], ha1,
-        ha2, ⟨skipped, hsk, hb⟩, ?_⟩
+        ha2, ⟨skipped, hsk, hb⟩, ?_, fun h => absurd hgc h⟩
       intro f l p hf
       simp only [directFind]
       rw [hsk, List.map_append, usableFind_skip]
@@ -880,24 +877,37 @@ theorem direct_map_plan_next_spec {N : Usize} (it : page_tables.DirectMapPlan N)
       exact Nat.le_trans (hb u hu) hf
     · refine ⟨(it.ranges.managed, it.ranges.reservations, it.ranges.cursor, it.range),
         by simp only [hgc, Bool.false_eq_true, ↓reduceIte], hm, hr,
-        ⟨[], rfl, fun u hu => absurd hu List.not_mem_nil⟩, fun f l p _ => rfl⟩
+        ⟨[], rfl, fun u hu => absurd hu List.not_mem_nil⟩, fun f l p _ => rfl, fun _ => rfl⟩
   rw [uncurry_apply_pair, hst, bind_ok]
   obtain ⟨sm, sr, sc, sg⟩ := st
   simp only at hsm hsr hsl hskp
-  simp only [Cur.step]
+  simp only [Cur.step] at hn ⊢
   cases mt with
   | Give stp =>
-    refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, hsm, hsr, hsl⟩
+    refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, hsm, hsr, ?_, hsl⟩
     · rw [← hmt]; rfl
     · rw [← hmt]; exact hmc
+    · intro hg
+      have hs := hsame ((u64_not_bne_iff _ _).2
+        (congrArg UScalar.val (show mc.gib = it.cursor.gib from hg)))
+      simp only [Prod.mk.injEq] at hs
+      obtain ⟨rfl, rfl, rfl, rfl⟩ := hs
+      exact ⟨rfl, rfl⟩
   | End =>
-    refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, hsm, hsr, hsl⟩
+    refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, hsm, hsr, ?_, hsl⟩
     · rw [← hmt]; rfl
     · rw [← hmt]; exact hmc
+    · intro hg
+      have hs := hsame ((u64_not_bne_iff _ _).2
+        (congrArg UScalar.val (show mc.gib = it.cursor.gib from hg)))
+      simp only [Prod.mk.injEq] at hs
+      obtain ⟨rfl, rfl, rfl, rfl⟩ := hs
+      exact ⟨rfl, rfl⟩
   | Seek =>
-    obtain ⟨hn1, ht21, hgib⟩ := hseek hmt.symm
+    obtain ⟨ht21, hgib⟩ := hseek hmt.symm
     obtain ⟨l0, hl0, hfr0, hph0⟩ := cur_take_seek _ _ _ _ hmt.symm
-    rw [← hmc] at hn1 ht21 hgib hph0 hfr0
+    rw [← hmc] at ht21 hgib hph0 hfr0
+    rw [← hmt, ← hmc] at hn
     have hmph : mc.phase = .Children := by
       cases h : mc.phase <;> simp only [curOf, phaseOf, h, reduceCtorEq] at hph0 ⊢
     have hs' : mc.phase = .NewPages → mc.slot.val + 2 ^ 21 < 2 ^ 64 := by
@@ -931,16 +941,28 @@ theorem direct_map_plan_next_spec {N : Usize} (it : page_tables.DirectMapPlan N)
       (fun u hu => (hok2 u hu).1)) ?_
     rintro ⟨ar1, rg1, found1⟩ ⟨_, _, hfound1, _⟩
     obtain ⟨hfl1, -⟩ := found_of_usableFind hok2 hfound1
-    refine WP.spec_bind (children_spec mc found1 hfl1 hn1 ht21) ?_
-    rintro ⟨st1, mc1⟩ ⟨hst1, hmc1⟩
     have hfd1 : foundOf found1 = directFind M Rs it.ranges it.range (curOf mc).search.1
         (curOf mc).search.2.1 (curOf mc).search.2.2 := by
       rw [hfound1, hfv1, hlv1, hpv1]
       exact hskp _ _ _ hge0
+    have hn1 : ((curOf mc).children (foundOf found1)).2.next ≤ Usize.max := by
+      rw [hfd1]; exact hn
+    refine WP.spec_bind (children_spec mc found1 hfl1 hn1 ht21) ?_
+    rintro ⟨st1, mc1⟩ ⟨hst1, hmc1⟩
     rw [hfd1] at hst1 hmc1
-    refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, hsm, hsr, hsl⟩
+    refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, hsm, hsr, ?_, hsl⟩
     · rw [← hmt, ← hmc]; simp only [turnOf, Option.map_some, hst1]
     · rw [← hmt, ← hmc]; exact hmc1
+    · intro hg
+      have hgm : mc1.gib.val = mc.gib.val := by
+        have := congrArg Cur.gib hmc1
+        rw [children_gib] at this
+        exact this
+      have hs := hsame ((u64_not_bne_iff _ _).2
+        (by rw [← hgm]; exact congrArg UScalar.val (show mc1.gib = it.cursor.gib from hg)))
+      simp only [Prod.mk.injEq] at hs
+      obtain ⟨rfl, rfl, rfl, rfl⟩ := hs
+      exact ⟨rfl, rfl⟩
 
 /-! ## The search from the start of the plan -/
 
@@ -1002,40 +1024,5 @@ theorem directFind_eq_firstFound {M Rs Us sk : List Krepi.Spec.Fdt.Span}
     directFind M Rs ranges range f l p =
       firstFound ((Us.flatMap usableLeaves).map foundOfLeaf) f l p := by
   rw [directFind_eq_of_skip h hb f l p hf, usableFind_eq_firstFound Us f hUs hpw hls]
-
-/-! ## What `DirectMap` needs besides these triples -/
-
-/-- **The statement `DirectMap` for one input, from the simulation.** For a
-map that stands for a boot memory map that the fdt entries built and a record
-of the set with the room of `DirectRoom`, `direct_map` satisfies the
-conclusion of `DirectMap` as soon as every plan iterator at its start
-(`DirectMapStart`) stands for the plan of a success of `Tables.directMap`:
-the simulation of `mapPlan` by `DirectMapPlan::next`, whose one step is
-`direct_map_plan_next_spec`. -/
-theorem direct_map_of_stands {N : Usize} (s : page_tables.Tables N true)
-    (memory : fdt.MemoryPlan) (P : Krepi.Spec.Fdt.MemoryPlan) (base : U64) (bits : U8)
-    (hP : MemoryPlanRepr memory P) (hB : Witnesses.TableSets.BuiltPlan P)
-    (hov : DirectRoom s.used.val)
-    (hsim : ∀ (it : page_tables.DirectMapPlan N) (S : Tables .upper N.val) (plan : Plan),
-      DirectMapStart s P base it →
-      (tablesOf s).directMap P (word64 base) (byte bits) = .ok (S, plan) →
-      Stands page_tables.boot.direct.DirectMapPlan.next StepRepr it plan) :
-    page_tables.direct_map s memory base bits ⦃ r s' =>
-      Writes (fun s' S => tablesOf s' = S) (Stands page_tables.boot.direct.DirectMapPlan.next StepRepr)
-        (tableErrorOf · = ·) s r s' ((tablesOf s).directMap P (word64 base) (byte bits)) ⦄ := by
-  refine spec_mono (direct_map_set_spec s memory P base bits hP hB hov) ?_
-  rintro ⟨r, s'⟩ h
-  cases hd : (tablesOf s).directMap P (word64 base) (byte bits) with
-  | error y =>
-    rw [hd] at h
-    cases r with
-    | Ok a => exact h.elim
-    | Err x => exact h
-  | ok v =>
-    obtain ⟨S, plan⟩ := v
-    rw [hd] at h
-    cases r with
-    | Ok a => exact ⟨hsim a S plan h.1 hd, h.2⟩
-    | Err x => exact h.elim
 
 end Krepi.Proofs.PageTables.Refinement

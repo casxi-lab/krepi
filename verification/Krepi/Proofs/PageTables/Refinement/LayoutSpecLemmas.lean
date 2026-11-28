@@ -18,7 +18,7 @@ the code.
   `allocOf`, `allocOf_nil`, `allocOf_cons`.
 - The leaves of a layout: `pageLeaf` (the page of a kind at an address,
   mapped at it), `layoutPages_succ`, `layoutPages_length`, `sub_page_div`,
-  `layout_room`.
+  `layout_room` (the bound on the count of new tables before a range).
 - The ranges before: `reachOf` (the largest end of the ranges before, 0 for
   none), `reachOf_append`, and `any_meets_eq` (for ranges that start at or
   below a page, an earlier range shares an address with the page exactly
@@ -33,7 +33,7 @@ the code.
   `layoutFind_cons_lt`, `layoutFind_cons_ge`, `layoutFind_nil`, `layoutFind_low`.
 - `Tables.kernelMap` step by step: `checkPool_ok_facts`,
   `kernelMap_pool_error`, `kernelMap_fold_error`, `kernelMap_fold_ok`.
-- Lists: `listRel_getElem`.
+- Lists: `layout_listRel_getElem`.
 - The insertion sort of the code: `insertAfter`, `insert_insertAfter`,
   `sortByKey_concat` (`sortByKey` of a list with one more element at its end
   is `insertAfter` of it), `insertAfter_append`, `insertAfter_of_le`,
@@ -72,16 +72,16 @@ def pageLeaf (k : Kind) (pa : Nat) : MapLeaf :=
 theorem layoutPages_succ (k : Kind) (n pa : Nat) :
     layoutPages k (n + 1) pa = pageLeaf k pa :: layoutPages k n (pa + PAGE_SIZE) := rfl
 
-/-- The bound on the record of new tables before a range of a layout of at
-most 16 ranges: at most `2 ^ 27` pages a range and two new tables a page. -/
-theorem layout_room {u n m idx : Nat} (h1 : u + 2 ^ 33 ≤ m) (h2 : n ≤ idx * 2 ^ 27)
-    (h3 : idx ≤ 15) : u + 2 * (n + 2 ^ 27) + 2 ≤ m := by
+/-- The bound on the count of new tables before a range of a layout of at
+most 16 ranges, `n` leaves before it: at most `2 ^ 27` pages a range and two
+new tables a page, below `2 ^ 33` with the pages of the range. -/
+theorem layout_room {n m idx : Nat} (h1 : 2 ^ 33 ≤ m) (h2 : n ≤ idx * 2 ^ 27)
+    (h3 : idx ≤ 15) : 2 * (n + 2 ^ 27) + 2 ≤ m := by
   have hn : n ≤ 15 * 2 ^ 27 := Nat.le_trans h2 (Nat.mul_le_mul_right _ h3)
   have hb : 2 * (n + 2 ^ 27) + 2 ≤ 2 ^ 33 :=
     Nat.le_trans (Nat.add_le_add_right (Nat.mul_le_mul_left 2 (Nat.add_le_add_right hn _)) 2)
       (Nat.le_of_ble_eq_true rfl)
-  rw [Nat.add_assoc]
-  exact Nat.le_trans (Nat.add_le_add_left hb u) h1
+  exact Nat.le_trans hb h1
 
 /-- One page fewer from one page further. -/
 theorem sub_page_div {a b m : Nat} (h : (a - b) / 4096 = m + 1) : (a - (b + 4096)) / 4096 = m := by
@@ -353,7 +353,7 @@ theorem layoutFind_low {rs : List RangeView} {frm limit : Nat} {f : Found}
 /-! ## Lists of ranges -/
 
 /-- Two lists that agree item by item agree at each index. -/
-theorem listRel_getElem {α β : Type} {R : α → β → Prop} :
+theorem layout_listRel_getElem {α β : Type} {R : α → β → Prop} :
     ∀ {l : List α} {m : List β}, Krepi.Statements.ListRel R l m →
       ∀ (i : Nat) (h1 : i < l.length) (h2 : i < m.length), R l[i] m[i]
   | [], [], _, i, h1, _ => absurd h1 (by simp)
@@ -362,7 +362,7 @@ theorem listRel_getElem {α β : Type} {R : α → β → Prop} :
     cases i with
     | zero => exact hab
     | succ i =>
-      exact listRel_getElem hlm i (by simpa using h1) (by simpa using h2)
+      exact layout_listRel_getElem hlm i (by simpa using h1) (by simpa using h2)
   | [], _ :: _, h, _, _, _ => h.elim
   | _ :: _, [], h, _, _, _ => h.elim
 

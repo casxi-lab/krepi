@@ -37,7 +37,6 @@ the record of the tables that the checks of the code count.
   phases of a run of pages), `FindOk`, `searchK_mk`, `searchK_start`,
   `searchK_low`, `lowB_of_ne`, `findOk_of_split`, `split_of_found`,
   `step_congr_find` (two searches that agree from `lowB` give one call),
-  `children_gib`,
   `gib_change_le`, `searchK_children`, `searchK_leaf` and `searchK_step`
   (each call keeps `SearchK`, and a call that changes the 1 GiB slot starts
   at or below the `lowB` after it).
@@ -524,15 +523,6 @@ theorem step_congr_find {find find' : Nat → Nat → Bool → Option Found} {pl
       rw [cur_search_frm]; exact heq _ _ _ (by simp only at hfr; omega)
     simp only [h2]
 
-/-- A call of `children` keeps the 1 GiB slot. -/
-theorem children_gib (c : Cur) (o : Option Found) : (c.children o).2.gib = c.gib := by
-  cases o with
-  | none => rfl
-  | some p =>
-    simp only [Cur.children]
-    by_cases h : slotOf p.pa = c.slot
-    · simp only [h, ↓reduceIte]
-    · simp only [h, ↓reduceIte]
 
 section Step
 

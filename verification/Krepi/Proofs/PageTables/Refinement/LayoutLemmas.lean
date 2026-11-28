@@ -20,9 +20,10 @@ layout for `kernel_map`, each against the checks of `Tables.kernelMap`.
 - The checks of a range and of a layout: `checkLayoutRange_tablesOf`,
   `check_range_spec` (`Tables.checkLayoutRange`), `check_layout_loop_spec`
   and `check_layout_spec` (the fold of `Tables.checkLayoutRange` over the
-  sorted ranges). These hold for a record of the set at least `2 ^ 33` below
-  the largest `usize`, where the count of new tables of the code cannot
-  overflow.
+  sorted ranges). The count of new tables of the code starts from 0 and
+  grows by at most two a page, below `2 ^ 33` for at most 16 ranges of at
+  most `2 ^ 27` pages: the layout checks take `Usize64`, and no premise on
+  the record of tables in use of the set.
 - The sort of the ranges: `startKey`, `insert_range_loop_spec` (one
   insertion, `insertAfter`), `sort_ranges_loop_spec`, `sort_ranges_spec`
   (the first `count` ranges sorted by `sortByKey`) and
@@ -32,9 +33,10 @@ layout for `kernel_map`, each against the checks of `Tables.kernelMap`.
   `kernel_map_plan_next_spec` (`KernelMapPlan::next` is one `Cur.step`).
 - `max_layout_ranges_eq`, `KernelMapStart` and `kernel_map_set_spec`:
   `kernel_map` gives the error of `Tables.kernelMap` with the set unchanged,
-  or its set after the write phase and a plan iterator at its start, for a
-  record of the set at least `2 ^ 33` below the largest `usize`; that the
-  iterator stands for `mapPlan` is not proved.
+  or its set after the write phase and a plan iterator at its start whose
+  set is that set; that the iterator stands for `mapPlan` is
+  `kernel_map_plan_stands`
+  (`Krepi.Proofs.PageTables.Refinement.KernelPlanLemmas`).
 -/
 
 @[expose] public section
@@ -93,13 +95,13 @@ guard address lies in the page at `pa`. -/
 
 /-- What the record of the checks of the code holds against the leaves `acc`
 that passed, latest first, after ranges whose largest end is `reach`: that
-end, the record of new tables of `allocOf used acc`, and at most two new
-tables a leaf. -/
+end, the new tables of `allocOf used acc` (the record `used` of the set plus
+the count of the code), and at most two new tables a leaf. -/
 def PagesRel (used reach : Nat) (check : page_tables.boot.MapCheck)
     (acc : List (MapLeaf × Place)) : Prop :=
   check.reach.val = reach ∧
-    AllocRel 0 check.next.val check.gib.val check.slot.val (allocOf used acc) ∧
-    check.next.val ≤ used + 2 * acc.length ∧ used ≤ check.next.val
+    AllocRel 0 (used + check.new_tables.val) check.gib.val check.slot.val (allocOf used acc) ∧
+    check.new_tables.val ≤ 2 * acc.length
 
 /-- The check of one page at `pa` by the code (`check_leaf` with the guard
 test) is the free-slot check of the page of kind `k` at `pa`, for ranges
@@ -118,10 +120,10 @@ theorem checkPlace_page {N : Usize} {upper : Bool} (set : page_tables.Tables N u
 
 /-- The loop of `check_pages` from the page at `pa` up to `e`, on a pool of
 at least one table, for an end at or below `2 ^ 39`, pages from `start`,
-ranges before that start at or below `start`, and a record of new tables
-that cannot overflow on the pages left: the fold of the free-slot checks of
-those pages (`checkPages`), the record standing for the leaves that passed
-(`PagesRel`). -/
+ranges before that start at or below `start`, and room in `usize` for two
+new tables for each leaf that passed and each page left: the fold of the
+free-slot checks of those pages (`checkPages`), the record standing for the
+leaves that passed (`PagesRel`). -/
 theorem check_pages_loop_spec {N : Usize} (set : page_tables.Tables N false) (guards : Slice U64)
     (base e : U64) (k : Kind) (earlier : List PhysRange) (used start : Nat)
     (hN : 0 < N.val) (he : e.val ≤ 2 ^ 39) (he4 : e.val % 4096 = 0)
@@ -129,7 +131,7 @@ theorem check_pages_loop_spec {N : Usize} (set : page_tables.Tables N false) (gu
     (check : page_tables.boot.MapCheck) (pa : U64) (acc : List (MapLeaf × Place))
     (hpa : start ≤ pa.val) (hpa4 : pa.val % 4096 = 0) (hpae : pa.val ≤ e.val)
     (hrel : PagesRel used (reachOf earlier) check acc)
-    (hov : used + 2 * (acc.length + (e.val - pa.val) / 4096) + 2 ≤ Usize.max) :
+    (hov : 2 * (acc.length + (e.val - pa.val) / 4096) + 2 ≤ Usize.max) :
     page_tables.boot.layout.check_pages_loop set check guards base e pa ⦃ r c =>
       Agrees (fun _ acc' => PagesRel used (reachOf earlier) c acc') tableErrorOf r
         (checkPages (tablesOf set) (word64 base) (layoutTaken earlier (guards.val.map word64)) k
@@ -140,14 +142,14 @@ theorem check_pages_loop_spec {N : Usize} (set : page_tables.Tables N false) (gu
     (inv := fun (x : page_tables.boot.MapCheck × U64) =>
       start ≤ x.2.val ∧ x.2.val % 4096 = 0 ∧ x.2.val ≤ e.val ∧
       ∃ acc', PagesRel used (reachOf earlier) x.1 acc' ∧
-        used + 2 * (acc'.length + (e.val - x.2.val) / 4096) + 2 ≤ Usize.max ∧
+        2 * (acc'.length + (e.val - x.2.val) / 4096) + 2 ≤ Usize.max ∧
         checkPages (tablesOf set) (word64 base) (layoutTaken earlier (guards.val.map word64)) k
           ((e.val - x.2.val) / 4096) x.2.val acc' =
         checkPages (tablesOf set) (word64 base) (layoutTaken earlier (guards.val.map word64)) k
           ((e.val - pa.val) / 4096) pa.val acc)
   · rintro ⟨c, p⟩ ⟨h1, h2, h3, acc', hr, hov', hspec⟩
     simp only at h1 h2 h3 hr hov' hspec
-    have hn : c.next.val + 2 ≤ Usize.max := by obtain ⟨-, -, h, -⟩ := hr; omega
+    have hn : c.new_tables.val + 2 ≤ Usize.max := by obtain ⟨-, -, h⟩ := hr; omega
     have hm : p.val < e.val → ∃ m, (e.val - p.val) / 4096 = m + 1 := fun h =>
       ⟨(e.val - p.val) / 4096 - 1, by omega⟩
     have hm0 : ¬ p.val < e.val → (e.val - p.val) / 4096 = 0 := fun h => by omega
@@ -168,21 +170,20 @@ theorem check_pages_loop_spec {N : Usize} (set : page_tables.Tables N false) (gu
       have hc2 := congrArg (fun x => x.2.1) hcount
       have hc3 := congrArg (fun x => x.2.2) hcount
       simp only at hc1 hc2 hc3
-      have hle2 := countStep_le false P p.val c.next.val c.gib.val c.slot.val
-      have hnb := hr.2.2.1
-      have hnu := hr.2.2.2
-      have hge2 := countStep_ge false P p.val c.next.val c.gib.val c.slot.val
+      have hle2 := countStep_le false P p.val c.new_tables.val c.gib.val c.slot.val
+      have hnb := hr.2.2
       have hpa1 : pa1.val = p.val + 4096 := pa1_post
       have hmm : (e.val - pa1.val) / 4096 = m := by rw [hpa1]; exact sub_page_div hm'
-      refine ⟨?_, ?_, ?_, ⟨(pageLeaf k p.val, P) :: acc', ⟨?_, ?_, ?_, ?_⟩, ?_, ?_⟩, ?_⟩
+      refine ⟨?_, ?_, ?_, ⟨(pageLeaf k p.val, P) :: acc', ⟨?_, ?_, ?_⟩, ?_, ?_⟩, ?_⟩
       · omega
       · omega
       · omega
       · rw [hreach']; exact hr.1
-      · rw [allocOf_cons, hc1, hc2, hc3]
-        exact allocRel_add hr.2.1 (by decide) hva rfl
+      · have ha := allocRel_add (block := false) (p := P) hr.2.1 (by decide) hva rfl
+        rw [countStep_add] at ha
+        rw [allocOf_cons, hc1, hc2, hc3]
+        exact ha
       · rw [hc1, List.length_cons]; omega
-      · rw [hc1]; omega
       · rw [List.length_cons]; omega
       · rw [hmm, show pa1.val = p.val + PAGE_SIZE from hpa1]
         exact hspec
@@ -209,7 +210,7 @@ theorem check_pages_spec {N : Usize} (set : page_tables.Tables N false)
     (he : range.range.start.val + range.range.len.val ≤ 2 ^ 39)
     (hstart : ∀ x ∈ earlier, x.start.toNat ≤ range.range.start.val)
     (hrel : PagesRel used (reachOf earlier) check acc)
-    (hov : used + 2 * (acc.length + range.range.len.val / 4096) + 2 ≤ Usize.max) :
+    (hov : 2 * (acc.length + range.range.len.val / 4096) + 2 ≤ Usize.max) :
     page_tables.boot.layout.check_pages set check range guards base ⦃ r c =>
       Agrees (fun _ acc' => PagesRel used (reachOf earlier) c acc') tableErrorOf r
         (checkPages (tablesOf set) (word64 base) (layoutTaken earlier (guards.val.map word64))
@@ -242,17 +243,17 @@ theorem checkLayoutRange_tablesOf {N : Usize} (set : page_tables.Tables N false)
 
 /-- `check_range(set, check, range, guards, base, bits)` on a pool of at
 least one table, for a range that stands for a range of the layout, after
-ranges that start at or below it, a width below 64 and a record of new
-tables that cannot overflow on the pages of a range below `2 ^ 39`: the
-checks of the range, `Tables.checkLayoutRange`, the record standing for the
-leaves that passed after the range (`PagesRel`). -/
+ranges that start at or below it, a width below 64 and room in `usize` for
+two new tables for each leaf that passed and each page of a range below
+`2 ^ 39`: the checks of the range, `Tables.checkLayoutRange`, the record
+standing for the leaves that passed after the range (`PagesRel`). -/
 theorem check_range_spec {N : Usize} (set : page_tables.Tables N false)
     (check : page_tables.boot.MapCheck) (range : page_tables.LayoutRange) (R : LayoutRange)
     (guards : Slice U64) (base : U64) (bits : U8) (earlier : List PhysRange)
     (acc : List (MapLeaf × Place)) (used : Nat) (hN : 0 < N.val) (hR : LayoutRangeRepr range R)
     (hb : bits.val < 64) (hstart : ∀ x ∈ earlier, x.start.toNat ≤ R.range.start.toNat)
     (hrel : PagesRel used (reachOf earlier) check acc)
-    (hov : used + 2 * (acc.length + 2 ^ 27) + 2 ≤ Usize.max) :
+    (hov : 2 * (acc.length + 2 ^ 27) + 2 ≤ Usize.max) :
     page_tables.boot.layout.check_range set check range guards base bits ⦃ r c =>
       Agrees (fun _ (x : List PhysRange × List (MapLeaf × Place)) =>
           x.1 = earlier ++ [R.range] ∧ PagesRel used (reachOf x.1) c x.2) tableErrorOf r
@@ -301,7 +302,7 @@ theorem check_range_spec {N : Usize} (set : page_tables.Tables N false)
       rw [← end_post, ← i1_post]; exact not_bne_zero_iff.1 ‹_›
     have he : range.range.start.val + range.range.len.val ≤ 2 ^ 39 := by rw [← end_post]; exact hle
     have hst : ∀ x ∈ earlier, x.start.toNat ≤ range.range.start.val := fun x hx => hS ▸ hstart x hx
-    have hov' : used + 2 * (acc.length + range.range.len.val / 4096) + 2 ≤ Usize.max := by omega
+    have hov' : 2 * (acc.length + range.range.len.val / 4096) + 2 ≤ Usize.max := by omega
     have hcp := check_pages_spec set check range R guards base earlier acc used hN hR hs4 he4 he
       hst hrel hov'
     rw [checkLayoutRange_tablesOf]
@@ -312,39 +313,37 @@ theorem check_range_spec {N : Usize} (set : page_tables.Tables N false)
     · obtain ⟨acc', hacc', hrel'⟩ := agrees_ok_iff.1 (agrees_of_branch_ok cf_post ‹_› hr)
       rw [hacc']
       refine ⟨rfl, ?_⟩
-      obtain ⟨h1, h2, h3, h4⟩ := hrel'
-      refine ⟨?_, ?_, ?_, ?_⟩
+      obtain ⟨h1, h2, h3⟩ := hrel'
+      refine ⟨?_, ?_, ?_⟩
       · rw [check2_post, h1, reachOf_append, hE, ← end_post]
       · rw [check2_post1, check2_post2, check2_post3]; exact h2
       · rw [check2_post1]; exact h3
-      · rw [check2_post1]; exact h4
     · rw [agrees_err_of_branch cf_post ‹_› residual_post hr, r1_post, e_post]
       rfl
 
 /-- The loop of `check_layout` from the range at `index`, on a pool of at
 least one table, for the first `count` ranges of the code that stand for the
-ranges `Rs` sorted by their starts, a width below 64 and a record of the set
-at least `2 ^ 33` below the largest `usize`: the fold of
+ranges `Rs` sorted by their starts, a width below 64, a 64-bit `usize` (the
+count of new tables reaches `2 ^ 32` for 16 ranges of `2 ^ 27` pages) and
+at most `2 ^ 27` leaves a range before `index`: the fold of
 `Tables.checkLayoutRange` over the ranges left, from the ranges before
 `index` and the leaves that passed (`PagesRel`). -/
-theorem check_layout_loop_spec {N : Usize}
-    (a : Aeneas.Std.Array (Aeneas.Std.Array U64 512#usize) N) (i : Usize)
+theorem check_layout_loop_spec (hU : Usize64) {N : Usize} (set : page_tables.Tables N false)
     (ranges : Aeneas.Std.Array page_tables.LayoutRange 16#usize) (count : Usize)
     (guards : Slice U64) (base : U64) (bits : U8) (Rs : List LayoutRange)
     (hN : 0 < N.val) (hb : bits.val < 64) (hc : count.val ≤ 16)
     (hR : ListRel LayoutRangeRepr (ranges.val.take count.val) Rs)
     (hsort : Rs.Pairwise (fun x y => x.range.start.toNat ≤ y.range.start.toNat))
-    (hov : i.val + 2 ^ 33 ≤ Usize.max)
     (check : page_tables.boot.MapCheck) (index : Usize)
     (x : List PhysRange × List (MapLeaf × Place)) (hidx : index.val ≤ count.val)
     (hx1 : x.1 = (Rs.take index.val).map (·.range)) (hx2 : x.2.length ≤ index.val * 2 ^ 27)
-    (hrel : PagesRel i.val (reachOf x.1) check x.2) :
-    page_tables.boot.layout.check_layout_loop a i ranges count guards base bits check index ⦃ r =>
+    (hrel : PagesRel set.used.val (reachOf x.1) check x.2) :
+    page_tables.boot.layout.check_layout_loop set ranges count guards base bits check index ⦃ r =>
       Agrees (fun c (y : List PhysRange × List (MapLeaf × Place)) =>
-          PagesRel i.val (reachOf y.1) c y.2) tableErrorOf r
+          PagesRel set.used.val (reachOf y.1) c y.2) tableErrorOf r
         ((Rs.drop index.val).foldlM
-          ((tablesOf ({ pool := a, used := i } : page_tables.Tables N false)).checkLayoutRange
-            (word64 base) (byte bits) (guards.val.map word64)) x) ⦄ := by
+          ((tablesOf set).checkLayoutRange (word64 base) (byte bits) (guards.val.map word64)) x) ⦄ := by
+  have h33 : 2 ^ 33 ≤ Usize.max := by rw [usize_max hU]; exact Nat.le_of_ble_eq_true rfl
   have hlen : Rs.length = count.val := by
     rw [← listRel_length hR, List.length_take]
     have : ranges.val.length = 16 := by simp
@@ -355,13 +354,11 @@ theorem check_layout_loop_spec {N : Usize}
     (inv := fun (z : page_tables.boot.MapCheck × Usize) =>
       z.2.val ≤ count.val ∧ ∃ y : List PhysRange × List (MapLeaf × Place),
         y.1 = (Rs.take z.2.val).map (·.range) ∧ y.2.length ≤ z.2.val * 2 ^ 27 ∧
-        PagesRel i.val (reachOf y.1) z.1 y.2 ∧
+        PagesRel set.used.val (reachOf y.1) z.1 y.2 ∧
         (Rs.drop z.2.val).foldlM
-          ((tablesOf ({ pool := a, used := i } : page_tables.Tables N false)).checkLayoutRange
-            (word64 base) (byte bits) (guards.val.map word64)) y =
+          ((tablesOf set).checkLayoutRange (word64 base) (byte bits) (guards.val.map word64)) y =
         (Rs.drop index.val).foldlM
-          ((tablesOf ({ pool := a, used := i } : page_tables.Tables N false)).checkLayoutRange
-            (word64 base) (byte bits) (guards.val.map word64)) x)
+          ((tablesOf set).checkLayoutRange (word64 base) (byte bits) (guards.val.map word64)) x)
   · rintro ⟨c, idx⟩ ⟨h1, ⟨e, l⟩, hy1, hy2, hyr, hspec⟩
     simp only at h1 hy1 hy2 hyr hspec
     unfold page_tables.boot.layout.check_layout_loop.body
@@ -370,7 +367,7 @@ theorem check_layout_loop_spec {N : Usize}
       have hi' : idx.val < (ranges.val.take count.val).length := by
         rw [listRel_length hR]; exact hi
       have hrep : LayoutRangeRepr lr Rs[idx.val] := by
-        have := listRel_getElem hR idx.val hi' hi
+        have := layout_listRel_getElem hR idx.val hi' hi
         rwa [List.getElem_take, ← lr_post] at this
       have hst : ∀ y ∈ e, y.start.toNat ≤ Rs[idx.val].range.start.toNat := by
         intro y hy
@@ -381,9 +378,9 @@ theorem check_layout_loop_spec {N : Usize}
         rw [List.getElem_take]
         exact List.pairwise_iff_getElem.1 hsort j idx.val (by omega) hi hj'
       have hidx15 : idx.val ≤ 15 := by have := ‹idx < count›; scalar_tac
-      have hov' : i.val + 2 * (l.length + 2 ^ 27) + 2 ≤ Usize.max := layout_room hov hy2 hidx15
-      have hcr := check_range_spec { pool := a, used := i } c lr Rs[idx.val] guards base bits e l
-        i.val hN hrep hb hst hyr hov'
+      have hov' : 2 * (l.length + 2 ^ 27) + 2 ≤ Usize.max := layout_room h33 hy2 hidx15
+      have hcr := check_range_spec set c lr Rs[idx.val] guards base bits e l set.used.val hN hrep
+        hb hst hyr hov'
       refine WP.spec_bind hcr ?_
       rintro ⟨r, check1⟩ hr
       rw [List.drop_eq_getElem_cons hi, List.foldlM_cons] at hspec
@@ -404,17 +401,15 @@ theorem check_layout_loop_spec {N : Usize}
 
 /-- `check_layout(set, ranges, count, guards, base, bits)` on a pool of at
 least one table, for the first `count` ranges of the code that stand for the
-ranges `Rs` sorted by their starts, a width below 64 and a record of the set
-at least `2 ^ 33` below the largest `usize`: the fold of
-`Tables.checkLayoutRange` over `Rs` that `Tables.kernelMap` makes, with the
-record of the checks standing for its result (`PagesRel`). -/
-theorem check_layout_spec {N : Usize} (set : page_tables.Tables N false)
+ranges `Rs` sorted by their starts, a width below 64 and a 64-bit `usize`:
+the fold of `Tables.checkLayoutRange` over `Rs` that `Tables.kernelMap`
+makes, with the record of the checks standing for its result (`PagesRel`). -/
+theorem check_layout_spec (hU : Usize64) {N : Usize} (set : page_tables.Tables N false)
     (ranges : Aeneas.Std.Array page_tables.LayoutRange 16#usize) (count : Usize)
     (guards : Slice U64) (base : U64) (bits : U8) (Rs : List LayoutRange)
     (hN : 0 < N.val) (hb : bits.val < 64) (hc : count.val ≤ 16)
     (hR : ListRel LayoutRangeRepr (ranges.val.take count.val) Rs)
-    (hsort : Rs.Pairwise (fun x y => x.range.start.toNat ≤ y.range.start.toNat))
-    (hov : set.used.val + 2 ^ 33 ≤ Usize.max) :
+    (hsort : Rs.Pairwise (fun x y => x.range.start.toNat ≤ y.range.start.toNat)) :
     page_tables.boot.layout.check_layout set ranges count guards base bits ⦃ r =>
       Agrees (fun c (y : List PhysRange × List (MapLeaf × Place)) =>
           PagesRel set.used.val (reachOf y.1) c y.2) tableErrorOf r
@@ -423,13 +418,12 @@ theorem check_layout_spec {N : Usize} (set : page_tables.Tables N false)
   unfold page_tables.boot.layout.check_layout
   step*
   have hrel : PagesRel set.used.val (reachOf []) check [] := by
-    refine ⟨check_post, ?_, ?_, ?_⟩
-    · rw [check_post1, ‹check.gib.val = noSlot›, ‹check.slot.val = noSlot›]
+    refine ⟨check_post, ?_, ?_⟩
+    · rw [check_post1, ‹check.gib.val = noSlot›, ‹check.slot.val = noSlot›, Nat.add_zero]
       exact allocRel_init 0 set.used.val
     · rw [check_post1]; simp
-    · rw [check_post1]
-  exact check_layout_loop_spec set.pool set.used ranges count guards base bits Rs hN hb hc hR hsort
-    hov check 0#usize ([], []) (Nat.zero_le _) rfl (Nat.zero_le _) hrel
+  exact check_layout_loop_spec hU set ranges count guards base bits Rs hN hb hc hR hsort
+    check 0#usize ([], []) (Nat.zero_le _) rfl (Nat.zero_le _) hrel
 
 /-! ## The sort of the ranges -/
 
@@ -617,16 +611,17 @@ def KernelMapStart {N : Usize} (s : page_tables.Tables N false) (layout : page_t
       (sortByKey (·.range.start.toNat) L.ranges)
 
 /-- `kernel_map(set, layout, base, bits)` for a layout that stands for a
-layout and a record of the set at least `2 ^ 33` below the largest `usize`:
-the error of `Tables.kernelMap` with the set unchanged, or its set after the
-write phase with a plan iterator at its start (`KernelMapStart`). That the
-iterator stands for `mapPlan` (the simulation) is not proved here. -/
-theorem kernel_map_set_spec {N : Usize} (s : page_tables.Tables N false)
+layout, on a 64-bit `usize`: the error of `Tables.kernelMap` with the set
+unchanged, or its set after the write phase with a plan iterator at its start
+(`KernelMapStart`) whose set is the set that `kernel_map` returns. That the
+iterator stands for `mapPlan` is `kernel_map_plan_stands`. -/
+theorem kernel_map_set_spec (hU : Usize64) {N : Usize} (s : page_tables.Tables N false)
     (layout : page_tables.Layout) (L : Layout) (base : U64) (bits : U8)
-    (hL : LayoutRepr layout L) (hov : s.used.val + 2 ^ 33 ≤ Usize.max) :
+    (hL : LayoutRepr layout L) :
     page_tables.kernel_map s layout base bits ⦃ r s' =>
       Writes (fun s' S => tablesOf s' = S) (fun it _ => KernelMapStart s layout L base it)
-        (tableErrorOf · = ·) s r s' ((tablesOf s).kernelMap L (word64 base) (byte bits)) ⦄ := by
+        (tableErrorOf · = ·) s r s' ((tablesOf s).kernelMap L (word64 base) (byte bits)) ∧
+        ∀ it, r = .Ok it → it.set = s' ⦄ := by
   obtain ⟨hc16, hR, hg⟩ := hL
   have hc : layout.count.val ≤ 16 := hc16
   unfold page_tables.kernel_map
@@ -650,49 +645,51 @@ theorem kernel_map_set_spec {N : Usize} (s : page_tables.Tables N false)
         (sortByKey (·.range.start.toNat) L.ranges) := by
       rw [ranges_post]
       exact listRel_sortByKey (fun a b hab => (physRange_start hab.1).symm) _ _ hR
-    have hcl := check_layout_spec s ranges layout.count layout.guards base bits _ hN hb hc hR'
-      (sortByKey_pairwise _ _) hov
+    have hcl := check_layout_spec hU s ranges layout.count layout.guards base bits _ hN hb hc hR'
+      (sortByKey_pairwise _ _)
     rw [← hg] at hcl
     refine WP.spec_bind hcl ?_
     intro r1 hr1
     step*
-    · obtain ⟨⟨earlier, leaves⟩, -, hrel⟩ := agrees_ok_iff.1 (agrees_of_branch_ok cf1_post ‹_› hr1)
-      exact hrel.2.2.2
     · obtain ⟨⟨earlier, leaves⟩, hy, hrel⟩ :=
         agrees_ok_iff.1 (agrees_of_branch_ok cf1_post ‹_› hr1)
-      have hnext : (allocOf s.used.val leaves).next = val.next.val := hrel.2.1.1
-      rw [kernelMap_fold_ok (s := tablesOf s) hp hy, tablesOf_used, hnext]
+      have hnext : (allocOf s.used.val leaves).next = s.used.val + val.new_tables.val := hrel.2.1.1
+      rw [kernelMap_fold_ok (s := tablesOf s) hp hy, tablesOf_used, hnext, Nat.add_sub_cancel_left]
       have hr2 := branch_ok cf2_post ‹_›
-      by_cases hcond : N.val - s.used.val < val.next.val - s.used.val
+      by_cases hcond : N.val - s.used.val < val.new_tables.val
       · simp only [hcond, ↓reduceIte] at r2_post
         rw [hr2] at r2_post
         cases r2_post.1
       · simp only [hcond, ↓reduceIte] at r2_post ⊢
         rw [hr2] at r2_post
-        obtain ⟨hv1, hs1⟩ := r2_post
+        obtain ⟨hv1, hpool1, hused1⟩ := r2_post
         cases hv1
-        refine ⟨⟨by rw [hs1], rfl, rfl, rfl, hR'⟩, ?_⟩
-        rw [hs1]
+        refine ⟨⟨⟨hpool1, rfl, rfl, rfl, hR'⟩, ?_⟩, fun it h => by cases h; rfl⟩
+        show (⟨poolOf set1.pool, set1.used.val⟩ : Tables .lower N.val) = _
+        rw [hpool1, hused1]
         rfl
     · obtain ⟨⟨earlier, leaves⟩, hy, hrel⟩ :=
         agrees_ok_iff.1 (agrees_of_branch_ok cf1_post ‹_› hr1)
-      have hnext : (allocOf s.used.val leaves).next = val.next.val := hrel.2.1.1
-      rw [kernelMap_fold_ok (s := tablesOf s) hp hy, tablesOf_used, hnext]
+      have hnext : (allocOf s.used.val leaves).next = s.used.val + val.new_tables.val := hrel.2.1.1
+      rw [kernelMap_fold_ok (s := tablesOf s) hp hy, tablesOf_used, hnext, Nat.add_sub_cancel_left]
       have hr2 := branch_err cf2_post ‹_› residual_post
-      by_cases hcond : N.val - s.used.val < val.next.val - s.used.val
+      by_cases hcond : N.val - s.used.val < val.new_tables.val
       · simp only [hcond, ↓reduceIte] at r2_post ⊢
         rw [hr2] at r2_post
         obtain ⟨he, hs1⟩ := r2_post
         cases he
+        refine ⟨?_, fun it h => by rw [r3_post] at h; cases h⟩
         rw [r3_post, ← e_post, hs1]
         exact ⟨rfl, rfl⟩
       · simp only [hcond, ↓reduceIte] at r2_post
         rw [hr2] at r2_post
         cases r2_post.1
-    · rw [kernelMap_fold_error (s := tablesOf s) hp
+    · refine ⟨?_, fun it h => by rw [r2_post] at h; cases h⟩
+      rw [kernelMap_fold_error (s := tablesOf s) hp
         (agrees_err_of_branch cf1_post ‹_› residual_post hr1), r2_post, e_post]
       exact ⟨rfl, rfl⟩
-  · rw [kernelMap_pool_error (s := tablesOf s) (agrees_err_of_branch cf_post ‹_› residual_post r_post),
+  · refine ⟨?_, fun it h => by rw [r2_post] at h; cases h⟩
+    rw [kernelMap_pool_error (s := tablesOf s) (agrees_err_of_branch cf_post ‹_› residual_post r_post),
       r2_post, e_post]
     exact ⟨rfl, rfl⟩
 
@@ -801,9 +798,10 @@ theorem foundLow_of_layoutFind {o : Option page_tables.boot.Leaf} {rs : List Ran
 
 /-- `KernelMapPlan::next()` on a pool of at least one table, for at most 16
 ranges whose ends fit in 64 bits and nonempty ranges that end at or below
-`2 ^ 39`, and a cursor that does not overflow in this call: one call of
-`Cur.step` with the leaf search `layoutFind` of the ranges and the place
-that the cursor reads; the set, the base and the ranges stay. -/
+`2 ^ 39`, a cursor whose tables and slots do not overflow in this call, and a
+next free table after the call that fits in `usize`: one call of `Cur.step`
+with the leaf search `layoutFind` of the ranges and the place that the
+cursor reads; the set, the base and the ranges stay. -/
 theorem kernel_map_plan_next_spec {N : Usize} (it : page_tables.KernelMapPlan N)
     (hN : 0 < N.val) (hc : it.count.val ≤ 16)
     (hfit : ∀ r ∈ it.ranges.val.take it.count.val, r.range.start.val + r.range.len.val < 2 ^ 64)
@@ -812,14 +810,16 @@ theorem kernel_map_plan_next_spec {N : Usize} (it : page_tables.KernelMapPlan N)
     (hs : it.cursor.phase = .NewPages → it.cursor.slot.val + 2 ^ 21 < 2 ^ 64)
     (hg : it.cursor.phase = .Children ∨ it.cursor.phase = .Entries →
       it.cursor.gib.val + 2 ^ 30 < 2 ^ 64)
+    (hn : ((curOf it.cursor).step
+        (fun f l _ => layoutFind ((it.ranges.val.take it.count.val).map viewOf) f l)
+        (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)).2.next ≤ Usize.max)
     (hseek : ((curOf it.cursor).take (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)
         (layoutFind ((it.ranges.val.take it.count.val).map viewOf) (curOf it.cursor).search.1
           (curOf it.cursor).search.2.1)).1 = .seek →
       let c' := ((curOf it.cursor).take (placeOr (tablesOf it.set) (word64 it.base))
         (word64 it.base) (layoutFind ((it.ranges.val.take it.count.val).map viewOf)
           (curOf it.cursor).search.1 (curOf it.cursor).search.2.1)).2
-      c'.next + 1 ≤ Usize.max ∧ c'.t2 + 1 ≤ Usize.max ∧ c'.gib + 2 ^ 30 < 2 ^ 64 ∧
-        c'.phase = .children) :
+      c'.t2 + 1 ≤ Usize.max ∧ c'.gib + 2 ^ 30 < 2 ^ 64 ∧ c'.phase = .children) :
     page_tables.boot.layout.KernelMapPlan.next it ⦃ o it' =>
       o.map stepOf = ((curOf it.cursor).step
           (fun f l _ => layoutFind ((it.ranges.val.take it.count.val).map viewOf) f l)
@@ -835,10 +835,16 @@ theorem kernel_map_plan_next_spec {N : Usize} (it : page_tables.KernelMapPlan N)
   refine WP.spec_bind (layout_leaf_spec it.ranges it.count «from» limit hc hfit) ?_
   intro found hfound
   have hfl : FoundLow found := foundLow_of_layoutFind hlow hfound
-  refine WP.spec_bind (take_spec it.cursor it.set it.base found hN hfl hcur) ?_
+  have hnt : ((curOf it.cursor).take (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base)
+      (foundOf found)).2.next ≤ Usize.max := by
+    rw [hfound, hfv, hlv]
+    exact Nat.le_trans (take_next_le_step
+      (fun f l _ => layoutFind ((it.ranges.val.take it.count.val).map viewOf) f l)
+      (placeOr (tablesOf it.set) (word64 it.base)) (word64 it.base) (curOf it.cursor)) hn
+  refine WP.spec_bind (take_spec it.cursor it.set it.base found hN hfl hcur hnt) ?_
   rintro ⟨mt, mc⟩ ⟨hmt, hmc⟩
   rw [hfound, hfv, hlv] at hmt hmc
-  simp only [Cur.step]
+  simp only [Cur.step] at hn ⊢
   cases mt with
   | Give st =>
     refine spec_of_eq rfl ⟨?_, ?_, rfl, rfl, rfl, rfl⟩
@@ -849,8 +855,9 @@ theorem kernel_map_plan_next_spec {N : Usize} (it : page_tables.KernelMapPlan N)
     · rw [← hmt]; rfl
     · rw [← hmt]; exact hmc
   | Seek =>
-    obtain ⟨hn1, ht21, hgib, hph⟩ := hseek hmt.symm
-    rw [← hmc] at hn1 ht21 hgib hph
+    obtain ⟨ht21, hgib, hph⟩ := hseek hmt.symm
+    rw [← hmc] at ht21 hgib hph
+    rw [← hmt, ← hmc] at hn
     have hmph : mc.phase = .Children := by
       cases h : mc.phase <;> simp only [curOf, phaseOf, h, reduceCtorEq] at hph ⊢
     have hs' : mc.phase = .NewPages → mc.slot.val + 2 ^ 21 < 2 ^ 64 := by
@@ -863,6 +870,8 @@ theorem kernel_map_plan_next_spec {N : Usize} (it : page_tables.KernelMapPlan N)
     refine WP.spec_bind (layout_leaf_spec it.ranges it.count from1 limit1 hc hfit) ?_
     intro found1 hfound1
     have hfl1 : FoundLow found1 := foundLow_of_layoutFind hlow hfound1
+    have hn1 : ((curOf mc).children (foundOf found1)).2.next ≤ Usize.max := by
+      rw [hfound1, hfv1, hlv1]; exact hn
     refine WP.spec_bind (children_spec mc found1 hfl1 hn1 ht21) ?_
     rintro ⟨st, mc1⟩ ⟨hst, hmc1⟩
     rw [hfound1, hfv1, hlv1] at hst hmc1

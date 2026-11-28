@@ -31,8 +31,8 @@ built once and not again for every mutant of the code.
   upper bound on the leaves left from an address), `leafFuel_step` and
   `leafFuel_leaf` (one leaf uses one), `leafFuel_start` (the fuel
   `directFuel` of the specification covers a range), `directFuel_le` (at
-  most `2 ^ 19` leaves in a range below `2 ^ 39`) and `usable_room` (the room
-  of the record of new tables before a range).
+  most `2 ^ 19` leaves in a range below `2 ^ 39`) and `usable_room` (the
+  bound on the count of new tables before a range).
 - The ranges before: `reachSpans`, `reachSpans_append`, and
   `any_meets_spans` (for ranges that start at or below a leaf, an earlier
   range shares an address with it exactly when the leaf starts below
@@ -237,17 +237,17 @@ theorem directFuel_le {len : Nat} (h : len ≤ 2 ^ 39) : directFuel len ≤ 2 ^ 
   rw [show (2 : Nat) ^ 19 = 524288 from rfl]
   omega
 
-/-- The bound on the record of new tables before a usable range of a boot
-memory map of at most 164 usable ranges: at most `2 ^ 19` leaves a range and
-two new tables a leaf. -/
-theorem usable_room {u n m idx : Nat} (h1 : u + 2 ^ 28 ≤ m) (h2 : n ≤ idx * 2 ^ 19)
-    (h3 : idx ≤ 163) : u + 2 * (n + 2 ^ 19) + 2 ≤ m := by
+/-- The bound on the count of new tables before a usable range of a boot
+memory map of at most 164 usable ranges, `n` leaves before it: at most
+`2 ^ 19` leaves a range and two new tables a leaf, below `2 ^ 28` with the
+leaves of the range. -/
+theorem usable_room {n m idx : Nat} (h1 : 2 ^ 28 ≤ m) (h2 : n ≤ idx * 2 ^ 19)
+    (h3 : idx ≤ 163) : 2 * (n + 2 ^ 19) + 2 ≤ m := by
   have hn : n ≤ 163 * 2 ^ 19 := Nat.le_trans h2 (Nat.mul_le_mul_right _ h3)
   have hb : 2 * (n + 2 ^ 19) + 2 ≤ 2 ^ 28 :=
     Nat.le_trans (Nat.add_le_add_right (Nat.mul_le_mul_left 2 (Nat.add_le_add_right hn _)) 2)
       (Nat.le_of_ble_eq_true rfl)
-  rw [Nat.add_assoc]
-  exact Nat.le_trans (Nat.add_le_add_left hb u) h1
+  exact Nat.le_trans hb h1
 
 /-! ## The ranges before -/
 

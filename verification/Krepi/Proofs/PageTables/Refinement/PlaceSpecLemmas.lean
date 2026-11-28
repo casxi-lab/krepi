@@ -16,7 +16,7 @@ imports no generated definitions, so it is built once and not again for
 every mutant of the code.
 
 - Bits without `bv_decide`: `u64_complement_val` (the complement of a
-  64-bit word), `and_high_bits` (the bits from `k` up of a 64-bit number),
+  64-bit word), `place_and_high_bits` (the bits from `k` up of a 64-bit number),
   `pow_two_of_and_pred` (a number other than 0 that shares no bit with its
   predecessor is a power of two), `isPowerOfTwo_iff_and`, and
   `alignDown_and` (rounding down to a power of two as a mask).
@@ -61,7 +61,7 @@ theorem u64_complement_val (x : U64) : (~~~x).val = 2 ^ 64 - 1 - x.val := by
   rfl
 
 /-- The bits from `k` up of a 64-bit number. -/
-theorem and_high_bits {n k : Nat} (hk : k ≤ 64) (hn : n < 2 ^ 64) :
+theorem place_and_high_bits {n k : Nat} (hk : k ≤ 64) (hn : n < 2 ^ 64) :
     n &&& (2 ^ 64 - 2 ^ k) = n / 2 ^ k * 2 ^ k := by
   apply Nat.eq_of_testBit_eq
   intro i
@@ -114,7 +114,7 @@ theorem alignDown_and {x a k : Nat} (hx : x < 2 ^ 64) (ha : a = 2 ^ k) (hk : k �
     x &&& (2 ^ 64 - 1 - (a - 1)) = alignDown x a := by
   have h1 : 1 ≤ 2 ^ k := Nat.one_le_two_pow
   have h2 : 2 ^ k ≤ 2 ^ 64 := Nat.pow_le_pow_right (by decide) hk
-  rw [show 2 ^ 64 - 1 - (a - 1) = 2 ^ 64 - 2 ^ k by omega, and_high_bits hk hx, alignDown, ha]
+  rw [show 2 ^ 64 - 1 - (a - 1) = 2 ^ 64 - 2 ^ k by omega, place_and_high_bits hk hx, alignDown, ha]
 
 /-- The greater of two words as the code chooses it. -/
 theorem u64_max_val (a b : U64) : (if a > b then a else b).val = max b.val a.val := by

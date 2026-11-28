@@ -23,18 +23,21 @@ search, and they hold without the premise `Usize64`.
   leaf at the physical address that the code walks, `placeProbe`, for a pool
   of at least one table).
 - The checks of a map: `map_check_new_spec`, `map_check_passed_spec`,
-  `check_leaf_spec` (`check_leaf`: `checkPlace` for the error, and the record
-  of the new tables after `countStep`, for a record that cannot overflow) and
-  `write_phase_spec` (`write_phase`: `OutOfTables` as `Tables.mapLeaves`
-  tests it, else the set with the record of the checks and `startCursor`).
+  `check_leaf_spec` (`check_leaf`: `checkPlace` for the error, and the count
+  of new tables after `countStep`, for a count at least 2 below the largest
+  `usize`) and `write_phase_spec` (`write_phase`: `OutOfTables` as
+  `Tables.mapLeaves` tests it, else `startCursor` and the set whose record
+  is the record before plus the count of the checks).
 - The cursor on numbers (`Cur` of `CursorSpecLemmas`): `phaseOf`, `curOf`,
   `foundOf`, `turnOf`, `FoundLow` (the leaves found lie below `2 ^ 39`),
   `gib_mask_val`, `slot_mask_val`, `placeCode` and `placeOr_of_agrees` (the
-  place that the cursor reads), `curOf_phase`, `curOf_leaf`, `CurFits` (a
-  cursor whose next step does not overflow); and the triples of `MapCursor`,
-  each against its function on `Cur`: `search_spec`, `children_spec`,
-  `new_page_spec`, `entry_spec`, `leaf_spec`, `held_page_spec` and
-  `take_spec`.
+  place that the cursor reads), `curOf_phase`, `curOf_leaf`, `CurFits` (the
+  tables and slots of a cursor whose next step does not overflow); and the
+  triples of `MapCursor`, each against its function on `Cur`: `search_spec`,
+  `children_spec`, `new_page_spec`, `entry_spec`, `leaf_spec`,
+  `held_page_spec` and `take_spec`. The ones that can take a new table ask
+  that the next free table after the call fit in `usize`, which asks for room
+  only on the branches that take a table.
 -/
 
 @[expose] public section
@@ -181,11 +184,11 @@ place of the leaf of the form of `block` at the physical address `pa`
 
 /-! ## The checks of a map -/
 
-/-- `MapCheck::new(used)`: nothing checked, no range before, the record `used`
-and no slot. -/
-@[step] theorem map_check_new_spec (used : Usize) :
-    page_tables.boot.MapCheck.new used ⦃ c =>
-      c.reach.val = 0 ∧ c.next = used ∧ c.gib.val = noSlot ∧ c.slot.val = noSlot ⦄ := by
+/-- `MapCheck::new()`: nothing checked, no range before, no new table and no
+slot. -/
+@[step] theorem map_check_new_spec :
+    page_tables.boot.MapCheck.new ⦃ c =>
+      c.reach.val = 0 ∧ c.new_tables.val = 0 ∧ c.gib.val = noSlot ∧ c.slot.val = noSlot ⦄ := by
   unfold page_tables.boot.MapCheck.new
   exact spec_of_eq rfl ⟨rfl, rfl, no_slot_val, no_slot_val⟩
 
@@ -193,7 +196,7 @@ and no slot. -/
 of the two ends. -/
 @[step] theorem map_check_passed_spec (c : page_tables.boot.MapCheck) (e : U64) :
     page_tables.boot.MapCheck.passed c e ⦃ c' =>
-      c'.reach.val = max c.reach.val e.val ∧ c'.next = c.next ∧ c'.gib = c.gib ∧
+      c'.reach.val = max c.reach.val e.val ∧ c'.new_tables = c.new_tables ∧ c'.gib = c.gib ∧
         c'.slot = c.slot ⦄ := by
   unfold page_tables.boot.MapCheck.passed
   step*
@@ -203,17 +206,17 @@ of the two ends. -/
     simp only [Nat.max_eq_left this]
 
 /-- `check_leaf(set, base, check, pa, block, guard)` on a pool of at least one
-table, for a record of new tables at least 2 below the largest `usize`: the
+table, for a count of new tables at least 2 below the largest `usize`: the
 check of the leaf of the form of `block` at `pa` (`checkPlace`), taken when
 `pa` is below the end `reach` of the ranges before or `guard` holds; on
-success the record after `countStep` of its place, with the same `reach`. -/
+success the count after `countStep` of its place, with the same `reach`. -/
 @[step] theorem check_leaf_spec {N : Usize} {upper : Bool} (set : page_tables.Tables N upper)
     (base : U64) (check : page_tables.boot.MapCheck) (pa : U64) (block guard : Bool)
-    (hN : 0 < N.val) (hn : check.next.val + 2 ≤ Usize.max) :
+    (hN : 0 < N.val) (hn : check.new_tables.val + 2 ≤ Usize.max) :
     page_tables.boot.check_leaf set base check pa block guard ⦃ r c =>
       Agrees (fun _ p => c.reach = check.reach ∧
-          (c.next.val, c.gib.val, c.slot.val) =
-            countStep block p pa.val check.next.val check.gib.val check.slot.val)
+          (c.new_tables.val, c.gib.val, c.slot.val) =
+            countStep block p pa.val check.new_tables.val check.gib.val check.slot.val)
         tableErrorOf r
         (checkPlace (tablesOf set) (word64 base) (placeProbe (word64 pa) block)
           (decide (pa.val < check.reach.val) || guard)) ⦄ := by
@@ -301,27 +304,33 @@ success the record after `countStep` of its place, with the same `reach`. -/
     rfl
 
 /-- The cursor of a map plan before its first leaf, on a set of `used`
-tables in use: the phase `Leaf` from address 0, the record `used`, no slot. -/
+tables in use: the phase `Leaf` from address 0, the next free table `used`,
+no slot. -/
 def startCursor (used : Usize) : page_tables.boot.MapCursor :=
   { phase := .Leaf, «from» := 0#u64, next := used, gib := page_tables.boot.NO_SLOT,
     slot := page_tables.boot.NO_SLOT, t2 := 0#usize, t3 := 0#usize }
 
-/-- `write_phase(set, check)` for a record of the checks at or above that of
-the set: `OutOfTables` and the set unchanged when the free tables are fewer
-than the new ones, as `Tables.mapLeaves` tests it; else the cursor before the
-first leaf and the set whose record is that of the checks. -/
+/-- `write_phase(set, check)`: `OutOfTables` and the set unchanged when the
+free tables are fewer than the new tables that the checks counted, as
+`Tables.mapLeaves` tests it; else the cursor before the first leaf and the
+set whose record is the record before plus that count. The sum does not
+overflow: the count is 0 when the record is at or above `N`, and the sum is
+at most `N` otherwise. -/
 @[step] theorem write_phase_spec {N : Usize} {upper : Bool} (set : page_tables.Tables N upper)
-    (check : page_tables.boot.MapCheck) (h : set.used.val ≤ check.next.val) :
+    (check : page_tables.boot.MapCheck) :
     page_tables.boot.write_phase set check ⦃ r s' =>
-      if N.val - set.used.val < check.next.val - set.used.val then
-        r = .Err .OutOfTables ∧ s' = set
-      else r = .Ok (startCursor set.used) ∧ s' = { set with used := check.next } ⦄ := by
+      if N.val - set.used.val < check.new_tables.val then r = .Err .OutOfTables ∧ s' = set
+      else r = .Ok (startCursor set.used) ∧ s'.pool = set.pool ∧
+        s'.used.val = set.used.val + check.new_tables.val ⦄ := by
   unfold page_tables.boot.write_phase
   step*
-  have hlt : ¬ N.val - set.used.val < check.next.val - set.used.val := by
-    rw [← i_post, ← i1_post]; exact ‹¬i < i1›
-  simp only [hlt, ↓reduceIte]
-  rfl
+  · -- the sum fits: the count is at most the free tables
+    have h1 : ¬ i.val < check.new_tables.val := ‹¬i < check.new_tables›
+    scalar_tac
+  · have hlt : ¬ N.val - set.used.val < check.new_tables.val := by
+      rw [← i_post]; exact ‹¬i < check.new_tables›
+    simp only [hlt, ↓reduceIte]
+    exact ⟨rfl, i1_post⟩
 
 /-! ## The cursor -/
 
@@ -387,9 +396,12 @@ whose ends fit in 64 bits where the phase reads them. -/
   · exact spec_of_eq rfl rfl
 
 /-- `MapCursor::children(found)`: `Cur.children`, for a leaf found below
-`2 ^ 39` and tables that do not overflow. -/
+`2 ^ 39`, a level 2 table that can be incremented, and a next free table after
+the call that fits in `usize` (the call takes a table for a page in another
+2 MiB slot). -/
 @[step] theorem children_spec (c : page_tables.boot.MapCursor) (found : Option page_tables.boot.Leaf)
-    (hf : FoundLow found) (hn : c.next.val + 1 ≤ Usize.max) (ht2 : c.t2.val + 1 ≤ Usize.max) :
+    (hf : FoundLow found) (hn : ((curOf c).children (foundOf found)).2.next ≤ Usize.max)
+    (ht2 : c.t2.val + 1 ≤ Usize.max) :
     page_tables.boot.MapCursor.children c found ⦃ s c' =>
       stepOf s = ((curOf c).children (foundOf found)).1 ∧
         curOf c' = ((curOf c).children (foundOf found)).2 ⦄ := by
@@ -401,6 +413,8 @@ whose ends fit in 64 bits where the phase reads them. -/
     exact ⟨rfl, by simp only [curOf, phaseOf, foundOf, Option.map_none, Cur.children, i_post]⟩
   | some p =>
     have hp := hf p rfl
+    have hn' : slotOf p.pa.val ≠ c.slot.val → c.next.val + 1 ≤ Usize.max := fun h => by
+      simpa only [foundOf, Option.map_some, curOf, Cur.children, h, ↓reduceIte] using hn
     step*
     · have hs : slotOf p.pa.val = c.slot.val := by
         rw [← slot_mask_val p.pa i i1 i_post i1_post, ← slot_post, ‹slot = c.slot›]
@@ -408,6 +422,10 @@ whose ends fit in 64 bits where the phase reads them. -/
       refine ⟨?_, ?_⟩
       · simp only [stepOf, i3_post]; rfl
       · simp only [i2_post, PAGE_SIZE]
+    · have hs : slotOf p.pa.val ≠ c.slot.val := by
+        rw [← slot_mask_val p.pa i i1 i_post i1_post, ← slot_post]
+        exact fun h => ‹¬slot = c.slot› (UScalar.eq_of_val_eq h)
+      exact hn' hs
     · have hs : slotOf p.pa.val ≠ c.slot.val := by
         rw [← slot_mask_val p.pa i i1 i_post i1_post, ← slot_post]
         exact fun h => ‹¬slot = c.slot› (UScalar.eq_of_val_eq h)
@@ -491,10 +509,14 @@ theorem placeOr_of_agrees {N : Nat} {r : Region} {s : Tables r N} {base : UInt64
 
 /-- `MapCursor::leaf(set, base, found)` on a pool of at least one table:
 `Cur.leaf` with the place that the cursor reads (`placeOr`), for a leaf found
-below `2 ^ 39` and a next free table at least 2 below the largest `usize`. -/
+below `2 ^ 39` and a next free table after the call that fits in `usize`
+(the call takes one or two tables for a leaf whose root or level 2 entry is
+invalid). -/
 @[step] theorem leaf_spec {N : Usize} {upper : Bool} (c : page_tables.boot.MapCursor)
     (set : page_tables.Tables N upper) (base : U64) (found : Option page_tables.boot.Leaf)
-    (hN : 0 < N.val) (hf : FoundLow found) (hn : c.next.val + 2 ≤ Usize.max) :
+    (hN : 0 < N.val) (hf : FoundLow found)
+    (hn : ((curOf c).leaf (placeOr (tablesOf set) (word64 base)) (foundOf found)).2.next ≤
+      Usize.max) :
     page_tables.boot.MapCursor.leaf c set base found ⦃ t c' =>
       turnOf t = ((curOf c).leaf (placeOr (tablesOf set) (word64 base)) (foundOf found)).1 ∧
         curOf c' = ((curOf c).leaf (placeOr (tablesOf set) (word64 base)) (foundOf found)).2 ⦄ := by
@@ -509,16 +531,24 @@ below `2 ^ 39` and a next free table at least 2 below the largest `usize`. -/
     step*
     have hpo := placeOr_of_agrees (f := ⟨l.pa.val, word64 l.desc, l.block⟩) r_post
     clear r_post
+    simp only [foundOf, Option.map_some] at hn
     simp only [foundOf, Option.map_some, Cur.leaf, hpo]
     cases r with
     | Ok q =>
       simp only [placeCode, bind_ok]
       cases q with
       | Root =>
+        rw [leaf_next_root hpo] at hn
+        have h1 : c.next.val + 1 ≤ Usize.max := by simp only [curOf] at hn; split at hn <;> omega
         step*
         · refine ⟨rfl, ?_⟩
           simp only [placeOf, curOf, phaseOf, i7_post, i3_post,
             gib_mask_val l.pa i1 i2 i1_post i2_post, no_slot_val]
+        · have hb : l.block = false := by simpa using ‹¬l.block = true›
+          simp only [curOf, hb, Bool.false_eq_true, ↓reduceIte] at hn
+          simp only [curOf, foundOf, Option.map_some, Cur.children, no_slot_val, slotOf_ne_noSlot,
+            ↓reduceIte, i7_post]
+          omega
         · have hc1 : curOf ⟨.Children, l.pa, i7, i3, page_tables.boot.NO_SLOT, c.next, c.t3⟩ =
               ⟨.children, l.pa.val, c.next.val + 1, gibOf l.pa.val, noSlot, c.next.val, c.t3.val⟩ := by
             simp only [curOf, phaseOf, i7_post, i3_post, gib_mask_val l.pa i1 i2 i1_post i2_post,
@@ -530,12 +560,16 @@ below `2 ^ 39` and a next free table at least 2 below the largest `usize`. -/
           simp only [placeOf, turnOf, s_post, curOf, Cur.children, slotOf_ne_noSlot, ↓reduceIte,
             and_self]
       | Level2 t2 =>
+        rw [leaf_next_level2 hpo] at hn
         step*
         · refine ⟨?_, ?_⟩
           · simp only [placeOf, turnOf, stepOf, i8_post]; rfl
           · simp only [placeOf, curOf, i7_post, i3_post, i6_post,
               gib_mask_val l.pa i1 i2 i1_post i2_post, slot_mask_val l.pa i4 i5 i4_post i5_post,
               BLOCK_SIZE]
+        · have hb : l.block = false := by simpa using ‹¬l.block = true›
+          simp only [curOf, hb, Bool.false_eq_true, ↓reduceIte] at hn
+          exact hn
         · refine ⟨rfl, ?_⟩
           simp only [placeOf, curOf, phaseOf, i7_post, i3_post, i6_post,
             gib_mask_val l.pa i1 i2 i1_post i2_post, slot_mask_val l.pa i4 i5 i4_post i5_post]
@@ -548,10 +582,17 @@ below `2 ^ 39` and a next free table at least 2 below the largest `usize`. -/
             PAGE_SIZE]
     | Err e =>
       simp only [placeCode, bind_ok]
+      rw [leaf_next_root hpo] at hn
+      have h1 : c.next.val + 1 ≤ Usize.max := by simp only [curOf] at hn; split at hn <;> omega
       step*
       · refine ⟨rfl, ?_⟩
         simp only [placeOf, curOf, phaseOf, i7_post, i3_post,
           gib_mask_val l.pa i1 i2 i1_post i2_post, no_slot_val]
+      · have hb : l.block = false := by simpa using ‹¬l.block = true›
+        simp only [curOf, hb, Bool.false_eq_true, ↓reduceIte] at hn
+        simp only [curOf, foundOf, Option.map_some, Cur.children, no_slot_val, slotOf_ne_noSlot,
+          ↓reduceIte, i7_post]
+        omega
       · have hc1 : curOf ⟨.Children, l.pa, i7, i3, page_tables.boot.NO_SLOT, c.next, c.t3⟩ =
             ⟨.children, l.pa.val, c.next.val + 1, gibOf l.pa.val, noSlot, c.next.val, c.t3.val⟩ := by
           simp only [curOf, phaseOf, i7_post, i3_post, gib_mask_val l.pa i1 i2 i1_post i2_post,
@@ -569,11 +610,13 @@ theorem curOf_leaf (c : page_tables.boot.MapCursor) :
     curOf { c with phase := .Leaf } = { curOf c with phase := .leaf } := rfl
 
 /-- `MapCursor::held_page(set, base, found)` on a pool of at least one table:
-`Cur.heldPage`, for a leaf found below `2 ^ 39` and a next free table at least
-2 below the largest `usize`. -/
+`Cur.heldPage`, for a leaf found below `2 ^ 39` and a next free table after
+the call that fits in `usize`. -/
 @[step] theorem held_page_spec {N : Usize} {upper : Bool} (c : page_tables.boot.MapCursor)
     (set : page_tables.Tables N upper) (base : U64) (found : Option page_tables.boot.Leaf)
-    (hN : 0 < N.val) (hf : FoundLow found) (hn : c.next.val + 2 ≤ Usize.max) :
+    (hN : 0 < N.val) (hf : FoundLow found)
+    (hn : ((curOf c).heldPage (placeOr (tablesOf set) (word64 base)) (foundOf found)).2.next ≤
+      Usize.max) :
     page_tables.boot.MapCursor.held_page c set base found ⦃ t c' =>
       turnOf t = ((curOf c).heldPage (placeOr (tablesOf set) (word64 base)) (foundOf found)).1 ∧
         curOf c' =
@@ -582,11 +625,18 @@ theorem curOf_leaf (c : page_tables.boot.MapCursor) :
   simp only [block_size_eq, page_size_eq]
   cases found with
   | none =>
+    have hn' : ((curOf { c with phase := .Leaf }).leaf (placeOr (tablesOf set) (word64 base))
+        (foundOf none)).2.next ≤ Usize.max := by rw [curOf_leaf]; exact hn
     step*
     rw [curOf_leaf] at t_post t_post1
     exact ⟨t_post, t_post1⟩
   | some p =>
     have hp := hf p rfl
+    have hn' : slotOf p.pa.val ≠ (curOf c).slot → ((curOf { c with phase := .Leaf }).leaf
+        (placeOr (tablesOf set) (word64 base)) (foundOf (some p))).2.next ≤ Usize.max := by
+      intro h
+      rw [curOf_leaf]
+      simpa only [foundOf, Option.map_some, Cur.heldPage, h, ↓reduceIte] using hn
     step*
     · have hs : slotOf p.pa.val = (curOf c).slot := by
         rw [← slot_mask_val p.pa i i1 i_post i1_post, ← i2_post, ‹i2 = c.slot›]; rfl
@@ -597,37 +647,44 @@ theorem curOf_leaf (c : page_tables.boot.MapCursor) :
     · have hs : slotOf p.pa.val ≠ (curOf c).slot := by
         rw [← slot_mask_val p.pa i i1 i_post i1_post, ← i2_post]
         exact fun h => ‹¬i2 = c.slot› (UScalar.eq_of_val_eq h)
+      exact hn' hs
+    · have hs : slotOf p.pa.val ≠ (curOf c).slot := by
+        rw [← slot_mask_val p.pa i i1 i_post i1_post, ← i2_post]
+        exact fun h => ‹¬i2 = c.slot› (UScalar.eq_of_val_eq h)
       simp only [foundOf, Option.map_some, Cur.heldPage, hs, ↓reduceIte]
       rw [curOf_leaf] at t_post t_post1
       exact ⟨t_post, t_post1⟩
 
-/-- What the cursor of the code needs for one step without overflow: a next
-free table at least 2 below the largest `usize`, a level 2 and a level 3 table
-that can be incremented and whose addresses at `base` fit in 64 bits, and the
-end of the 2 MiB slot after the pages of a new level 3 table and of the 1 GiB
-slot after the entries of a new level 2 table that fit in 64 bits. -/
+/-- What the cursor of the code needs for one step without overflow besides
+its next free table: a level 2 and a level 3 table that can be incremented
+and whose addresses at `base` fit in 64 bits, and the end of the 2 MiB slot
+after the pages of a new level 3 table and of the 1 GiB slot after the
+entries of a new level 2 table that fit in 64 bits. -/
 def CurFits (c : page_tables.boot.MapCursor) (base : U64) : Prop :=
-  c.next.val + 2 ≤ Usize.max ∧ c.t2.val + 1 ≤ Usize.max ∧ c.t3.val + 1 ≤ Usize.max ∧
+  c.t2.val + 1 ≤ Usize.max ∧ c.t3.val + 1 ≤ Usize.max ∧
     base.val + 4096 * c.t2.val < 2 ^ 64 ∧ base.val + 4096 * c.t3.val < 2 ^ 64 ∧
     (c.phase = .NewTable → c.slot.val + 2 ^ 21 < 2 ^ 64) ∧
     (c.phase = .Root → c.gib.val + 2 ^ 30 < 2 ^ 64)
 
 /-- `MapCursor::take(set, base, found)` on a pool of at least one table:
 `Cur.take` with the place that the cursor reads, for a leaf found below
-`2 ^ 39` and a cursor that does not overflow (`CurFits`). -/
+`2 ^ 39`, a cursor whose tables and slots do not overflow (`CurFits`) and a
+next free table after the call that fits in `usize`. -/
 @[step] theorem take_spec {N : Usize} {upper : Bool} (c : page_tables.boot.MapCursor)
     (set : page_tables.Tables N upper) (base : U64) (found : Option page_tables.boot.Leaf)
-    (hN : 0 < N.val) (hf : FoundLow found) (hc : CurFits c base) :
+    (hN : 0 < N.val) (hf : FoundLow found) (hc : CurFits c base)
+    (hn : ((curOf c).take (placeOr (tablesOf set) (word64 base)) (word64 base)
+      (foundOf found)).2.next ≤ Usize.max) :
     page_tables.boot.MapCursor.take c set base found ⦃ t c' =>
       turnOf t = ((curOf c).take (placeOr (tablesOf set) (word64 base)) (word64 base)
           (foundOf found)).1 ∧
         curOf c' = ((curOf c).take (placeOr (tablesOf set) (word64 base)) (word64 base)
           (foundOf found)).2 ⦄ := by
-  obtain ⟨hn, ht2, ht3, hb2, hb3, hsl, hgb⟩ := hc
+  obtain ⟨ht2, ht3, hb2, hb3, hsl, hgb⟩ := hc
   unfold page_tables.boot.MapCursor.take
   simp only [gib_size_eq, block_size_eq]
   cases hp : c.phase
-  all_goals simp only [Cur.take, curOf_phase, hp, phaseOf]
+  all_goals simp only [Cur.take, curOf_phase, hp, phaseOf] at hn ⊢
   · step*
   · step*
   · step*
