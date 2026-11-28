@@ -3453,8 +3453,9 @@ concludes its unit `BUDGET` too; the run is `BUDGET` either way. In a part
 that does not conclude the unit of the target, a command of the seed that
 meets the budget makes the mutants of the part `BUDGET`. The calibration
 target registers three parts of 1,000 s, each within the shard limit
-([calibration target](#calibration-target)), and each target of the
-kernel four parts, whose budgets its proof path gives.
+([calibration target](#calibration-target)); each target of the kernel
+registers the parts and the budgets that its proof path gives, which the
+measurement of its parts on the standard runner sets.
 
 The checks of the registration: every reached local function is
 in `proves`, `unclosed` or `derived`, every cut local item in `unclosed`,
@@ -4470,7 +4471,9 @@ in a checkout are not evidence; only a run of the gate produces receipts.
 - Two formal targets are registered, those of the device-tree and
   page-tables components; the rest of the kernel, its boot and board code,
   its assembly and its `unsafe` sites among it, is unverified and listed as
-  open obligations.
+  open obligations. The two targets are connected by a premise of
+  page-tables on the boot memory maps that the fdt entries build, which the
+  gate does not check yet.
 - Proofs cover only registered targets. Code outside them, including code
   ported from the legacy tree, is unverified until a target proves it.
 - Sequential refinement does not cover concurrency, weak memory, `unsafe`

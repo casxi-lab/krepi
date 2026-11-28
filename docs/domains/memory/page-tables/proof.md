@@ -87,22 +87,25 @@ the entries that give its iterator. The plans of `map_page`,
 most seven steps, and that of `reset` one `Zero` for each table in use.
 
 **Obligations.** One for each root: its refinement theorem states that, for
-every input of its machine widths ([widths and quantifiers](specification.md#widths-and-quantifiers))
-and under the premises below that its inputs need, the function returns the
-value that its specification gives, for a write entry the set or the table
-after its write phase and the plan or the value that it returns, related to
-it by the representation of the value types, or fails with the error that
-its specification gives, and that a failure returns nothing else and writes
+every input of its machine widths ([widths and
+quantifiers](specification.md#widths-and-quantifiers)) and under the
+premises below that its inputs need, the function returns the value that
+its specification gives, for a write entry the set or the table after its
+write phase and the plan or the value that it returns, related to it by the
+representation of the value types, or fails with the error that its
+specification gives, and that a failure returns nothing else and writes
 nothing. A function with a loop is proved to return as well, since Aeneas
 translates a loop as a function that may diverge. The refinement theorems
 lie below `Krepi.Proofs.PageTables.Refinement`, in three modules that
 restate the triples of the generated functions that the other modules
 prove, each a `@[step]` lemma about one function, so that the build of a
-mutant fails in the triple of the function that it edits. Each obligation
-holds the refinement theorem of its root and the triples that its proof
-uses and that unfold a generated definition, each triple in the first
-obligation in the order of the roots whose proof uses it; the 15 modules
-that hold them are the proof modules of the target.
+mutant fails in the triple of the function that it edits, and the modules
+that import a module that fails are not built. Each obligation holds the
+refinement theorem of its root and the theorems that its proof uses and
+that unfold a generated definition, the triples and the lemmas about
+generated constants, each in the first obligation in the order of the
+roots whose proof uses it; the 15 modules that hold them are the proof
+modules of the target.
 
 ### Premises
 
@@ -236,10 +239,12 @@ parts take 8, 7, 7 and 7. Each part extracts the target, builds its proofs
 and then runs its mutants; part 1 also concludes the target. The budget of
 each part is 1.5 times the seconds that the part took on the standard
 runner, rounded up to a minute, at most 1,800 s and at least 1.25 times
-those seconds, and the parts of a target have at most 7,200 s in all. By
+those seconds, and the parts of a target have at most 7,200 s in all. The
+number of parts is the least for which no part takes more than 1,440 s. By
 the build of its proof modules in the gate and the ratio of the parts of
-the calibration target, a part of 10 mutants takes more than 1,440 s, so
-three parts are not enough. The replay of the 9,382 cases of the vector
+the calibration target, a part of 10 mutants would take more than 1,440 s,
+so the registry starts from four parts; that is an estimate, and the
+measurement of the parts on the standard runner decides their number. The replay of the 9,382 cases of the vector
 file, about 270 s on a Darwin host, is a separate run of
 `cargo xtask formal vectors`.
 
@@ -315,14 +320,18 @@ replaces, the part that runs it ([cluster and budget](#cluster-and-budget))
 and the theorems of which one must fail: the refinement theorem of the
 function that it names and the theorems of that proof that unfold the
 function that the edit changes, where the build of the mutant fails
-([obligations](#page-tables)). The table describes the edit. Three edits
-lie in a function that other entries share, whose refinement they change
-too: the comparison of the free tables with the new tables of
-`direct-map-tables-off-by-one` is in the write phase that `kernel_map`
-shares, and the comparison of the generation of
-`release-stale-generation` is in the check of a holder that `publish` and
-`cancel` share; `unmap-page-of-block` edits `unmap_page` itself, since the
-check of a block is in a walk that `lookup_page` shares.
+([obligations](#page-tables)). The table describes the edit. A mutant
+that edits a function which other entries call changes their refinement
+too. Two edits lie in such a helper, away from the place that the mutant
+names: `direct-map-tables-off-by-one` edits the comparison of the free
+tables with the new tables in the write phase, which `kernel_map` shares,
+and `release-stale-generation` drops the comparison of the generation in
+the check of a holder, which `find_held` gives `publish`, `cancel` and
+`validate` as well. `unmap-page-of-block` edits `unmap_page` itself, not
+the walk of `page_leaf`, where the check of a block is, which `lookup_page`
+shares. `new-extents-off-by-one` passes its check and then fails at the
+write beyond the array of the extents, a panic in Rust and a failed
+`update` in the generated code, rather than admitting the extent.
 
 | Name | Line | Source change | Must fail |
 | --- | ---: | --- | --- |

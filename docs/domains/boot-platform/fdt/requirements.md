@@ -80,7 +80,8 @@ hand-over tree are those of FDT-R03 and FDT-R05.
   [Rejection and error priority](contract.md#rejection-and-error-priority).
 - **Specification.** [FDT-R01](specification.md#fdt-r01) of the specification.
 - **Proof path.** The formal target `fdt`, whose obligations hold the
-  refinement theorem of each of these entry points ([proof path](proof.md#fdt)).
+  refinement theorem of each function among these entry points
+  ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests of the module `fdt` that replay the
   vectors `fdt-parser-1` to `fdt-parser-9` and the tests of each limit
   that the [testing obligations](contract.md#testing-obligations) list. They
@@ -110,7 +111,8 @@ that step.
   [Check and execute](contract.md#check-and-execute).
 - **Specification.** [FDT-R02](specification.md#fdt-r02) of the specification.
 - **Proof path.** The formal target `fdt`, whose obligations hold the
-  refinement theorem of each of these entry points ([proof path](proof.md#fdt)).
+  refinement theorem of each function among these entry points
+  ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay the property vectors
   `fdt-parser-1` and `fdt-parser-6`, the vectors whose expected output is
   an error, and the tests of the errors that no vector reaches and of the
@@ -145,7 +147,8 @@ with the region of 62 bytes in the hole between two ranges kept.
 - **Contract.** [Memory discovery](contract.md#memory-discovery).
 - **Specification.** [FDT-R03](specification.md#fdt-r03) of the specification.
 - **Proof path.** The formal target `fdt`, whose obligations hold the
-  refinement theorem of each of these entry points ([proof path](proof.md#fdt)).
+  refinement theorem of each function among these entry points
+  ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay `fdt-discovery-1` to
   `fdt-discovery-6`, `fdt-parser-7`, `fdt-pi5-boundaries-5` and
   `fdt-pi5-selection-3`, and the tests of 32 RAM ranges and of the 8 GB
@@ -176,7 +179,8 @@ the [testing obligations](contract.md#testing-obligations) pass.
   [Behaviour changes](contract.md#behaviour-changes).
 - **Specification.** [FDT-R04](specification.md#fdt-r04) of the specification.
 - **Proof path.** The formal target `fdt`, whose obligations hold the
-  refinement theorem of each of these entry points ([proof path](proof.md#fdt)).
+  refinement theorem of each function among these entry points
+  ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay these vectors and the tests of
   the testing obligations. The vector `fdt-pi5-firmware-1` needs the
   shipped trees, which lie outside the repository; its other vectors and
@@ -206,7 +210,8 @@ accepted and one of 1 byte more fails with `LimitExceeded`.
   [Boot memory map](contract.md#boot-memory-map).
 - **Specification.** [FDT-R05](specification.md#fdt-r05) of the specification.
 - **Proof path.** The formal target `fdt`, whose obligations hold the
-  refinement theorem of each of these entry points ([proof path](proof.md#fdt)).
+  refinement theorem of each function among these entry points
+  ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay `fdt-pi5-1` to `fdt-pi5-4`,
   `fdt-pi5-boundaries-1` to `fdt-pi5-boundaries-5`, `fdt-pi5-selection-1`
   to `fdt-pi5-selection-3` and `fdt-pi5-firmware-2`, the last on merged
@@ -239,7 +244,8 @@ measured ranges.
   [Testing obligations](contract.md#testing-obligations).
 - **Specification.** [FDT-R06](specification.md#fdt-r06) of the specification.
 - **Proof path.** The formal target `fdt`, whose obligations hold the
-  refinement theorem of each of these entry points ([proof path](proof.md#fdt)).
+  refinement theorem of each function among these entry points
+  ([proof path](proof.md#fdt)).
 - **Evidence.** The four host tests of the testing obligations and the
   vector `fdt-pi5-platform-1`. They show that trees of these shapes are
   accepted and fit the capacities. They do not show the shapes that the
@@ -268,7 +274,8 @@ accepted and of 5 fails with `Capacity`.
 - **Contract.** [Boot memory map](contract.md#boot-memory-map).
 - **Specification.** [FDT-R07](specification.md#fdt-r07) of the specification.
 - **Proof path.** The formal target `fdt`, whose obligations hold the
-  refinement theorem of each of these entry points ([proof path](proof.md#fdt)).
+  refinement theorem of each function among these entry points
+  ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay `platform-1` to `platform-13`,
   `fdt-pi5-platform-1`, `fdt-pi5-platform-2` and `fdt-pi5-firmware-2`, and
   the test of the capacity of boot storage of the
@@ -299,7 +306,8 @@ The criterion: the vectors of the CPU nodes give their expected outputs.
 - **Contract.** [CPU nodes](contract.md#cpu-nodes).
 - **Specification.** [FDT-R08](specification.md#fdt-r08) of the specification.
 - **Proof path.** The formal target `fdt`, whose obligations hold the
-  refinement theorem of each of these entry points ([proof path](proof.md#fdt)).
+  refinement theorem of each function among these entry points
+  ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay `fdt-cpus-1` to `fdt-cpus-6`.
   They show the checks on trees that the tests build. They do not show that
   the CPUs start, which the multicore domain shows.
@@ -324,7 +332,8 @@ of the translation give their expected outputs.
   [Format and bounds](contract.md#format-and-bounds).
 - **Specification.** [FDT-R09](specification.md#fdt-r09) of the specification.
 - **Proof path.** The formal target `fdt`, whose obligations hold the
-  refinement theorem of each of these entry points ([proof path](proof.md#fdt)).
+  refinement theorem of each function among these entry points
+  ([proof path](proof.md#fdt)).
 - **Evidence.** The host tests that replay `fdt-translation-1` to
   `fdt-translation-5` and `fdt-discovery-2`. They show the translation on
   these maps. They do not show the tagged addresses of PCI, which the
@@ -349,7 +358,8 @@ process, give the same results of the parse and of the boot memory map.
 - **Contract.** [Determinism](contract.md#determinism).
 - **Specification.** [FDT-R10](specification.md#fdt-r10) of the specification.
 - **Proof path.** The formal target `fdt`, whose obligations hold the
-  refinement theorem of each of these entry points ([proof path](proof.md#fdt)).
+  refinement theorem of each function among these entry points
+  ([proof path](proof.md#fdt)).
 - **Evidence.** The case `boot-memory` of the QEMU boot suite,
   `cargo xtask qemu-boot`, in CI, which the
   [testing obligations](contract.md#testing-obligations) name, on the QEMU

@@ -46,8 +46,8 @@ pinned by a manifest, a reviewed Aeneas patch and the recipe of a container
 image that CI builds and publishes
 ([formal verification](docs/formal-verification.md#tools)). The device-tree
 and page-tables components have specifications whose statements are proved
-and formal proof targets that prove the refinement of their code; the rest
-of the kernel is not proved
+and formal proof targets that prove the refinement of their code under the
+premises of their proof paths; the rest of the kernel is not proved
 ([formal verification](docs/formal-verification.md#status)). Continuous
 integration runs the repository checks and the QEMU boot
 suite on every pull request to `main` and on every push to `main`.

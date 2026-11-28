@@ -923,7 +923,7 @@ afterwards.
 
 The module `fdt` has no `unsafe` code and no assembly, and its target lists
 the functions that it proves and reaches, so no row covers them. The only
-obligation is the board's: forming the slice of the hand-over tree
+row is the board's: forming the slice of the hand-over tree
 ([Extractability](#extractability)); the Pi 5 board adds its row with its crate.
 
 The target of the module has one open obligation of its own, which the

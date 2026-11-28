@@ -84,27 +84,31 @@ reaches to the list of the specification, and so covers the code of
 classified by the theorems of the functions that give its iterator.
 
 **Obligations.** One for each root: its refinement theorem states that, for
-every input of its machine widths ([widths and quantifiers](specification.md#widths-and-quantifiers))
-and under the premises below that its inputs need, the function returns the
-value that its specification gives, related to it by the representation of
-the value types, or fails with the error that its specification gives, and
-that a failure returns nothing else. A function with a loop is proved to
-return as well, since Aeneas translates a loop as a function that may
-diverge. The refinement theorems lie below `Krepi.Proofs.Fdt.Refinement`,
-in five modules that restate the triples of the generated functions that
-the other modules prove, each a `@[step]` lemma about one function, so
-that the build of a mutant fails in the triple of the function that it
-edits. Each obligation holds the refinement theorem of its root and the
-triples that its proof uses and that unfold a generated definition, each
-triple in the first obligation in the order of the roots whose proof uses
-it; the 18 modules that hold them are the proof modules of the target.
+every input of its machine widths ([widths and
+quantifiers](specification.md#widths-and-quantifiers)) and under the
+premises below that its inputs need, the function returns the value that
+its specification gives, related to it by the representation of the value
+types, or fails with the error that its specification gives, and that a
+failure returns nothing else. A function with a loop is proved to return as
+well, since Aeneas translates a loop as a function that may diverge. The
+refinement theorems lie below `Krepi.Proofs.Fdt.Refinement`, in five
+modules that restate the triples of the generated functions that the other
+modules prove, each a `@[step]` lemma about one function, so that the build
+of a mutant fails in the triple of the function that it edits, and the
+modules that import a module that fails are not built. Each obligation
+holds the refinement theorem of its root and the theorems that its proof
+uses and that unfold a generated definition, the triples and the lemmas
+about generated constants such as `max_name_val`, each in the first
+obligation in the order of the roots whose proof uses it; the 18 modules
+that hold them are the proof modules of the target.
 
 ### Premises
 
 The refinement theorems take these hypotheses. Each is an invariant of the
-specification ([invariants](specification.md#invariants)) or a condition of
-the boot, with the function or the code that establishes it, what
-preserves it and what relies on it. The translation of the module does not
+specification ([invariants](specification.md#invariants)), a condition of
+the boot, a representation of a value or of an external declaration, or
+the platform of the extraction, with the function or the code that
+establishes it, what preserves it and what relies on it. The translation of the module does not
 show which module may build a value, so the
 [compile-time guards](#compile-time-guards) make each premise of a value
 true of every value that another module holds.
@@ -181,24 +185,29 @@ parts take 8, 7, 7 and 7. Each part extracts the target, builds its proofs
 and then runs its mutants; part 1 also concludes the target. The budget of
 each part is 1.5 times the seconds that the part took on the standard
 runner, rounded up to a minute, at most 1,800 s and at least 1.25 times
-those seconds, and the parts of a target have at most 7,200 s in all. Three
-parts were not enough: each mutant extracts the target again and builds the
-generated definitions and the proof modules that the edit reaches, and by
-the ratio of the parts of the calibration target a part of 10 mutants takes
-more than 1,440 s.
+those seconds, and the parts of a target have at most 7,200 s in all. The
+number of parts is the least for which no part takes more than 1,440 s.
+Each mutant extracts the target again and builds the generated definitions
+and the proof modules that the edit reaches, and by the ratio of the parts
+of the calibration target a part of 10 mutants would take more than
+1,440 s, so the registry starts from four parts; that is an estimate, and
+the measurement of the parts on the standard runner decides their
+number.
 
 ## Trusted boundary
 
 The target relies on these rows of the
 [trusted boundary](../../../formal-verification.md#trusted-boundary): the
 Lean kernel and the three standard axioms; Mathlib and the Aeneas Lean
-library; Charon, the Rust nightly and Aeneas; and the compiler, which no
-proof covers. It relies on no assembly, `unsafe` code, atomics, IRQ path or
+library; Charon, the Rust nightly and Aeneas; the compiler, which no proof
+covers; and the unconstrained declarations, one item
+([below](#trusted-boundary)). It relies on no assembly, `unsafe` code, atomics, IRQ path or
 hardware: the module has none. The bytes that the firmware hands over are
 its input, which it checks; the board's forming of their slice is an open
 obligation, not a trusted item ([unclosed dependencies](#unclosed-dependencies)).
 
-The target adds no trusted item to the boundary:
+The target adds one item to the boundary, an unconstrained declaration
+with its premise, and no cut point, model or trusted axiom:
 
 - **Cut points.** None: no function of the module reads hardware or global
   state, so none needs to be translated without its body.
@@ -256,6 +265,10 @@ and the theorems of which one must fail: the refinement theorem of the
 function that it names and the theorems of that proof that unfold the
 function or constant that the edit changes, where the build of the mutant
 fails ([obligations](#fdt)). The table describes the edit.
+`parse-depth-off-by-one` and `memory-ranges-off-by-one` pass their check
+and then fail at the write beyond the array of the open nodes or of the RAM
+ranges, a panic in Rust and a failed `update` in the generated code,
+rather than admitting the node or the range.
 
 | Name | Line | Source change | Must fail |
 | --- | ---: | --- | --- |
