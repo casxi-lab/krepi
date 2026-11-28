@@ -1791,12 +1791,19 @@
           "budget": 1800,
           "mutants": [
             "parse-depth-off-by-one",
+            "parse-reservation-overlap-unchecked",
             "enabled-rejects-ok",
+            "memory-overlap-unchecked",
             "dynamic-not-counted",
+            "hand-over-image-on-tree-unchecked",
             "find-available-unaligned",
+            "cpus-repeated-id-accepted",
             "cells-high-cell-dropped",
+            "reg-low-4gib-unchecked",
             "plan-boot-storage-inward",
+            "available-ranges-past-reservation",
             "managed-bytes-of-banks",
+            "span-contains-end-off-by-one",
             "max-blob-size-off-by-one"
           ]
         },
@@ -1804,35 +1811,18 @@
           "budget": 1800,
           "mutants": [
             "parse-name-padding-unchecked",
-            "address-cells-inherited",
-            "hand-over-size-off-by-one",
-            "find-available-touch-at-end",
-            "translate-first-window",
-            "plan-window-outside-ram",
-            "span-new-wraps"
-          ]
-        },
-        {
-          "budget": 1800,
-          "mutants": [
-            "parse-reservation-overlap-unchecked",
-            "memory-overlap-unchecked",
-            "hand-over-image-on-tree-unchecked",
-            "cpus-repeated-id-accepted",
-            "reg-low-4gib-unchecked",
-            "available-ranges-past-reservation",
-            "span-contains-end-off-by-one"
-          ]
-        },
-        {
-          "budget": 1800,
-          "mutants": [
             "find-node-first-sibling",
+            "address-cells-inherited",
             "memory-ranges-off-by-one",
+            "hand-over-size-off-by-one",
             "is-available-ignores-tree",
+            "find-available-touch-at-end",
             "logical-id-unmasked",
+            "translate-first-window",
             "plan-boot-storage-off-by-one",
+            "plan-window-outside-ram",
             "permits-backing-all-banks",
+            "span-new-wraps",
             "max-property-name-off-by-one"
           ]
         }
@@ -2773,12 +2763,19 @@
           "budget": 1800,
           "mutants": [
             "read-write-executable",
+            "lookup-block-rounds-down",
             "clone-copies-private-leaf",
+            "map-page-overwrites-valid",
             "map-block-over-table",
+            "unmap-without-invalidate",
             "kernel-map-guard-unchecked",
+            "direct-map-block-past-range",
             "new-exclusion-inward",
+            "choose-high-from-lowest",
             "assign-keeps-counter",
+            "initialized-ignores-failure",
             "cancel-after-attempt",
+            "release-stale-generation",
             "stats-reserved-as-free"
           ]
         },
@@ -2786,35 +2783,18 @@
           "budget": 1800,
           "mutants": [
             "direct-address-limit-off-by-one",
-            "clone-reach-unchecked",
-            "map-block-output-unaligned",
-            "direct-map-tables-off-by-one",
-            "new-overlap-unchecked",
-            "reserve-published",
-            "release-without-merge"
-          ]
-        },
-        {
-          "budget": 1800,
-          "mutants": [
-            "lookup-block-rounds-down",
-            "map-page-overwrites-valid",
-            "unmap-without-invalidate",
-            "direct-map-block-past-range",
-            "choose-high-from-lowest",
-            "initialized-ignores-failure",
-            "release-stale-generation"
-          ]
-        },
-        {
-          "budget": 1800,
-          "mutants": [
             "reset-keeps-record",
+            "clone-reach-unchecked",
             "map-page-store-before-fence",
+            "map-block-output-unaligned",
             "unmap-page-of-block",
+            "direct-map-tables-off-by-one",
             "new-extents-off-by-one",
+            "new-overlap-unchecked",
             "choose-alignment-unchecked",
+            "reserve-published",
             "publish-ignores-state",
+            "release-without-merge",
             "owner-last-excluder"
           ]
         }

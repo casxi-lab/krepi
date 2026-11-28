@@ -13,7 +13,7 @@ that the implementation adopts so that the tools translate it into code a
 proof can rely on, its trusted boundary, its mutants and what no theorem
 states. The target is registered in `verification/targets.json` as a formal
 target, with its roots, the functions that it proves and reaches, its
-obligations, its proof modules and its mutants in four parts
+obligations, its proof modules and its mutants in two parts
 ([proof targets](../../../formal-verification.md#proof-targets)), and the
 gate verifies it.
 
@@ -39,7 +39,7 @@ target take the invariants that they need as hypotheses
 | Feature | `krepi.kernel.kernel-memory`, the [kernel memory](../../../features/kernel/kernel-memory.md), whose `theorems` are the refinement theorems of the roots |
 | Entries | The 11 rows of the [entry table](contract.md#entry-points) of the core, lines 107 to 117 of the contract: one target, not split; the row of the adapter, line 118, is excluded ([unclosed dependencies](#unclosed-dependencies)) |
 | Roots | 31: the 28 functions that the rows name, below, and the `next` of the three plan iterator types ([plans as iterators](#page-tables)) |
-| Budget | Four parts, each with a budget of its own ([cluster and budget](#cluster-and-budget)) |
+| Budget | Two parts, each with a budget of its own ([cluster and budget](#cluster-and-budget)) |
 
 The roots are the full paths of the functions that the rows of the entry
 table name, in the crate `krepi_kernel` of the root package and its module
@@ -231,20 +231,21 @@ ownership table are not connected ([premises](#premises)), so their proofs
 can be written apart.
 
 Budget and parts: the gate runs the 29 registered mutants of the target in
-four parts, each a job with its own budget
+two parts, each a job with its own budget
 ([shards and merge](../../../formal-verification.md#shards-and-merge)). The
 registry puts the mutants of the [mutant table](#mutants) into the parts in
 turn, the first into part 1, the second into part 2 and so on, so that the
-parts take 8, 7, 7 and 7. Each part extracts the target, builds its proofs
+parts take 15 and 14. Each part extracts the target, builds its proofs
 and then runs its mutants; part 1 also concludes the target. The budget of
 each part is 1.5 times the seconds that the part took on the standard
 runner, rounded up to a minute, at most 1,800 s and at least 1.25 times
 those seconds, and the parts of a target have at most 7,200 s in all. The
-number of parts is the least for which no part takes more than 1,440 s. By
-the build of its proof modules in the gate and the ratio of the parts of
-the calibration target, a part of 10 mutants would take more than 1,440 s,
-so the registry starts from four parts; that is an estimate, and the
-measurement of the parts on the standard runner decides their number.
+number of parts is the least for which no part takes more than 1,440 s. On
+the standard runner each of four parts took 534 s to 578 s, about 140 s
+to extract and build the target and up to 60 s for each of its mutants, so
+two parts of 15 and 14 mutants come to about 1,040 s each and one part of
+29 would pass 1,440 s; the measurement of the two parts on the standard
+runner decides their budgets.
 The replay of the 9,382 cases of the vector file, about 270 s on a Darwin
 host, is a separate run of `cargo xtask formal vectors`.
 
