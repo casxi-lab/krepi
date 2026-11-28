@@ -1494,7 +1494,7 @@
       "name": "Krepi.Statements.PageTables.KernelMap",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Boot.kernelMap",
       "module": "Krepi.Proofs.PageTables.Refinement.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.KernelMapPlanNext",
@@ -1506,7 +1506,7 @@
       "name": "Krepi.Statements.PageTables.DirectMap",
       "theorem": "Krepi.Proofs.PageTables.Refinement.Boot.directMap",
       "module": "Krepi.Proofs.PageTables.Refinement.Boot",
-      "state": "planned"
+      "state": "proved"
     },
     {
       "name": "Krepi.Statements.PageTables.DirectMapPlanNext",
