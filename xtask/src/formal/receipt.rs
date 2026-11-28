@@ -784,6 +784,14 @@ mod tests {
                     complete: true,
                 }),
                 part: Some("2/3".to_string()),
+                untranslated: vec![crate::formal::mutants::Untranslated {
+                    point: "kernel/src/lib.rs:3:5".to_string(),
+                    operator: "literal".to_string(),
+                    find: "6".to_string(),
+                    replace: "7".to_string(),
+                    receipt_sha256: None,
+                    reason: "generated build: KrepiGen/T/Funs.lean:9:5: failed".to_string(),
+                }],
             }),
             proof_targets: BTreeMap::from([("t".to_string(), target())]),
             guard: Some(guard()),
@@ -985,6 +993,11 @@ mod tests {
             assert_eq!(back, receipt);
             assert_eq!(render(&back), text);
         }
+        // A record of source mutants written before they had untranslated
+        // ones has none.
+        let record = r#"{"qualification": null, "part": null}"#;
+        let read: crate::formal::mutants::Record = serde_json::from_str(record).expect("a record");
+        assert_eq!(read.untranslated, []);
         let text = render(&full(Mode::Manual));
         for word in [
             "\"VERIFIED\"",

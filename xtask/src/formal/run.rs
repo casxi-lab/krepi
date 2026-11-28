@@ -3058,6 +3058,7 @@ pub(crate) mod tests {
         let record = mutants::Record {
             qualification: Some(read),
             part: Some("2/3".to_string()),
+            untranslated: Vec::new(),
         };
         assert_eq!(receipt.source_mutants, Some(record));
     }
@@ -3836,8 +3837,8 @@ pub(crate) mod tests {
             done.failures()
         );
         let (status, reason) = fixture::status(&done, "target/t/mutant/m1");
-        let inconclusive = "inconclusive, its extraction failed";
-        assert!(status == Status::Rejected && reason.is_some_and(|r| r.starts_with(inconclusive)));
+        let untranslated = "untranslated, extraction: not complete";
+        assert!(status == Status::Rejected && reason.is_some_and(|r| r.starts_with(untranslated)));
         let sites = fixture::commands(&done, "target/t/mutant/m1")
             .into_iter()
             .map(|c| c.site);
