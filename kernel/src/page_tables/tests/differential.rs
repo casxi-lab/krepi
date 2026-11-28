@@ -4,9 +4,15 @@
 //! tables in use. Each input runs on two sets that one construction builds;
 //! the two must give the same error or plans of the same steps, and leave
 //! the same record and descriptors. The inputs reach every branch of both
-//! checks, with each loop run 0 times, once and up to its bound, and hold
-//! the boot memory maps of the frozen vectors `dm-01` to `dm-04`. No record
-//! exceeds its pool, where the copy fails.
+//! checks that a caller can reach, with each loop run once and up to its
+//! bound and the range loops also 0 times, and hold the frozen vectors
+//! `dm-01` to `dm-04` with their pools; the pools give the largest inputs
+//! of both entries exactly the free tables that they need and one fewer.
+//! No record exceeds its pool, where the copy can overflow. No caller
+//! reaches the `else` of `MapCheck::passed`, a page or leaf loop run 0
+//! times, or, in `direct_map`, the `Alignment` branch of the range check and
+//! its exit for a leaf that an earlier range holds: a range has at least a
+//! page, and the usable ranges are whole pages, disjoint and in order.
 //!
 //! Feature: krepi.kernel.kernel-memory
 //!
@@ -136,12 +142,12 @@ fn direct_steps<const N: usize>(mut plan: DirectMapPlan<'_, N>) -> Vec<Step> {
 
 /// The layouts: none; one page under the root, under a level 2 table and
 /// into a level 3 table of the constructions, also followed by one under a
-/// level 2 table, on their page and on their block; pages across a 2 MiB and a 1 GiB boundary, and 1,024 pages; a
-/// range that an earlier one covers, also of the same start; a guard in a
-/// range and guards beside it; ends off a page, above `2^39` and above
-/// `2^32`, after a range that passed; ranges out of order; and 16 ranges, a
-/// page in each of 16 slots of 2 MiB over four of 1 GiB, with a count of
-/// 16, 17 and `usize::MAX`.
+/// level 2 table, on their page and on their block; pages across a 2 MiB
+/// and a 1 GiB boundary, and 1,024 pages; a range that an earlier one
+/// covers, also of the same start; a guard in a range and guards beside it;
+/// ends off a page, above `2^39` and above `2^32`, after a range that
+/// passed; ranges out of order; and 16 ranges, a page in each of 16 slots of
+/// 2 MiB over four of 1 GiB, with a count of 16, 17 and `usize::MAX`.
 fn layouts() -> Vec<Layout<'static>> {
     let gib = 1 << 30;
     let mut all = vec![
@@ -193,8 +199,10 @@ fn built_layouts_agree_with_the_code_before_the_count_from_zero() {
         + kernel_agrees::<3>(&layouts)
         + kernel_agrees::<4>(&layouts)
         + kernel_agrees::<5>(&layouts)
+        + kernel_agrees::<20>(&layouts)
+        + kernel_agrees::<21>(&layouts)
         + kernel_agrees::<KERNEL_TABLES>(&layouts);
-    assert_eq!(compared, 6 * 9 * 21 * 6);
+    assert_eq!(compared, 8 * 9 * 21 * 6);
 }
 
 /// The firmware reservation of `size` bytes at `start`.
@@ -271,7 +279,10 @@ fn built_direct_maps_agree_with_the_code_before_the_count_from_zero() {
         + direct_agrees::<2>(&memories)
         + direct_agrees::<3>(&memories)
         + direct_agrees::<4>(&memories)
+        + direct_agrees::<8>(&memories)
         + direct_agrees::<16>(&memories)
+        + direct_agrees::<33>(&memories)
+        + direct_agrees::<34>(&memories)
         + direct_agrees::<DIRECT_MAP_TABLES>(&memories);
-    assert_eq!(compared, 6 * 9 * 11 * 6);
+    assert_eq!(compared, 9 * 9 * 11 * 6);
 }

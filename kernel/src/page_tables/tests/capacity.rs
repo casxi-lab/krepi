@@ -83,7 +83,9 @@ fn a_record_above_the_pool_leaves_no_free_table() {
 /// a level 2 and a level 3 table is refused; a page at `0x20_0000` takes the
 /// third table, under the level 2 table of the block; then a page beside it
 /// needs no table and is mapped, and one at `0x40_0000`, which needs one, is
-/// refused. A refusal changes nothing.
+/// refused. A refusal changes nothing. With a record of `usize::MAX` no
+/// table is free, but a page into the level 3 table, which needs none, is
+/// still mapped, and the record stays.
 #[test]
 fn the_last_free_table_is_taken_and_one_more_is_refused() {
     let new = vec![
@@ -106,6 +108,11 @@ fn the_last_free_table_is_taken_and_one_more_is_refused() {
         let map = kernel(&mut t, layout(&[(start, PAGE_SIZE, rw)], &[]), BASE, BITS);
         assert_eq!((map, t.used()), (steps, used), "{start:#x}");
     }
+    t.used = usize::MAX;
+    let page_in_level_3 = layout(&[(0x20_2000, PAGE_SIZE, rw)], &[]);
+    let map = kernel(&mut t, page_in_level_3, BASE, BITS);
+    assert_eq!(map, Ok(vec![Store(2, 2, page(0x20_2000)), Sync]));
+    assert_eq!(t.used, usize::MAX);
     let mut t = set::<3, true>();
     block(&mut t, DIRECT_BASE, 0, BASE, BITS).unwrap();
     for (memory, steps, used) in [
@@ -119,6 +126,10 @@ fn the_last_free_table_is_taken_and_one_more_is_refused() {
             (steps, used)
         );
     }
+    t.used = usize::MAX;
+    let map = direct(&mut t, &one_page(0x20_2000, 0x20_3000), BASE, BITS);
+    assert_eq!(map, Ok(vec![Store(2, 2, page(0x20_2000)), Sync]));
+    assert_eq!(t.used, usize::MAX);
 }
 
 #[test]
