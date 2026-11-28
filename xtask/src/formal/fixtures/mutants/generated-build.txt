@@ -1,0 +1,11 @@
+# Lean 4.35.0 on linux-aarch64 in the pinned image in CI: `lake build --no-cache --wfail +Krepi` in the stage of a source mutant of the target `fdt` whose generated definitions do not build, exit 1; its standard output and then its standard error, as the run kept them
+✖ [1836/1861] Building KrepiGen.Fdt.Funs (16s)
+trace: .> LEAN_PATH=/opt/krepi-formal/backend/.lake/packages/Cli/.lake/build/lib/lean:/opt/krepi-formal/backend/.lake/packages/batteries/.lake/build/lib/lean:/opt/krepi-formal/backend/.lake/packages/Qq/.lake/build/lib/lean:/opt/krepi-formal/backend/.lake/packages/aesop/.lake/build/lib/lean:/opt/krepi-formal/backend/.lake/packages/proofwidgets/.lake/build/lib/lean:/opt/krepi-formal/backend/.lake/packages/importGraph/.lake/build/lib/lean:/opt/krepi-formal/backend/.lake/packages/LeanSearchClient/.lake/build/lib/lean:/opt/krepi-formal/backend/.lake/packages/plausible/.lake/build/lib/lean:/opt/krepi-formal/backend/.lake/packages/mathlib/.lake/build/lib/lean:/opt/krepi-formal/backend/.lake/build/lib/lean:/home/runner/work/krepi/krepi/artifacts/formal/runs/1795856815-8-0/work/mutants/fdt/2/stage/verification/.lake/build/lib/lean /opt/krepi-formal/lean/bin/lean /home/runner/work/krepi/krepi/artifacts/formal/runs/1795856815-8-0/work/mutants/fdt/2/stage/verification/KrepiGen/Fdt/Funs.lean -o /home/runner/work/krepi/krepi/artifacts/formal/runs/1795856815-8-0/work/mutants/fdt/2/stage/verification/.lake/build/lib/lean/KrepiGen/Fdt/Funs.olean -i /home/runner/work/krepi/krepi/artifacts/formal/runs/1795856815-8-0/work/mutants/fdt/2/stage/verification/.lake/build/lib/lean/KrepiGen/Fdt/Funs.ilean -c /home/runner/work/krepi/krepi/artifacts/formal/runs/1795856815-8-0/work/mutants/fdt/2/stage/verification/.lake/build/ir/KrepiGen/Fdt/Funs.c --setup /home/runner/work/krepi/krepi/artifacts/formal/runs/1795856815-8-0/work/mutants/fdt/2/stage/verification/.lake/build/ir/KrepiGen/Fdt/Funs.setup.json --json
+error: KrepiGen/Fdt/Funs.lean:1619:5: failed to synthesize
+  Decidable «matches»
+
+Hint: Additional diagnostic information may be available using the `set_option diagnostics true` command.
+warning: KrepiGen/Fdt/Funs.lean:1614:2: declaration uses `sorry`
+Some required targets logged failures:
+- KrepiGen.Fdt.Funs
+error: build failed

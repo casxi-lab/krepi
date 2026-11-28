@@ -1490,6 +1490,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
             let run = mutants::Run {
                 run: "r".into(),
                 operators: vec!["literal".into()],
+                generated: survivors.len(),
                 receipt_sha256: "e".repeat(64),
                 ..mutants::Run::default()
             };
@@ -1498,6 +1499,7 @@ fn merge(a: &Set, b: &Set) -> Set { a.union(b) }
                 target: "a".into(),
                 operators: vec!["literal".into()],
                 runs: vec![run],
+                generated: survivors.len(),
                 survivors,
                 ..mutants::List::default()
             };

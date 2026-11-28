@@ -51,7 +51,7 @@ const CHANGES: &str = "ordering < <=,ordering <= <,ordering > >=,ordering >= >,\
     method saturating_sub saturating_add,method min max,method max min";
 
 /// The schema of a list of survivors.
-pub const SCHEMA: u32 = 2;
+pub const SCHEMA: u32 = 3;
 
 /// The variable that names the directory below which a run of `formal
 /// mutants` finds the qualification receipt of its run, by default the runs
@@ -98,11 +98,37 @@ pub struct Source {
 }
 
 /// What the receipt of a run of `formal mutants` holds of it: the
-/// qualification receipt of its CI run that it read, and its part, `<i>/<k>`.
+/// qualification receipt of its CI run that it read, its part, `<i>/<k>`,
+/// and its untranslated mutants, none in a receipt written before they were.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Record {
     pub qualification: Option<Qualified>,
     pub part: Option<String>,
+    #[serde(default)]
+    pub untranslated: Vec<Untranslated>,
+}
+
+/// A source mutant whose extraction is not complete, whose generated files
+/// cannot be installed or whose generated definitions do not build: its
+/// point, operator and edit, in a list of survivors the SHA-256 of the
+/// receipt of its run, and the reason, which starts with `extraction` or
+/// `generated build`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Untranslated {
+    pub point: String,
+    pub operator: String,
+    pub find: String,
+    pub replace: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receipt_sha256: Option<String>,
+    pub reason: String,
+}
+
+/// The untranslated mutants that a run of `generated` source mutants
+/// allows: one in twenty, at least one.
+pub fn allowed(generated: usize) -> usize {
+    (generated / 20).max(1)
 }
 
 /// A qualification receipt that a run of `formal mutants` read: its
@@ -202,17 +228,27 @@ pub enum Verdict {
     },
     /// Something besides errors in the proof modules may explain the failure.
     Inconclusive(Vec<String>),
+    /// The build failed in the generated modules of the target alone, for
+    /// the reason.
+    Untranslated(String),
     /// Lake or a Lean process it ran was killed or ran out of time, so the
     /// build tells nothing about the mutant.
     Killed(String),
 }
 
 /// Classifies the build of a mutant, given the proof modules with their
-/// declaration ranges in the target's build and the theorems of which one
-/// must fail. An error counts against the top-level declaration whose range
-/// contains its position; an error outside every range counts against none
-/// and is listed by its position.
-pub fn verdict(build: &Ran, modules: &[String], ranges: &Ranges, fails: &[String]) -> Verdict {
+/// declaration ranges in the target's build, the theorems of which one
+/// must fail and the prefix of the generated modules of the target, such
+/// as `KrepiGen.Fdt`. An error counts against the top-level declaration
+/// whose range contains its position; an error outside every range counts
+/// against none and is listed by its position.
+pub fn verdict(
+    build: &Ran,
+    modules: &[String],
+    ranges: &Ranges,
+    fails: &[String],
+    generated: &str,
+) -> Verdict {
     if let Some(reason) = outcome::killed(build) {
         return Verdict::Killed(reason);
     }
@@ -223,7 +259,12 @@ pub fn verdict(build: &Ran, modules: &[String], ranges: &Ranges, fails: &[String
     }
     let errors = match lean::confined_errors(status, &build.output, modules) {
         Ok(errors) => errors,
-        Err(problems) => return Verdict::Inconclusive(problems),
+        Err(problems) => {
+            return match lean::generated_errors(status, &build.output, generated) {
+                Some(reason) => Verdict::Untranslated(reason),
+                None => Verdict::Inconclusive(problems),
+            };
+        }
     };
     for (module, line, column) in errors {
         match ranges.at(module, line, column) {
@@ -332,6 +373,8 @@ enum Judged {
     Survived(String),
     /// `cargo check` does not build it.
     Unbuildable,
+    /// It was not translated, for the reason.
+    Untranslated(String),
     /// It tells nothing, for the reason, with the status of its unit.
     Failed(Status, String),
 }
@@ -348,8 +391,10 @@ enum Ready {
 /// that Cargo builds it; then extracts it, installs what the tools generated
 /// in a stage and copies the build of the target there, so that Lake builds
 /// again only the modules whose sources or imports differ, all as commands
-/// of `unit`. A pattern that does not occur once, an extraction that fails
-/// and generated files that cannot be installed are rejections.
+/// of `unit`. A pattern that does not occur once is a rejection; an
+/// extraction that is not complete, unless one of its commands failed as a
+/// tool or met the budget, and generated files that cannot be installed
+/// leave the mutant untranslated.
 fn prepare(
     gate: &Gate,
     target: &Target,
@@ -420,16 +465,25 @@ fn prepare(
         triple: Some(layout.triple),
     };
     let extraction = extract::extract(gate, &request)?;
+    let untranslated = |why: String| Ok(Ready::Told(Judged::Untranslated(why)));
     if !extraction.complete {
-        return rejected(format!(
-            "inconclusive, its extraction failed: {}",
-            extraction.diagnostics.join("; ")
-        ));
+        let why = extraction.diagnostics.join("; ");
+        // Such a command forces the conclusion of the unit.
+        let dirs = [package, work.join("extract")];
+        let forced = (gate.records().commands.iter()).any(|c| {
+            let forces = matches!(c.class, Class::ToolFailure | Class::Budget)
+                || (c.class == Class::NotRun && c.limit_seconds <= 0.0);
+            c.unit.as_deref() == Some(unit) && forces && dirs.iter().any(|d| d.ends_with(&c.cwd))
+        });
+        return match forced {
+            true => rejected(format!("inconclusive, its extraction failed: {why}")),
+            false => untranslated(format!("extraction: not complete: {why}")),
+        };
     }
     let stage = work.join("stage");
     if let Err(why) = externals::stage(gate, target, &extraction, &stage)? {
-        return rejected(format!(
-            "inconclusive, its generated files cannot be installed: {why}"
+        return untranslated(format!(
+            "extraction: generated files cannot be installed: {why}"
         ));
     }
     let project = stage.join(Path::new(layout.project).file_name().unwrap_or_default());
@@ -456,10 +510,13 @@ fn judge(
     };
     let (ran, verdict) = prove(gate, unit, &project, &target.proof_modules)?;
     let modules = &target.proof_modules;
-    let judged = ran.map(|ran| self::verdict(&ran, modules, ranges, fails));
+    let module = target.module.as_deref().unwrap_or_default();
+    let generated = format!("{}.{module}", gate.layout().generated);
+    let judged = ran.map(|ran| self::verdict(&ran, modules, ranges, fails, &generated));
     Ok(
         match judged.unwrap_or_else(|| Verdict::Killed(verdict.reason.unwrap_or_default())) {
             Verdict::Rejected { .. } => Judged::Rejected,
+            Verdict::Untranslated(why) => Judged::Untranslated(why),
             Verdict::Accepted { outside, .. } => {
                 let mut why = format!("the mutant was not rejected by {}", fails.join(", "));
                 if !outside.is_empty() {
@@ -575,6 +632,9 @@ pub fn after(
                 Judged::Rejected => (Status::Verified, None),
                 Judged::Survived(why) => (Status::Rejected, Some(why)),
                 Judged::Unbuildable => (Status::Rejected, Some("it does not build".into())),
+                Judged::Untranslated(why) => {
+                    (Status::Rejected, Some(format!("untranslated, {why}")))
+                }
                 Judged::Failed(status, why) => (status, Some(why)),
             };
             gate.conclude(&unit, conclusion);
@@ -710,8 +770,8 @@ pub enum Category {
 }
 
 /// The list of survivors of a target, `<mutants>/<target>.json`, with the
-/// commit and the operators of its runs, the runs, their counts added up and
-/// their survivors.
+/// commit and the operators of its runs, the runs, their counts added up,
+/// their survivors and their untranslated mutants.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct List {
@@ -725,6 +785,7 @@ pub struct List {
     pub unbuildable: usize,
     pub not_unique: usize,
     pub survivors: Vec<Survivor>,
+    pub untranslated: Vec<Untranslated>,
 }
 
 /// A run of `formal mutants` in a list of survivors: its run directory, the
@@ -1016,7 +1077,9 @@ pub fn generate(
 /// export and runs each in a stage of its own, which starts from the build
 /// of the target, `seed`, with the theorems of all its obligations to
 /// fail, as commands of its unit; concludes the unit, and
-/// writes the draft of its list of survivors when every mutant was decided.
+/// writes the draft of its list of survivors when every mutant was decided:
+/// killed, survived, not built, or untranslated while the run has no more
+/// untranslated mutants than it [`allowed`]. The receipt records those.
 /// A theorem of the obligations outside the top-level theorems of the
 /// proofs rejects the unit before any mutant runs. The points without a
 /// text that occurs once count in the first part alone.
@@ -1051,7 +1114,7 @@ fn generated(
         ..List::default()
     };
     let (mut failed, work) = (Vec::new(), gate.work().join("mutants").join(&target.name));
-    let (gate, judged) = (&*gate, Mutex::new(BTreeMap::new()));
+    let (shared, judged) = (&*gate, Mutex::new(BTreeMap::new()));
     workers(
         &points,
         |(index, point)| {
@@ -1068,12 +1131,14 @@ fn generated(
             };
             let work = work.join(index.to_string());
             run::in_work(&work, || {
-                prepare(gate, target, &unit, &mutation, &work, true)
+                prepare(shared, target, &unit, &mutation, &work, true)
             })
         },
         |(index, _), ready| {
             let work = work.join(index.to_string());
-            let told = run::in_work(&work, || judge(gate, target, &unit, &fails, ranges, ready?))?;
+            let told = run::in_work(&work, || {
+                judge(shared, target, &unit, &fails, ranges, ready?)
+            })?;
             let _ = fs::remove_dir_all(work);
             let mut judged = judged.lock().unwrap_or_else(PoisonError::into_inner);
             judged.insert(*index, told);
@@ -1090,19 +1155,30 @@ fn generated(
             Judged::Rejected => list.killed += 1,
             Judged::Survived(_) => list.survivors.push(point),
             Judged::Unbuildable => list.unbuildable += 1,
+            Judged::Untranslated(reason) => list.untranslated.push(Untranslated {
+                point: point.point,
+                operator: point.operator,
+                find: point.find,
+                replace: point.replace,
+                receipt_sha256: None,
+                reason,
+            }),
             Judged::Failed(_, why) => failed.push(format!("{}: {why}", point.point)),
         }
     }
+    let (count, allows) = (list.untranslated.len(), allowed(generated));
+    let each = (list.untranslated.iter()).map(|u| format!("{}: {}", u.point, u.reason));
+    let each = Vec::from_iter(each).join("; ");
+    let over = format!("{count} untranslated mutants, more than the {allows} that {generated}");
+    let mut why =
+        Vec::from_iter((count > allows).then(|| over + " generated mutants allow: " + &each));
     let count = failed.len();
-    let why = (count > 0).then(|| format!("{count} mutants tell nothing: {}", failed.join("; ")));
-    if gate.conclude(
-        &unit,
-        (
-            [Status::Verified, Status::Rejected][usize::from(count > 0)],
-            why,
-        ),
-    ) == Status::Verified
-    {
+    why.extend((count > 0).then(|| format!("{count} mutants tell nothing: {}", failed.join("; "))));
+    let record = (gate.receipt.source_mutants).get_or_insert_with(Record::default);
+    record.untranslated.clone_from(&list.untranslated);
+    let status = [Status::Verified, Status::Rejected][usize::from(!why.is_empty())];
+    let why = Some(why.join("; ")).filter(|why| !why.is_empty());
+    if gate.conclude(&unit, (status, why)) == Status::Verified {
         let path = gate.work().join(DRAFT);
         fs::write(&path, serde_json::to_string_pretty(&list).expect("a list"))
             .map_err(at(&path))?;
@@ -1144,6 +1220,8 @@ pub fn write_list(
     };
     list.commit = receipt.commit.clone().unwrap_or_default();
     (list.survivors.iter_mut()).for_each(|s| s.receipt_sha256.clone_from(&item.receipt_sha256));
+    let sha256 = Some(item.receipt_sha256.clone());
+    (list.untranslated.iter_mut()).for_each(|u| u.receipt_sha256.clone_from(&sha256));
     list.runs = vec![item];
     let path = root.join(list_path(layout, target));
     let text = serde_json::to_string_pretty(&list).expect("a list") + "\n";
@@ -1155,8 +1233,9 @@ pub fn write_list(
     }
     let (generated, killed, survived) = (list.generated, list.killed, list.survivors.len());
     let (unbuildable, not_unique, path) = (list.unbuildable, list.not_unique, path.display());
+    let untranslated = list.untranslated.len();
     println!(
-        "formal mutants: {generated} generated, {killed} killed, {survived} survived, {unbuildable} do not build, {not_unique} points without a text that occurs once; {path}"
+        "formal mutants: {generated} generated, {killed} killed, {survived} survived, {unbuildable} do not build, {untranslated} untranslated, {not_unique} points without a text that occurs once; {path}"
     );
     code
 }
@@ -1165,10 +1244,14 @@ pub fn write_list(
 /// registry has `targets`: a list that does not parse, of another schema,
 /// of a target that the registry does not have or not at its path, the
 /// problems of its runs, two runs of the same receipt, operators or a number
-/// of mutants that are not those of its runs, a survivor of no run of the
-/// list, without a class or a reason, and one in a function of `unclosed` of
-/// another class than `no-theorem`; and the inventory keys of the functions
-/// of the survivors that no theorem covers.
+/// of mutants that are not those of its runs, a number of mutants that is
+/// not the sum of those killed, survived, not built and untranslated, an
+/// untranslated mutant without a reason that starts with `extraction` or
+/// `generated build`, of no run of the list or of an operator that its run
+/// did not take, a run with more untranslated mutants than it allows, a
+/// survivor of no run of the list, without a class or a reason, and one in a
+/// function of `unclosed` of another class than `no-theorem`; and the
+/// inventory keys of the functions of the survivors that no theorem covers.
 pub fn list_problems(
     tree: &Tree,
     layout: &Layout,
@@ -1212,6 +1295,45 @@ pub fn list_problems(
         if list.generated != sum {
             let generated = list.generated;
             problems.push(format!("{path}: {generated} generated, its runs {sum}"));
+        }
+        let (survived, untranslated) = (list.survivors.len(), list.untranslated.len());
+        let decided = list.killed + survived + list.unbuildable + untranslated;
+        if list.generated != decided {
+            let generated = list.generated;
+            problems.push(format!(
+                "{path}: {generated} generated, {decided} killed, survived, not built or untranslated"
+            ));
+        }
+        for mutant in &list.untranslated {
+            let (point, reason) = (&mutant.point, &mutant.reason);
+            let of = |run: &&Run| mutant.receipt_sha256.as_ref() == Some(&run.receipt_sha256);
+            if !["extraction", "generated build"]
+                .iter()
+                .any(|r| reason.starts_with(r))
+            {
+                problems.push(format!(
+                    "{path}: the untranslated mutant at {point} has no reason that starts with extraction or generated build"
+                ));
+            }
+            match list.runs.iter().find(of) {
+                None => problems.push(format!(
+                    "{path}: the untranslated mutant at {point} is of no run of the list"
+                )),
+                Some(run) if !run.operators.contains(&mutant.operator) => problems.push(format!(
+                    "{path}: the untranslated mutant at {point} is of an operator that its run did not take"
+                )),
+                Some(_) => {}
+            }
+        }
+        for run in &list.runs {
+            let of = |m: &&Untranslated| m.receipt_sha256.as_ref() == Some(&run.receipt_sha256);
+            let count = list.untranslated.iter().filter(of).count();
+            let (allows, generated, name) = (allowed(run.generated), run.generated, &run.run);
+            if count > allows {
+                problems.push(format!(
+                    "{path}: the run {name} has {count} untranslated mutants, more than the {allows} that {generated} generated mutants allow"
+                ));
+            }
         }
         for survivor in &list.survivors {
             let point = &survivor.point;
@@ -1316,6 +1438,24 @@ mod tests {
     const MUTANT: &str = include_str!("fixtures/mutants/calibration-mutant.txt");
     const RANGES: &str = include_str!("fixtures/mutants/ranges.txt");
     const CALIBRATION_RANGES: &str = include_str!("fixtures/mutants/calibration-ranges.txt");
+    const GENERATED: &str = include_str!("fixtures/mutants/generated-build.txt");
+
+    /// The reason of a mutant of the target `t` whose build printed
+    /// [`generated_log`].
+    const UNTRANSLATED: &str = "generated build: KrepiGen/T/Funs.lean:1619:5: failed to synthesize";
+
+    /// The log of [`GENERATED`], of a build that failed in `KrepiGen.Fdt.Funs`
+    /// alone, in `KrepiGen.T.Funs`, the generated module of the target `t`.
+    fn generated_log() -> String {
+        let log = captured(GENERATED).replace("KrepiGen/Fdt", "KrepiGen/T");
+        log.replace("KrepiGen.Fdt", "KrepiGen.T")
+    }
+
+    /// [`super::verdict`] of a target whose generated modules are those of
+    /// the calibration.
+    fn verdict(build: &Ran, modules: &[String], ranges: &Ranges, fails: &[String]) -> Verdict {
+        super::verdict(build, modules, ranges, fails, "KrepiGen.Calibration")
+    }
 
     /// A captured text without its first line, which names the command.
     fn captured(text: &str) -> &str {
@@ -1450,6 +1590,117 @@ mod tests {
     }
 
     #[test]
+    fn a_build_that_failed_in_the_generated_modules_alone_is_untranslated() {
+        // The log as CI kept it, which has no job of a proof module: Lake
+        // builds none that imports a module that failed.
+        let (_, ranges) = tables();
+        let (modules, fails) = (names(&["Krepi.Proofs.Fdt"]), names(&["Krepi.Proofs.Fdt.a"]));
+        let build = lake(Ended::Exited(1), captured(GENERATED));
+        let judged = |generated| super::verdict(&build, &modules, &ranges, &fails, generated);
+        let reason = "generated build: KrepiGen/Fdt/Funs.lean:1619:5: failed to synthesize";
+        assert_eq!(judged("KrepiGen.Fdt"), Verdict::Untranslated(reason.into()));
+        // The generated modules of another target are not those of this one.
+        assert!(matches!(judged("KrepiGen.Fd"), Verdict::Inconclusive(_)));
+    }
+
+    /// [`generated_log`] with `line` before its failure summary.
+    fn generated_log_with(line: &str) -> String {
+        let summary = "Some required targets";
+        generated_log().replace(summary, &format!("{line}\n{summary}"))
+    }
+
+    /// [`super::verdict`] of a mutant of the target `t` whose build ended as
+    /// `ended` and printed [`generated_log_with`] `line`.
+    fn generated_with(ended: Ended, line: &str) -> Verdict {
+        let (_, ranges) = tables();
+        let (modules, fails) = (
+            names(&["Krepi.Proofs.T"]),
+            names(&["Krepi.Proofs.T.f_spec"]),
+        );
+        let log = generated_log_with(line);
+        super::verdict(&lake(ended, &log), &modules, &ranges, &fails, "KrepiGen.T")
+    }
+
+    #[test]
+    fn a_generated_build_with_an_exit_code_or_process_output_stays_inconclusive() {
+        for line in ["error: Lean exited with code 3", "info: stdout:"] {
+            let found = generated_with(Ended::Exited(1), line);
+            assert!(matches!(found, Verdict::Inconclusive(_)), "{found:?}");
+        }
+        // In a run, the unit of the source mutants is rejected and no list
+        // is written.
+        let fixture = literal_fixture(
+            "generated-exited",
+            &first("cat \"$lake/exited.log\"; exit 1"),
+        );
+        let log = generated_log_with("error: Lean exited with code 3");
+        fixture.write("artifacts/lake/exited.log", &log);
+        let done = literal_run(&fixture);
+        let (status, reason) = fixture::status(&done, "mutants/t");
+        let inconclusive = "inconclusive, the build did not fail in the proofs alone: ";
+        assert_eq!(status, Status::Rejected);
+        assert!(
+            reason.is_some_and(|r| r.contains(inconclusive)),
+            "{reason:?}"
+        );
+        assert!(written(&fixture, &done).is_none());
+    }
+
+    #[test]
+    fn a_killed_generated_build_stays_a_tool_failure() {
+        let killed = [
+            (Ended::Signaled(9), ""),
+            (Ended::Exited(1), "error: Lean exited with code 137"),
+        ];
+        for (ended, line) in killed {
+            let found = generated_with(ended, line);
+            assert!(matches!(found, Verdict::Killed(_)), "{found:?}");
+        }
+        let fixture = literal_fixture(
+            "generated-killed",
+            &first("cat \"$lake/killed.log\"; exit 1"),
+        );
+        let log = generated_log_with("error: Lean exited with code 137");
+        fixture.write("artifacts/lake/killed.log", &log);
+        let done = literal_run(&fixture);
+        assert_eq!(fixture::status(&done, "mutants/t").0, Status::ToolFailure);
+        assert_eq!(
+            done.receipt.source_mutants.expect("a record").untranslated,
+            []
+        );
+    }
+
+    #[test]
+    fn each_rule_of_a_build_that_failed_in_the_generated_modules_is_kept() {
+        let g = |status, log: &str| lean::generated_errors(status, log, "KrepiGen.T");
+        let (log, item) = (generated_log(), "- KrepiGen.T.Funs\n");
+        assert_eq!(g(1, &log).as_deref(), Some(UNTRANSLATED));
+        let job = |mark, module| format!("{mark} [1837/1861] Building {module} (1s)");
+        let warned = generated_log_with(&job('⚠', "KrepiGen.T.Types"));
+        let listed = warned.replace(item, &format!("{item}- KrepiGen.T.Types\n"));
+        let summary = format!("Some required targets logged failures:\n{item}");
+        // Lake's status, a message outside the generated files, a job of
+        // another module, a failed job without an error, no summary, and a
+        // summary that names a module that only warned.
+        let broken = [
+            (2, log.clone()),
+            (1, generated_log_with("warning: Krepi/Spec/T.lean:1:1: w")),
+            (1, generated_log_with(&job('⚠', "Krepi.Spec.T"))),
+            (1, generated_log_with(&job('✖', "KrepiGen.T.Types"))),
+            (1, log.replace(&summary, "")),
+            (1, listed),
+        ];
+        for (rule, (status, log)) in [1, 4, 5, 6, 8, 9].into_iter().zip(broken) {
+            assert_eq!(g(status, &log), None, "U{rule}");
+        }
+        let errors = "error: KrepiGen/T/Funs.lean:1:1: a\nerror: KrepiGen/T/Funs.lean:2:1: b";
+        let shown =
+            format!("{UNTRANSLATED}; KrepiGen/T/Funs.lean:1:1: a; KrepiGen/T/Funs.lean:2:1: b; …");
+        let more = generated_log_with(&format!("{errors}\nerror: KrepiGen/T/Funs.lean:3:1: c"));
+        assert_eq!(g(1, &more), Some(shown));
+    }
+
+    #[test]
     fn a_mutant_names_theorems_of_the_proofs() {
         let (fixture, _) = tables();
         let of = |name: &str| format!("Krepi.Proofs.Fixture.{name}");
@@ -1561,7 +1812,7 @@ mod tests {
         assert_eq!(status, Status::Rejected);
         assert_eq!(
             reason,
-            Some("inconclusive, its extraction failed: error: no crate")
+            Some("untranslated, extraction: not complete: error: no crate")
         );
         assert_eq!(done.receipt.status, Status::Rejected);
         // The proofs build in the stage of the mutant: it survives.
@@ -1848,6 +2099,307 @@ mod tests {
         }
     }
 
+    /// The script of the builds of the mutants of [`with_targets`], which
+    /// the proofs reject.
+    fn rejecting() -> String {
+        let failed = "error: Krepi/Proofs/T.lean:3:0: unsolved goals";
+        let failing = fixture::failing("Krepi.Proofs.T", &[failed], 1);
+        format!("case $PWD in */mutants/*) {failing};; esac\n")
+    }
+
+    /// The script of the builds of the source mutants in which the first runs
+    /// `script` and the proofs reject the others.
+    fn first(script: &str) -> String {
+        format!(
+            "case $PWD in */mutants/t/0/*) {script} ;; esac\n{}",
+            rejecting()
+        )
+    }
+
+    /// The fixture `label` of [`with_targets`] whose target `t` proves `f`,
+    /// with two mutants of `literal`, `6` to `7` and then `7` to `8`, which
+    /// Cargo checks and Aeneas translates, with [`generated_log`] in the
+    /// directory of the Lake stand-in and `build` as the script of the builds.
+    fn literal_fixture(label: &str, build: &str) -> Fixture {
+        let fixture = with_targets(label, &two_targets(1_800, 1));
+        let mut registry: serde_json::Value = serde_json::from_str(&two_targets(1_800, 1)).unwrap();
+        registry[0]["proves"] = serde_json::json!(["kernel/src/lib.rs#f"]);
+        fixture.write(
+            "kernel/src/lib.rs",
+            "#![no_std]\npub fn f() -> u32 {\n    6 + 7\n}\n",
+        );
+        register(&fixture, &registry.to_string());
+        let shape = fixture.root().join("artifacts/shapes/t");
+        let from = shape.to_str().expect("UTF-8");
+        fixture.write("artifacts/shapes/KrepiGen.T.from", from);
+        let function = r#"{"rust_name": "krepi_kernel::f", "lean_name": "KrepiGen.T.f",
+            "lean_file": "KrepiGen/T/Funs.lean", "is_local": true, "is_opaque": false,
+            "source": {"file": "src/lib.rs"}}"#;
+        let translation = format!("{{\"functions\": [{function}], \"types\": []}}");
+        fixture.write("artifacts/shapes/t/translation.json", &translation);
+        for file in ["Types", "Funs"] {
+            fixture.write(&format!("artifacts/shapes/t/KrepiGen/T/{file}.lean"), "");
+        }
+        let cargo = "artifacts/formal/tools/cargo/bin/cargo";
+        let real = fs::read_to_string(fixture.root().join(cargo)).expect("the Cargo stand-in");
+        let checks = real.replacen("\n", "\n[ \"$1\" = check ] && exit 0\n", 1);
+        fixture.write(cargo, &checks);
+        fixture.chmod(cargo, 0o755);
+        fixture.write("artifacts/lake/generated.log", &generated_log());
+        fixture::lake_script(&fixture, "+Krepi", build);
+        fixture
+    }
+
+    /// The run of the source mutants of `literal` of the target `t` of
+    /// `fixture`.
+    fn literal_run(fixture: &Fixture) -> Done {
+        let operators = Some(vec!["literal".to_string()]);
+        gate(fixture, &["t"], generating_run(fixture, &["t"], operators))
+    }
+
+    /// The list of survivors that the run `done` of `fixture` writes, if any,
+    /// which it then removes, so that the gate inputs stay clean.
+    fn written(fixture: &Fixture, done: &Done) -> Option<List> {
+        let (root, draft) = (fixture.root(), done.draft.as_deref());
+        let (path, receipt) = (root.join("verification/mutants/t.json"), &done.receipt);
+        let code = write_list(
+            root,
+            &Layout::PRODUCTION,
+            "t",
+            draft,
+            &done.run,
+            receipt,
+            done.code,
+        );
+        let text = fs::read_to_string(&path);
+        assert_eq!(
+            (code == ExitCode::SUCCESS, fs::remove_file(path).is_ok()),
+            (text.is_ok(), text.is_ok())
+        );
+        text.ok()
+            .map(|text| serde_json::from_str(&text).expect("a list"))
+    }
+
+    /// Checks that the run of [`literal_fixture`] `fixture` is `SCOPED`, its
+    /// first mutant untranslated for `reason`, in its list and its receipt,
+    /// and its second killed.
+    fn first_untranslated(fixture: &Fixture, reason: &str) {
+        let done = literal_run(fixture);
+        assert_eq!(done.receipt.status, Status::Scoped, "{:?}", done.failures());
+        assert_eq!(
+            fixture::status(&done, "mutants/t"),
+            (Status::Verified, None)
+        );
+        let list = written(fixture, &done).expect("a list");
+        let counts = (
+            list.generated,
+            list.killed,
+            list.survivors.len(),
+            list.unbuildable,
+        );
+        assert_eq!(counts, (2, 1, 0, 0));
+        let receipt = Some(sha256(&fs::read(done.run.receipt()).expect("the receipt")));
+        let (point, operator) = ("kernel/src/lib.rs:3:5".to_string(), "literal".to_string());
+        let (find, replace, reason) = ("6".to_string(), "7".to_string(), reason.to_string());
+        let mutant = Untranslated {
+            point,
+            operator,
+            find,
+            replace,
+            receipt_sha256: None,
+            reason,
+        };
+        let record = done.receipt.source_mutants.expect("a record");
+        assert_eq!(record.untranslated, std::slice::from_ref(&mutant));
+        assert_eq!(
+            list.untranslated,
+            [Untranslated {
+                receipt_sha256: receipt,
+                ..mutant
+            }]
+        );
+    }
+
+    #[test]
+    fn a_source_mutant_whose_extraction_is_not_complete_is_untranslated() {
+        // Charon fails in the package of the first mutant.
+        let fixture = literal_fixture("untranslated-extraction", &rejecting());
+        let charon = "case $PWD in */mutants/t/0/*) echo 'error: no crate' >&2; exit 1 ;; esac\n";
+        fixture.tool("charon", &format!("{charon}{}", fixture::CHARON));
+        first_untranslated(&fixture, "extraction: not complete: error: no crate");
+        // An extraction whose command was killed tells nothing.
+        let killed = charon.replace("echo 'error: no crate' >&2; exit 1", "kill -9 $$");
+        fixture.tool("charon", &format!("{killed}{}", fixture::CHARON));
+        let done = literal_run(&fixture);
+        assert_eq!(fixture::status(&done, "mutants/t").0, Status::ToolFailure);
+        assert_eq!(
+            done.receipt.source_mutants.expect("a record").untranslated,
+            []
+        );
+    }
+
+    #[test]
+    fn a_tool_failure_of_another_mutant_does_not_force_this_one() {
+        // The Charon of the first mutant fails once that of the second was
+        // killed and its work directory removed.
+        let fixture = literal_fixture("untranslated-other", &rejecting());
+        let charon = format!(
+            "w() {{ i=0; while eval \"$1\" && [ $i -lt 6000 ]; do sleep 0.01; i=$((i+1)); done; }}\n\
+            case $PWD in */mutants/t/0/*) w '[ ! -e ../../../1.on ]'; w '[ -d ../../../1 ]'; exit 1 ;; \
+            */mutants/t/1/*) : > ../../../1.on; kill -9 $$ ;; esac\n{}",
+            fixture::CHARON
+        );
+        fixture.tool("charon", &charon);
+        let done = literal_run(&fixture);
+        assert_eq!(fixture::status(&done, "mutants/t").0, Status::ToolFailure);
+        let record = done.receipt.source_mutants.expect("a record");
+        let points = Vec::from_iter(record.untranslated.iter().map(|u| u.point.as_str()));
+        assert_eq!(points, ["kernel/src/lib.rs:3:5"]);
+    }
+
+    #[test]
+    fn an_extraction_that_meets_the_budget_is_no_untranslated_mutant() {
+        let fixture = literal_fixture("untranslated-budget", &rejecting());
+        let sleeping = "case $PWD in */mutants/*) exec sleep 5 ;; esac\n";
+        fixture.tool("charon", &(sleeping.to_string() + fixture::CHARON));
+        let operators = Some(vec!["literal".to_string()]);
+        let mut phases = generating_run(&fixture, &["t"], operators);
+        let (duration, by) = (Duration::from_millis(500), LimitBy::Target);
+        let limited = run::tests::phase("limited", run::tests::LONG, &[], move |run| {
+            run.overrides = Some((Site::Charon, Limit { duration, by }, "charon".to_string()));
+            Ok(())
+        });
+        phases.insert(2, limited);
+        let done = gate(&fixture, &["t"], phases);
+        assert_eq!(fixture::status(&done, "mutants/t").0, Status::Budget);
+        let record = done.receipt.source_mutants.expect("a record");
+        assert_eq!(record.untranslated, []);
+    }
+
+    #[test]
+    fn a_source_mutant_whose_generated_definitions_do_not_build_is_untranslated() {
+        let script = first("cat \"$lake/generated.log\"; exit 1");
+        first_untranslated(
+            &literal_fixture("untranslated-build", &script),
+            UNTRANSLATED,
+        );
+    }
+
+    #[test]
+    fn more_untranslated_mutants_than_a_run_allows_reject_its_unit() {
+        assert_eq!(Vec::from_iter([2, 39, 40, 103].map(allowed)), [1, 1, 2, 5]);
+        // Neither of the two mutants builds, of which 2 generated mutants
+        // allow 1.
+        let script = "case $PWD in */mutants/*) cat \"$lake/generated.log\"; exit 1 ;; esac\n";
+        let fixture = literal_fixture("untranslated-over", script);
+        let done = literal_run(&fixture);
+        let at = |column| format!("kernel/src/lib.rs:3:{column}: {UNTRANSLATED}");
+        let over = "2 untranslated mutants, more than the 1 that 2 generated mutants allow";
+        let reason = format!("{over}: {}; {}", at(5), at(9));
+        let unit = fixture::status(&done, "mutants/t");
+        assert_eq!(unit, (Status::Rejected, Some(reason.as_str())));
+        assert!(written(&fixture, &done).is_none());
+        assert_eq!(
+            done.receipt
+                .source_mutants
+                .expect("a record")
+                .untranslated
+                .len(),
+            2
+        );
+        // A list in which a run has more of them than it allows fails the
+        // check.
+        let problems = checked(|list| {
+            (list.generated, list.runs[0].generated) = (3, 3);
+            list.untranslated = vec![untranslated("generated build: x"); 2];
+        });
+        let over =
+            "the run r has 2 untranslated mutants, more than the 1 that 3 generated mutants allow";
+        assert_eq!(problems, [over]);
+    }
+
+    #[test]
+    fn the_cap_of_a_merged_list_is_counted_for_each_run() {
+        // 2 of the 20 mutants of r, which the 120 of the list would allow.
+        let problems = checked(|list| {
+            let mut s = run("s", &["literal"], None, "1");
+            (s.generated, list.runs[0].generated) = (100, 20);
+            list.runs.push(s);
+            list.operators.push("literal".into());
+            (list.generated, list.killed) = (120, 117);
+            list.untranslated = vec![untranslated("generated build: x"); 2];
+        });
+        let over =
+            "the run r has 2 untranslated mutants, more than the 1 that 20 generated mutants allow";
+        assert_eq!(problems, [over]);
+    }
+
+    /// The registered mutant of [`with_targets`] `label`, whose build runs
+    /// `build`, after a run of its target.
+    fn registered(label: &str, build: &str) -> Done {
+        let fixture = with_targets(label, &two_targets(1_800, 1));
+        fixture.write("artifacts/lake/generated.log", &generated_log());
+        fixture::lake_script(&fixture, "+Krepi", build);
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        assert_eq!(done.receipt.status, Status::Rejected);
+        done
+    }
+
+    #[test]
+    fn a_registered_mutant_whose_generated_definitions_do_not_build_is_rejected_untranslated() {
+        let build = "case $PWD in */mutants/*) cat \"$lake/generated.log\"; exit 1 ;; esac\n";
+        let done = registered("mutant-untranslated", build);
+        let reason = format!("untranslated, {UNTRANSLATED}");
+        let rejected = (Status::Rejected, Some(reason.as_str()));
+        assert_eq!(fixture::status(&done, "target/t/mutant/m0"), rejected);
+    }
+
+    #[test]
+    fn a_registered_mutant_whose_generated_files_cannot_be_installed_is_untranslated() {
+        // Aeneas writes a template that uses `sorry` for the mutant alone.
+        let fixture = with_targets("mutant-install", &two_targets(1_800, 1));
+        let bin = fixture.root().join("artifacts/formal/tools/bin");
+        fs::rename(bin.join("aeneas"), bin.join("aeneas-stand-in")).expect("rename");
+        let template = "case $PWD in */mutants/*) ;; *) exit 0 ;; esac\n\
+            while [ $# -gt 0 ]; do case \"$1\" in -subdir) s=$2 ;; -dest) d=$2 ;; esac; shift; done\n\
+            echo sorry > \"$d/$s/FunsExternal_Template.lean\"\n";
+        let stand_in = "\"$(dirname \"$0\")/aeneas-stand-in\" \"$@\" || exit\n";
+        fixture.tool("aeneas", &format!("{stand_in}{template}"));
+        let done = gate(&fixture, &[], target_run(&fixture, &[]));
+        let why = "generated files cannot be installed: t: FunsExternal.lean uses sorry";
+        let reason = format!("untranslated, extraction: {why}");
+        let rejected = (Status::Rejected, Some(reason.as_str()));
+        assert_eq!(fixture::status(&done, "target/t/mutant/m0"), rejected);
+    }
+
+    #[test]
+    fn a_failure_in_the_generated_modules_of_another_target_stays_inconclusive() {
+        let other = "sed -e 's/KrepiGen\\.T/KrepiGen.U/' -e 's#KrepiGen/T/#KrepiGen/U/#'";
+        let build =
+            format!("case $PWD in */mutants/*) {other} \"$lake/generated.log\"; exit 1 ;; esac\n");
+        let done = registered("mutant-another", &build);
+        let (status, reason) = fixture::status(&done, "target/t/mutant/m0");
+        let inconclusive = "inconclusive, the build did not fail in the proofs alone: ";
+        assert!(status == Status::Rejected && reason.is_some_and(|r| r.starts_with(inconclusive)));
+    }
+
+    #[test]
+    fn a_registered_mutant_with_an_error_in_another_module_stays_inconclusive() {
+        let error = "error: Krepi/Spec/T.lean:3:0: unknown identifier 'f'";
+        let failing = fixture::failing("Krepi.Spec.T", &[error], 1);
+        let done = registered(
+            "mutant-other",
+            &format!("case $PWD in */mutants/*) {failing};; esac\n"),
+        );
+        let (status, reason) = fixture::status(&done, "target/t/mutant/m0");
+        let inconclusive = "inconclusive, the build did not fail in the proofs alone: ";
+        assert_eq!(status, Status::Rejected);
+        assert!(
+            reason.is_some_and(|r| r.starts_with(inconclusive)),
+            "{reason:?}"
+        );
+    }
+
     /// The source of the tests of the generation, in the file `FILE`.
     const SOURCE: &str = r#"pub struct Table { used: u32 }
 
@@ -2034,11 +2586,80 @@ mod tests { fn t() { let _ = 1 + 1; } }
             schema: SCHEMA,
             target: target.into(),
             operators: vec!["arithmetic".into()],
-            runs: vec![run("r", &["arithmetic"], None, "1")],
+            runs: vec![Run {
+                generated: 1,
+                ..run("r", &["arithmetic"], None, "1")
+            }],
+            generated: 1,
             survivors: vec![survivor],
             ..List::default()
         };
         serde_json::to_string_pretty(&list).expect("JSON")
+    }
+
+    /// An untranslated mutant of the run `r` of [`list`], for `reason`.
+    fn untranslated(reason: &str) -> Untranslated {
+        Untranslated {
+            point: "kernel/src/lib.rs:5:15".into(),
+            operator: "arithmetic".into(),
+            find: "used + cost".into(),
+            replace: "used - cost".into(),
+            receipt_sha256: Some(receipt_of("r")),
+            reason: reason.into(),
+        }
+    }
+
+    #[test]
+    fn a_list_whose_counts_or_untranslated_mutants_do_not_hold_fails_the_check() {
+        let at = "the untranslated mutant at kernel/src/lib.rs:5:15";
+        let with = |mutant: Untranslated| {
+            checked(|list| {
+                (list.generated, list.runs[0].generated) = (2, 2);
+                list.untranslated.push(mutant);
+            })
+        };
+        assert_eq!(
+            with(untranslated("extraction: not complete: x")),
+            Vec::<String>::new()
+        );
+        let sum = checked(|list| list.killed = 1);
+        assert_eq!(
+            sum,
+            ["1 generated, 2 killed, survived, not built or untranslated"]
+        );
+        let reason = format!("{at} has no reason that starts with extraction or generated build");
+        for blank in [
+            " ",
+            "inconclusive, the build did not fail in the proofs alone: x",
+        ] {
+            assert_eq!(with(untranslated(blank)), [reason.as_str()]);
+        }
+        let mut other = untranslated("generated build: x");
+        other.receipt_sha256 = Some(receipt_of("s"));
+        assert_eq!(with(other), [format!("{at} is of no run of the list")]);
+        let mut other = untranslated("generated build: x");
+        other.operator = "literal".into();
+        let operator = format!("{at} is of an operator that its run did not take");
+        assert_eq!(with(other), [operator]);
+        // A list of schema 2, which has no untranslated mutants, is refused.
+        assert_eq!(
+            checked(|list| list.schema = 2),
+            ["schema 2 where 3 is expected"]
+        );
+        let text = list("t", Some(Category::Equivalent), Some("Same meaning."));
+        let mut value: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+        value
+            .as_object_mut()
+            .expect("an object")
+            .remove("untranslated");
+        let tree = Tree::from_files(&[("verification/mutants/t.json", &value.to_string())]);
+        let registry = r#"{"schema": 3, "specifications": [], "targets": [{"name": "t"}]}"#;
+        let targets = registry::parse(registry).expect("a registry").targets;
+        let problems = list_problems(&tree, &Layout::PRODUCTION, &targets).0;
+        assert!(
+            problems[0].contains("missing field `untranslated`"),
+            "{problems:?}"
+        );
     }
 
     #[test]
@@ -2112,7 +2733,10 @@ mod tests { fn t() { let _ = 1 + 1; } }
 
     /// The problems of the list of the target `t` with `runs`, their
     /// operators and a survivor of the run `survived`.
-    fn runs_checked(runs: Vec<Run>, survived: &str) -> Vec<String> {
+    fn runs_checked(mut runs: Vec<Run>, survived: &str) -> Vec<String> {
+        if let Some(run) = runs.first_mut() {
+            run.generated = 1;
+        }
         let operators = BTreeSet::from_iter(runs.iter().flat_map(|run| run.operators.clone()));
         checked(|list| {
             list.survivors[0].receipt_sha256 = receipt_of(survived);
@@ -2179,6 +2803,7 @@ mod tests { fn t() { let _ = 1 + 1; } }
             runs_checked(Vec::new(), "a"),
             [
                 "its runs are of 0 CI runs, not one",
+                "1 generated, its runs 0",
                 "the survivor at kernel/src/lib.rs:5:22 is of no run of the list"
             ]
         );
@@ -2251,12 +2876,12 @@ mod tests { fn t() { let _ = 1 + 1; } }
     #[test]
     fn a_list_whose_number_of_mutants_is_not_that_of_its_runs_fails_the_check() {
         let sum = checked(|list| {
-            list.generated = 3;
+            (list.generated, list.killed) = (3, 2);
             list.runs[0].generated = 2;
         });
         assert_eq!(sum, ["3 generated, its runs 2"]);
         let more = checked(|list| {
-            list.generated = 3;
+            (list.generated, list.killed) = (3, 2);
             list.runs[0].generated = 1;
             list.runs.push(run("s", &["literal"], None, "1"));
             list.runs[1].generated = 2;

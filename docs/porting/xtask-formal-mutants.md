@@ -87,6 +87,18 @@ The other tests of the module are new.
 - Two workers build the mutants side by side, and one that stops at an
   error stops the other before its next mutant. Test:
   `tests::a_worker_that_stops_at_an_error_stops_the_others_before_their_next_item`.
+- A mutant whose extraction is not complete, unless a command of it failed
+  as a tool or met the budget, whose generated files cannot be installed,
+  or whose build failed in the generated modules of its target alone is
+  untranslated, not inconclusive: a registered one is rejected with the
+  reason `untranslated, …`; a source mutant is counted and listed in the
+  list of survivors, of schema 3, and in the receipt, while a run has at
+  most one in twenty of them. Tests:
+  `tests::a_mutant_whose_extraction_fails_or_that_survives_fails_the_run`,
+  `tests::a_source_mutant_whose_extraction_is_not_complete_is_untranslated`,
+  `tests::a_registered_mutant_whose_generated_files_cannot_be_installed_is_untranslated`,
+  `tests::a_source_mutant_whose_generated_definitions_do_not_build_is_untranslated`
+  and `tests::more_untranslated_mutants_than_a_run_allows_reject_its_unit`.
 
 ## Hardware evidence to re-obtain
 

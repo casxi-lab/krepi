@@ -1093,6 +1093,8 @@ captured with absolute paths replaced; those stored below
 name the command that printed them, and the default answers of the fake
 tools follow the same forms; the fixtures of a rule of the logs or of the
 declaration ranges are those outputs with the edits that the test names.
+The log of a build in CI, `fixtures/mutants/generated-build.txt`, is kept
+byte for byte instead, with the absolute paths of the runner and the image.
 The repositories lie in the system's temporary directory, outside the
 checkout, whose Cargo configuration the gate would otherwise find above
 their exports. The tests therefore assume that no Cargo configuration lies

@@ -873,6 +873,61 @@ pub fn confined_errors<'a>(
     }
 }
 
+/// Reads the log of a failed `lake build` as [`confined_errors`] does, for
+/// the generated modules of a target, those whose names start with `prefix`
+/// and a dot and whose files lie below its path: when the build failed in
+/// them alone, returns the reason of an untranslated mutant, `generated
+/// build: ` and the errors in their files, at most three. That holds when
+/// Lake exited with 1, no line says how Lean exited, no process wrote
+/// output, every message with a position is in their files and one is an
+/// error, only they warned or failed and one failed, each failed one has an
+/// error in its file after its job line, no other `error:` or `warning:`
+/// line appears but the last `error: build failed`, and the failure summary
+/// lists failed ones of them alone, each with an error in its file.
+pub fn generated_errors(status: i32, output: &str, prefix: &str) -> Option<String> {
+    let dir = format!("{}/", prefix.replace('.', "/"));
+    let ours = |module: &str| {
+        module
+            .strip_prefix(prefix)
+            .is_some_and(|r| r.starts_with('.'))
+    };
+    let (mut held, mut errors, mut summary, mut listing) = (status == 1, vec![], vec![], false);
+    let (mut jobs, mut current): (Vec<(char, &str, bool)>, _) = (Vec::new(), None);
+    for line in output.lines() {
+        if listing && let Some(name) = line.strip_prefix("- ") {
+            summary.push(name.trim());
+            continue;
+        }
+        listing = false;
+        let stream = (line.trim_end().strip_prefix("info: ")).and_then(|r| r.strip_suffix(':'));
+        if line == FAILURE_SUMMARY {
+            (listing, current) = (true, None);
+        } else if let Some((mark, module)) = job_line(line) {
+            held &= ours(module) || !matches!(mark, '⚠' | '✖');
+            jobs.push((mark, module, false));
+            current = Some(jobs.len() - 1);
+        } else if let Some((error, file, number, column)) = diagnostic(line) {
+            held &= file.starts_with(&dir);
+            let message = line.splitn(3, ": ").nth(2).unwrap_or_default();
+            errors.extend(error.then(|| format!("{file}:{number}:{column}: {message}")));
+            if let Some(job) = current.and_then(|at| jobs.get_mut(at)) {
+                job.2 |= error && module_file(job.1) == file;
+            }
+        } else {
+            let other = line.starts_with("warning:")
+                || (line.starts_with("error:") && line.trim_end() != "error: build failed");
+            held &= !other && !matches!(stream, Some("stdout" | "stderr" | "stdout/stderr"));
+        }
+    }
+    let failed = |name: &str| jobs.iter().any(|j| j.1 == name && j.0 == '✖' && j.2);
+    held &= !errors.is_empty() && jobs.iter().any(|j| j.0 == '✖');
+    held &= jobs.iter().all(|j| j.0 != '✖' || j.2) && !summary.is_empty();
+    held &= summary.iter().all(|name| ours(name) && failed(name));
+    let mut shown = Vec::from_iter(errors.iter().take(3).map(String::as_str));
+    shown.extend((errors.len() > 3).then_some("…"));
+    held.then(|| format!("generated build: {}", shown.join("; ")))
+}
+
 /// The file of a stage's project that prints its declaration ranges.
 pub const RANGES_FILE: &str = "Ranges.lean";
 

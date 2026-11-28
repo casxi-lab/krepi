@@ -1020,7 +1020,7 @@ jobs:
               ' "$receipt"
             done
             if [ -f "$list" ]; then
-              jq -r '"- List: \(.generated) generated, \(.killed) killed, \(.survivors | length) survived, \(.unbuildable) do not build, \(.not_unique) without a text that occurs once"' "$list"
+              jq -r '"- List: \(.generated) generated, \(.killed) killed, \(.survivors | length) survived, \(.unbuildable) do not build, \(.untranslated | length) untranslated, \(.not_unique) without a text that occurs once"' "$list"
             else
               echo "- No list of survivors from this run"
             fi

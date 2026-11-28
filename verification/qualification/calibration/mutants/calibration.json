@@ -1,5 +1,5 @@
 {
-  "schema": 2,
+  "schema": 3,
   "target": "calibration",
   "commit": "686c5e5a6c8716e675970f9fae029d2025749998",
   "operators": [
@@ -49,5 +49,6 @@
       "class": "missing-lemma",
       "reason": "The theorem about Table::new states the capacity and that no slot is in use, but not that every generation starts at 0; a table made with generation 1 would count every slot as retired and refuse a handle of generation 0, so the mutant changes the meaning."
     }
-  ]
+  ],
+  "untranslated": []
 }
