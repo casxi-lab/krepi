@@ -755,22 +755,6 @@
       "contract": "docs/domains/runtime-sdk/dispatch/contract.md"
     },
     {
-      "item": "kernel/src/fdt",
-      "kind": "code",
-      "verified_state": null,
-      "carrier": "The refinement proof of the target fdt",
-      "stage": "0.1",
-      "contract": "docs/domains/boot-platform/fdt/contract.md"
-    },
-    {
-      "item": "kernel/src/fdt.rs",
-      "kind": "code",
-      "verified_state": null,
-      "carrier": "The refinement proof of the target fdt",
-      "stage": "0.1",
-      "contract": "docs/domains/boot-platform/fdt/contract.md"
-    },
-    {
       "item": "kernel/src/lifecycle.rs#acknowledge",
       "kind": "code",
       "verified_state": "reads and writes",
@@ -827,19 +811,27 @@
       "contract": "docs/domains/objects-capabilities/lifecycle/contract.md"
     },
     {
-      "item": "kernel/src/page_tables",
+      "item": "kernel/src/page_tables/ownership/receipts.rs#Initialized::allocation",
       "kind": "code",
       "verified_state": null,
-      "carrier": "The refinement proof of the target page-tables",
-      "stage": "0.1",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
       "contract": "docs/domains/memory/page-tables/contract.md"
     },
     {
-      "item": "kernel/src/page_tables.rs",
+      "item": "kernel/src/page_tables/ownership/receipts.rs#Initialized::failures",
       "kind": "code",
       "verified_state": null,
-      "carrier": "The refinement proof of the target page-tables",
-      "stage": "0.1",
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
+      "contract": "docs/domains/memory/page-tables/contract.md"
+    },
+    {
+      "item": "kernel/src/page_tables/ownership/receipts.rs#Reservation::allocation",
+      "kind": "code",
+      "verified_state": null,
+      "carrier": "The proof of contexts, user copies and the private VM",
+      "stage": "0.2",
       "contract": "docs/domains/memory/page-tables/contract.md"
     },
     {
