@@ -114,7 +114,7 @@ pub(in crate::page_tables) fn check_layout<const N: usize>(
     base: u64,
     bits: u8,
 ) -> Result<MapCheck, TableError> {
-    let mut check = MapCheck::new(set.used);
+    let mut check = MapCheck::new();
     let mut index = 0;
     while index < count {
         check_range(set, &mut check, ranges[index], guards, base, bits)?;
@@ -176,3 +176,6 @@ impl<const N: usize> KernelMapPlan<'_, N> {
         }
     }
 }
+
+#[cfg(test)]
+pub(in crate::page_tables) mod tests;

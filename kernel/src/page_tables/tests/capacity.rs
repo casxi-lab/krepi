@@ -1,11 +1,15 @@
 //! The capacities of the contract: the 80 tables of the pool of the direct
-//! map, and the 160 extents and 132 exclusion records of the page ownership
-//! table.
+//! map, the free tables of a pool whose record of tables in use is all its
+//! tables but one, all of them or above them, and the 160 extents and 132
+//! exclusion records of the page ownership table.
 //!
 //! Feature: krepi.kernel.kernel-memory
 
 use super::*;
 use OwnershipError::*;
+use Step::{Fence, Store, Sync, Zero};
+use TableError::OutOfTables;
+use std::vec;
 
 /// The boot memory map of one bank of 1 GiB from 0, whose boot storage is
 /// the page at `0x3000`, with `count` firmware reservations of one page,
@@ -39,6 +43,93 @@ fn direct_map_one_table_over_the_pool_fails() {
     assert_eq!(map, Err(TableError::OutOfTables));
     assert_eq!(t.used(), 1);
     assert!(t.pool.iter().all(|table| table.iter().all(|&d| d == 0)));
+}
+
+/// The page descriptor of `ReadWrite` at `pa`.
+const fn page(pa: u64) -> u64 {
+    0x60_0000_0000_0707 | pa
+}
+
+/// The table descriptor of table `t` of the pool at `BASE`.
+const fn table_entry(t: u64) -> u64 {
+    (BASE + 0x1000 * t) | 3
+}
+
+/// The boot memory map of RAM `[start, start + 0x2000)` whose boot storage
+/// is the page at `held`: its usable page is the other one.
+fn one_page(start: u64, held: u64) -> MemoryPlan {
+    MemoryPlan::all_ram(&[span(start, 0x2000)], &[span(held, 0x1000)], &[]).unwrap()
+}
+
+/// A record of `usize::MAX` on a pool of one table leaves no table free: a
+/// map of one page at 0, which needs a level 2 and a level 3 table, fails
+/// with `OutOfTables` and changes nothing.
+#[test]
+fn a_record_above_the_pool_leaves_no_free_table() {
+    let mut lower = set::<1, false>();
+    lower.used = usize::MAX;
+    let one = layout(&[(0, PAGE_SIZE, LayoutKind::ReadWrite)], &[]);
+    assert_eq!(kernel(&mut lower, one, 0, BITS), Err(OutOfTables));
+    assert_eq!(lower.used, usize::MAX);
+    let mut upper = set::<1, true>();
+    upper.used = usize::MAX;
+    let map = direct(&mut upper, &one_page(0, PAGE_SIZE), 0, BITS);
+    assert_eq!(map, Err(OutOfTables));
+    assert_eq!(upper.used, usize::MAX);
+    assert!(lower.pool[0].iter().chain(&upper.pool[0]).all(|&d| d == 0));
+}
+
+/// On a pool of 3 tables with a block at 0, which uses 2: a page that needs
+/// a level 2 and a level 3 table is refused; a page at `0x20_0000` takes the
+/// third table, under the level 2 table of the block; then a page beside it
+/// needs no table and is mapped, and one at `0x40_0000`, which needs one, is
+/// refused. A refusal changes nothing. With a record of `usize::MAX` no
+/// table is free, but a page into the level 3 table, which needs none, is
+/// still mapped, and the record stays.
+#[test]
+fn the_last_free_table_is_taken_and_one_more_is_refused() {
+    let new = vec![
+        Zero(2),
+        Store(2, 0, page(0x20_0000)),
+        Fence,
+        Store(1, 1, table_entry(2)),
+        Sync,
+    ];
+    let beside = vec![Store(2, 1, page(0x20_1000)), Sync];
+    let mut t = set::<3, false>();
+    block(&mut t, 0, 0, BASE, BITS).unwrap();
+    let rw = LayoutKind::ReadWrite;
+    for (start, steps, used) in [
+        (0x4000_0000, Err(OutOfTables), 2),
+        (0x20_0000, Ok(new.clone()), 3),
+        (0x20_1000, Ok(beside.clone()), 3),
+        (0x40_0000, Err(OutOfTables), 3),
+    ] {
+        let map = kernel(&mut t, layout(&[(start, PAGE_SIZE, rw)], &[]), BASE, BITS);
+        assert_eq!((map, t.used()), (steps, used), "{start:#x}");
+    }
+    t.used = usize::MAX;
+    let page_in_level_3 = layout(&[(0x20_2000, PAGE_SIZE, rw)], &[]);
+    let map = kernel(&mut t, page_in_level_3, BASE, BITS);
+    assert_eq!(map, Ok(vec![Store(2, 2, page(0x20_2000)), Sync]));
+    assert_eq!(t.used, usize::MAX);
+    let mut t = set::<3, true>();
+    block(&mut t, DIRECT_BASE, 0, BASE, BITS).unwrap();
+    for (memory, steps, used) in [
+        (one_page(0x4000_0000, 0x4000_1000), Err(OutOfTables), 2),
+        (one_page(0x20_0000, 0x20_1000), Ok(new), 3),
+        (one_page(0x20_0000, 0x20_0000), Ok(beside), 3),
+        (one_page(0x40_0000, 0x40_1000), Err(OutOfTables), 3),
+    ] {
+        assert_eq!(
+            (direct(&mut t, &memory, BASE, BITS), t.used()),
+            (steps, used)
+        );
+    }
+    t.used = usize::MAX;
+    let map = direct(&mut t, &one_page(0x20_2000, 0x20_3000), BASE, BITS);
+    assert_eq!(map, Ok(vec![Store(2, 2, page(0x20_2000)), Sync]));
+    assert_eq!(t.used, usize::MAX);
 }
 
 #[test]
