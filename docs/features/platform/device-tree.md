@@ -29,11 +29,7 @@ tests:
   - kernel/src/fdt/tests/parser.rs
   - kernel/src/fdt/tests/profiles.rs
   - kernel/src/fdt/tests/results.rs
-  - kernel/src/fdt/tests/results/differential.rs
-  - kernel/src/fdt/tests/results/differential/lengths.rs
   - kernel/src/fdt/tests/translation.rs
-  - kernel/src/fdt/cpus/tests.rs
-  - kernel/src/fdt/cpus/tests/before.rs
   - kernel/src/fdt/hand_over/tests.rs
   - kernel/src/fdt/hand_over/tests/boundaries.rs
   - kernel/src/fdt/hand_over/tests/builder.rs
@@ -41,11 +37,7 @@ tests:
   - kernel/src/fdt/hand_over/tests/models.rs
   - kernel/src/fdt/hand_over/tests/platform.rs
   - kernel/src/fdt/hand_over/tests/selection.rs
-  - kernel/src/fdt/nodes/tests.rs
-  - kernel/src/fdt/nodes/tests/old.rs
   - kernel/src/fdt/plan/tests.rs
-  - kernel/src/fdt/plan/tests/before.rs
-  - kernel/src/fdt/plan/tests/old.rs
 suites:
   - qemu-boot
 theorems: none
@@ -127,9 +119,8 @@ planned.
   -p krepi-kernel` runs the tests of the module. With
   `KREPI_VECTOR_RESULTS` set to a directory, the results test writes the
   outputs of the frozen vectors to `boot-platform/fdt.results` below it
-  ([host results](../../formal-verification.md#host-results)). The three
-  ignored tests of the trees that the Raspberry Pi firmware ships, the two
-  firmware tests and the differential test of the shipped trees, read their
+  ([host results](../../formal-verification.md#host-results)). The two
+  ignored tests of the trees that the Raspberry Pi firmware ships read their
   files from the directories that `KREPI_PI5_SOURCE_DTB_DIR` and
   `KREPI_PI5_VALIDATED_DTB_DIR` name.
 
@@ -316,14 +307,10 @@ reservations, and, with the tree at the start of RAM and the image at
   reservations; the five RAM models of the Pi 5; the examples above; and
   the results test, which compares every output of the vector file with its
   expected output. They establish the rules on trees that the tests build,
-  not on the trees that a board hands over. The differential tests compare
-  the board-neutral entries with a verbatim copy of the code before them on
-  the board profiles, and `MemoryPlan::from_boot_memory` and
-  `Fdt::find_node` with a verbatim copy of their code before they stopped
-  adding a constant to the length of an argument; further tests check
-  profile values that no board gives against the contract. The three
-  ignored tests of the firmware trees need files outside the repository
-  and do not run in CI.
+  not on the trees that a board hands over. Further tests check profile
+  values that no board gives against the contract. The two ignored tests
+  of the firmware trees need files outside the repository and do not run
+  in CI.
 - **Compile-time guards.** The `subset` step of `cargo xtask check` builds
   the two compile-fail cases below `kernel/compile-fail/`: a tree built
   without the parse, which the private fields refuse, and a byte of the

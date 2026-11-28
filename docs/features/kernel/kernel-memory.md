@@ -23,23 +23,15 @@ tests:
   - kernel/src/page_tables/tests/banks.rs
   - kernel/src/page_tables/tests/boot.rs
   - kernel/src/page_tables/tests/capacity.rs
-  - kernel/src/page_tables/tests/differential.rs
   - kernel/src/page_tables/tests/examples.rs
   - kernel/src/page_tables/tests/kinds.rs
   - kernel/src/page_tables/tests/mapping.rs
   - kernel/src/page_tables/tests/models.rs
-  - kernel/src/page_tables/tests/old.rs
   - kernel/src/page_tables/tests/ownership.rs
   - kernel/src/page_tables/tests/paging.rs
   - kernel/src/page_tables/tests/plans.rs
   - kernel/src/page_tables/tests/reservations.rs
   - kernel/src/page_tables/tests/results.rs
-  - kernel/src/page_tables/boot/tests.rs
-  - kernel/src/page_tables/boot/tests/old.rs
-  - kernel/src/page_tables/boot/direct/tests.rs
-  - kernel/src/page_tables/boot/direct/tests/old.rs
-  - kernel/src/page_tables/boot/layout/tests.rs
-  - kernel/src/page_tables/boot/layout/tests/old.rs
   - kernel/arch/src/mmu/tests.rs
   - kernel/boards/qemu-virt/src/boot_memory/tests.rs
 suites:
@@ -472,11 +464,9 @@ unchanged. The page `0x8000` of the process, mapped into the target as
   that the free pages are exactly the pages of the direct map; the
   capacities at the limit and one above, and the free tables of a pool
   whose record of tables in use is all its tables but one, all of them or
-  above them; the examples above; the results test, which compares every
-  output of the vector file with its expected output; and the differential
-  tests, which compare `kernel_map` and `direct_map` with a verbatim copy of
-  their code before their checks counted the new tables from 0. They
-  establish the rules on tables in host memory, not a CPU walking them.
+  above them; the examples above; and the results test, which compares
+  every output of the vector file with its expected output. They establish
+  the rules on tables in host memory, not a CPU walking them.
 - **Compile-time guards.** The `subset` step of `cargo xtask check` builds
   the four compile-fail cases of the module below `kernel/compile-fail/`: a
   `PhysRange` written without `PhysRange::new`, which its private fields
