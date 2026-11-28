@@ -43,17 +43,18 @@ prove is a definition there, registered in
 [`verification/statements.json`](../../../../verification/statements.json)
 with its theorem below
 [`verification/Krepi/Proofs/Fdt/`](../../../../verification/Krepi/Proofs/Fdt/),
-whose proof is planned: it is `sorry` until a proof pull request proves it
+which proves it
 ([statements and proofs](../../../formal-verification.md#statements-and-proofs)).
 The specification tests, for each requirement one input that the
 specification must accept and one that it must reject, are stated the same
 way in `Stp` below
 [`verification/Krepi/SpecTests/Fdt/`](../../../../verification/Krepi/SpecTests/Fdt/),
-on trees that `Builder` there writes, with their planned theorems in
+on trees that `Builder` there writes, with their theorems in
 `Krepi.Proofs.Fdt.Stp`; `Replay` there replays the vectors. The witnesses
 that the specification is not vacuous are theorems of `Witnesses` below
 `Krepi/Spec/Fdt`, all proved there; the statements that its unreachable
-error branches are never taken are planned ([Witnesses](#witnesses)).
+error branches are never taken are proved below `Krepi.Proofs.Fdt`
+([Witnesses](#witnesses)).
 
 ## Widths and quantifiers
 
@@ -429,7 +430,7 @@ contract.
 
 | Invariant | Kind | States | Established by | Preserved by | Read by | Decidable |
 | --- | --- | --- | --- | --- | --- | --- |
-| `Fdt.WellFormed` | Structural: the nodes and the reservation entries of a tree | `totalsize` from 40 to `MAX_BLOB_SIZE`; at most `MAX_RESERVATIONS` reservation entries, each nonempty, within 64 bits and disjoint from the others; 1 to `MAX_TOKENS` nodes, the root first without a parent and with the empty name, every other node with a parent before it and a name that is not empty, the characters of the names, a depth of at most `MAX_DEPTH - 1`, at most `MAX_PROPERTIES` properties of distinct names of 1 to `MAX_PROPERTY_NAME` bytes and their characters (format and bounds, lines 151 to 187) | `Fdt::parse` | No entry changes a tree | The node access; `Node::translate_reg`, whose fuel of `MAX_DEPTH` buses it bounds; `discover_memory` and `discover_boot_memory`, which find the root and take the reservation entries as reserved regions | Yes: `Fdt.checkWellFormed` |
+| `Fdt.WellFormed` | Structural: the nodes and the reservation entries of a tree | `totalsize` from 40 to `MAX_BLOB_SIZE`; at most `MAX_RESERVATIONS` reservation entries, each nonempty, within 64 bits and disjoint from the others; 1 to `MAX_TOKENS` nodes, the root first without a parent and with the empty name, every other node with a parent before it and a name that is not empty, the characters of the names, a depth of at most `MAX_DEPTH - 1`, at most `MAX_PROPERTIES` properties of distinct names of 1 to `MAX_PROPERTY_NAME` bytes and their characters (format and bounds, lines 151 to 186) | `Fdt::parse` | No entry changes a tree | The node access; `Node::translate_reg`, whose fuel of `MAX_DEPTH` buses it bounds; `discover_memory` and `discover_boot_memory`, which find the root and take the reservation entries as reserved regions | Yes: `Fdt.checkWellFormed` |
 | `Reg.WellFormed` | Structural: the entries of a `Reg` | At least one entry, each within the width of its address cells (lines 694 to 698 and 741 to 744) | `Reg::new`; `Node::reg` in the cells of the parent | No entry changes a `Reg` | `discover_memory`, whose RAM ranges and reserved regions are such entries; the device bindings | Yes: `Reg.checkWellFormed` |
 | `AddressMap.WellFormed` | Structural: the windows of a map | Child and parent address cells of 1 or 2, at most 2 size cells; every window nonempty, of one size on both sides and each side within its width (lines 700 to 706) | `AddressMap::new`; `Node::ranges` and `dma_ranges` | No entry changes a map | `to_parent` and `to_child`, whose translated span therefore stays within the width of its side; `Node::translate_reg` | Yes: `AddressMap.checkWellFormed` |
 | `MemoryMap.WellFormed` | Structural: the RAM ranges and the reserved regions | 1 to `MAX_MEMORY_REGIONS` RAM ranges, each nonempty and within 64 bits, no two sharing an address; at most `MAX_RESERVED_REGIONS` reserved regions, each nonempty and within 64 bits, none both `no-map` and `reusable`; at most `MAX_TOKENS` dynamic reservations, so that the count fits its width (lines 451 to 484) | `discover_memory` and `discover_boot_memory`, on a tree that keeps `Fdt.WellFormed` | No entry changes a memory map | `discover_boot_memory`, whose sum of the RAM ranges therefore fits 64 bits; the queries of the boot memory; `MemoryPlan::all_ram` and `from_boot_memory`, which take the RAM ranges as banks and the reserved regions as firmware reservations | Yes: `MemoryMap.checkWellFormed` |
@@ -543,7 +544,7 @@ requirement, one input that the specification must accept, with the result
 that it must give, and one that it must reject, with the error that it must
 give. Each test is a proposition, registered in `statements.json` with its
 theorem in `Krepi.Proofs.Fdt.Stp`, the name of the test with a lower-case
-first letter, whose proof is planned. The expected results are literals
+first letter, which proves it. The expected results are literals
 worked out from the requirements and the contract, never computed by the
 specification. Every input is below 1 KiB but the two trees of FDT-R05, which
 are the limit of 128 KiB itself.
@@ -623,7 +624,7 @@ audit of each of its theorems lists no axiom but `propext`,
 | 116 | 3 | 3 | 21 | 1 |
 | 117 | 11 | 11 | 0 | 0 |
 | 118 | 3 | 3 | 3 | 0 |
-| Total | 60 | 62 | 118 | 13, all planned |
+| Total | 60 | 62 | 118 | 13, all proved |
 
 `MemoryMap::dynamic` and `BootMemory::dynamic` have a second success
 witness with a nonzero count, on trees with dynamic reservations below
@@ -656,7 +657,7 @@ specification and `Builder` write are the bytes of `String.toByteArray`,
 which equals `String.toUTF8`.
 
 An error branch that no input of its entry reaches has no witness. For each,
-a planned proposition states that the entry, or the step of it where the
+a registered proposition states that the entry, or the step of it where the
 branch lies, never takes it; the error of the branch is witnessed through
 another branch where the function has one. All but the last are the checks
 that the [readings of the contract](#readings-of-the-contract) keep at their
@@ -712,8 +713,8 @@ reading follows the prototype and names the place.
 
 | Reading | Contract | Basis |
 | --- | --- | --- |
-| `Span` has no type invariant; `Span.Valid` is the condition of the term, and the entries that take a span check it and fail with `Overflow` | Terms, lines 48 and 49; the vectors `fdt-pi5-boundaries-3` and `platform-4` to `platform-8` give `Overflow` for spans whose end leaves 64 bits, lines 988 and 1031 to 1035; now stated in [Terms](contract.md#terms) | A type invariant would make those inputs unwritable |
-| `Span::new` accepts an empty span; `Span::end` gives `start + size` or `Overflow`; `Span::contains(other)` fails with `Overflow` when `other` and then the span itself end beyond 64 bits, and otherwise holds when `other` lies inside the span | The entry table names the three functions, line 99, and Work bounds gives them a fixed number of steps, line 727; neither states their results; now stated in [Terms](contract.md#terms) | The error table gives `Overflow` to a span that leaves 64 bits, line 267, and `EmptyRegion` is checked by the entries that refuse an empty span, such as step 2, line 301 |
+| `Span` has no type invariant; `Span.Valid` is the condition of the term, and the entries that take a span check it and fail with `Overflow` | Terms, lines 48 and 49; the vectors `fdt-pi5-boundaries-3` and `platform-4` to `platform-8` give `Overflow` for spans whose end leaves 64 bits, lines 1179 and 1222 to 1226; now stated in [Terms](contract.md#terms) | A type invariant would make those inputs unwritable |
+| `Span::new` accepts an empty span; `Span::end` gives `start + size` or `Overflow`; `Span::contains(other)` fails with `Overflow` when `other` and then the span itself end beyond 64 bits, and otherwise holds when `other` lies inside the span | The entry table names the three functions, line 118, and Work bounds gives them a fixed number of steps, line 819; neither states their results; now stated in [Terms](contract.md#terms) | The error table gives `Overflow` to a span that leaves 64 bits, line 267, and `EmptyRegion` is checked by the entries that refuse an empty span, such as step 2, line 301 |
 | In step 1, each block is checked for its start inside the header, `BadLayout`, then its end beyond 64 bits, `Overflow`, then its end past the tree, `Truncated`; the structure block before the strings block | Step 1, lines 294 to 297, lists the three errors without their order; now stated in [Rejection and error priority](contract.md#rejection-and-error-priority) | The order of the prototype, which the contract adopts: `block` in `src/fdt/format.rs`, lines 18 to 24, and `src/fdt/parser.rs`, lines 55 and 56 |
 | The checks of an `Overflow` that 64-bit arithmetic cannot reach stay in the specification at their place in the order: the end of a block in step 1, of a reservation entry before the tree's end in step 2, and of a property value in step 3, the translated span of a translation, and the sum of the RAM ranges in step 5 | Lines 295, 299, 310, 336 and 337, and 358; now stated in [Rejection and error priority](contract.md#rejection-and-error-priority) | Header words have 32 bits and a tree at most 2 MiB, so these sums stay below $2^{33}$; a translated span lies inside a window that was checked at construction; and the RAM ranges are disjoint and end within 64 bits, so their sum fits; the order is the contract's, and a theorem states that the entry never returns `Overflow` from these checks |
 | `Node::string_property` fails with `BadString` for a value without a NUL or whose bytes before the first NUL are not UTF-8, before `BadProperty` for a byte after that NUL | Format and bounds, lines 206 to 209, lists both errors; step 6, lines 346 to 349, refers to them; now stated in [Format and bounds](contract.md#format-and-bounds) | The order of the prototype: `string_property` in `src/fdt/nodes.rs`, lines 140 to 150 |
@@ -735,7 +736,7 @@ reading follows the prototype and names the place.
 | Two spans touch when both are nonempty and share an address; two spans are disjoint when they share none | "touches", lines 459 and 460 and 551 and 552, and "disjoint", lines 405 and 456, which Terms does not define; now stated in [Terms](contract.md#terms) | The plain meaning as sets of addresses; for the nonempty spans that the entries compare, it is the half-open intersection that the prototype's `overlaps` computes |
 | The queries of the boot memory know only the image and the tree as the board gives them, and the reserved regions; further boot storage, such as a boot bundle that the board gives as a span of its own, is excluded by the boot memory map alone. The image span is the one that the board passes, with its BSS and stacks and any read-only part of the image within it | Lines 449 and 461 to 463 and 60 to 63; now stated in [Terms](contract.md#terms) and [Memory discovery](contract.md#memory-discovery) | The queries take no further span, line 447; a page-aligned read-only part of the kernel image lies within the image span that the board passes |
 | An empty bound of `BootMemory::find_available` is a minimum at or above the limit; an alignment is a power of two when it is one of $2^0$ to $2^{63}$ | Step 8, line 362, and line 550; the error table, line 257; now stated in [Rejection and error priority](contract.md#rejection-and-error-priority) | The bound is the interval $[minimum, limit)$, line 551, which is empty exactly then |
-| `BootMemory::find_available` fails with `Overflow` when an alignment of its search leaves 64 bits: the first candidate of a RAM range, the greater of its start and the minimum, or the end of the furthest exclusion that a candidate touches, aligned up. The search meets them in the order of the RAM ranges and of their candidates, so a span found earlier is returned first. A candidate whose end leaves 64 bits or passes the bound ends the search in its range without an error | Step 8, lines 362 and 363, "then `Overflow`"; the vector `fdt-pi5-selection-2`, line 997, where the size `0xffffffffffffffff` gives none; now stated in [Rejection and error priority](contract.md#rejection-and-error-priority) | The order of the prototype, which the contract adopts: `find_available` and `align` in `src/fdt/pi5/selection.rs`, lines 24 to 61; the span that the search returns is the one of the rule of lines 549 to 554, which a theorem states |
+| `BootMemory::find_available` fails with `Overflow` when an alignment of its search leaves 64 bits: the first candidate of a RAM range, the greater of its start and the minimum, or the end of the furthest exclusion that a candidate touches, aligned up. The search meets them in the order of the RAM ranges and of their candidates, so a span found earlier is returned first. A candidate whose end leaves 64 bits or passes the bound ends the search in its range without an error | Step 8, lines 362 and 363, "then `Overflow`"; the vector `fdt-pi5-selection-2`, line 1188, where the size `0xffffffffffffffff` gives none; now stated in [Rejection and error priority](contract.md#rejection-and-error-priority) | The order of the prototype, which the contract adopts: `find_available` and `align` in `src/fdt/pi5/selection.rs`, lines 24 to 61; the span that the search returns is the one of the rule of lines 549 to 554, which a theorem states |
 | The search of a RAM range moves from a candidate to the end of the furthest exclusion that it touches, aligned up, and tries at most `Q + 3` candidates; out of fuel it fails with `LimitExceeded` | Work bounds, lines 705 to 707 | Every start between the candidate and that end touches that exclusion, so no span is passed over; each move passes at least one of the `Q + 2` exclusions for good, so the fuel is never used up |
 | The `status` of `/cpus` is read before its size cells | Step 6, lines 338 and 339, "disabled or with size cells other than 0"; now stated in [Rejection and error priority](contract.md#rejection-and-error-priority) | The order of the prototype: `discover_cpus` in `src/fdt/cpus.rs`, line 94 |
 | A CPU node fails at "its ID" when its `reg` is not `id << affinity_shift` for an ID below 4, flag bits included, or when an earlier CPU node has its ID; "the set of IDs" then checks the number of CPU nodes and that the IDs are `0` to `count - 1` | Step 6, lines 344 and 345; lines 571 to 579; rule 3, lines 235 and 236; now stated in [Rejection and error priority](contract.md#rejection-and-error-priority) | The order of the prototype: `discover_cpus` in `src/fdt/cpus.rs`, lines 110 to 113 and 123 to 128 |
@@ -825,7 +826,7 @@ names and have no line in the vector file. Of the 55:
 | Replayed, 48 | `fdt-parser-1` to `-6` and `-9`, `fdt-translation-1` to `-5`, `fdt-discovery-1` to `-6`, `fdt-cpus-1` to `-6`, `fdt-pi5-1` to `-4`, `fdt-pi5-boundaries-1`, `-3` to `-5`, `fdt-pi5-selection-1` to `-3`, `fdt-pi5-platform-1` and `-2`, `platform-1`, `platform-3` to `platform-10`, `platform-12` and `platform-13` | Every case is a line of the vector file |
 | Replayed with a large input, 1 | `fdt-pi5-boundaries-2` | Its second case is a tree longer than 128 KiB, a line of the vector file that the generator of the file builds; the representative case of the replay module is the first |
 | Replayed in part, 4 | `fdt-parser-7`, `fdt-parser-8`, `platform-2`, `platform-11` | `fdt-parser-7`: its two cases of the padding bound call a function internal to the parse, which no entry reaches with them, as the row of the contract states. `fdt-parser-8`: the odd host address is no input of the specification, which reads bytes one at a time. `platform-2`: its three cases of the page allocator, two allocations and the free bytes, go through the page ownership table of the page-tables component, whose vectors cover them; the boot memory map that it takes is replayed. `platform-11`: the comparison of the usable bytes with the free bytes of a page allocator goes through the same table; the case compares them instead with the managed bytes less `0x80000`, `0x38000`, `0x14000` and `0x2000`, the difference that the row writes |
-| Not applicable, 2 | `fdt-pi5-firmware-1`, `fdt-pi5-firmware-2` | Their inputs are the trees that the Raspberry Pi firmware ships and trees merged from them, device-tree files outside the prototype tree that the repository does not hold, lines 971 to 974; the requirements that they evidence have other vectors and the specification tests |
+| Not applicable, 2 | `fdt-pi5-firmware-1`, `fdt-pi5-firmware-2` | Their inputs are the trees that the Raspberry Pi firmware ships and trees merged from them, device-tree files outside the prototype tree that the repository does not hold, lines 969 to 972; the requirements that they evidence have other vectors and the specification tests |
 
 The comments of the vector file name the cases that are not applicable. The
 replay module checks one representative case of each vector of the file, and
@@ -887,10 +888,10 @@ state it, and its evidence on the specification: the cases of the
 [vector file](../../../../verification/vectors/boot-platform/fdt.vectors)
 that [`Krepi.SpecTests.Fdt.Replay`](../../../../verification/Krepi/SpecTests/Fdt/Replay.lean)
 answers; the registered statements of [invariants](#invariants) and
-[properties](#properties), whose theorems are planned; and the
+[properties](#properties), whose theorems are proved; and the
 [specification tests](#specification-tests), one input that the
 specification must accept and one that it must reject for each requirement,
-whose theorems in `Krepi.Proofs.Fdt.Stp` are planned. The last row
+whose theorems in `Krepi.Proofs.Fdt.Stp` are proved. The last row
 is the section of liveness, time and performance of the requirements, which
 has no ID. The statements of the boot state serve the
 [state fields](contract.md#state-fields), which no requirement observes.

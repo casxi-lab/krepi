@@ -22,32 +22,30 @@ The registries `verification/targets.json`, `verification/models.json` and
 `verification/axioms.json`, the registry of the trusted base
 `verification/tcb.json` and the waiver record `verification/waivers.json`
 ([waivers](#waivers)). Two specifications are registered, those of the
-device-tree and page-tables components, each with its planned statements
-and a planned target whose code does not exist yet
-([specifications](#specifications)); no formal target, model, library
-axiom, trusted item or waiver is registered. The pinned tools exist: the tool manifest
-`verification/toolchain.json`, the reviewed Aeneas patch, the recipe of the
-image that holds the tools, the workflows that build and publish it, the
-pin of the published image, `verification/image-pin.json`, and
-`cargo xtask formal toolchain-check`, which checks the manifest against the
-Aeneas and Charon sources ([tools](#tools)).
-`cargo xtask formal run` exists as the proof gate
-([gate run](#gate-run)): it takes a snapshot of the gate inputs, exports
-them, applies their rules, runs its phases and writes a receipt. Its phases
-are the [qualification](#qualification) of the tools on the code shapes of
-the qualification crate, with the three proofs about them; the extraction
-of the [proof targets](#proof-targets), of which only two planned ones are
-registered, which a whole run extracts only when a hand-written module
-imports their generated modules, as none does yet; the
-[base round](#base-round), which builds, audits and replays krepi's own
-Lean, divided between the qualification job and the [lanes](#lanes): today
-the qualification proofs and the definitions that they use, and the
-specifications of the device tree and of the page tables with their
-properties, their tests and the theorems that witness them, where the
-theorems of planned statements are built but not audited; and the targets,
-which build and audit the proofs of each target in a stage of its own and
-then build each of its registered [mutants](#mutants) in a stage of its
-own, which its proofs must reject. On a pull request, a first phase
+device-tree and page-tables components, with their statements, all proved
+([specifications](#specifications)), and two formal targets, `fdt` and
+`page-tables`, which refine the code of the two components against them
+([proof targets](#proof-targets)); no model, library axiom, trusted item
+or waiver is registered. The pinned tools exist: the tool manifest
+`verification/toolchain.json`, the reviewed Aeneas patch, the recipe of
+the image that holds the tools, the workflows that build and publish it,
+the pin of the published image, `verification/image-pin.json`, and `cargo
+xtask formal toolchain-check`, which checks the manifest against the
+Aeneas and Charon sources ([tools](#tools)). `cargo xtask formal run`
+exists as the proof gate ([gate run](#gate-run)): it takes a snapshot of
+the gate inputs, exports them, applies their rules, runs its phases and
+writes a receipt. Its phases are the [qualification](#qualification) of
+the tools on the code shapes of the qualification crate, with the three
+proofs about them; the extraction of the [proof targets](#proof-targets),
+the two formal targets of the kernel; the [base round](#base-round), which
+builds, audits and replays krepi's own Lean, divided between the
+qualification job and the [lanes](#lanes): the qualification proofs and
+the definitions that they use, and the specifications of the device tree
+and of the page tables with their properties, their tests, the theorems
+that witness them and the refinement proofs of the two targets; and the
+targets, which build and audit the proofs of each target in a stage of its
+own and then build each of its registered [mutants](#mutants) in a stage
+of its own, which its proofs must reject. On a pull request, a first phase
 records the [guard](#guard), which `cargo xtask formal guard` runs on its
 own. With `--shard`, `cargo xtask formal run` runs one part of the gate,
 the qualification job, a lane, whose base run `--comparator` follows with
@@ -76,24 +74,26 @@ both, the second in the pinned image ([vectors in CI](#vectors-in-ci)).
 `cargo xtask formal impact` lists the targets that a change affects
 ([commands](#commands)). A weekly toolchain canary runs the gate with the
 tools of Aeneas main through the steps of `cargo xtask formal canary` and
-records what they would break ([toolchain canary](#toolchain-canary)).
-None of them verifies anything about the kernel. The cases taken from the
-CAS project expect what the pinned tools give; for 27 of them this differs
-from the expectation recorded with the earlier Charon and Aeneas, and each
-such change is explained ([qualification](#qualification)). CI runs the
-gate in the pinned image when the label `full-check` is added to a pull
-request to `main` whose change affects it, on a manual run of `main` and
-once a week, as the qualification job, a job for each lane, a part for
-each formal target and their merge; four jobs judge the conclusion and
-each hard gate in the record of the merge, and with `formal fast` and
-`formal guard` they are the six checks of the gate, which the rules of
-`main` require. On a push to `main`, a job reviews the record of the
-merged head ([CI job](#ci-job)). Everything else on this page is planned:
-the proofs of the registered statements, the formal targets of the kernel,
-further specifications and the other commands of `cargo xtask formal`.
+records what they would break ([toolchain canary](#toolchain-canary)). The
+two targets prove that the code of the device-tree and page-tables
+components refines their specifications, under the premises of their proof
+paths. The cases taken from the CAS project expect what the pinned tools
+give; for 27 of them this differs from the expectation recorded with the
+earlier Charon and Aeneas, and each such change is explained
+([qualification](#qualification)). CI runs the gate in the pinned image
+when the label `full-check` is added to a pull request to `main` whose
+change affects it, on a manual run of `main` and once a week, as the
+qualification job, a job for each lane, a part for each formal target and
+their merge; four jobs judge the conclusion and each hard gate in the
+record of the merge, and with `formal fast` and `formal guard` they are
+the six checks of the gate, which the rules of `main` require. On a push
+to `main`, a job reviews the record of the merged head ([CI
+job](#ci-job)). Everything else on this page is planned: further
+specifications and targets and the other commands of `cargo xtask formal`.
 They are set up by porting the tooling of the CAS project and the
-prototype tree, and this page changes with them. Nothing about the kernel
-is proved.
+prototype tree, and this page changes with them. Of the kernel, only the
+code of those two components is proved; the rest is open obligations
+([legacy inventory and admission](#legacy-inventory-and-admission)).
 
 Proofs of the prototype are proofs about that code.
 They do not carry over: a module taken into krepi is proved again against the
@@ -3453,8 +3453,8 @@ concludes its unit `BUDGET` too; the run is `BUDGET` either way. In a part
 that does not conclude the unit of the target, a command of the seed that
 meets the budget makes the mutants of the part `BUDGET`. The calibration
 target registers three parts of 1,000 s, each within the shard limit
-([calibration target](#calibration-target)); a target of the kernel keeps
-the default.
+([calibration target](#calibration-target)), and each target of the
+kernel four parts, whose budgets its proof path gives.
 
 The checks of the registration: every reached local function is
 in `proves`, `unclosed` or `derived`, every cut local item in `unclosed`,
@@ -4332,7 +4332,19 @@ translation fails before it reaches a target. Besides the shapes taken from
 the CAS project, cases record a body chosen by `cfg` (`cfg-shape`), a const
 generic parameter (`const-generic`) and each construct R1 to R7 of the
 provable subset (`r1-function-item-value` to `r7-private-enum`), with what
-the pinned tools give them. Some constructs that
+the pinned tools give them, and the shapes of the code of the device-tree
+and page-tables components: views and iterators of their own
+(`borrowed-view-by-value`, `own-iterator-next`, `slice-range-generic`,
+`iterator-in-iterator`, `iterator-driven-loop`, `plan-iterator-from-mut`),
+byte strings, slices and arrays (`byte-string-slice`, `byte-string-return`,
+`const-array-repeat`, `option-slice-join`, `option-slice-arms`,
+`slice-is-empty`, `nested-array-index`, `nested-index-call`,
+`repr-c-array-field`, `capacity-at-new`), conditions and flags
+(`const-bool-parameter`, `or-chain-let`, `or-chain-helper`,
+`negation-flag`, `negation-in-condition`, `negation-return`), enumerations
+in arrays (`element-enum-match`, `element-enum-by-value`), constants whose
+initializers can fail (`fallible-constant`) and an `Option` of a structure
+reached by value (`option-array-by-value`). Some constructs that
 the prototype used, such as `Iterator::any` and `flatten`, do not translate
 into code that a proof can rely on; the
 [provable Rust subset](conventions/provable-subset.md) lists them with the
@@ -4455,11 +4467,10 @@ in a checkout are not evidence; only a run of the gate produces receipts.
 
 ## Limitations
 
-- No formal target is registered: the two specifications, those of the
-  device-tree and page-tables components, each have a planned target and
-  planned statements, so the whole kernel is unverified, and the base round
-  checks the qualification proofs, the definitions that they use and those
-  specifications with the theorems that witness them.
+- Two formal targets are registered, those of the device-tree and
+  page-tables components; the rest of the kernel, its boot and board code,
+  its assembly and its `unsafe` sites among it, is unverified and listed as
+  open obligations.
 - Proofs cover only registered targets. Code outside them, including code
   ported from the legacy tree, is unverified until a target proves it.
 - Sequential refinement does not cover concurrency, weak memory, `unsafe`

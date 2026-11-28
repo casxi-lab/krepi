@@ -36,7 +36,38 @@ tests:
   - kernel/boards/qemu-virt/src/boot_memory/tests.rs
 suites:
   - qemu-boot
-theorems: none
+theorems:
+  - Krepi.Proofs.PageTables.Refinement.Tables.descriptor
+  - Krepi.Proofs.PageTables.Refinement.Tables.directAddress
+  - Krepi.Proofs.PageTables.Refinement.Tables.physRangeNew
+  - Krepi.Proofs.PageTables.Refinement.Tables.physRangeEnd
+  - Krepi.Proofs.PageTables.Refinement.Tables.physRangeContains
+  - Krepi.Proofs.PageTables.Refinement.Tables.physRangeOverlaps
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesLookupPage
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesLookupBlock
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesUsed
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesNew
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesReset
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesCloneKernelFrom
+  - Krepi.Proofs.PageTables.Refinement.Tables.clonePlanNext
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesMapPage
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesMapBlock
+  - Krepi.Proofs.PageTables.Refinement.Tables.tablesUnmapPage
+  - Krepi.Proofs.PageTables.Refinement.Boot.kernelMap
+  - Krepi.Proofs.PageTables.Refinement.Boot.kernelMapPlanNext
+  - Krepi.Proofs.PageTables.Refinement.Boot.directMap
+  - Krepi.Proofs.PageTables.Refinement.Boot.directMapPlanNext
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipNew
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipChoose
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipAssign
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipReserve
+  - Krepi.Proofs.PageTables.Refinement.Ownership.reservationInitialized
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipPublish
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipCancel
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipRelease
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipOwner
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipValidate
+  - Krepi.Proofs.PageTables.Refinement.Ownership.ownershipStats
 related:
   - krepi.platform.device-tree
   - krepi.platform.qemu-virt-boot
@@ -499,15 +530,19 @@ unchanged. The page `0x8000` of the process, mapped into the target as
   establish that the tables that the plans build translate and check
   permissions as the contract says on one CPU of QEMU virt; they establish
   nothing for the caches on, several CPUs or a board.
-- **Proofs.** None of the code. The proof target `page-tables` is
-  registered as planned in `verification/targets.json`, with the functions
-  of the core rows of the contract's
+- **Proofs.** The proof target `page-tables` of
+  `verification/targets.json` has the functions of the core rows of the
+  contract's
   [entry table](../../domains/memory/page-tables/contract.md#entry-points)
-  and the `next` of the three plan iterators as its roots; it is extracted
-  and type-checked when a run names it, and its refinement proofs are
-  planned. The statements of the specification are about the
-  specification, not the code. The results that the host tests write are
-  not yet compared with the replay of the specification.
+  and the `next` of the three plan iterators as its roots. For each root, a
+  theorem listed in `theorems` states that the function returns what the
+  specification gives, with its write plan, or its error in the same order,
+  for every input of its machine widths, under the premises of the
+  [proof path](../../domains/memory/page-tables/proof.md); the gate builds
+  and audits them and runs the registered mutants of the target, which the
+  proofs reject. The results that the host tests write are compared line
+  by line with the replay of the specification by
+  `cargo xtask formal vectors`.
 - **Unverified.** The bank shapes of the 1, 2, 4 and 16 GB models, which
   the tests take from the ranges that the fdt contract infers; the tables
   on a Raspberry Pi 5 and with the caches on; the ordering that the
