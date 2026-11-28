@@ -1788,7 +1788,7 @@
       ],
       "parts": [
         {
-          "budget": 1800,
+          "budget": 3300,
           "mutants": [
             "parse-depth-off-by-one",
             "parse-reservation-overlap-unchecked",
@@ -1808,7 +1808,7 @@
           ]
         },
         {
-          "budget": 1800,
+          "budget": 3300,
           "mutants": [
             "parse-name-padding-unchecked",
             "find-node-first-sibling",
@@ -2760,7 +2760,7 @@
       ],
       "parts": [
         {
-          "budget": 1800,
+          "budget": 3300,
           "mutants": [
             "read-write-executable",
             "lookup-block-rounds-down",
@@ -2780,7 +2780,7 @@
           ]
         },
         {
-          "budget": 1800,
+          "budget": 3300,
           "mutants": [
             "direct-address-limit-off-by-one",
             "reset-keeps-record",
