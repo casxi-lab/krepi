@@ -364,7 +364,7 @@ fn the_pull_request_line_keeps_its_required_check_and_its_summary() {
     assert!(check["on"]["pull_request"].as_hash().is_some());
     let summary = &check["jobs"]["summary"];
     assert_eq!(summary["name"].as_str(), Some(SUMMARY));
-    assert_eq!(needs(summary), ["check", "image", "suite"]);
+    assert_eq!(needs(summary), ["check", "qemu-boot", "image", "suite"]);
     assert_eq!(summary["if"].as_str(), Some("always()"));
     assert_eq!(needs(&check["jobs"]["suite"]), ["image"]);
     let group = check["concurrency"]["group"].as_str().expect("the group");
@@ -386,6 +386,58 @@ fn the_pull_request_line_keeps_its_required_check_and_its_summary() {
             Some(false)
         );
     }
+}
+
+/// The job of the pull request line that runs the QEMU boot suite, with
+/// its name, its limit in minutes and its command.
+const QEMU_BOOT: (&str, &str, i64, &str) = (
+    "qemu-boot",
+    "qemu boot suite",
+    10,
+    "cargo xtask qemu-boot --output-dir artifacts/qemu-boot",
+);
+
+/// The problems of the QEMU boot suite in the pull request line `document`:
+/// the job [`QEMU_BOOT`] runs it with its name and limit, no other job runs
+/// it, and the summary waits for that job.
+fn qemu_boot_problems(document: &Yaml) -> Vec<String> {
+    let (key, name, limit, command) = QEMU_BOOT;
+    let mut problems = Vec::new();
+    let job = &document["jobs"][key];
+    if job["name"].as_str() != Some(name) || job["timeout-minutes"].as_i64() != Some(limit) {
+        problems.push(format!(
+            "no job {key} named {name} with a limit of {limit} minutes"
+        ));
+    }
+    for (other, job) in jobs(document) {
+        let scripts = scripts_of(job).join("\n");
+        if other == key && !scripts.contains(command) {
+            problems.push(format!("job {key} does not run {command}"));
+        } else if other != key && scripts.contains("cargo xtask qemu-boot") {
+            problems.push(format!("job {other} runs the QEMU boot suite"));
+        }
+    }
+    if !needs(&document["jobs"]["summary"]).contains(&key) {
+        problems.push(format!("{SUMMARY} does not wait for job {key}"));
+    }
+    problems
+}
+
+#[test]
+fn the_qemu_boot_suite_runs_in_a_job_of_its_own_that_the_summary_waits_for() {
+    let tree = Tree::load(&crate::repo::root()).expect("the tracked files");
+    let text = tree.text(LINES[0]).expect("tracked");
+    assert_eq!(qemu_boot_problems(&parse(text)), Vec::<String>::new());
+    // A summary that does not wait for the job.
+    let unwaited = text.replace(
+        "needs: [check, qemu-boot, image, suite]",
+        "needs: [check, image, suite]",
+    );
+    assert_ne!(unwaited, text);
+    assert_eq!(
+        qemu_boot_problems(&parse(&unwaited)),
+        ["check summary does not wait for job qemu-boot"]
+    );
 }
 
 /// The retention of the artifacts of a job that runs on `main` and
@@ -412,7 +464,7 @@ const RETENTION: [(&str, &str, &str, &str); 34] = [
     ),
     (
         ".github/workflows/check.yml",
-        "check",
+        "qemu-boot",
         "Upload the QEMU boot suite receipts",
         BY_REF,
     ),
@@ -2516,7 +2568,7 @@ fn every_job_with_a_computed_limit_writes_it_in_a_notice() {
 /// The script that runs a main command of a step under its deadline.
 const DEADLINE: &str = ".github/scripts/deadline.sh";
 /// The main commands of the jobs of the lines, as `cargo xtask <command>`.
-const MAIN_COMMANDS: [&str; 3] = ["check", "image", "suite"];
+const MAIN_COMMANDS: [&str; 4] = ["check", "qemu-boot", "image", "suite"];
 
 /// The lines of `script` that are not blank, each line that ends in `\`
 /// joined to the next.
@@ -2652,8 +2704,9 @@ fn every_main_command_of_the_lines_runs_under_its_deadline() {
         count += main;
     }
     // The check, the images and the suite of the pull request, full and
-    // nightly lines, and the images and the suite of the weekly line.
-    assert_eq!(count, 11);
+    // nightly lines, the QEMU boot suite of the pull request line, and the
+    // images and the suite of the weekly line.
+    assert_eq!(count, 12);
     // The script passes both stop signals on to `timeout`, which it starts
     // with SIGINT not ignored, and waits for the command.
     let tree = Tree::load(&crate::repo::root()).expect("the tracked files");
@@ -3442,7 +3495,7 @@ fn the_caches_are_restored_by_the_lines_and_saved_only_from_main() {
         .collect();
     let mut expected = Vec::new();
     for (path, keys) in [
-        (LINES[0], &["check", "image", "suite"][..]),
+        (LINES[0], &["check", "qemu-boot", "image", "suite"][..]),
         (LINES[1], &["check", "image", "suite"]),
         (LINES[2], &["check", "image", "suite"]),
         (LINES[3], &["image", "suite"]),
@@ -3576,9 +3629,10 @@ fn every_apt_install_leaves_the_packages_alone_in_the_tools_cache() {
             }
         }
     }
-    // The two jobs that install in each of the pull request, full and
-    // nightly lines, the suite of the weekly line and `cache build`.
-    assert_eq!(count, 8);
+    // The three jobs that install in the pull request line, the two in each
+    // of the full and nightly lines, the suite of the weekly line and
+    // `cache build`.
+    assert_eq!(count, 9);
 }
 
 /// The workflow that drafts a release.

@@ -1,18 +1,19 @@
 # The pull request line and the main line, on the exact candidate commit:
 # the head of a pull request to main, or the commit pushed to main. The job
-# `cargo xtask check` runs the required host checks and the QEMU boot suite;
+# `cargo xtask check` runs the required host checks; the job
+# `qemu boot suite` runs the QEMU boot suite;
 # the job `image` writes the images of the QEMU suites with their SHA-256
 # digests; the job `suite` takes the images by those digests and runs the
 # QEMU suites of suites.toml: on a pull request the smoke cases and the
 # suites that the changed paths select, on main every suite, both without
-# the slow cases. `check summary` succeeds only when the other three jobs
+# the slow cases. `check summary` succeeds only when the other four jobs
 # did. A newer push to a pull request cancels the run of its older head;
 # runs on main are never cancelled. Each job has a limit. The check, the
 # image command and the suite command also stop at a deadline one or two
 # minutes before the limit of their job, counting for the check the limit
 # of the pull of the proof-tool image before it, so that the uploads still
-# run when one of them takes too long; the QEMU boot suite runs after the
-# check without a deadline of its own. The script that sets the deadline
+# run when one of them takes too long; the QEMU boot suite stops at such
+# a deadline too. The script that sets the deadline
 # also passes a stop signal of the runner on to the command and waits for
 # it, so that a cancelled check still writes its receipt. After the check,
 # the job writes the known-failures ledger that its receipt gives and
@@ -43,7 +44,7 @@ jobs:
   check:
     name: cargo xtask check
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 19
+    timeout-minutes: 17
     permissions:
       contents: read
     steps:
@@ -93,13 +94,10 @@ jobs:
         run: docker pull "$(jq -er '"\(.repository)@\(.digest)"' verification/image-pin.json)"
 
       - name: Run cargo xtask check
-        run: exec bash .github/scripts/deadline.sh 14m 90s cargo xtask check --receipt artifacts/check-receipt.json
+        run: exec bash .github/scripts/deadline.sh 12m 60s cargo xtask check --receipt artifacts/check-receipt.json
 
       - name: Require the formal step to have passed
         run: jq -e '[.steps[] | select(.name == "formal")] | length == 1 and .[0].status == "passed"' artifacts/check-receipt.json
-
-      - name: Run the QEMU boot suite
-        run: cargo xtask qemu-boot --output-dir artifacts/qemu-boot
 
       # The known-failures ledger that this check gives: the failed tests of
       # its receipt, with the commit and finding of their committed entries.
@@ -155,6 +153,57 @@ jobs:
           path: artifacts/known-failures.json
           if-no-files-found: error
           retention-days: ${{ github.ref == 'refs/heads/main' && 90 || 30 }}
+
+  qemu-boot:
+    name: qemu boot suite
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the candidate commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Restore the CI tools
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'toolchains.toml') }}
+          path: |
+            ~/.cache/krepi-ci/apt/
+            ~/.rustup/toolchains/1.99.0-aarch64-unknown-linux-gnu/
+            ~/.rustup/update-hashes/1.99.0-aarch64-unknown-linux-gnu
+
+      - name: Restore the Cargo registry and build directories
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'kernel/Cargo.lock', 'user/Cargo.lock', 'xtask/Cargo.lock', 'tools/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            xtask/target/
+            tools/target/
+
+      # apt, which runs as root, leaves a lock and a partial directory that
+      # the runner user cannot read beside the packages; they are removed,
+      # so that the tools cache holds the packages alone, owned by the
+      # runner user.
+      - name: Install QEMU
+        run: |
+          mkdir -p ~/.cache/krepi-ci/apt/partial
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends -o Dir::Cache::Archives="$HOME/.cache/krepi-ci/apt" \
+            -o APT::Keep-Downloaded-Packages=true qemu-system-arm
+          sudo rm -rf ~/.cache/krepi-ci/apt/partial ~/.cache/krepi-ci/apt/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/.cache/krepi-ci/apt
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Run the QEMU boot suite
+        run: exec bash .github/scripts/deadline.sh 8m 60s cargo xtask qemu-boot --output-dir artifacts/qemu-boot
 
       - name: Upload the QEMU boot suite receipts
         if: always()
@@ -306,10 +355,10 @@ jobs:
 
   summary:
     name: check summary
-    needs: [check, image, suite]
+    needs: [check, qemu-boot, image, suite]
     if: always()
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 1
+    timeout-minutes: 3
     permissions: {}
     steps:
       - name: Require every job of the line to succeed
