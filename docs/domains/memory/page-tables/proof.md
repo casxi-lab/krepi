@@ -244,9 +244,9 @@ number of parts is the least for which no part takes more than 1,440 s. By
 the build of its proof modules in the gate and the ratio of the parts of
 the calibration target, a part of 10 mutants would take more than 1,440 s,
 so the registry starts from four parts; that is an estimate, and the
-measurement of the parts on the standard runner decides their number. The replay of the 9,382 cases of the vector
-file, about 270 s on a Darwin host, is a separate run of
-`cargo xtask formal vectors`.
+measurement of the parts on the standard runner decides their number.
+The replay of the 9,382 cases of the vector file, about 270 s on a Darwin
+host, is a separate run of `cargo xtask formal vectors`.
 
 ## Trusted boundary
 

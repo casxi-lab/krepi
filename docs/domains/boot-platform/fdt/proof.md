@@ -106,12 +106,12 @@ that hold them are the proof modules of the target.
 
 The refinement theorems take these hypotheses. Each is an invariant of the
 specification ([invariants](specification.md#invariants)), a condition of
-the boot, a representation of a value or of an external declaration, or
-the platform of the extraction, with the function or the code that
-establishes it, what preserves it and what relies on it. The translation of the module does not
-show which module may build a value, so the
-[compile-time guards](#compile-time-guards) make each premise of a value
-true of every value that another module holds.
+the boot, a representation of a value or of an external declaration, or the
+platform of the extraction, with the function or the code that establishes
+it, what preserves it and what relies on it. The translation of the module
+does not show which module may build a value, so the [compile-time
+guards](#compile-time-guards) make each premise of a value true of every
+value that another module holds.
 
 | Premise | Established by | Preserved by | Consumed by |
 | --- | --- | --- | --- |
@@ -196,15 +196,15 @@ number.
 
 ## Trusted boundary
 
-The target relies on these rows of the
-[trusted boundary](../../../formal-verification.md#trusted-boundary): the
-Lean kernel and the three standard axioms; Mathlib and the Aeneas Lean
-library; Charon, the Rust nightly and Aeneas; the compiler, which no proof
-covers; and the unconstrained declarations, one item
-([below](#trusted-boundary)). It relies on no assembly, `unsafe` code, atomics, IRQ path or
-hardware: the module has none. The bytes that the firmware hands over are
-its input, which it checks; the board's forming of their slice is an open
-obligation, not a trusted item ([unclosed dependencies](#unclosed-dependencies)).
+The target relies on these rows of the [trusted
+boundary](../../../formal-verification.md#trusted-boundary): the Lean
+kernel and the three standard axioms; Mathlib and the Aeneas Lean library;
+Charon, the Rust nightly and Aeneas; the compiler, which no proof covers;
+and the unconstrained declarations, one item ([below](#trusted-boundary)).
+It relies on no assembly, `unsafe` code, atomics, IRQ path or hardware: the
+module has none. The bytes that the firmware hands over are its input,
+which it checks; the board's forming of their slice is an open obligation,
+not a trusted item ([unclosed dependencies](#unclosed-dependencies)).
 
 The target adds one item to the boundary, an unconstrained declaration
 with its premise, and no cut point, model or trusted axiom:
