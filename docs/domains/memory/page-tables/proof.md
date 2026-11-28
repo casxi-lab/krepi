@@ -11,19 +11,17 @@ the [specification](specification.md) of the [contract](contract.md), the
 premises of its theorems with the guards that keep them, the code shapes
 that the implementation adopts so that the tools translate it into code a
 proof can rely on, its trusted boundary, its mutants and what no theorem
-states. The module `page_tables` does not exist yet, so the target is
-registered in `verification/targets.json` in the state `planned`, with its
-name, module, description and roots alone
-([proof targets](../../../formal-verification.md#proof-targets)). Its
-obligations, its mutants and the lists of the functions that it proves and
-reaches are registered once the code exists, as this page plans them; until
-then the target is extracted and type-checked only when a run names it.
+states. The target is registered in `verification/targets.json` as a formal
+target, with its roots, the functions that it proves and reaches, its
+obligations, its proof modules and its mutants in four parts
+([proof targets](../../../formal-verification.md#proof-targets)), and the
+gate verifies it.
 
 The statements of the specification itself, its invariants, its properties,
 its specification tests and the statements that its unreachable error
 branches are never taken, are registered in
 [`verification/statements.json`](../../../../verification/statements.json)
-as planned and are proved by proof pull requests below
+and proved below
 [`verification/Krepi/Proofs/PageTables/`](../../../../verification/Krepi/Proofs/PageTables/)
 ([statements and proofs](../../../formal-verification.md#statements-and-proofs)).
 They are not obligations of the target: the refinement theorems of the
@@ -36,12 +34,12 @@ target take the invariants that they need as hypotheses
 
 | Field | Value |
 | --- | --- |
-| Name | `page-tables`, in the state `planned` |
+| Name | `page-tables`, formal |
 | Module | `PageTables`, the namespace of the generated definitions |
-| Feature | None: no feature document describes the component, whose requirements list no feature, and a feature ID is that of a feature document ([documentation](../../../conventions/documentation.md#location-and-identity)) |
+| Feature | `krepi.kernel.kernel-memory`, the [kernel memory](../../../features/kernel/kernel-memory.md), whose `theorems` are the refinement theorems of the roots |
 | Entries | The 11 rows of the [entry table](contract.md#entry-points) of the core, lines 107 to 117 of the contract: one target, not split; the row of the adapter, line 118, is excluded ([unclosed dependencies](#unclosed-dependencies)) |
-| Roots | The 28 functions that the rows name, below |
-| Budget | The default of 1,800 s ([cluster and budget](#cluster-and-budget)) |
+| Roots | 31: the 28 functions that the rows name, below, and the `next` of the three plan iterator types ([plans as iterators](#page-tables)) |
+| Budget | Four parts, each with a budget of its own ([cluster and budget](#cluster-and-budget)) |
 
 The roots are the full paths of the functions that the rows of the entry
 table name, in the crate `krepi_kernel` of the root package and its module
@@ -74,20 +72,17 @@ use them.
 **Plans as iterators.** `kernel_map`, `direct_map` and `clone_kernel_from`
 give their steps one at a time, by an iterator of the core over their input
 ([write plans and publication](contract.md#write-plans-and-publication)),
-whose type the contract does not name. The adapter calls its `next`, and no
-root of the target does, so the extraction reaches no `next` of a plan. The
-refinement theorems of the three entries need it, to state that the steps
-that the iteration gives are the plan of the specification, `mapPlan` or the
-plan of the copy. This is an obligation of the target, which the contract
-records in its [open obligations](contract.md#open-obligations): the `next`
-of each plan iterator type joins `start_from` once the
-implementation names the types, and before the implementation merges. Its
-carriers are the implementation, which names the types and adds their
-`next` to the roots, and the refinement proof of the target, which proves
-each `next` against the representation of a plan by its list of steps
-([premises](#premises)). The new roots change the roots of the target,
-which is reviewed as a change of a statement
-([guard](../../../formal-verification.md#guard)). The plans of `map_page`,
+of the types `KernelMapPlan`, `DirectMapPlan` and `ClonePlan`, which the
+contract names in its [open obligations](contract.md#open-obligations). The
+adapter calls their `next`, and no other root does, so the `next` of each
+type is a root of its own. Its refinement theorem follows from the
+representation of a plan by its list of steps alone, `Stands` of
+`Krepi.Statements.Basic` ([premises](#premises)): the theorem of the entry
+that gives the iterator relates the calls of `next` from every state that
+the iterator reaches to the plan of the specification, `mapPlan` or the
+plan of the copy, and so covers the code of `next`. A source mutant that
+survives in the code of a `next` is therefore classified by the theorems of
+the entries that give its iterator. The plans of `map_page`,
 `map_block`, `unmap_page` and `reset` are values: the first three have at
 most seven steps, and that of `reset` one `Zero` for each table in use.
 
@@ -98,10 +93,16 @@ value that its specification gives, for a write entry the set or the table
 after its write phase and the plan or the value that it returns, related to
 it by the representation of the value types, or fails with the error that
 its specification gives, and that a failure returns nothing else and writes
-nothing. The mutants below name the theorem that each must fail as the
-refinement theorem of a function; the registration gives each theorem its
-Lean name. A function with a loop is proved to return as well, since Aeneas
-translates a loop as a function that may diverge.
+nothing. A function with a loop is proved to return as well, since Aeneas
+translates a loop as a function that may diverge. The refinement theorems
+lie below `Krepi.Proofs.PageTables.Refinement`, in three modules that
+restate the triples of the generated functions that the other modules
+prove, each a `@[step]` lemma about one function, so that the build of a
+mutant fails in the triple of the function that it edits. Each obligation
+holds the refinement theorem of its root and the triples that its proof
+uses and that unfold a generated definition, each triple in the first
+obligation in the order of the roots whose proof uses it; the 15 modules
+that hold them are the proof modules of the target.
 
 ### Premises
 
@@ -118,21 +119,28 @@ premise of a value true of every value that another module holds.
 | Premise | Established by | Preserved by | Consumed by |
 | --- | --- | --- | --- |
 | A set keeps `Tables.WellFormed` at the `base` and `bits` of its pool | `Tables::new` on zero storage (`NewWellFormed`); `reset` and `clone_kernel_from`, whose plans zero every table in use (`ResetWellFormed`, `CloneKernelFromWellFormed`); `kernel_map` and `direct_map` on the new kernel sets (`BootKernelMapWellFormed`, `BootDirectMapWellFormed`) | `map_page`, `map_block`, `unmap_page`, `kernel_map` and `direct_map`, once the plan has run (`MapPageWellFormed`, `MapBlockWellFormed`, `UnmapPageWellFormed`, `KernelMapWellFormed`, `DirectMapWellFormed`) | The walk of every entry, which meets no bad table descriptor on such a set; the properties `AfterEveryWrite`, `TablesInUseCounted`, `PlansPublishInOrder` and `KernelTablesOnlyFilled`; the source of `clone_kernel_from`, whose checks are these rules |
-| The storage that `Tables::new` takes is zero in all its tables | The boot wiring for the kernel tables, whose pools are BSS of the image; for the tables of a process, the page ownership table, whose pages are zero before they reach a holder (`AfterEveryWrite`, the rows of `assign` and `publish`) | No plan writes a table that is not in use, and the plans of `reset` and `clone_kernel_from` zero every table in use before it leaves use ([table pool](contract.md#table-pool)) | `Tables::new`, which checks nothing ([check and execute](contract.md#check-and-execute)); `NewWellFormed` |
+| The storage that `Tables::new` takes is zero in all its tables | The boot wiring for the kernel tables, whose pools are storage of the image that is zero when it is loaded; for the tables of a process, the page ownership table, whose pages are zero before they reach a holder (`AfterEveryWrite`, the rows of `assign` and `publish`) | No plan writes a table that is not in use, and the plans of `reset` and `clone_kernel_from` zero every table in use before it leaves use ([table pool](contract.md#table-pool)) | `Tables::new`, which checks nothing ([check and execute](contract.md#check-and-execute)); `NewWellFormed` |
 | The plan of each write entry on a set runs in full and in order before the next entry on the set, and only the plans change the pool of a set | `krepi_arch::mmu::apply`, which executes each step of a plan that the check of its entry fixed and does not fail, an [open obligation](contract.md#open-obligations); the caller, which holds the token of the set from the entry to the last step of its plan | The token of the set; the borrow of its inputs by a plan iterator (guard 3) | Every entry, whose walk reads the pool that `Tables.apply` of the earlier plans gives; the well-formedness lemmas and `AfterEveryWrite`, which state the set once its plan has run |
-| A plan iterator stands for a list of steps of the specification: its calls of `next` give the steps of `mapPlan`, for `kernel_map` and `direct_map`, or of the plan of `Tables.cloneKernelFrom`, in order, and then none | `kernel_map`, `direct_map` and `clone_kernel_from`, whose refinement theorems relate the iterator that each gives to its list | Each `next`, which advances a private cursor over the checked input and does not fail ([check and execute](contract.md#check-and-execute)) | `krepi_arch::mmu::apply`, which executes the steps; `PlansPublishInOrder` and `KernelTablesOnlyFilled`, which carry over to the steps |
+| A plan iterator stands for a list of steps of the specification (`Stands`): its calls of `next` give the steps of `mapPlan`, for `kernel_map` and `direct_map`, or of the plan of `Tables.cloneKernelFrom`, in order, and then none, at every later call too, the iterator staying where it is (the fixed point, which `fixed_iff` of the refinement modules states as a triple) | `kernel_map`, `direct_map` and `clone_kernel_from`, whose refinement theorems relate the iterator that each gives to its list | Each `next`, which advances a private cursor over the checked input and does not fail ([check and execute](contract.md#check-and-execute)) | `krepi_arch::mmu::apply`, which executes the steps; `PlansPublishInOrder` and `KernelTablesOnlyFilled`, which carry over to the steps |
 | A layout of `kernel_map` has at most 16 ranges, each with one of the four kinds of a layout | The board crate, which writes the layout of its image; the type of a layout (code shape 6) | A layout is a constant of the board | `kernel_map`, which checks neither rule ([kernel mappings](contract.md#kernel-mappings)); `Layout`, `layoutKinds` |
 | The boot memory map of `direct_map` is one that the fdt entries built, so it keeps `MemoryPlan.WellFormed` and its usable ranges are on page boundaries, disjoint and in address order (`BuiltPlan`) | `MemoryPlan::all_ram`, `new` and `from_boot_memory` of the [fdt](../../boot-platform/fdt/proof.md) target (`AllRamWellFormed`, `MemoryPlanNewWellFormed`, `FromBootMemoryWellFormed`, `UsableRangesExact`) | The publication of the boot memory map, which keeps it unchanged | `direct_map`, whose checks of a usable range off pages and of a leaf that an earlier usable range shares never fail (`DirectMapRangesOnPages`, `DirectMapRangesApart`); `BootOwnersMatchDirectMap` |
 | W^X, the first rule of the boot wiring: `kernel_map` and `direct_map` run at most once each, before the MMU is on | The boot wiring, which calls each once on the boot CPU ([entry points](contract.md#entry-points)); the transactions `Shared.buildKernelMap` and `Shared.buildDirectMap`, which run only before `Shared.enable` | No transaction writes the direct map's set once the MMU is on (`DirectMapUnchangedAfterBoot`) | `NoWritableExecutable`, through `WxPremises` |
 | W^X, the second rule: the boot memory map is well-formed and each `ReadExecute` range of the layout lies in the span of boot storage of the kernel image | The board, which gives the boot memory map the span of the image as boot storage and builds the layout from the symbols of its link ([descriptors and attributes](contract.md#descriptors-and-attributes)) | The boot memory map never changes once published | `NoWritableExecutable`, by which the text has no alias in the direct map; `Ownership::new` of the kernel root, which excludes the image |
 | W^X, the third rule: a plan that fills an invalid entry of the lower kernel set after boot maps an executable kind only at a page of the text of the image, and a page of the text only with `ReadExecute` | The code of the core that fills such an entry under the token of the kernel tables, which the third rule of [W^X](contract.md#descriptors-and-attributes) binds; the [address-space contract](../address-space/contract.md#address-spaces-and-asids) writes no fill after boot | Each fill, which writes only invalid entries (`KernelTablesOnlyFilled`) | `NoWritableExecutable`, through `WxPremises` |
 | A fill of the lower kernel set after boot keeps off the guard pages | The code that fills, as the [guard](contract.md#descriptors-and-attributes) rule states, since `map_page` does not know the guards | `kernel_map` writes no entry of a guard page (`AfterEveryWrite`, the row of `kernel_map`) | The translation fault of an access to a guard, which the QEMU tests show; no registered theorem ([not proved](#not-proved)) |
+| A `usize` has 64 bits (`Usize64`, `System.Platform.numBits = 64`), the first premise of every refinement theorem | The extraction triple, `aarch64-unknown-none`, and the 64-bit platforms that the contract describes | - | Every refinement theorem: it does not restrict the inputs, it names the platform of the contract and of the extraction |
 | A page ownership table keeps `Ownership.Invariant`: `Ownership.WellFormed`, `Ownership.OneOwner`, `Ownership.HolderRanges`, `Ownership.GenerationsBelowCounter` and `Ownership.FreeExtentsMaximal` | `Ownership::new` (`NewOwnershipWellFormed`, `NewOneOwner`, `NewHolderRanges`, `NewGenerationsBelowCounter`, `NewFreeExtentsMaximal`) | `assign` of a choice of `choose`, `reserve`, `publish`, `cancel` and `release` (the preservation statements and `AssignWellFormed` to `ReleaseWellFormed`) | `choose`, whose scan in address order gives the first fit (`PlacementFirstFit`); `owner` and `stats`; the checks of a receipt, a packet or a reservation, which find one extent; `TakeAcceptsChoice` |
 | The table of the kernel root keeps `Ownership.FreeOrHeldUsable` of its boot memory map: its free and held pages are the pages of the usable ranges | `Ownership::new` on the managed banks of a well-formed boot memory map and one exclusion for each span of its boot storage and each firmware reservation, which the boot wiring gives it (`NewFreeOrHeldUsable`) | The same five write entries | The zeroing of a chosen range through the direct map, which maps its pages; `BootOwnersMatchDirectMap`; the second rule of W^X |
 | The choice that `assign` takes is one of `choose` on the same table, taken under the same token (`Ownership.Chose`), the requirement of its row | The private fields of the choice, which only `choose` builds ([guard 1](#compile-time-guards)); the caller, which runs `choose`, its zeroing and `assign` as one transaction under the token of the page ownership table (`Shared.allocate`) | The token: no other entry runs on the table between `choose` and `assign` | The row of `assign` in `AfterEveryWrite` and its preservation statements, which take it as a hypothesis. The checks of [check and execute](contract.md#check-and-execute) refuse only the three cases that the contract lists, an exhausted counter, a range not inside one free extent and the extents beyond the capacity (`assignRechecks`), which a choice of `choose` passes (`TakeAcceptsChoice`); a choice off page boundaries or of a length that is not whole pages passes them and breaks `Ownership.WellFormed`, so only guard 1 keeps such a choice from `assign` |
 | The outcome that `assign` and `Reservation::initialized` take is true exactly when the zeroing of the range completed | The caller, which zeroes the range through the direct map with `krepi_arch::mmu::zero_frames`, an [open obligation](contract.md#open-obligations) | - | The rule that a page reaches a holder only once its bytes are zero ([page ownership](contract.md#page-ownership)); no registered theorem ([not proved](#not-proved)) |
 | A `PhysRange` keeps its invariant: its length is not 0 and its end fits in 64 bits | `PhysRange::new` | No entry changes a range | `end`, `contains`, `overlaps`, `direct_address` and the entries of the page ownership table, which take their banks, exclusions, windows and receipts as ranges |
 | Each shared field is written under its token, held by one CPU at a time from the first check of an entry to the end of its plan; with one CPU, the executing CPU holds it | The caller ([state fields](contract.md#state-fields)) | - | Every write entry, whose refinement is sequential; the transactions of `Krepi.Spec.PageTables.Tokens` |
+
+The representation of a page ownership table reads only the extents and
+the exclusion records below their counts; the slots above them are not part
+of the abstract table, so the modification set of an entry, stated on the
+abstract table, is exact although an entry may leave old values in those
+slots.
 
 The premises of the table sets and those of the page ownership table are
 not connected: no premise of one group names a value of the other. The
@@ -153,8 +161,9 @@ each with a compile-fail case that the `subset` step runs
    value that another module holds keeps the premise of its type: no other
    module makes a range of length 0, a choice that `choose` did not give, a
    packet whose zeroing did not complete, or a reservation that hides an
-   attempted zeroing. A choice is built only by `choose`. The case for
-   each type writes a struct literal of it in another module and expects
+   attempted zeroing. A choice is built only by `choose`. One case stands
+   for the guard of every type: `kernel/compile-fail/page-tables-private-fields.toml`
+   writes a struct literal of `PhysRange` in another module and expects
    `E0451`. `Allocation` carries no invariant, since `release`, `publish`
    and `validate` check every receipt ([page ownership](contract.md#page-ownership)),
    and `Kind` and the steps of a plan are enumerations whose every value
@@ -165,21 +174,26 @@ each with a compile-fail case that the `subset` step runs
    pool no longer has, a copy of the page ownership table would give the
    same pages twice, a copy of a reservation kept across a failed zeroing
    could be cancelled as if no zeroing had been attempted, and a packet is
-   published once. The case for each type derives `Clone` and expects
-   `E0283`. A receipt is bookkeeping, not authority
+   published once. One case stands for the guard of every type:
+   `kernel/compile-fail/page-tables-no-clone.toml` derives `Clone` for
+   `Tables` and expects `E0283`. A receipt is bookkeeping, not authority
    ([terms](contract.md#terms)), and may be copied.
 3. **Borrowed inputs.** A plan iterator borrows the set that its entry
-   wrote, the layout or the boot memory map, and the source of a copy, for
-   its lifetime, so no other entry on the set and no write to the source
-   compiles while the plan lives. The case calls `map_page` on the source of
-   a copy while the plan of the copy lives and expects `E0502`.
+   wrote, the guard addresses of a layout, which `kernel_map` takes by
+   value with that borrow, the boot memory map of `direct_map` and the
+   source of a copy, for its lifetime, so no other entry on the set and no
+   write to the source compiles while the plan lives. The case
+   `kernel/compile-fail/page-tables-borrowed-source.toml` calls `map_page`
+   on the source of a copy while the plan of the copy lives and expects
+   `E0502`.
 4. **Region and capacity in the type.** The region and the capacity of a
    set are parameters of its type, as in the specification: `kernel_map`
    takes a set of the lower region and `direct_map` one of the upper
    region, and `clone_kernel_from` a source of the region and the capacity
    of its target ([copying the kernel tables](contract.md#copying-the-kernel-tables)),
-   which no error of the contract checks. The case passes a set of the upper
-   region to `kernel_map` and expects `E0308`.
+   which no error of the contract checks. The case
+   `kernel/compile-fail/page-tables-region-in-type.toml` passes a set of the
+   upper region to `kernel_map` and expects `E0308`.
 
 The `subset` step also checks the module mechanically for `static mut`,
 interior mutability and `cfg` outside its allowlist
@@ -190,9 +204,15 @@ the adapter, so the module has no `unsafe` code and no assembly
 
 ### Cluster and budget
 
-The target reaches no function of another component and cuts none. It
-relies on the boot memory map of the [fdt](../../boot-platform/fdt/proof.md)
-component, which it reads as values: `direct_map` relies on the usable
+The target cuts no function. It reaches eight functions of the
+[fdt](../../boot-platform/fdt/proof.md) component, through the usable ranges
+of the boot memory map that `direct_map` walks: `MemoryPlan::available_ranges`,
+`managed_banks` and `reservations`, the `next` of `AvailableRanges` with
+`available_step`, `furthest_holding` and `nearest_start`, and
+`span::prefix`. It proves them again, on its own generated types and for
+every input under the premises of the fdt proof path, and lists them in its
+`proves`, so it depends on no theorem of the fdt target. It relies on the
+boot memory map of that component, which it reads as values: `direct_map` relies on the usable
 ranges of a map that the fdt entries built (`BuiltPlan`), so this target and the
 `fdt` target form a cluster connected by premises, in which the theorems of the
 `fdt` target about `MemoryPlan::all_ram`, `new`, `from_boot_memory` and
@@ -207,34 +227,21 @@ Within the target, the premises of the table sets and those of the page
 ownership table are not connected ([premises](#premises)), so their proofs
 can be written apart.
 
-Estimates for the budget:
-
-- The statements of the specification: the proofs of its 65 statements of
-  invariants, 8 properties, 24 specification tests and 5 statements of
-  unreachable branches, 102 in all, about 17,700 lines by a bottom-up
-  estimate of each group of statements, of which the rows of
-  `AfterEveryWrite` take about 2,850 and the lemmas about the pools, the
-  walk, the plans and the extents that several groups share about 2,450;
-  and about 12,600 lines (9,000 to 18,400) by the ratio of proof lines to
-  statement lines of a comparable specification. Three specification tests
-  need structured proofs, not `decide`: `EightGibOfBlocksInNineTables` and
-  `BlockBeyondNineTablesRefused`, whose 4,096 blocks `decide +kernel` did
-  not evaluate in 865 s, and `DirectMapCountsOfPi5Models`, whose five
-  models of up to 16 GiB it did not evaluate in 600 s; they need a closed
-  form of the pool after the loop of blocks, by induction, and lemmas that
-  count the leaves of `directLeaves`. The witnesses are proved in the
-  specification.
-- The gate: the target keeps the default budget of 1,800 s, which its
-  extraction, the type check of its generated definitions, the build of its
-  proofs and its 29 mutants share. The 14 modules of the statement side of
-  the component build in under 15 s from scratch, no module in more than
-  11 s and no declaration in more than 1 s, and `leanchecker` evaluates the
-  witnesses again. The
-  shard of the calibration target, 12 functions and 30 mutants, took 409 s;
-  this target has 28 functions, and its shard is measured when its
-  obligations are registered, and its budget is set from that measurement.
-  The replay of the 9,382 cases of the vector file, about 270 s on a Darwin
-  host, is a separate run of `cargo xtask formal vectors`.
+Budget and parts: the gate runs the 29 registered mutants of the target in
+four parts, each a job with its own budget
+([shards and merge](../../../formal-verification.md#shards-and-merge)). The
+registry puts the mutants of the [mutant table](#mutants) into the parts in
+turn, the first into part 1, the second into part 2 and so on, so that the
+parts take 8, 7, 7 and 7. Each part extracts the target, builds its proofs
+and then runs its mutants; part 1 also concludes the target. The budget of
+each part is 1.5 times the seconds that the part took on the standard
+runner, rounded up to a minute, at most 1,800 s and at least 1.25 times
+those seconds, and the parts of a target have at most 7,200 s in all. By
+the build of its proof modules in the gate and the ratio of the parts of
+the calibration target, a part of 10 mutants takes more than 1,440 s, so
+three parts are not enough. The replay of the 9,382 cases of the vector
+file, about 270 s on a Darwin host, is a separate run of
+`cargo xtask formal vectors`.
 
 ## Trusted boundary
 
@@ -247,19 +254,23 @@ hardware: the module has none. The execution of its plans, the zeroing of
 frames and the registers of the MMU are those of the adapter, an open
 obligation, not a trusted item ([unclosed dependencies](#unclosed-dependencies)).
 
-The target is to add no item to the boundary:
+The target adds no trusted item to the boundary:
 
 - **Cut points.** None, and no `opaque` entry: no function of the module
   reads hardware or global state, so none needs to be translated without
   its body.
 - **Models and trusted axioms.** None: no item of `models.json` or
   `tcb.json`, and no `trusted_axioms`. The witnesses of the specification
-  use `decide +kernel` and `rfl`, which the kernel checks, and no native
-  decision.
-- **Derived methods.** The module calls no method that a `#[derive(..)]`
-  defines, such as a derived `eq` of kinds or ranges, which would stay
-  unverified: it compares kinds with `match` and ranges field by field.
-- **Unconstrained items.** None when the module keeps the
+  use `decide +kernel` and `rfl`, which the kernel checks, and the proofs
+  use no native decision and no axiom of the Aeneas library that
+  `tcb.json` would have to admit.
+- **Derived methods.** The extraction translates the `clone` that
+  `#[derive(Clone)]` defines for `Extent`, `Exclusion`, `PhysRange` and
+  `Step`, which no function of the module calls; the target lists them in
+  `derived`, and they stay unverified. The module calls no method that a
+  `#[derive(..)]` defines, such as a derived `eq` of kinds or ranges: it
+  compares kinds with `match` and ranges field by field.
+- **Unconstrained items.** None while the module keeps the
   [code shapes](#code-shapes). Each library item below would otherwise be
   reached as an external declaration without a model. A theorem must hold
   for every interpretation of such a declaration
@@ -288,11 +299,10 @@ MMU on. The row of the adapter in the entry table, line 118,
 target: `enable` and `zero_frames` are `unsafe`, and `apply` stores
 descriptors, executes barriers and invalidates the TLB, whose effect belongs
 to the boot component. The contract registers the row in its open
-obligations, and it counts as a declared unproved entry. The target also
-leaves open, until the implementation names its plan iterator types, the
-`next` of each of them, which then joins the roots
-([plans as iterators](#page-tables)). It cuts no function, and it reaches no
-function of another component.
+obligations, and it counts as a declared unproved entry. Its `unclosed`
+is empty: it proves every function that it reaches, the eight of the fdt
+component among them ([cluster and budget](#cluster-and-budget)), and it
+cuts no function.
 
 ## Mutants
 
@@ -301,9 +311,18 @@ table, among them one that maps a writable page executable and three
 off-by-one changes, of the capacity of the pool of `direct_map`, of the
 capacity of the extents of `Ownership::new` and of the width of the direct
 address. Each is registered with its file, the text that it finds and
-replaces and the theorems that must fail once the code exists; the table
-describes the edit. Each must make the refinement theorem of the function
-that it names fail.
+replaces, the part that runs it ([cluster and budget](#cluster-and-budget))
+and the theorems of which one must fail: the refinement theorem of the
+function that it names and the theorems of that proof that unfold the
+function that the edit changes, where the build of the mutant fails
+([obligations](#page-tables)). The table describes the edit. Three edits
+lie in a function that other entries share, whose refinement they change
+too: the comparison of the free tables with the new tables of
+`direct-map-tables-off-by-one` is in the write phase that `kernel_map`
+shares, and the comparison of the generation of
+`release-stale-generation` is in the check of a holder that `publish` and
+`cancel` share; `unmap-page-of-block` edits `unmap_page` itself, since the
+check of a block is in a walk that `lookup_page` shares.
 
 | Name | Line | Source change | Must fail |
 | --- | ---: | --- | --- |
@@ -407,11 +426,13 @@ qualification cases that record the outcome of the shape in
    `const-generic`, `vector-operations`). The kind of a range of a layout is
    an enumeration of the four kinds of a layout, so both rules of a layout
    hold of every value of its type.
-7. **Sorting by hand.** The ranges of a layout, the usable ranges and the
-   banks are sorted by their start with an insertion sort whose inner loop
-   is a helper function (`split-loop`), not with a sort of the library,
-   which has no model and takes a closure for a key
+7. **Sorting by hand.** The ranges of a layout and the banks are sorted by
+   their start with an insertion sort whose inner loop is a helper function
+   (`split-loop`), not with a sort of the library, which has no model and
+   takes a closure for a key
    ([R4](../../../conventions/provable-subset.md#r4-closures-as-callbacks)).
+   The usable ranges are not sorted: `direct_map` takes them in the address
+   order of a boot memory map that the fdt entries built (`BuiltPlan`).
 8. **Bit tests by hand.** An alignment is a power of two when it is not 0
    and `align & (align - 1)` is 0; a start is rounded down with a mask and
    up by adding the alignment less one, checked, before the mask; and the
@@ -437,12 +458,21 @@ qualification cases that record the outcome of the shape in
     [work bounds](contract.md#work-bounds) of its entry: the walk reads one
     entry at each level, the copy each entry of each table in use once, the
     maps each range and each leaf once, and the page ownership table each
-    extent and exclusion record once
+    extent once and, at each pass of the cursor of `Ownership::new` over a
+    bank, every exclusion
     ([rule 4](../../../conventions/provable-subset.md#4-bounded-work-per-entry)).
 
-The qualification cases cover these shapes. A shape of the implementation
-that no case records gets a case of its own before the target is
-registered as formal.
+The qualification cases cover these shapes, and four cases record shapes
+of the module that the list above does not name: `slice-is-empty`, the
+`is_empty` of the banks that `Ownership::new` takes; `capacity-at-new`, the
+pool of a set and the extents of the page ownership table, arrays of a
+const length whose storage `new` takes and whose counts only the entries
+change; `nested-index-call`, the reads of the pool whose inner index is a
+function call, which the tools guard with an assertion of the outer index;
+and `fallible-constant`, the bits of a descriptor and the limits made with
+shifts, which the tools make computations that the functions bind. A shape
+of the implementation that no case records gets a case of its own before
+the code that has it merges.
 
 ## Not proved
 
